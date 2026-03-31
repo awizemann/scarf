@@ -20,9 +20,10 @@
 ## Features
 
 - **Dashboard** — System health, token usage, recent sessions at a glance
+- **Insights** — Usage analytics with token breakdown, model/platform stats, top tools bar chart, activity heatmaps, notable sessions, and time period filtering (7/30/90 days or all time)
 - **Sessions Browser** — Full conversation history with message rendering, tool call inspection, and full-text search (FTS5)
-- **Activity Feed** — Recent tool execution log with filtering by kind (read/edit/execute/fetch/browser) and detail inspector
-- **Live Chat** — Embedded terminal running `hermes chat` with full ANSI color and Rich formatting via [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)
+- **Activity Feed** — Recent tool execution log with filtering by kind and session, detail inspector with pretty-printed arguments
+- **Live Chat** — Embedded terminal running `hermes chat` with full ANSI color and Rich formatting via [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm), session persistence across navigation, resume/continue previous sessions, and voice mode controls
 - **Memory Viewer/Editor** — View and edit Hermes's MEMORY.md and USER.md with live refresh
 - **Skills Browser** — Browse all installed skills by category with file content viewer
 - **Cron Manager** — View scheduled jobs, their status, prompts, and output
@@ -61,9 +62,10 @@ scarf/
     Services/     Data access (SQLite reader, file I/O, log tailing, file watcher)
   Features/       Self-contained feature modules
     Dashboard/    System overview and stats
+    Insights/     Usage analytics and activity patterns
     Sessions/     Conversation browser with detail view
     Activity/     Tool execution feed with inspector
-    Chat/         Embedded terminal via SwiftTerm
+    Chat/         Embedded terminal via SwiftTerm with voice controls
     Memory/       Memory viewer and editor
     Skills/       Skill browser by category
     Cron/         Scheduled job viewer
