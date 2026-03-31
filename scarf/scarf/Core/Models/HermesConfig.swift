@@ -13,6 +13,7 @@ struct HermesConfig: Sendable {
     var streaming: Bool
     var showReasoning: Bool
     var verbose: Bool
+    var autoTTS: Bool
 
     static let empty = HermesConfig(
         model: "unknown",
@@ -26,7 +27,8 @@ struct HermesConfig: Sendable {
         nudgeInterval: 0,
         streaming: true,
         showReasoning: false,
-        verbose: false
+        verbose: false,
+        autoTTS: true
     )
 }
 

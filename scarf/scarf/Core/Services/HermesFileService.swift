@@ -42,7 +42,8 @@ struct HermesFileService: Sendable {
             nudgeInterval: Int(values["memory.nudge_interval"] ?? "") ?? 0,
             streaming: values["display.streaming"] != "false",
             showReasoning: values["display.show_reasoning"] == "true",
-            verbose: values["agent.verbose"] == "true"
+            verbose: values["agent.verbose"] == "true",
+            autoTTS: values["voice.auto_tts"] != "false"
         )
     }
 

@@ -5,6 +5,7 @@ import SwiftTerm
 @Observable
 final class ChatViewModel {
     private let dataService = HermesDataService()
+    private let fileService = HermesFileService()
 
     var recentSessions: [HermesSession] = []
     var sessionPreviews: [String: String] = [:]
@@ -63,6 +64,7 @@ final class ChatViewModel {
         } else {
             sendToTerminal(tv, text: "/voice on\r")
             voiceEnabled = true
+            ttsEnabled = fileService.loadConfig().autoTTS
         }
     }
 
