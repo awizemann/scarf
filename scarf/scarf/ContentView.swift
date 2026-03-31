@@ -30,6 +30,8 @@ struct ContentView: View {
             SkillsView()
         case .tools:
             ToolsView()
+        case .gateway:
+            GatewayView()
         case .cron:
             CronView()
         case .logs:
