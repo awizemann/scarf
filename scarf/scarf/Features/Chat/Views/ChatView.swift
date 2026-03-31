@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ChatView: View {
     @Environment(ChatViewModel.self) private var viewModel
+    @Environment(HermesFileWatcher.self) private var fileWatcher
 
     var body: some View {
         VStack(spacing: 0) {
@@ -11,6 +12,9 @@ struct ChatView: View {
         }
         .navigationTitle("Chat")
         .task { await viewModel.loadRecentSessions() }
+        .onChange(of: fileWatcher.lastChangeDate) {
+            Task { await viewModel.loadRecentSessions() }
+        }
     }
 
     private var toolbar: some View {
@@ -35,6 +39,10 @@ struct ChatView: View {
             }
 
             Spacer()
+
+            if viewModel.hasActiveProcess {
+                voiceControls
+            }
 
             if !viewModel.hermesBinaryExists {
                 Label("Hermes binary not found", systemImage: "exclamationmark.triangle")
@@ -78,6 +86,41 @@ struct ChatView: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 6)
+    }
+
+    private var voiceControls: some View {
+        HStack(spacing: 8) {
+            Button {
+                viewModel.toggleVoice()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: viewModel.voiceEnabled ? "mic.fill" : "mic.slash")
+                        .foregroundStyle(viewModel.voiceEnabled ? .green : .secondary)
+                    Text(viewModel.voiceEnabled ? "Voice On" : "Voice Off")
+                        .font(.caption)
+                        .foregroundStyle(viewModel.voiceEnabled ? .primary : .secondary)
+                }
+            }
+            .buttonStyle(.plain)
+            .help("Toggle voice mode (/voice)")
+
+            if viewModel.voiceEnabled {
+                Button {
+                    viewModel.pushToTalk()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: viewModel.isRecording ? "waveform.circle.fill" : "waveform.circle")
+                            .foregroundStyle(viewModel.isRecording ? .red : .accentColor)
+                            .symbolEffect(.pulse, isActive: viewModel.isRecording)
+                        Text(viewModel.isRecording ? "Recording..." : "Push to Talk")
+                            .font(.caption)
+                    }
+                }
+                .buttonStyle(.plain)
+                .help("Push to talk (Ctrl+B)")
+                .keyboardShortcut("b", modifiers: .control)
+            }
+        }
     }
 
     @ViewBuilder

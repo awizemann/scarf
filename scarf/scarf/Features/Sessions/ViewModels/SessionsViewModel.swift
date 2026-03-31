@@ -83,7 +83,7 @@ final class SessionsViewModel {
         let result = runHermes(["sessions", "rename", sessionId, title])
         if result.exitCode == 0 {
             if let idx = sessions.firstIndex(where: { $0.id == sessionId }) {
-                sessions[idx] = HermesSession(
+                let updated = HermesSession(
                     id: sessions[idx].id, source: sessions[idx].source,
                     userId: sessions[idx].userId, model: sessions[idx].model,
                     title: title, parentSessionId: sessions[idx].parentSessionId,
@@ -94,7 +94,12 @@ final class SessionsViewModel {
                     cacheWriteTokens: sessions[idx].cacheWriteTokens,
                     estimatedCostUSD: sessions[idx].estimatedCostUSD
                 )
+                sessions[idx] = updated
+                if selectedSession?.id == sessionId {
+                    selectedSession = updated
+                }
             }
+            sessionPreviews[sessionId] = title
         }
         showRenameSheet = false
         renameSessionId = nil

@@ -3,6 +3,7 @@ import SwiftUI
 struct DashboardView: View {
     @State private var viewModel = DashboardViewModel()
     @Environment(AppCoordinator.self) private var coordinator
+    @Environment(HermesFileWatcher.self) private var fileWatcher
 
     var body: some View {
         ScrollView {
@@ -16,6 +17,9 @@ struct DashboardView: View {
         }
         .navigationTitle("Dashboard")
         .task { await viewModel.load() }
+        .onChange(of: fileWatcher.lastChangeDate) {
+            Task { await viewModel.load() }
+        }
     }
 
     private var statusSection: some View {
