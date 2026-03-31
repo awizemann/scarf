@@ -21,20 +21,36 @@ struct ActivityView: View {
     }
 
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                FilterChip(label: "All", isSelected: viewModel.filterKind == nil) {
-                    viewModel.filterKind = nil
-                }
-                ForEach(ToolKind.allCases, id: \.rawValue) { kind in
-                    FilterChip(label: kind.rawValue.capitalized, isSelected: viewModel.filterKind == kind) {
-                        viewModel.filterKind = kind
+        HStack(spacing: 12) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    FilterChip(label: "All", isSelected: viewModel.filterKind == nil) {
+                        viewModel.filterKind = nil
+                    }
+                    ForEach(ToolKind.allCases, id: \.rawValue) { kind in
+                        FilterChip(label: kind.rawValue.capitalized, isSelected: viewModel.filterKind == kind) {
+                            viewModel.filterKind = kind
+                        }
                     }
                 }
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
+            Divider()
+                .frame(height: 16)
+            Picker(selection: $viewModel.filterSessionId) {
+                Text("All Sessions").tag(String?.none)
+                Divider()
+                ForEach(viewModel.availableSessions, id: \.id) { session in
+                    Text(session.label)
+                        .lineLimit(1)
+                        .tag(String?.some(session.id))
+                }
+            } label: {
+                EmptyView()
+            }
+            .frame(maxWidth: 250)
         }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
     }
 
     private var activityList: some View {

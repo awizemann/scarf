@@ -6,8 +6,19 @@ final class ActivityViewModel {
 
     var toolMessages: [HermesMessage] = []
     var filterKind: ToolKind?
+    var filterSessionId: String?
     var selectedEntry: ActivityEntry?
+    var sessionPreviews: [String: String] = [:]
     var isLoading = true
+
+    var availableSessions: [(id: String, label: String)] {
+        var seen = Set<String>()
+        return toolMessages.compactMap { message in
+            guard seen.insert(message.sessionId).inserted else { return nil }
+            let label = sessionPreviews[message.sessionId] ?? message.sessionId
+            return (id: message.sessionId, label: label)
+        }
+    }
 
     var filteredActivity: [ActivityEntry] {
         let entries = toolMessages.flatMap { message in
@@ -24,10 +35,11 @@ final class ActivityViewModel {
                 )
             }
         }
-        if let filterKind {
-            return entries.filter { $0.kind == filterKind }
+        return entries.filter { entry in
+            let kindOk = filterKind == nil || entry.kind == filterKind
+            let sessionOk = filterSessionId == nil || entry.sessionId == filterSessionId
+            return kindOk && sessionOk
         }
-        return entries
     }
 
     func load() async {
@@ -38,6 +50,7 @@ final class ActivityViewModel {
             return
         }
         toolMessages = await dataService.fetchRecentToolCalls(limit: 200)
+        sessionPreviews = await dataService.fetchSessionPreviews(limit: 200)
         isLoading = false
     }
 
