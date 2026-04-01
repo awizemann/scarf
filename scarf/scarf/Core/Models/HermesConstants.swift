@@ -16,4 +16,6 @@ enum HermesPaths: Sendable {
     nonisolated static let errorsLog: String = home + "/logs/errors.log"
     nonisolated static let gatewayLog: String = home + "/logs/gateway.log"
     nonisolated static let hermesBinary: String = ProcessInfo.processInfo.environment["HOME"]! + "/.local/bin/hermes"
+    nonisolated static let scarfDir: String = home + "/scarf"
+    nonisolated static let projectsRegistry: String = scarfDir + "/projects.json"
 }

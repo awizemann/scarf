@@ -12,6 +12,12 @@ struct SidebarView: View {
                         .tag(section)
                 }
             }
+            Section("Projects") {
+                ForEach([SidebarSection.projects]) { section in
+                    Label(section.rawValue, systemImage: section.icon)
+                        .tag(section)
+                }
+            }
             Section("Interact") {
                 ForEach([SidebarSection.chat, .memory, .skills]) { section in
                     Label(section.rawValue, systemImage: section.icon)

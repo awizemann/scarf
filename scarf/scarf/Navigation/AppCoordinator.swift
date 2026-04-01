@@ -5,6 +5,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
     case insights = "Insights"
     case sessions = "Sessions"
     case activity = "Activity"
+    case projects = "Projects"
     case chat = "Chat"
     case memory = "Memory"
     case skills = "Skills"
@@ -23,6 +24,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .insights: return "chart.bar"
         case .sessions: return "bubble.left.and.bubble.right"
         case .activity: return "bolt.horizontal"
+        case .projects: return "square.grid.2x2"
         case .chat: return "text.bubble"
         case .memory: return "brain"
         case .skills: return "lightbulb"
@@ -40,4 +42,5 @@ enum SidebarSection: String, CaseIterable, Identifiable {
 final class AppCoordinator {
     var selectedSection: SidebarSection = .dashboard
     var selectedSessionId: String?
+    var selectedProjectName: String?
 }

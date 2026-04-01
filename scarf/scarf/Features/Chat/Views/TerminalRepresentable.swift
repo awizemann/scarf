@@ -10,7 +10,7 @@ struct PersistentTerminalView: NSViewRepresentable {
         terminalView.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(terminalView)
         NSLayoutConstraint.activate([
-            terminalView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            terminalView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 4),
             terminalView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             terminalView.topAnchor.constraint(equalTo: container.topAnchor),
             terminalView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
@@ -24,7 +24,7 @@ struct PersistentTerminalView: NSViewRepresentable {
             terminalView.translatesAutoresizingMaskIntoConstraints = false
             nsView.addSubview(terminalView)
             NSLayoutConstraint.activate([
-                terminalView.leadingAnchor.constraint(equalTo: nsView.leadingAnchor),
+                terminalView.leadingAnchor.constraint(equalTo: nsView.leadingAnchor, constant: 4),
                 terminalView.trailingAnchor.constraint(equalTo: nsView.trailingAnchor),
                 terminalView.topAnchor.constraint(equalTo: nsView.topAnchor),
                 terminalView.bottomAnchor.constraint(equalTo: nsView.bottomAnchor),

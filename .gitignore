@@ -43,3 +43,6 @@ Package.resolved
 # Claude Code
 .claude/
 scarf/standards/backups/
+
+# Scarf project dashboards (user-specific)
+.scarf/

@@ -22,6 +22,8 @@ struct ContentView: View {
             SessionsView()
         case .activity:
             ActivityView()
+        case .projects:
+            ProjectsView()
         case .chat:
             ChatView()
         case .memory:

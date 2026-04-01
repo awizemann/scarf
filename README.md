@@ -30,7 +30,8 @@
 - **Gateway Control** — Start/stop/restart the messaging gateway, view platform connection status, manage user pairing (approve/revoke)
 - **Cron Manager** — View scheduled jobs, their status, prompts, and output
 - **Log Viewer** — Real-time log tailing with level filtering and text search
-- **Settings** — Configuration display with raw YAML viewer and Finder path links
+- **Project Dashboards** — Custom, agent-generated dashboards for any project. Define stat boxes, charts, tables, progress bars, checklists, and rich text in a simple JSON file — Scarf renders them with live refresh. Let your Hermes agent build and maintain project-specific visualizations automatically
+- **Settings** — Structured config editor for all Hermes settings
 - **Menu Bar** — Status icon showing Hermes running state with quick actions
 
 ## Requirements
@@ -88,6 +89,7 @@ scarf/
     Insights/     Usage analytics and activity patterns
     Sessions/     Conversation browser with rename, delete, export
     Activity/     Tool execution feed with inspector
+    Projects/     Agent-generated project dashboards with widget rendering
     Chat/         Embedded terminal via SwiftTerm with voice controls
     Memory/       Memory viewer and editor
     Skills/       Skill browser by category
@@ -95,7 +97,7 @@ scarf/
     Gateway/      Messaging gateway control and pairing
     Cron/         Scheduled job viewer
     Logs/         Real-time log viewer
-    Settings/     Configuration display
+    Settings/     Structured config editor
   Navigation/     AppCoordinator + SidebarView
 ```
 
@@ -117,6 +119,8 @@ Scarf reads Hermes data directly from `~/.hermes/`:
 | `hermes sessions` | CLI commands | Rename/Delete/Export |
 | `hermes gateway` | CLI commands | Start/Stop/Restart |
 | `hermes pairing` | CLI commands | Approve/Revoke |
+| `.scarf/dashboard.json` | JSON (per-project) | Read-only |
+| `scarf/projects.json` | JSON (registry) | Read/Write |
 
 The app opens `state.db` in read-only mode to avoid WAL contention with Hermes. Management actions (tool toggles, session rename/delete/export) go through the Hermes CLI.
 
@@ -126,7 +130,7 @@ The app opens `state.db` in read-only mode to avoid WAL contention with Hermes. 
 |---------|---------|
 | [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | Terminal emulator for the Chat feature |
 
-Everything else uses system frameworks: SQLite3 C API, Foundation JSON, AttributedString markdown, GCD file watching.
+Everything else uses system frameworks: SQLite3 C API, Foundation JSON, AttributedString markdown, SwiftUI Charts, GCD file watching.
 
 ## How It Works
 
@@ -137,6 +141,124 @@ The Chat tab spawns `hermes chat` as a subprocess in a pseudo-terminal, giving y
 Management actions (renaming sessions, toggling tools, editing memory) call the Hermes CLI or write directly to the appropriate files, keeping Scarf and Hermes in sync.
 
 The app sandbox is disabled because Scarf needs direct access to `~/.hermes/` and the ability to spawn the Hermes binary.
+
+## Project Dashboards
+
+Project Dashboards turn Scarf into a customizable monitoring hub for all your projects. You define a simple JSON file in your project folder describing what to display — stat boxes, charts, tables, progress bars, checklists, and rich text — and Scarf renders it as a live-updating dashboard. Your Hermes agent can generate and maintain these dashboards automatically.
+
+### What You Can Build
+
+- **Development dashboards** — test coverage, build status, open issues, sprint progress
+- **Data project trackers** — pipeline metrics, data quality scores, processing throughput
+- **Deployment monitors** — deploy history tables, uptime stats, error rate charts
+- **Research dashboards** — experiment results, key findings, paper status checklists
+- **Agent activity views** — cron job results, content generation stats, task completion rates
+- **Any project status** — if your agent can measure it, Scarf can display it
+
+### Quick Start
+
+**1. Create the dashboard file**
+
+Create `.scarf/dashboard.json` in any project folder:
+
+```json
+{
+  "version": 1,
+  "title": "My Project",
+  "description": "Project status at a glance",
+  "sections": [
+    {
+      "title": "Overview",
+      "columns": 3,
+      "widgets": [
+        {
+          "type": "stat",
+          "title": "Test Coverage",
+          "value": "87%",
+          "icon": "checkmark.shield",
+          "color": "green",
+          "subtitle": "+2.1% this week"
+        },
+        {
+          "type": "progress",
+          "title": "Sprint Progress",
+          "value": 0.73,
+          "label": "73% complete",
+          "color": "blue"
+        },
+        {
+          "type": "list",
+          "title": "Tasks",
+          "items": [
+            { "text": "Write unit tests", "status": "done" },
+            { "text": "Update API docs", "status": "active" },
+            { "text": "Deploy to prod", "status": "pending" }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+**2. Register your project**
+
+In Scarf, go to **Projects** in the sidebar and click the **+** button to add your project folder. Or have your agent add it directly to the registry at `~/.hermes/scarf/projects.json`:
+
+```json
+{
+  "projects": [
+    { "name": "my-project", "path": "/Users/you/Developer/my-project" }
+  ]
+}
+```
+
+**3. View in Scarf**
+
+Select your project in the Projects sidebar — the dashboard renders immediately. Scarf watches the file for changes and refreshes automatically whenever the JSON is updated.
+
+### Widget Types
+
+| Type | Description | Key Fields |
+|------|-------------|------------|
+| `stat` | Key metric with large value display | `value`, `icon`, `color`, `subtitle` |
+| `progress` | Progress bar with label | `value` (0.0–1.0), `label`, `color` |
+| `text` | Rich text block | `content`, `format` ("markdown" or "plain") |
+| `table` | Data table with headers | `columns`, `rows` |
+| `chart` | Line, bar, or pie chart | `chartType`, `series` (each with `name`, `color`, `data`) |
+| `list` | Checklist with status indicators | `items` (each with `text`, `status`: done/active/pending) |
+
+**Colors**: red, orange, yellow, green, blue, purple, pink, teal, indigo, mint, brown, gray
+
+**Icons**: Any [SF Symbol](https://developer.apple.com/sf-symbols/) name (e.g., `checkmark.shield`, `cpu`, `doc.text`, `chart.bar`)
+
+### Agent-Generated Dashboards
+
+The real power is letting your Hermes agent build and update dashboards automatically. Add instructions like this to your agent's context:
+
+> Analyze this project and create a `.scarf/dashboard.json` dashboard with relevant metrics and status. Use stat widgets for key numbers, charts for trends, tables for structured data, and lists for task tracking. Register the project in `~/.hermes/scarf/projects.json` if not already registered.
+
+Your agent can update the dashboard as part of cron jobs, after builds, or whenever project state changes. Since Scarf watches the file, updates appear in real-time.
+
+### Dashboard Schema Reference
+
+```json
+{
+  "version": 1,
+  "title": "Required — dashboard title",
+  "description": "Optional — subtitle text",
+  "updatedAt": "Optional — ISO 8601 timestamp",
+  "sections": [
+    {
+      "title": "Section Name",
+      "columns": 3,
+      "widgets": [{ "type": "...", "title": "..." }]
+    }
+  ]
+}
+```
+
+Each section defines a grid with 1–4 columns. Widgets flow left-to-right, wrapping to new rows. See [DASHBOARD_SCHEMA.md](scarf/docs/DASHBOARD_SCHEMA.md) for the full schema reference with examples of every widget type.
 
 ## Contributing
 

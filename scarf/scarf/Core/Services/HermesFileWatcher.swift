@@ -3,7 +3,8 @@ import Foundation
 @Observable
 final class HermesFileWatcher {
     private(set) var lastChangeDate = Date()
-    private var sources: [DispatchSourceFileSystemObject] = []
+    private var coreSources: [DispatchSourceFileSystemObject] = []
+    private var projectSources: [DispatchSourceFileSystemObject] = []
     private var timer: Timer?
 
     func startWatching() {
@@ -16,11 +17,14 @@ final class HermesFileWatcher {
             HermesPaths.cronJobsJSON,
             HermesPaths.gatewayStateJSON,
             HermesPaths.errorsLog,
-            HermesPaths.gatewayLog
+            HermesPaths.gatewayLog,
+            HermesPaths.projectsRegistry
         ]
 
         for path in paths {
-            watchFile(path)
+            if let source = makeSource(for: path) {
+                coreSources.append(source)
+            }
         }
 
         timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
@@ -29,17 +33,30 @@ final class HermesFileWatcher {
     }
 
     func stopWatching() {
-        for source in sources {
+        for source in coreSources + projectSources {
             source.cancel()
         }
-        sources.removeAll()
+        coreSources.removeAll()
+        projectSources.removeAll()
         timer?.invalidate()
         timer = nil
     }
 
-    private func watchFile(_ path: String) {
+    func updateProjectWatches(_ dashboardPaths: [String]) {
+        for source in projectSources {
+            source.cancel()
+        }
+        projectSources.removeAll()
+        for path in dashboardPaths {
+            if let source = makeSource(for: path) {
+                projectSources.append(source)
+            }
+        }
+    }
+
+    private func makeSource(for path: String) -> DispatchSourceFileSystemObject? {
         let fd = Darwin.open(path, O_EVTONLY)
-        guard fd >= 0 else { return }
+        guard fd >= 0 else { return nil }
 
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
@@ -53,7 +70,7 @@ final class HermesFileWatcher {
             Darwin.close(fd)
         }
         source.resume()
-        sources.append(source)
+        return source
     }
 
     deinit {
