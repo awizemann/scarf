@@ -69,6 +69,10 @@ struct DashboardWidget: Codable, Sendable, Identifiable {
 
     // List
     let items: [ListItem]?
+
+    // Webview
+    let url: String?
+    let height: Double?
 }
 
 // MARK: - Widget Value (String or Number)

@@ -141,13 +141,29 @@ Create `.scarf/dashboard.json` in your project root:
 
 - `status`: "done" (checkmark), "active" (filled circle), "pending" (empty circle)
 
+### webview — Embedded web browser
+
+```json
+{
+  "type": "webview",
+  "title": "Project Dashboard",
+  "url": "http://localhost:8000",
+  "height": 500
+}
+```
+
+- `url`: Any URL — local servers, file paths, or remote pages
+- `height`: Height in points (optional, default: 400)
+
+When a section contains a webview alongside other widgets, Scarf splits the layout automatically: grid widgets on the left, webview on the right. If the section contains only a webview, it uses the full width.
+
 ## Agent Instructions
 
 To have your Hermes agent generate a dashboard, include these instructions:
 
 > Analyze the project and create a `.scarf/dashboard.json` file with relevant metrics,
 > status indicators, and visualizations. Use the Scarf dashboard schema with sections
-> containing stat, progress, text, table, chart, and list widgets. Register the project
+> containing stat, progress, text, table, chart, list, and webview widgets. Register the project
 > in `~/.hermes/scarf/projects.json` if not already registered.
 
 The agent can update the dashboard file at any time — Scarf watches for changes and re-renders automatically.

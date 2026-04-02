@@ -30,7 +30,7 @@
 - **Gateway Control** — Start/stop/restart the messaging gateway, view platform connection status, manage user pairing (approve/revoke)
 - **Cron Manager** — View scheduled jobs, their status, prompts, and output
 - **Log Viewer** — Real-time log tailing with level filtering and text search
-- **Project Dashboards** — Custom, agent-generated dashboards for any project. Define stat boxes, charts, tables, progress bars, checklists, and rich text in a simple JSON file — Scarf renders them with live refresh. Let your Hermes agent build and maintain project-specific visualizations automatically
+- **Project Dashboards** — Custom, agent-generated dashboards for any project. Define stat boxes, charts, tables, progress bars, checklists, rich text, and embedded web views in a simple JSON file — Scarf renders them with live refresh. Let your Hermes agent build and maintain project-specific visualizations automatically
 - **Settings** — Structured config editor for all Hermes settings
 - **Menu Bar** — Status icon showing Hermes running state with quick actions
 
@@ -144,7 +144,7 @@ The app sandbox is disabled because Scarf needs direct access to `~/.hermes/` an
 
 ## Project Dashboards
 
-Project Dashboards turn Scarf into a customizable monitoring hub for all your projects. You define a simple JSON file in your project folder describing what to display — stat boxes, charts, tables, progress bars, checklists, and rich text — and Scarf renders it as a live-updating dashboard. Your Hermes agent can generate and maintain these dashboards automatically.
+Project Dashboards turn Scarf into a customizable monitoring hub for all your projects. You define a simple JSON file in your project folder describing what to display — stat boxes, charts, tables, progress bars, checklists, rich text, and embedded web views — and Scarf renders it as a live-updating dashboard. Your Hermes agent can generate and maintain these dashboards automatically.
 
 ### What You Can Build
 
@@ -227,6 +227,21 @@ Select your project in the Projects sidebar — the dashboard renders immediatel
 | `table` | Data table with headers | `columns`, `rows` |
 | `chart` | Line, bar, or pie chart | `chartType`, `series` (each with `name`, `color`, `data`) |
 | `list` | Checklist with status indicators | `items` (each with `text`, `status`: done/active/pending) |
+| `webview` | Embedded web browser | `url`, `height` (default 400) |
+
+The `webview` widget embeds a live web browser directly in your dashboard — perfect for displaying local dev servers, HTML reports, or any web-based tool your agent generates. When a section contains a webview alongside other widgets, Scarf automatically splits the layout: widgets on the left, webview on the right. If the section only has a webview, it takes the full width.
+
+```json
+{
+  "type": "webview",
+  "title": "Project Report",
+  "url": "http://localhost:8000/dashboard",
+  "height": 500
+}
+```
+
+- `url`: Any URL — typically a local server (`http://localhost:...`) or file path
+- `height`: Height in points (default: 400)
 
 **Colors**: red, orange, yellow, green, blue, purple, pink, teal, indigo, mint, brown, gray
 

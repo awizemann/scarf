@@ -152,16 +152,53 @@ struct ProjectsView: View {
 struct DashboardSectionView: View {
     let section: DashboardSection
 
+    private var gridWidgets: [DashboardWidget] {
+        section.widgets.filter { $0.type != "webview" }
+    }
+
+    private var webviewWidgets: [DashboardWidget] {
+        section.widgets.filter { $0.type == "webview" }
+    }
+
+    private var hasWebview: Bool { !webviewWidgets.isEmpty }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(section.title)
                 .font(.headline)
-            LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: section.columnCount),
-                spacing: 12
-            ) {
-                ForEach(section.widgets) { widget in
-                    WidgetView(widget: widget)
+            if hasWebview && !gridWidgets.isEmpty {
+                // Split layout: widgets on left, webview on right
+                HStack(alignment: .top, spacing: 12) {
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: max(1, section.columnCount / 2)),
+                        spacing: 12
+                    ) {
+                        ForEach(gridWidgets) { widget in
+                            WidgetView(widget: widget)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    VStack(spacing: 12) {
+                        ForEach(webviewWidgets) { widget in
+                            WebviewWidgetView(widget: widget)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            } else if hasWebview {
+                // Webview only — full width
+                ForEach(webviewWidgets) { widget in
+                    WebviewWidgetView(widget: widget)
+                }
+            } else {
+                // Standard grid
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: section.columnCount),
+                    spacing: 12
+                ) {
+                    ForEach(gridWidgets) { widget in
+                        WidgetView(widget: widget)
+                    }
                 }
             }
         }
@@ -188,6 +225,8 @@ struct WidgetView: View {
                 ChartWidgetView(widget: widget)
             case "list":
                 ListWidgetView(widget: widget)
+            case "webview":
+                WebviewWidgetView(widget: widget)
             default:
                 VStack {
                     Image(systemName: "questionmark.square.dashed")
