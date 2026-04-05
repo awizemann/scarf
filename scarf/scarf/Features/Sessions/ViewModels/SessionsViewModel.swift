@@ -83,17 +83,7 @@ final class SessionsViewModel {
         let result = runHermes(["sessions", "rename", sessionId, title])
         if result.exitCode == 0 {
             if let idx = sessions.firstIndex(where: { $0.id == sessionId }) {
-                let updated = HermesSession(
-                    id: sessions[idx].id, source: sessions[idx].source,
-                    userId: sessions[idx].userId, model: sessions[idx].model,
-                    title: title, parentSessionId: sessions[idx].parentSessionId,
-                    startedAt: sessions[idx].startedAt, endedAt: sessions[idx].endedAt,
-                    endReason: sessions[idx].endReason, messageCount: sessions[idx].messageCount,
-                    toolCallCount: sessions[idx].toolCallCount, inputTokens: sessions[idx].inputTokens,
-                    outputTokens: sessions[idx].outputTokens, cacheReadTokens: sessions[idx].cacheReadTokens,
-                    cacheWriteTokens: sessions[idx].cacheWriteTokens,
-                    estimatedCostUSD: sessions[idx].estimatedCostUSD
-                )
+                let updated = sessions[idx].withTitle(title)
                 sessions[idx] = updated
                 if selectedSession?.id == sessionId {
                     selectedSession = updated

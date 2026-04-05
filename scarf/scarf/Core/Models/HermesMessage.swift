@@ -11,10 +11,12 @@ struct HermesMessage: Identifiable, Sendable {
     let timestamp: Date?
     let tokenCount: Int?
     let finishReason: String?
+    let reasoning: String?
 
     var isUser: Bool { role == "user" }
     var isAssistant: Bool { role == "assistant" }
     var isToolResult: Bool { role == "tool" }
+    var hasReasoning: Bool { reasoning != nil && !(reasoning?.isEmpty ?? true) }
 }
 
 struct HermesToolCall: Identifiable, Sendable, Codable {
@@ -61,7 +63,7 @@ struct HermesToolCall: Identifiable, Sendable, Codable {
         switch functionName {
         case "read_file", "search_files", "vision_analyze": return .read
         case "write_file", "patch": return .edit
-        case "terminal": return .execute
+        case "terminal", "execute_code": return .execute
         case "web_search", "web_extract": return .fetch
         case "browser_navigate", "browser_click", "browser_screenshot": return .browser
         default: return .other

@@ -44,7 +44,12 @@ struct HermesFileService: Sendable {
             showReasoning: values["display.show_reasoning"] == "true",
             verbose: values["agent.verbose"] == "true",
             autoTTS: values["voice.auto_tts"] != "false",
-            silenceThreshold: Int(values["voice.silence_threshold"] ?? "") ?? QueryDefaults.defaultSilenceThreshold
+            silenceThreshold: Int(values["voice.silence_threshold"] ?? "") ?? QueryDefaults.defaultSilenceThreshold,
+            reasoningEffort: values["agent.reasoning_effort"] ?? "medium",
+            showCost: values["display.show_cost"] == "true",
+            approvalMode: values["approvals.mode"] ?? "manual",
+            browserBackend: values["browser.backend"] ?? "",
+            memoryProvider: values["memory.provider"] ?? ""
         )
     }
 

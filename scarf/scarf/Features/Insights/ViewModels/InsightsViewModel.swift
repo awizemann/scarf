@@ -27,7 +27,8 @@ struct ModelUsage: Identifiable {
     let outputTokens: Int
     let cacheReadTokens: Int
     let cacheWriteTokens: Int
-    var totalTokens: Int { inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens }
+    let reasoningTokens: Int
+    var totalTokens: Int { inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens + reasoningTokens }
 }
 
 struct PlatformUsage: Identifiable {
@@ -69,7 +70,9 @@ final class InsightsViewModel {
     var totalOutputTokens = 0
     var totalCacheReadTokens = 0
     var totalCacheWriteTokens = 0
+    var totalReasoningTokens = 0
     var totalTokens = 0
+    var totalCost: Double = 0
     var activeTime: TimeInterval = 0
     var avgSessionDuration: TimeInterval = 0
 
@@ -119,7 +122,9 @@ final class InsightsViewModel {
         totalOutputTokens = sessions.reduce(0) { $0 + $1.outputTokens }
         totalCacheReadTokens = sessions.reduce(0) { $0 + $1.cacheReadTokens }
         totalCacheWriteTokens = sessions.reduce(0) { $0 + $1.cacheWriteTokens }
-        totalTokens = totalInputTokens + totalOutputTokens + totalCacheReadTokens + totalCacheWriteTokens
+        totalReasoningTokens = sessions.reduce(0) { $0 + $1.reasoningTokens }
+        totalTokens = totalInputTokens + totalOutputTokens + totalCacheReadTokens + totalCacheWriteTokens + totalReasoningTokens
+        totalCost = sessions.reduce(0.0) { $0 + ($1.displayCostUSD ?? 0) }
 
         var total: TimeInterval = 0
         var count = 0
@@ -134,21 +139,22 @@ final class InsightsViewModel {
     }
 
     private func computeModelBreakdown() {
-        var grouped: [String: (sessions: Int, input: Int, output: Int, cacheRead: Int, cacheWrite: Int)] = [:]
+        var grouped: [String: (sessions: Int, input: Int, output: Int, cacheRead: Int, cacheWrite: Int, reasoning: Int)] = [:]
         for s in sessions {
             let model = s.model ?? "unknown"
-            var entry = grouped[model, default: (0, 0, 0, 0, 0)]
+            var entry = grouped[model, default: (0, 0, 0, 0, 0, 0)]
             entry.sessions += 1
             entry.input += s.inputTokens
             entry.output += s.outputTokens
             entry.cacheRead += s.cacheReadTokens
             entry.cacheWrite += s.cacheWriteTokens
+            entry.reasoning += s.reasoningTokens
             grouped[model] = entry
         }
         modelUsage = grouped.map { key, val in
             ModelUsage(model: key, sessions: val.sessions, inputTokens: val.input,
                        outputTokens: val.output, cacheReadTokens: val.cacheRead,
-                       cacheWriteTokens: val.cacheWrite)
+                       cacheWriteTokens: val.cacheWrite, reasoningTokens: val.reasoning)
         }.sorted { $0.totalTokens > $1.totalTokens }
     }
 
@@ -158,7 +164,7 @@ final class InsightsViewModel {
             var entry = grouped[s.source, default: (0, 0, 0)]
             entry.sessions += 1
             entry.messages += s.messageCount
-            entry.tokens += s.inputTokens + s.outputTokens + s.cacheReadTokens + s.cacheWriteTokens
+            entry.tokens += s.inputTokens + s.outputTokens + s.cacheReadTokens + s.cacheWriteTokens + s.reasoningTokens
             grouped[s.source] = entry
         }
         platformUsage = grouped.map { key, val in

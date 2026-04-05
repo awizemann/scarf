@@ -15,6 +15,11 @@ struct HermesConfig: Sendable {
     var verbose: Bool
     var autoTTS: Bool
     var silenceThreshold: Int
+    var reasoningEffort: String
+    var showCost: Bool
+    var approvalMode: String
+    var browserBackend: String
+    var memoryProvider: String
 
     static let empty = HermesConfig(
         model: "unknown",
@@ -30,7 +35,12 @@ struct HermesConfig: Sendable {
         showReasoning: false,
         verbose: false,
         autoTTS: true,
-        silenceThreshold: 200
+        silenceThreshold: 200,
+        reasoningEffort: "medium",
+        showCost: false,
+        approvalMode: "manual",
+        browserBackend: "",
+        memoryProvider: ""
     )
 }
 

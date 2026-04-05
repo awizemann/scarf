@@ -44,6 +44,12 @@ struct SessionDetailView: View {
                 Label(session.model ?? "unknown", systemImage: "cpu")
                 Label("\(session.messageCount) msgs", systemImage: "bubble.left")
                 Label("\(session.toolCallCount) tools", systemImage: "wrench")
+                if session.reasoningTokens > 0 {
+                    Label("\(session.reasoningTokens) reasoning", systemImage: "brain")
+                }
+                if let cost = session.displayCostUSD {
+                    Label(String(format: "$%.4f%@", cost, session.costIsActual ? "" : " est."), systemImage: "dollarsign.circle")
+                }
                 if let date = session.startedAt {
                     Label(date.formatted(.dateTime.month().day().hour().minute()), systemImage: "calendar")
                 }
@@ -78,6 +84,16 @@ struct MessageBubble: View {
             HStack {
                 if message.isUser { Spacer(minLength: 60) }
                 VStack(alignment: .leading, spacing: 6) {
+                    if message.hasReasoning {
+                        DisclosureGroup("Reasoning") {
+                            Text(message.reasoning ?? "")
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        .font(.caption.bold())
+                        .foregroundStyle(.orange)
+                    }
                     if !message.content.isEmpty {
                         Text(message.content)
                             .textSelection(.enabled)

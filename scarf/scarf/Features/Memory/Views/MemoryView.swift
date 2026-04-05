@@ -7,6 +7,18 @@ struct MemoryView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                if viewModel.hasExternalProvider {
+                    HStack(spacing: 8) {
+                        Image(systemName: "info.circle")
+                        Text("Memory is managed by \(viewModel.memoryProvider). File contents shown here may be stale.")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.orange.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
                 memorySection("Agent Memory", content: viewModel.memoryContent, charCount: viewModel.memoryCharCount, target: .memory)
                 memorySection("User Profile", content: viewModel.userContent, charCount: viewModel.userCharCount, target: .user)
             }

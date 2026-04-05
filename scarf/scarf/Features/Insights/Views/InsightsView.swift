@@ -50,7 +50,9 @@ struct InsightsView: View {
                 InsightCard(label: "Output Tokens", value: formatTokens(viewModel.totalOutputTokens))
                 InsightCard(label: "Cache Read", value: formatTokens(viewModel.totalCacheReadTokens))
                 InsightCard(label: "Cache Write", value: formatTokens(viewModel.totalCacheWriteTokens))
+                InsightCard(label: "Reasoning Tokens", value: formatTokens(viewModel.totalReasoningTokens))
                 InsightCard(label: "Total Tokens", value: formatTokens(viewModel.totalTokens))
+                InsightCard(label: "Total Cost", value: String(format: "$%.2f", viewModel.totalCost))
                 InsightCard(label: "Active Time", value: formatDuration(viewModel.activeTime))
                 InsightCard(label: "Avg Session", value: formatDuration(viewModel.avgSessionDuration))
                 InsightCard(label: "Avg Msgs/Session", value: viewModel.sessions.isEmpty ? "0" : String(format: "%.1f", Double(viewModel.totalMessages) / Double(viewModel.sessions.count)))
@@ -273,19 +275,12 @@ struct InsightsView: View {
     // MARK: - Helpers
 
     private func platformIcon(_ platform: String) -> String {
-        switch platform {
-        case "cli": return "terminal"
-        case "telegram": return "paperplane"
-        case "discord": return "bubble.left.and.bubble.right"
-        case "slack": return "number"
-        case "email": return "envelope"
-        default: return "bubble.left"
-        }
+        KnownPlatforms.icon(for: platform)
     }
 
     private func barColor(for toolName: String) -> Color {
         switch toolName {
-        case "terminal": return .orange
+        case "terminal", "execute_code": return .orange
         case "read_file", "search_files": return .green
         case "write_file", "patch": return .blue
         case "web_search", "web_extract": return .purple

@@ -17,8 +17,16 @@ struct HermesSession: Identifiable, Sendable {
     let cacheReadTokens: Int
     let cacheWriteTokens: Int
     let estimatedCostUSD: Double?
+    let reasoningTokens: Int
+    let actualCostUSD: Double?
+    let costStatus: String?
+    let billingProvider: String?
 
-    var totalTokens: Int { inputTokens + outputTokens }
+    var totalTokens: Int { inputTokens + outputTokens + reasoningTokens }
+
+    var displayCostUSD: Double? { actualCostUSD ?? estimatedCostUSD }
+
+    var costIsActual: Bool { actualCostUSD != nil }
 
     var duration: TimeInterval? {
         guard let start = startedAt, let end = endedAt else { return nil }
@@ -30,13 +38,20 @@ struct HermesSession: Identifiable, Sendable {
     }
 
     var sourceIcon: String {
-        switch source {
-        case "cli": return "terminal"
-        case "telegram": return "paperplane"
-        case "discord": return "bubble.left.and.bubble.right"
-        case "slack": return "number"
-        case "email": return "envelope"
-        default: return "bubble.left"
-        }
+        KnownPlatforms.icon(for: source)
+    }
+
+    func withTitle(_ newTitle: String) -> HermesSession {
+        HermesSession(
+            id: id, source: source, userId: userId, model: model,
+            title: newTitle, parentSessionId: parentSessionId,
+            startedAt: startedAt, endedAt: endedAt, endReason: endReason,
+            messageCount: messageCount, toolCallCount: toolCallCount,
+            inputTokens: inputTokens, outputTokens: outputTokens,
+            cacheReadTokens: cacheReadTokens, cacheWriteTokens: cacheWriteTokens,
+            estimatedCostUSD: estimatedCostUSD, reasoningTokens: reasoningTokens,
+            actualCostUSD: actualCostUSD, costStatus: costStatus,
+            billingProvider: billingProvider
+        )
     }
 }

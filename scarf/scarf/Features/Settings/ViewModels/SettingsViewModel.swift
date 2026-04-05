@@ -52,6 +52,9 @@ final class SettingsViewModel {
     func setVerbose(_ value: Bool) { setSetting("agent.verbose", value: value ? "true" : "false") }
     func setAutoTTS(_ value: Bool) { setSetting("voice.auto_tts", value: value ? "true" : "false") }
     func setSilenceThreshold(_ value: Int) { setSetting("voice.silence_threshold", value: String(value)) }
+    func setReasoningEffort(_ value: String) { setSetting("agent.reasoning_effort", value: value) }
+    func setShowCost(_ value: Bool) { setSetting("display.show_cost", value: value ? "true" : "false") }
+    func setApprovalMode(_ value: String) { setSetting("approvals.mode", value: value) }
 
     func openConfigInEditor() {
         NSWorkspace.shared.open(URL(fileURLWithPath: HermesPaths.configYAML))

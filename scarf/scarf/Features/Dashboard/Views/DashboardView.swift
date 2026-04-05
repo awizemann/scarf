@@ -60,6 +60,10 @@ struct DashboardView: View {
                 StatCard(label: "Messages", value: "\(viewModel.stats.totalMessages)")
                 StatCard(label: "Tool Calls", value: "\(viewModel.stats.totalToolCalls)")
                 StatCard(label: "Tokens", value: formatTokens(viewModel.stats.totalInputTokens + viewModel.stats.totalOutputTokens))
+                let cost = viewModel.stats.totalActualCostUSD > 0 ? viewModel.stats.totalActualCostUSD : viewModel.stats.totalCostUSD
+                if cost > 0 {
+                    StatCard(label: "Cost", value: String(format: "$%.2f", cost))
+                }
             }
         }
     }
@@ -90,14 +94,6 @@ struct DashboardView: View {
         }
     }
 
-    private func formatTokens(_ count: Int) -> String {
-        if count >= 1_000_000 {
-            return String(format: "%.1fM", Double(count) / 1_000_000)
-        } else if count >= 1_000 {
-            return String(format: "%.1fK", Double(count) / 1_000)
-        }
-        return "\(count)"
-    }
 }
 
 struct StatusCard: View {

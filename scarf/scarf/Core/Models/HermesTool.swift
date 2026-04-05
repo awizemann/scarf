@@ -25,5 +25,24 @@ enum KnownPlatforms {
         HermesToolPlatform(name: "whatsapp", displayName: "WhatsApp", icon: "phone.bubble"),
         HermesToolPlatform(name: "signal", displayName: "Signal", icon: "lock.shield"),
         HermesToolPlatform(name: "email", displayName: "Email", icon: "envelope"),
+        HermesToolPlatform(name: "homeassistant", displayName: "Home Assistant", icon: "house"),
+        HermesToolPlatform(name: "webhook", displayName: "Webhook", icon: "arrow.up.right.square"),
+        HermesToolPlatform(name: "matrix", displayName: "Matrix", icon: "lock.rectangle.stack"),
     ]
+
+    static func icon(for platform: String) -> String {
+        switch platform {
+        case "cli": return "terminal"
+        case "telegram": return "paperplane"
+        case "discord": return "bubble.left.and.bubble.right"
+        case "slack": return "number"
+        case "whatsapp": return "phone.bubble"
+        case "signal": return "lock.shield"
+        case "email": return "envelope"
+        case "homeassistant": return "house"
+        case "webhook": return "arrow.up.right.square"
+        case "matrix": return "lock.rectangle.stack"
+        default: return "bubble.left"
+        }
+    }
 }
