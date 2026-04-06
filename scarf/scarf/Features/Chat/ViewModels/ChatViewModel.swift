@@ -14,6 +14,9 @@ final class ChatViewModel {
     var voiceEnabled = false
     var ttsEnabled = false
     var isRecording = false
+    var displayMode: ChatDisplayMode = .richChat
+    var activeSessionId: String?
+    let richChatViewModel = RichChatViewModel()
     private var coordinator: Coordinator?
 
     var hermesBinaryExists: Bool {
@@ -24,21 +27,46 @@ final class ChatViewModel {
         voiceEnabled = false
         ttsEnabled = false
         isRecording = false
+        richChatViewModel.stopPolling()
+        activeSessionId = nil
         launchTerminal(arguments: ["chat"])
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            await discoverActiveSessionId()
+        }
     }
 
     func resumeSession(_ sessionId: String) {
         voiceEnabled = false
         ttsEnabled = false
         isRecording = false
+        richChatViewModel.stopPolling()
+        activeSessionId = sessionId
         launchTerminal(arguments: ["chat", "--resume", sessionId])
+        richChatViewModel.startPolling(sessionId: sessionId)
     }
 
     func continueLastSession() {
         voiceEnabled = false
         ttsEnabled = false
         isRecording = false
+        richChatViewModel.stopPolling()
+        activeSessionId = nil
         launchTerminal(arguments: ["chat", "--continue"])
+        if let mostRecent = recentSessions.first {
+            activeSessionId = mostRecent.id
+            richChatViewModel.startPolling(sessionId: mostRecent.id)
+        } else {
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                await discoverActiveSessionId()
+            }
+        }
+    }
+
+    func sendText(_ text: String) {
+        guard let tv = terminalView else { return }
+        sendToTerminal(tv, text: text + "\r")
     }
 
     func loadRecentSessions() async {
@@ -82,6 +110,26 @@ final class ChatViewModel {
         isRecording.toggle()
     }
 
+    private func discoverActiveSessionId() async {
+        // Capture the session that existed before launch so we can detect the new one
+        let previousSessionId = recentSessions.first?.id
+        for _ in 0..<8 {
+            let opened = await dataService.open()
+            guard opened else {
+                try? await Task.sleep(for: .seconds(1))
+                continue
+            }
+            let sessions = await dataService.fetchSessions(limit: 1)
+            await dataService.close()
+            if let newest = sessions.first, newest.id != previousSessionId {
+                activeSessionId = newest.id
+                richChatViewModel.startPolling(sessionId: newest.id)
+                return
+            }
+            try? await Task.sleep(for: .seconds(1))
+        }
+    }
+
     private func sendToTerminal(_ tv: LocalProcessTerminalView, text: String) {
         let bytes = Array(text.utf8)
         tv.send(source: tv, data: bytes[0..<bytes.count])
@@ -102,6 +150,8 @@ final class ChatViewModel {
             self?.hasActiveProcess = false
             self?.voiceEnabled = false
             self?.isRecording = false
+            self?.richChatViewModel.stopPolling()
+            Task { await self?.richChatViewModel.refreshMessages() }
         })
         terminal.processDelegate = coord
         self.coordinator = coord
