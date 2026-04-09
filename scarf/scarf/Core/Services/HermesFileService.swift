@@ -199,13 +199,21 @@ struct HermesFileService: Sendable {
     }
 
     func loadSkillContent(path: String) -> String {
-        // Validate path stays within the skills directory to prevent traversal
-        guard !path.contains(".."),
-              path.hasPrefix(HermesPaths.skillsDir) else {
-            print("[Scarf] Rejected skill path outside skills directory: \(path)")
-            return ""
-        }
+        guard isValidSkillPath(path) else { return "" }
         return readFile(path) ?? ""
+    }
+
+    func saveSkillContent(path: String, content: String) {
+        guard isValidSkillPath(path) else { return }
+        writeFile(path, content: content)
+    }
+
+    private func isValidSkillPath(_ path: String) -> Bool {
+        guard !path.contains(".."), path.hasPrefix(HermesPaths.skillsDir) else {
+            print("[Scarf] Rejected skill path outside skills directory: \(path)")
+            return false
+        }
+        return true
     }
 
     private func parseSkillRequiredConfig(_ path: String) -> [String] {

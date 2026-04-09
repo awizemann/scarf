@@ -139,8 +139,12 @@ struct MessageBubble: View {
                         .foregroundStyle(.orange)
                     }
                     if !message.content.isEmpty {
-                        Text(message.content)
-                            .textSelection(.enabled)
+                        if message.isAssistant {
+                            MarkdownContentView(content: message.content)
+                        } else {
+                            Text(message.content)
+                                .textSelection(.enabled)
+                        }
                     }
                     if !message.toolCalls.isEmpty {
                         ForEach(message.toolCalls) { call in

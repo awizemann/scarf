@@ -99,17 +99,57 @@ struct SkillsView: View {
                     }
                     if !viewModel.skillContent.isEmpty {
                         Divider()
-                        Text(viewModel.skillContent)
-                            .font(.system(.body, design: .monospaced))
-                            .textSelection(.enabled)
+                        HStack {
+                            Spacer()
+                            Button("Edit") { viewModel.startEditing() }
+                                .controlSize(.small)
+                        }
+                        if viewModel.isMarkdownFile {
+                            MarkdownContentView(content: viewModel.skillContent)
+                        } else {
+                            Text(viewModel.skillContent)
+                                .font(.system(.body, design: .monospaced))
+                                .textSelection(.enabled)
+                        }
                     }
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            .sheet(isPresented: $viewModel.isEditing) {
+                skillEditorSheet
+            }
         } else {
             ContentUnavailableView("Select a Skill", systemImage: "lightbulb", description: Text("Choose a skill from the list"))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    private var skillEditorSheet: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Edit \(viewModel.selectedFileName ?? "File")")
+                    .font(.headline)
+                Spacer()
+                Button("Cancel") { viewModel.cancelEditing() }
+                Button("Save") { viewModel.saveEdit() }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding()
+            Divider()
+            HSplitView {
+                TextEditor(text: $viewModel.editText)
+                    .font(.system(.body, design: .monospaced))
+                    .padding(8)
+                if viewModel.isMarkdownFile {
+                    ScrollView {
+                        MarkdownContentView(content: viewModel.editText)
+                            .padding()
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
+                }
+            }
+        }
+        .frame(minWidth: 800, minHeight: 500)
     }
 }

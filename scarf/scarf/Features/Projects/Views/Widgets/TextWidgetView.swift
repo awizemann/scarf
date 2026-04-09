@@ -9,10 +9,8 @@ struct TextWidgetView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if let content = widget.content {
-                if widget.format == "markdown",
-                   let attributed = try? AttributedString(markdown: content) {
-                    Text(attributed)
-                        .font(.callout)
+                if widget.format == "markdown" {
+                    MarkdownContentView(content: content)
                 } else {
                     Text(content)
                         .font(.callout)

@@ -71,8 +71,7 @@ struct MemoryView: View {
                     .foregroundStyle(.secondary)
                     .padding()
             } else {
-                Text(markdownAttributed(content))
-                    .textSelection(.enabled)
+                MarkdownContentView(content: content)
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(.quaternary.opacity(0.5))
@@ -93,14 +92,17 @@ struct MemoryView: View {
             }
             .padding()
             Divider()
-            TextEditor(text: $viewModel.editText)
-                .font(.system(.body, design: .monospaced))
-                .padding(8)
+            HSplitView {
+                TextEditor(text: $viewModel.editText)
+                    .font(.system(.body, design: .monospaced))
+                    .padding(8)
+                ScrollView {
+                    MarkdownContentView(content: viewModel.editText)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+            }
         }
-        .frame(minWidth: 600, minHeight: 400)
-    }
-
-    private func markdownAttributed(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+        .frame(minWidth: 800, minHeight: 500)
     }
 }

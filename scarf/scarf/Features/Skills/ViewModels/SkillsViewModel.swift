@@ -10,6 +10,8 @@ final class SkillsViewModel {
     var selectedFileName: String?
     var searchText = ""
     var missingConfig: [String] = []
+    var isEditing = false
+    var editText = ""
     private var currentConfig = HermesConfig.empty
 
     var filteredCategories: [HermesSkillCategory] {
@@ -60,5 +62,30 @@ final class SkillsViewModel {
         guard let skill = selectedSkill else { return }
         selectedFileName = file
         skillContent = fileService.loadSkillContent(path: skill.path + "/" + file)
+    }
+
+    var isMarkdownFile: Bool {
+        selectedFileName?.hasSuffix(".md") == true
+    }
+
+    private var currentFilePath: String? {
+        guard let skill = selectedSkill, let file = selectedFileName else { return nil }
+        return skill.path + "/" + file
+    }
+
+    func startEditing() {
+        editText = skillContent
+        isEditing = true
+    }
+
+    func saveEdit() {
+        guard let path = currentFilePath else { return }
+        fileService.saveSkillContent(path: path, content: editText)
+        skillContent = editText
+        isEditing = false
+    }
+
+    func cancelEditing() {
+        isEditing = false
     }
 }
