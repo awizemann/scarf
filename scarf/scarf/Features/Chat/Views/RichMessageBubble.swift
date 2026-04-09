@@ -76,13 +76,7 @@ struct RichMessageBubble: View {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .text(let text):
-                    if let attributed = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
-                        Text(attributed)
-                            .textSelection(.enabled)
-                    } else {
-                        Text(text)
-                            .textSelection(.enabled)
-                    }
+                    MarkdownContentView(content: text)
                 case .code(let code, let language):
                     CodeBlockView(code: code, language: language)
                 }
