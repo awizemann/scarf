@@ -235,6 +235,10 @@ struct HermesFileService: Sendable {
     // MARK: - Hermes Process
 
     func isHermesRunning() -> Bool {
+        hermesPID() != nil
+    }
+
+    func hermesPID() -> pid_t? {
         let pipe = Pipe()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
@@ -245,10 +249,19 @@ struct HermesFileService: Sendable {
             try process.run()
             process.waitUntilExit()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return !data.isEmpty
+            let output = String(data: data, encoding: .utf8) ?? ""
+            guard let firstLine = output.components(separatedBy: "\n").first(where: { !$0.isEmpty }),
+                  let pid = pid_t(firstLine.trimmingCharacters(in: .whitespaces)) else { return nil }
+            return pid
         } catch {
-            return false
+            return nil
         }
+    }
+
+    @discardableResult
+    func stopHermes() -> Bool {
+        guard let pid = hermesPID() else { return false }
+        return kill(pid, SIGTERM) == 0
     }
 
     // MARK: - File I/O

@@ -54,6 +54,33 @@ final class MenuBarStatus {
         timer = nil
     }
 
+    func startHermes() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: HermesPaths.hermesBinary)
+        process.arguments = ["gateway", "start"]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        try? process.run()
+        process.waitUntilExit()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            self?.refresh()
+        }
+    }
+
+    func stopHermes() {
+        fileService.stopHermes()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.refresh()
+        }
+    }
+
+    func restartHermes() {
+        fileService.stopHermes()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.startHermes()
+        }
+    }
+
     private func refresh() {
         hermesRunning = fileService.isHermesRunning()
         gatewayRunning = fileService.loadGatewayState()?.isRunning ?? false
@@ -68,6 +95,13 @@ struct MenuBarMenu: View {
         VStack {
             Label(status.hermesRunning ? "Hermes Running" : "Hermes Stopped", systemImage: status.hermesRunning ? "circle.fill" : "circle")
             Label(status.gatewayRunning ? "Gateway Running" : "Gateway Stopped", systemImage: status.gatewayRunning ? "circle.fill" : "circle")
+            Divider()
+            Button("Start Hermes") { status.startHermes() }
+                .disabled(status.hermesRunning)
+            Button("Stop Hermes") { status.stopHermes() }
+                .disabled(!status.hermesRunning)
+            Button("Restart Hermes") { status.restartHermes() }
+                .disabled(!status.hermesRunning)
             Divider()
             Button("Open Dashboard") {
                 coordinator.selectedSection = .dashboard

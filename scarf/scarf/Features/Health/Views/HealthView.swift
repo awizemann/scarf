@@ -29,36 +29,75 @@ struct HealthView: View {
     // MARK: - Header
 
     private var headerBar: some View {
-        HStack(spacing: 16) {
-            if !viewModel.version.isEmpty {
-                Text(viewModel.version)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-
-            if viewModel.hasUpdate {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.caption2)
-                    Text(viewModel.updateInfo)
-                        .font(.caption)
+        VStack(spacing: 0) {
+            HStack(spacing: 16) {
+                if !viewModel.version.isEmpty {
+                    Text(viewModel.version)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
                 }
-                .foregroundStyle(.orange)
+
+                if viewModel.hasUpdate {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.caption2)
+                        Text(viewModel.updateInfo)
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.orange)
+                }
+
+                Spacer()
+
+                HStack(spacing: 12) {
+                    MiniCount(count: viewModel.okCount, color: .green, icon: "checkmark.circle.fill")
+                    MiniCount(count: viewModel.warningCount, color: .orange, icon: "exclamationmark.triangle.fill")
+                    MiniCount(count: viewModel.issueCount, color: .red, icon: "xmark.circle.fill")
+                }
+
+                Button("Refresh") { viewModel.load() }
+                    .controlSize(.small)
             }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
 
-            Spacer()
+            Divider()
 
-            HStack(spacing: 12) {
-                MiniCount(count: viewModel.okCount, color: .green, icon: "checkmark.circle.fill")
-                MiniCount(count: viewModel.warningCount, color: .orange, icon: "exclamationmark.triangle.fill")
-                MiniCount(count: viewModel.issueCount, color: .red, icon: "xmark.circle.fill")
-            }
+            HStack(spacing: 16) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(viewModel.hermesRunning ? .green : .red)
+                        .frame(width: 8, height: 8)
+                    Text(viewModel.hermesRunning ? "Hermes Running" : "Hermes Stopped")
+                        .font(.caption.bold())
+                    if let pid = viewModel.hermesPID {
+                        Text("PID \(pid)")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
-            Button("Refresh") { viewModel.load() }
+                if let msg = viewModel.actionMessage {
+                    Label(msg, systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+
+                Spacer()
+
+                HStack(spacing: 8) {
+                    Button("Start") { viewModel.startHermes() }
+                        .disabled(viewModel.hermesRunning)
+                    Button("Stop") { viewModel.stopHermes() }
+                        .disabled(!viewModel.hermesRunning)
+                    Button("Restart") { viewModel.restartHermes() }
+                        .disabled(!viewModel.hermesRunning)
+                }
                 .controlSize(.small)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
     }
 
     // MARK: - Grid

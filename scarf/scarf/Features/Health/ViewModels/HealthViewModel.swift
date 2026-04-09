@@ -22,6 +22,8 @@ struct HealthSection: Identifiable {
 
 @Observable
 final class HealthViewModel {
+    private let fileService = HermesFileService()
+
     var version = ""
     var updateInfo = ""
     var hasUpdate = false
@@ -31,9 +33,13 @@ final class HealthViewModel {
     var warningCount = 0
     var okCount = 0
     var isLoading = false
+    var hermesRunning = false
+    var hermesPID: pid_t?
+    var actionMessage: String?
 
     func load() {
         isLoading = true
+        refreshProcessStatus()
         loadVersion()
         let statusOutput = runHermes(["status"]).output
         statusSections = parseOutput(statusOutput)
@@ -41,6 +47,41 @@ final class HealthViewModel {
         doctorSections = parseOutput(doctorOutput)
         computeCounts()
         isLoading = false
+    }
+
+    func refreshProcessStatus() {
+        hermesPID = fileService.hermesPID()
+        hermesRunning = hermesPID != nil
+    }
+
+    func stopHermes() {
+        fileService.stopHermes()
+        actionMessage = "Stop signal sent"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.refreshProcessStatus()
+            self?.actionMessage = nil
+        }
+    }
+
+    func startHermes() {
+        runHermes(["gateway", "start"])
+        actionMessage = "Start requested"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            self?.refreshProcessStatus()
+            self?.actionMessage = nil
+        }
+    }
+
+    func restartHermes() {
+        fileService.stopHermes()
+        actionMessage = "Restarting..."
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.runHermes(["gateway", "start"])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                self?.refreshProcessStatus()
+                self?.actionMessage = nil
+            }
+        }
     }
 
     private func loadVersion() {
