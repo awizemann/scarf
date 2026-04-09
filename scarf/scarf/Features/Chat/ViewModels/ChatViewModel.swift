@@ -26,12 +26,14 @@ final class ChatViewModel {
     private var acpPromptTask: Task<Void, Never>?
     private var healthMonitorTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
+    private var isHandlingDisconnect = false
     var isACPConnected: Bool { acpClient != nil && hasActiveProcess }
     var acpStatus: String = ""
     var acpError: String?
 
-    private static let maxReconnectAttempts = 3
+    private static let maxReconnectAttempts = 5
     private static let reconnectBaseDelay: UInt64 = 1_000_000_000 // 1 second
+    private static let maxReconnectDelay: UInt64 = 16_000_000_000 // 16 seconds
 
     var hermesBinaryExists: Bool {
         FileManager.default.fileExists(atPath: HermesPaths.hermesBinary)
@@ -295,8 +297,12 @@ final class ChatViewModel {
     }
 
     private func handleConnectionDied() {
-        guard acpClient != nil else { return } // already handled
+        guard acpClient != nil, !isHandlingDisconnect else { return }
+        isHandlingDisconnect = true
         logger.warning("ACP connection died")
+
+        // Finalize any in-progress streaming message before reconnection
+        richChatViewModel.finalizeOnDisconnect()
 
         // Save session ID for reconnection before cleaning up
         let savedSessionId = richChatViewModel.sessionId
@@ -317,6 +323,7 @@ final class ChatViewModel {
         // Attempt auto-reconnect if we have a session to restore
         guard let savedSessionId else {
             showConnectionFailure()
+            isHandlingDisconnect = false
             return
         }
         attemptReconnect(sessionId: savedSessionId)
@@ -337,7 +344,10 @@ final class ChatViewModel {
 
                 // Backoff delay (skip on first attempt for fast recovery)
                 if attempt > 1 {
-                    let delay = Self.reconnectBaseDelay * UInt64(1 << (attempt - 1))
+                    let delay = min(
+                        Self.reconnectBaseDelay * UInt64(1 << (attempt - 1)),
+                        Self.maxReconnectDelay
+                    )
                     try? await Task.sleep(nanoseconds: delay)
                     guard !Task.isCancelled else { return }
                 }
@@ -348,23 +358,31 @@ final class ChatViewModel {
 
                     let cwd = NSHomeDirectory()
                     let resolvedSessionId: String
+
+                    // Try resumeSession first (designed for reconnection), then loadSession.
+                    // NEVER fall back to newSession — that loses all conversation context.
                     do {
-                        resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: sessionId)
+                        resolvedSessionId = try await client.resumeSession(cwd: cwd, sessionId: sessionId)
                     } catch {
-                        logger.info("Session \(sessionId) not loadable, creating new: \(error.localizedDescription)")
-                        resolvedSessionId = try await client.newSession(cwd: cwd)
+                        logger.info("session/resume failed, trying session/load: \(error.localizedDescription)")
+                        resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: sessionId)
                     }
 
                     // Success — wire up the new client
                     self.acpClient = client
                     self.hasActiveProcess = true
                     richChatViewModel.setSessionId(resolvedSessionId)
+
+                    // Reconcile in-memory messages with what Hermes persisted to DB
+                    await richChatViewModel.reconcileWithDB(sessionId: resolvedSessionId)
+
                     acpStatus = "Reconnected (\(resolvedSessionId.prefix(12)))"
                     acpError = nil
 
                     startACPEventLoop(client: client)
                     startHealthMonitor(client: client)
 
+                    isHandlingDisconnect = false
                     logger.info("Reconnected successfully on attempt \(attempt)")
                     return
                 } catch {
@@ -377,6 +395,7 @@ final class ChatViewModel {
             // All attempts exhausted
             guard !Task.isCancelled else { return }
             showConnectionFailure()
+            isHandlingDisconnect = false
         }
     }
 
@@ -400,6 +419,7 @@ final class ChatViewModel {
         }
         acpClient = nil
         hasActiveProcess = false
+        isHandlingDisconnect = false
     }
 
     /// Respond to a permission request from the ACP agent.

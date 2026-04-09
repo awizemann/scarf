@@ -281,6 +281,64 @@ final class RichChatViewModel {
         streamingToolCalls = []
     }
 
+    // MARK: - Disconnect Recovery
+
+    /// Finalize streaming state on disconnect, before reconnection attempts begin.
+    /// Saves partial content as a permanent message without adding a system message.
+    func finalizeOnDisconnect() {
+        finalizeStreamingMessage()
+        isAgentWorking = false
+        pendingPermission = nil
+        buildMessageGroups()
+    }
+
+    /// Reconcile in-memory messages with DB state after a successful reconnection.
+    /// Merges DB-persisted messages with any local-only messages (e.g., user messages
+    /// that the ACP process may not have persisted before crashing).
+    func reconcileWithDB(sessionId: String) async {
+        let opened = await dataService.open()
+        guard opened else { return }
+
+        var dbMessages = await dataService.fetchMessages(sessionId: sessionId)
+
+        // If we have an origin session (CLI session continued via ACP),
+        // include those messages too
+        if let origin = originSessionId, origin != sessionId {
+            let originMessages = await dataService.fetchMessages(sessionId: origin)
+            if !originMessages.isEmpty {
+                dbMessages = originMessages + dbMessages
+                dbMessages.sort { ($0.timestamp ?? .distantPast) < ($1.timestamp ?? .distantPast) }
+            }
+        }
+
+        let session = await dataService.fetchSession(id: sessionId)
+        await dataService.close()
+
+        // Find local-only user messages not yet in DB.
+        // Local messages have negative IDs; DB messages have positive IDs.
+        let dbUserContents = Set(dbMessages.filter(\.isUser).map(\.content))
+        let localOnlyMessages = messages.filter { msg in
+            msg.id < 0 && msg.isUser && !dbUserContents.contains(msg.content)
+        }
+
+        // Build reconciled list: DB messages + unmatched local user messages
+        var reconciled = dbMessages
+        for localMsg in localOnlyMessages {
+            if let ts = localMsg.timestamp,
+               let insertIdx = reconciled.firstIndex(where: { ($0.timestamp ?? .distantPast) > ts }) {
+                reconciled.insert(localMsg, at: insertIdx)
+            } else {
+                reconciled.append(localMsg)
+            }
+        }
+
+        messages = reconciled
+        currentSession = session
+        let minId = reconciled.map(\.id).min() ?? 0
+        nextLocalId = min(minId - 1, -1)
+        buildMessageGroups()
+    }
+
     // MARK: - Load History from DB (for resumed sessions)
 
     /// Load message history from the DB, optionally combining an origin session

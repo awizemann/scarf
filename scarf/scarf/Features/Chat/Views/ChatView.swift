@@ -40,6 +40,14 @@ struct ChatView: View {
                     .foregroundStyle(.red)
                     .lineLimit(1)
                     .help(error)
+                if let sid = viewModel.richChatViewModel.sessionId {
+                    Button("Reconnect") {
+                        viewModel.resumeSession(sid)
+                    }
+                    .font(.caption)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
             } else if !viewModel.acpStatus.isEmpty {
                 Circle()
                     .fill(.yellow)

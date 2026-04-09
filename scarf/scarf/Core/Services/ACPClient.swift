@@ -10,6 +10,7 @@ actor ACPClient {
     private var stdinPipe: Pipe?
     private var stdoutPipe: Pipe?
     private var stderrPipe: Pipe?
+    private var stdinFd: Int32 = -1
 
     private var nextRequestId = 1
     private var pendingRequests: [Int: CheckedContinuation<AnyCodable?, Error>] = [:]
@@ -45,6 +46,9 @@ actor ACPClient {
     func start() async throws {
         guard process == nil else { return }
 
+        // Ignore SIGPIPE so broken-pipe writes return EPIPE instead of crashing
+        signal(SIGPIPE, SIG_IGN)
+
         // Create the event stream BEFORE anything else so no events are lost
         let (stream, continuation) = AsyncStream.makeStream(of: ACPEvent.self)
         self._eventStream = stream
@@ -62,8 +66,9 @@ actor ACPClient {
         proc.standardOutput = stdout
         proc.standardError = stderr
 
+        // ACP uses JSON-RPC over pipes — do NOT set TERM to avoid terminal escape pollution
         var env = ProcessInfo.processInfo.environment
-        env["TERM"] = "xterm-256color"
+        env.removeValue(forKey: "TERM")
         proc.environment = env
 
         proc.terminationHandler = { [weak self] proc in
@@ -85,6 +90,7 @@ actor ACPClient {
         self.stdinPipe = stdin
         self.stdoutPipe = stdout
         self.stderrPipe = stderr
+        self.stdinFd = stdin.fileHandleForWriting.fileDescriptor
         self.isConnected = true
 
         // Start reading stdout BEFORE sending initialize (so we catch the response)
@@ -123,10 +129,21 @@ actor ACPClient {
         }
         pendingRequests.removeAll()
 
-        if let process, process.isRunning {
-            process.terminate()
-        }
+        // Close stdin first so the subprocess sees EOF and can shut down gracefully
         stdinPipe?.fileHandleForWriting.closeFile()
+
+        if let process, process.isRunning {
+            // SIGINT for graceful Python shutdown (raises KeyboardInterrupt cleanly)
+            process.interrupt()
+            // Watchdog: force-kill if still running after 2 seconds
+            let watchdogProcess = process
+            Task.detached {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if watchdogProcess.isRunning {
+                    watchdogProcess.terminate()
+                }
+            }
+        }
         stdinPipe?.fileHandleForReading.closeFile()
         stdoutPipe?.fileHandleForReading.closeFile()
         stderrPipe?.fileHandleForReading.closeFile()
@@ -135,6 +152,7 @@ actor ACPClient {
         stdinPipe = nil
         stdoutPipe = nil
         stderrPipe = nil
+        stdinFd = -1
         isConnected = false
         currentSessionId = nil
         statusMessage = "Disconnected"
@@ -153,12 +171,21 @@ actor ACPClient {
         }
     }
 
+    /// Valid JSON-RPC notification used as a keepalive probe.
+    /// Sending bare newlines causes `json.loads("")` errors in the ACP library.
+    private static let keepalivePayload: Data = {
+        let json = #"{"jsonrpc":"2.0","method":"$/ping"}"# + "\n"
+        return Data(json.utf8)
+    }()
+
     private func sendKeepalive() {
-        guard let pipe = stdinPipe else { return }
-        let handle = pipe.fileHandleForWriting
-        Task.detached {
-            // Empty newline — JSON-RPC parser skips it, but triggers EPIPE if process is dead
-            handle.write(Data("\n".utf8))
+        let fd = stdinFd
+        guard fd >= 0 else { return }
+        Task.detached { [weak self] in
+            let ok = Self.safeWrite(fd: fd, data: Self.keepalivePayload)
+            if !ok {
+                await self?.handleWriteFailed()
+            }
         }
     }
 
@@ -291,10 +318,11 @@ actor ACPClient {
 
         defer { timeoutTask?.cancel() }
 
+        let fd = stdinFd
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AnyCodable?, Error>) in
             pendingRequests[requestId] = continuation
 
-            guard let pipe = stdinPipe else {
+            guard fd >= 0 else {
                 pendingRequests.removeValue(forKey: requestId)
                 continuation.resume(throwing: ACPClientError.notConnected)
                 return
@@ -304,8 +332,12 @@ actor ACPClient {
             payload.append(contentsOf: "\n".utf8)
             // Write in a detached task to avoid blocking the actor's executor.
             // The continuation is already stored; the response arrives via the read loop.
-            let handle = pipe.fileHandleForWriting
-            Task.detached { handle.write(payload) }
+            Task.detached { [weak self] in
+                let ok = Self.safeWrite(fd: fd, data: payload)
+                if !ok {
+                    await self?.handleWriteFailedForRequest(id: requestId)
+                }
+            }
         }
     }
 
@@ -317,12 +349,17 @@ actor ACPClient {
     }
 
     private func writeJSON(_ dict: [String: Any]) {
-        guard let pipe = stdinPipe,
+        let fd = stdinFd
+        guard fd >= 0,
               let data = try? JSONSerialization.data(withJSONObject: dict) else { return }
         var payload = data
         payload.append(contentsOf: "\n".utf8)
-        let handle = pipe.fileHandleForWriting
-        Task.detached { handle.write(payload) }
+        Task.detached { [weak self] in
+            let ok = Self.safeWrite(fd: fd, data: payload)
+            if !ok {
+                await self?.handleWriteFailed()
+            }
+        }
     }
 
     // MARK: - Read Loop
@@ -402,9 +439,12 @@ actor ACPClient {
         }
     }
 
-    private func handleReadLoopEnded() {
-        guard isConnected else { return } // idempotent with handleTermination
-        logger.warning("ACP read loop ended unexpectedly — cleaning up")
+    // MARK: - Disconnect Cleanup
+
+    /// Single idempotent cleanup path for all disconnect scenarios.
+    private func performDisconnectCleanup(reason: String) {
+        guard isConnected else { return }
+        logger.warning("ACP disconnecting: \(reason)")
         isConnected = false
         statusMessage = "Connection lost"
         for (_, continuation) in pendingRequests {
@@ -415,16 +455,41 @@ actor ACPClient {
         eventContinuation = nil
     }
 
+    private func handleReadLoopEnded() {
+        performDisconnectCleanup(reason: "read loop ended (EOF)")
+    }
+
     private func handleTermination(exitCode: Int32) {
-        logger.info("hermes acp process terminated with code \(exitCode)")
-        statusMessage = "Process exited (\(exitCode))"
-        isConnected = false
-        for (_, continuation) in pendingRequests {
+        performDisconnectCleanup(reason: "process exited (\(exitCode))")
+    }
+
+    private func handleWriteFailed() {
+        performDisconnectCleanup(reason: "write failed (broken pipe)")
+    }
+
+    private func handleWriteFailedForRequest(id: Int) {
+        if let continuation = pendingRequests.removeValue(forKey: id) {
             continuation.resume(throwing: ACPClientError.processTerminated)
         }
-        pendingRequests.removeAll()
-        eventContinuation?.finish()
-        eventContinuation = nil
+        performDisconnectCleanup(reason: "write failed (broken pipe)")
+    }
+
+    // MARK: - Safe POSIX Write
+
+    /// Write data to a file descriptor using POSIX write(), returning false on error.
+    /// Handles partial writes and returns false on EPIPE or other errors.
+    private static func safeWrite(fd: Int32, data: Data) -> Bool {
+        data.withUnsafeBytes { buf in
+            guard let base = buf.baseAddress else { return false }
+            var written = 0
+            let total = buf.count
+            while written < total {
+                let result = Darwin.write(fd, base.advanced(by: written), total - written)
+                if result <= 0 { return false }
+                written += result
+            }
+            return true
+        }
     }
 }
 

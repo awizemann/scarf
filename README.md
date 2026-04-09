@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/macOS-26.2+-blue" alt="macOS">
+  <img src="https://img.shields.io/badge/macOS-14.6+%20Sonoma-blue" alt="macOS">
   <img src="https://img.shields.io/badge/Swift-6-orange" alt="Swift">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <br><br>
@@ -22,22 +22,23 @@
 - **Dashboard** — System health, token usage, cost tracking, recent sessions with live refresh
 - **Insights** — Usage analytics with token breakdown (including reasoning tokens), cost tracking, model/platform stats, top tools bar chart, activity heatmaps, notable sessions, and time period filtering (7/30/90 days or all time)
 - **Sessions Browser** — Full conversation history with message rendering, model reasoning/thinking display, tool call inspection, full-text search, rename, delete, and JSONL export. Subagent sessions are filtered from the main list and accessible via parent session drill-down
-- **Activity Feed** — Recent tool execution log with filtering by kind and session, detail inspector with pretty-printed arguments
-- **Live Chat** — Embedded terminal running `hermes chat` with full ANSI color and Rich formatting via [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm), session persistence across navigation, resume/continue previous sessions, and voice mode controls
+- **Activity Feed** — Recent tool execution log with filtering by kind and session, detail inspector with pretty-printed arguments and tool output display
+- **Live Chat** — Two modes: **Rich Chat** streams responses in real-time via the Agent Client Protocol (ACP) with iMessage-style bubbles, markdown rendering, tool call visualization, thinking/reasoning display, and permission request dialogs; **Terminal** runs `hermes chat` with full ANSI color and Rich formatting via [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm). Both modes support session persistence, resume/continue previous sessions, auto-reconnection with session recovery, and voice mode controls
 - **Memory Viewer/Editor** — View and edit Hermes's MEMORY.md and USER.md with live file-watcher refresh, external memory provider awareness (Honcho, Supermemory, etc.), and profile-scoped memory support with profile picker
-- **Skills Browser** — Browse all installed skills by category with file content viewer, file switcher, and required config warnings for skills that need specific settings
+- **Skills Browser** — Browse and edit installed skills by category with file content viewer, file switcher, and required config warnings for skills that need specific settings
 - **Tools Manager** — Enable/disable toolsets per platform (CLI, Telegram, Discord, Slack, WhatsApp, Signal, Email, Home Assistant, Webhook, Matrix, Feishu, Mattermost) with toggle switches and segmented platform picker, MCP server status
 - **Gateway Control** — Start/stop/restart the messaging gateway, view platform connection status, manage user pairing (approve/revoke)
 - **Cron Manager** — View scheduled jobs with pre-run scripts, delivery failure tracking, timeout info, and `[SILENT]` job indicators
 - **Log Viewer** — Real-time log tailing for agent.log, errors.log, and gateway.log with level filtering and text search
 - **Project Dashboards** — Custom, agent-generated dashboards for any project. Define stat boxes, charts, tables, progress bars, checklists, rich text, and embedded web views in a simple JSON file — Scarf renders them with live refresh. Let your Hermes agent build and maintain project-specific visualizations automatically
 - **Settings** — Structured config editor for all Hermes settings including model/provider selection, browser backend, reasoning effort, approval mode, cost display, Docker environment, command allowlist, credential management, and more
+- **Hermes Process Control** — Start, stop, and restart the Hermes agent directly from Scarf
 - **Menu Bar** — Status icon showing Hermes running state with quick actions
 
 ## Requirements
 
-- macOS 26.2+
-- Xcode 26.3+
+- macOS 14.6+ (Sonoma)
+- Xcode 16.0+
 - [Hermes agent](https://github.com/hermes-ai/hermes-agent) v0.6.0+ installed at `~/.hermes/` (v0.8.0 recommended for full feature support)
 
 ### Compatibility
@@ -91,7 +92,7 @@ scarf/
     Sessions/     Conversation browser with rename, delete, export
     Activity/     Tool execution feed with inspector
     Projects/     Agent-generated project dashboards with widget rendering
-    Chat/         Embedded terminal via SwiftTerm with voice controls
+    Chat/         Rich ACP chat and embedded terminal with voice controls
     Memory/       Memory viewer and editor
     Skills/       Skill browser by category
     Tools/        Toolset management per platform
@@ -115,6 +116,7 @@ Scarf reads Hermes data directly from `~/.hermes/`:
 | `logs/*.log` | Text | Read-only |
 | `gateway_state.json` | JSON | Read-only |
 | `skills/` | Directory tree | Read-only |
+| `hermes acp` | ACP subprocess (JSON-RPC stdio) | Real-time chat |
 | `hermes chat` | Terminal subprocess | Interactive |
 | `hermes tools` | CLI commands | Enable/Disable |
 | `hermes sessions` | CLI commands | Rename/Delete/Export |
@@ -137,7 +139,7 @@ Everything else uses system frameworks: SQLite3 C API, Foundation JSON, Attribut
 
 Scarf watches `~/.hermes/` for file changes and queries the SQLite database for sessions, messages, and analytics. Views refresh automatically when Hermes writes new data.
 
-The Chat tab spawns `hermes chat` as a subprocess in a pseudo-terminal, giving you the full interactive CLI experience with proper ANSI rendering. Sessions persist across navigation — switch tabs and come back without losing your conversation.
+The Chat tab has two modes. **Rich Chat** communicates with Hermes via the Agent Client Protocol (ACP) — a JSON-RPC connection over stdio — streaming responses in real-time with automatic reconnection and session recovery on connection loss. **Terminal** mode spawns `hermes chat` in a pseudo-terminal for the full interactive CLI experience with proper ANSI rendering. Sessions persist across navigation in both modes — switch tabs and come back without losing your conversation.
 
 Management actions (renaming sessions, toggling tools, editing memory) call the Hermes CLI or write directly to the appropriate files, keeping Scarf and Hermes in sync.
 
