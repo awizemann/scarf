@@ -157,6 +157,17 @@ actor HermesDataService {
         return messages
     }
 
+    func fetchToolResult(callId: String) -> String? {
+        guard let db else { return nil }
+        let sql = "SELECT content FROM messages WHERE role = 'tool' AND tool_call_id = ? LIMIT 1"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, callId, -1, sqliteTransient)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return columnText(stmt!, 0)
+    }
+
     func fetchRecentToolCalls(limit: Int = QueryDefaults.toolCallLimit) -> [HermesMessage] {
         guard let db else { return [] }
         let sql = """

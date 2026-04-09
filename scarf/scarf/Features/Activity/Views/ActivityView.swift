@@ -57,11 +57,8 @@ struct ActivityView: View {
         List(selection: Binding(
             get: { viewModel.selectedEntry?.id },
             set: { id in
-                if let id {
-                    viewModel.selectedEntry = viewModel.filteredActivity.first(where: { $0.id == id })
-                } else {
-                    viewModel.selectedEntry = nil
-                }
+                let entry = id.flatMap { id in viewModel.filteredActivity.first(where: { $0.id == id }) }
+                Task { await viewModel.selectEntry(entry) }
             }
         )) {
             ForEach(viewModel.filteredActivity) { entry in
@@ -146,14 +143,32 @@ struct ActivityView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
 
+                    if let result = viewModel.toolResult, !result.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Output")
+                                .font(.caption.bold())
+                                .foregroundStyle(.secondary)
+                            Text(result)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                                .lineLimit(50)
+                                .padding(8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color(.textBackgroundColor).opacity(0.5))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .strokeBorder(.quaternary, lineWidth: 1)
+                                )
+                        }
+                    }
+
                     if !entry.messageContent.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Assistant Message")
                                 .font(.caption.bold())
                                 .foregroundStyle(.secondary)
-                            Text(entry.messageContent)
-                                .font(.caption)
-                                .textSelection(.enabled)
+                            MarkdownContentView(content: entry.messageContent)
                                 .padding(8)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(.quaternary.opacity(0.5))

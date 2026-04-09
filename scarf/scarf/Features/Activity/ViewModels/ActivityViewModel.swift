@@ -8,6 +8,7 @@ final class ActivityViewModel {
     var filterKind: ToolKind?
     var filterSessionId: String?
     var selectedEntry: ActivityEntry?
+    var toolResult: String?
     var sessionPreviews: [String: String] = [:]
     var isLoading = true
 
@@ -52,6 +53,15 @@ final class ActivityViewModel {
         toolMessages = await dataService.fetchRecentToolCalls(limit: 200)
         sessionPreviews = await dataService.fetchSessionPreviews(limit: 200)
         isLoading = false
+    }
+
+    func selectEntry(_ entry: ActivityEntry?) async {
+        selectedEntry = entry
+        if let entry {
+            toolResult = await dataService.fetchToolResult(callId: entry.id)
+        } else {
+            toolResult = nil
+        }
     }
 
     func cleanup() async {
