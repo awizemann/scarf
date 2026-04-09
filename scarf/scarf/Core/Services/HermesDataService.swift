@@ -217,6 +217,30 @@ actor HermesDataService {
         return previews
     }
 
+    // MARK: - Single-Row Queries
+
+    func fetchMessageCount(sessionId: String) -> Int {
+        guard let db else { return 0 }
+        let sql = "SELECT COUNT(*) FROM messages WHERE session_id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, sessionId, -1, sqliteTransient)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }
+        return Int(sqlite3_column_int(stmt, 0))
+    }
+
+    func fetchSession(id: String) -> HermesSession? {
+        guard let db else { return nil }
+        let sql = "SELECT \(sessionColumns) FROM sessions WHERE id = ? LIMIT 1"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, id, -1, sqliteTransient)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return sessionFromRow(stmt!)
+    }
+
     // MARK: - Stats
 
     struct SessionStats: Sendable {

@@ -5,10 +5,11 @@ struct ChatView: View {
     @Environment(HermesFileWatcher.self) private var fileWatcher
 
     var body: some View {
+        @Bindable var vm = viewModel
         VStack(spacing: 0) {
             toolbar
             Divider()
-            terminalArea
+            chatArea
         }
         .navigationTitle("Chat")
         .task { await viewModel.loadRecentSessions() }
@@ -19,7 +20,7 @@ struct ChatView: View {
 
     private var toolbar: some View {
         HStack(spacing: 12) {
-            Image(systemName: "terminal")
+            Image(systemName: viewModel.displayMode == .terminal ? "terminal" : "bubble.left.and.text.bubble.right")
                 .foregroundStyle(.secondary)
 
             if viewModel.hasActiveProcess {
@@ -43,6 +44,17 @@ struct ChatView: View {
             if viewModel.hasActiveProcess {
                 voiceControls
             }
+
+            Picker("View", selection: Bindable(viewModel).displayMode) {
+                Image(systemName: "terminal")
+                    .help("Terminal")
+                    .tag(ChatDisplayMode.terminal)
+                Image(systemName: "bubble.left.and.text.bubble.right")
+                    .help("Rich Chat")
+                    .tag(ChatDisplayMode.richChat)
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
 
             if !viewModel.hermesBinaryExists {
                 Label("Hermes binary not found", systemImage: "exclamationmark.triangle")
@@ -138,6 +150,16 @@ struct ChatView: View {
     }
 
     @ViewBuilder
+    private var chatArea: some View {
+        switch viewModel.displayMode {
+        case .terminal:
+            terminalArea
+        case .richChat:
+            richChatArea
+        }
+    }
+
+    @ViewBuilder
     private var terminalArea: some View {
         if let terminal = viewModel.terminalView {
             PersistentTerminalView(terminalView: terminal)
@@ -155,6 +177,30 @@ struct ChatView: View {
                 description: Text("Expected at \(HermesPaths.hermesBinary)")
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private var richChatArea: some View {
+        ZStack {
+            // Keep terminal alive in background for process hosting
+            if let terminal = viewModel.terminalView {
+                PersistentTerminalView(terminalView: terminal)
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
+                    .allowsHitTesting(false)
+            }
+
+            if viewModel.hermesBinaryExists {
+                RichChatView()
+            } else {
+                ContentUnavailableView(
+                    "Hermes Not Found",
+                    systemImage: "terminal",
+                    description: Text("Expected at \(HermesPaths.hermesBinary)")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
     }
 }
