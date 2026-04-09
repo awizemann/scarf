@@ -21,7 +21,10 @@ final class MemoryViewModel {
     var userCharCount: Int { userContent.count }
 
     var hasExternalProvider: Bool {
-        !memoryProvider.isEmpty && memoryProvider != "file"
+        let stripped = memoryProvider
+            .trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
+        return !stripped.isEmpty && stripped != "file"
     }
 
     var hasMultipleProfiles: Bool { !profiles.isEmpty }
