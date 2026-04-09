@@ -47,7 +47,7 @@ struct ToolUsage: Identifiable {
 }
 
 struct NotableSession: Identifiable {
-    var id: String { session.id }
+    var id: String { "\(session.id)-\(label)" }
     let label: String
     let value: String
     let session: HermesSession

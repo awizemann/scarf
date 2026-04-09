@@ -27,9 +27,27 @@ struct ChatView: View {
                 Circle()
                     .fill(.green)
                     .frame(width: 6, height: 6)
-                Text("Active")
+                Text(viewModel.acpStatus.isEmpty ? "Active" : viewModel.acpStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            } else if let error = viewModel.acpError {
+                Circle()
+                    .fill(.red)
+                    .frame(width: 6, height: 6)
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .lineLimit(1)
+                    .help(error)
+            } else if !viewModel.acpStatus.isEmpty {
+                Circle()
+                    .fill(.yellow)
+                    .frame(width: 6, height: 6)
+                Text(viewModel.acpStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             } else {
                 Circle()
                     .fill(.secondary)
@@ -41,7 +59,7 @@ struct ChatView: View {
 
             Spacer()
 
-            if viewModel.hasActiveProcess {
+            if viewModel.hasActiveProcess && viewModel.displayMode == .terminal {
                 voiceControls
             }
 
@@ -63,6 +81,13 @@ struct ChatView: View {
             }
 
             Menu {
+                if viewModel.hasActiveProcess, let activeId = viewModel.richChatViewModel.sessionId {
+                    Button("Return to Active Session (\(activeId.prefix(8))...)") {
+                        // Already active — just ensure we're showing it
+                    }
+                    .disabled(true)
+                    Divider()
+                }
                 Button("New Session") {
                     viewModel.startNewSession()
                 }
@@ -183,7 +208,7 @@ struct ChatView: View {
     @ViewBuilder
     private var richChatArea: some View {
         ZStack {
-            // Keep terminal alive in background for process hosting
+            // Keep terminal alive in background if it exists (terminal mode session)
             if let terminal = viewModel.terminalView {
                 PersistentTerminalView(terminalView: terminal)
                     .frame(width: 0, height: 0)
@@ -192,7 +217,11 @@ struct ChatView: View {
             }
 
             if viewModel.hermesBinaryExists {
-                RichChatView()
+                RichChatView(
+                    richChat: viewModel.richChatViewModel,
+                    onSend: { viewModel.sendText($0) },
+                    isEnabled: viewModel.hasActiveProcess || viewModel.hermesBinaryExists
+                )
             } else {
                 ContentUnavailableView(
                     "Hermes Not Found",
@@ -201,6 +230,93 @@ struct ChatView: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        }
+        // Permission approval sheet
+        .sheet(item: permissionBinding) { permission in
+            PermissionApprovalView(
+                title: permission.title,
+                kind: permission.kind,
+                options: permission.options,
+                onRespond: { optionId in
+                    viewModel.respondToPermission(optionId: optionId)
+                }
+            )
+        }
+    }
+
+    private var permissionBinding: Binding<RichChatViewModel.PendingPermission?> {
+        Binding(
+            get: { viewModel.richChatViewModel.pendingPermission },
+            set: { viewModel.richChatViewModel.pendingPermission = $0 }
+        )
+    }
+}
+
+// MARK: - Permission Approval View
+
+extension RichChatViewModel.PendingPermission: @retroactive Identifiable {
+    var id: Int { requestId }
+}
+
+struct PermissionApprovalView: View {
+    let title: String
+    let kind: String
+    let options: [(optionId: String, name: String)]
+    let onRespond: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: kindIcon)
+                .font(.title)
+                .foregroundStyle(kindColor)
+
+            Text("Tool Approval Required")
+                .font(.headline)
+
+            Text(title)
+                .font(.body.monospaced())
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
+            HStack(spacing: 12) {
+                ForEach(options, id: \.optionId) { option in
+                    if option.optionId == "deny" {
+                        Button(option.name) {
+                            onRespond(option.optionId)
+                            dismiss()
+                        }
+                        .buttonStyle(.bordered)
+                    } else {
+                        Button(option.name) {
+                            onRespond(option.optionId)
+                            dismiss()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 350)
+    }
+
+    private var kindIcon: String {
+        switch kind {
+        case "execute": return "terminal"
+        case "edit": return "pencil"
+        case "delete": return "trash"
+        default: return "wrench"
+        }
+    }
+
+    private var kindColor: Color {
+        switch kind {
+        case "execute": return .orange
+        case "edit": return .blue
+        case "delete": return .red
+        default: return .secondary
         }
     }
 }

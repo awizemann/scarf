@@ -4,12 +4,22 @@ struct RichChatMessageList: View {
     let groups: [MessageGroup]
     let isWorking: Bool
 
+    /// Track the last group's assistant content length to detect streaming updates.
+    private var scrollAnchor: String {
+        if isWorking { return "typing-indicator" }
+        if let last = groups.last { return "group-\(last.id)" }
+        return "scroll-top"
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
+                    Spacer(minLength: 0)
+                        .id("scroll-top")
                     ForEach(groups) { group in
                         MessageGroupView(group: group)
+                            .id("group-\(group.id)")
                     }
 
                     if isWorking {
@@ -19,29 +29,45 @@ struct RichChatMessageList: View {
                 }
                 .padding()
             }
+            .defaultScrollAnchor(.bottom)
+            // Scroll on new groups
             .onChange(of: groups.count) {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    if isWorking {
-                        proxy.scrollTo("typing-indicator", anchor: .bottom)
-                    } else if let last = groups.last {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
-                }
+                scrollToBottom(proxy: proxy)
             }
+            // Scroll when agent starts/stops working
             .onChange(of: isWorking) {
-                if isWorking {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo("typing-indicator", anchor: .bottom)
-                    }
-                }
+                scrollToBottom(proxy: proxy)
             }
+            // Scroll on streaming content updates (group content changes)
+            .onChange(of: scrollAnchor) {
+                scrollToBottom(proxy: proxy)
+            }
+            // Scroll on last message content change (streaming text)
+            .onChange(of: groups.last?.assistantMessages.last?.content ?? "") {
+                scrollToBottom(proxy: proxy, animated: false)
+            }
+            // Scroll on tool call count change
+            .onChange(of: groups.last?.toolCallCount ?? 0) {
+                scrollToBottom(proxy: proxy)
+            }
+        }
+    }
+
+    private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool = true) {
+        let target = scrollAnchor
+        if animated {
+            withAnimation(.easeOut(duration: 0.15)) {
+                proxy.scrollTo(target, anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo(target, anchor: .bottom)
         }
     }
 
     private var typingIndicator: some View {
         HStack {
             HStack(spacing: 4) {
-                ForEach(0..<3, id: \.self) { i in
+                ForEach(0..<3, id: \.self) { _ in
                     Circle()
                         .fill(.secondary)
                         .frame(width: 6, height: 6)
@@ -76,7 +102,6 @@ struct MessageGroupView: View {
                 toolSummary
             }
         }
-        .id(group.id)
     }
 
     @ViewBuilder

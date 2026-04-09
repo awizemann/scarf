@@ -6,6 +6,7 @@ actor HermesDataService {
     private var hasV07Schema = false
 
     func open() -> Bool {
+        if db != nil { return true }
         let path = HermesPaths.stateDB
         guard FileManager.default.fileExists(atPath: path) else { return false }
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX
@@ -219,6 +220,29 @@ actor HermesDataService {
 
     // MARK: - Single-Row Queries
 
+    struct MessageFingerprint: Equatable, Sendable {
+        let count: Int
+        let maxId: Int
+        let maxTimestamp: Double
+
+        static let empty = MessageFingerprint(count: 0, maxId: 0, maxTimestamp: 0)
+    }
+
+    func fetchMessageFingerprint(sessionId: String) -> MessageFingerprint {
+        guard let db else { return .empty }
+        let sql = "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(timestamp), 0) FROM messages WHERE session_id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return .empty }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, sessionId, -1, sqliteTransient)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return .empty }
+        return MessageFingerprint(
+            count: Int(sqlite3_column_int(stmt, 0)),
+            maxId: Int(sqlite3_column_int(stmt, 1)),
+            maxTimestamp: sqlite3_column_double(stmt, 2)
+        )
+    }
+
     func fetchMessageCount(sessionId: String) -> Int {
         guard let db else { return 0 }
         let sql = "SELECT COUNT(*) FROM messages WHERE session_id = ?"
@@ -239,6 +263,34 @@ actor HermesDataService {
         sqlite3_bind_text(stmt, 1, id, -1, sqliteTransient)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
         return sessionFromRow(stmt!)
+    }
+
+    func fetchMostRecentlyActiveSessionId() -> String? {
+        guard let db else { return nil }
+        let sql = "SELECT session_id FROM messages ORDER BY timestamp DESC LIMIT 1"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return columnText(stmt!, 0)
+    }
+
+    func fetchMostRecentlyStartedSessionId(after: Date? = nil) -> String? {
+        guard let db else { return nil }
+        let sql: String
+        if after != nil {
+            sql = "SELECT id FROM sessions WHERE parent_session_id IS NULL AND started_at > ? ORDER BY started_at DESC LIMIT 1"
+        } else {
+            sql = "SELECT id FROM sessions WHERE parent_session_id IS NULL ORDER BY started_at DESC LIMIT 1"
+        }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        if let after {
+            sqlite3_bind_double(stmt, 1, after.timeIntervalSince1970)
+        }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return columnText(stmt!, 0)
     }
 
     // MARK: - Stats

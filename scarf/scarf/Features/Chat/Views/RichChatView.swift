@@ -1,18 +1,24 @@
 import SwiftUI
 
 struct RichChatView: View {
-    @Environment(ChatViewModel.self) private var viewModel
+    @Bindable var richChat: RichChatViewModel
+    var onSend: (String) -> Void
+    var isEnabled: Bool
     @Environment(HermesFileWatcher.self) private var fileWatcher
+    @Environment(ChatViewModel.self) private var chatViewModel
+
+    /// In ACP mode, events drive updates directly — no DB polling needed.
+    private var isACPMode: Bool { chatViewModel.isACPConnected }
 
     var body: some View {
         VStack(spacing: 0) {
             SessionInfoBar(
-                session: viewModel.richChatViewModel.currentSession,
-                isWorking: viewModel.richChatViewModel.isAgentWorking
+                session: richChat.currentSession,
+                isWorking: richChat.isAgentWorking
             )
             Divider()
 
-            if viewModel.richChatViewModel.messageGroups.isEmpty && !viewModel.richChatViewModel.isAgentWorking {
+            if richChat.messageGroups.isEmpty && !richChat.isAgentWorking {
                 ContentUnavailableView(
                     "Chat Messages",
                     systemImage: "bubble.left.and.text.bubble.right",
@@ -21,22 +27,24 @@ struct RichChatView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 RichChatMessageList(
-                    groups: viewModel.richChatViewModel.messageGroups,
-                    isWorking: viewModel.richChatViewModel.isAgentWorking
+                    groups: richChat.messageGroups,
+                    isWorking: richChat.isAgentWorking
                 )
             }
 
             Divider()
             RichChatInputBar(
                 onSend: { text in
-                    viewModel.sendText(text)
-                    viewModel.richChatViewModel.markAgentWorking()
+                    onSend(text)
                 },
-                isEnabled: viewModel.hasActiveProcess
+                isEnabled: isEnabled
             )
         }
+        // DB polling fallback for terminal mode only — never overwrite ACP messages
         .onChange(of: fileWatcher.lastChangeDate) {
-            Task { await viewModel.richChatViewModel.refreshMessages() }
+            if !isACPMode, !richChat.hasMessages, richChat.sessionId != nil {
+                richChat.scheduleRefresh()
+            }
         }
     }
 }

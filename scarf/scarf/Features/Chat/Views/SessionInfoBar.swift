@@ -19,6 +19,13 @@ struct SessionInfoBar: View {
                     }
                 }
 
+                if let title = session.title, !title.isEmpty {
+                    Text(title)
+                        .font(.caption.bold())
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
                 if let model = session.model {
                     Label(model, systemImage: "cpu")
                 }
