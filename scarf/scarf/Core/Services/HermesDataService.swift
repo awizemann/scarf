@@ -58,7 +58,7 @@ actor HermesDataService {
 
     func fetchSessions(limit: Int = QueryDefaults.sessionLimit) -> [HermesSession] {
         guard let db else { return [] }
-        let sql = "SELECT \(sessionColumns) FROM sessions ORDER BY started_at DESC LIMIT ?"
+        let sql = "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id IS NULL ORDER BY started_at DESC LIMIT ?"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
@@ -73,11 +73,26 @@ actor HermesDataService {
 
     func fetchSessionsInPeriod(since: Date) -> [HermesSession] {
         guard let db else { return [] }
-        let sql = "SELECT \(sessionColumns) FROM sessions WHERE started_at >= ? ORDER BY started_at DESC"
+        let sql = "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id IS NULL AND started_at >= ? ORDER BY started_at DESC"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_double(stmt, 1, since.timeIntervalSince1970)
+
+        var sessions: [HermesSession] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            sessions.append(sessionFromRow(stmt!))
+        }
+        return sessions
+    }
+
+    func fetchSubagentSessions(parentId: String) -> [HermesSession] {
+        guard let db else { return [] }
+        let sql = "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id = ? ORDER BY started_at ASC"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, parentId, -1, sqliteTransient)
 
         var sessions: [HermesSession] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -252,7 +267,7 @@ actor HermesDataService {
         let sql = """
             SELECT COUNT(*) FROM messages m
             JOIN sessions s ON m.session_id = s.id
-            WHERE m.role = 'user' AND s.started_at >= ?
+            WHERE m.role = 'user' AND s.parent_session_id IS NULL AND s.started_at >= ?
             """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
@@ -268,7 +283,7 @@ actor HermesDataService {
             SELECT m.tool_name, COUNT(*) as cnt
             FROM messages m
             JOIN sessions s ON m.session_id = s.id
-            WHERE m.tool_name IS NOT NULL AND m.tool_name <> '' AND s.started_at >= ?
+            WHERE m.tool_name IS NOT NULL AND m.tool_name <> '' AND s.parent_session_id IS NULL AND s.started_at >= ?
             GROUP BY m.tool_name
             ORDER BY cnt DESC
             """
@@ -289,7 +304,7 @@ actor HermesDataService {
     func fetchSessionStartHours(since: Date) -> [Int: Int] {
         guard let db else { return [:] }
         let sql = """
-            SELECT started_at FROM sessions WHERE started_at >= ?
+            SELECT started_at FROM sessions WHERE parent_session_id IS NULL AND started_at >= ?
             """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [:] }
@@ -310,7 +325,7 @@ actor HermesDataService {
     func fetchSessionDaysOfWeek(since: Date) -> [Int: Int] {
         guard let db else { return [:] }
         let sql = """
-            SELECT started_at FROM sessions WHERE started_at >= ?
+            SELECT started_at FROM sessions WHERE parent_session_id IS NULL AND started_at >= ?
             """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [:] }

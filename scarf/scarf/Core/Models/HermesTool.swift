@@ -28,6 +28,8 @@ enum KnownPlatforms {
         HermesToolPlatform(name: "homeassistant", displayName: "Home Assistant", icon: "house"),
         HermesToolPlatform(name: "webhook", displayName: "Webhook", icon: "arrow.up.right.square"),
         HermesToolPlatform(name: "matrix", displayName: "Matrix", icon: "lock.rectangle.stack"),
+        HermesToolPlatform(name: "feishu", displayName: "Feishu", icon: "message.badge.circle"),
+        HermesToolPlatform(name: "mattermost", displayName: "Mattermost", icon: "bubble.left.and.exclamationmark.bubble.right"),
     ]
 
     static func icon(for platform: String) -> String {
@@ -42,6 +44,8 @@ enum KnownPlatforms {
         case "homeassistant": return "house"
         case "webhook": return "arrow.up.right.square"
         case "matrix": return "lock.rectangle.stack"
+        case "feishu": return "message.badge.circle"
+        case "mattermost": return "bubble.left.and.exclamationmark.bubble.right"
         default: return "bubble.left"
         }
     }

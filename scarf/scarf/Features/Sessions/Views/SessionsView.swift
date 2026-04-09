@@ -115,10 +115,14 @@ struct SessionsView: View {
             SessionDetailView(
                 session: session,
                 messages: viewModel.messages,
+                subagentSessions: viewModel.subagentSessions,
                 preview: viewModel.previewFor(session),
                 onRename: { viewModel.beginRename(session) },
                 onExport: { viewModel.exportSession(session) },
-                onDelete: { viewModel.beginDelete(session) }
+                onDelete: { viewModel.beginDelete(session) },
+                onSelectSubagent: { sub in
+                    Task { await viewModel.selectSession(sub) }
+                }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else {
@@ -149,13 +153,6 @@ struct SessionsView: View {
     }
 
     private func platformIcon(_ platform: String) -> String {
-        switch platform {
-        case "cli": return "terminal"
-        case "telegram": return "paperplane"
-        case "discord": return "bubble.left.and.bubble.right"
-        case "slack": return "number"
-        case "email": return "envelope"
-        default: return "bubble.left"
-        }
+        KnownPlatforms.icon(for: platform)
     }
 }

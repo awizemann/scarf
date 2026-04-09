@@ -12,4 +12,5 @@ struct HermesSkill: Identifiable, Sendable {
     let category: String
     let path: String
     let files: [String]
+    let requiredConfig: [String]
 }

@@ -7,6 +7,23 @@ struct MemoryView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                if viewModel.hasMultipleProfiles {
+                    HStack(spacing: 8) {
+                        Text("Profile")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                        Picker("", selection: Binding(
+                            get: { viewModel.activeProfile },
+                            set: { viewModel.switchProfile($0) }
+                        )) {
+                            Text("Default").tag("")
+                            ForEach(viewModel.profiles, id: \.self) { profile in
+                                Text(profile).tag(profile)
+                            }
+                        }
+                        .frame(maxWidth: 200)
+                    }
+                }
                 if viewModel.hasExternalProvider {
                     HStack(spacing: 8) {
                         Image(systemName: "info.circle")

@@ -38,6 +38,11 @@ struct CronView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    if job.silent == true {
+                        Text("SILENT")
+                            .font(.caption2.bold())
+                            .foregroundStyle(.purple)
+                    }
                     if !job.enabled {
                         Text("Disabled")
                             .font(.caption2)
@@ -86,6 +91,20 @@ struct CronView: View {
                             .background(.quaternary.opacity(0.5))
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
+                    if let script = job.preRunScript, !script.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Pre-Run Script")
+                                .font(.caption.bold())
+                                .foregroundStyle(.secondary)
+                            Text(script)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                                .padding(8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.quaternary.opacity(0.5))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                    }
                     if let skills = job.skills, !skills.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Skills")
@@ -117,6 +136,21 @@ struct CronView: View {
                         Label(error, systemImage: "exclamationmark.triangle")
                             .font(.caption)
                             .foregroundStyle(.red)
+                    }
+                    if let timeout = job.timeoutSeconds {
+                        Label("Timeout: \(timeout)s (\(job.timeoutType ?? "wall_clock"))", systemImage: "timer")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let failures = job.deliveryFailures, failures > 0 {
+                        Label("\(failures) delivery failure\(failures == 1 ? "" : "s")", systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    if let deliveryError = job.lastDeliveryError {
+                        Label(deliveryError, systemImage: "paperplane.circle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
                     }
                     if let output = viewModel.jobOutput {
                         Divider()

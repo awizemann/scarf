@@ -19,17 +19,7 @@ struct PlatformInfo: Identifiable {
 
     var isConnected: Bool { state == "connected" }
 
-    var icon: String {
-        switch name {
-        case "telegram": return "paperplane"
-        case "discord": return "bubble.left.and.bubble.right"
-        case "slack": return "number"
-        case "whatsapp": return "phone.bubble"
-        case "signal": return "lock.shield"
-        case "email": return "envelope"
-        default: return "bubble.left"
-        }
-    }
+    var icon: String { KnownPlatforms.icon(for: name) }
 }
 
 struct PairedUser: Identifiable {

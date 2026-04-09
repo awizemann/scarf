@@ -10,9 +10,11 @@ final class SettingsViewModel {
     var hermesRunning = false
     var rawConfigYAML = ""
     var personalities: [String] = []
-    var providers = ["anthropic", "openrouter", "nous", "openai-codex", "zai", "kimi-coding", "minimax"]
+    var providers = ["anthropic", "openrouter", "nous", "openai-codex", "google-ai-studio", "xai", "ollama-cloud", "zai", "kimi-coding", "minimax"]
     var terminalBackends = ["local", "docker", "singularity", "modal", "daytona", "ssh"]
+    var browserBackends = ["browseruse", "firecrawl", "local"]
     var saveMessage: String?
+    var showAuthRemoveConfirmation = false
 
     func load() {
         config = fileService.loadConfig()
@@ -55,6 +57,19 @@ final class SettingsViewModel {
     func setReasoningEffort(_ value: String) { setSetting("agent.reasoning_effort", value: value) }
     func setShowCost(_ value: Bool) { setSetting("display.show_cost", value: value ? "true" : "false") }
     func setApprovalMode(_ value: String) { setSetting("approvals.mode", value: value) }
+    func setBrowserBackend(_ value: String) { setSetting("browser.backend", value: value) }
+
+    func removeAuth() {
+        let result = runHermes(["auth", "remove"])
+        if result.exitCode == 0 {
+            saveMessage = "Credentials removed"
+        } else {
+            saveMessage = "Failed to remove credentials"
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.saveMessage = nil
+        }
+    }
 
     func openConfigInEditor() {
         NSWorkspace.shared.open(URL(fileURLWithPath: HermesPaths.configYAML))

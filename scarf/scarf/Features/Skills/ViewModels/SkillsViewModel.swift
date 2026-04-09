@@ -9,6 +9,8 @@ final class SkillsViewModel {
     var skillContent = ""
     var selectedFileName: String?
     var searchText = ""
+    var missingConfig: [String] = []
+    private var currentConfig = HermesConfig.empty
 
     var filteredCategories: [HermesSkillCategory] {
         guard !searchText.isEmpty else { return categories }
@@ -28,6 +30,7 @@ final class SkillsViewModel {
 
     func load() {
         categories = fileService.loadSkills()
+        currentConfig = fileService.loadConfig()
     }
 
     func selectSkill(_ skill: HermesSkill) {
@@ -39,6 +42,17 @@ final class SkillsViewModel {
         } else {
             selectedFileName = nil
             skillContent = ""
+        }
+        missingConfig = computeMissingConfig(for: skill)
+    }
+
+    private func computeMissingConfig(for skill: HermesSkill) -> [String] {
+        guard !skill.requiredConfig.isEmpty else { return [] }
+        guard let yaml = try? String(contentsOfFile: HermesPaths.configYAML, encoding: .utf8) else {
+            return skill.requiredConfig
+        }
+        return skill.requiredConfig.filter { key in
+            !yaml.contains(key)
         }
     }
 

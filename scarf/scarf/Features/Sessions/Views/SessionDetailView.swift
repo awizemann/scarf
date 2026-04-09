@@ -3,14 +3,19 @@ import SwiftUI
 struct SessionDetailView: View {
     let session: HermesSession
     let messages: [HermesMessage]
+    var subagentSessions: [HermesSession] = []
     var preview: String?
     var onRename: (() -> Void)?
     var onExport: (() -> Void)?
     var onDelete: (() -> Void)?
+    var onSelectSubagent: ((HermesSession) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             sessionHeader
+            if !subagentSessions.isEmpty {
+                subagentSection
+            }
             Divider()
             messagesList
         }
@@ -41,6 +46,13 @@ struct SessionDetailView: View {
             }
             HStack(spacing: 16) {
                 Label(session.source, systemImage: session.sourceIcon)
+                if session.isSubagent {
+                    Label("Subagent", systemImage: "arrow.triangle.branch")
+                        .foregroundStyle(.orange)
+                }
+                if let userId = session.userId, !userId.isEmpty, session.source != "cli" {
+                    Label(userId, systemImage: "person")
+                }
                 Label(session.model ?? "unknown", systemImage: "cpu")
                 Label("\(session.messageCount) msgs", systemImage: "bubble.left")
                 Label("\(session.toolCallCount) tools", systemImage: "wrench")
@@ -62,6 +74,38 @@ struct SessionDetailView: View {
                 .textSelection(.enabled)
         }
         .padding()
+    }
+
+    private var subagentSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Divider()
+            Text("Subagent Sessions (\(subagentSessions.count))")
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+            ForEach(subagentSessions) { sub in
+                Button {
+                    onSelectSubagent?(sub)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.triangle.branch")
+                            .foregroundStyle(.orange)
+                        Text(sub.displayTitle)
+                            .lineLimit(1)
+                        Spacer()
+                        Text(sub.model ?? "")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Text("\(sub.messageCount) msgs")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .font(.caption)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 8)
     }
 
     private var messagesList: some View {

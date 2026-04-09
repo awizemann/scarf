@@ -21,6 +21,7 @@ final class SessionsViewModel {
     var searchResults: [HermesMessage] = []
     var isSearching = false
     var storeStats: SessionStoreStats?
+    var subagentSessions: [HermesSession] = []
 
     var renameSessionId: String?
     var renameText = ""
@@ -45,6 +46,7 @@ final class SessionsViewModel {
     func selectSession(_ session: HermesSession) async {
         selectedSession = session
         messages = await dataService.fetchMessages(sessionId: session.id)
+        subagentSessions = await dataService.fetchSubagentSessions(parentId: session.id)
     }
 
     func selectSessionById(_ id: String) async {

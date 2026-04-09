@@ -13,12 +13,23 @@ struct HermesCronJob: Identifiable, Sendable, Codable {
     let nextRunAt: String?
     let lastRunAt: String?
     let lastError: String?
+    let preRunScript: String?
+    let deliveryFailures: Int?
+    let lastDeliveryError: String?
+    let timeoutType: String?
+    let timeoutSeconds: Int?
+    let silent: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, prompt, skills, model, schedule, enabled, state, deliver
+        case id, name, prompt, skills, model, schedule, enabled, state, deliver, silent
         case nextRunAt = "next_run_at"
         case lastRunAt = "last_run_at"
         case lastError = "last_error"
+        case preRunScript = "pre_run_script"
+        case deliveryFailures = "delivery_failures"
+        case lastDeliveryError = "last_delivery_error"
+        case timeoutType = "timeout_type"
+        case timeoutSeconds = "timeout_seconds"
     }
 
     var stateIcon: String {

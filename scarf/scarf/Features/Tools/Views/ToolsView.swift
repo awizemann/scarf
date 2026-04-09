@@ -18,23 +18,20 @@ struct ToolsView: View {
     }
 
     private var platformPicker: some View {
-        HStack(spacing: 16) {
-            ForEach(viewModel.availablePlatforms) { platform in
-                Button {
-                    viewModel.switchPlatform(platform)
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: platform.icon)
-                        Text(platform.displayName)
-                            .font(.caption)
+        HStack(spacing: 12) {
+            Picker("Platform", selection: Binding(
+                get: { viewModel.selectedPlatform.name },
+                set: { name in
+                    if let platform = viewModel.availablePlatforms.first(where: { $0.name == name }) {
+                        viewModel.switchPlatform(platform)
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(viewModel.selectedPlatform.name == platform.name ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
-                .buttonStyle(.plain)
+            )) {
+                ForEach(viewModel.availablePlatforms) { platform in
+                    Text(platform.displayName).tag(platform.name)
+                }
             }
+            .pickerStyle(.segmented)
             Spacer()
             Text("\(viewModel.toolsets.filter(\.enabled).count) of \(viewModel.toolsets.count) enabled")
                 .font(.caption)
@@ -56,6 +53,7 @@ struct ToolsView: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
         }
+        .id(viewModel.selectedPlatform.name)
     }
 
     private var mcpSection: some View {

@@ -53,9 +53,28 @@ struct SkillsView: View {
                     HStack {
                         Label(skill.category, systemImage: "folder")
                         Label("\(skill.files.count) files", systemImage: "doc")
+                        if !skill.requiredConfig.isEmpty {
+                            Label("\(skill.requiredConfig.count) required config", systemImage: "gearshape")
+                        }
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    if !viewModel.missingConfig.isEmpty {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Missing required config:")
+                                    .font(.caption.bold())
+                                Text(viewModel.missingConfig.joined(separator: ", "))
+                                    .font(.caption.monospaced())
+                            }
+                        }
+                        .foregroundStyle(.orange)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.orange.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
                     Divider()
                     if !skill.files.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {

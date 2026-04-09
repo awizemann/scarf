@@ -5,12 +5,13 @@ final class LogsViewModel {
     private let logService = HermesLogService()
 
     var entries: [LogEntry] = []
-    var selectedLogFile: LogFile = .errors
+    var selectedLogFile: LogFile = .agent
     var filterLevel: LogEntry.LogLevel?
     var searchText = ""
     private var pollTimer: Timer?
 
     enum LogFile: String, CaseIterable, Identifiable {
+        case agent = "agent.log"
         case errors = "errors.log"
         case gateway = "gateway.log"
 
@@ -18,6 +19,7 @@ final class LogsViewModel {
 
         var path: String {
             switch self {
+            case .agent: return HermesPaths.agentLog
             case .errors: return HermesPaths.errorsLog
             case .gateway: return HermesPaths.gatewayLog
             }

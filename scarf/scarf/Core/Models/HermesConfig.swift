@@ -20,6 +20,9 @@ struct HermesConfig: Sendable {
     var approvalMode: String
     var browserBackend: String
     var memoryProvider: String
+    var dockerEnv: [String: String]
+    var commandAllowlist: [String]
+    var memoryProfile: String
 
     static let empty = HermesConfig(
         model: "unknown",
@@ -40,7 +43,10 @@ struct HermesConfig: Sendable {
         showCost: false,
         approvalMode: "manual",
         browserBackend: "",
-        memoryProvider: ""
+        memoryProvider: "",
+        dockerEnv: [:],
+        commandAllowlist: [],
+        memoryProfile: ""
     )
 }
 

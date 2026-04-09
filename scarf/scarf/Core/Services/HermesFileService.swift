@@ -12,12 +12,37 @@ struct HermesFileService: Sendable {
     private func parseConfig(_ yaml: String) -> HermesConfig {
         var values: [String: String] = [:]
         var currentSection = ""
+        var dockerEnv: [String: String] = [:]
+        var commandAllowlist: [String] = []
+        var inDockerEnv = false
+        var inAllowlist = false
 
         for line in yaml.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
 
             let indent = line.prefix(while: { $0 == " " }).count
+
+            // Detect end of nested blocks when indent returns to section level
+            if indent <= 2 && (inDockerEnv || inAllowlist) {
+                inDockerEnv = false
+                inAllowlist = false
+            }
+
+            // Collect docker_env nested key-value pairs
+            if inDockerEnv, indent >= 4, let colonIdx = trimmed.firstIndex(of: ":") {
+                let key = String(trimmed[trimmed.startIndex..<colonIdx]).trimmingCharacters(in: .whitespaces)
+                let val = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
+                dockerEnv[key] = val
+                continue
+            }
+
+            // Collect allowlist items
+            if inAllowlist, indent >= 4, trimmed.hasPrefix("- ") {
+                commandAllowlist.append(String(trimmed.dropFirst(2)))
+                continue
+            }
+
             if indent == 0 && trimmed.hasSuffix(":") {
                 currentSection = String(trimmed.dropLast())
                 continue
@@ -26,6 +51,16 @@ struct HermesFileService: Sendable {
             if let colonIdx = trimmed.firstIndex(of: ":") {
                 let key = String(trimmed[trimmed.startIndex..<colonIdx]).trimmingCharacters(in: .whitespaces)
                 let val = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
+
+                if key == "docker_env" && val.isEmpty {
+                    inDockerEnv = true
+                    continue
+                }
+                if key == "permanent_allowlist" && val.isEmpty {
+                    inAllowlist = true
+                    continue
+                }
+
                 values[currentSection + "." + key] = val
             }
         }
@@ -49,7 +84,10 @@ struct HermesFileService: Sendable {
             showCost: values["display.show_cost"] == "true",
             approvalMode: values["approvals.mode"] ?? "manual",
             browserBackend: values["browser.backend"] ?? "",
-            memoryProvider: values["memory.provider"] ?? ""
+            memoryProvider: values["memory.provider"] ?? "",
+            dockerEnv: dockerEnv,
+            commandAllowlist: commandAllowlist,
+            memoryProfile: values["memory.profile"] ?? ""
         )
     }
 
@@ -67,20 +105,41 @@ struct HermesFileService: Sendable {
 
     // MARK: - Memory
 
-    func loadMemory() -> String {
-        readFile(HermesPaths.memoryMD) ?? ""
+    func loadMemoryProfiles() -> [String] {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(atPath: HermesPaths.memoriesDir) else { return [] }
+        return entries.filter { name in
+            var isDir: ObjCBool = false
+            let path = HermesPaths.memoriesDir + "/" + name
+            return fm.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
+        }.sorted()
     }
 
-    func loadUserProfile() -> String {
-        readFile(HermesPaths.userMD) ?? ""
+    func loadMemory(profile: String = "") -> String {
+        let path = memoryPath(profile: profile, file: "MEMORY.md")
+        return readFile(path) ?? ""
     }
 
-    func saveMemory(_ content: String) {
-        writeFile(HermesPaths.memoryMD, content: content)
+    func loadUserProfile(profile: String = "") -> String {
+        let path = memoryPath(profile: profile, file: "USER.md")
+        return readFile(path) ?? ""
     }
 
-    func saveUserProfile(_ content: String) {
-        writeFile(HermesPaths.userMD, content: content)
+    func saveMemory(_ content: String, profile: String = "") {
+        let path = memoryPath(profile: profile, file: "MEMORY.md")
+        writeFile(path, content: content)
+    }
+
+    func saveUserProfile(_ content: String, profile: String = "") {
+        let path = memoryPath(profile: profile, file: "USER.md")
+        writeFile(path, content: content)
+    }
+
+    private func memoryPath(profile: String, file: String) -> String {
+        if profile.isEmpty {
+            return HermesPaths.memoriesDir + "/" + file
+        }
+        return HermesPaths.memoriesDir + "/" + profile + "/" + file
     }
 
     // MARK: - Cron
@@ -123,12 +182,14 @@ struct HermesFileService: Sendable {
                 var isSkillDir: ObjCBool = false
                 guard fm.fileExists(atPath: skillPath, isDirectory: &isSkillDir), isSkillDir.boolValue else { return nil }
                 let files = (try? fm.contentsOfDirectory(atPath: skillPath)) ?? []
+                let requiredConfig = parseSkillRequiredConfig(skillPath + "/skill.yaml")
                 return HermesSkill(
                     id: categoryName + "/" + skillName,
                     name: skillName,
                     category: categoryName,
                     path: skillPath,
-                    files: files.sorted()
+                    files: files.sorted(),
+                    requiredConfig: requiredConfig
                 )
             }
 
@@ -145,6 +206,30 @@ struct HermesFileService: Sendable {
             return ""
         }
         return readFile(path) ?? ""
+    }
+
+    private func parseSkillRequiredConfig(_ path: String) -> [String] {
+        guard let content = readFile(path) else { return [] }
+        var result: [String] = []
+        var inRequiredConfig = false
+        for line in content.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            let indent = line.prefix(while: { $0 == " " }).count
+            if trimmed == "required_config:" || trimmed.hasPrefix("required_config:") {
+                inRequiredConfig = true
+                continue
+            }
+            if inRequiredConfig {
+                if indent < 2 && !trimmed.isEmpty {
+                    break
+                }
+                if trimmed.hasPrefix("- ") {
+                    result.append(String(trimmed.dropFirst(2)))
+                }
+            }
+        }
+        return result
     }
 
     // MARK: - Hermes Process

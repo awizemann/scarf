@@ -16,6 +16,7 @@ final class HermesFileWatcher {
             HermesPaths.userMD,
             HermesPaths.cronJobsJSON,
             HermesPaths.gatewayStateJSON,
+            HermesPaths.agentLog,
             HermesPaths.errorsLog,
             HermesPaths.gatewayLog,
             HermesPaths.projectsRegistry

@@ -22,6 +22,8 @@ struct HermesSession: Identifiable, Sendable {
     let costStatus: String?
     let billingProvider: String?
 
+    var isSubagent: Bool { parentSessionId != nil }
+
     var totalTokens: Int { inputTokens + outputTokens + reasoningTokens }
 
     var displayCostUSD: Double? { actualCostUSD ?? estimatedCostUSD }

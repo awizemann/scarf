@@ -21,24 +21,24 @@
 
 - **Dashboard** — System health, token usage, cost tracking, recent sessions with live refresh
 - **Insights** — Usage analytics with token breakdown (including reasoning tokens), cost tracking, model/platform stats, top tools bar chart, activity heatmaps, notable sessions, and time period filtering (7/30/90 days or all time)
-- **Sessions Browser** — Full conversation history with message rendering, model reasoning/thinking display, tool call inspection, full-text search, rename, delete, and JSONL export
+- **Sessions Browser** — Full conversation history with message rendering, model reasoning/thinking display, tool call inspection, full-text search, rename, delete, and JSONL export. Subagent sessions are filtered from the main list and accessible via parent session drill-down
 - **Activity Feed** — Recent tool execution log with filtering by kind and session, detail inspector with pretty-printed arguments
 - **Live Chat** — Embedded terminal running `hermes chat` with full ANSI color and Rich formatting via [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm), session persistence across navigation, resume/continue previous sessions, and voice mode controls
-- **Memory Viewer/Editor** — View and edit Hermes's MEMORY.md and USER.md with live file-watcher refresh, external memory provider awareness (Honcho, etc.)
-- **Skills Browser** — Browse all installed skills by category with file content viewer and file switcher
-- **Tools Manager** — Enable/disable toolsets per platform (CLI, Telegram, Discord, Slack, WhatsApp, Signal, Email, Home Assistant, Webhook, Matrix) with toggle switches, MCP server status
+- **Memory Viewer/Editor** — View and edit Hermes's MEMORY.md and USER.md with live file-watcher refresh, external memory provider awareness (Honcho, Supermemory, etc.), and profile-scoped memory support with profile picker
+- **Skills Browser** — Browse all installed skills by category with file content viewer, file switcher, and required config warnings for skills that need specific settings
+- **Tools Manager** — Enable/disable toolsets per platform (CLI, Telegram, Discord, Slack, WhatsApp, Signal, Email, Home Assistant, Webhook, Matrix, Feishu, Mattermost) with toggle switches and segmented platform picker, MCP server status
 - **Gateway Control** — Start/stop/restart the messaging gateway, view platform connection status, manage user pairing (approve/revoke)
-- **Cron Manager** — View scheduled jobs, their status, prompts, and output
-- **Log Viewer** — Real-time log tailing with level filtering and text search
+- **Cron Manager** — View scheduled jobs with pre-run scripts, delivery failure tracking, timeout info, and `[SILENT]` job indicators
+- **Log Viewer** — Real-time log tailing for agent.log, errors.log, and gateway.log with level filtering and text search
 - **Project Dashboards** — Custom, agent-generated dashboards for any project. Define stat boxes, charts, tables, progress bars, checklists, rich text, and embedded web views in a simple JSON file — Scarf renders them with live refresh. Let your Hermes agent build and maintain project-specific visualizations automatically
-- **Settings** — Structured config editor for all Hermes settings including reasoning effort, approval mode, cost display, and more
+- **Settings** — Structured config editor for all Hermes settings including model/provider selection, browser backend, reasoning effort, approval mode, cost display, Docker environment, command allowlist, credential management, and more
 - **Menu Bar** — Status icon showing Hermes running state with quick actions
 
 ## Requirements
 
 - macOS 26.2+
 - Xcode 26.3+
-- [Hermes agent](https://github.com/hermes-ai/hermes-agent) v0.6.0+ installed at `~/.hermes/`
+- [Hermes agent](https://github.com/hermes-ai/hermes-agent) v0.6.0+ installed at `~/.hermes/` (v0.8.0 recommended for full feature support)
 
 ### Compatibility
 
@@ -47,7 +47,8 @@ Scarf reads Hermes's SQLite database and parses CLI output from `hermes status`,
 | Hermes Version | Status |
 |----------------|--------|
 | v0.6.0 (2026-03-30) | Verified |
-| v0.7.0 (2026-04-03, latest) | Verified |
+| v0.7.0 (2026-04-03) | Verified |
+| v0.8.0 (2026-04-08, latest) | Verified |
 
 If a Hermes update changes the database schema or CLI output format, Scarf may need to be updated. Check the [Health](#features) view for compatibility warnings.
 

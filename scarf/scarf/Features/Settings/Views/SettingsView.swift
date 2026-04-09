@@ -11,6 +11,12 @@ struct SettingsView: View {
                 modelSection
                 displaySection
                 terminalSection
+                if !viewModel.config.dockerEnv.isEmpty {
+                    dockerEnvSection
+                }
+                if !viewModel.config.commandAllowlist.isEmpty {
+                    allowlistSection
+                }
                 voiceSection
                 memorySection
                 pathsSection
@@ -21,6 +27,12 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .onAppear { viewModel.load() }
+        .confirmationDialog("Remove Credentials?", isPresented: $viewModel.showAuthRemoveConfirmation) {
+            Button("Remove", role: .destructive) { viewModel.removeAuth() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently clear all stored provider credentials.")
+        }
     }
 
     private var headerBar: some View {
@@ -44,6 +56,20 @@ struct SettingsView: View {
         SettingsSection(title: "Model", icon: "cpu") {
             EditableTextField(label: "Model", value: viewModel.config.model) { viewModel.setModel($0) }
             PickerRow(label: "Provider", selection: viewModel.config.provider, options: viewModel.providers) { viewModel.setProvider($0) }
+            HStack {
+                Text("Credentials")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 130, alignment: .trailing)
+                Button("Remove Credentials", role: .destructive) {
+                    viewModel.showAuthRemoveConfirmation = true
+                }
+                .controlSize(.small)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.quaternary.opacity(0.3))
         }
     }
 
@@ -71,6 +97,25 @@ struct SettingsView: View {
             StepperRow(label: "Max Turns", value: viewModel.config.maxTurns, range: 1...200) { viewModel.setMaxTurns($0) }
             PickerRow(label: "Reasoning Effort", selection: viewModel.config.reasoningEffort, options: ["low", "medium", "high"]) { viewModel.setReasoningEffort($0) }
             PickerRow(label: "Approval Mode", selection: viewModel.config.approvalMode, options: ["auto", "manual", "smart"]) { viewModel.setApprovalMode($0) }
+            PickerRow(label: "Browser Backend", selection: viewModel.config.browserBackend, options: viewModel.browserBackends) { viewModel.setBrowserBackend($0) }
+        }
+    }
+
+    // MARK: - Docker Environment
+
+    private var dockerEnvSection: some View {
+        SettingsSection(title: "Docker Environment", icon: "shippingbox") {
+            ForEach(viewModel.config.dockerEnv.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
+                ReadOnlyRow(label: key, value: value)
+            }
+        }
+    }
+
+    // MARK: - Command Allowlist
+
+    private var allowlistSection: some View {
+        SettingsSection(title: "Command Allowlist", icon: "checkmark.shield") {
+            ReadOnlyRow(label: "Commands", value: viewModel.config.commandAllowlist.joined(separator: ", "))
         }
     }
 
@@ -88,6 +133,9 @@ struct SettingsView: View {
     private var memorySection: some View {
         SettingsSection(title: "Memory", icon: "brain") {
             ToggleRow(label: "Memory Enabled", isOn: viewModel.config.memoryEnabled) { viewModel.setMemoryEnabled($0) }
+            if !viewModel.config.memoryProfile.isEmpty {
+                ReadOnlyRow(label: "Profile", value: viewModel.config.memoryProfile)
+            }
             StepperRow(label: "Memory Char Limit", value: viewModel.config.memoryCharLimit, range: 500...10000) { viewModel.setMemoryCharLimit($0) }
             StepperRow(label: "User Char Limit", value: viewModel.config.userCharLimit, range: 500...10000) { viewModel.setUserCharLimit($0) }
             StepperRow(label: "Nudge Interval", value: viewModel.config.nudgeInterval, range: 1...50) { viewModel.setNudgeInterval($0) }
@@ -104,7 +152,8 @@ struct SettingsView: View {
             PathRow(label: "Memory", path: HermesPaths.memoriesDir)
             PathRow(label: "Sessions", path: HermesPaths.sessionsDir)
             PathRow(label: "Skills", path: HermesPaths.skillsDir)
-            PathRow(label: "Logs", path: HermesPaths.errorsLog)
+            PathRow(label: "Agent Log", path: HermesPaths.agentLog)
+            PathRow(label: "Error Log", path: HermesPaths.errorsLog)
         }
     }
 
@@ -265,6 +314,27 @@ struct StepperRow: View {
                 set: { onChange($0) }
             ), in: range)
             .labelsHidden()
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.quaternary.opacity(0.3))
+    }
+}
+
+struct ReadOnlyRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 130, alignment: .trailing)
+            Text(value)
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
             Spacer()
         }
         .padding(.horizontal, 12)

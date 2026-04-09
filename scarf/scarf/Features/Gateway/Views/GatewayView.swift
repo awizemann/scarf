@@ -177,15 +177,7 @@ struct GatewayView: View {
     }
 
     private func platformIcon(_ platform: String) -> String {
-        switch platform {
-        case "telegram": return "paperplane"
-        case "discord": return "bubble.left.and.bubble.right"
-        case "slack": return "number"
-        case "whatsapp": return "phone.bubble"
-        case "signal": return "lock.shield"
-        case "email": return "envelope"
-        default: return "bubble.left"
-        }
+        KnownPlatforms.icon(for: platform)
     }
 }
 

@@ -10,6 +10,8 @@ final class MemoryViewModel {
     var isEditing = false
     var editingFile: EditTarget = .memory
     var editText = ""
+    var profiles: [String] = []
+    var activeProfile = ""
 
     enum EditTarget {
         case memory, user
@@ -22,10 +24,23 @@ final class MemoryViewModel {
         !memoryProvider.isEmpty && memoryProvider != "file"
     }
 
+    var hasMultipleProfiles: Bool { !profiles.isEmpty }
+
     func load() {
-        memoryContent = fileService.loadMemory()
-        userContent = fileService.loadUserProfile()
-        memoryProvider = fileService.loadConfig().memoryProvider
+        let config = fileService.loadConfig()
+        memoryProvider = config.memoryProvider
+        profiles = fileService.loadMemoryProfiles()
+        if activeProfile.isEmpty {
+            activeProfile = config.memoryProfile
+        }
+        memoryContent = fileService.loadMemory(profile: activeProfile)
+        userContent = fileService.loadUserProfile(profile: activeProfile)
+    }
+
+    func switchProfile(_ profile: String) {
+        activeProfile = profile
+        memoryContent = fileService.loadMemory(profile: profile)
+        userContent = fileService.loadUserProfile(profile: profile)
     }
 
     func startEditing(_ target: EditTarget) {
@@ -37,10 +52,10 @@ final class MemoryViewModel {
     func save() {
         switch editingFile {
         case .memory:
-            fileService.saveMemory(editText)
+            fileService.saveMemory(editText, profile: activeProfile)
             memoryContent = editText
         case .user:
-            fileService.saveUserProfile(editText)
+            fileService.saveUserProfile(editText, profile: activeProfile)
             userContent = editText
         }
         isEditing = false
