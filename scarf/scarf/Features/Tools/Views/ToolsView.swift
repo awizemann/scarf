@@ -14,7 +14,7 @@ struct ToolsView: View {
             }
         }
         .navigationTitle("Tools")
-        .onAppear { viewModel.load() }
+        .task { await viewModel.load() }
     }
 
     private var platformPicker: some View {
@@ -23,7 +23,7 @@ struct ToolsView: View {
                 get: { viewModel.selectedPlatform.name },
                 set: { name in
                     if let platform = viewModel.availablePlatforms.first(where: { $0.name == name }) {
-                        viewModel.switchPlatform(platform)
+                        Task { await viewModel.switchPlatform(platform) }
                     }
                 }
             )) {
@@ -46,7 +46,7 @@ struct ToolsView: View {
             LazyVStack(spacing: 1) {
                 ForEach(viewModel.toolsets) { tool in
                     ToolRow(tool: tool) {
-                        viewModel.toggleTool(tool)
+                        await viewModel.toggleTool(tool)
                     }
                 }
             }
@@ -78,7 +78,7 @@ struct ToolsView: View {
 
 struct ToolRow: View {
     let tool: HermesToolset
-    let onToggle: () -> Void
+    let onToggle: () async -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -95,7 +95,7 @@ struct ToolRow: View {
             Spacer()
             Toggle("", isOn: Binding(
                 get: { tool.enabled },
-                set: { _ in onToggle() }
+                set: { _ in Task { await onToggle() } }
             ))
             .toggleStyle(.switch)
             .labelsHidden()

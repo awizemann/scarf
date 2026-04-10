@@ -1,40 +1,56 @@
 import Foundation
+import os
 
 @Observable
 final class ToolsViewModel {
+    private let logger = Logger(subsystem: "com.scarf", category: "ToolsViewModel")
+
     var selectedPlatform: HermesToolPlatform = KnownPlatforms.cli
     var toolsets: [HermesToolset] = []
     var mcpStatus: String = ""
     var isLoading = false
     var availablePlatforms: [HermesToolPlatform] = []
 
-    func load() {
-        loadPlatforms()
-        loadTools(for: selectedPlatform)
-        loadMCPStatus()
+    @MainActor
+    func load() async {
+        isLoading = true
+        await loadPlatforms()
+        await loadTools(for: selectedPlatform)
+        await loadMCPStatus()
+        isLoading = false
     }
 
-    func switchPlatform(_ platform: HermesToolPlatform) {
+    @MainActor
+    func switchPlatform(_ platform: HermesToolPlatform) async {
         selectedPlatform = platform
-        loadTools(for: platform)
+        await loadTools(for: platform)
     }
 
-    func toggleTool(_ tool: HermesToolset) {
-        let action = tool.enabled ? "disable" : "enable"
-        let result = runHermes(["tools", action, tool.name, "--platform", selectedPlatform.name])
-        if result.exitCode == 0 {
+    @MainActor
+    func toggleTool(_ tool: HermesToolset) async {
+        guard let idx = toolsets.firstIndex(where: { $0.name == tool.name }) else { return }
+        toolsets[idx].enabled.toggle()
+        let newEnabled = toolsets[idx].enabled
+
+        let action = newEnabled ? "enable" : "disable"
+        let result = await runHermes(["tools", action, tool.name, "--platform", selectedPlatform.name])
+
+        if result.exitCode != 0 {
             if let idx = toolsets.firstIndex(where: { $0.name == tool.name }) {
-                toolsets[idx].enabled.toggle()
+                toolsets[idx].enabled = !newEnabled
             }
         }
     }
 
-    private func loadPlatforms() {
+    @MainActor
+    private func loadPlatforms() async {
         let config: String
         do {
-            config = try String(contentsOfFile: HermesPaths.configYAML, encoding: .utf8)
+            config = try await Task.detached {
+                try String(contentsOfFile: HermesPaths.configYAML, encoding: .utf8)
+            }.value
         } catch {
-            print("[Scarf] Failed to read config.yaml: \(error.localizedDescription)")
+            logger.error("Failed to read config.yaml: \(error.localizedDescription)")
             config = ""
         }
         var platforms: [HermesToolPlatform] = []
@@ -67,15 +83,15 @@ final class ToolsViewModel {
         }
     }
 
-    private func loadTools(for platform: HermesToolPlatform) {
-        isLoading = true
-        let result = runHermes(["tools", "list", "--platform", platform.name])
+    @MainActor
+    private func loadTools(for platform: HermesToolPlatform) async {
+        let result = await runHermes(["tools", "list", "--platform", platform.name])
         toolsets = parseToolsList(result.output)
-        isLoading = false
     }
 
-    private func loadMCPStatus() {
-        let result = runHermes(["mcp", "list"])
+    @MainActor
+    private func loadMCPStatus() async {
+        let result = await runHermes(["mcp", "list"])
         mcpStatus = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -121,21 +137,32 @@ final class ToolsViewModel {
         return "🔧"
     }
 
-    private func runHermes(_ arguments: [String]) -> (output: String, exitCode: Int32) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: HermesPaths.hermesBinary)
-        process.arguments = arguments
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-            return (output, process.terminationStatus)
-        } catch {
-            return ("", -1)
-        }
+    private nonisolated func runHermes(_ arguments: [String]) async -> (output: String, exitCode: Int32) {
+        await Task.detached {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: HermesPaths.hermesBinary)
+            process.arguments = arguments
+            let stdoutPipe = Pipe()
+            let stderrPipe = Pipe()
+            process.standardOutput = stdoutPipe
+            process.standardError = stderrPipe
+            do {
+                try process.run()
+                process.waitUntilExit()
+                let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? ""
+                try? stdoutPipe.fileHandleForReading.close()
+                try? stdoutPipe.fileHandleForWriting.close()
+                try? stderrPipe.fileHandleForReading.close()
+                try? stderrPipe.fileHandleForWriting.close()
+                return (output, process.terminationStatus)
+            } catch {
+                try? stdoutPipe.fileHandleForReading.close()
+                try? stdoutPipe.fileHandleForWriting.close()
+                try? stderrPipe.fileHandleForReading.close()
+                try? stderrPipe.fileHandleForWriting.close()
+                return ("", -1)
+            }
+        }.value
     }
 }
