@@ -164,6 +164,9 @@ struct SessionRow: View {
             HStack(spacing: 12) {
                 Label("\(session.messageCount)", systemImage: "bubble.left")
                 Label("\(session.toolCallCount)", systemImage: "wrench")
+                if let cost = session.displayCostUSD, cost > 0 {
+                    Label(String(format: "$%.4f", cost), systemImage: "dollarsign.circle")
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)

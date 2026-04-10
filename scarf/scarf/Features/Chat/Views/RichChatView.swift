@@ -14,7 +14,10 @@ struct RichChatView: View {
         VStack(spacing: 0) {
             SessionInfoBar(
                 session: richChat.currentSession,
-                isWorking: richChat.isAgentWorking
+                isWorking: richChat.isAgentWorking,
+                acpInputTokens: richChat.acpInputTokens,
+                acpOutputTokens: richChat.acpOutputTokens,
+                acpThoughtTokens: richChat.acpThoughtTokens
             )
             Divider()
 
@@ -28,7 +31,8 @@ struct RichChatView: View {
             } else {
                 RichChatMessageList(
                     groups: richChat.messageGroups,
-                    isWorking: richChat.isAgentWorking
+                    isWorking: richChat.isAgentWorking,
+                    scrollTrigger: richChat.scrollTrigger
                 )
             }
 

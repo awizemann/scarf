@@ -91,9 +91,8 @@ struct ChatView: View {
             Menu {
                 if viewModel.hasActiveProcess, let activeId = viewModel.richChatViewModel.sessionId {
                     Button("Return to Active Session (\(activeId.prefix(8))...)") {
-                        // Already active — just ensure we're showing it
+                        viewModel.richChatViewModel.requestScrollToBottom()
                     }
-                    .disabled(true)
                     Divider()
                 }
                 Button("New Session") {
@@ -105,6 +104,8 @@ struct ChatView: View {
                 if !viewModel.recentSessions.isEmpty {
                     Divider()
                     Text("Resume Session")
+                    let activeSessionId = viewModel.richChatViewModel.sessionId
+                    let originSessionId = viewModel.richChatViewModel.originSessionId
                     ForEach(viewModel.recentSessions) { session in
                         Button {
                             viewModel.resumeSession(session.id)
@@ -120,6 +121,7 @@ struct ChatView: View {
                                 }
                             }
                         }
+                        .disabled(session.id == activeSessionId || session.id == originSessionId)
                     }
                 }
             } label: {

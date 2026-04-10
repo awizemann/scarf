@@ -187,6 +187,8 @@ final class ChatViewModel {
                 richChatViewModel.handleACPEvent(
                     .promptComplete(sessionId: sessionId, response: result)
                 )
+                // Re-fetch session from DB to pick up cost/token data Hermes may have written
+                await richChatViewModel.refreshSessionFromDB()
             } catch is CancellationError {
                 acpStatus = "Cancelled"
             } catch {

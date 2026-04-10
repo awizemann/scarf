@@ -3,6 +3,8 @@ import SwiftUI
 struct RichChatMessageList: View {
     let groups: [MessageGroup]
     let isWorking: Bool
+    /// External trigger to force a scroll-to-bottom (e.g., from "Return to Active Session").
+    var scrollTrigger: UUID = UUID()
 
     /// Track the last group's assistant content length to detect streaming updates.
     private var scrollAnchor: String {
@@ -30,6 +32,14 @@ struct RichChatMessageList: View {
                 .padding()
             }
             .defaultScrollAnchor(.bottom)
+            // Scroll to bottom when view first appears with content
+            .onAppear {
+                if !groups.isEmpty {
+                    DispatchQueue.main.async {
+                        scrollToBottom(proxy: proxy, animated: false)
+                    }
+                }
+            }
             // Scroll on new groups
             .onChange(of: groups.count) {
                 scrollToBottom(proxy: proxy)
@@ -48,6 +58,10 @@ struct RichChatMessageList: View {
             }
             // Scroll on tool call count change
             .onChange(of: groups.last?.toolCallCount ?? 0) {
+                scrollToBottom(proxy: proxy)
+            }
+            // Scroll on external trigger (e.g., "Return to Active Session" button)
+            .onChange(of: scrollTrigger) {
                 scrollToBottom(proxy: proxy)
             }
         }

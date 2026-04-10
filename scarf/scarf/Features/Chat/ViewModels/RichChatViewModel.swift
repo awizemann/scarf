@@ -32,8 +32,20 @@ final class RichChatViewModel {
     var messageGroups: [MessageGroup] = []
     var isAgentWorking = false
     var pendingPermission: PendingPermission?
+    /// Mutated to trigger a scroll-to-bottom in the message list.
+    var scrollTrigger = UUID()
+
+    // Cumulative ACP token tracking (ACP returns tokens per prompt but DB has none)
+    private(set) var acpInputTokens = 0
+    private(set) var acpOutputTokens = 0
+    private(set) var acpThoughtTokens = 0
+    private(set) var acpCachedReadTokens = 0
 
     var hasMessages: Bool { !messages.isEmpty }
+
+    func requestScrollToBottom() {
+        scrollTrigger = UUID()
+    }
 
     private(set) var sessionId: String?
     /// The original CLI session ID when resuming a CLI session via ACP.
@@ -77,6 +89,10 @@ final class RichChatViewModel {
         streamingAssistantText = ""
         streamingThinkingText = ""
         streamingToolCalls = []
+        acpInputTokens = 0
+        acpOutputTokens = 0
+        acpThoughtTokens = 0
+        acpCachedReadTokens = 0
         pendingPermission = nil
     }
 
@@ -88,6 +104,17 @@ final class RichChatViewModel {
     func cleanup() async {
         stopActivePolling()
         debounceTask?.cancel()
+        await dataService.close()
+    }
+
+    /// Re-fetch session metadata from DB to pick up cost/token updates.
+    func refreshSessionFromDB() async {
+        guard let sessionId else { return }
+        let opened = await dataService.open()
+        guard opened else { return }
+        if let session = await dataService.fetchSession(id: sessionId) {
+            currentSession = session
+        }
         await dataService.close()
     }
 
@@ -136,8 +163,8 @@ final class RichChatViewModel {
                 kind: request.toolCallKind,
                 options: request.options
             )
-        case .promptComplete:
-            handlePromptComplete()
+        case .promptComplete(_, let response):
+            handlePromptComplete(response: response)
         case .connectionLost(let reason):
             handleConnectionLost(reason: reason)
         case .availableCommands, .unknown:
@@ -188,9 +215,13 @@ final class RichChatViewModel {
         buildMessageGroups()
     }
 
-    private func handlePromptComplete() {
-        // Finalize any remaining streaming content
+    private func handlePromptComplete(response: ACPPromptResult) {
         finalizeStreamingMessage()
+        // Accumulate token usage from this prompt
+        acpInputTokens += response.inputTokens
+        acpOutputTokens += response.outputTokens
+        acpThoughtTokens += response.thoughtTokens
+        acpCachedReadTokens += response.cachedReadTokens
         isAgentWorking = false
         buildMessageGroups()
     }

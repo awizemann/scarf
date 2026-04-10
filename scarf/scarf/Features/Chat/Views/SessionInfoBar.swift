@@ -3,6 +3,10 @@ import SwiftUI
 struct SessionInfoBar: View {
     let session: HermesSession?
     let isWorking: Bool
+    /// Fallback token counts from ACP prompt results (DB may have zeros for ACP sessions).
+    var acpInputTokens: Int = 0
+    var acpOutputTokens: Int = 0
+    var acpThoughtTokens: Int = 0
 
     var body: some View {
         HStack(spacing: 16) {
@@ -30,11 +34,14 @@ struct SessionInfoBar: View {
                     Label(model, systemImage: "cpu")
                 }
 
-                Label("\(formatTokens(session.inputTokens)) in / \(formatTokens(session.outputTokens)) out", systemImage: "number")
+                let inputToks = session.inputTokens > 0 ? session.inputTokens : acpInputTokens
+                let outputToks = session.outputTokens > 0 ? session.outputTokens : acpOutputTokens
+                Label("\(formatTokens(inputToks)) in / \(formatTokens(outputToks)) out", systemImage: "number")
                     .contentTransition(.numericText())
 
-                if session.reasoningTokens > 0 {
-                    Label("\(formatTokens(session.reasoningTokens)) reasoning", systemImage: "brain")
+                let reasonToks = session.reasoningTokens > 0 ? session.reasoningTokens : acpThoughtTokens
+                if reasonToks > 0 {
+                    Label("\(formatTokens(reasonToks)) reasoning", systemImage: "brain")
                 }
 
                 if let cost = session.displayCostUSD {
