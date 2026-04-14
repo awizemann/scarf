@@ -87,7 +87,13 @@ struct HermesFileService: Sendable {
             memoryProvider: values["memory.provider"] ?? "",
             dockerEnv: dockerEnv,
             commandAllowlist: commandAllowlist,
-            memoryProfile: values["memory.profile"] ?? ""
+            memoryProfile: values["memory.profile"] ?? "",
+            serviceTier: values["agent.service_tier"] ?? "normal",
+            gatewayNotifyInterval: Int(values["agent.gateway_notify_interval"] ?? "") ?? 600,
+            forceIPv4: values["network.force_ipv4"] == "true",
+            contextEngine: values["context.engine"] ?? "compressor",
+            interimAssistantMessages: values["display.interim_assistant_messages"] != "false",
+            honchoInitOnSessionStart: values["honcho.initOnSessionStart"] == "true"
         )
     }
 
@@ -268,8 +274,55 @@ struct HermesFileService: Sendable {
 
     @discardableResult
     func stopHermes() -> Bool {
+        // v0.9.0 fixed `hermes gateway stop` so it issues `launchctl bootout` and
+        // waits for exit. Use the CLI to avoid racing launchd's KeepAlive respawn.
+        if runHermesCLI(args: ["gateway", "stop"]).exitCode == 0 {
+            return true
+        }
         guard let pid = hermesPID() else { return false }
         return kill(pid, SIGTERM) == 0
+    }
+
+    nonisolated func hermesBinaryPath() -> String? {
+        let candidates = [
+            ("\(NSHomeDirectory())/.local/bin/hermes"),
+            "/opt/homebrew/bin/hermes",
+            "/usr/local/bin/hermes"
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    @discardableResult
+    nonisolated func runHermesCLI(args: [String], timeout: TimeInterval = 60) -> (exitCode: Int32, output: String) {
+        guard let binary = hermesBinaryPath() else { return (-1, "") }
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: binary)
+        process.arguments = args
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        defer {
+            try? stdoutPipe.fileHandleForReading.close()
+            try? stdoutPipe.fileHandleForWriting.close()
+            try? stderrPipe.fileHandleForReading.close()
+            try? stderrPipe.fileHandleForWriting.close()
+        }
+        do {
+            try process.run()
+            let deadline = Date().addingTimeInterval(timeout)
+            while process.isRunning && Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            if process.isRunning { process.terminate() }
+            process.waitUntilExit()
+            let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+            let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            let combined = (String(data: outData, encoding: .utf8) ?? "") + (String(data: errData, encoding: .utf8) ?? "")
+            return (process.terminationStatus, combined)
+        } catch {
+            return (-1, error.localizedDescription)
+        }
     }
 
     // MARK: - File I/O

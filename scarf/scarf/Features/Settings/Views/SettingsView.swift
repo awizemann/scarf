@@ -19,6 +19,10 @@ struct SettingsView: View {
                 }
                 voiceSection
                 memorySection
+                performanceSection
+                networkSection
+                advancedSection
+                backupSection
                 pathsSection
                 rawConfigSection
             }
@@ -85,6 +89,7 @@ struct SettingsView: View {
             ToggleRow(label: "Streaming", isOn: viewModel.config.streaming) { viewModel.setStreaming($0) }
             ToggleRow(label: "Show Reasoning", isOn: viewModel.config.showReasoning) { viewModel.setShowReasoning($0) }
             ToggleRow(label: "Show Cost", isOn: viewModel.config.showCost) { viewModel.setShowCost($0) }
+            ToggleRow(label: "Interim Messages", isOn: viewModel.config.interimAssistantMessages) { viewModel.setInterimAssistantMessages($0) }
             ToggleRow(label: "Verbose", isOn: viewModel.config.verbose) { viewModel.setVerbose($0) }
         }
     }
@@ -139,6 +144,87 @@ struct SettingsView: View {
             StepperRow(label: "Memory Char Limit", value: viewModel.config.memoryCharLimit, range: 500...10000) { viewModel.setMemoryCharLimit($0) }
             StepperRow(label: "User Char Limit", value: viewModel.config.userCharLimit, range: 500...10000) { viewModel.setUserCharLimit($0) }
             StepperRow(label: "Nudge Interval", value: viewModel.config.nudgeInterval, range: 1...50) { viewModel.setNudgeInterval($0) }
+            if viewModel.config.memoryProvider == "honcho" {
+                ToggleRow(label: "Honcho Eager Init", isOn: viewModel.config.honchoInitOnSessionStart) { viewModel.setHonchoInitOnSessionStart($0) }
+            }
+        }
+    }
+
+    // MARK: - Performance (v0.9.0)
+
+    private var performanceSection: some View {
+        SettingsSection(title: "Performance", icon: "bolt") {
+            ToggleRow(label: "Fast Mode", isOn: viewModel.config.serviceTier == "fast") { on in
+                viewModel.setServiceTier(on ? "fast" : "normal")
+            }
+            StepperRow(label: "Notify Interval (s)", value: viewModel.config.gatewayNotifyInterval, range: 0...3600) { viewModel.setGatewayNotifyInterval($0) }
+        }
+    }
+
+    // MARK: - Network (v0.9.0)
+
+    private var networkSection: some View {
+        SettingsSection(title: "Network", icon: "network") {
+            ToggleRow(label: "Force IPv4", isOn: viewModel.config.forceIPv4) { viewModel.setForceIPv4($0) }
+        }
+    }
+
+    // MARK: - Advanced (v0.9.0)
+
+    private var advancedSection: some View {
+        SettingsSection(title: "Advanced", icon: "slider.horizontal.3") {
+            ReadOnlyRow(label: "Context Engine", value: viewModel.config.contextEngine)
+        }
+    }
+
+    // MARK: - Backup & Restore (v0.9.0)
+
+    @State private var showRestoreConfirm = false
+    @State private var pendingRestoreURL: URL?
+
+    private var backupSection: some View {
+        SettingsSection(title: "Backup & Restore", icon: "externaldrive") {
+            HStack {
+                Text("Archive")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 130, alignment: .trailing)
+                Button {
+                    viewModel.runBackup()
+                } label: {
+                    Label("Backup Now", systemImage: "arrow.down.doc")
+                }
+                .controlSize(.small)
+                .disabled(viewModel.backupInProgress)
+                Button {
+                    if let url = viewModel.presentRestorePicker() {
+                        pendingRestoreURL = url
+                        showRestoreConfirm = true
+                    }
+                } label: {
+                    Label("Restore…", systemImage: "arrow.up.doc")
+                }
+                .controlSize(.small)
+                .disabled(viewModel.backupInProgress)
+                if viewModel.backupInProgress {
+                    ProgressView().controlSize(.small)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.quaternary.opacity(0.3))
+        }
+        .confirmationDialog("Restore from backup?", isPresented: $showRestoreConfirm) {
+            Button("Restore", role: .destructive) {
+                if let url = pendingRestoreURL {
+                    viewModel.runRestore(from: url)
+                }
+                pendingRestoreURL = nil
+            }
+            Button("Cancel", role: .cancel) { pendingRestoreURL = nil }
+        } message: {
+            Text("This will overwrite files under ~/.hermes/ with the archive contents.")
         }
     }
 

@@ -41,6 +41,21 @@ struct HermesCronJob: Identifiable, Sendable, Codable {
         default: return "questionmark.circle"
         }
     }
+
+    var deliveryDisplay: String? {
+        guard let deliver, !deliver.isEmpty else { return nil }
+        // v0.9.0 extends Discord routing to threads: `discord:<chat>:<thread>`.
+        if deliver.hasPrefix("discord:") {
+            let parts = deliver.dropFirst("discord:".count).split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            if parts.count == 2 {
+                return "Discord thread \(parts[1]) in \(parts[0])"
+            }
+            if parts.count == 1 {
+                return "Discord \(parts[0])"
+            }
+        }
+        return deliver
+    }
 }
 
 struct CronSchedule: Sendable, Codable {

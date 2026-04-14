@@ -41,6 +41,11 @@ final class RichChatViewModel {
     private(set) var acpThoughtTokens = 0
     private(set) var acpCachedReadTokens = 0
 
+    /// Slash commands advertised by the ACP server via `available_commands_update`.
+    private(set) var availableCommandNames: Set<String> = []
+
+    var supportsCompress: Bool { availableCommandNames.contains("compress") }
+
     var hasMessages: Bool { !messages.isEmpty }
 
     func requestScrollToBottom() {
@@ -93,6 +98,7 @@ final class RichChatViewModel {
         acpOutputTokens = 0
         acpThoughtTokens = 0
         acpCachedReadTokens = 0
+        availableCommandNames = []
         pendingPermission = nil
     }
 
@@ -167,7 +173,16 @@ final class RichChatViewModel {
             handlePromptComplete(response: response)
         case .connectionLost(let reason):
             handleConnectionLost(reason: reason)
-        case .availableCommands, .unknown:
+        case .availableCommands(_, let commands):
+            var names: Set<String> = []
+            for entry in commands {
+                if let name = entry["name"] as? String {
+                    // Hermes sends names either as "compress" or "/compress"
+                    names.insert(name.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+                }
+            }
+            availableCommandNames = names
+        case .unknown:
             break
         }
     }

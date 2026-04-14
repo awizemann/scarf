@@ -23,6 +23,12 @@ struct HermesConfig: Sendable {
     var dockerEnv: [String: String]
     var commandAllowlist: [String]
     var memoryProfile: String
+    var serviceTier: String
+    var gatewayNotifyInterval: Int
+    var forceIPv4: Bool
+    var contextEngine: String
+    var interimAssistantMessages: Bool
+    var honchoInitOnSessionStart: Bool
 
     static let empty = HermesConfig(
         model: "unknown",
@@ -46,7 +52,13 @@ struct HermesConfig: Sendable {
         memoryProvider: "",
         dockerEnv: [:],
         commandAllowlist: [],
-        memoryProfile: ""
+        memoryProfile: "",
+        serviceTier: "normal",
+        gatewayNotifyInterval: 600,
+        forceIPv4: false,
+        contextEngine: "compressor",
+        interimAssistantMessages: true,
+        honchoInitOnSessionStart: false
     )
 }
 

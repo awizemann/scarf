@@ -7,6 +7,7 @@ final class LogsViewModel {
     var entries: [LogEntry] = []
     var selectedLogFile: LogFile = .agent
     var filterLevel: LogEntry.LogLevel?
+    var selectedComponent: LogComponent = .all
     var searchText = ""
     private var pollTimer: Timer?
 
@@ -26,11 +27,37 @@ final class LogsViewModel {
         }
     }
 
+    enum LogComponent: String, CaseIterable, Identifiable {
+        case all = "All"
+        case gateway = "Gateway"
+        case agent = "Agent"
+        case tools = "Tools"
+        case cli = "CLI"
+        case cron = "Cron"
+
+        var id: String { rawValue }
+
+        var loggerPrefix: String? {
+            switch self {
+            case .all: return nil
+            case .gateway: return "gateway"
+            case .agent: return "agent"
+            case .tools: return "tools"
+            case .cli: return "cli"
+            case .cron: return "cron"
+            }
+        }
+    }
+
     var filteredEntries: [LogEntry] {
         entries.filter { entry in
             let levelOk = filterLevel == nil || entry.level == filterLevel
             let searchOk = searchText.isEmpty || entry.raw.localizedCaseInsensitiveContains(searchText)
-            return levelOk && searchOk
+            let componentOk: Bool = {
+                guard let prefix = selectedComponent.loggerPrefix else { return true }
+                return entry.logger.hasPrefix(prefix)
+            }()
+            return levelOk && searchOk && componentOk
         }
     }
 

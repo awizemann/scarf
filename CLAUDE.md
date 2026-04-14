@@ -38,3 +38,7 @@ scarf/scarf/           Xcode project root (PBXFileSystemSynchronizedRootGroup â€
 ```bash
 xcodebuild -project scarf/scarf.xcodeproj -scheme scarf -configuration Debug build
 ```
+
+## Hermes Version
+
+Targets Hermes v0.9.0 (v2026.4.13). Log lines may carry an optional `[session_id]` tag between the level and logger name â€” `HermesLogService.parseLine` treats the session tag as an optional capture group, so older untagged lines still parse.

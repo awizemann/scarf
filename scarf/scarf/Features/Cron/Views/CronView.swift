@@ -72,7 +72,7 @@ struct CronView: View {
                             Label(job.state, systemImage: job.stateIcon)
                             Label(job.schedule.display ?? job.schedule.kind, systemImage: "clock")
                             Label(job.enabled ? "Enabled" : "Disabled", systemImage: job.enabled ? "checkmark.circle" : "xmark.circle")
-                            if let deliver = job.deliver {
+                            if let deliver = job.deliveryDisplay {
                                 Label("Deliver: \(deliver)", systemImage: "paperplane")
                             }
                         }

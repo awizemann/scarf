@@ -4,6 +4,7 @@ struct LogEntry: Identifiable, Sendable {
     let id: Int
     let timestamp: String
     let level: LogLevel
+    let sessionId: String?
     let logger: String
     let message: String
     let raw: String
@@ -72,23 +73,30 @@ actor HermesLogService {
 
     private func parseLine(_ line: String) -> LogEntry {
         entryCounter += 1
-        // Format: YYYY-MM-DD HH:MM:SS,MMM LEVEL logger: message
-        let pattern = #"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})\s+(DEBUG|INFO|WARNING|ERROR|CRITICAL)\s+(\S+?):\s+(.*)$"#
+        // Format (v0.9.0+): YYYY-MM-DD HH:MM:SS,MMM LEVEL [session_id] logger: message
+        // Session tag is optional — earlier Hermes releases and out-of-session lines omit it.
+        let pattern = #"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})\s+(DEBUG|INFO|WARNING|ERROR|CRITICAL)\s+(?:\[([^\]]+)\]\s+)?(\S+?):\s+(.*)$"#
         if let regex = try? NSRegularExpression(pattern: pattern),
            let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) {
             let timestamp = String(line[Range(match.range(at: 1), in: line)!])
             let levelStr = String(line[Range(match.range(at: 2), in: line)!])
-            let logger = String(line[Range(match.range(at: 3), in: line)!])
-            let message = String(line[Range(match.range(at: 4), in: line)!])
+            let sessionId: String? = {
+                let range = match.range(at: 3)
+                guard range.location != NSNotFound, let r = Range(range, in: line) else { return nil }
+                return String(line[r])
+            }()
+            let logger = String(line[Range(match.range(at: 4), in: line)!])
+            let message = String(line[Range(match.range(at: 5), in: line)!])
             return LogEntry(
                 id: entryCounter,
                 timestamp: timestamp,
                 level: LogEntry.LogLevel(rawValue: levelStr) ?? .info,
+                sessionId: sessionId,
                 logger: logger,
                 message: message,
                 raw: line
             )
         }
-        return LogEntry(id: entryCounter, timestamp: "", level: .info, logger: "", message: line, raw: line)
+        return LogEntry(id: entryCounter, timestamp: "", level: .info, sessionId: nil, logger: "", message: line, raw: line)
     }
 }

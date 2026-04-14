@@ -30,6 +30,7 @@ enum KnownPlatforms {
         HermesToolPlatform(name: "matrix", displayName: "Matrix", icon: "lock.rectangle.stack"),
         HermesToolPlatform(name: "feishu", displayName: "Feishu", icon: "message.badge.circle"),
         HermesToolPlatform(name: "mattermost", displayName: "Mattermost", icon: "bubble.left.and.exclamationmark.bubble.right"),
+        HermesToolPlatform(name: "imessage", displayName: "iMessage", icon: "message.fill"),
     ]
 
     static func icon(for platform: String) -> String {
@@ -46,6 +47,7 @@ enum KnownPlatforms {
         case "matrix": return "lock.rectangle.stack"
         case "feishu": return "message.badge.circle"
         case "mattermost": return "bubble.left.and.exclamationmark.bubble.right"
+        case "imessage": return "message.fill"
         default: return "bubble.left"
         }
     }

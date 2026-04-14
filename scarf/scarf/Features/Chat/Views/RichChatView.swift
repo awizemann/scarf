@@ -41,7 +41,8 @@ struct RichChatView: View {
                 onSend: { text in
                     onSend(text)
                 },
-                isEnabled: isEnabled
+                isEnabled: isEnabled,
+                supportsCompress: richChat.supportsCompress
             )
         }
         // DB polling fallback for terminal mode only — never overwrite ACP messages

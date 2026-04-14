@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import UniformTypeIdentifiers
 
 @Observable
 final class SettingsViewModel {
@@ -58,6 +59,79 @@ final class SettingsViewModel {
     func setShowCost(_ value: Bool) { setSetting("display.show_cost", value: value ? "true" : "false") }
     func setApprovalMode(_ value: String) { setSetting("approvals.mode", value: value) }
     func setBrowserBackend(_ value: String) { setSetting("browser.backend", value: value) }
+    func setServiceTier(_ value: String) { setSetting("agent.service_tier", value: value) }
+    func setGatewayNotifyInterval(_ value: Int) { setSetting("agent.gateway_notify_interval", value: String(value)) }
+    func setForceIPv4(_ value: Bool) { setSetting("network.force_ipv4", value: value ? "true" : "false") }
+    func setInterimAssistantMessages(_ value: Bool) { setSetting("display.interim_assistant_messages", value: value ? "true" : "false") }
+    // Hermes v0.9.0 PR #6995: the key is camelCase in config.yaml (not snake_case like the rest of Hermes).
+    func setHonchoInitOnSessionStart(_ value: Bool) { setSetting("honcho.initOnSessionStart", value: value ? "true" : "false") }
+
+    // MARK: - Backup & Restore (v0.9.0)
+
+    var backupInProgress = false
+
+    func runBackup() {
+        backupInProgress = true
+        Task.detached { [fileService] in
+            let result = fileService.runHermesCLI(args: ["backup"], timeout: 300)
+            let zipPath = Self.extractZipPath(from: result.output)
+            await MainActor.run {
+                self.backupInProgress = false
+                if result.exitCode == 0 {
+                    if let zipPath {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: zipPath)])
+                        self.saveMessage = "Backup saved"
+                    } else {
+                        self.saveMessage = "Backup complete"
+                    }
+                } else {
+                    self.saveMessage = "Backup failed"
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                    self?.saveMessage = nil
+                }
+            }
+        }
+    }
+
+    func runRestore(from url: URL) {
+        backupInProgress = true
+        Task.detached { [fileService] in
+            let result = fileService.runHermesCLI(args: ["import", url.path], timeout: 300)
+            await MainActor.run {
+                self.backupInProgress = false
+                self.saveMessage = result.exitCode == 0 ? "Restore complete — restart Scarf" : "Restore failed"
+                if result.exitCode == 0 {
+                    self.load()
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                    self?.saveMessage = nil
+                }
+            }
+        }
+    }
+
+    /// Pull the first absolute `.zip` path out of `hermes backup` stdout.
+    /// Hermes prints a line like "Backup saved to /Users/foo/.hermes-backups/hermes-2026-04-14.zip (5.4 MB)".
+    nonisolated static func extractZipPath(from output: String) -> String? {
+        let pattern = #"(/[^\s]+\.zip)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(output.startIndex..., in: output)
+        guard let match = regex.firstMatch(in: output, range: range),
+              let r = Range(match.range(at: 1), in: output) else { return nil }
+        return String(output[r])
+    }
+
+    func presentRestorePicker() -> URL? {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.zip]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a Hermes backup archive to restore"
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        return url
+    }
 
     func removeAuth() {
         let result = runHermes(["auth", "remove"])

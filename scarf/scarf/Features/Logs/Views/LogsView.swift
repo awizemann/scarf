@@ -28,6 +28,13 @@ struct LogsView: View {
             .pickerStyle(.segmented)
             .frame(maxWidth: 300)
 
+            Picker("Component", selection: $viewModel.selectedComponent) {
+                ForEach(LogsViewModel.LogComponent.allCases) { component in
+                    Text(component.rawValue).tag(component)
+                }
+            }
+            .frame(maxWidth: 140)
+
             Spacer()
 
             Picker("Level", selection: $viewModel.filterLevel) {
@@ -58,6 +65,27 @@ struct LogsView: View {
                         .font(.caption.monospaced().bold())
                         .foregroundStyle(colorForLevel(entry.level))
                         .frame(width: 60, alignment: .leading)
+                    if let sessionId = entry.sessionId {
+                        Button {
+                            viewModel.searchText = sessionId
+                        } label: {
+                            Text(sessionId)
+                                .font(.system(.caption2, design: .monospaced))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.accentColor.opacity(0.15))
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Filter to session \(sessionId)")
+                    }
+                    Text(entry.logger)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: 140, alignment: .leading)
                     Text(entry.message)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
