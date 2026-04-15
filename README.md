@@ -58,11 +58,13 @@ If a Hermes update changes the database schema or CLI output format, Scarf may n
 
 ### Pre-built Binary (no Xcode required)
 
-Download the latest universal binary (Apple Silicon + Intel) from [Releases](https://github.com/awizemann/scarf/releases):
+Download the latest build from [Releases](https://github.com/awizemann/scarf/releases):
 
-1. Download `Scarf-vX.X.X-Universal.zip`
-2. Unzip and drag **Scarf.app** to Applications
-3. On first launch, right-click and choose **Open** (or go to System Settings → Privacy & Security → Open Anyway)
+- `Scarf-vX.X.X-Universal.zip` — Apple Silicon + Intel (recommended)
+- `Scarf-vX.X.X-ARM64.zip` — Apple Silicon only (smaller)
+
+1. Unzip and drag **Scarf.app** to Applications
+2. On first launch, right-click and choose **Open** (or go to System Settings → Privacy & Security → Open Anyway)
 
 ### Build from Source
 
