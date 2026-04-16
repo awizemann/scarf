@@ -323,10 +323,18 @@ struct HermesFileService: Sendable {
         }.value
         let elapsed = Date().timeIntervalSince(started)
         let tools = Self.parseToolListFromTestOutput(result.1)
+        // hermes mcp test exits 0 even when the inner connection fails — it
+        // reports the failure on stdout instead. Look for explicit failure
+        // markers so the UI doesn't show a green check on a broken server.
+        let output = result.1
+        let hasFailureMarker = output.contains("✗")
+            || output.range(of: "Connection failed", options: .caseInsensitive) != nil
+            || output.range(of: "No such file or directory", options: .caseInsensitive) != nil
+            || output.range(of: "Error:", options: .caseInsensitive) != nil
         return MCPTestResult(
             serverName: name,
-            succeeded: result.0 == 0,
-            output: result.1,
+            succeeded: result.0 == 0 && !hasFailureMarker,
+            output: output,
             tools: tools,
             elapsed: elapsed
         )
@@ -930,6 +938,70 @@ struct HermesFileService: Sendable {
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
+    /// PATH cobbled together from the user's login shell — needed because
+    /// .app bundles launched from Finder/Dock get a minimal PATH (no Homebrew,
+    /// no nvm, no asdf, no mise). Without this, MCP servers using `npx`,
+    /// `node`, `python`, `uv`, etc. fail to launch with `[Errno 2] No such
+    /// file or directory`. Computed once and cached.
+    private static let enrichedPath: String = {
+        let pipe = Pipe()
+        let errPipe = Pipe()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        // -l sources the user's login files (.zprofile, .zshrc via /etc/zshrc
+        // chain on macOS) so PATH manipulations made there are picked up.
+        // Skip -i to avoid hangs from interactive prompts.
+        process.arguments = ["-l", "-c", "echo $PATH"]
+        process.standardOutput = pipe
+        process.standardError = errPipe
+        defer {
+            try? pipe.fileHandleForReading.close()
+            try? pipe.fileHandleForWriting.close()
+            try? errPipe.fileHandleForReading.close()
+            try? errPipe.fileHandleForWriting.close()
+        }
+        do {
+            try process.run()
+            let deadline = Date().addingTimeInterval(3)
+            while process.isRunning && Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            if process.isRunning { process.terminate() }
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let path = (String(data: data, encoding: .utf8) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if process.terminationStatus == 0 && !path.isEmpty {
+                return path
+            }
+        } catch {
+            // Fall through to default below.
+        }
+        // Fallback when the login shell can't be queried (zsh missing,
+        // sandbox restriction, timeout). Covers Apple Silicon + Intel
+        // Homebrew plus the standard system paths.
+        let home = NSHomeDirectory()
+        return [
+            "\(home)/.local/bin",
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin"
+        ].joined(separator: ":")
+    }()
+
+    /// Environment to hand any subprocess that may itself spawn user-installed
+    /// binaries (Hermes spawning MCP servers, ACP tool calls, etc.). Identical
+    /// to ProcessInfo.processInfo.environment but with PATH replaced by the
+    /// login-shell PATH.
+    nonisolated static func enrichedEnvironment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = enrichedPath
+        return env
+    }
+
     @discardableResult
     nonisolated func runHermesCLI(args: [String], timeout: TimeInterval = 60, stdinInput: String? = nil) -> (exitCode: Int32, output: String) {
         guard let binary = hermesBinaryPath() else { return (-1, "") }
@@ -939,6 +1011,7 @@ struct HermesFileService: Sendable {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binary)
         process.arguments = args
+        process.environment = Self.enrichedEnvironment()
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
         if let stdinPipe { process.standardInput = stdinPipe }

@@ -66,8 +66,10 @@ actor ACPClient {
         proc.standardOutput = stdout
         proc.standardError = stderr
 
-        // ACP uses JSON-RPC over pipes — do NOT set TERM to avoid terminal escape pollution
-        var env = ProcessInfo.processInfo.environment
+        // ACP uses JSON-RPC over pipes — do NOT set TERM to avoid terminal escape pollution.
+        // Use the enriched environment so any tools hermes spawns (MCP servers,
+        // shell commands) can find brew/nvm/asdf binaries on PATH.
+        var env = HermesFileService.enrichedEnvironment()
         env.removeValue(forKey: "TERM")
         proc.environment = env
 
