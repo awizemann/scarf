@@ -22,6 +22,7 @@ enum HermesPaths: Sendable {
     nonisolated static let hermesBinary: String = userHome + "/.local/bin/hermes"
     nonisolated static let scarfDir: String = home + "/scarf"
     nonisolated static let projectsRegistry: String = scarfDir + "/projects.json"
+    nonisolated static let mcpTokensDir: String = home + "/mcp-tokens"
 }
 
 // MARK: - SQLite Constants

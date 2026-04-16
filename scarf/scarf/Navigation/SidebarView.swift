@@ -25,7 +25,7 @@ struct SidebarView: View {
                 }
             }
             Section("Manage") {
-                ForEach([SidebarSection.tools, .gateway, .cron, .health, .logs, .settings]) { section in
+                ForEach([SidebarSection.tools, .mcpServers, .gateway, .cron, .health, .logs, .settings]) { section in
                     Label(section.rawValue, systemImage: section.icon)
                         .tag(section)
                 }

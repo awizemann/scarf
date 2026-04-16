@@ -19,7 +19,8 @@ final class HermesFileWatcher {
             HermesPaths.agentLog,
             HermesPaths.errorsLog,
             HermesPaths.gatewayLog,
-            HermesPaths.projectsRegistry
+            HermesPaths.projectsRegistry,
+            HermesPaths.mcpTokensDir
         ]
 
         for path in paths {
