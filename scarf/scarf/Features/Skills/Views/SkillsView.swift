@@ -2,17 +2,62 @@ import SwiftUI
 
 struct SkillsView: View {
     @State private var viewModel = SkillsViewModel()
+    @State private var currentTab: Tab = .installed
+
+    enum Tab: String, CaseIterable, Identifiable {
+        case installed = "Installed"
+        case hub = "Browse Hub"
+        case updates = "Updates"
+        var id: String { rawValue }
+    }
 
     var body: some View {
+        VStack(spacing: 0) {
+            modePicker
+            Divider()
+            switch currentTab {
+            case .installed: installedContent
+            case .hub:       hubContent
+            case .updates:   updatesContent
+            }
+        }
+        .navigationTitle("Skills (\(viewModel.totalSkillCount))")
+        .onAppear { viewModel.load() }
+    }
+
+    private var modePicker: some View {
+        HStack {
+            Picker("", selection: $currentTab) {
+                ForEach(Tab.allCases) { tab in
+                    Text(tab.rawValue).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 360)
+            Spacer()
+            if let msg = viewModel.hubMessage {
+                Label(msg, systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if viewModel.isHubLoading {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+    }
+
+    // MARK: - Installed
+
+    private var installedContent: some View {
         HSplitView {
             skillsList
                 .frame(minWidth: 250, idealWidth: 300)
             skillDetail
                 .frame(minWidth: 400)
         }
-        .navigationTitle("Skills (\(viewModel.totalSkillCount))")
         .searchable(text: $viewModel.searchText, prompt: "Filter skills...")
-        .onAppear { viewModel.load() }
     }
 
     private var skillsList: some View {
@@ -103,6 +148,10 @@ struct SkillsView: View {
                             Spacer()
                             Button("Edit") { viewModel.startEditing() }
                                 .controlSize(.small)
+                            Button("Uninstall", role: .destructive) {
+                                viewModel.uninstallHubSkill(skill.id)
+                            }
+                            .controlSize(.small)
                         }
                         if viewModel.isMarkdownFile {
                             MarkdownContentView(content: viewModel.skillContent)
@@ -151,5 +200,142 @@ struct SkillsView: View {
             }
         }
         .frame(minWidth: 800, minHeight: 500)
+    }
+
+    // MARK: - Hub
+
+    private var hubContent: some View {
+        VStack(spacing: 0) {
+            hubToolbar
+            Divider()
+            if viewModel.hubResults.isEmpty {
+                ContentUnavailableView(
+                    "Browse the Hub",
+                    systemImage: "books.vertical",
+                    description: Text("Search or browse skills published to registries like skills.sh, GitHub, and the official hub.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 1) {
+                        ForEach(viewModel.hubResults) { hub in
+                            hubRow(hub)
+                        }
+                    }
+                    .padding()
+                }
+            }
+        }
+    }
+
+    private var hubToolbar: some View {
+        HStack(spacing: 8) {
+            TextField("Search registries", text: $viewModel.hubQuery)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { viewModel.searchHub() }
+            Picker("Source", selection: $viewModel.hubSource) {
+                ForEach(viewModel.hubSources, id: \.self) { src in
+                    Text(src).tag(src)
+                }
+            }
+            .frame(maxWidth: 160)
+            Button("Search") { viewModel.searchHub() }
+                .controlSize(.small)
+            Button("Browse") { viewModel.browseHub() }
+                .controlSize(.small)
+        }
+        .padding()
+    }
+
+    private func hubRow(_ hub: HermesHubSkill) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "books.vertical")
+                .foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(hub.name)
+                        .font(.system(.body, design: .monospaced, weight: .medium))
+                    if !hub.source.isEmpty {
+                        Text(hub.source)
+                            .font(.caption2.bold())
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1)
+                            .background(.quaternary)
+                            .clipShape(Capsule())
+                    }
+                }
+                Text(hub.identifier)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                if !hub.description.isEmpty {
+                    Text(hub.description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+            }
+            Spacer()
+            Button {
+                viewModel.installHubSkill(hub)
+            } label: {
+                Label("Install", systemImage: "arrow.down.to.line")
+            }
+            .controlSize(.small)
+            .disabled(viewModel.isHubLoading)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.quaternary.opacity(0.3))
+    }
+
+    // MARK: - Updates
+
+    private var updatesContent: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button("Check for Updates") { viewModel.checkForUpdates() }
+                    .controlSize(.small)
+                if !viewModel.updates.isEmpty {
+                    Button("Update All") { viewModel.updateAll() }
+                        .controlSize(.small)
+                        .buttonStyle(.borderedProminent)
+                }
+                Spacer()
+            }
+            .padding()
+            Divider()
+            if viewModel.updates.isEmpty {
+                ContentUnavailableView(
+                    "No Updates",
+                    systemImage: "checkmark.circle",
+                    description: Text("All installed hub skills are up to date.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 1) {
+                        ForEach(viewModel.updates) { update in
+                            HStack {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .foregroundStyle(.orange)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(update.identifier)
+                                        .font(.system(.body, design: .monospaced, weight: .medium))
+                                    Text("\(update.currentVersion) → \(update.availableVersion)")
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(.quaternary.opacity(0.3))
+                        }
+                    }
+                    .padding()
+                }
+            }
+        }
     }
 }

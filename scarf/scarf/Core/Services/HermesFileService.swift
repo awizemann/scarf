@@ -10,91 +10,364 @@ struct HermesFileService: Sendable {
     }
 
     private func parseConfig(_ yaml: String) -> HermesConfig {
-        var values: [String: String] = [:]
-        var currentSection = ""
-        var dockerEnv: [String: String] = [:]
-        var commandAllowlist: [String] = []
-        var inDockerEnv = false
-        var inAllowlist = false
+        let parsed = Self.parseNestedYAML(yaml)
+        let values = parsed.values
+        let lists = parsed.lists
+        let maps = parsed.maps
 
-        for line in yaml.components(separatedBy: "\n") {
+        func bool(_ key: String, default def: Bool) -> Bool {
+            guard let v = values[key] else { return def }
+            return v == "true"
+        }
+        func int(_ key: String, default def: Int) -> Int {
+            Int(values[key] ?? "") ?? def
+        }
+        func double(_ key: String, default def: Double) -> Double {
+            Double(values[key] ?? "") ?? def
+        }
+        func str(_ key: String, default def: String = "") -> String {
+            // Strip quotes added by Hermes's YAML dumper around strings with special chars.
+            let raw = values[key] ?? def
+            return Self.stripYAMLQuotes(raw)
+        }
+
+        let dockerEnv = maps["terminal.docker_env"] ?? [:]
+        let commandAllowlist = lists["permanent_allowlist"] ?? lists["command_allowlist"] ?? []
+
+        let display = DisplaySettings(
+            skin: str("display.skin", default: "default"),
+            compact: bool("display.compact", default: false),
+            resumeDisplay: str("display.resume_display", default: "full"),
+            bellOnComplete: bool("display.bell_on_complete", default: false),
+            inlineDiffs: bool("display.inline_diffs", default: true),
+            toolProgressCommand: bool("display.tool_progress_command", default: false),
+            toolPreviewLength: int("display.tool_preview_length", default: 0),
+            busyInputMode: str("display.busy_input_mode", default: "interrupt")
+        )
+
+        let terminal = TerminalSettings(
+            cwd: str("terminal.cwd", default: "."),
+            timeout: int("terminal.timeout", default: 180),
+            envPassthrough: lists["terminal.env_passthrough"] ?? [],
+            persistentShell: bool("terminal.persistent_shell", default: true),
+            dockerImage: str("terminal.docker_image"),
+            dockerMountCwdToWorkspace: bool("terminal.docker_mount_cwd_to_workspace", default: false),
+            dockerForwardEnv: lists["terminal.docker_forward_env"] ?? [],
+            dockerVolumes: lists["terminal.docker_volumes"] ?? [],
+            containerCPU: int("terminal.container_cpu", default: 0),
+            containerMemory: int("terminal.container_memory", default: 0),
+            containerDisk: int("terminal.container_disk", default: 0),
+            containerPersistent: bool("terminal.container_persistent", default: false),
+            modalImage: str("terminal.modal_image"),
+            modalMode: str("terminal.modal_mode", default: "auto"),
+            daytonaImage: str("terminal.daytona_image"),
+            singularityImage: str("terminal.singularity_image")
+        )
+
+        let browser = BrowserSettings(
+            inactivityTimeout: int("browser.inactivity_timeout", default: 120),
+            commandTimeout: int("browser.command_timeout", default: 30),
+            recordSessions: bool("browser.record_sessions", default: false),
+            allowPrivateURLs: bool("browser.allow_private_urls", default: false),
+            camofoxManagedPersistence: bool("browser.camofox.managed_persistence", default: false)
+        )
+
+        let voice = VoiceSettings(
+            recordKey: str("voice.record_key", default: "ctrl+b"),
+            maxRecordingSeconds: int("voice.max_recording_seconds", default: 120),
+            silenceDuration: double("voice.silence_duration", default: 3.0),
+            ttsProvider: str("tts.provider", default: "edge"),
+            ttsEdgeVoice: str("tts.edge.voice", default: "en-US-AriaNeural"),
+            ttsElevenLabsVoiceID: str("tts.elevenlabs.voice_id"),
+            ttsElevenLabsModelID: str("tts.elevenlabs.model_id", default: "eleven_multilingual_v2"),
+            ttsOpenAIModel: str("tts.openai.model", default: "gpt-4o-mini-tts"),
+            ttsOpenAIVoice: str("tts.openai.voice", default: "alloy"),
+            ttsNeuTTSModel: str("tts.neutts.model"),
+            ttsNeuTTSDevice: str("tts.neutts.device", default: "cpu"),
+            sttEnabled: bool("stt.enabled", default: true),
+            sttProvider: str("stt.provider", default: "local"),
+            sttLocalModel: str("stt.local.model", default: "base"),
+            sttLocalLanguage: str("stt.local.language"),
+            sttOpenAIModel: str("stt.openai.model", default: "whisper-1"),
+            sttMistralModel: str("stt.mistral.model", default: "voxtral-mini-latest")
+        )
+
+        func aux(_ name: String) -> AuxiliaryModel {
+            AuxiliaryModel(
+                provider: str("auxiliary.\(name).provider", default: "auto"),
+                model: str("auxiliary.\(name).model"),
+                baseURL: str("auxiliary.\(name).base_url"),
+                apiKey: str("auxiliary.\(name).api_key"),
+                timeout: int("auxiliary.\(name).timeout", default: 30)
+            )
+        }
+        let auxiliary = AuxiliarySettings(
+            vision: aux("vision"),
+            webExtract: aux("web_extract"),
+            compression: aux("compression"),
+            sessionSearch: aux("session_search"),
+            skillsHub: aux("skills_hub"),
+            approval: aux("approval"),
+            mcp: aux("mcp"),
+            flushMemories: aux("flush_memories")
+        )
+
+        let security = SecuritySettings(
+            redactSecrets: bool("security.redact_secrets", default: true),
+            redactPII: bool("privacy.redact_pii", default: false),
+            tirithEnabled: bool("security.tirith_enabled", default: true),
+            tirithPath: str("security.tirith_path", default: "tirith"),
+            tirithTimeout: int("security.tirith_timeout", default: 5),
+            tirithFailOpen: bool("security.tirith_fail_open", default: true),
+            blocklistEnabled: bool("security.website_blocklist.enabled", default: false),
+            blocklistDomains: lists["security.website_blocklist.domains"] ?? []
+        )
+
+        let humanDelay = HumanDelaySettings(
+            mode: str("human_delay.mode", default: "off"),
+            minMS: int("human_delay.min_ms", default: 800),
+            maxMS: int("human_delay.max_ms", default: 2500)
+        )
+
+        let compression = CompressionSettings(
+            enabled: bool("compression.enabled", default: true),
+            threshold: double("compression.threshold", default: 0.5),
+            targetRatio: double("compression.target_ratio", default: 0.2),
+            protectLastN: int("compression.protect_last_n", default: 20)
+        )
+
+        let checkpoints = CheckpointSettings(
+            enabled: bool("checkpoints.enabled", default: true),
+            maxSnapshots: int("checkpoints.max_snapshots", default: 50)
+        )
+
+        let logging = LoggingSettings(
+            level: str("logging.level", default: "INFO"),
+            maxSizeMB: int("logging.max_size_mb", default: 5),
+            backupCount: int("logging.backup_count", default: 3)
+        )
+
+        let delegation = DelegationSettings(
+            model: str("delegation.model"),
+            provider: str("delegation.provider"),
+            baseURL: str("delegation.base_url"),
+            apiKey: str("delegation.api_key"),
+            maxIterations: int("delegation.max_iterations", default: 50)
+        )
+
+        let discord = DiscordSettings(
+            requireMention: bool("discord.require_mention", default: true),
+            freeResponseChannels: str("discord.free_response_channels"),
+            autoThread: bool("discord.auto_thread", default: true),
+            reactions: bool("discord.reactions", default: true)
+        )
+
+        let telegram = TelegramSettings(
+            requireMention: bool("telegram.require_mention", default: true),
+            reactions: bool("telegram.reactions", default: false)
+        )
+
+        // Slack fields live under both `platforms.slack.*` (newer) and `slack.*`
+        // (legacy) in config.yaml. Prefer the newer path but fall back.
+        let slack = SlackSettings(
+            replyToMode: values["platforms.slack.reply_to_mode"] ?? values["slack.reply_to_mode"] ?? "first",
+            requireMention: (values["platforms.slack.require_mention"] ?? values["slack.require_mention"]) != "false",
+            replyInThread: (values["platforms.slack.extra.reply_in_thread"] ?? "true") != "false",
+            replyBroadcast: (values["platforms.slack.extra.reply_broadcast"] ?? "false") == "true"
+        )
+
+        let matrix = MatrixSettings(
+            requireMention: bool("matrix.require_mention", default: true),
+            autoThread: bool("matrix.auto_thread", default: true),
+            dmMentionThreads: bool("matrix.dm_mention_threads", default: false)
+        )
+
+        let mattermost = MattermostSettings(
+            requireMention: bool("mattermost.require_mention", default: true),
+            replyMode: str("mattermost.reply_mode", default: "off")
+        )
+
+        let whatsapp = WhatsAppSettings(
+            unauthorizedDMBehavior: str("whatsapp.unauthorized_dm_behavior", default: "pair"),
+            replyPrefix: str("whatsapp.reply_prefix")
+        )
+
+        // Home Assistant lives under `platforms.homeassistant.extra.*`.
+        let homeAssistant = HomeAssistantSettings(
+            watchDomains: lists["platforms.homeassistant.extra.watch_domains"] ?? [],
+            watchEntities: lists["platforms.homeassistant.extra.watch_entities"] ?? [],
+            watchAll: bool("platforms.homeassistant.extra.watch_all", default: false),
+            ignoreEntities: lists["platforms.homeassistant.extra.ignore_entities"] ?? [],
+            cooldownSeconds: int("platforms.homeassistant.extra.cooldown_seconds", default: 30)
+        )
+
+        return HermesConfig(
+            model: str("model.default", default: "unknown"),
+            provider: str("model.provider", default: "unknown"),
+            maxTurns: int("agent.max_turns", default: 0),
+            personality: str("display.personality", default: "default"),
+            terminalBackend: str("terminal.backend", default: "local"),
+            memoryEnabled: bool("memory.memory_enabled", default: false),
+            memoryCharLimit: int("memory.memory_char_limit", default: 0),
+            userCharLimit: int("memory.user_char_limit", default: 0),
+            nudgeInterval: int("memory.nudge_interval", default: 0),
+            streaming: values["display.streaming"] != "false",
+            showReasoning: bool("display.show_reasoning", default: false),
+            verbose: bool("agent.verbose", default: false),
+            autoTTS: values["voice.auto_tts"] != "false",
+            silenceThreshold: int("voice.silence_threshold", default: QueryDefaults.defaultSilenceThreshold),
+            reasoningEffort: str("agent.reasoning_effort", default: "medium"),
+            showCost: bool("display.show_cost", default: false),
+            approvalMode: str("approvals.mode", default: "manual"),
+            browserBackend: str("browser.backend"),
+            memoryProvider: str("memory.provider"),
+            dockerEnv: dockerEnv,
+            commandAllowlist: commandAllowlist,
+            memoryProfile: str("memory.profile"),
+            serviceTier: str("agent.service_tier", default: "normal"),
+            gatewayNotifyInterval: int("agent.gateway_notify_interval", default: 600),
+            forceIPv4: bool("network.force_ipv4", default: false),
+            contextEngine: str("context.engine", default: "compressor"),
+            interimAssistantMessages: values["display.interim_assistant_messages"] != "false",
+            honchoInitOnSessionStart: bool("honcho.initOnSessionStart", default: false),
+            timezone: str("timezone"),
+            userProfileEnabled: bool("memory.user_profile_enabled", default: true),
+            toolUseEnforcement: str("agent.tool_use_enforcement", default: "auto"),
+            gatewayTimeout: int("agent.gateway_timeout", default: 1800),
+            approvalTimeout: int("approvals.timeout", default: 60),
+            fileReadMaxChars: int("file_read_max_chars", default: 100_000),
+            cronWrapResponse: bool("cron.wrap_response", default: true),
+            prefillMessagesFile: str("prefill_messages_file"),
+            skillsExternalDirs: lists["skills.external_dirs"] ?? [],
+            display: display,
+            terminal: terminal,
+            browser: browser,
+            voice: voice,
+            auxiliary: auxiliary,
+            security: security,
+            humanDelay: humanDelay,
+            compression: compression,
+            checkpoints: checkpoints,
+            logging: logging,
+            delegation: delegation,
+            discord: discord,
+            telegram: telegram,
+            slack: slack,
+            matrix: matrix,
+            mattermost: mattermost,
+            whatsapp: whatsapp,
+            homeAssistant: homeAssistant
+        )
+    }
+
+    /// Parsed YAML result bundle.
+    struct ParsedYAML: Sendable {
+        var values: [String: String]           // "section.key" -> scalar string
+        var lists: [String: [String]]          // "section.key" -> items from a bullet list
+        var maps: [String: [String: String]]   // "section.key" -> nested key-value map
+    }
+
+    /// Parse a subset of YAML into flat dotted paths.
+    ///
+    /// Supports:
+    /// - Scalar key-value pairs at any indent level → `values["a.b.c"] = "..."`
+    /// - Empty-valued section headers → acts as a path prefix for nested scalars
+    /// - Bullet lists (`- item`) nested under a `key:` → `lists["a.b"]`
+    /// - Nested maps where a header has no value and children are `k: v` pairs →
+    ///   captured as `maps["a.b"]` AND each child as `values["a.b.k"]`.
+    ///
+    /// This is sufficient for Hermes config; we do not attempt full YAML compliance.
+    nonisolated static func parseNestedYAML(_ yaml: String) -> ParsedYAML {
+        var values: [String: String] = [:]
+        var lists: [String: [String]] = [:]
+        var maps: [String: [String: String]] = [:]
+        // Path stack: each entry is (indent, name). Pop when indent shrinks.
+        var stack: [(indent: Int, name: String)] = []
+
+        func currentPath(joinedWith child: String? = nil) -> String {
+            var parts = stack.map(\.name)
+            if let child { parts.append(child) }
+            return parts.joined(separator: ".")
+        }
+
+        let rawLines = yaml.components(separatedBy: "\n")
+        for line in rawLines {
+            // Skip comment-only and blank lines but preserve indent semantics.
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
 
             let indent = line.prefix(while: { $0 == " " }).count
+            let isListItem = trimmed.hasPrefix("- ")
 
-            // Detect end of nested blocks when indent returns to section level
-            if indent <= 2 && (inDockerEnv || inAllowlist) {
-                inDockerEnv = false
-                inAllowlist = false
-            }
-
-            // Collect docker_env nested key-value pairs
-            if inDockerEnv, indent >= 4, let colonIdx = trimmed.firstIndex(of: ":") {
-                let key = String(trimmed[trimmed.startIndex..<colonIdx]).trimmingCharacters(in: .whitespaces)
-                let val = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
-                dockerEnv[key] = val
-                continue
-            }
-
-            // Collect allowlist items
-            if inAllowlist, indent >= 4, trimmed.hasPrefix("- ") {
-                commandAllowlist.append(String(trimmed.dropFirst(2)))
-                continue
-            }
-
-            if indent == 0 && trimmed.hasSuffix(":") {
-                currentSection = String(trimmed.dropLast())
-                continue
-            }
-
-            if let colonIdx = trimmed.firstIndex(of: ":") {
-                let key = String(trimmed[trimmed.startIndex..<colonIdx]).trimmingCharacters(in: .whitespaces)
-                let val = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
-
-                if key == "docker_env" && val.isEmpty {
-                    inDockerEnv = true
-                    continue
+            // Pop stack entries with indent >= current indent.
+            // Exception: a list item at the same indent as its parent key is
+            // valid block-style YAML ("toolsets:\n- hermes-cli") — keep the
+            // parent so the item is attributed to it.
+            while let top = stack.last {
+                let shouldPop: Bool
+                if isListItem && top.indent == indent {
+                    shouldPop = false
+                } else {
+                    shouldPop = top.indent >= indent
                 }
-                if key == "permanent_allowlist" && val.isEmpty {
-                    inAllowlist = true
-                    continue
-                }
+                if shouldPop { stack.removeLast() } else { break }
+            }
 
-                values[currentSection + "." + key] = val
+            if isListItem {
+                let item = String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                let stripped = stripYAMLQuotes(item)
+                let path = currentPath()
+                guard !path.isEmpty else { continue }
+                lists[path, default: []].append(stripped)
+                continue
+            }
+
+            // Key-value or section line.
+            guard let colonIdx = trimmed.firstIndex(of: ":") else { continue }
+            let key = String(trimmed[trimmed.startIndex..<colonIdx]).trimmingCharacters(in: .whitespaces)
+            let afterColon = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
+
+            let path = currentPath(joinedWith: key)
+
+            if afterColon.isEmpty || afterColon == "|" || afterColon == ">" {
+                // Section header or empty-valued key — push onto stack so children nest.
+                stack.append((indent: indent, name: key))
+                continue
+            }
+
+            // Inline `{}` / `[]` literals → treat as empty.
+            if afterColon == "{}" {
+                values[path] = ""
+                maps[path] = [:]
+                continue
+            }
+            if afterColon == "[]" {
+                values[path] = ""
+                lists[path] = []
+                continue
+            }
+
+            values[path] = afterColon
+
+            // Also record as a map entry under the parent, so we can treat blocks
+            // like `terminal.docker_env` as `[String: String]` without a separate scan.
+            if !stack.isEmpty {
+                let parentPath = currentPath()
+                maps[parentPath, default: [:]][key] = stripYAMLQuotes(afterColon)
             }
         }
+        return ParsedYAML(values: values, lists: lists, maps: maps)
+    }
 
-        return HermesConfig(
-            model: values["model.default"] ?? "unknown",
-            provider: values["model.provider"] ?? "unknown",
-            maxTurns: Int(values["agent.max_turns"] ?? "") ?? 0,
-            personality: values["display.personality"] ?? "default",
-            terminalBackend: values["terminal.backend"] ?? "local",
-            memoryEnabled: values["memory.memory_enabled"] == "true",
-            memoryCharLimit: Int(values["memory.memory_char_limit"] ?? "") ?? 0,
-            userCharLimit: Int(values["memory.user_char_limit"] ?? "") ?? 0,
-            nudgeInterval: Int(values["memory.nudge_interval"] ?? "") ?? 0,
-            streaming: values["display.streaming"] != "false",
-            showReasoning: values["display.show_reasoning"] == "true",
-            verbose: values["agent.verbose"] == "true",
-            autoTTS: values["voice.auto_tts"] != "false",
-            silenceThreshold: Int(values["voice.silence_threshold"] ?? "") ?? QueryDefaults.defaultSilenceThreshold,
-            reasoningEffort: values["agent.reasoning_effort"] ?? "medium",
-            showCost: values["display.show_cost"] == "true",
-            approvalMode: values["approvals.mode"] ?? "manual",
-            browserBackend: values["browser.backend"] ?? "",
-            memoryProvider: values["memory.provider"] ?? "",
-            dockerEnv: dockerEnv,
-            commandAllowlist: commandAllowlist,
-            memoryProfile: values["memory.profile"] ?? "",
-            serviceTier: values["agent.service_tier"] ?? "normal",
-            gatewayNotifyInterval: Int(values["agent.gateway_notify_interval"] ?? "") ?? 600,
-            forceIPv4: values["network.force_ipv4"] == "true",
-            contextEngine: values["context.engine"] ?? "compressor",
-            interimAssistantMessages: values["display.interim_assistant_messages"] != "false",
-            honchoInitOnSessionStart: values["honcho.initOnSessionStart"] == "true"
-        )
+    /// Strip a single layer of surrounding single or double quotes from a YAML scalar.
+    nonisolated static func stripYAMLQuotes(_ s: String) -> String {
+        guard s.count >= 2 else { return s }
+        let first = s.first!
+        let last = s.last!
+        if (first == "'" && last == "'") || (first == "\"" && last == "\"") {
+            return String(s.dropFirst().dropLast())
+        }
+        return s
     }
 
     // MARK: - Gateway State

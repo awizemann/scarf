@@ -1,42 +1,64 @@
 import SwiftUI
 
+/// Settings is now organized into tabs because the full Hermes config surface is far
+/// too large for a single scrolling form (~70 config fields). Each tab has its own
+/// extracted view file under `Tabs/` — per CLAUDE.md guidance, splitting avoids
+/// SwiftUI type-checker timeouts and keeps each section testable in isolation.
 struct SettingsView: View {
     @State private var viewModel = SettingsViewModel()
-    @State private var showRawConfig = false
+    @State private var selectedTab: SettingsTab = .general
+
+    enum SettingsTab: String, CaseIterable, Identifiable {
+        case general = "General"
+        case display = "Display"
+        case agent = "Agent"
+        case terminal = "Terminal"
+        case browser = "Browser"
+        case voice = "Voice"
+        case memory = "Memory"
+        case auxiliary = "Aux Models"
+        case security = "Security"
+        case advanced = "Advanced"
+
+        var id: String { rawValue }
+        var icon: String {
+            switch self {
+            case .general: return "gear"
+            case .display: return "paintbrush"
+            case .agent: return "brain.head.profile"
+            case .terminal: return "terminal"
+            case .browser: return "globe"
+            case .voice: return "mic"
+            case .memory: return "memorychip"
+            case .auxiliary: return "sparkles.rectangle.stack"
+            case .security: return "lock.shield"
+            case .advanced: return "slider.horizontal.3"
+            }
+        }
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                headerBar
-                modelSection
-                displaySection
-                terminalSection
-                if !viewModel.config.dockerEnv.isEmpty {
-                    dockerEnvSection
+        VStack(spacing: 0) {
+            headerBar
+            Divider()
+            TabView(selection: $selectedTab) {
+                ForEach(SettingsTab.allCases) { tab in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 20) {
+                            tabContent(tab)
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
+                    .tabItem {
+                        Label(tab.rawValue, systemImage: tab.icon)
+                    }
+                    .tag(tab)
                 }
-                if !viewModel.config.commandAllowlist.isEmpty {
-                    allowlistSection
-                }
-                voiceSection
-                memorySection
-                performanceSection
-                networkSection
-                advancedSection
-                backupSection
-                pathsSection
-                rawConfigSection
             }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .navigationTitle("Settings")
         .onAppear { viewModel.load() }
-        .confirmationDialog("Remove Credentials?", isPresented: $viewModel.showAuthRemoveConfirmation) {
-            Button("Remove", role: .destructive) { viewModel.removeAuth() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This will permanently clear all stored provider credentials.")
-        }
     }
 
     private var headerBar: some View {
@@ -52,407 +74,23 @@ struct SettingsView: View {
             Button("Reload") { viewModel.load() }
                 .controlSize(.small)
         }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
     }
 
-    // MARK: - Model & Provider
-
-    private var modelSection: some View {
-        SettingsSection(title: "Model", icon: "cpu") {
-            EditableTextField(label: "Model", value: viewModel.config.model) { viewModel.setModel($0) }
-            PickerRow(label: "Provider", selection: viewModel.config.provider, options: viewModel.providers) { viewModel.setProvider($0) }
-            HStack {
-                Text("Credentials")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 130, alignment: .trailing)
-                Button("Remove Credentials", role: .destructive) {
-                    viewModel.showAuthRemoveConfirmation = true
-                }
-                .controlSize(.small)
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.quaternary.opacity(0.3))
+    @ViewBuilder
+    private func tabContent(_ tab: SettingsTab) -> some View {
+        switch tab {
+        case .general:   GeneralTab(viewModel: viewModel)
+        case .display:   DisplayTab(viewModel: viewModel)
+        case .agent:     AgentTab(viewModel: viewModel)
+        case .terminal:  TerminalTab(viewModel: viewModel)
+        case .browser:   BrowserTab(viewModel: viewModel)
+        case .voice:     VoiceTab(viewModel: viewModel)
+        case .memory:    MemoryTab(viewModel: viewModel)
+        case .auxiliary: AuxiliaryTab(viewModel: viewModel)
+        case .security:  SecurityTab(viewModel: viewModel)
+        case .advanced:  AdvancedTab(viewModel: viewModel)
         }
-    }
-
-    // MARK: - Display
-
-    private var displaySection: some View {
-        SettingsSection(title: "Display", icon: "paintbrush") {
-            if !viewModel.personalities.isEmpty {
-                PickerRow(label: "Personality", selection: viewModel.config.personality, options: viewModel.personalities) { viewModel.setPersonality($0) }
-            } else {
-                EditableTextField(label: "Personality", value: viewModel.config.personality) { viewModel.setPersonality($0) }
-            }
-            ToggleRow(label: "Streaming", isOn: viewModel.config.streaming) { viewModel.setStreaming($0) }
-            ToggleRow(label: "Show Reasoning", isOn: viewModel.config.showReasoning) { viewModel.setShowReasoning($0) }
-            ToggleRow(label: "Show Cost", isOn: viewModel.config.showCost) { viewModel.setShowCost($0) }
-            ToggleRow(label: "Interim Messages", isOn: viewModel.config.interimAssistantMessages) { viewModel.setInterimAssistantMessages($0) }
-            ToggleRow(label: "Verbose", isOn: viewModel.config.verbose) { viewModel.setVerbose($0) }
-        }
-    }
-
-    // MARK: - Terminal
-
-    private var terminalSection: some View {
-        SettingsSection(title: "Terminal", icon: "terminal") {
-            PickerRow(label: "Backend", selection: viewModel.config.terminalBackend, options: viewModel.terminalBackends) { viewModel.setTerminalBackend($0) }
-            StepperRow(label: "Max Turns", value: viewModel.config.maxTurns, range: 1...200) { viewModel.setMaxTurns($0) }
-            PickerRow(label: "Reasoning Effort", selection: viewModel.config.reasoningEffort, options: ["low", "medium", "high"]) { viewModel.setReasoningEffort($0) }
-            PickerRow(label: "Approval Mode", selection: viewModel.config.approvalMode, options: ["auto", "manual", "smart"]) { viewModel.setApprovalMode($0) }
-            PickerRow(label: "Browser Backend", selection: viewModel.config.browserBackend, options: viewModel.browserBackends) { viewModel.setBrowserBackend($0) }
-        }
-    }
-
-    // MARK: - Docker Environment
-
-    private var dockerEnvSection: some View {
-        SettingsSection(title: "Docker Environment", icon: "shippingbox") {
-            ForEach(viewModel.config.dockerEnv.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
-                ReadOnlyRow(label: key, value: value)
-            }
-        }
-    }
-
-    // MARK: - Command Allowlist
-
-    private var allowlistSection: some View {
-        SettingsSection(title: "Command Allowlist", icon: "checkmark.shield") {
-            ReadOnlyRow(label: "Commands", value: viewModel.config.commandAllowlist.joined(separator: ", "))
-        }
-    }
-
-    // MARK: - Voice
-
-    private var voiceSection: some View {
-        SettingsSection(title: "Voice", icon: "mic") {
-            ToggleRow(label: "Auto TTS", isOn: viewModel.config.autoTTS) { viewModel.setAutoTTS($0) }
-            StepperRow(label: "Silence Threshold", value: viewModel.config.silenceThreshold, range: 50...500) { viewModel.setSilenceThreshold($0) }
-        }
-    }
-
-    // MARK: - Memory
-
-    private var memorySection: some View {
-        SettingsSection(title: "Memory", icon: "brain") {
-            ToggleRow(label: "Memory Enabled", isOn: viewModel.config.memoryEnabled) { viewModel.setMemoryEnabled($0) }
-            if !viewModel.config.memoryProfile.isEmpty {
-                ReadOnlyRow(label: "Profile", value: viewModel.config.memoryProfile)
-            }
-            StepperRow(label: "Memory Char Limit", value: viewModel.config.memoryCharLimit, range: 500...10000) { viewModel.setMemoryCharLimit($0) }
-            StepperRow(label: "User Char Limit", value: viewModel.config.userCharLimit, range: 500...10000) { viewModel.setUserCharLimit($0) }
-            StepperRow(label: "Nudge Interval", value: viewModel.config.nudgeInterval, range: 1...50) { viewModel.setNudgeInterval($0) }
-            if viewModel.config.memoryProvider == "honcho" {
-                ToggleRow(label: "Honcho Eager Init", isOn: viewModel.config.honchoInitOnSessionStart) { viewModel.setHonchoInitOnSessionStart($0) }
-            }
-        }
-    }
-
-    // MARK: - Performance (v0.9.0)
-
-    private var performanceSection: some View {
-        SettingsSection(title: "Performance", icon: "bolt") {
-            ToggleRow(label: "Fast Mode", isOn: viewModel.config.serviceTier == "fast") { on in
-                viewModel.setServiceTier(on ? "fast" : "normal")
-            }
-            StepperRow(label: "Notify Interval (s)", value: viewModel.config.gatewayNotifyInterval, range: 0...3600) { viewModel.setGatewayNotifyInterval($0) }
-        }
-    }
-
-    // MARK: - Network (v0.9.0)
-
-    private var networkSection: some View {
-        SettingsSection(title: "Network", icon: "network") {
-            ToggleRow(label: "Force IPv4", isOn: viewModel.config.forceIPv4) { viewModel.setForceIPv4($0) }
-        }
-    }
-
-    // MARK: - Advanced (v0.9.0)
-
-    private var advancedSection: some View {
-        SettingsSection(title: "Advanced", icon: "slider.horizontal.3") {
-            ReadOnlyRow(label: "Context Engine", value: viewModel.config.contextEngine)
-        }
-    }
-
-    // MARK: - Backup & Restore (v0.9.0)
-
-    @State private var showRestoreConfirm = false
-    @State private var pendingRestoreURL: URL?
-
-    private var backupSection: some View {
-        SettingsSection(title: "Backup & Restore", icon: "externaldrive") {
-            HStack {
-                Text("Archive")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 130, alignment: .trailing)
-                Button {
-                    viewModel.runBackup()
-                } label: {
-                    Label("Backup Now", systemImage: "arrow.down.doc")
-                }
-                .controlSize(.small)
-                .disabled(viewModel.backupInProgress)
-                Button {
-                    if let url = viewModel.presentRestorePicker() {
-                        pendingRestoreURL = url
-                        showRestoreConfirm = true
-                    }
-                } label: {
-                    Label("Restore…", systemImage: "arrow.up.doc")
-                }
-                .controlSize(.small)
-                .disabled(viewModel.backupInProgress)
-                if viewModel.backupInProgress {
-                    ProgressView().controlSize(.small)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.quaternary.opacity(0.3))
-        }
-        .confirmationDialog("Restore from backup?", isPresented: $showRestoreConfirm) {
-            Button("Restore", role: .destructive) {
-                if let url = pendingRestoreURL {
-                    viewModel.runRestore(from: url)
-                }
-                pendingRestoreURL = nil
-            }
-            Button("Cancel", role: .cancel) { pendingRestoreURL = nil }
-        } message: {
-            Text("This will overwrite files under ~/.hermes/ with the archive contents.")
-        }
-    }
-
-    // MARK: - Paths
-
-    private var pathsSection: some View {
-        SettingsSection(title: "Paths", icon: "folder") {
-            PathRow(label: "Hermes Home", path: HermesPaths.home)
-            PathRow(label: "State DB", path: HermesPaths.stateDB)
-            PathRow(label: "Config", path: HermesPaths.configYAML)
-            PathRow(label: "Memory", path: HermesPaths.memoriesDir)
-            PathRow(label: "Sessions", path: HermesPaths.sessionsDir)
-            PathRow(label: "Skills", path: HermesPaths.skillsDir)
-            PathRow(label: "Agent Log", path: HermesPaths.agentLog)
-            PathRow(label: "Error Log", path: HermesPaths.errorsLog)
-        }
-    }
-
-    // MARK: - Raw Config
-
-    private var rawConfigSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Raw Config")
-                    .font(.headline)
-                Button(showRawConfig ? "Hide" : "Show") {
-                    showRawConfig.toggle()
-                }
-                .controlSize(.small)
-            }
-            if showRawConfig {
-                Text(viewModel.rawConfigYAML)
-                    .font(.system(.caption, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.quaternary.opacity(0.5))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-            }
-        }
-    }
-}
-
-// MARK: - Reusable Components
-
-struct SettingsSection<Content: View>: View {
-    let title: String
-    let icon: String
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: icon)
-                .font(.headline)
-            VStack(spacing: 1) {
-                content
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-        }
-    }
-}
-
-struct EditableTextField: View {
-    let label: String
-    let value: String
-    let onCommit: (String) -> Void
-    @State private var text: String = ""
-    @State private var isEditing = false
-
-    var body: some View {
-        HStack {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 130, alignment: .trailing)
-            if isEditing {
-                TextField(label, text: $text, onCommit: {
-                    if text != value { onCommit(text) }
-                    isEditing = false
-                })
-                .textFieldStyle(.roundedBorder)
-                .font(.system(.caption, design: .monospaced))
-                Button("Cancel") { isEditing = false }
-                    .controlSize(.mini)
-            } else {
-                Text(value)
-                    .font(.system(.caption, design: .monospaced))
-                Spacer()
-                Button("Edit") {
-                    text = value
-                    isEditing = true
-                }
-                .controlSize(.mini)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.3))
-    }
-}
-
-struct PickerRow: View {
-    let label: String
-    let selection: String
-    let options: [String]
-    let onChange: (String) -> Void
-
-    var body: some View {
-        HStack {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 130, alignment: .trailing)
-            Picker("", selection: Binding(
-                get: { selection },
-                set: { onChange($0) }
-            )) {
-                ForEach(options, id: \.self) { option in
-                    Text(option).tag(option)
-                }
-            }
-            .frame(maxWidth: 250)
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.3))
-    }
-}
-
-struct ToggleRow: View {
-    let label: String
-    let isOn: Bool
-    let onChange: (Bool) -> Void
-
-    var body: some View {
-        HStack {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 130, alignment: .trailing)
-            Toggle("", isOn: Binding(
-                get: { isOn },
-                set: { onChange($0) }
-            ))
-            .toggleStyle(.switch)
-            .labelsHidden()
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.3))
-    }
-}
-
-struct StepperRow: View {
-    let label: String
-    let value: Int
-    let range: ClosedRange<Int>
-    let onChange: (Int) -> Void
-
-    var body: some View {
-        HStack {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 130, alignment: .trailing)
-            Text("\(value)")
-                .font(.system(.caption, design: .monospaced))
-                .frame(width: 50)
-            Stepper("", value: Binding(
-                get: { value },
-                set: { onChange($0) }
-            ), in: range)
-            .labelsHidden()
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.3))
-    }
-}
-
-struct ReadOnlyRow: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 130, alignment: .trailing)
-            Text(value)
-                .font(.system(.caption, design: .monospaced))
-                .textSelection(.enabled)
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.3))
-    }
-}
-
-struct PathRow: View {
-    let label: String
-    let path: String
-
-    var body: some View {
-        HStack {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 130, alignment: .trailing)
-            Text(path)
-                .font(.system(.caption, design: .monospaced))
-                .textSelection(.enabled)
-            Spacer()
-            Button {
-                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
-            } label: {
-                Image(systemName: "folder")
-                    .font(.caption)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.3))
     }
 }

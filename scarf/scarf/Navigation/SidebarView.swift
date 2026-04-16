@@ -24,6 +24,12 @@ struct SidebarView: View {
                         .tag(section)
                 }
             }
+            Section("Configure") {
+                ForEach([SidebarSection.platforms, .personalities, .quickCommands, .credentialPools, .plugins, .webhooks, .profiles]) { section in
+                    Label(section.rawValue, systemImage: section.icon)
+                        .tag(section)
+                }
+            }
             Section("Manage") {
                 ForEach([SidebarSection.tools, .mcpServers, .gateway, .cron, .health, .logs, .settings]) { section in
                     Label(section.rawValue, systemImage: section.icon)

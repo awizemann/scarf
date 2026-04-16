@@ -37,6 +37,10 @@ final class HealthViewModel {
     var hermesPID: pid_t?
     var actionMessage: String?
 
+    /// Text output from `hermes dump` / `hermes debug share`. Shown in an expandable panel.
+    var diagnosticsOutput: String = ""
+    var isSharingDebug = false
+
     func load() {
         isLoading = true
         refreshProcessStatus()
@@ -201,6 +205,37 @@ final class HealthViewModel {
         }
     }
 
+    /// Capture `hermes dump` output — a setup summary used for debugging / support.
+    /// Does NOT upload anything.
+    func runDump() {
+        actionMessage = "Running dump…"
+        let result = runHermes(["dump"])
+        diagnosticsOutput = result.output
+        actionMessage = result.exitCode == 0 ? "Dump captured" : "Dump failed"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            self?.actionMessage = nil
+        }
+    }
+
+    /// Upload a debug report via `hermes debug share`. THIS UPLOADS DATA to Nous
+    /// Research support infrastructure — caller must confirm with the user first.
+    func runDebugShare() {
+        isSharingDebug = true
+        actionMessage = "Uploading debug report…"
+        Task.detached { [fileService] in
+            let result = fileService.runHermesCLI(args: ["debug", "share"], timeout: 120)
+            await MainActor.run {
+                self.isSharingDebug = false
+                self.diagnosticsOutput = result.output
+                self.actionMessage = result.exitCode == 0 ? "Upload complete" : "Upload failed"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                    self?.actionMessage = nil
+                }
+            }
+        }
+    }
+
+    @discardableResult
     private func runHermes(_ arguments: [String]) -> (output: String, exitCode: Int32) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: HermesPaths.hermesBinary)

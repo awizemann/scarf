@@ -4,18 +4,38 @@ struct HealthView: View {
     @State private var viewModel = HealthViewModel()
     @State private var expandedSection: UUID?
     @State private var selectedTab = 0
+    @State private var showShareConfirm = false
+    @State private var showDiagnostics = false
 
     var body: some View {
         VStack(spacing: 0) {
             headerBar
             Divider()
-            Picker("", selection: $selectedTab) {
-                Text("Status").tag(0)
-                Text("Diagnostics").tag(1)
+            HStack {
+                Picker("", selection: $selectedTab) {
+                    Text("Status").tag(0)
+                    Text("Diagnostics").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 300)
+                Spacer()
+                Button("Run Dump") {
+                    viewModel.runDump()
+                    showDiagnostics = true
+                }
+                .controlSize(.small)
+                Button("Share Debug Report…") {
+                    showShareConfirm = true
+                }
+                .controlSize(.small)
+                .disabled(viewModel.isSharingDebug)
             }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 300)
             .padding(.vertical, 8)
+            .padding(.horizontal)
+            if showDiagnostics && !viewModel.diagnosticsOutput.isEmpty {
+                Divider()
+                diagnosticsPanel
+            }
             Divider()
             ScrollView {
                 sectionGrid(selectedTab == 0 ? viewModel.statusSections : viewModel.doctorSections)
@@ -24,6 +44,40 @@ struct HealthView: View {
         }
         .navigationTitle("Health")
         .onAppear { viewModel.load() }
+        .confirmationDialog("Upload debug report?", isPresented: $showShareConfirm) {
+            Button("Upload", role: .destructive) {
+                viewModel.runDebugShare()
+                showDiagnostics = true
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This uploads logs, config (with secrets redacted), and system info to Nous Research support infrastructure. Review the output below before sharing the returned URL.")
+        }
+    }
+
+    private var diagnosticsPanel: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Diagnostic Output")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Hide") { showDiagnostics = false }
+                    .controlSize(.mini)
+            }
+            ScrollView {
+                Text(viewModel.diagnosticsOutput)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 240)
+            .background(.quaternary.opacity(0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Header

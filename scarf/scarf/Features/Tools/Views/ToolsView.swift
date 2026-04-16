@@ -19,19 +19,46 @@ struct ToolsView: View {
 
     private var platformPicker: some View {
         HStack(spacing: 12) {
-            Picker("Platform", selection: Binding(
-                get: { viewModel.selectedPlatform.name },
-                set: { name in
-                    if let platform = viewModel.availablePlatforms.first(where: { $0.name == name }) {
+            // macOS renders Menu items using NSMenu, which only honors text and
+            // SF Symbol images — custom-drawn Circle() shapes don't appear in the
+            // dropdown. We use a filled SF Symbol "circlebadge.fill" and the status
+            // text suffix so users can tell offline from connected inside the menu.
+            Menu {
+                ForEach(viewModel.availablePlatforms) { platform in
+                    Button {
                         Task { await viewModel.switchPlatform(platform) }
+                    } label: {
+                        let status = viewModel.connectivity[platform.name] ?? .notConfigured
+                        Label(
+                            menuLabel(platform: platform, status: status),
+                            systemImage: statusSymbol(status)
+                        )
                     }
                 }
-            )) {
-                ForEach(viewModel.availablePlatforms) { platform in
-                    Text(platform.displayName).tag(platform.name)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: KnownPlatforms.icon(for: viewModel.selectedPlatform.name))
+                    Text(viewModel.selectedPlatform.displayName)
+                        .fontWeight(.medium)
+                    statusDot(for: viewModel.connectivity[viewModel.selectedPlatform.name] ?? .notConfigured)
+                    Image(systemName: "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.quaternary.opacity(0.4))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
             }
-            .pickerStyle(.segmented)
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
+            if let tooltip = statusDescription(viewModel.connectivity[viewModel.selectedPlatform.name] ?? .notConfigured) {
+                Text(tooltip)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Spacer()
             Text("\(viewModel.toolsets.filter(\.enabled).count) of \(viewModel.toolsets.count) enabled")
                 .font(.caption)
@@ -39,6 +66,52 @@ struct ToolsView: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private func statusDot(for status: PlatformConnectivity) -> some View {
+        Circle()
+            .fill(statusColor(status))
+            .frame(width: 8, height: 8)
+    }
+
+    /// SF Symbol name used inside NSMenu (where Circle shapes don't render).
+    private func statusSymbol(_ status: PlatformConnectivity) -> String {
+        switch status {
+        case .connected: return "circle.fill"
+        case .configured: return "circle.dotted"
+        case .notConfigured: return "circle"
+        case .error: return "exclamationmark.circle.fill"
+        }
+    }
+
+    /// Menu-item label with an offline/connected suffix so status is readable even
+    /// if the color of the SF Symbol doesn't come through NSMenu tinting.
+    private func menuLabel(platform: HermesToolPlatform, status: PlatformConnectivity) -> String {
+        switch status {
+        case .connected: return platform.displayName
+        case .configured: return "\(platform.displayName) (offline)"
+        case .notConfigured: return "\(platform.displayName) (not configured)"
+        case .error: return "\(platform.displayName) (error)"
+        }
+    }
+
+    private func statusColor(_ status: PlatformConnectivity) -> Color {
+        switch status {
+        case .connected: return .green
+        case .configured: return .orange
+        case .notConfigured: return .secondary.opacity(0.4)
+        case .error: return .red
+        }
+    }
+
+    private func statusDescription(_ status: PlatformConnectivity) -> String? {
+        switch status {
+        case .connected: return "Connected"
+        case .configured: return "Configured · not running"
+        case .notConfigured: return "Not configured"
+        case .error(let msg): return "Error: \(msg)"
+        }
     }
 
     private var toolsList: some View {

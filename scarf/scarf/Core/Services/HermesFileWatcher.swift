@@ -12,6 +12,7 @@ final class HermesFileWatcher {
             HermesPaths.stateDB,
             HermesPaths.stateDB + "-wal",
             HermesPaths.configYAML,
+            HermesPaths.home + "/.env",          // Platform setup forms write here.
             HermesPaths.memoryMD,
             HermesPaths.userMD,
             HermesPaths.cronJobsJSON,
