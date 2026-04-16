@@ -27,6 +27,7 @@
 - **Memory Viewer/Editor** — View and edit Hermes's MEMORY.md and USER.md with live file-watcher refresh, external memory provider awareness (Honcho, Supermemory, etc.), and profile-scoped memory support with profile picker
 - **Skills Browser** — Browse and edit installed skills by category with file content viewer, file switcher, and required config warnings for skills that need specific settings
 - **Tools Manager** — Enable/disable toolsets per platform (CLI, Telegram, Discord, Slack, WhatsApp, Signal, iMessage, Email, Home Assistant, Webhook, Matrix, Feishu, Mattermost) with toggle switches and segmented platform picker, MCP server status
+- **MCP Servers** — Manage Model Context Protocol servers Hermes connects to. Add via curated presets (GitHub, Linear, Notion, Sentry, Stripe, and more) or fully custom (stdio command + args, or HTTP URL with optional bearer auth). Per-server detail view with enable/disable toggle, environment variable + header editor, tool-include/exclude filters, resources/prompts toggles, request and connect timeouts, OAuth token detection + clearing, and one-click "Test Connection" that runs `hermes mcp test` and surfaces the discovered tool list. Gateway-restart banner appears after config changes that require a reload
 - **Gateway Control** — Start/stop/restart the messaging gateway, view platform connection status, manage user pairing (approve/revoke)
 - **Cron Manager** — View scheduled jobs with pre-run scripts, delivery failure tracking, timeout info, and `[SILENT]` job indicators
 - **Log Viewer** — Real-time log tailing for agent.log, errors.log, and gateway.log with level filtering, component filter (Gateway / Agent / Tools / CLI / Cron), clickable session-ID pills that filter to a single session, and text search
@@ -99,6 +100,7 @@ scarf/
     Memory/       Memory viewer and editor
     Skills/       Skill browser by category
     Tools/        Toolset management per platform
+    MCPServers/   MCP server registry, presets, OAuth, tool filters, test runner
     Gateway/      Messaging gateway control and pairing
     Cron/         Scheduled job viewer
     Logs/         Real-time log viewer
@@ -125,6 +127,8 @@ Scarf reads Hermes data directly from `~/.hermes/`:
 | `hermes sessions` | CLI commands | Rename/Delete/Export |
 | `hermes gateway` | CLI commands | Start/Stop/Restart |
 | `hermes pairing` | CLI commands | Approve/Revoke |
+| `hermes mcp` | CLI commands | Add/Remove/Test MCP servers |
+| `mcp-tokens/*.json` | JSON (per-server OAuth) | Detect/Delete |
 | `.scarf/dashboard.json` | JSON (per-project) | Read-only |
 | `scarf/projects.json` | JSON (registry) | Read/Write |
 
