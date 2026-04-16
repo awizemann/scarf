@@ -437,6 +437,20 @@ struct HermesFileService: Sendable {
         if blockStart < 0 {
             return MCPBlockLocation(prefix: lines, block: [], suffix: [])
         }
+        // Trim trailing blank lines and comments from the block — they belong
+        // to the file footer, not the mcp_servers section. Without this, when
+        // mcp_servers is the last top-level key, the block would extend to EOF
+        // and any inserted content (args, env, headers, tools) would land
+        // after the trailing comments.
+        while blockEnd > blockStart + 1 {
+            let line = lines[blockEnd - 1]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") {
+                blockEnd -= 1
+            } else {
+                break
+            }
+        }
         return MCPBlockLocation(
             prefix: Array(lines[0..<blockStart]),
             block: Array(lines[blockStart..<blockEnd]),
@@ -605,6 +619,20 @@ struct HermesFileService: Sendable {
             }
         }
         guard entryStart >= 0 else { return false }
+
+        // Trim trailing blank lines and comments off the entry so inserts land
+        // immediately after the entry's last real key, not after intervening
+        // comments that conceptually belong to the next entry (or the file
+        // footer when this is the last entry in the block).
+        while entryEnd > entryStart + 1 {
+            let line = block[entryEnd - 1]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") {
+                entryEnd -= 1
+            } else {
+                break
+            }
+        }
 
         var entryLines = Array(block[entryStart..<entryEnd])
         mutate(&entryLines)
@@ -826,9 +854,20 @@ struct HermesFileService: Sendable {
 
     private static func yamlScalar(_ value: String) -> String {
         if value.isEmpty { return "\"\"" }
+        // YAML 1.2 reserved indicators that change meaning at the start of a
+        // scalar: @ * & ? | > ! % , [ ] { } < ` ' " — plus space (would be
+        // trimmed) and dash (looks like a sequence). Anything starting with
+        // one of these must be quoted or YAML treats the value as an alias,
+        // tag, flow collection, etc., and parsing breaks.
+        let reservedFirstChars: Set<Character> = [
+            "@", "*", "&", "?", "|", ">", "!", "%", ",",
+            "[", "]", "{", "}", "<", "`", "'", "\""
+        ]
+        let firstCharNeedsQuoting = value.first.map { reservedFirstChars.contains($0) } ?? false
         let needsQuoting = value.contains(":") || value.contains("#") || value.contains("\"")
             || value.hasPrefix(" ") || value.hasSuffix(" ") || value.hasPrefix("-")
             || ["true", "false", "null", "yes", "no"].contains(value.lowercased())
+            || firstCharNeedsQuoting
         if needsQuoting {
             let escaped = value.replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "\"", with: "\\\"")
