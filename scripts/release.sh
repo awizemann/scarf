@@ -106,8 +106,15 @@ xcodebuild \
   -exportPath "$EXPORT_DIR" \
   -exportOptionsPlist "$EXPORT_OPTIONS"
 
+# Xcode exports as scarf.app (PRODUCT_NAME = $TARGET_NAME = "scarf"). Rename the
+# wrapper to Scarf.app so users see properly-cased app in /Applications. Renaming
+# the bundle directory does NOT invalidate the signature (codesign signs contents,
+# not the wrapper folder name).
+if [[ -d "$EXPORT_DIR/scarf.app" && ! -d "$EXPORT_DIR/Scarf.app" ]]; then
+  mv "$EXPORT_DIR/scarf.app" "$EXPORT_DIR/Scarf.app"
+fi
 APP_PATH="$EXPORT_DIR/Scarf.app"
-[[ -d "$APP_PATH" ]] || die "exported app not found at $APP_PATH (expected Scarf.app — confirm PRODUCT_NAME)"
+[[ -d "$APP_PATH" ]] || die "exported app not found at $APP_PATH"
 
 # ---------- verify signature ----------
 log "Verify signature"
