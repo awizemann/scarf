@@ -5,5 +5,16 @@
     <link>https://awizemann.github.io/scarf/appcast.xml</link>
     <description>Scarf macOS app updates</description>
     <language>en</language>
+    <item>
+      <title>Version 1.6.1</title>
+      <sparkle:version>17</sparkle:version>
+      <sparkle:shortVersionString>1.6.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Fri, 17 Apr 2026 02:11:53 +0000</pubDate>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v1.6.1/Scarf-v1.6.1-Universal.zip"
+                 sparkle:edSignature="hoYDb7VRQ+YDNUox1kf7eYbhckOJWYLEi8ZPfBZG59qK4L/5N2mmgV7jOCLriHkNx0F4mvM9UK8UQZIkxsX1DA=="
+                 length="16566934"
+                 type="application/octet-stream" />
+    </item>
   </channel>
 </rss>
