@@ -30,6 +30,14 @@ final class ChatViewModel {
     var isACPConnected: Bool { acpClient != nil && hasActiveProcess }
     var acpStatus: String = ""
     var acpError: String?
+    /// Human-readable hint derived from error + stderr (e.g. "set ANTHROPIC_API_KEY").
+    /// Shown above the raw error in the UI when present.
+    var acpErrorHint: String?
+    /// Tail of stderr captured from `hermes acp` at the time of the last
+    /// failure — shown in a collapsible details section so users can copy/paste.
+    var acpErrorDetails: String?
+    /// True when `hasAnyAICredential()` returned false at last preflight.
+    var missingCredentials: Bool = false
 
     private static let maxReconnectAttempts = 5
     private static let reconnectBaseDelay: UInt64 = 1_000_000_000 // 1 second
@@ -37,6 +45,34 @@ final class ChatViewModel {
 
     var hermesBinaryExists: Bool {
         FileManager.default.fileExists(atPath: HermesPaths.hermesBinary)
+    }
+
+    /// Re-checks env + `~/.hermes/.env` for AI-provider credentials and
+    /// updates `missingCredentials`. Cheap — safe to call from view `.task`.
+    func refreshCredentialPreflight() {
+        missingCredentials = !HermesFileService.hasAnyAICredential()
+    }
+
+    /// Clears the error/hint/details triplet so future failures overwrite
+    /// cleanly instead of stacking on top of stale state.
+    private func clearACPErrorState() {
+        acpError = nil
+        acpErrorHint = nil
+        acpErrorDetails = nil
+    }
+
+    /// Populates acpError, acpErrorHint, acpErrorDetails from an error + the
+    /// stderr tail the ACP client captured, and logs the failure with a
+    /// site-specific context label. Call on any failure path.
+    @MainActor
+    private func recordACPFailure(_ error: Error, client: ACPClient?, context: String) async {
+        let msg = error.localizedDescription
+        logger.error("\(context): \(msg)")
+        let stderrTail = await client?.recentStderr ?? ""
+        let hint = ACPErrorHint.classify(errorMessage: msg, stderrTail: stderrTail)
+        acpError = msg
+        acpErrorHint = hint
+        acpErrorDetails = stderrTail.isEmpty ? nil : stderrTail
     }
 
     // MARK: - Session Lifecycle
@@ -157,10 +193,8 @@ final class ChatViewModel {
                 // Now send the queued prompt
                 sendViaACP(client: client, text: text)
             } catch {
-                let msg = error.localizedDescription
-                logger.error("Auto-start ACP failed: \(msg)")
                 acpStatus = "Failed"
-                acpError = msg
+                await recordACPFailure(error, client: client, context: "Auto-start ACP failed")
                 hasActiveProcess = false
                 acpClient = nil
             }
@@ -169,6 +203,7 @@ final class ChatViewModel {
 
     private func sendViaACP(client: ACPClient, text: String) {
         guard let sessionId = richChatViewModel.sessionId else {
+            clearACPErrorState()
             acpError = "No session ID — cannot send"
             return
         }
@@ -192,10 +227,8 @@ final class ChatViewModel {
             } catch is CancellationError {
                 acpStatus = "Cancelled"
             } catch {
-                let msg = error.localizedDescription
-                logger.error("ACP prompt failed: \(msg)")
                 acpStatus = "Error"
-                acpError = msg
+                await recordACPFailure(error, client: client, context: "ACP prompt failed")
                 richChatViewModel.handleACPEvent(
                     .promptComplete(sessionId: sessionId, response: ACPPromptResult(
                         stopReason: "error",
@@ -211,7 +244,7 @@ final class ChatViewModel {
 
     private func startACPSession(resume sessionId: String?) {
         stopACP()
-        acpError = nil
+        clearACPErrorState()
         acpStatus = "Starting..."
 
         let client = ACPClient()
@@ -259,10 +292,8 @@ final class ChatViewModel {
 
                 logger.info("ACP session ready: \(resolvedSessionId)")
             } catch {
-                let msg = error.localizedDescription
-                logger.error("Failed to start ACP session: \(msg)")
                 acpStatus = "Failed"
-                acpError = msg
+                await recordACPFailure(error, client: client, context: "Failed to start ACP session")
                 hasActiveProcess = false
                 acpClient = nil
             }
@@ -333,7 +364,7 @@ final class ChatViewModel {
 
     private func attemptReconnect(sessionId: String) {
         reconnectTask?.cancel()
-        acpError = nil
+        clearACPErrorState()
 
         reconnectTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -379,7 +410,7 @@ final class ChatViewModel {
                     await richChatViewModel.reconcileWithDB(sessionId: resolvedSessionId)
 
                     acpStatus = "Reconnected (\(resolvedSessionId.prefix(12)))"
-                    acpError = nil
+                    clearACPErrorState()
 
                     startACPEventLoop(client: client)
                     startHealthMonitor(client: client)
@@ -404,6 +435,7 @@ final class ChatViewModel {
     private func showConnectionFailure() {
         richChatViewModel.handleACPEvent(.connectionLost(reason: "The ACP process terminated unexpectedly"))
         acpStatus = "Connection lost"
+        clearACPErrorState()
         acpError = "Connection lost. Use the Session menu to reconnect."
     }
 

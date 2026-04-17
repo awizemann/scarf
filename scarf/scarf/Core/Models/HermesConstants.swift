@@ -19,10 +19,30 @@ enum HermesPaths: Sendable {
     nonisolated static let errorsLog: String = home + "/logs/errors.log"
     nonisolated static let agentLog: String = home + "/logs/agent.log"
     nonisolated static let gatewayLog: String = home + "/logs/gateway.log"
-    nonisolated static let hermesBinary: String = userHome + "/.local/bin/hermes"
     nonisolated static let scarfDir: String = home + "/scarf"
     nonisolated static let projectsRegistry: String = scarfDir + "/projects.json"
     nonisolated static let mcpTokensDir: String = home + "/mcp-tokens"
+
+    /// Install locations we look for the `hermes` binary in, in priority order.
+    /// Checked every access so a user installing via a different method doesn't
+    /// need to relaunch Scarf.
+    nonisolated static let hermesBinaryCandidates: [String] = [
+        userHome + "/.local/bin/hermes",   // pipx / pip --user (default)
+        "/opt/homebrew/bin/hermes",        // Homebrew on Apple Silicon
+        "/usr/local/bin/hermes",           // Homebrew on Intel / manual install
+        userHome + "/.hermes/bin/hermes"   // Some self-install layouts
+    ]
+
+    /// Resolved path to the `hermes` executable. Returns the first candidate
+    /// that exists and is executable; falls back to the pipx default so error
+    /// messages ("Expected at …") still make sense on a fresh machine.
+    nonisolated static var hermesBinary: String {
+        for path in hermesBinaryCandidates
+        where FileManager.default.isExecutableFile(atPath: path) {
+            return path
+        }
+        return hermesBinaryCandidates[0]
+    }
 }
 
 // MARK: - SQLite Constants

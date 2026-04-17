@@ -24,6 +24,27 @@ actor ACPClient {
     private(set) var currentSessionId: String?
     private(set) var statusMessage = ""
 
+    /// Ring buffer of recent stderr lines from `hermes acp` — used to attach
+    /// a diagnostic tail to user-visible errors. Capped to avoid unbounded
+    /// growth when the subprocess logs heavily.
+    private var stderrBuffer: [String] = []
+    private static let stderrBufferMaxLines = 50
+
+    /// Returns the last ~`stderrBufferMaxLines` stderr lines captured from the
+    /// `hermes acp` subprocess, joined by newlines.
+    var recentStderr: String {
+        stderrBuffer.joined(separator: "\n")
+    }
+
+    fileprivate func appendStderr(_ text: String) {
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            stderrBuffer.append(String(line))
+        }
+        if stderrBuffer.count > Self.stderrBufferMaxLines {
+            stderrBuffer.removeFirst(stderrBuffer.count - Self.stderrBufferMaxLines)
+        }
+    }
+
     /// Check if the underlying process is still alive and connected.
     var isHealthy: Bool {
         guard isConnected, let process else { return false }
@@ -398,7 +419,8 @@ actor ACPClient {
             await self?.handleReadLoopEnded()
         }
 
-        // Read stderr in background for diagnostic logging
+        // Read stderr in background for diagnostic logging AND ring-buffer
+        // capture so we can attach a tail to user-visible errors.
         stderrTask = Task.detached { [weak self] in
             let handle = stderr.fileHandleForReading
             while !Task.isCancelled {
@@ -407,6 +429,7 @@ actor ACPClient {
                 if let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !text.isEmpty {
                     await self?.logger.info("ACP stderr: \(text.prefix(500))")
+                    await self?.appendStderr(text)
                 }
             }
         }
@@ -514,5 +537,37 @@ enum ACPClientError: Error, LocalizedError {
         case .processTerminated: return "ACP process terminated unexpectedly"
         case .requestTimeout(let method): return "ACP request '\(method)' timed out"
         }
+    }
+}
+
+/// Maps a raw error message (RPC message or captured stderr) to a short
+/// human-readable hint for the chat UI. Pattern-matches the most common
+/// fresh-install failure modes. Returns nil when no known pattern matches.
+enum ACPErrorHint {
+    static func classify(errorMessage: String, stderrTail: String) -> String? {
+        let haystack = errorMessage + "\n" + stderrTail
+        if haystack.range(of: #"No\s+(Anthropic|OpenAI|OpenRouter|Gemini|Google|Groq|Mistral|XAI)?\s*credentials\s+found"#,
+                          options: .regularExpression) != nil
+            || haystack.contains("ANTHROPIC_API_KEY")
+            || haystack.contains("ANTHROPIC_TOKEN")
+            || haystack.contains("claude setup-token")
+            || haystack.contains("claude /login") {
+            return "Hermes can't find your AI provider credentials. Set `ANTHROPIC_API_KEY` (or similar) in `~/.hermes/.env` or your shell profile, then restart Scarf."
+        }
+        if let match = haystack.range(of: #"No such file or directory:\s*'([^']+)'"#,
+                                      options: .regularExpression) {
+            let matched = String(haystack[match])
+            if let nameStart = matched.range(of: "'"),
+               let nameEnd = matched.range(of: "'", range: nameStart.upperBound..<matched.endIndex) {
+                let name = String(matched[nameStart.upperBound..<nameEnd.lowerBound])
+                return "Hermes couldn't find `\(name)` on PATH. If you use nvm/asdf/mise, make sure it's exported in `~/.zprofile` (not only `~/.zshrc`), then restart Scarf."
+            }
+            return "Hermes couldn't find a required binary on PATH. Check that your shell's PATH is exported in `~/.zprofile`, then restart Scarf."
+        }
+        if haystack.localizedCaseInsensitiveContains("rate limit")
+            || haystack.localizedCaseInsensitiveContains("429") {
+            return "Your AI provider returned a rate-limit error. Try again in a moment."
+        }
+        return nil
     }
 }

@@ -3,18 +3,113 @@ import SwiftUI
 struct ChatView: View {
     @Environment(ChatViewModel.self) private var viewModel
     @Environment(HermesFileWatcher.self) private var fileWatcher
+    @State private var showErrorDetails = false
 
     var body: some View {
         @Bindable var vm = viewModel
         VStack(spacing: 0) {
             toolbar
             Divider()
+            errorBanner
             chatArea
         }
         .navigationTitle("Chat")
-        .task { await viewModel.loadRecentSessions() }
+        .task {
+            await viewModel.loadRecentSessions()
+            viewModel.refreshCredentialPreflight()
+        }
         .onChange(of: fileWatcher.lastChangeDate) {
             Task { await viewModel.loadRecentSessions() }
+            viewModel.refreshCredentialPreflight()
+        }
+    }
+
+    /// Banner rendered between the toolbar and the chat area when either
+    /// (a) a preflight credential check failed, or (b) the ACP subprocess
+    /// returned an error we captured. Shows a short hint + expandable raw
+    /// details (stderr tail) that the user can copy to the clipboard.
+    @ViewBuilder
+    private var errorBanner: some View {
+        if let err = viewModel.acpError {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let hint = viewModel.acpErrorHint {
+                            Text(hint)
+                                .font(.callout)
+                                .textSelection(.enabled)
+                        }
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .lineLimit(showErrorDetails ? nil : 2)
+                    }
+                    Spacer()
+                    if viewModel.acpErrorDetails != nil {
+                        Button(showErrorDetails ? "Hide details" : "Show details") {
+                            showErrorDetails.toggle()
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                    }
+                    Button {
+                        let payload = [viewModel.acpErrorHint, err, viewModel.acpErrorDetails]
+                            .compactMap { $0 }
+                            .joined(separator: "\n\n")
+                        let pb = NSPasteboard.general
+                        pb.clearContents()
+                        pb.setString(payload, forType: .string)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Copy error details")
+                }
+                if showErrorDetails, let details = viewModel.acpErrorDetails {
+                    ScrollView {
+                        Text(details)
+                            .font(.system(.caption2, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 160)
+                    .padding(8)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+            }
+            .padding(10)
+            .background(Color.orange.opacity(0.08))
+            .overlay(
+                Rectangle()
+                    .fill(Color.orange.opacity(0.25))
+                    .frame(height: 1),
+                alignment: .bottom
+            )
+        } else if viewModel.missingCredentials && !viewModel.hasActiveProcess {
+            HStack(spacing: 8) {
+                Image(systemName: "key.fill")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("No AI provider credentials detected")
+                        .font(.callout)
+                    Text("Add `ANTHROPIC_API_KEY` (or similar) to `~/.hermes/.env` or your shell profile, then restart Scarf.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(10)
+            .background(Color.orange.opacity(0.08))
+            .overlay(
+                Rectangle()
+                    .fill(Color.orange.opacity(0.25))
+                    .frame(height: 1),
+                alignment: .bottom
+            )
         }
     }
 

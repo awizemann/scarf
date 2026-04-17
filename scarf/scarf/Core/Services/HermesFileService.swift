@@ -1203,58 +1203,66 @@ struct HermesFileService: Sendable {
     }
 
     nonisolated func hermesBinaryPath() -> String? {
-        let candidates = [
-            ("\(NSHomeDirectory())/.local/bin/hermes"),
-            "/opt/homebrew/bin/hermes",
-            "/usr/local/bin/hermes"
-        ]
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+        // Single source of truth for install-location candidates lives in
+        // HermesPaths.hermesBinaryCandidates — keeps pipx/brew/manual lookups
+        // consistent across the app.
+        return HermesPaths.hermesBinaryCandidates
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
-    /// PATH cobbled together from the user's login shell — needed because
-    /// .app bundles launched from Finder/Dock get a minimal PATH (no Homebrew,
-    /// no nvm, no asdf, no mise). Without this, MCP servers using `npx`,
-    /// `node`, `python`, `uv`, etc. fail to launch with `[Errno 2] No such
-    /// file or directory`. Computed once and cached.
-    private static let enrichedPath: String = {
-        let pipe = Pipe()
-        let errPipe = Pipe()
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        // -l sources the user's login files (.zprofile, .zshrc via /etc/zshrc
-        // chain on macOS) so PATH manipulations made there are picked up.
-        // Skip -i to avoid hangs from interactive prompts.
-        process.arguments = ["-l", "-c", "echo $PATH"]
-        process.standardOutput = pipe
-        process.standardError = errPipe
-        defer {
-            try? pipe.fileHandleForReading.close()
-            try? pipe.fileHandleForWriting.close()
-            try? errPipe.fileHandleForReading.close()
-            try? errPipe.fileHandleForWriting.close()
+    /// Keys queried from the user's login shell. PATH is needed because .app
+    /// bundles launched from Finder/Dock get a minimal PATH (no Homebrew, no
+    /// nvm, no asdf, no mise). The credential keys are needed because Hermes
+    /// resolves AI provider auth by reading env vars — a GUI-launched Scarf
+    /// subprocess sees none of the `export ANTHROPIC_API_KEY=…` lines from
+    /// the user's shell init files.
+    private static let shellEnvKeys: [String] = [
+        "PATH",
+        "ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "ANTHROPIC_BASE_URL",
+        "OPENAI_API_KEY", "OPENAI_BASE_URL",
+        "OPENROUTER_API_KEY",
+        "GEMINI_API_KEY", "GOOGLE_API_KEY",
+        "GROQ_API_KEY", "MISTRAL_API_KEY", "XAI_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN"
+    ]
+
+    /// Env vars harvested from the user's login shell. Computed once and cached.
+    ///
+    /// Probing strategy — two attempts, best result wins:
+    /// 1. `zsh -l -i` (login + interactive) — sources BOTH `.zprofile` and
+    ///    `.zshrc`, which is required for nvm/asdf/mise PATH on most setups
+    ///    (those tools inject PATH from `.zshrc`, not `.zprofile`).
+    ///    Interactive mode can hang on prompt frameworks (oh-my-zsh,
+    ///    powerlevel10k, starship) so we suppress prompts via env and bound
+    ///    with a 5-second timeout.
+    /// 2. If that yields no PATH (timed out / prompt framework broke it),
+    ///    fall back to `zsh -l` (login only) with a 3-second timeout.
+    /// 3. If that also fails, hardcoded sane-default PATH; no credentials.
+    private static let enrichedShellEnv: [String: String] = {
+        // Build a shell script that prints `KEY\0VALUE\0` for each key.
+        // Using printf with \0 as separator lets us unambiguously split the
+        // output even if a value contains newlines.
+        let script = shellEnvKeys.map { key in
+            #"printf '%s\0%s\0' "\#(key)" "$\#(key)""#
+        }.joined(separator: "; ")
+
+        // Attempt 1: login + interactive (covers nvm/asdf/mise in .zshrc).
+        if let result = runShellProbe(script: script, interactive: true, timeout: 5.0),
+           result["PATH"] != nil {
+            return result
         }
-        do {
-            try process.run()
-            let deadline = Date().addingTimeInterval(3)
-            while process.isRunning && Date() < deadline {
-                Thread.sleep(forTimeInterval: 0.05)
-            }
-            if process.isRunning { process.terminate() }
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let path = (String(data: data, encoding: .utf8) ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if process.terminationStatus == 0 && !path.isEmpty {
-                return path
-            }
-        } catch {
-            // Fall through to default below.
+        // Attempt 2: login only (safe fallback if interactive hangs).
+        if let result = runShellProbe(script: script, interactive: false, timeout: 3.0),
+           result["PATH"] != nil {
+            return result
         }
+
         // Fallback when the login shell can't be queried (zsh missing,
         // sandbox restriction, timeout). Covers Apple Silicon + Intel
-        // Homebrew plus the standard system paths.
+        // Homebrew plus the standard system paths. No credential env is
+        // inferred — the user will see the missing-credentials hint instead.
         let home = NSHomeDirectory()
-        return [
+        let fallbackPath = [
             "\(home)/.local/bin",
             "/opt/homebrew/bin",
             "/usr/local/bin",
@@ -1263,16 +1271,122 @@ struct HermesFileService: Sendable {
             "/usr/sbin",
             "/sbin"
         ].joined(separator: ":")
+        return ["PATH": fallbackPath]
     }()
 
+    /// Runs a zsh probe with the given script and returns the parsed
+    /// `KEY\0VALUE\0`-delimited output. Returns nil on timeout/failure.
+    /// When `interactive` is true, injects env vars that suppress common
+    /// prompt frameworks so the shell doesn't hang waiting for terminal setup.
+    private static func runShellProbe(script: String, interactive: Bool, timeout: TimeInterval) -> [String: String]? {
+        let pipe = Pipe()
+        let errPipe = Pipe()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = interactive ? ["-l", "-i", "-c", script] : ["-l", "-c", script]
+        process.standardOutput = pipe
+        process.standardError = errPipe
+
+        if interactive {
+            // Defang prompt frameworks so -i doesn't hang on async prompt init.
+            // We still inherit the parent env (HOME, USER etc.) so rc files resolve.
+            var env = ProcessInfo.processInfo.environment
+            env["TERM"] = "dumb"                       // disables fancy prompt setup
+            env["PS1"] = ""
+            env["PROMPT"] = ""
+            env["RPROMPT"] = ""
+            env["POWERLEVEL9K_INSTANT_PROMPT"] = "off" // p10k
+            env["STARSHIP_DISABLE"] = "1"              // starship (some versions)
+            env["ZSH_DISABLE_COMPFIX"] = "true"        // oh-my-zsh compaudit hang
+            process.environment = env
+        }
+
+        defer {
+            try? pipe.fileHandleForReading.close()
+            try? pipe.fileHandleForWriting.close()
+            try? errPipe.fileHandleForReading.close()
+            try? errPipe.fileHandleForWriting.close()
+        }
+        do {
+            try process.run()
+            let deadline = Date().addingTimeInterval(timeout)
+            while process.isRunning && Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            if process.isRunning {
+                process.terminate()
+                // Brief grace period for SIGTERM to take; then the defer
+                // cleanup closes the pipes regardless.
+                Thread.sleep(forTimeInterval: 0.1)
+                return nil
+            }
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            guard process.terminationStatus == 0, !data.isEmpty else { return nil }
+            var result: [String: String] = [:]
+            let parts = data.split(separator: 0, omittingEmptySubsequences: false)
+            var i = 0
+            while i + 1 < parts.count {
+                if let key = String(data: Data(parts[i]), encoding: .utf8),
+                   let value = String(data: Data(parts[i + 1]), encoding: .utf8),
+                   !key.isEmpty, !value.isEmpty {
+                    result[key] = value
+                }
+                i += 2
+            }
+            return result.isEmpty ? nil : result
+        } catch {
+            return nil
+        }
+    }
+
     /// Environment to hand any subprocess that may itself spawn user-installed
-    /// binaries (Hermes spawning MCP servers, ACP tool calls, etc.). Identical
-    /// to ProcessInfo.processInfo.environment but with PATH replaced by the
-    /// login-shell PATH.
+    /// binaries (Hermes spawning MCP servers, ACP tool calls, etc.). Starts
+    /// from ProcessInfo.environment and overlays PATH + allowlisted credential
+    /// env vars harvested from the user's login shell.
     nonisolated static func enrichedEnvironment() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
-        env["PATH"] = enrichedPath
+        for (key, value) in enrichedShellEnv where !value.isEmpty {
+            // Shell wins for PATH (we explicitly want the enriched one). For
+            // credential keys, also let the shell win — GUI env rarely has
+            // them, and if it does, the shell-exported value is usually the
+            // one the user actually maintains.
+            env[key] = value
+        }
         return env
+    }
+
+    /// True if any known AI-provider credential is reachable — either already
+    /// in the current process env, present in the login-shell env we queried,
+    /// or present in `~/.hermes/.env`. Used by Chat to warn the user before
+    /// `hermes acp` fails on send with "No Anthropic credentials found".
+    nonisolated static func hasAnyAICredential() -> Bool {
+        let credentialKeys = shellEnvKeys.filter { $0 != "PATH" && $0 != "ANTHROPIC_BASE_URL" && $0 != "OPENAI_BASE_URL" }
+        let env = enrichedEnvironment()
+        for key in credentialKeys {
+            if let value = env[key], !value.isEmpty {
+                return true
+            }
+        }
+        // Scan ~/.hermes/.env for KEY= lines. Uses a simple substring check —
+        // good enough for a preflight hint; hermes itself does the real parse.
+        let envPath = HermesPaths.home + "/.env"
+        if let data = try? String(contentsOfFile: envPath, encoding: .utf8) {
+            for line in data.split(separator: "\n") {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+                for key in credentialKeys where trimmed.hasPrefix("\(key)=") || trimmed.hasPrefix("export \(key)=") {
+                    // Must have a non-empty value after `=`
+                    if let eq = trimmed.firstIndex(of: "="),
+                       trimmed.index(after: eq) < trimmed.endIndex {
+                        let value = trimmed[trimmed.index(after: eq)...]
+                            .trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+                        if !value.isEmpty { return true }
+                    }
+                }
+            }
+        }
+        return false
     }
 
     @discardableResult
