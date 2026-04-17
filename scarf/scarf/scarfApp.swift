@@ -6,6 +6,7 @@ struct ScarfApp: App {
     @State private var fileWatcher = HermesFileWatcher()
     @State private var menuBarStatus = MenuBarStatus()
     @State private var chatViewModel = ChatViewModel()
+    @State private var updater = UpdaterService()
 
     var body: some Scene {
         WindowGroup {
@@ -13,6 +14,7 @@ struct ScarfApp: App {
                 .environment(coordinator)
                 .environment(fileWatcher)
                 .environment(chatViewModel)
+                .environment(updater)
                 .onAppear {
                     fileWatcher.startWatching()
                     menuBarStatus.startPolling()
@@ -23,9 +25,14 @@ struct ScarfApp: App {
                 }
         }
         .defaultSize(width: 1100, height: 700)
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { updater.checkForUpdates() }
+            }
+        }
 
         MenuBarExtra("Scarf", systemImage: menuBarStatus.icon) {
-            MenuBarMenu(status: menuBarStatus, coordinator: coordinator)
+            MenuBarMenu(status: menuBarStatus, coordinator: coordinator, updater: updater)
         }
     }
 }
@@ -90,6 +97,7 @@ final class MenuBarStatus {
 struct MenuBarMenu: View {
     let status: MenuBarStatus
     let coordinator: AppCoordinator
+    let updater: UpdaterService
 
     var body: some View {
         VStack {
@@ -115,6 +123,8 @@ struct MenuBarMenu: View {
                 coordinator.selectedSection = .sessions
                 NSApplication.shared.activate()
             }
+            Divider()
+            Button("Check for Updates…") { updater.checkForUpdates() }
             Divider()
             Button("Quit Scarf") {
                 NSApplication.shared.terminate(nil)

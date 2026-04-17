@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		53495AB62F7B992C00BD31AD /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 53SWIFTTERM0001 /* SwiftTerm */; };
+		53SPARKLE00010 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 53SPARKLE00011 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -33,9 +34,22 @@
 		534959592F7B83B700BD31AD /* scarfUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = scarfUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		534959AA2F7B83B600BD31AD /* Exceptions for "scarf" folder in "scarf" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 5349593F2F7B83B600BD31AD /* scarf */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		534959422F7B83B600BD31AD /* scarf */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				534959AA2F7B83B600BD31AD /* Exceptions for "scarf" folder in "scarf" target */,
+			);
 			path = scarf;
 			sourceTree = "<group>";
 		};
@@ -57,6 +71,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				53495AB62F7B992C00BD31AD /* SwiftTerm in Frameworks */,
+				53SPARKLE00010 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -118,6 +133,7 @@
 			name = scarf;
 			packageProductDependencies = (
 				53SWIFTTERM0001 /* SwiftTerm */,
+				53SPARKLE00011 /* Sparkle */,
 			);
 			productName = scarf;
 			productReference = 534959402F7B83B600BD31AD /* scarf.app */;
@@ -203,6 +219,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				53SWIFTTERM0002 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+				53SPARKLE00012 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 534959412F7B83B600BD31AD /* Products */;
@@ -407,23 +424,20 @@
 				CODE_SIGN_ENTITLEMENTS = scarf/scarf.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 11;
+				CURRENT_PROJECT_VERSION = 16;
 				DEVELOPMENT_TEAM = 3Q6X2L86C4;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Scarf;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Scarf uses the microphone for Hermes voice chat.";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = scarf/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				MARKETING_VERSION = 1.6.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.scarf;
+				PRODUCT_BUNDLE_IDENTIFIER = com.scarf.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -444,23 +458,20 @@
 				CODE_SIGN_ENTITLEMENTS = scarf/scarf.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 11;
+				CURRENT_PROJECT_VERSION = 16;
 				DEVELOPMENT_TEAM = 3Q6X2L86C4;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Scarf;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Scarf uses the microphone for Hermes voice chat.";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = scarf/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				MARKETING_VERSION = 1.6.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.scarf;
+				PRODUCT_BUNDLE_IDENTIFIER = com.scarf.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -594,6 +605,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		53SPARKLE00012 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.6.0;
+			};
+		};
 		53SWIFTTERM0002 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm.git";
@@ -605,6 +624,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		53SPARKLE00011 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 53SPARKLE00012 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
 		53SWIFTTERM0001 /* SwiftTerm */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 53SWIFTTERM0002 /* XCRemoteSwiftPackageReference "SwiftTerm" */;

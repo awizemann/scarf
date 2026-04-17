@@ -101,10 +101,11 @@ If a Hermes update changes the database schema or CLI output format, Scarf may n
 Download the latest build from [Releases](https://github.com/awizemann/scarf/releases):
 
 - `Scarf-vX.X.X-Universal.zip` — Apple Silicon + Intel (recommended)
-- `Scarf-vX.X.X-ARM64.zip` — Apple Silicon only (smaller)
 
 1. Unzip and drag **Scarf.app** to Applications
-2. On first launch, right-click and choose **Open** (or go to System Settings → Privacy & Security → Open Anyway)
+2. Launch normally — builds are Developer ID signed and notarized, so Gatekeeper accepts them on first launch
+
+Scarf checks for updates automatically on launch via [Sparkle](https://sparkle-project.org) and daily thereafter. You can disable automatic checks or trigger a manual check from **Settings → General → Updates** or the menu bar icon.
 
 ### Build from Source
 
@@ -178,6 +179,7 @@ The app opens `state.db` in read-only mode to avoid WAL contention with Hermes. 
 | Package | Purpose |
 |---------|---------|
 | [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | Terminal emulator for the Chat feature |
+| [Sparkle](https://github.com/sparkle-project/Sparkle) | Auto-updates from the GitHub-hosted appcast |
 
 Everything else uses system frameworks: SQLite3 C API, Foundation JSON, AttributedString markdown, SwiftUI Charts, GCD file watching.
 
@@ -326,6 +328,20 @@ Your agent can update the dashboard as part of cron jobs, after builds, or whene
 ```
 
 Each section defines a grid with 1–4 columns. Widgets flow left-to-right, wrapping to new rows. See [DASHBOARD_SCHEMA.md](scarf/docs/DASHBOARD_SCHEMA.md) for the full schema reference with examples of every widget type.
+
+## Releases
+
+Scarf ships through GitHub releases — the App Store is not supported because Scarf spawns the user-installed `hermes` binary and reads `~/.hermes/` directly, both of which App Sandbox forbids.
+
+Each release goes through a single local script: [scripts/release.sh](scripts/release.sh). The script archives a universal binary, signs it with the Developer ID Application cert, submits to `notarytool`, staples the ticket, produces the distribution zip, signs an appcast entry with Sparkle's EdDSA key, pushes an updated `appcast.xml` to the `gh-pages` branch, creates the GitHub release, and tags `main`.
+
+The Sparkle appcast is served from [awizemann.github.io/scarf/appcast.xml](https://awizemann.github.io/scarf/appcast.xml).
+
+Signing prerequisites (one-time):
+
+- `Developer ID Application` certificate in the login Keychain
+- `scarf-notary` keychain profile registered via `xcrun notarytool store-credentials`
+- Sparkle EdDSA private key in Keychain item `https://sparkle-project.org` (back this up — without it, shipped apps can never receive updates)
 
 ## Contributing
 

@@ -39,6 +39,8 @@ struct GeneralTab: View {
         SettingsSection(title: "Locale", icon: "globe.americas") {
             EditableTextField(label: "Timezone (IANA)", value: viewModel.config.timezone) { viewModel.setTimezone($0) }
         }
+
+        UpdatesSection()
     }
 
     /// Breadcrumb-style row that points users to the Credential Pools sidebar

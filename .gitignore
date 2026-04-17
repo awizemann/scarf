@@ -1,5 +1,6 @@
 # Xcode
 build/
+.gh-pages-worktree/
 DerivedData/
 *.pbxuser
 !default.pbxuser
