@@ -54,8 +54,6 @@ APPCAST_URL="https://awizemann.github.io/scarf/appcast.xml"
 DOWNLOAD_URL_BASE="https://github.com/awizemann/scarf/releases/download"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="$REPO_ROOT/build"
-ARCHIVE_PATH="$BUILD_DIR/scarf.xcarchive"
-EXPORT_DIR="$BUILD_DIR/export"
 EXPORT_OPTIONS="$REPO_ROOT/scripts/ExportOptions.plist"
 RELEASE_DIR="$REPO_ROOT/releases/v${VERSION}"
 GH_PAGES_WORKTREE="${GH_PAGES_WORKTREE:-$REPO_ROOT/.gh-pages-worktree}"
@@ -111,68 +109,86 @@ if [[ -f "$NOTES_FILE" ]]; then
 fi
 git commit -m "chore: Bump version to ${VERSION}"
 
-# ---------- build ----------
+# ---------- build variants ----------
+# Each release produces two zips: a Universal binary (recommended — works on
+# both Apple Silicon and Intel) and an ARM64-only variant (smaller download for
+# users who know they're on M-series silicon). Each variant is independently
+# notarized and stapled. The appcast only references the Universal zip since
+# it works everywhere; ARM64 is an alternative manual download.
+
 log "Clean build directory"
 rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR"
+mkdir -p "$BUILD_DIR" "$RELEASE_DIR"
 
-log "Archive (universal arm64+x86_64)"
-xcodebuild \
-  -project "$PROJECT" \
-  -scheme "$SCHEME" \
-  -configuration Release \
-  -archivePath "$ARCHIVE_PATH" \
-  -destination "generic/platform=macOS" \
-  ONLY_ACTIVE_ARCH=NO \
-  ARCHS="arm64 x86_64" \
-  archive
+# build_variant <label> <archs> <output_zip>
+#   label        e.g. "Universal" or "ARM64" (used as subdir name + log prefix)
+#   archs        e.g. "arm64 x86_64" or "arm64" (space-separated ARCHS value)
+#   output_zip   absolute path where the stapled, distribution-ready zip is written
+build_variant() {
+  local label="$1"
+  local archs="$2"
+  local out_zip="$3"
+  local variant_dir="$BUILD_DIR/$label"
+  local archive_path="$variant_dir/scarf.xcarchive"
+  local export_dir="$variant_dir/export"
+  local app_path="$export_dir/Scarf.app"
+  local notarize_zip="$variant_dir/Scarf-notarize.zip"
 
-log "Export signed .app"
-xcodebuild \
-  -exportArchive \
-  -archivePath "$ARCHIVE_PATH" \
-  -exportPath "$EXPORT_DIR" \
-  -exportOptionsPlist "$EXPORT_OPTIONS"
+  mkdir -p "$variant_dir"
 
-# Xcode exports as scarf.app (PRODUCT_NAME = $TARGET_NAME = "scarf"). Rename the
-# wrapper to Scarf.app so users see properly-cased app in /Applications. Renaming
-# the bundle directory does NOT invalidate the signature (codesign signs contents,
-# not the wrapper folder name).
-if [[ -d "$EXPORT_DIR/scarf.app" && ! -d "$EXPORT_DIR/Scarf.app" ]]; then
-  mv "$EXPORT_DIR/scarf.app" "$EXPORT_DIR/Scarf.app"
-fi
-APP_PATH="$EXPORT_DIR/Scarf.app"
-[[ -d "$APP_PATH" ]] || die "exported app not found at $APP_PATH"
+  log "[$label] Archive (archs: $archs)"
+  xcodebuild \
+    -project "$PROJECT" \
+    -scheme "$SCHEME" \
+    -configuration Release \
+    -archivePath "$archive_path" \
+    -destination "generic/platform=macOS" \
+    ONLY_ACTIVE_ARCH=NO \
+    ARCHS="$archs" \
+    archive
 
-# ---------- verify signature ----------
-log "Verify signature"
-codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-# spctl will fail here (not yet notarized) — that's fine, we check after stapling
-spctl --assess --type execute --verbose "$APP_PATH" || true
+  log "[$label] Export signed .app"
+  xcodebuild \
+    -exportArchive \
+    -archivePath "$archive_path" \
+    -exportPath "$export_dir" \
+    -exportOptionsPlist "$EXPORT_OPTIONS"
 
-# ---------- notarize ----------
-log "Zip for notarization"
-NOTARIZE_ZIP="$BUILD_DIR/Scarf-notarize.zip"
-ditto -c -k --keepParent "$APP_PATH" "$NOTARIZE_ZIP"
+  # Xcode exports as scarf.app (PRODUCT_NAME = $TARGET_NAME = "scarf"). Rename so
+  # users see properly-cased Scarf.app in /Applications. Renaming the bundle
+  # wrapper does NOT invalidate the signature — codesign signs contents, not the
+  # wrapper folder name.
+  if [[ -d "$export_dir/scarf.app" && ! -d "$app_path" ]]; then
+    mv "$export_dir/scarf.app" "$app_path"
+  fi
+  [[ -d "$app_path" ]] || die "[$label] exported app not found at $app_path"
 
-log "Submit to notarytool (blocking)"
-xcrun notarytool submit "$NOTARIZE_ZIP" \
-  --keychain-profile "$NOTARY_PROFILE" \
-  --wait \
-  --timeout 30m
+  log "[$label] Verify signature"
+  codesign --verify --deep --strict --verbose=2 "$app_path"
 
-log "Staple notarization ticket"
-xcrun stapler staple "$APP_PATH"
-xcrun stapler validate "$APP_PATH"
+  log "[$label] Zip for notarization"
+  ditto -c -k --keepParent "$app_path" "$notarize_zip"
 
-log "Final gatekeeper assessment"
-spctl --assess --type execute --verbose "$APP_PATH"
+  log "[$label] Submit to notarytool (blocking)"
+  xcrun notarytool submit "$notarize_zip" \
+    --keychain-profile "$NOTARY_PROFILE" \
+    --wait \
+    --timeout 30m
 
-# ---------- package distribution artifacts ----------
-log "Package distribution zips"
-mkdir -p "$RELEASE_DIR"
+  log "[$label] Staple + validate"
+  xcrun stapler staple "$app_path"
+  xcrun stapler validate "$app_path"
+  spctl --assess --type execute --verbose "$app_path"
+
+  log "[$label] Package $(basename "$out_zip")"
+  ditto -c -k --keepParent "$app_path" "$out_zip"
+}
+
 UNIVERSAL_ZIP="$RELEASE_DIR/Scarf-v${VERSION}-Universal.zip"
-ditto -c -k --keepParent "$APP_PATH" "$UNIVERSAL_ZIP"
+ARM64_ZIP="$RELEASE_DIR/Scarf-v${VERSION}-ARM64.zip"
+
+build_variant "Universal" "arm64 x86_64" "$UNIVERSAL_ZIP"
+build_variant "ARM64"     "arm64"        "$ARM64_ZIP"
 
 # ---------- sign appcast entry ----------
 log "Sign appcast entry with EdDSA"
@@ -241,7 +257,8 @@ fi
 gh release create "v${VERSION}" \
   --title "Scarf v${VERSION}" \
   "${GH_FLAGS[@]}" \
-  "$UNIVERSAL_ZIP"
+  "$UNIVERSAL_ZIP" \
+  "$ARM64_ZIP"
 
 # ---------- tag main (skipped for drafts) ----------
 if [[ $DRAFT -eq 0 ]]; then

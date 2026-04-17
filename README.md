@@ -101,6 +101,7 @@ If a Hermes update changes the database schema or CLI output format, Scarf may n
 Download the latest build from [Releases](https://github.com/awizemann/scarf/releases):
 
 - `Scarf-vX.X.X-Universal.zip` — Apple Silicon + Intel (recommended)
+- `Scarf-vX.X.X-ARM64.zip` — Apple Silicon only (smaller download)
 
 1. Unzip and drag **Scarf.app** to Applications
 2. Launch normally — builds are Developer ID signed and notarized, so Gatekeeper accepts them on first launch
