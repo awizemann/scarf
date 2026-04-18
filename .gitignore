@@ -47,3 +47,8 @@ scarf/standards/backups/
 
 # Scarf project dashboards (user-specific)
 .scarf/
+
+# Release artifacts — GitHub Releases hosts the binaries; no need to bloat git
+# history. RELEASE_NOTES.md stays tracked (committed with the version bump).
+releases/v*/*.zip
+releases/v*/appcast-entry.xml
