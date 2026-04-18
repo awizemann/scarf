@@ -39,6 +39,26 @@ scarf/scarf/           Xcode project root (PBXFileSystemSynchronizedRootGroup �
 xcodebuild -project scarf/scarf.xcodeproj -scheme scarf -configuration Debug build
 ```
 
+## Releases
+
+Shipped via a single local script. **Never run manual `xcodebuild archive` / `notarytool` / `gh release create` steps — use the script so nothing is skipped or misordered.**
+
+```bash
+./scripts/release.sh <version>           # full release: notarize → appcast → gh-pages → tag
+./scripts/release.sh <version> --draft   # draft: everything builds + notarizes, but appcast/tag are skipped
+```
+
+The script bumps version, archives Universal (arm64 + x86_64) + ARM64-only variants, signs with Developer ID, notarizes via `xcrun notarytool` (keychain profile `scarf-notary`), staples, EdDSA-signs the appcast entry with Sparkle's key, pushes the appcast to `gh-pages`, and creates a GitHub release with both zips attached. Draft mode stops after the release is uploaded so the current version stays "latest" until explicitly promoted.
+
+**Release notes convention:** write them to `releases/v<version>/RELEASE_NOTES.md` BEFORE running the script — it's auto-included in the version-bump commit and used as the GitHub release body. If absent, a placeholder is used.
+
+**Canonical prompts (any of these trigger the flow):**
+- "Release v1.6.2" — full release
+- "Release v1.6.2 as draft" — draft mode
+- "Prepare v1.6.2 release notes from recent commits, then release" — generate notes first, then run
+
+**Prerequisites (one-time, already set up on Alan's machine):** Developer ID Application cert in login Keychain (team `3Q6X2L86C4`), notarytool keychain profile `scarf-notary`, Sparkle EdDSA private key in Keychain item `https://sparkle-project.org`, `gh-pages` branch + GitHub Pages enabled. See the header of [scripts/release.sh](scripts/release.sh) and the Releases section in [README.md](README.md) for details.
+
 ## Hermes Version
 
 Targets Hermes v0.9.0 (v2026.4.13). Log lines may carry an optional `[session_id]` tag between the level and logger name — `HermesLogService.parseLine` treats the session tag as an optional capture group, so older untagged lines still parse.
