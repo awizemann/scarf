@@ -6,6 +6,17 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 1.6.2</title>
+      <sparkle:version>18</sparkle:version>
+      <sparkle:shortVersionString>1.6.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Sat, 18 Apr 2026 00:22:28 +0000</pubDate>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v1.6.2/Scarf-v1.6.2-Universal.zip"
+                 sparkle:edSignature="wtf0QjTKCvYq8BZW1meeWdWk8GMsbYopfM/DNiYw8ImdgmX6X8jN5+bIG9KvzYv0VgZ0la8ssSliiz7zdJA2CQ=="
+                 length="16570465"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 1.6.1</title>
       <sparkle:version>17</sparkle:version>
       <sparkle:shortVersionString>1.6.1</sparkle:shortVersionString>
