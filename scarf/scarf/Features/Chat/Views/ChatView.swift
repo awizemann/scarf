@@ -96,7 +96,7 @@ struct ChatView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("No AI provider credentials detected")
                         .font(.callout)
-                    Text("Add `ANTHROPIC_API_KEY` (or similar) to `~/.hermes/.env` or your shell profile, then restart Scarf.")
+                    Text("Add credentials in **Configure → Credential Pools**, set `ANTHROPIC_API_KEY` (or similar) in `~/.hermes/.env`, or export it in your shell profile, then restart Scarf.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

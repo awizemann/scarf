@@ -1356,10 +1356,16 @@ struct HermesFileService: Sendable {
         return env
     }
 
-    /// True if any known AI-provider credential is reachable — either already
-    /// in the current process env, present in the login-shell env we queried,
-    /// or present in `~/.hermes/.env`. Used by Chat to warn the user before
-    /// `hermes acp` fails on send with "No Anthropic credentials found".
+    /// True if any known AI-provider credential is reachable. Hermes itself
+    /// resolves credentials from four locations at runtime, so the preflight
+    /// mirrors that set to avoid false "no credentials" warnings:
+    ///   1. Current process env + login-shell env (queried once at startup)
+    ///   2. `~/.hermes/.env`
+    ///   3. `~/.hermes/auth.json` — Credential Pools (v1.6+ blessed flow)
+    ///   4. `~/.hermes/config.yaml` — embedded `api_key:` for auxiliary /
+    ///      delegation tasks
+    /// Used by Chat to warn the user before `hermes acp` fails on send with
+    /// "No Anthropic credentials found".
     nonisolated static func hasAnyAICredential() -> Bool {
         let credentialKeys = shellEnvKeys.filter { $0 != "PATH" && $0 != "ANTHROPIC_BASE_URL" && $0 != "OPENAI_BASE_URL" }
         let env = enrichedEnvironment()
@@ -1384,6 +1390,36 @@ struct HermesFileService: Sendable {
                         if !value.isEmpty { return true }
                     }
                 }
+            }
+        }
+        // Scan ~/.hermes/auth.json — the Credential Pools file written by the
+        // Configure → Credential Pools UI. Schema is
+        //   { "credential_pool": { "<provider>": [ { "access_token": "...", ... }, ... ] } }
+        // Defensive parse: any malformed input falls through to the next check.
+        let authPath = HermesPaths.home + "/auth.json"
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: authPath)),
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let pool = root["credential_pool"] as? [String: Any] {
+            for (_, entries) in pool {
+                guard let list = entries as? [[String: Any]] else { continue }
+                for cred in list {
+                    if let token = cred["access_token"] as? String, !token.isEmpty {
+                        return true
+                    }
+                }
+            }
+        }
+        // Scan ~/.hermes/config.yaml for `api_key:` lines with a non-empty
+        // value. Covers both `auxiliary.<task>.api_key` and `delegation.api_key`
+        // without needing to parse the YAML structure — any leaf `api_key: ...`
+        // with a value means Hermes has a credential to fall back on.
+        if let text = try? String(contentsOfFile: HermesPaths.configYAML, encoding: .utf8) {
+            for line in text.split(separator: "\n") {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard trimmed.hasPrefix("api_key:") else { continue }
+                let value = trimmed.dropFirst("api_key:".count)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+                if !value.isEmpty { return true }
             }
         }
         return false
