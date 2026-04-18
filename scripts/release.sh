@@ -251,6 +251,20 @@ else
   printf '%s\n' "$APPCAST_ITEM" > "$RELEASE_DIR/appcast-entry.xml"
 fi
 
+# ---------- push main + tag (skipped for drafts) ----------
+# Order matters: push main and the tag BEFORE `gh release create`, so gh finds
+# the tag already on origin and attaches the release to the correct commit. If
+# we let gh auto-create the tag, it pins to the then-current origin HEAD —
+# which is one commit behind the bump (since we haven't pushed main yet) —
+# and the subsequent `git push origin v<VER>` gets rejected as non-fast-forward.
+if [[ $DRAFT -eq 0 ]]; then
+  log "Push main"
+  git push origin main
+  log "Tag main at v${VERSION} and push tag"
+  git tag "v${VERSION}"
+  git push origin "v${VERSION}"
+fi
+
 # ---------- github release ----------
 log "Create GitHub release and upload artifacts"
 GH_FLAGS=()
@@ -266,13 +280,8 @@ gh release create "v${VERSION}" \
   "$UNIVERSAL_ZIP" \
   "$ARM64_ZIP"
 
-# ---------- tag main (skipped for drafts) ----------
-if [[ $DRAFT -eq 0 ]]; then
-  log "Tag main and push"
-  git tag "v${VERSION}"
-  git push origin main --tags
-else
-  log "Draft mode — skipping tag. Bump commit is local only; push manually with: git push origin main"
+if [[ $DRAFT -eq 1 ]]; then
+  log "Draft mode — main bump commit is local only; push manually with: git push origin main"
 fi
 
 if [[ $DRAFT -eq 1 ]]; then
