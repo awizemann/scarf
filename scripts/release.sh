@@ -74,8 +74,14 @@ require_cmd gh
 
 cd "$REPO_ROOT"
 
-# git must be clean and on main
-if [[ -n "$(git status --porcelain)" ]]; then
+# git must be clean and on main. The one exception: the release dir
+# (releases/v<VERSION>/) may already exist and be untracked — the user may
+# have written RELEASE_NOTES.md there ahead of time, and the rest of the dir
+# is auto-populated + gitignored anyway. Git status abbreviates to the dir
+# path when all contents are untracked, so the whitelist matches both forms.
+ALLOW="^\?\? releases/v${VERSION}/"
+DIRTY="$(git status --porcelain | grep -Ev "$ALLOW" || true)"
+if [[ -n "$DIRTY" ]]; then
   die "working tree not clean — commit or stash first"
 fi
 CUR_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
