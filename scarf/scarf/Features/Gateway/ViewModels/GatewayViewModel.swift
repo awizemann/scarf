@@ -69,7 +69,7 @@ final class GatewayViewModel {
 
     /// Static form of the gateway-status walk so the detached load can call
     /// it without bouncing back to MainActor.
-    private static func fetchGatewayStatus(context: ServerContext) -> GatewayInfo {
+    nonisolated private static func fetchGatewayStatus(context: ServerContext) -> GatewayInfo {
         let stateJSON = context.readData(context.paths.gatewayStateJSON)
         var pid: Int?
         var state = "unknown"
@@ -108,7 +108,7 @@ final class GatewayViewModel {
         )
     }
 
-    private static func fetchPairing(context: ServerContext) -> (approved: [PairedUser], pending: [PendingPairing]) {
+    nonisolated private static func fetchPairing(context: ServerContext) -> (approved: [PairedUser], pending: [PendingPairing]) {
         let output = context.runHermes(["pairing", "list"]).output
         var approved: [PairedUser] = []
         var pending: [PendingPairing] = []

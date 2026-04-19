@@ -13,7 +13,7 @@ final class HermesFileWatcher {
     let context: ServerContext
     private let transport: any ServerTransport
 
-    init(context: ServerContext = .local) {
+    nonisolated init(context: ServerContext = .local) {
         self.context = context
         self.transport = context.makeTransport()
     }

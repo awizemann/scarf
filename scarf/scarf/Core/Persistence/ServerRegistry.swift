@@ -98,9 +98,37 @@ final class ServerRegistry {
     }
 
     func removeServer(_ id: ServerID) {
+        // Grab the entry BEFORE removing it so we can tear down its transport
+        // state. Without this the user would leak a ControlMaster socket
+        // (~10min TTL) and a snapshot cache dir (indefinite) per removed
+        // server — harmless individually, ugly at scale.
+        let removed = entries.first { $0.id == id }
         entries.removeAll { $0.id == id }
         save()
+
+        if let removed, case .ssh(let config) = removed.kind {
+            let transport = SSHTransport(contextID: id, config: config, displayName: removed.displayName)
+            transport.closeControlMaster()
+        }
+        SSHTransport.pruneSnapshotCache(for: id)
+        // Drop process-wide cache entries keyed on this ServerID so a future
+        // re-add with a colliding ID (theoretical — UUIDs are random, but be
+        // defensive) doesn't serve stale data.
+        Task.detached { await ServerContext.invalidateCaches(for: id) }
+
         onEntriesChanged?()
+    }
+
+    // MARK: - App-launch sweep
+
+    /// Remove snapshot cache directories whose UUID isn't in the current
+    /// registry. Handles the case where the user removed a server while the
+    /// app was closed — we want the cache to converge to the registry's
+    /// state at launch rather than carrying forever.
+    func sweepOrphanCaches() {
+        var keep: Set<ServerID> = [ServerContext.local.id]
+        for entry in entries { keep.insert(entry.id) }
+        SSHTransport.sweepOrphanSnapshots(keeping: keep)
     }
 
     // MARK: - Persistence

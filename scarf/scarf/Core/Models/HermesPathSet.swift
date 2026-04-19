@@ -25,44 +25,44 @@ struct HermesPathSet: Sendable, Hashable {
     // MARK: - Defaults
 
     /// Absolute path to the local user's `~/.hermes` directory.
-    static let defaultLocalHome: String = {
+    nonisolated static let defaultLocalHome: String = {
         let user = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
         return user + "/.hermes"
     }()
 
     /// Default remote home when the user doesn't override it in `SSHConfig`.
     /// We leave `~` unexpanded on purpose — the remote shell resolves it.
-    static let defaultRemoteHome: String = "~/.hermes"
+    nonisolated static let defaultRemoteHome: String = "~/.hermes"
 
     // MARK: - Paths (mirror of the old HermesPaths layout)
 
-    var stateDB: String { home + "/state.db" }
-    var configYAML: String { home + "/config.yaml" }
-    var envFile: String { home + "/.env" }
-    var authJSON: String { home + "/auth.json" }
-    var soulMD: String { home + "/SOUL.md" }
-    var pluginsDir: String { home + "/plugins" }
-    var memoriesDir: String { home + "/memories" }
-    var memoryMD: String { memoriesDir + "/MEMORY.md" }
-    var userMD: String { memoriesDir + "/USER.md" }
-    var sessionsDir: String { home + "/sessions" }
-    var cronJobsJSON: String { home + "/cron/jobs.json" }
-    var cronOutputDir: String { home + "/cron/output" }
-    var gatewayStateJSON: String { home + "/gateway_state.json" }
-    var skillsDir: String { home + "/skills" }
-    var errorsLog: String { home + "/logs/errors.log" }
-    var agentLog: String { home + "/logs/agent.log" }
-    var gatewayLog: String { home + "/logs/gateway.log" }
-    var scarfDir: String { home + "/scarf" }
-    var projectsRegistry: String { scarfDir + "/projects.json" }
-    var mcpTokensDir: String { home + "/mcp-tokens" }
+    nonisolated var stateDB: String { home + "/state.db" }
+    nonisolated var configYAML: String { home + "/config.yaml" }
+    nonisolated var envFile: String { home + "/.env" }
+    nonisolated var authJSON: String { home + "/auth.json" }
+    nonisolated var soulMD: String { home + "/SOUL.md" }
+    nonisolated var pluginsDir: String { home + "/plugins" }
+    nonisolated var memoriesDir: String { home + "/memories" }
+    nonisolated var memoryMD: String { memoriesDir + "/MEMORY.md" }
+    nonisolated var userMD: String { memoriesDir + "/USER.md" }
+    nonisolated var sessionsDir: String { home + "/sessions" }
+    nonisolated var cronJobsJSON: String { home + "/cron/jobs.json" }
+    nonisolated var cronOutputDir: String { home + "/cron/output" }
+    nonisolated var gatewayStateJSON: String { home + "/gateway_state.json" }
+    nonisolated var skillsDir: String { home + "/skills" }
+    nonisolated var errorsLog: String { home + "/logs/errors.log" }
+    nonisolated var agentLog: String { home + "/logs/agent.log" }
+    nonisolated var gatewayLog: String { home + "/logs/gateway.log" }
+    nonisolated var scarfDir: String { home + "/scarf" }
+    nonisolated var projectsRegistry: String { scarfDir + "/projects.json" }
+    nonisolated var mcpTokensDir: String { home + "/mcp-tokens" }
 
     // MARK: - Binary resolution
 
     /// Install locations we probe for the local `hermes` binary, in priority
     /// order. Checked on every access so a user installing via a different
     /// method doesn't need to relaunch Scarf.
-    static let hermesBinaryCandidates: [String] = {
+    nonisolated static let hermesBinaryCandidates: [String] = {
         let user = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
         return [
             user + "/.local/bin/hermes",   // pipx / pip --user (default)
@@ -79,7 +79,7 @@ struct HermesPathSet: Sendable, Hashable {
     ///
     /// Remote: returns `binaryHint` (populated at connect time) or bare
     /// `"hermes"` as a last-resort default that relies on the remote `$PATH`.
-    var hermesBinary: String {
+    nonisolated var hermesBinary: String {
         if isRemote {
             return binaryHint ?? "hermes"
         }

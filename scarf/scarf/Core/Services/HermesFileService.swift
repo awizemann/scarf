@@ -5,19 +5,19 @@ struct HermesFileService: Sendable {
     let context: ServerContext
     let transport: any ServerTransport
 
-    init(context: ServerContext = .local) {
+    nonisolated init(context: ServerContext = .local) {
         self.context = context
         self.transport = context.makeTransport()
     }
 
     // MARK: - Config
 
-    func loadConfig() -> HermesConfig {
+    nonisolated func loadConfig() -> HermesConfig {
         guard let content = readFile(context.paths.configYAML) else { return .empty }
         return parseConfig(content)
     }
 
-    private func parseConfig(_ yaml: String) -> HermesConfig {
+    nonisolated private func parseConfig(_ yaml: String) -> HermesConfig {
         let parsed = Self.parseNestedYAML(yaml)
         let values = parsed.values
         let lists = parsed.lists
@@ -380,7 +380,7 @@ struct HermesFileService: Sendable {
 
     // MARK: - Gateway State
 
-    func loadGatewayState() -> GatewayState? {
+    nonisolated func loadGatewayState() -> GatewayState? {
         guard let data = readFileData(context.paths.gatewayStateJSON) else { return nil }
         do {
             return try JSONDecoder().decode(GatewayState.self, from: data)
@@ -392,7 +392,7 @@ struct HermesFileService: Sendable {
 
     // MARK: - Memory
 
-    func loadMemoryProfiles() -> [String] {
+    nonisolated func loadMemoryProfiles() -> [String] {
         guard let entries = try? transport.listDirectory(context.paths.memoriesDir) else { return [] }
         return entries.filter { name in
             let path = context.paths.memoriesDir + "/" + name
@@ -400,27 +400,27 @@ struct HermesFileService: Sendable {
         }.sorted()
     }
 
-    func loadMemory(profile: String = "") -> String {
+    nonisolated func loadMemory(profile: String = "") -> String {
         let path = memoryPath(profile: profile, file: "MEMORY.md")
         return readFile(path) ?? ""
     }
 
-    func loadUserProfile(profile: String = "") -> String {
+    nonisolated func loadUserProfile(profile: String = "") -> String {
         let path = memoryPath(profile: profile, file: "USER.md")
         return readFile(path) ?? ""
     }
 
-    func saveMemory(_ content: String, profile: String = "") {
+    nonisolated func saveMemory(_ content: String, profile: String = "") {
         let path = memoryPath(profile: profile, file: "MEMORY.md")
         writeFile(path, content: content)
     }
 
-    func saveUserProfile(_ content: String, profile: String = "") {
+    nonisolated func saveUserProfile(_ content: String, profile: String = "") {
         let path = memoryPath(profile: profile, file: "USER.md")
         writeFile(path, content: content)
     }
 
-    private func memoryPath(profile: String, file: String) -> String {
+    nonisolated private func memoryPath(profile: String, file: String) -> String {
         if profile.isEmpty {
             return context.paths.memoriesDir + "/" + file
         }
@@ -429,7 +429,7 @@ struct HermesFileService: Sendable {
 
     // MARK: - Cron
 
-    func loadCronJobs() -> [HermesCronJob] {
+    nonisolated func loadCronJobs() -> [HermesCronJob] {
         guard let data = readFileData(context.paths.cronJobsJSON) else { return [] }
         do {
             let file = try JSONDecoder().decode(CronJobsFile.self, from: data)
@@ -440,7 +440,7 @@ struct HermesFileService: Sendable {
         }
     }
 
-    func loadCronOutput(jobId: String) -> String? {
+    nonisolated func loadCronOutput(jobId: String) -> String? {
         let dir = context.paths.cronOutputDir
         guard let files = try? transport.listDirectory(dir) else { return nil }
         let matching = files.filter { $0.contains(jobId) }.sorted().last
@@ -450,7 +450,7 @@ struct HermesFileService: Sendable {
 
     // MARK: - Skills
 
-    func loadSkills() -> [HermesSkillCategory] {
+    nonisolated func loadSkills() -> [HermesSkillCategory] {
         let dir = context.paths.skillsDir
         guard let categories = try? transport.listDirectory(dir) else { return [] }
 
@@ -479,17 +479,17 @@ struct HermesFileService: Sendable {
         }
     }
 
-    func loadSkillContent(path: String) -> String {
+    nonisolated func loadSkillContent(path: String) -> String {
         guard isValidSkillPath(path) else { return "" }
         return readFile(path) ?? ""
     }
 
-    func saveSkillContent(path: String, content: String) {
+    nonisolated func saveSkillContent(path: String, content: String) {
         guard isValidSkillPath(path) else { return }
         writeFile(path, content: content)
     }
 
-    private func isValidSkillPath(_ path: String) -> Bool {
+    nonisolated private func isValidSkillPath(_ path: String) -> Bool {
         guard !path.contains(".."), path.hasPrefix(context.paths.skillsDir) else {
             print("[Scarf] Rejected skill path outside skills directory: \(path)")
             return false
@@ -497,7 +497,7 @@ struct HermesFileService: Sendable {
         return true
     }
 
-    private func parseSkillRequiredConfig(_ path: String) -> [String] {
+    nonisolated private func parseSkillRequiredConfig(_ path: String) -> [String] {
         guard let content = readFile(path) else { return [] }
         var result: [String] = []
         var inRequiredConfig = false
@@ -523,7 +523,7 @@ struct HermesFileService: Sendable {
 
     // MARK: - MCP Servers
 
-    func loadMCPServers() -> [HermesMCPServer] {
+    nonisolated func loadMCPServers() -> [HermesMCPServer] {
         guard let yaml = readFile(context.paths.configYAML) else { return [] }
         let parsed = parseMCPServersBlock(yaml: yaml)
         return parsed.map { server in
@@ -555,7 +555,7 @@ struct HermesFileService: Sendable {
     /// Args are written separately via `setMCPServerArgs` to avoid argparse issues with `-`-prefixed args like `-y`.
     /// Pipes `y\n` because the CLI prompts to save even when the initial connection check fails (which it will, since we intentionally add no args first).
     @discardableResult
-    func addMCPServerStdio(name: String, command: String, args: [String]) -> (exitCode: Int32, output: String) {
+    nonisolated func addMCPServerStdio(name: String, command: String, args: [String]) -> (exitCode: Int32, output: String) {
         let addResult = runHermesCLI(
             args: ["mcp", "add", name, "--command", command],
             timeout: 45,
@@ -569,7 +569,7 @@ struct HermesFileService: Sendable {
     }
 
     @discardableResult
-    func addMCPServerHTTP(name: String, url: String, auth: String?) -> (exitCode: Int32, output: String) {
+    nonisolated func addMCPServerHTTP(name: String, url: String, auth: String?) -> (exitCode: Int32, output: String) {
         var cliArgs: [String] = ["mcp", "add", name, "--url", url]
         if let auth, !auth.isEmpty {
             cliArgs.append(contentsOf: ["--auth", auth])
@@ -578,14 +578,14 @@ struct HermesFileService: Sendable {
     }
 
     @discardableResult
-    func setMCPServerArgs(name: String, args: [String]) -> Bool {
+    nonisolated func setMCPServerArgs(name: String, args: [String]) -> Bool {
         patchMCPServerField(name: name) { entryLines in
             Self.replaceOrInsertList(header: "args", items: args, in: &entryLines)
         }
     }
 
     @discardableResult
-    func removeMCPServer(name: String) -> (exitCode: Int32, output: String) {
+    nonisolated func removeMCPServer(name: String) -> (exitCode: Int32, output: String) {
         runHermesCLI(args: ["mcp", "remove", name], timeout: 30)
     }
 
@@ -614,7 +614,7 @@ struct HermesFileService: Sendable {
         )
     }
 
-    private static func parseToolListFromTestOutput(_ output: String) -> [String] {
+    nonisolated private static func parseToolListFromTestOutput(_ output: String) -> [String] {
         var tools: [String] = []
         for rawLine in output.components(separatedBy: "\n") {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
@@ -630,35 +630,35 @@ struct HermesFileService: Sendable {
     }
 
     @discardableResult
-    func toggleMCPServerEnabled(name: String, enabled: Bool) -> Bool {
+    nonisolated func toggleMCPServerEnabled(name: String, enabled: Bool) -> Bool {
         patchMCPServerField(name: name) { entryLines in
             Self.replaceOrInsertScalar(key: "enabled", value: enabled ? "true" : "false", in: &entryLines)
         }
     }
 
     @discardableResult
-    func setMCPServerEnv(name: String, env: [String: String]) -> Bool {
+    nonisolated func setMCPServerEnv(name: String, env: [String: String]) -> Bool {
         patchMCPServerField(name: name) { entryLines in
             Self.replaceOrInsertSubMap(header: "env", map: env, in: &entryLines)
         }
     }
 
     @discardableResult
-    func setMCPServerHeaders(name: String, headers: [String: String]) -> Bool {
+    nonisolated func setMCPServerHeaders(name: String, headers: [String: String]) -> Bool {
         patchMCPServerField(name: name) { entryLines in
             Self.replaceOrInsertSubMap(header: "headers", map: headers, in: &entryLines)
         }
     }
 
     @discardableResult
-    func updateMCPToolFilters(name: String, include: [String], exclude: [String], resources: Bool, prompts: Bool) -> Bool {
+    nonisolated func updateMCPToolFilters(name: String, include: [String], exclude: [String], resources: Bool, prompts: Bool) -> Bool {
         patchMCPServerField(name: name) { entryLines in
             Self.replaceOrInsertToolsBlock(include: include, exclude: exclude, resources: resources, prompts: prompts, in: &entryLines)
         }
     }
 
     @discardableResult
-    func setMCPServerTimeouts(name: String, timeout: Int?, connectTimeout: Int?) -> Bool {
+    nonisolated func setMCPServerTimeouts(name: String, timeout: Int?, connectTimeout: Int?) -> Bool {
         patchMCPServerField(name: name) { entryLines in
             if let timeout {
                 Self.replaceOrInsertScalar(key: "timeout", value: String(timeout), in: &entryLines)
@@ -674,7 +674,7 @@ struct HermesFileService: Sendable {
     }
 
     @discardableResult
-    func deleteMCPOAuthToken(name: String) -> Bool {
+    nonisolated func deleteMCPOAuthToken(name: String) -> Bool {
         let path = context.paths.mcpTokensDir + "/" + name + ".json"
         do {
             try transport.removeFile(path)
@@ -685,7 +685,7 @@ struct HermesFileService: Sendable {
     }
 
     @discardableResult
-    func restartGateway() -> (exitCode: Int32, output: String) {
+    nonisolated func restartGateway() -> (exitCode: Int32, output: String) {
         runHermesCLI(args: ["gateway", "restart"], timeout: 30)
     }
 
@@ -697,7 +697,7 @@ struct HermesFileService: Sendable {
         let suffix: [String]
     }
 
-    private func extractMCPBlock(yaml: String) -> MCPBlockLocation {
+    nonisolated private func extractMCPBlock(yaml: String) -> MCPBlockLocation {
         let lines = yaml.components(separatedBy: "\n")
         var blockStart = -1
         var blockEnd = lines.count
@@ -740,7 +740,7 @@ struct HermesFileService: Sendable {
         )
     }
 
-    fileprivate func parseMCPServersBlock(yaml: String) -> [HermesMCPServer] {
+    nonisolated fileprivate func parseMCPServersBlock(yaml: String) -> [HermesMCPServer] {
         let location = extractMCPBlock(yaml: yaml)
         guard location.block.count > 1 else { return [] }
 
@@ -876,7 +876,7 @@ struct HermesFileService: Sendable {
 
     // MARK: - MCP YAML: surgical patcher
 
-    private func patchMCPServerField(name: String, mutate: (inout [String]) -> Void) -> Bool {
+    nonisolated private func patchMCPServerField(name: String, mutate: (inout [String]) -> Void) -> Bool {
         guard let yaml = readFile(context.paths.configYAML) else { return false }
         let location = extractMCPBlock(yaml: yaml)
         guard !location.block.isEmpty else { return false }
@@ -932,7 +932,7 @@ struct HermesFileService: Sendable {
 
     // MARK: - MCP YAML: mutators
 
-    private static func replaceOrInsertScalar(key: String, value: String, in lines: inout [String]) {
+    nonisolated private static func replaceOrInsertScalar(key: String, value: String, in lines: inout [String]) {
         // entry header is at lines[0] at indent 2. Scalars live at indent 4.
         for index in 1..<lines.count {
             let line = lines[index]
@@ -950,7 +950,7 @@ struct HermesFileService: Sendable {
         lines.insert("    \(key): \(value)", at: 1)
     }
 
-    private static func removeScalar(key: String, in lines: inout [String]) {
+    nonisolated private static func removeScalar(key: String, in lines: inout [String]) {
         var removeIndex: Int?
         for index in 1..<lines.count {
             let line = lines[index]
@@ -969,7 +969,7 @@ struct HermesFileService: Sendable {
         }
     }
 
-    private static func replaceOrInsertList(header: String, items: [String], in lines: inout [String]) {
+    nonisolated private static func replaceOrInsertList(header: String, items: [String], in lines: inout [String]) {
         var headerIndex: Int?
         var removeEnd: Int?
         for index in 1..<lines.count {
@@ -1027,7 +1027,7 @@ struct HermesFileService: Sendable {
         }
     }
 
-    private static func replaceOrInsertSubMap(header: String, map: [String: String], in lines: inout [String]) {
+    nonisolated private static func replaceOrInsertSubMap(header: String, map: [String: String], in lines: inout [String]) {
         var headerIndex: Int?
         var removeEnd: Int?
         for index in 1..<lines.count {
@@ -1085,7 +1085,7 @@ struct HermesFileService: Sendable {
         }
     }
 
-    private static func replaceOrInsertToolsBlock(include: [String], exclude: [String], resources: Bool, prompts: Bool, in lines: inout [String]) {
+    nonisolated private static func replaceOrInsertToolsBlock(include: [String], exclude: [String], resources: Bool, prompts: Bool, in lines: inout [String]) {
         var headerIndex: Int?
         var removeEnd: Int?
         for index in 1..<lines.count {
@@ -1134,7 +1134,7 @@ struct HermesFileService: Sendable {
         }
     }
 
-    private static func yamlScalar(_ value: String) -> String {
+    nonisolated private static func yamlScalar(_ value: String) -> String {
         if value.isEmpty { return "\"\"" }
         // YAML 1.2 reserved indicators that change meaning at the start of a
         // scalar: @ * & ? | > ! % , [ ] { } < ` ' " — plus space (would be
@@ -1158,7 +1158,7 @@ struct HermesFileService: Sendable {
         return value
     }
 
-    private static func unquote(_ value: String) -> String {
+    nonisolated private static func unquote(_ value: String) -> String {
         var v = value
         if (v.hasPrefix("\"") && v.hasSuffix("\"") && v.count >= 2) || (v.hasPrefix("'") && v.hasSuffix("'") && v.count >= 2) {
             v = String(v.dropFirst().dropLast())
@@ -1168,11 +1168,11 @@ struct HermesFileService: Sendable {
 
     // MARK: - Hermes Process
 
-    func isHermesRunning() -> Bool {
+    nonisolated func isHermesRunning() -> Bool {
         hermesPID() != nil
     }
 
-    func hermesPID() -> pid_t? {
+    nonisolated func hermesPID() -> pid_t? {
         // Run `pgrep -f hermes` either locally or via the transport. On
         // remote hosts we trust `pgrep` to be present — it's standard on
         // Linux and macOS. On failure we conservatively return nil rather
@@ -1192,7 +1192,7 @@ struct HermesFileService: Sendable {
     }
 
     @discardableResult
-    func stopHermes() -> Bool {
+    nonisolated func stopHermes() -> Bool {
         // v0.9.0 fixed `hermes gateway stop` so it issues `launchctl bootout` and
         // waits for exit. Use the CLI to avoid racing launchd's KeepAlive respawn.
         if runHermesCLI(args: ["gateway", "stop"]).exitCode == 0 {
@@ -1227,7 +1227,7 @@ struct HermesFileService: Sendable {
     /// resolves AI provider auth by reading env vars — a GUI-launched Scarf
     /// subprocess sees none of the `export ANTHROPIC_API_KEY=…` lines from
     /// the user's shell init files.
-    private static let shellEnvKeys: [String] = [
+    nonisolated private static let shellEnvKeys: [String] = [
         "PATH",
         "ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "ANTHROPIC_BASE_URL",
         "OPENAI_API_KEY", "OPENAI_BASE_URL",
@@ -1255,7 +1255,7 @@ struct HermesFileService: Sendable {
     /// 2. If that yields no PATH (timed out / prompt framework broke it),
     ///    fall back to `zsh -l` (login only) with a 3-second timeout.
     /// 3. If that also fails, hardcoded sane-default PATH; no credentials.
-    private static let enrichedShellEnv: [String: String] = {
+    nonisolated private static let enrichedShellEnv: [String: String] = {
         // Build a shell script that prints `KEY\0VALUE\0` for each key.
         // Using printf with \0 as separator lets us unambiguously split the
         // output even if a value contains newlines.
@@ -1295,7 +1295,7 @@ struct HermesFileService: Sendable {
     /// `KEY\0VALUE\0`-delimited output. Returns nil on timeout/failure.
     /// When `interactive` is true, injects env vars that suppress common
     /// prompt frameworks so the shell doesn't hang waiting for terminal setup.
-    private static func runShellProbe(script: String, interactive: Bool, timeout: TimeInterval) -> [String: String]? {
+    nonisolated private static func runShellProbe(script: String, interactive: Bool, timeout: TimeInterval) -> [String: String]? {
         let pipe = Pipe()
         let errPipe = Pipe()
         let process = Process()
@@ -1388,7 +1388,7 @@ struct HermesFileService: Sendable {
     /// **Remote context:** skips that step — our process env has nothing to
     /// do with the remote `hermes acp`'s runtime env. The remote `.env` /
     /// `auth.json` / `config.yaml` are still checked through the transport.
-    func hasAnyAICredential() -> Bool {
+    nonisolated func hasAnyAICredential() -> Bool {
         let credentialKeys = Self.shellEnvKeys.filter { $0 != "PATH" && $0 != "ANTHROPIC_BASE_URL" && $0 != "OPENAI_BASE_URL" }
 
         if !context.isRemote {
@@ -1490,12 +1490,12 @@ struct HermesFileService: Sendable {
     /// Read a UTF-8 text file through the transport. Missing files and any
     /// transport error surface as `nil` — callers treat missing/unreadable
     /// the same way they always have.
-    private func readFile(_ path: String) -> String? {
+    nonisolated private func readFile(_ path: String) -> String? {
         guard let data = try? transport.readFile(path) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
-    private func readFileData(_ path: String) -> Data? {
+    nonisolated private func readFileData(_ path: String) -> Data? {
         try? transport.readFile(path)
     }
 
@@ -1503,7 +1503,7 @@ struct HermesFileService: Sendable {
     /// old pre-transport behavior (print + swallow on error) because the
     /// callers don't have a UI path for surfacing I/O failures — that's
     /// planned for Phase 4.
-    private func writeFile(_ path: String, content: String) {
+    nonisolated private func writeFile(_ path: String, content: String) {
         guard let data = content.data(using: .utf8) else { return }
         do {
             try transport.writeFile(path, data: data)

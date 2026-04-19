@@ -174,21 +174,20 @@ final class ChatViewModel {
         }
     }
 
-    /// Start ACP for the current or most recent session, then send the queued prompt.
+    /// Start ACP for the current session (or create a new one), then send the
+    /// queued prompt. Typing into a blank Chat screen ALWAYS creates a new
+    /// session — the "Continue from Last Session" button is the explicit path
+    /// for resuming. The previous behavior (falling back to the most recently
+    /// active session in the DB) would pick up cron/background sessions the
+    /// user never interacted with; those can be garbage-collected by Hermes
+    /// between the DB read and ACP `session/load`, producing a silent prompt
+    /// failure with no UI feedback.
     private func autoStartACPAndSend(text: String) {
         // Show the user message immediately
         richChatViewModel.addUserMessage(text: text)
 
         Task { @MainActor in
-            // Find a session to resume: prefer current sessionId, then most recent
-            var sessionToResume = richChatViewModel.sessionId
-            if sessionToResume == nil {
-                let opened = await dataService.open()
-                if opened {
-                    sessionToResume = await dataService.fetchMostRecentlyActiveSessionId()
-                    await dataService.close()
-                }
-            }
+            let sessionToResume = richChatViewModel.sessionId
 
             let client = ACPClient(context: context)
             self.acpClient = client
@@ -199,7 +198,7 @@ final class ChatViewModel {
                 startACPEventLoop(client: client)
                 startHealthMonitor(client: client)
 
-                let cwd = NSHomeDirectory()
+                let cwd = await context.resolvedUserHome()
 
                 hasActiveProcess = true
 
@@ -289,7 +288,7 @@ final class ChatViewModel {
                 startACPEventLoop(client: client)
                 startHealthMonitor(client: client)
 
-                let cwd = NSHomeDirectory()
+                let cwd = await context.resolvedUserHome()
 
                 // Mark active BEFORE setting session ID so .task(id:) sees isACPMode=true
                 // and doesn't wipe messages with a DB refresh
@@ -420,7 +419,7 @@ final class ChatViewModel {
                 do {
                     try await client.start()
 
-                    let cwd = NSHomeDirectory()
+                    let cwd = await context.resolvedUserHome()
                     let resolvedSessionId: String
 
                     // Try resumeSession first (designed for reconnection), then loadSession.

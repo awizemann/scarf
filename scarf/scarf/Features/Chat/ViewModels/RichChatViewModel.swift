@@ -238,7 +238,44 @@ final class RichChatViewModel {
     }
 
     private func handlePromptComplete(response: ACPPromptResult) {
+        // Detect a failed prompt that produced no assistant output — e.g.
+        // Hermes returning `stopReason: "refusal"` when the session was
+        // silently garbage-collected, or `"error"` when the ACP call itself
+        // threw. Without surfacing this, the user sees their prompt sitting
+        // alone under "Agent working…" that never completes with any text.
+        let hadAssistantOutput = streamingAssistantText.isEmpty == false
+            || messages.last?.isAssistant == true
         finalizeStreamingMessage()
+
+        if !hadAssistantOutput, response.stopReason != "end_turn" {
+            let reason: String
+            switch response.stopReason {
+            case "refusal":
+                reason = "The agent refused to respond (the session may have been cleared on the server). Try starting a new session from the Session menu."
+            case "error":
+                reason = "The prompt failed — check the ACP error banner above for details."
+            case "max_tokens":
+                reason = "The response was cut off before the agent could produce any output (max_tokens reached before any tokens were emitted)."
+            default:
+                reason = "The prompt ended without a response (stopReason: \(response.stopReason))."
+            }
+            let id = nextLocalId
+            nextLocalId -= 1
+            messages.append(HermesMessage(
+                id: id,
+                sessionId: sessionId ?? "",
+                role: "system",
+                content: reason,
+                toolCallId: nil,
+                toolCalls: [],
+                toolName: nil,
+                timestamp: Date(),
+                tokenCount: nil,
+                finishReason: response.stopReason,
+                reasoning: nil
+            ))
+        }
+
         // Accumulate token usage from this prompt
         acpInputTokens += response.inputTokens
         acpOutputTokens += response.outputTokens
@@ -398,7 +435,11 @@ final class RichChatViewModel {
     /// (e.g., CLI session) with the current ACP session.
     func loadSessionHistory(sessionId: String, acpSessionId: String? = nil) async {
         self.sessionId = sessionId
-        let opened = await dataService.open()
+        // Force a fresh snapshot pull on remote contexts. An earlier open()
+        // would have cached a stale copy — on resume we need whatever
+        // Hermes has actually persisted since then, or the resumed session
+        // will show only history up to the moment the snapshot was taken.
+        let opened = await dataService.refresh()
         guard opened else { return }
 
         var allMessages = await dataService.fetchMessages(sessionId: sessionId)
@@ -441,7 +482,10 @@ final class RichChatViewModel {
     }
 
     func refreshMessages() async {
-        let opened = await dataService.open()
+        // Polling tick (terminal mode): pull a fresh snapshot so remote
+        // reflects Hermes writes since the last tick. On local this is a
+        // cheap reopen of the live DB.
+        let opened = await dataService.refresh()
         guard opened else { return }
 
         if sessionId == nil {

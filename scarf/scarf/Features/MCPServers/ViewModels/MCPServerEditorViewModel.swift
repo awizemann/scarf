@@ -76,23 +76,29 @@ final class MCPServerEditorViewModel {
         let prompts = promptsEnabled
 
         Task.detached {
-            var success = true
-            switch transport {
-            case .stdio:
-                if !service.setMCPServerEnv(name: name, env: envMap) { success = false }
-            case .http:
-                if !service.setMCPServerHeaders(name: name, headers: headerMap) { success = false }
-            }
-            if !service.updateMCPToolFilters(
-                name: name,
-                include: include,
-                exclude: exclude,
-                resources: resources,
-                prompts: prompts
-            ) { success = false }
-            if !service.setMCPServerTimeouts(name: name, timeout: timeoutValue, connectTimeout: connectValue) {
-                success = false
-            }
+            // Compute success as an immutable so the MainActor.run closure
+            // captures a value, not a mutable var. Swift 6 rejects
+            // var-captures across concurrent closures as data races.
+            let success: Bool = {
+                var ok = true
+                switch transport {
+                case .stdio:
+                    if !service.setMCPServerEnv(name: name, env: envMap) { ok = false }
+                case .http:
+                    if !service.setMCPServerHeaders(name: name, headers: headerMap) { ok = false }
+                }
+                if !service.updateMCPToolFilters(
+                    name: name,
+                    include: include,
+                    exclude: exclude,
+                    resources: resources,
+                    prompts: prompts
+                ) { ok = false }
+                if !service.setMCPServerTimeouts(name: name, timeout: timeoutValue, connectTimeout: connectValue) {
+                    ok = false
+                }
+                return ok
+            }()
             await MainActor.run {
                 self.isSaving = false
                 if !success {

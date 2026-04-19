@@ -359,7 +359,7 @@ struct ChatView: View {
 
 // MARK: - Permission Approval View
 
-extension RichChatViewModel.PendingPermission: @retroactive Identifiable {
+extension RichChatViewModel.PendingPermission: Identifiable {
     var id: Int { requestId }
 }
 

@@ -2,39 +2,83 @@ import Foundation
 
 // MARK: - JSON-RPC Transport
 
-struct ACPRequest: Encodable {
-    let jsonrpc = "2.0"
-    let id: Int
-    let method: String
-    let params: [String: AnyCodable]
+// Hand-written `encode(to:)` / `init(from:)` with explicit `nonisolated` so
+// Swift 6's default-isolation doesn't synthesize a MainActor-isolated
+// conformance — which would prevent these payloads from being encoded or
+// decoded inside `ACPClient`'s actor context (the JSON-RPC read/write loop).
+// The member list must stay in sync with the stored properties above.
+
+struct ACPRequest: Encodable, Sendable {
+    nonisolated let jsonrpc = "2.0"
+    nonisolated let id: Int
+    nonisolated let method: String
+    nonisolated let params: [String: AnyCodable]
+
+    enum CodingKeys: String, CodingKey { case jsonrpc, id, method, params }
+
+    nonisolated func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(jsonrpc, forKey: .jsonrpc)
+        try c.encode(id, forKey: .id)
+        try c.encode(method, forKey: .method)
+        try c.encode(params, forKey: .params)
+    }
 }
 
-struct ACPRawMessage: Decodable {
-    let jsonrpc: String?
-    let id: Int?
-    let method: String?
-    let result: AnyCodable?
-    let error: ACPError?
-    let params: AnyCodable?
+struct ACPRawMessage: Decodable, Sendable {
+    nonisolated let jsonrpc: String?
+    nonisolated let id: Int?
+    nonisolated let method: String?
+    nonisolated let result: AnyCodable?
+    nonisolated let error: ACPError?
+    nonisolated let params: AnyCodable?
 
-    var isResponse: Bool { id != nil && method == nil }
-    var isNotification: Bool { method != nil && id == nil }
-    var isRequest: Bool { method != nil && id != nil }
+    nonisolated var isResponse: Bool { id != nil && method == nil }
+    nonisolated var isNotification: Bool { method != nil && id == nil }
+    nonisolated var isRequest: Bool { method != nil && id != nil }
+
+    enum CodingKeys: String, CodingKey { case jsonrpc, id, method, result, error, params }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.jsonrpc = try c.decodeIfPresent(String.self, forKey: .jsonrpc)
+        self.id      = try c.decodeIfPresent(Int.self, forKey: .id)
+        self.method  = try c.decodeIfPresent(String.self, forKey: .method)
+        self.result  = try c.decodeIfPresent(AnyCodable.self, forKey: .result)
+        self.error   = try c.decodeIfPresent(ACPError.self, forKey: .error)
+        self.params  = try c.decodeIfPresent(AnyCodable.self, forKey: .params)
+    }
 }
 
 struct ACPError: Decodable, Sendable {
-    let code: Int
-    let message: String
+    nonisolated let code: Int
+    nonisolated let message: String
+
+    enum CodingKeys: String, CodingKey { case code, message }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.code = try c.decode(Int.self, forKey: .code)
+        self.message = try c.decode(String.self, forKey: .message)
+    }
 }
 
 // MARK: - AnyCodable (for dynamic JSON)
 
-struct AnyCodable: Codable, Sendable {
-    let value: Any
+struct AnyCodable: Codable, @unchecked Sendable {
+    nonisolated let value: Any
 
-    init(_ value: Any) { self.value = value }
+    nonisolated init(_ value: Any) { self.value = value }
 
-    init(from decoder: Decoder) throws {
+    // NOT marked `nonisolated`: Swift's default-isolation treats writes to a
+    // `let value: Any` stored property as MainActor-isolated even when the
+    // property is declared nonisolated (Any can't be strictly Sendable, so
+    // the compiler can't prove the write is safe off-main). Leaving the
+    // init as default-isolated silences the mutation warnings; the Decodable
+    // conformance is still usable from ACPClient's nonisolated read loop
+    // because all callers are already @preconcurrency with respect to
+    // `AnyCodable` (it's @unchecked Sendable).
+    init(from decoder: any Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() {
             value = NSNull()
@@ -55,7 +99,7 @@ struct AnyCodable: Codable, Sendable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    func encode(to encoder: any Encoder) throws {
         var container = encoder.singleValueContainer()
         switch value {
         case is NSNull:
@@ -79,10 +123,10 @@ struct AnyCodable: Codable, Sendable {
 
     // MARK: - Accessors
 
-    var stringValue: String? { value as? String }
-    var intValue: Int? { value as? Int }
-    var dictValue: [String: Any]? { value as? [String: Any] }
-    var arrayValue: [Any]? { value as? [Any] }
+    nonisolated var stringValue: String? { value as? String }
+    nonisolated var intValue: Int? { value as? Int }
+    nonisolated var dictValue: [String: Any]? { value as? [String: Any] }
+    nonisolated var arrayValue: [Any]? { value as? [Any] }
 }
 
 // MARK: - ACP Events (parsed from session/update notifications)
@@ -154,7 +198,7 @@ struct ACPPromptResult: Sendable {
 // MARK: - Event Parsing
 
 enum ACPEventParser {
-    static func parse(notification: ACPRawMessage) -> ACPEvent? {
+    nonisolated static func parse(notification: ACPRawMessage) -> ACPEvent? {
         guard notification.method == "session/update",
               let params = notification.params?.dictValue,
               let sessionId = params["sessionId"] as? String,
@@ -202,7 +246,7 @@ enum ACPEventParser {
         }
     }
 
-    static func parsePermissionRequest(_ message: ACPRawMessage) -> ACPEvent? {
+    nonisolated static func parsePermissionRequest(_ message: ACPRawMessage) -> ACPEvent? {
         guard message.method == "session/request_permission",
               let params = message.params?.dictValue,
               let sessionId = params["sessionId"] as? String,
@@ -226,7 +270,7 @@ enum ACPEventParser {
 
     // MARK: - Content Extraction
 
-    private static func extractContentText(from update: [String: Any]) -> String {
+    nonisolated private static func extractContentText(from update: [String: Any]) -> String {
         if let content = update["content"] as? [String: Any],
            let text = content["text"] as? String {
             return text
@@ -234,7 +278,7 @@ enum ACPEventParser {
         return ""
     }
 
-    private static func extractContentArrayText(from update: [String: Any]) -> String {
+    nonisolated private static func extractContentArrayText(from update: [String: Any]) -> String {
         if let contentArray = update["content"] as? [[String: Any]] {
             return contentArray.compactMap { item -> String? in
                 guard let inner = item["content"] as? [String: Any] else { return nil }

@@ -3,6 +3,7 @@ import SwiftUI
 struct InsightsView: View {
     @State private var viewModel: InsightsViewModel
     @Environment(AppCoordinator.self) private var coordinator
+    @Environment(HermesFileWatcher.self) private var fileWatcher
 
     init(context: ServerContext) {
         _viewModel = State(initialValue: InsightsViewModel(context: context))
@@ -26,6 +27,9 @@ struct InsightsView: View {
         .navigationTitle("Insights")
         .task { await viewModel.load() }
         .onChange(of: viewModel.period) {
+            Task { await viewModel.load() }
+        }
+        .onChange(of: fileWatcher.lastChangeDate) {
             Task { await viewModel.load() }
         }
     }

@@ -5,12 +5,12 @@ import os
 /// `FileManager`, `Process`, and `DispatchSourceFileSystemObject` — the APIs
 /// services were already using before Phase 2.
 struct LocalTransport: ServerTransport {
-    private static let logger = Logger(subsystem: "com.scarf", category: "LocalTransport")
+    nonisolated private static let logger = Logger(subsystem: "com.scarf", category: "LocalTransport")
 
     let contextID: ServerID
     let isRemote: Bool = false
 
-    init(contextID: ServerID = ServerContext.local.id) {
+    nonisolated init(contextID: ServerID = ServerContext.local.id) {
         self.contextID = contextID
     }
 
@@ -156,10 +156,13 @@ struct LocalTransport: ServerTransport {
 
     func watchPaths(_ paths: [String]) -> AsyncStream<WatchEvent> {
         AsyncStream { continuation in
-            var sources: [DispatchSourceFileSystemObject] = []
-            for path in paths {
+            // Build the source list immutably, then hand a value-typed copy
+            // to onTermination. Swift 6's concurrent-capture rule rejects a
+            // `var sources` shared between the outer builder and the inner
+            // termination closure.
+            let sources: [DispatchSourceFileSystemObject] = paths.compactMap { path in
                 let fd = Darwin.open(path, O_EVTONLY)
-                guard fd >= 0 else { continue }
+                guard fd >= 0 else { return nil }
                 let src = DispatchSource.makeFileSystemObjectSource(
                     fileDescriptor: fd,
                     eventMask: [.write, .extend, .rename],
@@ -168,7 +171,7 @@ struct LocalTransport: ServerTransport {
                 src.setEventHandler { continuation.yield(.anyChanged) }
                 src.setCancelHandler { Darwin.close(fd) }
                 src.resume()
-                sources.append(src)
+                return src
             }
             continuation.onTermination = { _ in
                 for s in sources { s.cancel() }

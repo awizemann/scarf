@@ -47,7 +47,7 @@ final class PersonalitiesViewModel {
     /// Static form so the detached load can call into it without touching
     /// MainActor-isolated state. The instance form below remains for any
     /// other callers that need it.
-    private static func parsePersonalitiesBlock(yaml: String) -> [HermesPersonality] {
+    nonisolated private static func parsePersonalitiesBlock(yaml: String) -> [HermesPersonality] {
         guard !yaml.isEmpty else { return [] }
         let parsed = HermesFileService.parseNestedYAML(yaml)
         var nameSet: Set<String> = []

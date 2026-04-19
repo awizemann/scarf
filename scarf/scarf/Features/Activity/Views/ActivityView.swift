@@ -3,6 +3,7 @@ import SwiftUI
 struct ActivityView: View {
     @State private var viewModel: ActivityViewModel
     @Environment(AppCoordinator.self) private var coordinator
+    @Environment(HermesFileWatcher.self) private var fileWatcher
 
     init(context: ServerContext) {
         _viewModel = State(initialValue: ActivityViewModel(context: context))
@@ -22,6 +23,9 @@ struct ActivityView: View {
         }
         .navigationTitle("Activity")
         .task { await viewModel.load() }
+        .onChange(of: fileWatcher.lastChangeDate) {
+            Task { await viewModel.load() }
+        }
         .onDisappear { Task { await viewModel.cleanup() } }
     }
 

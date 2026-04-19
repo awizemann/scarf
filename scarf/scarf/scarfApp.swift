@@ -21,6 +21,11 @@ struct ScarfApp: App {
         _registry = State(initialValue: registry)
         _liveRegistry = State(initialValue: live)
 
+        // Prune snapshot cache dirs whose server UUIDs aren't in the registry
+        // anymore — handles the case where a server was removed while Scarf
+        // wasn't running. Cheap: just an `ls` of the snapshots root.
+        registry.sweepOrphanCaches()
+
         // Warm up the login-shell env probe off-main at launch. Without
         // this, the first MainActor caller (chat preflight, OAuth flow,
         // signal-cli detect, etc.) blocks for 5-8 seconds while
@@ -43,7 +48,7 @@ struct ScarfApp: App {
             // last open. Show a dedicated "server removed" view rather than
             // silently falling back to local — falling back would mislead
             // the user into thinking they're looking at the right server.
-            if let ctx = registry.context(for: serverID ?? ServerContext.local.id) {
+            if let ctx = registry.context(for: serverID) {
                 ContextBoundRoot(context: ctx)
                     .environment(registry)
                     .environment(\.serverContext, ctx)
@@ -53,7 +58,7 @@ struct ScarfApp: App {
                     // another window since this one last opened.
                     .onAppear { liveRegistry.rebuild() }
             } else {
-                MissingServerView(removedServerID: serverID ?? ServerContext.local.id)
+                MissingServerView(removedServerID: serverID)
                     .environment(registry)
                     .environment(updater)
             }
@@ -202,7 +207,7 @@ final class ServerLiveStatus: Identifiable {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 10_000_000_000)
                 if Task.isCancelled { return }
-                await self?.refresh()
+                self?.refresh()
             }
         }
     }
@@ -219,7 +224,7 @@ final class ServerLiveStatus: Identifiable {
         // Refresh after a short delay to pick up the new state.
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
-            await self?.refresh()
+            self?.refresh()
         }
     }
 
@@ -227,7 +232,7 @@ final class ServerLiveStatus: Identifiable {
         Task.detached { [fileService] in _ = fileService.stopHermes() }
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 2_000_000_000)
-            await self?.refresh()
+            self?.refresh()
         }
     }
 
@@ -246,7 +251,7 @@ final class ServerLiveStatus: Identifiable {
         Task.detached { [weak self] in
             let running = svc.isHermesRunning()
             let gateway = svc.loadGatewayState()?.isRunning ?? false
-            await MainActor.run {
+            await MainActor.run { [weak self] in
                 self?.hermesRunning = running
                 self?.gatewayRunning = gateway
             }

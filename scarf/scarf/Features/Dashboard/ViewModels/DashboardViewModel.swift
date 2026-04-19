@@ -23,7 +23,9 @@ final class DashboardViewModel {
 
     func load() async {
         isLoading = true
-        let opened = await dataService.open()
+        // refresh() = close + reopen, forces a fresh remote snapshot. Cheap
+        // on local (live DB reopen).
+        let opened = await dataService.refresh()
         if opened {
             stats = await dataService.fetchStats()
             recentSessions = await dataService.fetchSessions(limit: 5)

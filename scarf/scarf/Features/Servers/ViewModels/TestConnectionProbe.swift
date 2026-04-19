@@ -102,7 +102,7 @@ struct TestConnectionProbe {
             // Bound the probe so a hung connection doesn't lock the UI.
             let deadline = Date().addingTimeInterval(20)
             while proc.isRunning && Date() < deadline {
-                Thread.sleep(forTimeInterval: 0.1)
+                try? await Task.sleep(nanoseconds: 100_000_000)
             }
             if proc.isRunning {
                 proc.terminate()

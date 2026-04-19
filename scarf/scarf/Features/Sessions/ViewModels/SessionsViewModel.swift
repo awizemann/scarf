@@ -37,7 +37,10 @@ final class SessionsViewModel {
     var deleteSessionId: String?
 
     func load() async {
-        let opened = await dataService.open()
+        // refresh() forces a fresh snapshot on remote contexts. The DB stays
+        // open after load() so selectSession()/search() can query without
+        // re-opening — cleanup() closes on disappear.
+        let opened = await dataService.refresh()
         guard opened else { return }
         sessions = await dataService.fetchSessions(limit: 500)
         sessionPreviews = await dataService.fetchSessionPreviews(limit: 500)

@@ -38,23 +38,29 @@ final class PluginsViewModel {
         // of sync transport ops on remote — definitively a beach ball if
         // run on main. Detach the whole walk.
         Task.detached { [weak self] in
-            let transport = ctx.makeTransport()
-            var result: [HermesPlugin] = []
-            if let entries = try? transport.listDirectory(dir) {
-                for entry in entries.sorted() where !entry.hasPrefix(".") {
-                    let path = dir + "/" + entry
-                    guard transport.stat(path)?.isDirectory == true else { continue }
-                    let manifest = Self.readManifestStatic(path: path, context: ctx)
-                    let disabled = transport.fileExists(path + "/.disabled")
-                    result.append(HermesPlugin(
-                        name: entry,
-                        source: manifest.source,
-                        enabled: !disabled,
-                        version: manifest.version,
-                        path: path
-                    ))
+            // Build `result` as an immutable before the MainActor hop, so the
+            // cross-closure capture is a value, not a mutated `var` (Swift 6
+            // concurrent-capture rule).
+            let result: [HermesPlugin] = {
+                let transport = ctx.makeTransport()
+                var out: [HermesPlugin] = []
+                if let entries = try? transport.listDirectory(dir) {
+                    for entry in entries.sorted() where !entry.hasPrefix(".") {
+                        let path = dir + "/" + entry
+                        guard transport.stat(path)?.isDirectory == true else { continue }
+                        let manifest = Self.readManifestStatic(path: path, context: ctx)
+                        let disabled = transport.fileExists(path + "/.disabled")
+                        out.append(HermesPlugin(
+                            name: entry,
+                            source: manifest.source,
+                            enabled: !disabled,
+                            version: manifest.version,
+                            path: path
+                        ))
+                    }
                 }
-            }
+                return out
+            }()
             await MainActor.run { [weak self] in
                 self?.plugins = result
                 self?.isLoading = false
@@ -64,7 +70,7 @@ final class PluginsViewModel {
 
     /// Static form of readManifest used by the detached load task. The
     /// instance form delegates to this so both call paths share logic.
-    fileprivate static func readManifestStatic(path: String, context: ServerContext) -> (source: String, version: String) {
+    nonisolated fileprivate static func readManifestStatic(path: String, context: ServerContext) -> (source: String, version: String) {
         let jsonPath = path + "/plugin.json"
         if let data = context.readData(jsonPath),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {

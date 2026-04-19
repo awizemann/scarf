@@ -55,7 +55,7 @@ struct ModelCatalogService: Sendable {
     let path: String
     let transport: any ServerTransport
 
-    init(context: ServerContext = .local) {
+    nonisolated init(context: ServerContext = .local) {
         self.path = context.paths.home + "/models_dev_cache.json"
         self.transport = context.makeTransport()
     }

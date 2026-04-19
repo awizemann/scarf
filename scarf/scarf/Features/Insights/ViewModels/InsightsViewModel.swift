@@ -92,7 +92,9 @@ final class InsightsViewModel {
 
     func load() async {
         isLoading = true
-        let opened = await dataService.open()
+        // refresh() forces a fresh remote snapshot each load. On local it's
+        // a cheap reopen of the live DB.
+        let opened = await dataService.refresh()
         guard opened else {
             isLoading = false
             return

@@ -229,16 +229,40 @@ final class CredentialPoolsViewModel {
 // All fields are optional because the format evolves and we want decoding to
 // succeed even if hermes adds new keys or omits some for certain auth types.
 
-private struct AuthFile: Decodable {
-    let credential_pool: [String: [AuthEntry]]
+// Hand-written `init(from:)` so Swift 6 doesn't synthesize a MainActor-
+// isolated conformance — auth.json decode runs in `load()`'s detached task.
+private struct AuthFile: Decodable, Sendable {
+    nonisolated let credential_pool: [String: [AuthEntry]]
+
+    enum CodingKeys: String, CodingKey { case credential_pool }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.credential_pool = try c.decode([String: [AuthEntry]].self, forKey: .credential_pool)
+    }
 }
 
-private struct AuthEntry: Decodable {
-    let id: String?
-    let label: String?
-    let auth_type: String?
-    let source: String?
-    let access_token: String?
-    let last_status: String?
-    let request_count: Int?
+private struct AuthEntry: Decodable, Sendable {
+    nonisolated let id: String?
+    nonisolated let label: String?
+    nonisolated let auth_type: String?
+    nonisolated let source: String?
+    nonisolated let access_token: String?
+    nonisolated let last_status: String?
+    nonisolated let request_count: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, label, auth_type, source, access_token, last_status, request_count
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id            = try c.decodeIfPresent(String.self, forKey: .id)
+        self.label         = try c.decodeIfPresent(String.self, forKey: .label)
+        self.auth_type     = try c.decodeIfPresent(String.self, forKey: .auth_type)
+        self.source        = try c.decodeIfPresent(String.self, forKey: .source)
+        self.access_token  = try c.decodeIfPresent(String.self, forKey: .access_token)
+        self.last_status   = try c.decodeIfPresent(String.self, forKey: .last_status)
+        self.request_count = try c.decodeIfPresent(Int.self, forKey: .request_count)
+    }
 }

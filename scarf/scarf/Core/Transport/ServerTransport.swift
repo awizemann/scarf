@@ -18,32 +18,32 @@ import Foundation
 protocol ServerTransport: Sendable {
     /// Identifies the context this transport serves. Used for cache
     /// namespacing (e.g. per-server SQLite snapshot directories).
-    var contextID: ServerID { get }
+    nonisolated var contextID: ServerID { get }
 
     /// `true` if this transport talks to a remote host over SSH.
-    var isRemote: Bool { get }
+    nonisolated var isRemote: Bool { get }
 
     // MARK: - Files
 
-    func readFile(_ path: String) throws -> Data
+    nonisolated func readFile(_ path: String) throws -> Data
     /// Atomic write: the file at `path` is either the previous contents or
     /// the new contents, never a partial write. Preserves `0600` mode for
     /// paths that match `.env` conventions so secrets stay owner-only.
-    func writeFile(_ path: String, data: Data) throws
-    func fileExists(_ path: String) -> Bool
-    func stat(_ path: String) -> FileStat?
-    func listDirectory(_ path: String) throws -> [String]
+    nonisolated func writeFile(_ path: String, data: Data) throws
+    nonisolated func fileExists(_ path: String) -> Bool
+    nonisolated func stat(_ path: String) -> FileStat?
+    nonisolated func listDirectory(_ path: String) throws -> [String]
     /// Create directories including intermediates. No-op if already present.
-    func createDirectory(_ path: String) throws
+    nonisolated func createDirectory(_ path: String) throws
     /// Delete a file. No-op if absent.
-    func removeFile(_ path: String) throws
+    nonisolated func removeFile(_ path: String) throws
 
     // MARK: - Processes
 
     /// Run a process to completion and capture its stdout/stderr. For remote
     /// transports this actually invokes `ssh host -- executable args…` under
     /// the hood; for local it spawns `executable` directly.
-    func runProcess(
+    nonisolated func runProcess(
         executable: String,
         args: [String],
         stdin: Data?,
@@ -57,7 +57,7 @@ protocol ServerTransport: Sendable {
     ///
     /// Local: `executable` + `args` verbatim.
     /// Remote: `/usr/bin/ssh` + connection flags + `[host, "--", executable, args…]`.
-    func makeProcess(executable: String, args: [String]) -> Process
+    nonisolated func makeProcess(executable: String, args: [String]) -> Process
 
     // MARK: - SQLite
 
@@ -66,13 +66,13 @@ protocol ServerTransport: Sendable {
     /// just the remote path unchanged. For SSH transports this performs
     /// `sqlite3 .backup` on the remote side and scp's the backup into
     /// `~/Library/Caches/scarf/<serverID>/state.db`, returning that URL.
-    func snapshotSQLite(remotePath: String) throws -> URL
+    nonisolated func snapshotSQLite(remotePath: String) throws -> URL
 
     // MARK: - Watching
 
     /// Observe changes to a set of paths and yield events when any of them
     /// change. Local: FSEvents. Remote: polls `stat` mtime every 3s.
-    func watchPaths(_ paths: [String]) -> AsyncStream<WatchEvent>
+    nonisolated func watchPaths(_ paths: [String]) -> AsyncStream<WatchEvent>
 }
 
 /// Stat-style file metadata. `nil` (return value) means the file does not
@@ -89,8 +89,8 @@ struct ProcessResult: Sendable {
     let stdout: Data
     let stderr: Data
 
-    var stdoutString: String { String(data: stdout, encoding: .utf8) ?? "" }
-    var stderrString: String { String(data: stderr, encoding: .utf8) ?? "" }
+    nonisolated var stdoutString: String { String(data: stdout, encoding: .utf8) ?? "" }
+    nonisolated var stderrString: String { String(data: stderr, encoding: .utf8) ?? "" }
 }
 
 enum WatchEvent: Sendable {

@@ -247,8 +247,17 @@ final class SettingsViewModel {
                 self.backupInProgress = false
                 if result.exitCode == 0 {
                     if let zipPath {
-                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: zipPath)])
-                        self.saveMessage = "Backup saved"
+                        // NSWorkspace operates on the *local* Mac's filesystem;
+                        // a remote backup path doesn't exist here, so revealing
+                        // it would silently no-op (or worse, reveal an
+                        // unrelated local file with the same path). Surface the
+                        // remote location in the saveMessage instead.
+                        if self.context.isRemote {
+                            self.saveMessage = "Backup saved on \(self.context.displayName): \(zipPath)"
+                        } else {
+                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: zipPath)])
+                            self.saveMessage = "Backup saved"
+                        }
                     } else {
                         self.saveMessage = "Backup complete"
                     }

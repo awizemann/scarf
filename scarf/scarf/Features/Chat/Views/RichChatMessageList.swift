@@ -6,22 +6,27 @@ struct RichChatMessageList: View {
     /// External trigger to force a scroll-to-bottom (e.g., from "Return to Active Session").
     var scrollTrigger: UUID = UUID()
 
-    /// Stable scroll target. Must NOT depend on `isWorking` — if the anchor
-    /// flipped between "typing-indicator" and "group-N" at stream start/
-    /// finish, two onChange handlers would race to scroll to different
-    /// targets and the chat would visibly jump.
-    private var scrollAnchor: String {
-        if let last = groups.last { return "group-\(last.id)" }
-        return "scroll-top"
-    }
-
+    /// Why `.defaultScrollAnchor(.bottom)` *alone* and no `proxy.scrollTo`.
+    ///
+    /// `.defaultScrollAnchor(.bottom)` tells SwiftUI to pin the viewport to
+    /// the bottom of the content automatically — as messages stream in or
+    /// new turns arrive, the scroll position tracks the bottom edge.
+    ///
+    /// We used to also call `proxy.scrollTo(lastID, anchor: .bottom)` from
+    /// six different `onChange` handlers during streaming. The two
+    /// mechanisms fought each other: the ScrollViewReader can resolve an ID
+    /// to a position **before** LazyVStack has finished laying out that
+    /// row, so `scrollTo` would land past the actual content — the
+    /// "viewport showing whitespace, chat is above" symptom. Removing the
+    /// manual scroll and trusting `defaultScrollAnchor` eliminates the race.
+    ///
+    /// The only remaining explicit scroll is `scrollTrigger` for the "Return
+    /// to Active Session" button; that fires rarely, after layout has
+    /// settled, so the overshoot doesn't happen.
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    Spacer(minLength: 0)
-                        .id("scroll-top")
-
                     if groups.isEmpty && !isWorking {
                         emptyState
                     }
@@ -39,27 +44,22 @@ struct RichChatMessageList: View {
                 .padding()
             }
             .defaultScrollAnchor(.bottom)
-            .onAppear {
-                if !groups.isEmpty {
-                    DispatchQueue.main.async {
-                        scrollToBottom(proxy: proxy, animated: false)
-                    }
+            .onChange(of: scrollTrigger) {
+                let target = lastAnchorID
+                withAnimation(.easeOut(duration: 0.15)) {
+                    proxy.scrollTo(target, anchor: .bottom)
                 }
             }
-            // New turn: animate to the bottom.
-            .onChange(of: groups.count) {
-                scrollToBottom(proxy: proxy)
-            }
-            // Streaming chunks: track the bottom without animation so the
-            // text glides instead of bouncing.
-            .onChange(of: groups.last?.assistantMessages.last?.content ?? "") {
-                scrollToBottom(proxy: proxy, animated: false)
-            }
-            // Explicit "Return to Active Session" button.
-            .onChange(of: scrollTrigger) {
-                scrollToBottom(proxy: proxy)
-            }
         }
+    }
+
+    /// Anchor ID used by the explicit scrollTrigger path. Prefers the typing
+    /// indicator when visible (so we scroll to the very bottom of the
+    /// current turn), otherwise the last group.
+    private var lastAnchorID: String {
+        if isWorking { return "typing-indicator" }
+        if let last = groups.last { return "group-\(last.id)" }
+        return "group-0"
     }
 
     private var emptyState: some View {
@@ -77,17 +77,6 @@ struct RichChatMessageList: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 80)
-    }
-
-    private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool = true) {
-        let target = scrollAnchor
-        if animated {
-            withAnimation(.easeOut(duration: 0.15)) {
-                proxy.scrollTo(target, anchor: .bottom)
-            }
-        } else {
-            proxy.scrollTo(target, anchor: .bottom)
-        }
     }
 
     private var typingIndicator: some View {

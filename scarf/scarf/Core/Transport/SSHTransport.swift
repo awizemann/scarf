@@ -16,7 +16,7 @@ import os
 /// control socket at `~/Library/Caches/scarf/ssh/%C` so multiple Scarf
 /// windows pointed at the same host share one session cleanly.
 struct SSHTransport: ServerTransport {
-    private static let logger = Logger(subsystem: "com.scarf", category: "SSHTransport")
+    nonisolated private static let logger = Logger(subsystem: "com.scarf", category: "SSHTransport")
 
     let contextID: ServerID
     let isRemote: Bool = true
@@ -24,7 +24,7 @@ struct SSHTransport: ServerTransport {
     let config: SSHConfig
     let displayName: String
 
-    init(contextID: ServerID, config: SSHConfig, displayName: String) {
+    nonisolated init(contextID: ServerID, config: SSHConfig, displayName: String) {
         self.contextID = contextID
         self.config = config
         self.displayName = displayName
@@ -32,28 +32,77 @@ struct SSHTransport: ServerTransport {
 
     // MARK: - ssh/scp binary discovery
 
-    private var sshBinary: String { "/usr/bin/ssh" }
-    private var scpBinary: String { "/usr/bin/scp" }
+    nonisolated private var sshBinary: String { "/usr/bin/ssh" }
+    nonisolated private var scpBinary: String { "/usr/bin/scp" }
 
     /// The fully-qualified `user@host` spec (or just `host` if no user set).
-    private var hostSpec: String {
+    nonisolated private var hostSpec: String {
         if let user = config.user, !user.isEmpty { return "\(user)@\(config.host)" }
         return config.host
     }
 
     /// Absolute path to this server's ControlMaster socket directory. One
     /// socket per server, lives under the app's Caches so macOS can sweep it.
-    private var controlDir: String {
+    nonisolated private var controlDir: String { Self.controlDirPath() }
+
+    /// Per-server snapshot cache directory (for SQLite `.backup` drops).
+    nonisolated private var snapshotDir: String { Self.snapshotDirPath(for: contextID) }
+
+    /// Shared control-master socket directory (one dir, sockets within it are
+    /// per-host via OpenSSH's `%C` token). Exposed as a static so
+    /// cleanup paths (`ServerRegistry.removeServer`, app-launch sweep) can
+    /// compute it without instantiating a transport.
+    nonisolated static func controlDirPath() -> String {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.path
             ?? NSHomeDirectory() + "/Library/Caches"
         return base + "/scarf/ssh"
     }
 
-    /// Per-server snapshot cache directory (for SQLite `.backup` drops).
-    private var snapshotDir: String {
+    /// Snapshot cache directory for a given server. Stable per-ID so repeated
+    /// connections to the same server share the cache, and so cleanup can
+    /// find it from the ID alone.
+    nonisolated static func snapshotDirPath(for contextID: ServerID) -> String {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.path
             ?? NSHomeDirectory() + "/Library/Caches"
         return base + "/scarf/snapshots/\(contextID.uuidString)"
+    }
+
+    /// Root of the snapshot cache (all servers). Used by the app-launch sweep
+    /// that prunes dirs whose UUID no longer appears in the registry.
+    nonisolated static func snapshotRootPath() -> String {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.path
+            ?? NSHomeDirectory() + "/Library/Caches"
+        return base + "/scarf/snapshots"
+    }
+
+    /// Remove the snapshot directory for a server (no-op if absent). Called
+    /// on `removeServer` and on app-launch for orphaned dirs.
+    static func pruneSnapshotCache(for contextID: ServerID) {
+        let dir = snapshotDirPath(for: contextID)
+        try? FileManager.default.removeItem(atPath: dir)
+    }
+
+    /// Walk the snapshot root and delete any directory whose UUID isn't in
+    /// `keep`. Called once at app launch so snapshots from servers the user
+    /// removed while the app was closed don't linger.
+    static func sweepOrphanSnapshots(keeping keep: Set<ServerID>) {
+        let root = snapshotRootPath()
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: root) else { return }
+        for name in entries {
+            if let id = ServerID(uuidString: name), keep.contains(id) { continue }
+            try? FileManager.default.removeItem(atPath: root + "/" + name)
+        }
+    }
+
+    /// Ask OpenSSH to shut down this host's ControlMaster socket, so the TCP
+    /// session isn't held open after the user removes this server. If no
+    /// master is currently running, `ssh -O exit` exits non-zero — we ignore
+    /// the exit code because the desired end state (no master) is reached
+    /// either way.
+    func closeControlMaster() {
+        ensureControlDir()
+        let args = sshArgs(extra: ["-O", "exit", hostSpec])
+        _ = try? runLocal(executable: sshBinary, args: args, stdin: nil, timeout: 10)
     }
 
     /// Common ssh options used by every invocation. Keep every `-o` flag
@@ -68,7 +117,7 @@ struct SSHTransport: ServerTransport {
     ///   process exit rather than a hang.
     /// - `LogLevel=QUIET` suppresses the login banner so ACP's line-delimited
     ///   JSON stays binary-clean.
-    private func sshArgs(extra: [String] = []) -> [String] {
+    nonisolated private func sshArgs(extra: [String] = []) -> [String] {
         var args: [String] = [
             "-o", "ControlMaster=auto",
             "-o", "ControlPath=\(controlDir)/%C",
@@ -91,7 +140,7 @@ struct SSHTransport: ServerTransport {
     /// Ensure the ControlMaster socket directory exists. Called before every
     /// ssh invocation. Cheap — `createDirectory(withIntermediateDirectories: true)`
     /// is a no-op when present.
-    private func ensureControlDir() {
+    nonisolated private func ensureControlDir() {
         try? FileManager.default.createDirectory(atPath: controlDir, withIntermediateDirectories: true)
         // 0700 so socket files aren't visible to other users on the Mac.
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: controlDir)
@@ -100,7 +149,7 @@ struct SSHTransport: ServerTransport {
     /// Shell-quote a single argument for remote execution. The remote shell
     /// receives our argv joined with spaces, so anything containing
     /// whitespace/metacharacters must be quoted to survive that flattening.
-    private static func shellQuote(_ s: String) -> String {
+    nonisolated private static func shellQuote(_ s: String) -> String {
         if s.isEmpty { return "''" }
         // Safe subset: alphanumerics + a few shell-inert characters.
         let safe = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@%+=:,./-_")
@@ -120,7 +169,7 @@ struct SSHTransport: ServerTransport {
     /// Why not single-quote: that would make `$HOME` literal too. We
     /// specifically need partial-expansion semantics, which is what double
     /// quotes give us.
-    private static func remotePathArg(_ path: String) -> String {
+    nonisolated private static func remotePathArg(_ path: String) -> String {
         var p = path
         if p.hasPrefix("~/") {
             p = "$HOME/" + p.dropFirst(2)
@@ -140,7 +189,7 @@ struct SSHTransport: ServerTransport {
     /// single-quoted via `shellQuote` so ssh's argv-join-by-space doesn't
     /// split it across multiple shell tokens on the remote side.
     @discardableResult
-    private func runRemoteShell(_ command: String, timeout: TimeInterval? = 60) throws -> ProcessResult {
+    nonisolated private func runRemoteShell(_ command: String, timeout: TimeInterval? = 60) throws -> ProcessResult {
         var args = sshArgs()
         args.append(hostSpec)
         args.append("sh")
@@ -322,7 +371,7 @@ struct SSHTransport: ServerTransport {
     /// SSH_AUTH_SOCK / SSH_AGENT_PID harvested from the user's login shell.
     /// Without this, GUI-launched Scarf can't reach 1Password / Secretive /
     /// `ssh-add`'d keys that the user's terminal sees fine.
-    private static func sshSubprocessEnvironment() -> [String: String] {
+    nonisolated private static func sshSubprocessEnvironment() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
         let shellEnv = HermesFileService.enrichedEnvironment()
         for key in ["SSH_AUTH_SOCK", "SSH_AGENT_PID"] {
@@ -430,7 +479,7 @@ struct SSHTransport: ServerTransport {
     /// `LocalTransport.runProcess` — duplicated rather than shared because
     /// SSH-specific code paths live on this type and we want all Process
     /// lifecycle in one place per transport.
-    private func runLocal(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+    nonisolated private func runLocal(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
         ensureControlDir()
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: executable)

@@ -17,15 +17,30 @@
   <a href="https://www.buymeacoffee.com/awizemann"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="28"></a>
 </p>
 
-## What's New in 1.6
+## What's New in 2.0
+
+- **Multi-server** — Manage multiple Hermes installations (local + any number of remotes) from one app. Each window binds to one server; open them side-by-side.
+- **Remote Hermes over SSH** — Every feature that worked against your local `~/.hermes/` now works against a remote host. File I/O routes through `scp`/`sftp`; chat ACP runs over `ssh -T`; SQLite is served from atomic `.backup` snapshots pulled on file-watcher ticks.
+- **Chat UX overhaul** — No more white-screen flash on first message, no more scroll jumping into whitespace during streaming, failed prompts explain themselves instead of silently spinning forever.
+- **Correctness pass** — Fixed remote WAL error spam, stale-snapshot session resume, auto-resume of dead cron sessions, 230+ Swift 6 concurrency warnings.
+
+See the full [v2.0.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.0.0).
+
+### Previously, in 1.6
 
 - **Platforms** — Native GUI setup for all 13 messaging platforms, no more hand-editing `.env`
 - **Credential Pools** — Fixed OAuth flow and API-key handling; pick providers from a catalog
 - **Model Picker** — Hierarchical browser backed by the 111-provider models.dev cache
 - **Settings tabs** — 10 organized tabs covering ~60 previously hidden config fields
-- **Configure sidebar** — New section for Personalities, Quick Commands, Plugins, Webhooks, Profiles
+- **Configure sidebar** — Personalities, Quick Commands, Plugins, Webhooks, Profiles
 
-See the full [v1.6.0 release notes](https://github.com/awizemann/scarf/releases/tag/v1.6.0).
+See the [v1.6.0 release notes](https://github.com/awizemann/scarf/releases/tag/v1.6.0) for the full 1.6 series.
+
+## Multi-server, one window per server
+
+Scarf 2.0 is a multi-window app. Each window is bound to exactly one Hermes server — your local `~/.hermes/` is synthesized automatically, and you can add remotes via **File → Open Server…** → **Add Server** (host, user, port, optional identity file). Open a second window for a different server and the two run side-by-side with independent state.
+
+Remote Hermes is reached over system SSH — the same `~/.ssh/config`, ssh-agent, ProxyJump, and ControlMaster pooling your terminal uses. File I/O flows through `scp`/`sftp`; SQLite is served from atomic `sqlite3 .backup` snapshots cached under `~/Library/Caches/scarf/snapshots/<server-id>/`; chat (ACP) tunnels as `ssh -T host -- hermes acp` with JSON-RPC over stdio end-to-end. Everything in the feature list below works against remote identically to local.
 
 ## Features
 
@@ -77,7 +92,8 @@ Custom, agent-generated dashboards for any project. Define stat boxes, charts, t
 
 - macOS 14.6+ (Sonoma)
 - Xcode 16.0+
-- [Hermes agent](https://github.com/hermes-ai/hermes-agent) v0.6.0+ installed at `~/.hermes/` (v0.9.0 recommended for full feature support)
+- [Hermes agent](https://github.com/hermes-ai/hermes-agent) v0.6.0+ installed at `~/.hermes/` on each target host (v0.9.0+ recommended for full feature support)
+- For remote servers: SSH access (key-based), `sqlite3` on the remote (for atomic DB snapshots), and the `hermes` CLI resolvable from the remote user's `PATH` or at a path you specify per server.
 
 ### Compatibility
 
@@ -88,9 +104,10 @@ Scarf reads Hermes's SQLite database and parses CLI output from `hermes status`,
 | v0.6.0 (2026-03-30) | Verified |
 | v0.7.0 (2026-04-03) | Verified |
 | v0.8.0 (2026-04-08) | Verified |
-| v0.9.0 (2026-04-13) | Verified (recommended for full 1.6 feature support) |
+| v0.9.0 (2026-04-13) | Verified |
+| v0.10.0 (2026-04-18) | Verified (recommended for full 2.0 feature support) |
 
-Scarf 1.6 targets Hermes v0.9.0 specifically for the new Platforms, Credentials, Skills Hub, and Cron write features. Earlier Hermes versions remain supported for the monitoring and session features but may not expose every new setup form.
+Scarf 2.0 targets Hermes v0.10.0 for the ACP session/fork/list/resume capabilities used by remote chat. Earlier Hermes versions remain supported for monitoring, sessions, and file-based features; ACP-specific behavior may gracefully degrade on older agents.
 
 If a Hermes update changes the database schema or CLI output format, Scarf may need to be updated. Check the [Health](#features) view for compatibility warnings.
 

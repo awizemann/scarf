@@ -24,7 +24,7 @@ struct HermesEnvService: Sendable {
     let path: String
     let transport: any ServerTransport
 
-    init(context: ServerContext = .local) {
+    nonisolated init(context: ServerContext = .local) {
         self.path = context.paths.envFile
         self.transport = context.makeTransport()
     }

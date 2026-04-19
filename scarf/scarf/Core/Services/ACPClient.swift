@@ -436,14 +436,14 @@ actor ACPClient {
                     guard !lineData.isEmpty else { continue }
 
                     if let lineStr = String(data: lineData, encoding: .utf8) {
-                        await self?.logger.debug("ACP recv: \(lineStr.prefix(200))")
+                        self?.logger.debug("ACP recv: \(lineStr.prefix(200))")
                     }
 
                     do {
                         let message = try JSONDecoder().decode(ACPRawMessage.self, from: lineData)
                         await self?.handleMessage(message)
                     } catch {
-                        await self?.logger.warning("Failed to decode ACP message: \(error.localizedDescription)")
+                        self?.logger.warning("Failed to decode ACP message: \(error.localizedDescription)")
                     }
                 }
             }
@@ -459,7 +459,7 @@ actor ACPClient {
                 if data.isEmpty { break }
                 if let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !text.isEmpty {
-                    await self?.logger.info("ACP stderr: \(text.prefix(500))")
+                    self?.logger.info("ACP stderr: \(text.prefix(500))")
                     await self?.appendStderr(text)
                 }
             }

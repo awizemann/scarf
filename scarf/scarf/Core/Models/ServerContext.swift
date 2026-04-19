@@ -42,6 +42,15 @@ enum ServerKind: Sendable, Hashable, Codable {
 /// every service and ViewModel in Phase 1. One `ServerContext` corresponds to
 /// one Hermes installation; multi-window scenes in Phase 3 will construct
 /// one per window.
+///
+/// **Why every member is `nonisolated`.** This file imports `AppKit`
+/// (`NSWorkspace.shared.open` in `openInLocalEditor`), which under Swift 6's
+/// upcoming default-isolation rules pulls the whole struct to `@MainActor`.
+/// `ServerContext` is a plain `Sendable` value — accessing `.local`, `.paths`,
+/// `.isRemote`, or `makeTransport()` from a background actor must not trap
+/// the caller into hopping MainActor. `nonisolated` on each member keeps
+/// them callable from any context; the one MainActor-dependent method
+/// (`openInLocalEditor`) lives in the extension below.
 struct ServerContext: Sendable, Hashable, Identifiable {
     let id: ServerID
     var displayName: String
@@ -49,7 +58,7 @@ struct ServerContext: Sendable, Hashable, Identifiable {
 
     /// Path layout for this server. Cheap — all path components are computed
     /// on demand from `home`, no I/O.
-    var paths: HermesPathSet {
+    nonisolated var paths: HermesPathSet {
         switch kind {
         case .local:
             return HermesPathSet(
@@ -66,7 +75,7 @@ struct ServerContext: Sendable, Hashable, Identifiable {
         }
     }
 
-    var isRemote: Bool {
+    nonisolated var isRemote: Bool {
         if case .ssh = kind { return true }
         return false
     }
@@ -75,7 +84,7 @@ struct ServerContext: Sendable, Hashable, Identifiable {
     /// a `LocalTransport`; SSH contexts get an `SSHTransport` configured
     /// from `SSHConfig`. Each call returns a fresh value — transports are
     /// cheap and stateless beyond disk caches.
-    func makeTransport() -> any ServerTransport {
+    nonisolated func makeTransport() -> any ServerTransport {
         switch kind {
         case .local:
             return LocalTransport(contextID: id)
@@ -90,15 +99,70 @@ struct ServerContext: Sendable, Hashable, Identifiable {
     /// local context has the same identity across launches, and so persisted
     /// window-state restorations that reference it continue to resolve even
     /// if `servers.json` hasn't been touched yet.
-    private static let localID = ServerID(uuidString: "00000000-0000-0000-0000-000000000001")!
+    nonisolated private static let localID = ServerID(uuidString: "00000000-0000-0000-0000-000000000001")!
 
     /// The default "this machine" context. Used everywhere in Phase 0/1 and
     /// remains the fallback when no remote server is selected.
-    static let local = ServerContext(
+    nonisolated static let local = ServerContext(
         id: localID,
         displayName: "Local",
         kind: .local
     )
+}
+
+// MARK: - Remote user-home resolution
+
+/// Process-wide cache of each server's resolved user `$HOME`. Probed once per
+/// `ServerID` via the transport, then memoized for the app's lifetime — home
+/// directories don't change under us, and the probe is a ~5ms SSH round-trip
+/// with ControlMaster. Used by anything that needs to hand a working
+/// directory to the ACP agent or the Hermes CLI on the correct host.
+private actor UserHomeCache {
+    static let shared = UserHomeCache()
+    private var cache: [ServerID: String] = [:]
+
+    func resolve(for context: ServerContext) async -> String {
+        if let cached = cache[context.id] { return cached }
+        let resolved = await probe(context: context)
+        cache[context.id] = resolved
+        return resolved
+    }
+
+    func invalidate(contextID: ServerID) {
+        cache.removeValue(forKey: contextID)
+    }
+
+    private func probe(context: ServerContext) async -> String {
+        if !context.isRemote { return NSHomeDirectory() }
+        let transport = context.makeTransport()
+        let result = try? transport.runProcess(
+            executable: "/bin/sh",
+            args: ["-c", "echo $HOME"],
+            stdin: nil,
+            timeout: 10
+        )
+        let out = result?.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // Fall back to `~` (unexpanded) so ACP at least gets a plausible cwd
+        // rather than a local Mac path. The remote side will expand it if
+        // passed through a shell; if not, failures are surfaced by ACP itself.
+        return out.isEmpty ? "~" : out
+    }
+}
+
+extension ServerContext {
+    /// Resolved absolute path to the user's home directory on the target host.
+    /// Local: `NSHomeDirectory()`. Remote: probed `$HOME` over SSH, cached.
+    /// Use this — not `NSHomeDirectory()` — whenever you're passing a `cwd`
+    /// or user path to a process that runs on the target host.
+    func resolvedUserHome() async -> String {
+        await UserHomeCache.shared.resolve(for: self)
+    }
+
+    /// Called when a server is removed from the registry, so the process-wide
+    /// caches keyed by `ServerID` don't hold stale entries forever.
+    static func invalidateCaches(for contextID: ServerID) async {
+        await UserHomeCache.shared.invalidate(contextID: contextID)
+    }
 }
 
 // MARK: - Convenience file I/O via the right transport
@@ -114,20 +178,20 @@ struct ServerContext: Sendable, Hashable, Identifiable {
 extension ServerContext {
     /// Read a UTF-8 text file. `nil` on any error (missing, transport down,
     /// invalid encoding).
-    func readText(_ path: String) -> String? {
+    nonisolated func readText(_ path: String) -> String? {
         guard let data = try? makeTransport().readFile(path) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
     /// Read raw bytes. `nil` on any error.
-    func readData(_ path: String) -> Data? {
+    nonisolated func readData(_ path: String) -> Data? {
         try? makeTransport().readFile(path)
     }
 
     /// Atomic write. Returns `true` on success, `false` on any error
     /// (caller is expected to surface failures via UI when relevant).
     @discardableResult
-    func writeText(_ path: String, content: String) -> Bool {
+    nonisolated func writeText(_ path: String, content: String) -> Bool {
         guard let data = content.data(using: .utf8) else { return false }
         do {
             try makeTransport().writeFile(path, data: data)
@@ -138,12 +202,12 @@ extension ServerContext {
     }
 
     /// Existence check. Local: `FileManager`. Remote: `ssh test -e`.
-    func fileExists(_ path: String) -> Bool {
+    nonisolated func fileExists(_ path: String) -> Bool {
         makeTransport().fileExists(path)
     }
 
     /// File modification timestamp, or `nil` if the file doesn't exist.
-    func modificationDate(_ path: String) -> Date? {
+    nonisolated func modificationDate(_ path: String) -> Date? {
         makeTransport().stat(path)?.mtime
     }
 
@@ -153,7 +217,7 @@ extension ServerContext {
     /// to fire off a CLI command — never spawn `hermes` via `Process()`
     /// directly, because that path bypasses the transport for remote.
     @discardableResult
-    func runHermes(_ args: [String], timeout: TimeInterval = 60, stdin: String? = nil) -> (output: String, exitCode: Int32) {
+    nonisolated func runHermes(_ args: [String], timeout: TimeInterval = 60, stdin: String? = nil) -> (output: String, exitCode: Int32) {
         let result = HermesFileService(context: self).runHermesCLI(args: args, timeout: timeout, stdinInput: stdin)
         return (result.output, result.exitCode)
     }
