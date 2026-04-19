@@ -5,6 +5,12 @@ import Foundation
 @Observable
 @MainActor
 final class EmailSetupViewModel {
+    let context: ServerContext
+
+    init(context: ServerContext = .local) {
+        self.context = context
+    }
+
     var address: String = ""
     var password: String = ""
     var imapHost: String = ""
@@ -34,7 +40,7 @@ final class EmailSetupViewModel {
     ]
 
     func load() {
-        let env = HermesEnvService().load()
+        let env = HermesEnvService(context: context).load()
         address = env["EMAIL_ADDRESS"] ?? ""
         password = env["EMAIL_PASSWORD"] ?? ""
         imapHost = env["EMAIL_IMAP_HOST"] ?? ""
@@ -46,7 +52,7 @@ final class EmailSetupViewModel {
         homeAddress = env["EMAIL_HOME_ADDRESS"] ?? ""
         allowAllUsers = PlatformSetupHelpers.parseEnvBool(env["EMAIL_ALLOW_ALL_USERS"])
         // skip_attachments lives in config.yaml.
-        let yaml = (try? String(contentsOfFile: HermesPaths.configYAML, encoding: .utf8)) ?? ""
+        let yaml = context.readText(context.paths.configYAML) ?? ""
         let parsed = HermesFileService.parseNestedYAML(yaml)
         skipAttachments = (parsed.values["platforms.email.skip_attachments"] ?? "false") == "true"
     }
@@ -72,7 +78,7 @@ final class EmailSetupViewModel {
         let configKV: [String: String] = [
             "platforms.email.skip_attachments": PlatformSetupHelpers.envBool(skipAttachments)
         ]
-        message = PlatformSetupHelpers.saveForm(envPairs: envPairs, configKV: configKV)
+        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             self?.message = nil
         }

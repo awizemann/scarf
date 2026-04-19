@@ -13,7 +13,14 @@ struct HermesWebhook: Identifiable, Sendable, Equatable {
 @Observable
 final class WebhooksViewModel {
     private let logger = Logger(subsystem: "com.scarf", category: "WebhooksViewModel")
-    private let fileService = HermesFileService()
+    let context: ServerContext
+    private let fileService: HermesFileService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.fileService = HermesFileService(context: context)
+    }
+
 
     var webhooks: [HermesWebhook] = []
     var isLoading = false

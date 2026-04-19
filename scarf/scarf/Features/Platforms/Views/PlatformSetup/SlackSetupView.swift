@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct SlackSetupView: View {
-    @State private var viewModel = SlackSetupViewModel()
+    @State private var viewModel: SlackSetupViewModel
+    init(context: ServerContext) { _viewModel = State(initialValue: SlackSetupViewModel(context: context)) }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

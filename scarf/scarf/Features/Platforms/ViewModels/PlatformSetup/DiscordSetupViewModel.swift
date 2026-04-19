@@ -6,6 +6,9 @@ import os
 @Observable
 @MainActor
 final class DiscordSetupViewModel {
+    let context: ServerContext
+    init(context: ServerContext = .local) { self.context = context }
+
     var botToken: String = ""
     var allowedUsers: String = ""
     var homeChannel: String = ""
@@ -26,7 +29,7 @@ final class DiscordSetupViewModel {
     let replyToModeOptions = ["off", "first", "all"]
 
     func load() {
-        let env = HermesEnvService().load()
+        let env = HermesEnvService(context: context).load()
         botToken = env["DISCORD_BOT_TOKEN"] ?? ""
         allowedUsers = env["DISCORD_ALLOWED_USERS"] ?? ""
         homeChannel = env["DISCORD_HOME_CHANNEL"] ?? ""
@@ -34,7 +37,7 @@ final class DiscordSetupViewModel {
         allowBots = env["DISCORD_ALLOW_BOTS"] ?? "none"
         replyToMode = env["DISCORD_REPLY_TO_MODE"] ?? "first"
 
-        let cfg = HermesFileService().loadConfig().discord
+        let cfg = HermesFileService(context: context).loadConfig().discord
         requireMention = cfg.requireMention
         freeResponseChannels = cfg.freeResponseChannels
         autoThread = cfg.autoThread
@@ -56,7 +59,7 @@ final class DiscordSetupViewModel {
             "discord.auto_thread": PlatformSetupHelpers.envBool(autoThread),
             "discord.reactions": PlatformSetupHelpers.envBool(reactions)
         ]
-        message = PlatformSetupHelpers.saveForm(envPairs: envPairs, configKV: configKV)
+        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             self?.message = nil
         }

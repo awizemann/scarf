@@ -1,8 +1,13 @@
 import SwiftUI
 
 struct MemoryView: View {
-    @State private var viewModel = MemoryViewModel()
+    @State private var viewModel: MemoryViewModel
     @Environment(HermesFileWatcher.self) private var fileWatcher
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: MemoryViewModel(context: context))
+    }
+
 
     var body: some View {
         ScrollView {
@@ -43,6 +48,11 @@ struct MemoryView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .navigationTitle("Memory")
+        .loadingOverlay(
+            viewModel.isLoading,
+            label: "Loading memory…",
+            isEmpty: viewModel.memoryContent.isEmpty && viewModel.userContent.isEmpty
+        )
         .onAppear { viewModel.load() }
         .onChange(of: fileWatcher.lastChangeDate) {
             viewModel.load()

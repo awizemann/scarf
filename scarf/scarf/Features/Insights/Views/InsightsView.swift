@@ -1,8 +1,13 @@
 import SwiftUI
 
 struct InsightsView: View {
-    @State private var viewModel = InsightsViewModel()
+    @State private var viewModel: InsightsViewModel
     @Environment(AppCoordinator.self) private var coordinator
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: InsightsViewModel(context: context))
+    }
+
 
     var body: some View {
         ScrollView {

@@ -2,10 +2,18 @@ import Foundation
 
 struct HermesFileService: Sendable {
 
+    let context: ServerContext
+    let transport: any ServerTransport
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.transport = context.makeTransport()
+    }
+
     // MARK: - Config
 
     func loadConfig() -> HermesConfig {
-        guard let content = readFile(HermesPaths.configYAML) else { return .empty }
+        guard let content = readFile(context.paths.configYAML) else { return .empty }
         return parseConfig(content)
     }
 
@@ -373,7 +381,7 @@ struct HermesFileService: Sendable {
     // MARK: - Gateway State
 
     func loadGatewayState() -> GatewayState? {
-        guard let data = readFileData(HermesPaths.gatewayStateJSON) else { return nil }
+        guard let data = readFileData(context.paths.gatewayStateJSON) else { return nil }
         do {
             return try JSONDecoder().decode(GatewayState.self, from: data)
         } catch {
@@ -385,12 +393,10 @@ struct HermesFileService: Sendable {
     // MARK: - Memory
 
     func loadMemoryProfiles() -> [String] {
-        let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(atPath: HermesPaths.memoriesDir) else { return [] }
+        guard let entries = try? transport.listDirectory(context.paths.memoriesDir) else { return [] }
         return entries.filter { name in
-            var isDir: ObjCBool = false
-            let path = HermesPaths.memoriesDir + "/" + name
-            return fm.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
+            let path = context.paths.memoriesDir + "/" + name
+            return transport.stat(path)?.isDirectory == true
         }.sorted()
     }
 
@@ -416,15 +422,15 @@ struct HermesFileService: Sendable {
 
     private func memoryPath(profile: String, file: String) -> String {
         if profile.isEmpty {
-            return HermesPaths.memoriesDir + "/" + file
+            return context.paths.memoriesDir + "/" + file
         }
-        return HermesPaths.memoriesDir + "/" + profile + "/" + file
+        return context.paths.memoriesDir + "/" + profile + "/" + file
     }
 
     // MARK: - Cron
 
     func loadCronJobs() -> [HermesCronJob] {
-        guard let data = readFileData(HermesPaths.cronJobsJSON) else { return [] }
+        guard let data = readFileData(context.paths.cronJobsJSON) else { return [] }
         do {
             let file = try JSONDecoder().decode(CronJobsFile.self, from: data)
             return file.jobs
@@ -435,9 +441,8 @@ struct HermesFileService: Sendable {
     }
 
     func loadCronOutput(jobId: String) -> String? {
-        let dir = HermesPaths.cronOutputDir
-        let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(atPath: dir) else { return nil }
+        let dir = context.paths.cronOutputDir
+        guard let files = try? transport.listDirectory(dir) else { return nil }
         let matching = files.filter { $0.contains(jobId) }.sorted().last
         guard let filename = matching else { return nil }
         return readFile(dir + "/" + filename)
@@ -446,21 +451,18 @@ struct HermesFileService: Sendable {
     // MARK: - Skills
 
     func loadSkills() -> [HermesSkillCategory] {
-        let dir = HermesPaths.skillsDir
-        let fm = FileManager.default
-        guard let categories = try? fm.contentsOfDirectory(atPath: dir) else { return [] }
+        let dir = context.paths.skillsDir
+        guard let categories = try? transport.listDirectory(dir) else { return [] }
 
         return categories.sorted().compactMap { categoryName in
             let categoryPath = dir + "/" + categoryName
-            var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: categoryPath, isDirectory: &isDir), isDir.boolValue else { return nil }
-            guard let skillNames = try? fm.contentsOfDirectory(atPath: categoryPath) else { return nil }
+            guard transport.stat(categoryPath)?.isDirectory == true else { return nil }
+            guard let skillNames = try? transport.listDirectory(categoryPath) else { return nil }
 
             let skills = skillNames.sorted().compactMap { skillName -> HermesSkill? in
                 let skillPath = categoryPath + "/" + skillName
-                var isSkillDir: ObjCBool = false
-                guard fm.fileExists(atPath: skillPath, isDirectory: &isSkillDir), isSkillDir.boolValue else { return nil }
-                let files = (try? fm.contentsOfDirectory(atPath: skillPath)) ?? []
+                guard transport.stat(skillPath)?.isDirectory == true else { return nil }
+                let files = (try? transport.listDirectory(skillPath)) ?? []
                 let requiredConfig = parseSkillRequiredConfig(skillPath + "/skill.yaml")
                 return HermesSkill(
                     id: categoryName + "/" + skillName,
@@ -488,7 +490,7 @@ struct HermesFileService: Sendable {
     }
 
     private func isValidSkillPath(_ path: String) -> Bool {
-        guard !path.contains(".."), path.hasPrefix(HermesPaths.skillsDir) else {
+        guard !path.contains(".."), path.hasPrefix(context.paths.skillsDir) else {
             print("[Scarf] Rejected skill path outside skills directory: \(path)")
             return false
         }
@@ -522,12 +524,11 @@ struct HermesFileService: Sendable {
     // MARK: - MCP Servers
 
     func loadMCPServers() -> [HermesMCPServer] {
-        guard let yaml = readFile(HermesPaths.configYAML) else { return [] }
+        guard let yaml = readFile(context.paths.configYAML) else { return [] }
         let parsed = parseMCPServersBlock(yaml: yaml)
-        let fm = FileManager.default
         return parsed.map { server in
-            let tokenPath = HermesPaths.mcpTokensDir + "/" + server.name + ".json"
-            let hasToken = fm.fileExists(atPath: tokenPath)
+            let tokenPath = context.paths.mcpTokensDir + "/" + server.name + ".json"
+            let hasToken = transport.fileExists(tokenPath)
             guard hasToken != server.hasOAuthToken else { return server }
             return HermesMCPServer(
                 name: server.name,
@@ -674,9 +675,9 @@ struct HermesFileService: Sendable {
 
     @discardableResult
     func deleteMCPOAuthToken(name: String) -> Bool {
-        let path = HermesPaths.mcpTokensDir + "/" + name + ".json"
+        let path = context.paths.mcpTokensDir + "/" + name + ".json"
         do {
-            try FileManager.default.removeItem(atPath: path)
+            try transport.removeFile(path)
             return true
         } catch {
             return false
@@ -876,7 +877,7 @@ struct HermesFileService: Sendable {
     // MARK: - MCP YAML: surgical patcher
 
     private func patchMCPServerField(name: String, mutate: (inout [String]) -> Void) -> Bool {
-        guard let yaml = readFile(HermesPaths.configYAML) else { return false }
+        guard let yaml = readFile(context.paths.configYAML) else { return false }
         let location = extractMCPBlock(yaml: yaml)
         guard !location.block.isEmpty else { return false }
 
@@ -925,7 +926,7 @@ struct HermesFileService: Sendable {
         combined.append(contentsOf: block)
         combined.append(contentsOf: location.suffix)
         let newYAML = combined.joined(separator: "\n")
-        writeFile(HermesPaths.configYAML, content: newYAML)
+        writeFile(context.paths.configYAML, content: newYAML)
         return true
     }
 
@@ -1172,23 +1173,22 @@ struct HermesFileService: Sendable {
     }
 
     func hermesPID() -> pid_t? {
-        let pipe = Pipe()
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        process.arguments = ["-f", "hermes"]
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-            guard let firstLine = output.components(separatedBy: "\n").first(where: { !$0.isEmpty }),
-                  let pid = pid_t(firstLine.trimmingCharacters(in: .whitespaces)) else { return nil }
-            return pid
-        } catch {
-            return nil
-        }
+        // Run `pgrep -f hermes` either locally or via the transport. On
+        // remote hosts we trust `pgrep` to be present — it's standard on
+        // Linux and macOS. On failure we conservatively return nil rather
+        // than pretending Hermes is down: the caller will see
+        // isHermesRunning==false, which is already the "unknown" UX.
+        let result = try? transport.runProcess(
+            executable: "/usr/bin/pgrep",
+            args: ["-f", "hermes"],
+            stdin: nil,
+            timeout: 5
+        )
+        guard let result, let firstLine = result.stdoutString
+            .components(separatedBy: "\n")
+            .first(where: { !$0.isEmpty }),
+              let pid = pid_t(firstLine.trimmingCharacters(in: .whitespaces)) else { return nil }
+        return pid
     }
 
     @discardableResult
@@ -1199,14 +1199,25 @@ struct HermesFileService: Sendable {
             return true
         }
         guard let pid = hermesPID() else { return false }
+        // For remote we can't issue a raw `kill(2)` — route through `kill(1)`
+        // via the transport. Local uses the syscall for its minimal overhead.
+        if context.isRemote {
+            let result = try? transport.runProcess(
+                executable: "/bin/kill",
+                args: ["-TERM", String(pid)],
+                stdin: nil,
+                timeout: 5
+            )
+            return (result?.exitCode ?? -1) == 0
+        }
         return kill(pid, SIGTERM) == 0
     }
 
     nonisolated func hermesBinaryPath() -> String? {
         // Single source of truth for install-location candidates lives in
-        // HermesPaths.hermesBinaryCandidates — keeps pipx/brew/manual lookups
+        // HermesPathSet.hermesBinaryCandidates — keeps pipx/brew/manual lookups
         // consistent across the app.
-        return HermesPaths.hermesBinaryCandidates
+        return HermesPathSet.hermesBinaryCandidates
             .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
@@ -1223,7 +1234,13 @@ struct HermesFileService: Sendable {
         "OPENROUTER_API_KEY",
         "GEMINI_API_KEY", "GOOGLE_API_KEY",
         "GROQ_API_KEY", "MISTRAL_API_KEY", "XAI_API_KEY",
-        "CLAUDE_CODE_OAUTH_TOKEN"
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        // SSH agent socket — set by 1Password / Secretive / a manual
+        // `ssh-add` in the user's shell rc. GUI-launched apps don't inherit
+        // these by default, so without harvesting them here, `ssh` spawned
+        // from Scarf can't reach the agent and authentication fails with
+        // "Permission denied" (exit 255) even though terminal ssh works.
+        "SSH_AUTH_SOCK", "SSH_AGENT_PID"
     ]
 
     /// Env vars harvested from the user's login shell. Computed once and cached.
@@ -1366,19 +1383,27 @@ struct HermesFileService: Sendable {
     ///      delegation tasks
     /// Used by Chat to warn the user before `hermes acp` fails on send with
     /// "No Anthropic credentials found".
-    nonisolated static func hasAnyAICredential() -> Bool {
-        let credentialKeys = shellEnvKeys.filter { $0 != "PATH" && $0 != "ANTHROPIC_BASE_URL" && $0 != "OPENAI_BASE_URL" }
-        let env = enrichedEnvironment()
-        for key in credentialKeys {
-            if let value = env[key], !value.isEmpty {
-                return true
+    ///
+    /// **Local context:** also checks Scarf's process / login-shell env.
+    /// **Remote context:** skips that step — our process env has nothing to
+    /// do with the remote `hermes acp`'s runtime env. The remote `.env` /
+    /// `auth.json` / `config.yaml` are still checked through the transport.
+    func hasAnyAICredential() -> Bool {
+        let credentialKeys = Self.shellEnvKeys.filter { $0 != "PATH" && $0 != "ANTHROPIC_BASE_URL" && $0 != "OPENAI_BASE_URL" }
+
+        if !context.isRemote {
+            let env = Self.enrichedEnvironment()
+            for key in credentialKeys {
+                if let value = env[key], !value.isEmpty {
+                    return true
+                }
             }
         }
-        // Scan ~/.hermes/.env for KEY= lines. Uses a simple substring check —
-        // good enough for a preflight hint; hermes itself does the real parse.
-        let envPath = HermesPaths.home + "/.env"
-        if let data = try? String(contentsOfFile: envPath, encoding: .utf8) {
-            for line in data.split(separator: "\n") {
+        // Scan .env (via transport — local file or scp) for KEY= lines.
+        // Uses a simple substring check — good enough for a preflight hint;
+        // hermes itself does the real parse.
+        if let envText = readFile(context.paths.envFile) {
+            for line in envText.split(separator: "\n") {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
                 for key in credentialKeys where trimmed.hasPrefix("\(key)=") || trimmed.hasPrefix("export \(key)=") {
@@ -1392,12 +1417,11 @@ struct HermesFileService: Sendable {
                 }
             }
         }
-        // Scan ~/.hermes/auth.json — the Credential Pools file written by the
-        // Configure → Credential Pools UI. Schema is
+        // Scan auth.json (Credential Pools file written by the Configure →
+        // Credential Pools UI). Schema:
         //   { "credential_pool": { "<provider>": [ { "access_token": "...", ... }, ... ] } }
         // Defensive parse: any malformed input falls through to the next check.
-        let authPath = HermesPaths.home + "/auth.json"
-        if let data = try? Data(contentsOf: URL(fileURLWithPath: authPath)),
+        if let data = readFileData(context.paths.authJSON),
            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let pool = root["credential_pool"] as? [String: Any] {
             for (_, entries) in pool {
@@ -1409,11 +1433,10 @@ struct HermesFileService: Sendable {
                 }
             }
         }
-        // Scan ~/.hermes/config.yaml for `api_key:` lines with a non-empty
-        // value. Covers both `auxiliary.<task>.api_key` and `delegation.api_key`
-        // without needing to parse the YAML structure — any leaf `api_key: ...`
-        // with a value means Hermes has a credential to fall back on.
-        if let text = try? String(contentsOfFile: HermesPaths.configYAML, encoding: .utf8) {
+        // Scan config.yaml for `api_key:` lines with a non-empty value.
+        // Covers both `auxiliary.<task>.api_key` and `delegation.api_key`
+        // without needing to parse YAML structure.
+        if let text = readFile(context.paths.configYAML) {
             for line in text.split(separator: "\n") {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 guard trimmed.hasPrefix("api_key:") else { continue }
@@ -1427,41 +1450,36 @@ struct HermesFileService: Sendable {
 
     @discardableResult
     nonisolated func runHermesCLI(args: [String], timeout: TimeInterval = 60, stdinInput: String? = nil) -> (exitCode: Int32, output: String) {
-        guard let binary = hermesBinaryPath() else { return (-1, "") }
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        let stdinPipe: Pipe? = stdinInput != nil ? Pipe() : nil
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: binary)
-        process.arguments = args
-        process.environment = Self.enrichedEnvironment()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-        if let stdinPipe { process.standardInput = stdinPipe }
-        defer {
-            try? stdoutPipe.fileHandleForReading.close()
-            try? stdoutPipe.fileHandleForWriting.close()
-            try? stderrPipe.fileHandleForReading.close()
-            try? stderrPipe.fileHandleForWriting.close()
-            try? stdinPipe?.fileHandleForReading.close()
-            try? stdinPipe?.fileHandleForWriting.close()
+        // Resolve the executable path — for remote, prefer the cached
+        // `hermesBinaryHint` on the SSHConfig (populated by the Test
+        // Connection probe) and fall back to bare `hermes` which relies on
+        // the remote user's `$PATH`.
+        let binary: String
+        if context.isRemote {
+            binary = context.paths.hermesBinary
+        } else {
+            guard let local = hermesBinaryPath() else { return (-1, "") }
+            binary = local
         }
+
+        let stdinData = stdinInput?.data(using: .utf8)
         do {
-            try process.run()
-            if let stdinInput, let stdinPipe, let data = stdinInput.data(using: .utf8) {
-                stdinPipe.fileHandleForWriting.write(data)
-                try? stdinPipe.fileHandleForWriting.close()
-            }
-            let deadline = Date().addingTimeInterval(timeout)
-            while process.isRunning && Date() < deadline {
-                Thread.sleep(forTimeInterval: 0.05)
-            }
-            if process.isRunning { process.terminate() }
-            process.waitUntilExit()
-            let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-            let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-            let combined = (String(data: outData, encoding: .utf8) ?? "") + (String(data: errData, encoding: .utf8) ?? "")
-            return (process.terminationStatus, combined)
+            let result = try transport.runProcess(
+                executable: binary,
+                args: args,
+                stdin: stdinData,
+                timeout: timeout
+            )
+            // Match the legacy signature: combined stdout+stderr in one
+            // String so callers that grep through output don't need to
+            // change. Stderr after stdout mirrors what the old Process impl
+            // produced since both pipes were drained in that order.
+            let combined = result.stdoutString + result.stderrString
+            return (result.exitCode, combined)
+        } catch let error as TransportError {
+            return (-1, error.diagnosticStderr.isEmpty
+                ? (error.errorDescription ?? "transport error")
+                : error.diagnosticStderr)
         } catch {
             return (-1, error.localizedDescription)
         }
@@ -1469,17 +1487,26 @@ struct HermesFileService: Sendable {
 
     // MARK: - File I/O
 
+    /// Read a UTF-8 text file through the transport. Missing files and any
+    /// transport error surface as `nil` — callers treat missing/unreadable
+    /// the same way they always have.
     private func readFile(_ path: String) -> String? {
-        try? String(contentsOfFile: path, encoding: .utf8)
+        guard let data = try? transport.readFile(path) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     private func readFileData(_ path: String) -> Data? {
-        FileManager.default.contents(atPath: path)
+        try? transport.readFile(path)
     }
 
+    /// Write a UTF-8 text file atomically through the transport. Matches the
+    /// old pre-transport behavior (print + swallow on error) because the
+    /// callers don't have a UI path for surfacing I/O failures — that's
+    /// planned for Phase 4.
     private func writeFile(_ path: String, content: String) {
+        guard let data = content.data(using: .utf8) else { return }
         do {
-            try content.write(toFile: path, atomically: true, encoding: .utf8)
+            try transport.writeFile(path, data: data)
         } catch {
             print("[Scarf] Failed to write \(path): \(error.localizedDescription)")
         }

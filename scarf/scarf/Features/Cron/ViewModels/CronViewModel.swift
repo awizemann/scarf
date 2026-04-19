@@ -5,7 +5,14 @@ import os
 @Observable
 final class CronViewModel {
     private let logger = Logger(subsystem: "com.scarf", category: "CronViewModel")
-    private let fileService = HermesFileService()
+    let context: ServerContext
+    private let fileService: HermesFileService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.fileService = HermesFileService(context: context)
+    }
+
 
     var jobs: [HermesCronJob] = []
     var selectedJob: HermesCronJob?
@@ -14,19 +21,37 @@ final class CronViewModel {
     var message: String?
     var showCreateSheet = false
     var editingJob: HermesCronJob?
+    var isLoading = false
 
     func load() {
-        jobs = fileService.loadCronJobs()
-        availableSkills = fileService.loadSkills().flatMap { $0.skills.map(\.id) }.sorted()
-        if let selected = selectedJob, let refreshed = jobs.first(where: { $0.id == selected.id }) {
-            selectedJob = refreshed
-            jobOutput = fileService.loadCronOutput(jobId: refreshed.id)
+        isLoading = true
+        let svc = fileService
+        let selectedID = selectedJob?.id
+        Task.detached { [weak self] in
+            // Three sync transport ops on remote — keep them off main.
+            let jobs = svc.loadCronJobs()
+            let skills = svc.loadSkills().flatMap { $0.skills.map(\.id) }.sorted()
+            let refreshed = selectedID.flatMap { id in jobs.first(where: { $0.id == id }) }
+            let output = refreshed.flatMap { svc.loadCronOutput(jobId: $0.id) }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.jobs = jobs
+                self.availableSkills = skills
+                if let refreshed { self.selectedJob = refreshed }
+                if output != nil { self.jobOutput = output }
+                self.isLoading = false
+            }
         }
     }
 
     func selectJob(_ job: HermesCronJob) {
         selectedJob = job
-        jobOutput = fileService.loadCronOutput(jobId: job.id)
+        let svc = fileService
+        let jobID = job.id
+        Task.detached { [weak self] in
+            let output = svc.loadCronOutput(jobId: jobID)
+            await MainActor.run { [weak self] in self?.jobOutput = output }
+        }
     }
 
     // MARK: - CLI wrappers

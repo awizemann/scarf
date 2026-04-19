@@ -13,59 +13,67 @@ struct HermesPlugin: Identifiable, Sendable, Equatable {
 @Observable
 final class PluginsViewModel {
     private let logger = Logger(subsystem: "com.scarf", category: "PluginsViewModel")
-    private let fileService = HermesFileService()
+    let context: ServerContext
+    private let fileService: HermesFileService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.fileService = HermesFileService(context: context)
+    }
 
     var plugins: [HermesPlugin] = []
     var isLoading = false
     var message: String?
 
-    private var pluginsDir: String { HermesPaths.home + "/plugins" }
+    private var pluginsDir: String { context.paths.pluginsDir }
 
     /// Source of truth is the `~/.hermes/plugins/` directory. Each plugin is a
     /// subdirectory — we read its `plugin.json` (if present) for source/version
     /// metadata. Parsing `hermes plugins list` box-drawn output is fragile.
     func load() {
         isLoading = true
-        defer { isLoading = false }
-
-        let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(atPath: pluginsDir) else {
-            plugins = []
-            return
+        let dir = pluginsDir
+        let ctx = context
+        // listDirectory + (stat × N entries) + (readManifest × N) is a lot
+        // of sync transport ops on remote — definitively a beach ball if
+        // run on main. Detach the whole walk.
+        Task.detached { [weak self] in
+            let transport = ctx.makeTransport()
+            var result: [HermesPlugin] = []
+            if let entries = try? transport.listDirectory(dir) {
+                for entry in entries.sorted() where !entry.hasPrefix(".") {
+                    let path = dir + "/" + entry
+                    guard transport.stat(path)?.isDirectory == true else { continue }
+                    let manifest = Self.readManifestStatic(path: path, context: ctx)
+                    let disabled = transport.fileExists(path + "/.disabled")
+                    result.append(HermesPlugin(
+                        name: entry,
+                        source: manifest.source,
+                        enabled: !disabled,
+                        version: manifest.version,
+                        path: path
+                    ))
+                }
+            }
+            await MainActor.run { [weak self] in
+                self?.plugins = result
+                self?.isLoading = false
+            }
         }
-        var result: [HermesPlugin] = []
-        for entry in entries.sorted() where !entry.hasPrefix(".") {
-            let path = pluginsDir + "/" + entry
-            var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else { continue }
-
-            let manifest = Self.readManifest(path: path)
-            let disabled = fm.fileExists(atPath: path + "/.disabled")
-            result.append(HermesPlugin(
-                name: entry,
-                source: manifest.source,
-                enabled: !disabled,
-                version: manifest.version,
-                path: path
-            ))
-        }
-        plugins = result
     }
 
-    /// Best-effort manifest read. Supports both plugin.json and plugin.yaml shapes.
-    private static func readManifest(path: String) -> (source: String, version: String) {
-        let fm = FileManager.default
+    /// Static form of readManifest used by the detached load task. The
+    /// instance form delegates to this so both call paths share logic.
+    fileprivate static func readManifestStatic(path: String, context: ServerContext) -> (source: String, version: String) {
         let jsonPath = path + "/plugin.json"
-        if fm.fileExists(atPath: jsonPath),
-           let data = try? Data(contentsOf: URL(fileURLWithPath: jsonPath)),
+        if let data = context.readData(jsonPath),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             let source = (obj["source"] as? String) ?? (obj["repository"] as? String) ?? (obj["url"] as? String) ?? ""
             let version = (obj["version"] as? String) ?? ""
             return (source, version)
         }
         let yamlPath = path + "/plugin.yaml"
-        if fm.fileExists(atPath: yamlPath),
-           let yaml = try? String(contentsOfFile: yamlPath, encoding: .utf8) {
+        if let yaml = context.readText(yamlPath) {
             let parsed = HermesFileService.parseNestedYAML(yaml)
             let source = HermesFileService.stripYAMLQuotes(parsed.values["source"] ?? parsed.values["repository"] ?? parsed.values["url"] ?? "")
             let version = HermesFileService.stripYAMLQuotes(parsed.values["version"] ?? "")
@@ -73,6 +81,10 @@ final class PluginsViewModel {
         }
         return ("", "")
     }
+
+    // (readManifestStatic above is the new implementation; the instance
+    // version was removed because the only caller was the load() walk,
+    // which now runs detached and uses the static form.)
 
     func install(_ identifier: String) {
         isLoading = true

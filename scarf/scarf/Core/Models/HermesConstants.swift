@@ -1,48 +1,70 @@
 import Foundation
 import SQLite3
 
+/// Deprecated module-level path statics. Preserved as thin forwarders to
+/// `ServerContext.local.paths` so existing call sites continue to compile
+/// while Phase 1 migrates them to a per-server `ServerContext`.
+///
+/// New code should accept a `ServerContext` and read `context.paths.<field>`.
 enum HermesPaths: Sendable {
-    private nonisolated static let userHome: String = ProcessInfo.processInfo.environment["HOME"]
-        ?? NSHomeDirectory()
+    @available(*, deprecated, message: "use ServerContext.paths.home")
+    nonisolated static var home: String { ServerContext.local.paths.home }
 
-    nonisolated static let home: String = userHome + "/.hermes"
-    nonisolated static let stateDB: String = home + "/state.db"
-    nonisolated static let configYAML: String = home + "/config.yaml"
-    nonisolated static let memoriesDir: String = home + "/memories"
-    nonisolated static let memoryMD: String = memoriesDir + "/MEMORY.md"
-    nonisolated static let userMD: String = memoriesDir + "/USER.md"
-    nonisolated static let sessionsDir: String = home + "/sessions"
-    nonisolated static let cronJobsJSON: String = home + "/cron/jobs.json"
-    nonisolated static let cronOutputDir: String = home + "/cron/output"
-    nonisolated static let gatewayStateJSON: String = home + "/gateway_state.json"
-    nonisolated static let skillsDir: String = home + "/skills"
-    nonisolated static let errorsLog: String = home + "/logs/errors.log"
-    nonisolated static let agentLog: String = home + "/logs/agent.log"
-    nonisolated static let gatewayLog: String = home + "/logs/gateway.log"
-    nonisolated static let scarfDir: String = home + "/scarf"
-    nonisolated static let projectsRegistry: String = scarfDir + "/projects.json"
-    nonisolated static let mcpTokensDir: String = home + "/mcp-tokens"
+    @available(*, deprecated, message: "use ServerContext.paths.stateDB")
+    nonisolated static var stateDB: String { ServerContext.local.paths.stateDB }
 
-    /// Install locations we look for the `hermes` binary in, in priority order.
-    /// Checked every access so a user installing via a different method doesn't
-    /// need to relaunch Scarf.
-    nonisolated static let hermesBinaryCandidates: [String] = [
-        userHome + "/.local/bin/hermes",   // pipx / pip --user (default)
-        "/opt/homebrew/bin/hermes",        // Homebrew on Apple Silicon
-        "/usr/local/bin/hermes",           // Homebrew on Intel / manual install
-        userHome + "/.hermes/bin/hermes"   // Some self-install layouts
-    ]
+    @available(*, deprecated, message: "use ServerContext.paths.configYAML")
+    nonisolated static var configYAML: String { ServerContext.local.paths.configYAML }
 
-    /// Resolved path to the `hermes` executable. Returns the first candidate
-    /// that exists and is executable; falls back to the pipx default so error
-    /// messages ("Expected at …") still make sense on a fresh machine.
-    nonisolated static var hermesBinary: String {
-        for path in hermesBinaryCandidates
-        where FileManager.default.isExecutableFile(atPath: path) {
-            return path
-        }
-        return hermesBinaryCandidates[0]
+    @available(*, deprecated, message: "use ServerContext.paths.memoriesDir")
+    nonisolated static var memoriesDir: String { ServerContext.local.paths.memoriesDir }
+
+    @available(*, deprecated, message: "use ServerContext.paths.memoryMD")
+    nonisolated static var memoryMD: String { ServerContext.local.paths.memoryMD }
+
+    @available(*, deprecated, message: "use ServerContext.paths.userMD")
+    nonisolated static var userMD: String { ServerContext.local.paths.userMD }
+
+    @available(*, deprecated, message: "use ServerContext.paths.sessionsDir")
+    nonisolated static var sessionsDir: String { ServerContext.local.paths.sessionsDir }
+
+    @available(*, deprecated, message: "use ServerContext.paths.cronJobsJSON")
+    nonisolated static var cronJobsJSON: String { ServerContext.local.paths.cronJobsJSON }
+
+    @available(*, deprecated, message: "use ServerContext.paths.cronOutputDir")
+    nonisolated static var cronOutputDir: String { ServerContext.local.paths.cronOutputDir }
+
+    @available(*, deprecated, message: "use ServerContext.paths.gatewayStateJSON")
+    nonisolated static var gatewayStateJSON: String { ServerContext.local.paths.gatewayStateJSON }
+
+    @available(*, deprecated, message: "use ServerContext.paths.skillsDir")
+    nonisolated static var skillsDir: String { ServerContext.local.paths.skillsDir }
+
+    @available(*, deprecated, message: "use ServerContext.paths.errorsLog")
+    nonisolated static var errorsLog: String { ServerContext.local.paths.errorsLog }
+
+    @available(*, deprecated, message: "use ServerContext.paths.agentLog")
+    nonisolated static var agentLog: String { ServerContext.local.paths.agentLog }
+
+    @available(*, deprecated, message: "use ServerContext.paths.gatewayLog")
+    nonisolated static var gatewayLog: String { ServerContext.local.paths.gatewayLog }
+
+    @available(*, deprecated, message: "use ServerContext.paths.scarfDir")
+    nonisolated static var scarfDir: String { ServerContext.local.paths.scarfDir }
+
+    @available(*, deprecated, message: "use ServerContext.paths.projectsRegistry")
+    nonisolated static var projectsRegistry: String { ServerContext.local.paths.projectsRegistry }
+
+    @available(*, deprecated, message: "use ServerContext.paths.mcpTokensDir")
+    nonisolated static var mcpTokensDir: String { ServerContext.local.paths.mcpTokensDir }
+
+    @available(*, deprecated, message: "use HermesPathSet.hermesBinaryCandidates")
+    nonisolated static var hermesBinaryCandidates: [String] {
+        HermesPathSet.hermesBinaryCandidates
     }
+
+    @available(*, deprecated, message: "use ServerContext.paths.hermesBinary")
+    nonisolated static var hermesBinary: String { ServerContext.local.paths.hermesBinary }
 }
 
 // MARK: - SQLite Constants

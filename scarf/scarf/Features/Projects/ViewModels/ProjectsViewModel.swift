@@ -2,7 +2,14 @@ import Foundation
 
 @Observable
 final class ProjectsViewModel {
-    private let service = ProjectDashboardService()
+    let context: ServerContext
+    private let service: ProjectDashboardService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.service = ProjectDashboardService(context: context)
+    }
+
 
     var projects: [ProjectEntry] = []
     var selectedProject: ProjectEntry?

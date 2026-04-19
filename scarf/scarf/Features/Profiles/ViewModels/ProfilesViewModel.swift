@@ -11,7 +11,14 @@ struct HermesProfile: Identifiable, Sendable, Equatable {
 @Observable
 final class ProfilesViewModel {
     private let logger = Logger(subsystem: "com.scarf", category: "ProfilesViewModel")
-    private let fileService = HermesFileService()
+    let context: ServerContext
+    private let fileService: HermesFileService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.fileService = HermesFileService(context: context)
+    }
+
 
     var profiles: [HermesProfile] = []
     var activeName: String = "default"

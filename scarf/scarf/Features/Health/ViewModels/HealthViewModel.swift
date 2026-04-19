@@ -22,7 +22,14 @@ struct HealthSection: Identifiable {
 
 @Observable
 final class HealthViewModel {
-    private let fileService = HermesFileService()
+    let context: ServerContext
+    private let fileService: HermesFileService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.fileService = HermesFileService(context: context)
+    }
+
 
     var version = ""
     var updateInfo = ""
@@ -43,19 +50,50 @@ final class HealthViewModel {
 
     func load() {
         isLoading = true
-        refreshProcessStatus()
-        loadVersion()
-        let statusOutput = runHermes(["status"]).output
-        statusSections = parseOutput(statusOutput)
-        let doctorOutput = runHermes(["doctor"]).output
-        doctorSections = parseOutput(doctorOutput)
-        computeCounts()
-        isLoading = false
+        let ctx = context
+        let svc = fileService
+        // Health runs four sync transport-mediated commands plus a process
+        // probe — that's 4-5 ssh round-trips on remote, easily 1-2s. Detach
+        // the whole load.
+        Task.detached { [weak self] in
+            let pid = svc.hermesPID()
+            let versionOutput = ctx.runHermes(["version"]).output
+            let statusOutput = ctx.runHermes(["status"]).output
+            let doctorOutput = ctx.runHermes(["doctor"]).output
+
+            let lines = versionOutput.components(separatedBy: "\n")
+            let version = lines.first ?? ""
+            let updateLine = lines.first(where: { $0.contains("commits behind") })
+            let hasUpdate = updateLine != nil
+            let updateInfo = updateLine?.trimmingCharacters(in: .whitespaces) ?? ""
+
+            let statusSections = Self.parseOutputStatic(statusOutput)
+            let doctorSections = Self.parseOutputStatic(doctorOutput)
+
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.hermesPID = pid
+                self.hermesRunning = pid != nil
+                self.version = version
+                self.updateInfo = updateInfo
+                self.hasUpdate = hasUpdate
+                self.statusSections = statusSections
+                self.doctorSections = doctorSections
+                self.computeCounts()
+                self.isLoading = false
+            }
+        }
     }
 
     func refreshProcessStatus() {
-        hermesPID = fileService.hermesPID()
-        hermesRunning = hermesPID != nil
+        let svc = fileService
+        Task.detached { [weak self] in
+            let pid = svc.hermesPID()
+            await MainActor.run { [weak self] in
+                self?.hermesPID = pid
+                self?.hermesRunning = pid != nil
+            }
+        }
     }
 
     func stopHermes() {
@@ -99,6 +137,96 @@ final class HealthViewModel {
             updateInfo = ""
             hasUpdate = false
         }
+    }
+
+    /// Static-callable form for the detached load() task. The instance
+    /// `parseOutput` below delegates here so existing call sites still work.
+    nonisolated static func parseOutputStatic(_ output: String) -> [HealthSection] {
+        var sections: [HealthSection] = []
+        var currentTitle = ""
+        var currentChecks: [HealthCheck] = []
+
+        for line in output.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            if trimmed.hasPrefix("◆ ") {
+                if !currentTitle.isEmpty {
+                    sections.append(HealthSection(
+                        title: currentTitle,
+                        icon: iconForSectionStatic(currentTitle),
+                        checks: currentChecks
+                    ))
+                }
+                currentTitle = String(trimmed.dropFirst(2))
+                currentChecks = []
+                continue
+            }
+
+            if trimmed.hasPrefix("✓ ") {
+                let text = String(trimmed.dropFirst(2))
+                let (label, detail) = splitCheckStatic(text)
+                currentChecks.append(HealthCheck(label: label, status: .ok, detail: detail))
+            } else if trimmed.hasPrefix("⚠ ") || trimmed.hasPrefix("⚠") {
+                let text = trimmed.replacingOccurrences(of: "⚠ ", with: "").replacingOccurrences(of: "⚠", with: "")
+                let (label, detail) = splitCheckStatic(text)
+                currentChecks.append(HealthCheck(label: label, status: .warning, detail: detail))
+            } else if trimmed.hasPrefix("✗ ") {
+                let text = String(trimmed.dropFirst(2))
+                let (label, detail) = splitCheckStatic(text)
+                currentChecks.append(HealthCheck(label: label, status: .error, detail: detail))
+            } else if trimmed.hasPrefix("→ ") || trimmed.hasPrefix("Error:") {
+                if !currentChecks.isEmpty {
+                    let last = currentChecks.removeLast()
+                    let extra = trimmed.replacingOccurrences(of: "→ ", with: "").replacingOccurrences(of: "Error:", with: "").trimmingCharacters(in: .whitespaces)
+                    let combined = [last.detail, extra].compactMap { $0 }.joined(separator: " ")
+                    currentChecks.append(HealthCheck(label: last.label, status: last.status, detail: combined))
+                }
+            } else if !trimmed.isEmpty && trimmed.contains(":") && !trimmed.hasPrefix("┌") && !trimmed.hasPrefix("│") && !trimmed.hasPrefix("└") && !trimmed.hasPrefix("─") && !trimmed.hasPrefix("Run ") && !trimmed.hasPrefix("Found ") && !trimmed.hasPrefix("Tip:") {
+                let parts = trimmed.split(separator: ":", maxSplits: 1)
+                if parts.count == 2 {
+                    let key = parts[0].trimmingCharacters(in: .whitespaces)
+                    let val = parts[1].trimmingCharacters(in: .whitespaces)
+                    if !key.isEmpty && key.count < 30 {
+                        currentChecks.append(HealthCheck(label: key, status: .ok, detail: val))
+                    }
+                }
+            }
+        }
+
+        if !currentTitle.isEmpty {
+            sections.append(HealthSection(
+                title: currentTitle,
+                icon: iconForSectionStatic(currentTitle),
+                checks: currentChecks
+            ))
+        }
+        return sections
+    }
+
+    nonisolated private static func splitCheckStatic(_ text: String) -> (String, String?) {
+        if let range = text.range(of: ":") {
+            let label = String(text[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+            let detail = String(text[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+            return (label, detail.isEmpty ? nil : detail)
+        }
+        return (text, nil)
+    }
+
+    nonisolated private static func iconForSectionStatic(_ title: String) -> String {
+        let lower = title.lowercased()
+        if lower.contains("system") || lower.contains("environment") { return "desktopcomputer" }
+        if lower.contains("config") { return "doc.text" }
+        if lower.contains("model") || lower.contains("provider") { return "brain" }
+        if lower.contains("memory") { return "memorychip" }
+        if lower.contains("session") { return "list.bullet" }
+        if lower.contains("gateway") || lower.contains("platform") { return "antenna.radiowaves.left.and.right" }
+        if lower.contains("skill") { return "wrench.and.screwdriver" }
+        if lower.contains("mcp") { return "cube.box" }
+        if lower.contains("plugin") { return "puzzlepiece" }
+        if lower.contains("auth") || lower.contains("credential") { return "key" }
+        if lower.contains("disk") || lower.contains("storage") { return "internaldrive" }
+        if lower.contains("update") { return "arrow.triangle.2.circlepath" }
+        return "circle"
     }
 
     private func parseOutput(_ output: String) -> [HealthSection] {
@@ -237,19 +365,6 @@ final class HealthViewModel {
 
     @discardableResult
     private func runHermes(_ arguments: [String]) -> (output: String, exitCode: Int32) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: HermesPaths.hermesBinary)
-        process.arguments = arguments
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return (String(data: data, encoding: .utf8) ?? "", process.terminationStatus)
-        } catch {
-            return ("", -1)
-        }
+        context.runHermes(arguments)
     }
 }

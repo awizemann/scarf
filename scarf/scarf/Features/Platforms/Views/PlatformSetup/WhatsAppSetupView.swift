@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct WhatsAppSetupView: View {
-    @State private var viewModel = WhatsAppSetupViewModel()
+    @State private var viewModel: WhatsAppSetupViewModel
+    init(context: ServerContext) { _viewModel = State(initialValue: WhatsAppSetupViewModel(context: context)) }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

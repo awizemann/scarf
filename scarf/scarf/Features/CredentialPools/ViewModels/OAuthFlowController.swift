@@ -27,6 +27,12 @@ import os
 @MainActor
 final class OAuthFlowController {
     private let logger = Logger(subsystem: "com.scarf", category: "OAuthFlowController")
+    let context: ServerContext
+
+    init(context: ServerContext = .local) {
+        self.context = context
+    }
+
 
     // MARK: - Observable state
 
@@ -82,10 +88,20 @@ final class OAuthFlowController {
             args += ["--label", trimmedLabel]
         }
 
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: HermesPaths.hermesBinary)
-        proc.arguments = args
-        proc.environment = HermesFileService.enrichedEnvironment()
+        // Use the transport so OAuth works against remote contexts too:
+        // local spawns hermes directly, remote rounds through ssh -T while
+        // preserving stdin (for the auth-code prompt) and stdout (for the
+        // URL parser).
+        let proc = context.makeTransport().makeProcess(
+            executable: context.paths.hermesBinary,
+            args: args
+        )
+        if !context.isRemote {
+            // Only enrich env locally — the remote ssh process gets the
+            // remote login env naturally, and exporting our local API keys
+            // into it would be wrong.
+            proc.environment = HermesFileService.enrichedEnvironment()
+        }
 
         let outPipe = Pipe()
         let inPipe = Pipe()

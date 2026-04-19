@@ -5,6 +5,9 @@ import Foundation
 @Observable
 @MainActor
 final class FeishuSetupViewModel {
+    let context: ServerContext
+    init(context: ServerContext = .local) { self.context = context }
+
     var appID: String = ""
     var appSecret: String = ""
     var domain: String = "lark"
@@ -19,7 +22,7 @@ final class FeishuSetupViewModel {
     let connectionOptions = ["websocket", "webhook"]
 
     func load() {
-        let env = HermesEnvService().load()
+        let env = HermesEnvService(context: context).load()
         appID = env["FEISHU_APP_ID"] ?? ""
         appSecret = env["FEISHU_APP_SECRET"] ?? ""
         domain = env["FEISHU_DOMAIN"] ?? "lark"
@@ -39,7 +42,7 @@ final class FeishuSetupViewModel {
             "FEISHU_ALLOWED_USERS": allowedUsers,
             "FEISHU_CONNECTION_MODE": connectionMode == "websocket" ? "" : connectionMode
         ]
-        message = PlatformSetupHelpers.saveForm(envPairs: envPairs, configKV: [:])
+        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: [:])
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             self?.message = nil
         }

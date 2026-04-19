@@ -33,10 +33,46 @@ actor HermesLogService {
     private var currentPath: String?
     private var entryCounter = 0
 
+    /// Remote tailing state. When set, we're reading from `ssh host tail -F`
+    /// instead of a local file. Process stdout pipe drives `readNewLines()`;
+    /// process lifecycle is the actor's responsibility.
+    private var remoteTailProcess: Process?
+    private var remoteTailBuffer: String = ""
+
+    let context: ServerContext
+    private let transport: any ServerTransport
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.transport = context.makeTransport()
+    }
+
     func openLog(path: String) {
         closeLog()
         currentPath = path
-        fileHandle = FileHandle(forReadingAtPath: path)
+        if context.isRemote {
+            // Spawn `ssh host tail -F` and pipe stdout into our buffer. `-F`
+            // follows the file through rotations — important for remote
+            // log rotation setups (logrotate).
+            let proc = transport.makeProcess(
+                executable: "/usr/bin/tail",
+                args: ["-n", String(QueryDefaults.logLineLimit), "-F", path]
+            )
+            let outPipe = Pipe()
+            proc.standardOutput = outPipe
+            proc.standardError = Pipe()
+            do {
+                try proc.run()
+                remoteTailProcess = proc
+                fileHandle = outPipe.fileHandleForReading
+            } catch {
+                print("[Scarf] Failed to start remote tail: \(error.localizedDescription)")
+                remoteTailProcess = nil
+                fileHandle = nil
+            }
+        } else {
+            fileHandle = FileHandle(forReadingAtPath: path)
+        }
     }
 
     func closeLog() {
@@ -47,11 +83,29 @@ actor HermesLogService {
         }
         fileHandle = nil
         currentPath = nil
+        if let proc = remoteTailProcess, proc.isRunning {
+            proc.terminate()
+        }
+        remoteTailProcess = nil
+        remoteTailBuffer = ""
     }
 
     func readLastLines(count: Int = QueryDefaults.logLineLimit) -> [LogEntry] {
-        guard let path = currentPath,
-              let data = FileManager.default.contents(atPath: path) else { return [] }
+        guard let path = currentPath else { return [] }
+        if context.isRemote {
+            // For the initial load we bypass the streaming tail and run a
+            // one-shot `tail -n <count>` for a clean bounded read.
+            let result = try? transport.runProcess(
+                executable: "/usr/bin/tail",
+                args: ["-n", String(count), path],
+                stdin: nil,
+                timeout: 30
+            )
+            let content = result?.stdoutString ?? ""
+            let lines = content.components(separatedBy: "\n").filter { !$0.isEmpty }
+            return lines.map { parseLine($0) }
+        }
+        guard let data = FileManager.default.contents(atPath: path) else { return [] }
         let content = String(data: data, encoding: .utf8) ?? ""
         let lines = content.components(separatedBy: "\n").filter { !$0.isEmpty }
         let lastLines = Array(lines.suffix(count))
@@ -62,13 +116,29 @@ actor HermesLogService {
         guard let handle = fileHandle else { return [] }
         let data = handle.availableData
         guard !data.isEmpty else { return [] }
-        let content = String(data: data, encoding: .utf8) ?? ""
-        let lines = content.components(separatedBy: "\n").filter { !$0.isEmpty }
+        let chunk = String(data: data, encoding: .utf8) ?? ""
+        if context.isRemote {
+            // Remote tail emits bytes as they arrive — not line-aligned.
+            // Buffer partials across reads so we don't split a line mid-way.
+            remoteTailBuffer += chunk
+            guard let lastNewline = remoteTailBuffer.lastIndex(of: "\n") else {
+                return []
+            }
+            let complete = String(remoteTailBuffer[..<lastNewline])
+            remoteTailBuffer = String(remoteTailBuffer[remoteTailBuffer.index(after: lastNewline)...])
+            let lines = complete.components(separatedBy: "\n").filter { !$0.isEmpty }
+            return lines.map { parseLine($0) }
+        }
+        let lines = chunk.components(separatedBy: "\n").filter { !$0.isEmpty }
         return lines.map { parseLine($0) }
     }
 
     func seekToEnd() {
-        fileHandle?.seekToEndOfFile()
+        // Only meaningful for local FileHandles — remote tail starts at the
+        // end implicitly after `readLastLines` drained the initial load.
+        if !context.isRemote {
+            fileHandle?.seekToEndOfFile()
+        }
     }
 
     private func parseLine(_ line: String) -> LogEntry {

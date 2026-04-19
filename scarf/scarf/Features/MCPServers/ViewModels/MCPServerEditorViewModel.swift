@@ -8,7 +8,8 @@ final class MCPServerEditorViewModel {
         var value: String
     }
 
-    private let fileService = HermesFileService()
+    let context: ServerContext
+    private let fileService: HermesFileService
     let server: HermesMCPServer
 
     var envDraft: [KeyValueRow]
@@ -23,8 +24,10 @@ final class MCPServerEditorViewModel {
     var isSaving: Bool = false
     var saveError: String?
 
-    init(server: HermesMCPServer) {
+    init(server: HermesMCPServer, context: ServerContext = .local) {
         self.server = server
+        self.context = context
+        self.fileService = HermesFileService(context: context)
         self.envDraft = server.env.keys.sorted().map { KeyValueRow(key: $0, value: server.env[$0] ?? "") }
         self.headersDraft = server.headers.keys.sorted().map { KeyValueRow(key: $0, value: server.headers[$0] ?? "") }
         self.includeDraft = server.toolsInclude.joined(separator: ", ")
@@ -93,7 +96,7 @@ final class MCPServerEditorViewModel {
             await MainActor.run {
                 self.isSaving = false
                 if !success {
-                    self.saveError = "One or more fields could not be written. Check \(HermesPaths.configYAML)."
+                    self.saveError = "One or more fields could not be written. Check \(self.context.paths.configYAML)."
                 }
                 completion(success)
             }

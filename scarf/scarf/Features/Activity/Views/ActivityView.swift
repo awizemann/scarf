@@ -1,8 +1,13 @@
 import SwiftUI
 
 struct ActivityView: View {
-    @State private var viewModel = ActivityViewModel()
+    @State private var viewModel: ActivityViewModel
     @Environment(AppCoordinator.self) private var coordinator
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: ActivityViewModel(context: context))
+    }
+
 
     var body: some View {
         VStack(spacing: 0) {

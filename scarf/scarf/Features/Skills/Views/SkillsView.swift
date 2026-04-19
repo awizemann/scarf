@@ -1,8 +1,13 @@
 import SwiftUI
 
 struct SkillsView: View {
-    @State private var viewModel = SkillsViewModel()
+    @State private var viewModel: SkillsViewModel
     @State private var currentTab: Tab = .installed
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: SkillsViewModel(context: context))
+    }
+
 
     enum Tab: String, CaseIterable, Identifiable {
         case installed = "Installed"

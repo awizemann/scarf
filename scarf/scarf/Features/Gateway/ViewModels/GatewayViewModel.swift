@@ -37,6 +37,12 @@ struct PendingPairing: Identifiable {
 
 @Observable
 final class GatewayViewModel {
+    let context: ServerContext
+
+    init(context: ServerContext = .local) {
+        self.context = context
+    }
+
     var gateway = GatewayInfo(pid: nil, state: "unknown", exitReason: nil, startTime: nil, updatedAt: nil, platforms: [], isLoaded: false, isStale: false)
     var approvedUsers: [PairedUser] = []
     var pendingPairings: [PendingPairing] = []
@@ -45,52 +51,26 @@ final class GatewayViewModel {
 
     func load() {
         isLoading = true
-        loadGatewayStatus()
-        loadPairing()
-        isLoading = false
-    }
-
-    func startGateway() {
-        runHermes(["gateway", "start"])
-        actionMessage = "Gateway start requested"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.loadGatewayStatus()
-            self?.actionMessage = nil
+        let ctx = context
+        Task.detached { [weak self] in
+            // Two sync transport calls + two CLI invocations — substantial
+            // remote latency. Detach the whole load and commit at the end.
+            let status = Self.fetchGatewayStatus(context: ctx)
+            let pairing = Self.fetchPairing(context: ctx)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.gateway = status
+                self.approvedUsers = pairing.approved
+                self.pendingPairings = pairing.pending
+                self.isLoading = false
+            }
         }
     }
 
-    func stopGateway() {
-        runHermes(["gateway", "stop"])
-        actionMessage = "Gateway stop requested"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.loadGatewayStatus()
-            self?.actionMessage = nil
-        }
-    }
-
-    func restartGateway() {
-        runHermes(["gateway", "restart"])
-        actionMessage = "Gateway restart requested"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.loadGatewayStatus()
-            self?.actionMessage = nil
-        }
-    }
-
-    func approvePairing(platform: String, code: String) {
-        runHermes(["pairing", "approve", platform, code])
-        loadPairing()
-    }
-
-    func revokeUser(_ user: PairedUser) {
-        runHermes(["pairing", "revoke", user.platform, user.userId])
-        approvedUsers.removeAll { $0.id == user.id }
-    }
-
-    // MARK: - Private
-
-    private func loadGatewayStatus() {
-        let stateJSON = FileManager.default.contents(atPath: HermesPaths.gatewayStateJSON)
+    /// Static form of the gateway-status walk so the detached load can call
+    /// it without bouncing back to MainActor.
+    private static func fetchGatewayStatus(context: ServerContext) -> GatewayInfo {
+        let stateJSON = context.readData(context.paths.gatewayStateJSON)
         var pid: Int?
         var state = "unknown"
         var exitReason: String?
@@ -117,21 +97,21 @@ final class GatewayViewModel {
             }
         }
 
-        let statusOutput = runHermes(["gateway", "status"]).output
+        let statusOutput = context.runHermes(["gateway", "status"]).output
         let isLoaded = statusOutput.contains("service is loaded")
         let isStale = statusOutput.contains("stale")
 
-        gateway = GatewayInfo(
+        return GatewayInfo(
             pid: pid, state: state, exitReason: exitReason,
             startTime: startTime, updatedAt: updatedAt,
             platforms: platforms, isLoaded: isLoaded, isStale: isStale
         )
     }
 
-    private func loadPairing() {
-        let output = runHermes(["pairing", "list"]).output
-        approvedUsers = []
-        pendingPairings = []
+    private static func fetchPairing(context: ServerContext) -> (approved: [PairedUser], pending: [PendingPairing]) {
+        let output = context.runHermes(["pairing", "list"]).output
+        var approved: [PairedUser] = []
+        var pending: [PendingPairing] = []
 
         var inApproved = false
         var inPending = false
@@ -147,31 +127,59 @@ final class GatewayViewModel {
                 let platform = String(parts[0])
                 let userId = String(parts[1])
                 let name = parts[2...].joined(separator: " ")
-                approvedUsers.append(PairedUser(platform: platform, userId: userId, name: name))
-            }
-            if inPending && parts.count >= 2 {
+                approved.append(PairedUser(platform: platform, userId: userId, name: name))
+            } else if inPending && parts.count >= 2 {
                 let platform = String(parts[0])
                 let code = String(parts[1])
-                pendingPairings.append(PendingPairing(platform: platform, code: code))
+                pending.append(PendingPairing(platform: platform, code: code))
             }
+        }
+        return (approved, pending)
+    }
+
+    func startGateway() {
+        runHermes(["gateway", "start"])
+        actionMessage = "Gateway start requested"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.load()
+            self?.actionMessage = nil
         }
     }
 
+    func stopGateway() {
+        runHermes(["gateway", "stop"])
+        actionMessage = "Gateway stop requested"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.load()
+            self?.actionMessage = nil
+        }
+    }
+
+    func restartGateway() {
+        runHermes(["gateway", "restart"])
+        actionMessage = "Gateway restart requested"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            self?.load()
+            self?.actionMessage = nil
+        }
+    }
+
+    func approvePairing(platform: String, code: String) {
+        runHermes(["pairing", "approve", platform, code])
+        load()
+    }
+
+    func revokeUser(_ user: PairedUser) {
+        runHermes(["pairing", "revoke", user.platform, user.userId])
+        approvedUsers.removeAll { $0.id == user.id }
+    }
+
+    // MARK: - Private
+    // (loadGatewayStatus / loadPairing were moved to static helpers above
+    // so the detached load() can run them without touching MainActor state.)
+
     @discardableResult
     private func runHermes(_ arguments: [String]) -> (output: String, exitCode: Int32) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: HermesPaths.hermesBinary)
-        process.arguments = arguments
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return (String(data: data, encoding: .utf8) ?? "", process.terminationStatus)
-        } catch {
-            return ("", -1)
-        }
+        context.runHermes(arguments)
     }
 }

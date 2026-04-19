@@ -25,7 +25,14 @@ struct MessageGroup: Identifiable {
 
 @Observable
 final class RichChatViewModel {
-    private let dataService = HermesDataService()
+    let context: ServerContext
+    private let dataService: HermesDataService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.dataService = HermesDataService(context: context)
+    }
+
 
     var messages: [HermesMessage] = []
     var currentSession: HermesSession?

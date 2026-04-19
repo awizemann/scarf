@@ -1,9 +1,14 @@
 import SwiftUI
 
 struct PersonalitiesView: View {
-    @State private var viewModel = PersonalitiesViewModel()
+    @State private var viewModel: PersonalitiesViewModel
     @State private var soulDraft = ""
     @State private var editingSOUL = false
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: PersonalitiesViewModel(context: context))
+    }
+
 
     var body: some View {
         ScrollView {

@@ -5,8 +5,13 @@ import SwiftUI
 /// extracted view file under `Tabs/` — per CLAUDE.md guidance, splitting avoids
 /// SwiftUI type-checker timeouts and keeps each section testable in isolation.
 struct SettingsView: View {
-    @State private var viewModel = SettingsViewModel()
+    @State private var viewModel: SettingsViewModel
     @State private var selectedTab: SettingsTab = .general
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: SettingsViewModel(context: context))
+    }
+
 
     enum SettingsTab: String, CaseIterable, Identifiable {
         case general = "General"
@@ -58,6 +63,11 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .loadingOverlay(
+            viewModel.isLoading,
+            label: "Loading settings…",
+            isEmpty: viewModel.rawConfigYAML.isEmpty
+        )
         .onAppear { viewModel.load() }
     }
 

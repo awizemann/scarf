@@ -8,6 +8,12 @@ import Foundation
 @Observable
 @MainActor
 final class WhatsAppSetupViewModel {
+    let context: ServerContext
+
+    init(context: ServerContext = .local) {
+        self.context = context
+    }
+
     var enabled: Bool = false
     var mode: String = "bot"        // "bot" | "self-chat"
     var allowedUsers: String = ""   // Comma-separated phone numbers (no +)
@@ -27,7 +33,7 @@ final class WhatsAppSetupViewModel {
     var pairingInProgress: Bool = false
 
     func load() {
-        let env = HermesEnvService().load()
+        let env = HermesEnvService(context: context).load()
         enabled = PlatformSetupHelpers.parseEnvBool(env["WHATSAPP_ENABLED"])
         mode = env["WHATSAPP_MODE"] ?? "bot"
         allowedUsers = env["WHATSAPP_ALLOWED_USERS"] ?? ""
@@ -40,7 +46,7 @@ final class WhatsAppSetupViewModel {
             allowedUsers = ""
         }
 
-        let cfg = HermesFileService().loadConfig().whatsapp
+        let cfg = HermesFileService(context: context).loadConfig().whatsapp
         unauthorizedDMBehavior = cfg.unauthorizedDMBehavior
         replyPrefix = cfg.replyPrefix
     }
@@ -57,7 +63,7 @@ final class WhatsAppSetupViewModel {
             "whatsapp.unauthorized_dm_behavior": unauthorizedDMBehavior,
             "whatsapp.reply_prefix": replyPrefix
         ]
-        message = PlatformSetupHelpers.saveForm(envPairs: envPairs, configKV: configKV)
+        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV)
         clearMessageAfterDelay()
     }
 
@@ -72,7 +78,7 @@ final class WhatsAppSetupViewModel {
             self?.clearMessageAfterDelay()
         }
         terminalController.start(
-            executable: HermesPaths.hermesBinary,
+            executable: context.paths.hermesBinary,
             arguments: ["whatsapp"]
         )
     }

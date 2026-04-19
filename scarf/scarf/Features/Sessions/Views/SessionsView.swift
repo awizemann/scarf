@@ -1,8 +1,13 @@
 import SwiftUI
 
 struct SessionsView: View {
-    @State private var viewModel = SessionsViewModel()
+    @State private var viewModel: SessionsViewModel
     @Environment(AppCoordinator.self) private var coordinator
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: SessionsViewModel(context: context))
+    }
+
 
     var body: some View {
         VStack(spacing: 0) {

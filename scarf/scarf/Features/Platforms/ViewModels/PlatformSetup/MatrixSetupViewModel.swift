@@ -5,6 +5,9 @@ import Foundation
 @Observable
 @MainActor
 final class MatrixSetupViewModel {
+    let context: ServerContext
+    init(context: ServerContext = .local) { self.context = context }
+
     var homeserver: String = ""
     var accessToken: String = ""        // preferred
     var userID: String = ""
@@ -22,7 +25,7 @@ final class MatrixSetupViewModel {
     var message: String?
 
     func load() {
-        let env = HermesEnvService().load()
+        let env = HermesEnvService(context: context).load()
         homeserver = env["MATRIX_HOMESERVER"] ?? ""
         accessToken = env["MATRIX_ACCESS_TOKEN"] ?? ""
         userID = env["MATRIX_USER_ID"] ?? ""
@@ -32,7 +35,7 @@ final class MatrixSetupViewModel {
         recoveryKey = env["MATRIX_RECOVERY_KEY"] ?? ""
         encryption = PlatformSetupHelpers.parseEnvBool(env["MATRIX_ENCRYPTION"])
 
-        let cfg = HermesFileService().loadConfig().matrix
+        let cfg = HermesFileService(context: context).loadConfig().matrix
         requireMention = cfg.requireMention
         autoThread = cfg.autoThread
         dmMentionThreads = cfg.dmMentionThreads
@@ -54,7 +57,7 @@ final class MatrixSetupViewModel {
             "matrix.auto_thread": PlatformSetupHelpers.envBool(autoThread),
             "matrix.dm_mention_threads": PlatformSetupHelpers.envBool(dmMentionThreads)
         ]
-        message = PlatformSetupHelpers.saveForm(envPairs: envPairs, configKV: configKV)
+        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             self?.message = nil
         }

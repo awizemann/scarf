@@ -56,7 +56,14 @@ struct NotableSession: Identifiable {
 
 @Observable
 final class InsightsViewModel {
-    private let dataService = HermesDataService()
+    let context: ServerContext
+    private let dataService: HermesDataService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.dataService = HermesDataService(context: context)
+    }
+
 
     var period: InsightsPeriod = .month
     var isLoading = true

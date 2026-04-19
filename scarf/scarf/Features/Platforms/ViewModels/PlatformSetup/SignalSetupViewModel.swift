@@ -9,6 +9,9 @@ import Foundation
 @Observable
 @MainActor
 final class SignalSetupViewModel {
+    let context: ServerContext
+    init(context: ServerContext = .local) { self.context = context }
+
     var httpURL: String = "http://127.0.0.1:8080"
     var account: String = ""            // E.164 phone, e.g. +15551234567
     var allowedUsers: String = ""
@@ -29,7 +32,7 @@ final class SignalSetupViewModel {
     }
 
     func load() {
-        let env = HermesEnvService().load()
+        let env = HermesEnvService(context: context).load()
         httpURL = env["SIGNAL_HTTP_URL"] ?? "http://127.0.0.1:8080"
         account = env["SIGNAL_ACCOUNT"] ?? ""
         allowedUsers = env["SIGNAL_ALLOWED_USERS"] ?? ""
@@ -60,7 +63,7 @@ final class SignalSetupViewModel {
             "SIGNAL_HOME_CHANNEL": homeChannel,
             "SIGNAL_ALLOW_ALL_USERS": allowAllUsers ? "true" : ""
         ]
-        message = PlatformSetupHelpers.saveForm(envPairs: envPairs, configKV: [:])
+        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: [:])
         clearMessageAfterDelay()
     }
 

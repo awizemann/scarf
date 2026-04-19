@@ -304,7 +304,7 @@ struct ChatView: View {
             ContentUnavailableView(
                 "Hermes Not Found",
                 systemImage: "terminal",
-                description: Text("Expected at \(HermesPaths.hermesBinary)")
+                description: Text("Expected at \(viewModel.context.paths.hermesBinary)")
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -331,7 +331,7 @@ struct ChatView: View {
                 ContentUnavailableView(
                     "Hermes Not Found",
                     systemImage: "terminal",
-                    description: Text("Expected at \(HermesPaths.hermesBinary)")
+                    description: Text("Expected at \(viewModel.context.paths.hermesBinary)")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }

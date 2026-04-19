@@ -2,7 +2,14 @@ import Foundation
 
 @Observable
 final class MCPServersViewModel {
-    private let fileService = HermesFileService()
+    let context: ServerContext
+    private let fileService: HermesFileService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.fileService = HermesFileService(context: context)
+    }
+
 
     var servers: [HermesMCPServer] = []
     var selectedServerName: String?
@@ -41,10 +48,19 @@ final class MCPServersViewModel {
 
     func load() {
         isLoading = true
-        servers = fileService.loadMCPServers()
-        isLoading = false
-        if let name = selectedServerName, !servers.contains(where: { $0.name == name }) {
-            selectedServerName = nil
+        let svc = fileService
+        Task.detached { [weak self] in
+            // loadMCPServers reads config.yaml + lists mcp-tokens — both
+            // are sync transport calls that block on remote ssh round-trips.
+            let result = svc.loadMCPServers()
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.servers = result
+                self.isLoading = false
+                if let name = self.selectedServerName, !result.contains(where: { $0.name == name }) {
+                    self.selectedServerName = nil
+                }
+            }
         }
     }
 

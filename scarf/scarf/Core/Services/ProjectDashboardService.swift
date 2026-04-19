@@ -2,10 +2,18 @@ import Foundation
 
 struct ProjectDashboardService: Sendable {
 
+    let context: ServerContext
+    let transport: any ServerTransport
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.transport = context.makeTransport()
+    }
+
     // MARK: - Registry
 
     func loadRegistry() -> ProjectRegistry {
-        guard let data = FileManager.default.contents(atPath: HermesPaths.projectsRegistry) else {
+        guard let data = try? transport.readFile(context.paths.projectsRegistry) else {
             return ProjectRegistry(projects: [])
         }
         do {
@@ -17,10 +25,10 @@ struct ProjectDashboardService: Sendable {
     }
 
     func saveRegistry(_ registry: ProjectRegistry) {
-        let dir = HermesPaths.scarfDir
-        if !FileManager.default.fileExists(atPath: dir) {
+        let dir = context.paths.scarfDir
+        if !transport.fileExists(dir) {
             do {
-                try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+                try transport.createDirectory(dir)
             } catch {
                 print("[Scarf] Failed to create scarf directory: \(error.localizedDescription)")
                 return
@@ -28,18 +36,20 @@ struct ProjectDashboardService: Sendable {
         }
         guard let data = try? JSONEncoder().encode(registry) else { return }
         // Pretty-print for readability (agents may read this file)
+        let writeData: Data
         if let pretty = try? JSONSerialization.jsonObject(with: data),
            let formatted = try? JSONSerialization.data(withJSONObject: pretty, options: [.prettyPrinted, .sortedKeys]) {
-            FileManager.default.createFile(atPath: HermesPaths.projectsRegistry, contents: formatted)
+            writeData = formatted
         } else {
-            FileManager.default.createFile(atPath: HermesPaths.projectsRegistry, contents: data)
+            writeData = data
         }
+        try? transport.writeFile(context.paths.projectsRegistry, data: writeData)
     }
 
     // MARK: - Dashboard
 
     func loadDashboard(for project: ProjectEntry) -> ProjectDashboard? {
-        guard let data = FileManager.default.contents(atPath: project.dashboardPath) else {
+        guard let data = try? transport.readFile(project.dashboardPath) else {
             return nil
         }
         do {
@@ -51,13 +61,10 @@ struct ProjectDashboardService: Sendable {
     }
 
     func dashboardExists(for project: ProjectEntry) -> Bool {
-        FileManager.default.fileExists(atPath: project.dashboardPath)
+        transport.fileExists(project.dashboardPath)
     }
 
     func dashboardModificationDate(for project: ProjectEntry) -> Date? {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: project.dashboardPath) else {
-            return nil
-        }
-        return attrs[.modificationDate] as? Date
+        transport.stat(project.dashboardPath)?.mtime
     }
 }

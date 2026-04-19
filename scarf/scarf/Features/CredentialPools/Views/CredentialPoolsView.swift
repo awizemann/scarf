@@ -1,9 +1,14 @@
 import SwiftUI
 
 struct CredentialPoolsView: View {
-    @State private var viewModel = CredentialPoolsViewModel()
+    @State private var viewModel: CredentialPoolsViewModel
     @State private var showAddSheet = false
     @State private var pendingRemove: HermesCredential?
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: CredentialPoolsViewModel(context: context))
+    }
+
 
     var body: some View {
         ScrollView {
@@ -24,6 +29,11 @@ struct CredentialPoolsView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .navigationTitle("Credential Pools")
+        .loadingOverlay(
+            viewModel.isLoading,
+            label: "Loading credentials…",
+            isEmpty: viewModel.pools.isEmpty
+        )
         .onAppear { viewModel.load() }
         .sheet(isPresented: $showAddSheet) {
             AddCredentialSheet(viewModel: viewModel) {
@@ -194,7 +204,7 @@ private struct AddCredentialSheet: View {
     @State private var oauthStarted: Bool = false
     @State private var authCode: String = ""
 
-    private let catalog = ModelCatalogService()
+    private var catalog: ModelCatalogService { ModelCatalogService(context: viewModel.context) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

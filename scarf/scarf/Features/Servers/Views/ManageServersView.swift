@@ -1,0 +1,112 @@
+import SwiftUI
+
+/// List of registered remote servers with add/remove actions. Rendered as a
+/// popover from the toolbar switcher.
+struct ManageServersView: View {
+    @Environment(ServerRegistry.self) private var registry
+    @State private var showAddSheet = false
+    @State private var pendingRemoveID: ServerID?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider()
+            if registry.entries.isEmpty {
+                empty
+            } else {
+                list
+            }
+        }
+        .frame(width: 380, height: 360)
+        .sheet(isPresented: $showAddSheet) {
+            AddServerSheet { name, config in
+                _ = registry.addServer(displayName: name, config: config)
+            }
+        }
+        .confirmationDialog(
+            "Remove this server?",
+            isPresented: Binding(
+                get: { pendingRemoveID != nil },
+                set: { if !$0 { pendingRemoveID = nil } }
+            ),
+            actions: {
+                Button("Remove", role: .destructive) {
+                    if let id = pendingRemoveID { registry.removeServer(id) }
+                    pendingRemoveID = nil
+                }
+                Button("Cancel", role: .cancel) { pendingRemoveID = nil }
+            },
+            message: {
+                Text("The server's SSH configuration is removed from Scarf. Your remote files are untouched.")
+            }
+        )
+    }
+
+    private var header: some View {
+        HStack {
+            Text("Servers").font(.headline)
+            Spacer()
+            Button {
+                showAddSheet = true
+            } label: {
+                Label("Add", systemImage: "plus")
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(12)
+    }
+
+    private var empty: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "server.rack")
+                .font(.system(size: 28))
+                .foregroundStyle(.secondary)
+            Text("No remote servers").font(.headline)
+            Text("Click Add to connect to a remote Hermes installation over SSH.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 280)
+        }
+        .padding(32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var list: some View {
+        List {
+            ForEach(registry.entries) { entry in
+                HStack(spacing: 10) {
+                    Image(systemName: "server.rack")
+                        .foregroundStyle(.blue)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entry.displayName).font(.body)
+                        if case .ssh(let config) = entry.kind {
+                            Text(summary(for: config))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Button {
+                        pendingRemoveID = entry.id
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.red)
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .listStyle(.inset)
+    }
+
+    private func summary(for config: SSHConfig) -> String {
+        var s = ""
+        if let user = config.user, !user.isEmpty { s += "\(user)@" }
+        s += config.host
+        if let port = config.port { s += ":\(port)" }
+        if let home = config.remoteHome, !home.isEmpty { s += " (\(home))" }
+        return s
+    }
+}

@@ -1,8 +1,13 @@
 import SwiftUI
 
 struct PlatformsView: View {
-    @State private var viewModel = PlatformsViewModel()
+    @State private var viewModel: PlatformsViewModel
     @Environment(HermesFileWatcher.self) private var fileWatcher
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: PlatformsViewModel(context: context))
+    }
+
 
     // HSplitView (not nested NavigationSplitView) because ContentView already
     // hosts the outer NavigationSplitView — nesting them breaks layout on macOS.
@@ -114,23 +119,25 @@ struct PlatformsView: View {
 
     /// Dispatch to the right per-platform setup view based on the selection.
     /// Each setup view owns its own `@State` view model and handles load/save
-    /// independently; we don't push state down from this container.
+    /// independently; the parent's `context` is forwarded so writes go to the
+    /// right server.
     @ViewBuilder
     private var platformForm: some View {
+        let ctx = viewModel.context
         switch viewModel.selected.name {
         case "cli":            cliPanel
-        case "telegram":       TelegramSetupView()
-        case "discord":        DiscordSetupView()
-        case "slack":          SlackSetupView()
-        case "whatsapp":       WhatsAppSetupView()
-        case "signal":         SignalSetupView()
-        case "email":          EmailSetupView()
-        case "matrix":         MatrixSetupView()
-        case "mattermost":     MattermostSetupView()
-        case "feishu":         FeishuSetupView()
-        case "imessage":       IMessageSetupView()
-        case "homeassistant":  HomeAssistantSetupView()
-        case "webhook":        WebhookSetupView()
+        case "telegram":       TelegramSetupView(context: ctx)
+        case "discord":        DiscordSetupView(context: ctx)
+        case "slack":          SlackSetupView(context: ctx)
+        case "whatsapp":       WhatsAppSetupView(context: ctx)
+        case "signal":         SignalSetupView(context: ctx)
+        case "email":          EmailSetupView(context: ctx)
+        case "matrix":         MatrixSetupView(context: ctx)
+        case "mattermost":     MattermostSetupView(context: ctx)
+        case "feishu":         FeishuSetupView(context: ctx)
+        case "imessage":       IMessageSetupView(context: ctx)
+        case "homeassistant":  HomeAssistantSetupView(context: ctx)
+        case "webhook":        WebhookSetupView(context: ctx)
         default:
             SettingsSection(title: viewModel.selected.displayName, icon: KnownPlatforms.icon(for: viewModel.selected.name)) {
                 ReadOnlyRow(label: "Setup", value: "No setup form for this platform yet.")

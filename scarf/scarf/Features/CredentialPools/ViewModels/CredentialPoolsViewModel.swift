@@ -28,6 +28,12 @@ struct HermesCredentialPool: Identifiable, Sendable {
 @MainActor
 final class CredentialPoolsViewModel {
     private let logger = Logger(subsystem: "com.scarf", category: "CredentialPoolsViewModel")
+    let context: ServerContext
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.oauthFlow = OAuthFlowController(context: context)
+    }
 
     var pools: [HermesCredentialPool] = []
     var isLoading = false
@@ -37,7 +43,7 @@ final class CredentialPoolsViewModel {
     /// can extract the authorization URL, pop it open with an explicit button,
     /// and feed the code back via stdin. See OAuthFlowController for why we
     /// moved off the embedded-terminal approach.
-    let oauthFlow = OAuthFlowController()
+    let oauthFlow: OAuthFlowController
     var oauthProvider: String = ""
     /// Convenience — the sheet keys a lot of UI off "is the flow running?".
     var oauthInProgress: Bool { oauthFlow.isRunning }
@@ -47,34 +53,42 @@ final class CredentialPoolsViewModel {
     /// Source of truth is `~/.hermes/auth.json`. Parsing box-drawn `hermes auth list`
     /// output is fragile — the JSON file is structured, stable, and already stores
     /// exactly the pool data the UI needs. We never display full tokens.
+    ///
+    /// Runs the file reads on a detached task so the synchronous SSH calls
+    /// (which can block for hundreds of milliseconds even with ControlMaster
+    /// multiplexing) don't freeze the main thread / spin the beach ball.
     func load() {
         isLoading = true
-        defer { isLoading = false }
+        let ctx = context
+        Task.detached { [weak self] in
+            let authData = ctx.readData(ctx.paths.authJSON)
+            let yaml = ctx.readText(ctx.paths.configYAML) ?? ""
+            let strategies = Self.parseStrategies(from: yaml)
 
-        let authPath = HermesPaths.home + "/auth.json"
-        let strategies = parseStrategies()
+            let decodedPools: [HermesCredentialPool]
+            if let data = authData,
+               let decoded = try? JSONDecoder().decode(AuthFile.self, from: data) {
+                decodedPools = Self.buildPools(from: decoded, strategies: strategies)
+            } else {
+                decodedPools = []
+            }
 
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: authPath)) else {
-            pools = []
-            return
-        }
-        do {
-            let decoded = try JSONDecoder().decode(AuthFile.self, from: data)
-            pools = Self.buildPools(from: decoded, strategies: strategies)
-        } catch {
-            logger.error("Failed to decode auth.json: \(error.localizedDescription)")
-            pools = []
+            await MainActor.run { [weak self] in
+                self?.pools = decodedPools
+                self?.isLoading = false
+            }
         }
     }
 
     /// The `credential_pool_strategies:` map lives in config.yaml as `<provider>: <strategy>`.
-    private func parseStrategies() -> [String: String] {
-        guard let yaml = try? String(contentsOfFile: HermesPaths.configYAML, encoding: .utf8) else { return [:] }
+    /// Pure-function form so it's safe to call from the detached load task.
+    nonisolated private static func parseStrategies(from yaml: String) -> [String: String] {
+        guard !yaml.isEmpty else { return [:] }
         let parsed = HermesFileService.parseNestedYAML(yaml)
         return parsed.maps["credential_pool_strategies"] ?? [:]
     }
 
-    private static func buildPools(from auth: AuthFile, strategies: [String: String]) -> [HermesCredentialPool] {
+    nonisolated private static func buildPools(from auth: AuthFile, strategies: [String: String]) -> [HermesCredentialPool] {
         auth.credential_pool.keys.sorted().map { provider in
             let entries = auth.credential_pool[provider] ?? []
             let creds = entries.enumerated().map { index, entry in
@@ -100,7 +114,7 @@ final class CredentialPoolsViewModel {
 
     /// Return last 4 chars prefixed with "…", or "" if the token is too short.
     /// Callers MUST NOT pass the full token anywhere user-visible beyond this.
-    private static func tail(of token: String) -> String {
+    nonisolated private static func tail(of token: String) -> String {
         guard token.count >= 4 else { return "" }
         return "…" + String(token.suffix(4))
     }
@@ -206,21 +220,7 @@ final class CredentialPoolsViewModel {
 
     @discardableResult
     private func runHermes(_ arguments: [String]) -> (output: String, exitCode: Int32) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: HermesPaths.hermesBinary)
-        process.arguments = arguments
-        process.environment = HermesFileService.enrichedEnvironment()
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return (String(data: data, encoding: .utf8) ?? "", process.terminationStatus)
-        } catch {
-            return ("", -1)
-        }
+        context.runHermes(arguments)
     }
 }
 

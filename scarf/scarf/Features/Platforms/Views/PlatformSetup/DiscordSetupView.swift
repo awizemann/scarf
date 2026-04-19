@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct DiscordSetupView: View {
-    @State private var viewModel = DiscordSetupViewModel()
+    @State private var viewModel: DiscordSetupViewModel
+    init(context: ServerContext) { _viewModel = State(initialValue: DiscordSetupViewModel(context: context)) }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

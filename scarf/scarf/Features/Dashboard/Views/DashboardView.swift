@@ -1,9 +1,14 @@
 import SwiftUI
 
 struct DashboardView: View {
-    @State private var viewModel = DashboardViewModel()
+    @State private var viewModel: DashboardViewModel
     @Environment(AppCoordinator.self) private var coordinator
     @Environment(HermesFileWatcher.self) private var fileWatcher
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: DashboardViewModel(context: context))
+    }
+
 
     var body: some View {
         ScrollView {
@@ -16,6 +21,11 @@ struct DashboardView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .navigationTitle("Dashboard")
+        .loadingOverlay(
+            viewModel.isLoading,
+            label: "Loading dashboard…",
+            isEmpty: viewModel.recentSessions.isEmpty
+        )
         .task { await viewModel.load() }
         .onChange(of: fileWatcher.lastChangeDate) {
             Task { await viewModel.load() }

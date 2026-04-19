@@ -15,6 +15,12 @@ import AppKit
 @Observable
 @MainActor
 final class HomeAssistantSetupViewModel {
+    let context: ServerContext
+
+    init(context: ServerContext = .local) {
+        self.context = context
+    }
+
     var url: String = "http://homeassistant.local:8123"
     var token: String = ""
 
@@ -30,11 +36,11 @@ final class HomeAssistantSetupViewModel {
     var message: String?
 
     func load() {
-        let env = HermesEnvService().load()
+        let env = HermesEnvService(context: context).load()
         url = env["HASS_URL"] ?? "http://homeassistant.local:8123"
         token = env["HASS_TOKEN"] ?? ""
 
-        let cfg = HermesFileService().loadConfig().homeAssistant
+        let cfg = HermesFileService(context: context).loadConfig().homeAssistant
         watchAll = cfg.watchAll
         cooldownSeconds = cfg.cooldownSeconds
         watchDomains = cfg.watchDomains
@@ -53,7 +59,7 @@ final class HomeAssistantSetupViewModel {
             "platforms.homeassistant.extra.watch_all": PlatformSetupHelpers.envBool(watchAll),
             "platforms.homeassistant.extra.cooldown_seconds": String(cooldownSeconds)
         ]
-        message = PlatformSetupHelpers.saveForm(envPairs: envPairs, configKV: configKV)
+        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             self?.message = nil
         }
@@ -62,6 +68,6 @@ final class HomeAssistantSetupViewModel {
     /// Open config.yaml in the user's default editor so they can manually edit
     /// the list-valued filter fields.
     func openConfigForLists() {
-        NSWorkspace.shared.open(URL(fileURLWithPath: HermesPaths.configYAML))
+        context.openInLocalEditor(context.paths.configYAML)
     }
 }

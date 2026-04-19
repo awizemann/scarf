@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct TelegramSetupView: View {
-    @State private var viewModel = TelegramSetupViewModel()
+    @State private var viewModel: TelegramSetupViewModel
+    init(context: ServerContext) { _viewModel = State(initialValue: TelegramSetupViewModel(context: context)) }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

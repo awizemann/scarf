@@ -2,7 +2,14 @@ import Foundation
 
 @Observable
 final class ActivityViewModel {
-    private let dataService = HermesDataService()
+    let context: ServerContext
+    private let dataService: HermesDataService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.dataService = HermesDataService(context: context)
+    }
+
 
     var toolMessages: [HermesMessage] = []
     var filterKind: ToolKind?

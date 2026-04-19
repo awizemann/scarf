@@ -2,7 +2,14 @@ import Foundation
 
 @Observable
 final class MemoryViewModel {
-    private let fileService = HermesFileService()
+    let context: ServerContext
+    private let fileService: HermesFileService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.fileService = HermesFileService(context: context)
+    }
+
 
     var memoryContent = ""
     var userContent = ""
@@ -12,6 +19,7 @@ final class MemoryViewModel {
     var editText = ""
     var profiles: [String] = []
     var activeProfile = ""
+    var isLoading = false
 
     enum EditTarget {
         case memory, user
@@ -30,20 +38,40 @@ final class MemoryViewModel {
     var hasMultipleProfiles: Bool { !profiles.isEmpty }
 
     func load() {
-        let config = fileService.loadConfig()
-        memoryProvider = config.memoryProvider
-        profiles = fileService.loadMemoryProfiles()
-        if activeProfile.isEmpty {
-            activeProfile = config.memoryProfile
+        isLoading = true
+        let svc = fileService
+        let currentProfile = activeProfile
+        // Sync transport calls would beach-ball the UI on remote — dispatch
+        // off main, then commit results back on MainActor.
+        Task.detached { [weak self] in
+            let config = svc.loadConfig()
+            let profiles = svc.loadMemoryProfiles()
+            let profile = currentProfile.isEmpty ? config.memoryProfile : currentProfile
+            let memory = svc.loadMemory(profile: profile)
+            let user = svc.loadUserProfile(profile: profile)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.memoryProvider = config.memoryProvider
+                self.profiles = profiles
+                self.activeProfile = profile
+                self.memoryContent = memory
+                self.userContent = user
+                self.isLoading = false
+            }
         }
-        memoryContent = fileService.loadMemory(profile: activeProfile)
-        userContent = fileService.loadUserProfile(profile: activeProfile)
     }
 
     func switchProfile(_ profile: String) {
         activeProfile = profile
-        memoryContent = fileService.loadMemory(profile: profile)
-        userContent = fileService.loadUserProfile(profile: profile)
+        let svc = fileService
+        Task.detached { [weak self] in
+            let memory = svc.loadMemory(profile: profile)
+            let user = svc.loadUserProfile(profile: profile)
+            await MainActor.run { [weak self] in
+                self?.memoryContent = memory
+                self?.userContent = user
+            }
+        }
     }
 
     func startEditing(_ target: EditTarget) {
@@ -53,15 +81,24 @@ final class MemoryViewModel {
     }
 
     func save() {
-        switch editingFile {
-        case .memory:
-            fileService.saveMemory(editText, profile: activeProfile)
-            memoryContent = editText
-        case .user:
-            fileService.saveUserProfile(editText, profile: activeProfile)
-            userContent = editText
+        let svc = fileService
+        let target = editingFile
+        let text = editText
+        let profile = activeProfile
+        Task.detached { [weak self] in
+            switch target {
+            case .memory: svc.saveMemory(text, profile: profile)
+            case .user:   svc.saveUserProfile(text, profile: profile)
+            }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                switch target {
+                case .memory: self.memoryContent = text
+                case .user:   self.userContent = text
+                }
+                self.isEditing = false
+            }
         }
-        isEditing = false
     }
 
     func cancelEditing() {

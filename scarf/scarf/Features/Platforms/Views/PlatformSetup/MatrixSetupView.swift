@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct MatrixSetupView: View {
-    @State private var viewModel = MatrixSetupViewModel()
+    @State private var viewModel: MatrixSetupViewModel
+    init(context: ServerContext) { _viewModel = State(initialValue: MatrixSetupViewModel(context: context)) }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

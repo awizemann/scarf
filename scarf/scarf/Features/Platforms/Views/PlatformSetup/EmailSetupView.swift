@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct EmailSetupView: View {
-    @State private var viewModel = EmailSetupViewModel()
+    @State private var viewModel: EmailSetupViewModel
+    init(context: ServerContext) { _viewModel = State(initialValue: EmailSetupViewModel(context: context)) }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

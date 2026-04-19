@@ -6,8 +6,29 @@ import os
 @Observable
 final class ChatViewModel {
     private let logger = Logger(subsystem: "com.scarf", category: "ChatViewModel")
-    private let dataService = HermesDataService()
-    private let fileService = HermesFileService()
+    let context: ServerContext
+    private let dataService: HermesDataService
+    private let fileService: HermesFileService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.dataService = HermesDataService(context: context)
+        self.fileService = HermesFileService(context: context)
+        self.richChatViewModel = RichChatViewModel(context: context)
+        // Probe hermes binary existence once off-main, then cache. Doing
+        // this synchronously inside `hermesBinaryExists`'s getter would
+        // block main on every chat-body re-evaluation — for a remote
+        // context that's a SSH `test -e` round-trip on every streaming
+        // chunk, which manifests as the chat screen flashing or going
+        // blank during prompts.
+        Task.detached(priority: .userInitiated) { [context] in
+            let exists = context.fileExists(context.paths.hermesBinary)
+            await MainActor.run { [weak self] in
+                self?.hermesBinaryExists = exists
+            }
+        }
+    }
+
 
     var recentSessions: [HermesSession] = []
     var sessionPreviews: [String: String] = [:]
@@ -17,7 +38,7 @@ final class ChatViewModel {
     var ttsEnabled = false
     var isRecording = false
     var displayMode: ChatDisplayMode = .richChat
-    let richChatViewModel = RichChatViewModel()
+    let richChatViewModel: RichChatViewModel
     private var coordinator: Coordinator?
 
     // ACP state
@@ -43,14 +64,17 @@ final class ChatViewModel {
     private static let reconnectBaseDelay: UInt64 = 1_000_000_000 // 1 second
     private static let maxReconnectDelay: UInt64 = 16_000_000_000 // 16 seconds
 
-    var hermesBinaryExists: Bool {
-        FileManager.default.fileExists(atPath: HermesPaths.hermesBinary)
-    }
+    /// Cached result of probing for `hermes` on the target server. Updated
+    /// once at init by a detached task; defaults to `true` so the chat
+    /// view doesn't briefly flash "Hermes not found" while the async
+    /// probe runs. Set to `false` only after the probe confirms the
+    /// binary really isn't there.
+    var hermesBinaryExists: Bool = true
 
     /// Re-checks env + `~/.hermes/.env` for AI-provider credentials and
     /// updates `missingCredentials`. Cheap — safe to call from view `.task`.
     func refreshCredentialPreflight() {
-        missingCredentials = !HermesFileService.hasAnyAICredential()
+        missingCredentials = !fileService.hasAnyAICredential()
     }
 
     /// Clears the error/hint/details triplet so future failures overwrite
@@ -114,7 +138,14 @@ final class ChatViewModel {
             // Find most recent session and resume via ACP
             Task { @MainActor in
                 let opened = await dataService.open()
-                guard opened else { return }
+                if !opened {
+                    acpError = context.isRemote
+                        ? "Couldn't reach \(context.displayName). Check the SSH connection and try again."
+                        : "Couldn't open the Hermes state database."
+                    acpErrorHint = nil
+                    acpErrorDetails = nil
+                    return
+                }
                 let sessionId = await dataService.fetchMostRecentlyActiveSessionId()
                 await dataService.close()
                 if let sessionId {
@@ -159,7 +190,7 @@ final class ChatViewModel {
                 }
             }
 
-            let client = ACPClient()
+            let client = ACPClient(context: context)
             self.acpClient = client
 
             do {
@@ -247,7 +278,7 @@ final class ChatViewModel {
         clearACPErrorState()
         acpStatus = "Starting..."
 
-        let client = ACPClient()
+        let client = ACPClient(context: context)
         self.acpClient = client
 
         Task { @MainActor in
@@ -385,7 +416,7 @@ final class ChatViewModel {
                     guard !Task.isCancelled else { return }
                 }
 
-                let client = ACPClient()
+                let client = ACPClient(context: context)
                 do {
                     try await client.start()
 
@@ -542,11 +573,44 @@ final class ChatViewModel {
         var env = ProcessInfo.processInfo.environment
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
+        // Inherit ssh-agent socket for remote so password-less auth works.
+        if context.isRemote {
+            let shellEnv = HermesFileService.enrichedEnvironment()
+            for key in ["SSH_AUTH_SOCK", "SSH_AGENT_PID"] {
+                if env[key] == nil, let v = shellEnv[key], !v.isEmpty {
+                    env[key] = v
+                }
+            }
+        }
         let envArray = env.map { "\($0.key)=\($0.value)" }
 
+        // For remote: wrap the invocation in `ssh -t host -- hermes <args>`
+        // so the embedded terminal opens a pty against the remote and the
+        // hermes TUI gets the bytes it expects. `-t` requests a pty (the
+        // SwiftTerm view is one).
+        let exe: String
+        let argv: [String]
+        if context.isRemote, case .ssh(let cfg) = context.kind {
+            let host = cfg.user.map { "\($0)@\(cfg.host)" } ?? cfg.host
+            exe = "/usr/bin/ssh"
+            var sshArgs: [String] = ["-t"]
+            if let port = cfg.port { sshArgs += ["-p", String(port)] }
+            if let id = cfg.identityFile, !id.isEmpty { sshArgs += ["-i", id] }
+            sshArgs += ["-o", "StrictHostKeyChecking=accept-new"]
+            sshArgs += ["-o", "BatchMode=yes"]
+            sshArgs.append(host)
+            sshArgs.append("--")
+            sshArgs.append(context.paths.hermesBinary)
+            sshArgs.append(contentsOf: arguments)
+            argv = sshArgs
+        } else {
+            exe = context.paths.hermesBinary
+            argv = arguments
+        }
+
         terminal.startProcess(
-            executable: HermesPaths.hermesBinary,
-            args: arguments,
+            executable: exe,
+            args: argv,
             environment: envArray,
             execName: nil
         )

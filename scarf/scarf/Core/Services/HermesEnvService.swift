@@ -22,15 +22,24 @@ struct HermesEnvService: Sendable {
 
     /// Path to `~/.hermes/.env`. Kept configurable for tests.
     let path: String
+    let transport: any ServerTransport
 
-    init(path: String = HermesPaths.home + "/.env") {
+    init(context: ServerContext = .local) {
+        self.path = context.paths.envFile
+        self.transport = context.makeTransport()
+    }
+
+    /// Escape hatch for tests that want to point at a fixture path directly.
+    init(path: String) {
         self.path = path
+        self.transport = LocalTransport()
     }
 
     /// Read the .env file into a `[key: value]` dict. Comments and commented-out
     /// assignments are ignored. Missing file returns an empty dict.
     func load() -> [String: String] {
-        guard let content = try? String(contentsOfFile: path, encoding: .utf8) else {
+        guard let data = try? transport.readFile(path),
+              let content = String(data: data, encoding: .utf8) else {
             return [:]
         }
         var result: [String: String] = [:]
@@ -69,7 +78,8 @@ struct HermesEnvService: Sendable {
         var lines: [String]
 
         // Start from existing file contents, or a minimal header if creating new.
-        if let content = try? String(contentsOfFile: path, encoding: .utf8) {
+        if let data = try? transport.readFile(path),
+           let content = String(data: data, encoding: .utf8) {
             lines = content.components(separatedBy: "\n")
             // Trim a single trailing empty line from splitting the final newline;
             // we'll re-add it on write.
@@ -105,7 +115,8 @@ struct HermesEnvService: Sendable {
     /// uncommenting. If the key doesn't exist, this is a no-op.
     @discardableResult
     func unset(_ key: String) -> Bool {
-        guard let content = try? String(contentsOfFile: path, encoding: .utf8) else {
+        guard let data = try? transport.readFile(path),
+              let content = String(data: data, encoding: .utf8) else {
             return true
         }
         var lines = content.components(separatedBy: "\n")
@@ -125,28 +136,18 @@ struct HermesEnvService: Sendable {
 
     // MARK: - Internals
 
-    /// Writes the entire file in one shot via a tmp + rename to avoid corrupting
-    /// `.env` if the process is killed mid-write. Preserves `0600` permissions
-    /// since `.env` typically holds secrets.
+    /// Writes the entire file in one shot through the transport. For local
+    /// contexts this ends up doing the same atomic-rename dance as before
+    /// (via `LocalTransport.writeFile`). For remote contexts this goes
+    /// through `scp` + remote `mv`, still atomic from Hermes's point of
+    /// view.
     private func atomicWrite(_ content: String) -> Bool {
-        let tmp = path + ".tmp"
+        guard let data = content.data(using: .utf8) else { return false }
         do {
-            try content.write(toFile: tmp, atomically: false, encoding: .utf8)
-            // Mirror the typical `.env` mode of `0600` (owner read/write only).
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tmp)
-            // Swap into place. FileManager.replaceItem handles the replacement
-            // atomically on the same volume; fall back to a two-step rename.
-            let destURL = URL(fileURLWithPath: path)
-            let tmpURL = URL(fileURLWithPath: tmp)
-            if FileManager.default.fileExists(atPath: path) {
-                _ = try FileManager.default.replaceItemAt(destURL, withItemAt: tmpURL)
-            } else {
-                try FileManager.default.moveItem(at: tmpURL, to: destURL)
-            }
+            try transport.writeFile(path, data: data)
             return true
         } catch {
             logger.error("Failed to write .env: \(error.localizedDescription)")
-            try? FileManager.default.removeItem(atPath: tmp)
             return false
         }
     }
