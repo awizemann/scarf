@@ -1,7 +1,12 @@
 import SwiftUI
 
 struct MCPServersView: View {
-    @State private var viewModel = MCPServersViewModel()
+    @State private var viewModel: MCPServersViewModel
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: MCPServersViewModel(context: context))
+    }
+
 
     var body: some View {
         HSplitView {
@@ -11,6 +16,11 @@ struct MCPServersView: View {
                 .frame(minWidth: 500)
         }
         .navigationTitle("MCP Servers (\(viewModel.servers.count))")
+        .loadingOverlay(
+            viewModel.isLoading,
+            label: "Loading MCP servers…",
+            isEmpty: viewModel.servers.isEmpty
+        )
         .searchable(text: $viewModel.searchText, prompt: "Filter servers...")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {

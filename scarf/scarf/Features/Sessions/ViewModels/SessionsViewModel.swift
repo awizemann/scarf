@@ -11,7 +11,14 @@ struct SessionStoreStats {
 
 @Observable
 final class SessionsViewModel {
-    private let dataService = HermesDataService()
+    let context: ServerContext
+    private let dataService: HermesDataService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.dataService = HermesDataService(context: context)
+    }
+
 
     var sessions: [HermesSession] = []
     var sessionPreviews: [String: String] = [:]
@@ -30,7 +37,10 @@ final class SessionsViewModel {
     var deleteSessionId: String?
 
     func load() async {
-        let opened = await dataService.open()
+        // refresh() forces a fresh snapshot on remote contexts. The DB stays
+        // open after load() so selectSession()/search() can query without
+        // re-opening — cleanup() closes on disappear.
+        let opened = await dataService.refresh()
         guard opened else { return }
         sessions = await dataService.fetchSessions(limit: 500)
         sessionPreviews = await dataService.fetchSessionPreviews(limit: 500)
@@ -146,14 +156,14 @@ final class SessionsViewModel {
         }
         let sorted = platformCounts.sorted { $0.value > $1.value }.map { (platform: $0.key, count: $0.value) }
 
-        let dbPath = HermesPaths.stateDB
+        let dbPath = context.paths.stateDB
         let fileSize: String
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: dbPath),
-           let size = attrs[.size] as? Int {
-            if Double(size) >= FileSizeUnit.megabyte {
-                fileSize = String(format: "%.1f MB", Double(size) / FileSizeUnit.megabyte)
+        if let stat = context.makeTransport().stat(dbPath) {
+            let size = Double(stat.size)
+            if size >= FileSizeUnit.megabyte {
+                fileSize = String(format: "%.1f MB", size / FileSizeUnit.megabyte)
             } else {
-                fileSize = String(format: "%.0f KB", Double(size) / FileSizeUnit.kilobyte)
+                fileSize = String(format: "%.0f KB", size / FileSizeUnit.kilobyte)
             }
         } else {
             fileSize = "unknown"
@@ -171,20 +181,6 @@ final class SessionsViewModel {
 
     @discardableResult
     private func runHermes(_ arguments: [String]) -> (output: String, exitCode: Int32) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: HermesPaths.hermesBinary)
-        process.arguments = arguments
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-            return (output, process.terminationStatus)
-        } catch {
-            return ("", -1)
-        }
+        context.runHermes(arguments)
     }
 }

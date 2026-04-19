@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct SignalSetupView: View {
-    @State private var viewModel = SignalSetupViewModel()
+    @State private var viewModel: SignalSetupViewModel
+    init(context: ServerContext) { _viewModel = State(initialValue: SignalSetupViewModel(context: context)) }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

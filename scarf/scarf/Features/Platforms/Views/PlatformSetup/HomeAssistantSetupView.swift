@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct HomeAssistantSetupView: View {
-    @State private var viewModel = HomeAssistantSetupViewModel()
+    @State private var viewModel: HomeAssistantSetupViewModel
+    init(context: ServerContext) { _viewModel = State(initialValue: HomeAssistantSetupViewModel(context: context)) }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

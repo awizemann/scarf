@@ -1,23 +1,105 @@
 import Foundation
 import SQLite3
 
+/// Dedupes concurrent `snapshotSQLite` calls for the same server. When the
+/// file watcher ticks, Dashboard + Sessions + Activity (+ Chat's loadHistory)
+/// can all ask for a fresh snapshot within the same millisecond — without
+/// coordination they each spawn their own `ssh host sqlite3 .backup; scp`
+/// round-trip, three parallel backups of the same DB. Callers in flight for
+/// the same `ServerID` await the first caller's Task and share its result.
+actor SnapshotCoordinator {
+    static let shared = SnapshotCoordinator()
+    private var inFlight: [ServerID: Task<URL, Error>] = [:]
+
+    func snapshot(
+        remotePath: String,
+        contextID: ServerID,
+        transport: any ServerTransport
+    ) async throws -> URL {
+        if let existing = inFlight[contextID] {
+            return try await existing.value
+        }
+        let task = Task<URL, Error> {
+            try transport.snapshotSQLite(remotePath: remotePath)
+        }
+        inFlight[contextID] = task
+        defer { inFlight[contextID] = nil }
+        return try await task.value
+    }
+}
+
 actor HermesDataService {
     private var db: OpaquePointer?
     private var hasV07Schema = false
+    /// Local filesystem path we last opened. For remote contexts this is
+    /// the cached snapshot under `~/Library/Caches/scarf/snapshots/<id>/`.
+    private var openedAtPath: String?
 
-    func open() -> Bool {
+    let context: ServerContext
+    private let transport: any ServerTransport
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.transport = context.makeTransport()
+    }
+
+    func open() async -> Bool {
         if db != nil { return true }
-        let path = HermesPaths.stateDB
-        guard FileManager.default.fileExists(atPath: path) else { return false }
-        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX
-        let result = sqlite3_open_v2(path, &db, flags, nil)
+        let localPath: String
+        if context.isRemote {
+            // Pull a fresh snapshot from the remote host. Uses `sqlite3
+            // .backup` on the remote, which is WAL-safe; a plain cp would
+            // corrupt. Routed through SnapshotCoordinator so concurrent
+            // view models don't each spawn a parallel SSH backup for the
+            // same server.
+            let url = try? await SnapshotCoordinator.shared.snapshot(
+                remotePath: context.paths.stateDB,
+                contextID: context.id,
+                transport: transport
+            )
+            guard let url else { return false }
+            localPath = url.path
+        } else {
+            localPath = context.paths.stateDB
+            guard FileManager.default.fileExists(atPath: localPath) else { return false }
+        }
+        // Remote snapshots are point-in-time copies that no one writes to;
+        // opening them with `immutable=1` tells SQLite to skip WAL/SHM and
+        // locking entirely, which is both faster and avoids spurious
+        // "unable to open database file" errors if the snapshot ever gets
+        // pulled mid-checkpoint. Local points at the live Hermes DB where
+        // the process already has WAL enabled in the header, so a plain
+        // readonly open is the right thing.
+        let flags: Int32
+        let openPath: String
+        if context.isRemote {
+            openPath = "file:\(localPath)?immutable=1"
+            flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_URI
+        } else {
+            openPath = localPath
+            flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX
+        }
+        let result = sqlite3_open_v2(openPath, &db, flags, nil)
         guard result == SQLITE_OK else {
             db = nil
             return false
         }
-        sqlite3_exec(db, "PRAGMA journal_mode=WAL", nil, nil, nil)
+        openedAtPath = localPath
         detectSchema()
         return true
+    }
+
+    /// Force a fresh snapshot pull + reopen. Used on session-load and in
+    /// any path that needs the UI to reflect writes Hermes just made.
+    /// Without this, remote snapshots would be frozen at the first `open()`
+    /// for the app's lifetime — new messages added to a resumed session
+    /// would never appear because the snapshot was pulled before they were
+    /// written. Local contexts pay essentially nothing: close+reopen on a
+    /// live DB is a no-op.
+    @discardableResult
+    func refresh() async -> Bool {
+        close()
+        return await open()
     }
 
     func close() {
@@ -431,11 +513,10 @@ actor HermesDataService {
     }
 
     func stateDBModificationDate() -> Date? {
-        let walPath = HermesPaths.stateDB + "-wal"
-        let dbPath = HermesPaths.stateDB
-        let fm = FileManager.default
-        let walDate = (try? fm.attributesOfItem(atPath: walPath))?[.modificationDate] as? Date
-        let dbDate = (try? fm.attributesOfItem(atPath: dbPath))?[.modificationDate] as? Date
+        // For remote contexts we stat the remote paths. For local it's the
+        // same FileManager lookup as before, just via the transport.
+        let walDate = transport.stat(context.paths.stateDB + "-wal")?.mtime
+        let dbDate = transport.stat(context.paths.stateDB)?.mtime
         if let w = walDate, let d = dbDate {
             return max(w, d)
         }

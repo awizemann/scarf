@@ -24,6 +24,14 @@ actor ACPClient {
     private(set) var currentSessionId: String?
     private(set) var statusMessage = ""
 
+    let context: ServerContext
+    private let transport: any ServerTransport
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.transport = context.makeTransport()
+    }
+
     /// Ring buffer of recent stderr lines from `hermes acp` — used to attach
     /// a diagnostic tail to user-visible errors. Capped to avoid unbounded
     /// growth when the subprocess logs heavily.
@@ -75,9 +83,15 @@ actor ACPClient {
         self._eventStream = stream
         self.eventContinuation = continuation
 
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: HermesPaths.hermesBinary)
-        proc.arguments = ["acp"]
+        // For local: Process is `hermes acp` directly.
+        // For remote: the transport returns a Process configured as
+        // `/usr/bin/ssh -T <opts> host -- <hermes> acp`. ACP's JSON-RPC
+        // over stdio works identically because `-T` keeps the ssh channel
+        // byte-clean and stdin/stdout travel end-to-end unmodified.
+        let proc = transport.makeProcess(
+            executable: context.paths.hermesBinary,
+            args: ["acp"]
+        )
 
         let stdin = Pipe()
         let stdout = Pipe()
@@ -88,11 +102,28 @@ actor ACPClient {
         proc.standardError = stderr
 
         // ACP uses JSON-RPC over pipes — do NOT set TERM to avoid terminal escape pollution.
-        // Use the enriched environment so any tools hermes spawns (MCP servers,
-        // shell commands) can find brew/nvm/asdf binaries on PATH.
-        var env = HermesFileService.enrichedEnvironment()
-        env.removeValue(forKey: "TERM")
-        proc.environment = env
+        if context.isRemote {
+            // Remote: this is the LOCAL ssh process spawning `ssh host …
+            // hermes acp`. We don't forward our local PATH/credentials to
+            // the remote (hermes runs under the remote user's login env),
+            // but the ssh binary itself needs SSH_AUTH_SOCK to reach the
+            // local ssh-agent for key-based auth.
+            var env = ProcessInfo.processInfo.environment
+            let shellEnv = HermesFileService.enrichedEnvironment()
+            for key in ["SSH_AUTH_SOCK", "SSH_AGENT_PID"] {
+                if env[key] == nil, let v = shellEnv[key], !v.isEmpty {
+                    env[key] = v
+                }
+            }
+            env.removeValue(forKey: "TERM")
+            proc.environment = env
+        } else {
+            // Local: enriched env so any tools hermes spawns (MCP servers,
+            // shell commands) can find brew/nvm/asdf binaries on PATH.
+            var env = HermesFileService.enrichedEnvironment()
+            env.removeValue(forKey: "TERM")
+            proc.environment = env
+        }
 
         proc.terminationHandler = { [weak self] proc in
             Task { await self?.handleTermination(exitCode: proc.terminationStatus) }
@@ -405,14 +436,14 @@ actor ACPClient {
                     guard !lineData.isEmpty else { continue }
 
                     if let lineStr = String(data: lineData, encoding: .utf8) {
-                        await self?.logger.debug("ACP recv: \(lineStr.prefix(200))")
+                        self?.logger.debug("ACP recv: \(lineStr.prefix(200))")
                     }
 
                     do {
                         let message = try JSONDecoder().decode(ACPRawMessage.self, from: lineData)
                         await self?.handleMessage(message)
                     } catch {
-                        await self?.logger.warning("Failed to decode ACP message: \(error.localizedDescription)")
+                        self?.logger.warning("Failed to decode ACP message: \(error.localizedDescription)")
                     }
                 }
             }
@@ -428,7 +459,7 @@ actor ACPClient {
                 if data.isEmpty { break }
                 if let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !text.isEmpty {
-                    await self?.logger.info("ACP stderr: \(text.prefix(500))")
+                    self?.logger.info("ACP stderr: \(text.prefix(500))")
                     await self?.appendStderr(text)
                 }
             }

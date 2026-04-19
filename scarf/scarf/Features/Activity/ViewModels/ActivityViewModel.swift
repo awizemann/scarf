@@ -2,7 +2,14 @@ import Foundation
 
 @Observable
 final class ActivityViewModel {
-    private let dataService = HermesDataService()
+    let context: ServerContext
+    private let dataService: HermesDataService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.dataService = HermesDataService(context: context)
+    }
+
 
     var toolMessages: [HermesMessage] = []
     var filterKind: ToolKind?
@@ -45,7 +52,12 @@ final class ActivityViewModel {
 
     func load() async {
         isLoading = true
-        let opened = await dataService.open()
+        // refresh() = close + reopen, which forces a fresh snapshot pull on
+        // remote contexts. Using open() here would short-circuit after the
+        // first load and show stale data for the view's lifetime. The DB
+        // stays open after load() returns so selectEntry() can read tool
+        // results without re-opening — cleanup() closes on disappear.
+        let opened = await dataService.refresh()
         guard opened else {
             isLoading = false
             return

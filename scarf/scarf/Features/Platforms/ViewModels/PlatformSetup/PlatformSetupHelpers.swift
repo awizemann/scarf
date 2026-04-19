@@ -15,10 +15,11 @@ import os
 @MainActor
 enum PlatformSetupHelpers {
     static let logger = Logger(subsystem: "com.scarf", category: "PlatformSetup")
-    static let envService = HermesEnvService()
 
-    /// Apply a form save in one atomic batch.
+    /// Apply a form save in one atomic batch against a specific server.
     ///
+    /// - `context`: the server whose `.env` and `config.yaml` we're writing.
+    ///   Local goes through `LocalTransport`; remote rounds through ssh+scp.
     /// - `envPairs`: values to write into `.env`. Empty strings trigger `unset()`
     ///   (commenting the line out) rather than storing a literal empty value.
     /// - `configKV`: scalar config.yaml paths to set via `hermes config set`.
@@ -27,7 +28,9 @@ enum PlatformSetupHelpers {
     ///
     /// Returns a user-facing summary message.
     @discardableResult
-    static func saveForm(envPairs: [String: String], configKV: [String: String]) -> String {
+    static func saveForm(context: ServerContext, envPairs: [String: String], configKV: [String: String]) -> String {
+        let envService = HermesEnvService(context: context)
+
         // Split env pairs into set vs. unset.
         var toSet: [String: String] = [:]
         var toUnset: [String] = []
@@ -49,7 +52,7 @@ enum PlatformSetupHelpers {
 
         var configFailures: [String] = []
         for (key, value) in configKV {
-            let result = runHermesCLI(args: ["config", "set", key, value])
+            let result = runHermesCLI(context: context, args: ["config", "set", key, value])
             if result.exitCode != 0 {
                 configFailures.append(key)
                 logger.warning("hermes config set \(key) failed: \(result.output)")
@@ -61,11 +64,11 @@ enum PlatformSetupHelpers {
         return "Saved — restart gateway to apply"
     }
 
-    /// Synchronous hermes CLI invocation. Use only for fast commands like
-    /// `config set`; longer commands should use `HermesFileService.runHermesCLI`
-    /// from a `Task.detached`.
-    static func runHermesCLI(args: [String], timeout: TimeInterval = 15) -> (exitCode: Int32, output: String) {
-        HermesFileService().runHermesCLI(args: args, timeout: timeout)
+    /// Synchronous hermes CLI invocation against the given server. Use only
+    /// for fast commands like `config set`; longer commands should use
+    /// `HermesFileService.runHermesCLI` from a `Task.detached`.
+    static func runHermesCLI(context: ServerContext, args: [String], timeout: TimeInterval = 15) -> (exitCode: Int32, output: String) {
+        HermesFileService(context: context).runHermesCLI(args: args, timeout: timeout)
     }
 
     /// Ask the user's default browser to open a URL (typically a hermes doc page

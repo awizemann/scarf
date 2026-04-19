@@ -1,9 +1,14 @@
 import SwiftUI
 
 struct QuickCommandsView: View {
-    @State private var viewModel = QuickCommandsViewModel()
+    @State private var viewModel: QuickCommandsViewModel
     @State private var showAddSheet = false
     @State private var editTarget: HermesQuickCommand?
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: QuickCommandsViewModel(context: context))
+    }
+
 
     var body: some View {
         ScrollView {

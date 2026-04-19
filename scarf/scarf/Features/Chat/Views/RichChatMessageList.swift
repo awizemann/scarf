@@ -6,19 +6,31 @@ struct RichChatMessageList: View {
     /// External trigger to force a scroll-to-bottom (e.g., from "Return to Active Session").
     var scrollTrigger: UUID = UUID()
 
-    /// Track the last group's assistant content length to detect streaming updates.
-    private var scrollAnchor: String {
-        if isWorking { return "typing-indicator" }
-        if let last = groups.last { return "group-\(last.id)" }
-        return "scroll-top"
-    }
-
+    /// Why `.defaultScrollAnchor(.bottom)` *alone* and no `proxy.scrollTo`.
+    ///
+    /// `.defaultScrollAnchor(.bottom)` tells SwiftUI to pin the viewport to
+    /// the bottom of the content automatically — as messages stream in or
+    /// new turns arrive, the scroll position tracks the bottom edge.
+    ///
+    /// We used to also call `proxy.scrollTo(lastID, anchor: .bottom)` from
+    /// six different `onChange` handlers during streaming. The two
+    /// mechanisms fought each other: the ScrollViewReader can resolve an ID
+    /// to a position **before** LazyVStack has finished laying out that
+    /// row, so `scrollTo` would land past the actual content — the
+    /// "viewport showing whitespace, chat is above" symptom. Removing the
+    /// manual scroll and trusting `defaultScrollAnchor` eliminates the race.
+    ///
+    /// The only remaining explicit scroll is `scrollTrigger` for the "Return
+    /// to Active Session" button; that fires rarely, after layout has
+    /// settled, so the overshoot doesn't happen.
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    Spacer(minLength: 0)
-                        .id("scroll-top")
+                    if groups.isEmpty && !isWorking {
+                        emptyState
+                    }
+
                     ForEach(groups) { group in
                         MessageGroupView(group: group)
                             .id("group-\(group.id)")
@@ -32,50 +44,39 @@ struct RichChatMessageList: View {
                 .padding()
             }
             .defaultScrollAnchor(.bottom)
-            // Scroll to bottom when view first appears with content
-            .onAppear {
-                if !groups.isEmpty {
-                    DispatchQueue.main.async {
-                        scrollToBottom(proxy: proxy, animated: false)
-                    }
-                }
-            }
-            // Scroll on new groups
-            .onChange(of: groups.count) {
-                scrollToBottom(proxy: proxy)
-            }
-            // Scroll when agent starts/stops working
-            .onChange(of: isWorking) {
-                scrollToBottom(proxy: proxy)
-            }
-            // Scroll on streaming content updates (group content changes)
-            .onChange(of: scrollAnchor) {
-                scrollToBottom(proxy: proxy)
-            }
-            // Scroll on last message content change (streaming text)
-            .onChange(of: groups.last?.assistantMessages.last?.content ?? "") {
-                scrollToBottom(proxy: proxy, animated: false)
-            }
-            // Scroll on tool call count change
-            .onChange(of: groups.last?.toolCallCount ?? 0) {
-                scrollToBottom(proxy: proxy)
-            }
-            // Scroll on external trigger (e.g., "Return to Active Session" button)
             .onChange(of: scrollTrigger) {
-                scrollToBottom(proxy: proxy)
+                let target = lastAnchorID
+                withAnimation(.easeOut(duration: 0.15)) {
+                    proxy.scrollTo(target, anchor: .bottom)
+                }
             }
         }
     }
 
-    private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool = true) {
-        let target = scrollAnchor
-        if animated {
-            withAnimation(.easeOut(duration: 0.15)) {
-                proxy.scrollTo(target, anchor: .bottom)
-            }
-        } else {
-            proxy.scrollTo(target, anchor: .bottom)
+    /// Anchor ID used by the explicit scrollTrigger path. Prefers the typing
+    /// indicator when visible (so we scroll to the very bottom of the
+    /// current turn), otherwise the last group.
+    private var lastAnchorID: String {
+        if isWorking { return "typing-indicator" }
+        if let last = groups.last { return "group-\(last.id)" }
+        return "group-0"
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "bubble.left.and.text.bubble.right")
+                .font(.system(size: 40))
+                .foregroundStyle(.tertiary)
+            Text("Chat Messages")
+                .font(.title3)
+                .fontWeight(.semibold)
+            Text("Messages will appear here as the conversation progresses.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 80)
     }
 
     private var typingIndicator: some View {
@@ -108,7 +109,17 @@ struct MessageGroupView: View {
                 RichMessageBubble(message: user, toolResults: [:])
             }
 
-            ForEach(group.assistantMessages.filter(\.isAssistant)) { message in
+            // Identify by array offset rather than `message.id`. The
+            // streaming assistant message starts with id=0 and gets a
+            // new negative id when finalized — using `\.id` would make
+            // SwiftUI think the bubble disappeared and a new one appeared
+            // (destroying + recreating the view, which manifests as the
+            // chat flashing or jumping right when the prompt completes).
+            // Within a single group the assistant messages are
+            // append-only, so offset is a stable identity for the
+            // group's lifetime.
+            let assistantMessages = group.assistantMessages.filter(\.isAssistant)
+            ForEach(Array(assistantMessages.enumerated()), id: \.offset) { _, message in
                 RichMessageBubble(message: message, toolResults: group.toolResults)
             }
 

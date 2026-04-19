@@ -2,7 +2,13 @@ import Foundation
 
 @Observable
 final class LogsViewModel {
-    private let logService = HermesLogService()
+    let context: ServerContext
+    private let logService: HermesLogService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.logService = HermesLogService(context: context)
+    }
 
     var entries: [LogEntry] = []
     var selectedLogFile: LogFile = .agent
@@ -17,13 +23,13 @@ final class LogsViewModel {
         case gateway = "gateway.log"
 
         var id: String { rawValue }
+    }
 
-        var path: String {
-            switch self {
-            case .agent: return HermesPaths.agentLog
-            case .errors: return HermesPaths.errorsLog
-            case .gateway: return HermesPaths.gatewayLog
-            }
+    private func path(for file: LogFile) -> String {
+        switch file {
+        case .agent: return context.paths.agentLog
+        case .errors: return context.paths.errorsLog
+        case .gateway: return context.paths.gatewayLog
         }
     }
 
@@ -62,7 +68,7 @@ final class LogsViewModel {
     }
 
     func load() async {
-        await logService.openLog(path: selectedLogFile.path)
+        await logService.openLog(path: path(for: selectedLogFile))
         entries = await logService.readLastLines(count: 500)
         await logService.seekToEnd()
         startPolling()
@@ -71,7 +77,7 @@ final class LogsViewModel {
     func switchLogFile(_ file: LogFile) async {
         selectedLogFile = file
         entries = []
-        await logService.openLog(path: file.path)
+        await logService.openLog(path: path(for: file))
         entries = await logService.readLastLines(count: 500)
         await logService.seekToEnd()
     }

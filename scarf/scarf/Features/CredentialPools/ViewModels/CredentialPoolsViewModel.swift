@@ -28,6 +28,12 @@ struct HermesCredentialPool: Identifiable, Sendable {
 @MainActor
 final class CredentialPoolsViewModel {
     private let logger = Logger(subsystem: "com.scarf", category: "CredentialPoolsViewModel")
+    let context: ServerContext
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.oauthFlow = OAuthFlowController(context: context)
+    }
 
     var pools: [HermesCredentialPool] = []
     var isLoading = false
@@ -37,7 +43,7 @@ final class CredentialPoolsViewModel {
     /// can extract the authorization URL, pop it open with an explicit button,
     /// and feed the code back via stdin. See OAuthFlowController for why we
     /// moved off the embedded-terminal approach.
-    let oauthFlow = OAuthFlowController()
+    let oauthFlow: OAuthFlowController
     var oauthProvider: String = ""
     /// Convenience — the sheet keys a lot of UI off "is the flow running?".
     var oauthInProgress: Bool { oauthFlow.isRunning }
@@ -47,34 +53,42 @@ final class CredentialPoolsViewModel {
     /// Source of truth is `~/.hermes/auth.json`. Parsing box-drawn `hermes auth list`
     /// output is fragile — the JSON file is structured, stable, and already stores
     /// exactly the pool data the UI needs. We never display full tokens.
+    ///
+    /// Runs the file reads on a detached task so the synchronous SSH calls
+    /// (which can block for hundreds of milliseconds even with ControlMaster
+    /// multiplexing) don't freeze the main thread / spin the beach ball.
     func load() {
         isLoading = true
-        defer { isLoading = false }
+        let ctx = context
+        Task.detached { [weak self] in
+            let authData = ctx.readData(ctx.paths.authJSON)
+            let yaml = ctx.readText(ctx.paths.configYAML) ?? ""
+            let strategies = Self.parseStrategies(from: yaml)
 
-        let authPath = HermesPaths.home + "/auth.json"
-        let strategies = parseStrategies()
+            let decodedPools: [HermesCredentialPool]
+            if let data = authData,
+               let decoded = try? JSONDecoder().decode(AuthFile.self, from: data) {
+                decodedPools = Self.buildPools(from: decoded, strategies: strategies)
+            } else {
+                decodedPools = []
+            }
 
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: authPath)) else {
-            pools = []
-            return
-        }
-        do {
-            let decoded = try JSONDecoder().decode(AuthFile.self, from: data)
-            pools = Self.buildPools(from: decoded, strategies: strategies)
-        } catch {
-            logger.error("Failed to decode auth.json: \(error.localizedDescription)")
-            pools = []
+            await MainActor.run { [weak self] in
+                self?.pools = decodedPools
+                self?.isLoading = false
+            }
         }
     }
 
     /// The `credential_pool_strategies:` map lives in config.yaml as `<provider>: <strategy>`.
-    private func parseStrategies() -> [String: String] {
-        guard let yaml = try? String(contentsOfFile: HermesPaths.configYAML, encoding: .utf8) else { return [:] }
+    /// Pure-function form so it's safe to call from the detached load task.
+    nonisolated private static func parseStrategies(from yaml: String) -> [String: String] {
+        guard !yaml.isEmpty else { return [:] }
         let parsed = HermesFileService.parseNestedYAML(yaml)
         return parsed.maps["credential_pool_strategies"] ?? [:]
     }
 
-    private static func buildPools(from auth: AuthFile, strategies: [String: String]) -> [HermesCredentialPool] {
+    nonisolated private static func buildPools(from auth: AuthFile, strategies: [String: String]) -> [HermesCredentialPool] {
         auth.credential_pool.keys.sorted().map { provider in
             let entries = auth.credential_pool[provider] ?? []
             let creds = entries.enumerated().map { index, entry in
@@ -100,7 +114,7 @@ final class CredentialPoolsViewModel {
 
     /// Return last 4 chars prefixed with "…", or "" if the token is too short.
     /// Callers MUST NOT pass the full token anywhere user-visible beyond this.
-    private static func tail(of token: String) -> String {
+    nonisolated private static func tail(of token: String) -> String {
         guard token.count >= 4 else { return "" }
         return "…" + String(token.suffix(4))
     }
@@ -206,21 +220,7 @@ final class CredentialPoolsViewModel {
 
     @discardableResult
     private func runHermes(_ arguments: [String]) -> (output: String, exitCode: Int32) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: HermesPaths.hermesBinary)
-        process.arguments = arguments
-        process.environment = HermesFileService.enrichedEnvironment()
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return (String(data: data, encoding: .utf8) ?? "", process.terminationStatus)
-        } catch {
-            return ("", -1)
-        }
+        context.runHermes(arguments)
     }
 }
 
@@ -229,16 +229,40 @@ final class CredentialPoolsViewModel {
 // All fields are optional because the format evolves and we want decoding to
 // succeed even if hermes adds new keys or omits some for certain auth types.
 
-private struct AuthFile: Decodable {
-    let credential_pool: [String: [AuthEntry]]
+// Hand-written `init(from:)` so Swift 6 doesn't synthesize a MainActor-
+// isolated conformance — auth.json decode runs in `load()`'s detached task.
+private struct AuthFile: Decodable, Sendable {
+    nonisolated let credential_pool: [String: [AuthEntry]]
+
+    enum CodingKeys: String, CodingKey { case credential_pool }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.credential_pool = try c.decode([String: [AuthEntry]].self, forKey: .credential_pool)
+    }
 }
 
-private struct AuthEntry: Decodable {
-    let id: String?
-    let label: String?
-    let auth_type: String?
-    let source: String?
-    let access_token: String?
-    let last_status: String?
-    let request_count: Int?
+private struct AuthEntry: Decodable, Sendable {
+    nonisolated let id: String?
+    nonisolated let label: String?
+    nonisolated let auth_type: String?
+    nonisolated let source: String?
+    nonisolated let access_token: String?
+    nonisolated let last_status: String?
+    nonisolated let request_count: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, label, auth_type, source, access_token, last_status, request_count
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id            = try c.decodeIfPresent(String.self, forKey: .id)
+        self.label         = try c.decodeIfPresent(String.self, forKey: .label)
+        self.auth_type     = try c.decodeIfPresent(String.self, forKey: .auth_type)
+        self.source        = try c.decodeIfPresent(String.self, forKey: .source)
+        self.access_token  = try c.decodeIfPresent(String.self, forKey: .access_token)
+        self.last_status   = try c.decodeIfPresent(String.self, forKey: .last_status)
+        self.request_count = try c.decodeIfPresent(Int.self, forKey: .request_count)
+    }
 }

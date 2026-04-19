@@ -6,7 +6,14 @@ import os
 @Observable
 final class SettingsViewModel {
     private let logger = Logger(subsystem: "com.scarf", category: "SettingsViewModel")
-    private let fileService = HermesFileService()
+    let context: ServerContext
+    private let fileService: HermesFileService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.fileService = HermesFileService(context: context)
+    }
+
 
     var config = HermesConfig.empty
     var gatewayState: GatewayState?
@@ -20,18 +27,35 @@ final class SettingsViewModel {
     var sttProviders = ["local", "groq", "openai", "mistral"]
     var memoryProviders = ["", "honcho", "openviking", "mem0", "hindsight", "holographic", "retaindb", "byterover", "supermemory"]
     var saveMessage: String?
+    var isLoading = false
 
     func load() {
-        config = fileService.loadConfig()
-        gatewayState = fileService.loadGatewayState()
-        hermesRunning = fileService.isHermesRunning()
-        do {
-            rawConfigYAML = try String(contentsOfFile: HermesPaths.configYAML, encoding: .utf8)
-        } catch {
-            logger.error("Failed to read config.yaml: \(error.localizedDescription)")
-            rawConfigYAML = ""
+        isLoading = true
+        let svc = fileService
+        let ctx = context
+        let displayName = ctx.displayName
+        let log = logger
+        // Heavy load: config + gateway state + isRunning + raw YAML are
+        // four sync transport calls. On remote each is a blocking ssh
+        // round-trip; doing them on MainActor would beach-ball for ~1s.
+        Task.detached { [weak self] in
+            let cfg = svc.loadConfig()
+            let gw = svc.loadGatewayState()
+            let running = svc.isHermesRunning()
+            let raw = ctx.readText(ctx.paths.configYAML)
+            if raw == nil {
+                log.error("Failed to read config.yaml from \(displayName)")
+            }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.config = cfg
+                self.gatewayState = gw
+                self.hermesRunning = running
+                self.rawConfigYAML = raw ?? ""
+                self.personalities = self.parsePersonalities()
+                self.isLoading = false
+            }
         }
-        personalities = parsePersonalities()
     }
 
     /// Set a scalar config value via `hermes config set <key> <value>` and reload
@@ -223,8 +247,17 @@ final class SettingsViewModel {
                 self.backupInProgress = false
                 if result.exitCode == 0 {
                     if let zipPath {
-                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: zipPath)])
-                        self.saveMessage = "Backup saved"
+                        // NSWorkspace operates on the *local* Mac's filesystem;
+                        // a remote backup path doesn't exist here, so revealing
+                        // it would silently no-op (or worse, reveal an
+                        // unrelated local file with the same path). Surface the
+                        // remote location in the saveMessage instead.
+                        if self.context.isRemote {
+                            self.saveMessage = "Backup saved on \(self.context.displayName): \(zipPath)"
+                        } else {
+                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: zipPath)])
+                            self.saveMessage = "Backup saved"
+                        }
                     } else {
                         self.saveMessage = "Backup complete"
                     }
@@ -278,7 +311,10 @@ final class SettingsViewModel {
     }
 
     func openConfigInEditor() {
-        NSWorkspace.shared.open(URL(fileURLWithPath: HermesPaths.configYAML))
+        // No-op for remote contexts — the file is on the remote host, not
+        // this Mac. The Settings tab's in-app editor is the supported way
+        // to edit remote configs.
+        context.openInLocalEditor(context.paths.configYAML)
     }
 
     private func parsePersonalities() -> [String] {
@@ -308,21 +344,6 @@ final class SettingsViewModel {
 
     @discardableResult
     private func runHermes(_ arguments: [String]) -> (output: String, exitCode: Int32) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: HermesPaths.hermesBinary)
-        process.arguments = arguments
-        process.environment = HermesFileService.enrichedEnvironment()
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return (String(data: data, encoding: .utf8) ?? "", process.terminationStatus)
-        } catch {
-            logger.error("Failed to run hermes \(arguments.joined(separator: " ")): \(error.localizedDescription)")
-            return ("", -1)
-        }
+        context.runHermes(arguments)
     }
 }

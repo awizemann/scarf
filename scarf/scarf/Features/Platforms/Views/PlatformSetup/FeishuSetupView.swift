@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct FeishuSetupView: View {
-    @State private var viewModel = FeishuSetupViewModel()
+    @State private var viewModel: FeishuSetupViewModel
+    init(context: ServerContext) { _viewModel = State(initialValue: FeishuSetupViewModel(context: context)) }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

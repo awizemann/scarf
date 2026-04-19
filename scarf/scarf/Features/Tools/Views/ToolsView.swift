@@ -1,7 +1,12 @@
 import SwiftUI
 
 struct ToolsView: View {
-    @State private var viewModel = ToolsViewModel()
+    @State private var viewModel: ToolsViewModel
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: ToolsViewModel(context: context))
+    }
+
 
     var body: some View {
         VStack(spacing: 0) {

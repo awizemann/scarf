@@ -9,7 +9,7 @@ struct AuxiliaryModel: Sendable, Equatable {
     var apiKey: String
     var timeout: Int
 
-    static let empty = AuxiliaryModel(provider: "auto", model: "", baseURL: "", apiKey: "", timeout: 30)
+    nonisolated static let empty = AuxiliaryModel(provider: "auto", model: "", baseURL: "", apiKey: "", timeout: 30)
 }
 
 /// Group of display-related settings mirroring the `display:` block in config.yaml.
@@ -23,7 +23,7 @@ struct DisplaySettings: Sendable, Equatable {
     var toolPreviewLength: Int
     var busyInputMode: String           // e.g. "interrupt"
 
-    static let empty = DisplaySettings(
+    nonisolated static let empty = DisplaySettings(
         skin: "default",
         compact: false,
         resumeDisplay: "full",
@@ -54,7 +54,7 @@ struct TerminalSettings: Sendable, Equatable {
     var daytonaImage: String
     var singularityImage: String
 
-    static let empty = TerminalSettings(
+    nonisolated static let empty = TerminalSettings(
         cwd: ".",
         timeout: 180,
         envPassthrough: [],
@@ -82,7 +82,7 @@ struct BrowserSettings: Sendable, Equatable {
     var allowPrivateURLs: Bool
     var camofoxManagedPersistence: Bool
 
-    static let empty = BrowserSettings(
+    nonisolated static let empty = BrowserSettings(
         inactivityTimeout: 120,
         commandTimeout: 30,
         recordSessions: false,
@@ -115,7 +115,7 @@ struct VoiceSettings: Sendable, Equatable {
     var sttOpenAIModel: String
     var sttMistralModel: String
 
-    static let empty = VoiceSettings(
+    nonisolated static let empty = VoiceSettings(
         recordKey: "ctrl+b",
         maxRecordingSeconds: 120,
         silenceDuration: 3.0,
@@ -147,7 +147,7 @@ struct AuxiliarySettings: Sendable, Equatable {
     var mcp: AuxiliaryModel
     var flushMemories: AuxiliaryModel
 
-    static let empty = AuxiliarySettings(
+    nonisolated static let empty = AuxiliarySettings(
         vision: .empty,
         webExtract: .empty,
         compression: .empty,
@@ -170,7 +170,7 @@ struct SecuritySettings: Sendable, Equatable {
     var blocklistEnabled: Bool
     var blocklistDomains: [String]
 
-    static let empty = SecuritySettings(
+    nonisolated static let empty = SecuritySettings(
         redactSecrets: true,
         redactPII: false,
         tirithEnabled: true,
@@ -188,7 +188,7 @@ struct HumanDelaySettings: Sendable, Equatable {
     var minMS: Int
     var maxMS: Int
 
-    static let empty = HumanDelaySettings(mode: "off", minMS: 800, maxMS: 2500)
+    nonisolated static let empty = HumanDelaySettings(mode: "off", minMS: 800, maxMS: 2500)
 }
 
 /// Compression / context routing.
@@ -198,14 +198,14 @@ struct CompressionSettings: Sendable, Equatable {
     var targetRatio: Double
     var protectLastN: Int
 
-    static let empty = CompressionSettings(enabled: true, threshold: 0.5, targetRatio: 0.2, protectLastN: 20)
+    nonisolated static let empty = CompressionSettings(enabled: true, threshold: 0.5, targetRatio: 0.2, protectLastN: 20)
 }
 
 struct CheckpointSettings: Sendable, Equatable {
     var enabled: Bool
     var maxSnapshots: Int
 
-    static let empty = CheckpointSettings(enabled: true, maxSnapshots: 50)
+    nonisolated static let empty = CheckpointSettings(enabled: true, maxSnapshots: 50)
 }
 
 struct LoggingSettings: Sendable, Equatable {
@@ -213,7 +213,7 @@ struct LoggingSettings: Sendable, Equatable {
     var maxSizeMB: Int
     var backupCount: Int
 
-    static let empty = LoggingSettings(level: "INFO", maxSizeMB: 5, backupCount: 3)
+    nonisolated static let empty = LoggingSettings(level: "INFO", maxSizeMB: 5, backupCount: 3)
 }
 
 struct DelegationSettings: Sendable, Equatable {
@@ -223,7 +223,7 @@ struct DelegationSettings: Sendable, Equatable {
     var apiKey: String
     var maxIterations: Int
 
-    static let empty = DelegationSettings(model: "", provider: "", baseURL: "", apiKey: "", maxIterations: 50)
+    nonisolated static let empty = DelegationSettings(model: "", provider: "", baseURL: "", apiKey: "", maxIterations: 50)
 }
 
 /// Discord-specific platform settings (`discord.*`). Other platforms currently have thinner schemas.
@@ -233,7 +233,7 @@ struct DiscordSettings: Sendable, Equatable {
     var autoThread: Bool
     var reactions: Bool
 
-    static let empty = DiscordSettings(requireMention: true, freeResponseChannels: "", autoThread: true, reactions: true)
+    nonisolated static let empty = DiscordSettings(requireMention: true, freeResponseChannels: "", autoThread: true, reactions: true)
 }
 
 /// Telegram settings under `telegram.*` in config.yaml. Most Telegram tuning is
@@ -243,7 +243,7 @@ struct TelegramSettings: Sendable, Equatable {
     var requireMention: Bool
     var reactions: Bool
 
-    static let empty = TelegramSettings(requireMention: true, reactions: false)
+    nonisolated static let empty = TelegramSettings(requireMention: true, reactions: false)
 }
 
 /// Slack settings under `platforms.slack.*` (and a couple of top-level keys).
@@ -253,7 +253,7 @@ struct SlackSettings: Sendable, Equatable {
     var replyInThread: Bool
     var replyBroadcast: Bool
 
-    static let empty = SlackSettings(replyToMode: "first", requireMention: true, replyInThread: true, replyBroadcast: false)
+    nonisolated static let empty = SlackSettings(replyToMode: "first", requireMention: true, replyInThread: true, replyBroadcast: false)
 }
 
 /// Matrix settings under `matrix.*`.
@@ -262,7 +262,7 @@ struct MatrixSettings: Sendable, Equatable {
     var autoThread: Bool
     var dmMentionThreads: Bool
 
-    static let empty = MatrixSettings(requireMention: true, autoThread: true, dmMentionThreads: false)
+    nonisolated static let empty = MatrixSettings(requireMention: true, autoThread: true, dmMentionThreads: false)
 }
 
 /// Mattermost settings. Mattermost is mostly driven by env vars; config.yaml
@@ -272,7 +272,7 @@ struct MattermostSettings: Sendable, Equatable {
     var requireMention: Bool
     var replyMode: String           // "thread" | "off"
 
-    static let empty = MattermostSettings(requireMention: true, replyMode: "off")
+    nonisolated static let empty = MattermostSettings(requireMention: true, replyMode: "off")
 }
 
 /// WhatsApp settings under `whatsapp.*`.
@@ -280,7 +280,7 @@ struct WhatsAppSettings: Sendable, Equatable {
     var unauthorizedDMBehavior: String  // "pair" | "ignore"
     var replyPrefix: String
 
-    static let empty = WhatsAppSettings(unauthorizedDMBehavior: "pair", replyPrefix: "")
+    nonisolated static let empty = WhatsAppSettings(unauthorizedDMBehavior: "pair", replyPrefix: "")
 }
 
 /// Home Assistant filters under `platforms.homeassistant.extra`. Hermes ignores
@@ -292,7 +292,7 @@ struct HomeAssistantSettings: Sendable, Equatable {
     var ignoreEntities: [String]
     var cooldownSeconds: Int
 
-    static let empty = HomeAssistantSettings(watchDomains: [], watchEntities: [], watchAll: false, ignoreEntities: [], cooldownSeconds: 30)
+    nonisolated static let empty = HomeAssistantSettings(watchDomains: [], watchEntities: [], watchAll: false, ignoreEntities: [], cooldownSeconds: 30)
 }
 
 // MARK: - Root Config
@@ -359,7 +359,7 @@ struct HermesConfig: Sendable {
     var whatsapp: WhatsAppSettings
     var homeAssistant: HomeAssistantSettings
 
-    static let empty = HermesConfig(
+    nonisolated static let empty = HermesConfig(
         model: "unknown",
         provider: "unknown",
         maxTurns: 0,
@@ -418,13 +418,16 @@ struct HermesConfig: Sendable {
     )
 }
 
+// Hand-written `init(from:)` so Swift 6 doesn't synthesize a
+// MainActor-isolated Decodable conformance (which would fail to be used from
+// `HermesFileService.loadGatewayState()`, a nonisolated method).
 struct GatewayState: Sendable, Codable {
-    let pid: Int?
-    let kind: String?
-    let gatewayState: String?
-    let exitReason: String?
-    let platforms: [String: PlatformState]?
-    let updatedAt: String?
+    nonisolated let pid: Int?
+    nonisolated let kind: String?
+    nonisolated let gatewayState: String?
+    nonisolated let exitReason: String?
+    nonisolated let platforms: [String: PlatformState]?
+    nonisolated let updatedAt: String?
 
     enum CodingKeys: String, CodingKey {
         case pid, kind
@@ -434,16 +437,50 @@ struct GatewayState: Sendable, Codable {
         case updatedAt = "updated_at"
     }
 
-    var isRunning: Bool {
+    nonisolated init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.pid          = try c.decodeIfPresent(Int.self, forKey: .pid)
+        self.kind         = try c.decodeIfPresent(String.self, forKey: .kind)
+        self.gatewayState = try c.decodeIfPresent(String.self, forKey: .gatewayState)
+        self.exitReason   = try c.decodeIfPresent(String.self, forKey: .exitReason)
+        self.platforms    = try c.decodeIfPresent([String: PlatformState].self, forKey: .platforms)
+        self.updatedAt    = try c.decodeIfPresent(String.self, forKey: .updatedAt)
+    }
+
+    nonisolated func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(pid, forKey: .pid)
+        try c.encodeIfPresent(kind, forKey: .kind)
+        try c.encodeIfPresent(gatewayState, forKey: .gatewayState)
+        try c.encodeIfPresent(exitReason, forKey: .exitReason)
+        try c.encodeIfPresent(platforms, forKey: .platforms)
+        try c.encodeIfPresent(updatedAt, forKey: .updatedAt)
+    }
+
+    nonisolated var isRunning: Bool {
         gatewayState == "running"
     }
 
-    var statusText: String {
+    nonisolated var statusText: String {
         gatewayState ?? "unknown"
     }
 }
 
 struct PlatformState: Sendable, Codable {
-    let connected: Bool?
-    let error: String?
+    nonisolated let connected: Bool?
+    nonisolated let error: String?
+
+    enum CodingKeys: String, CodingKey { case connected, error }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.connected = try c.decodeIfPresent(Bool.self, forKey: .connected)
+        self.error     = try c.decodeIfPresent(String.self, forKey: .error)
+    }
+
+    nonisolated func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(connected, forKey: .connected)
+        try c.encodeIfPresent(error, forKey: .error)
+    }
 }

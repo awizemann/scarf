@@ -21,20 +21,15 @@ struct RichChatView: View {
             )
             Divider()
 
-            if richChat.messageGroups.isEmpty && !richChat.isAgentWorking {
-                ContentUnavailableView(
-                    "Chat Messages",
-                    systemImage: "bubble.left.and.text.bubble.right",
-                    description: Text("Messages will appear here as the conversation progresses.")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                RichChatMessageList(
-                    groups: richChat.messageGroups,
-                    isWorking: richChat.isAgentWorking,
-                    scrollTrigger: richChat.scrollTrigger
-                )
-            }
+            // Always mount RichChatMessageList; empty state lives inside it.
+            // Swapping between a ContentUnavailableView and the ScrollView
+            // hierarchy on first message caused a full view tree rebuild,
+            // which manifests as a white flash.
+            RichChatMessageList(
+                groups: richChat.messageGroups,
+                isWorking: richChat.isAgentWorking,
+                scrollTrigger: richChat.scrollTrigger
+            )
 
             Divider()
             RichChatInputBar(

@@ -1,8 +1,13 @@
 import SwiftUI
 
 struct CronView: View {
-    @State private var viewModel = CronViewModel()
+    @State private var viewModel: CronViewModel
     @State private var pendingDelete: HermesCronJob?
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: CronViewModel(context: context))
+    }
+
 
     var body: some View {
         HSplitView {
@@ -12,6 +17,7 @@ struct CronView: View {
                 .frame(minWidth: 400)
         }
         .navigationTitle("Cron Jobs")
+        .loadingOverlay(viewModel.isLoading, label: "Loading cron jobs…", isEmpty: viewModel.jobs.isEmpty)
         .onAppear { viewModel.load() }
         .sheet(isPresented: $viewModel.showCreateSheet) {
             CronJobEditor(mode: .create, availableSkills: viewModel.availableSkills) { form in

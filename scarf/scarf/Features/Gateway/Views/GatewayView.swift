@@ -1,8 +1,13 @@
 import SwiftUI
 
 struct GatewayView: View {
-    @State private var viewModel = GatewayViewModel()
+    @State private var viewModel: GatewayViewModel
     @Environment(HermesFileWatcher.self) private var fileWatcher
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: GatewayViewModel(context: context))
+    }
+
 
     var body: some View {
         ScrollView {

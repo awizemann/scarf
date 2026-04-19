@@ -5,6 +5,9 @@ import Foundation
 @Observable
 @MainActor
 final class MattermostSetupViewModel {
+    let context: ServerContext
+    init(context: ServerContext = .local) { self.context = context }
+
     var serverURL: String = ""
     var token: String = ""
     var allowedUsers: String = ""
@@ -18,7 +21,7 @@ final class MattermostSetupViewModel {
     let replyModeOptions = ["off", "thread"]
 
     func load() {
-        let env = HermesEnvService().load()
+        let env = HermesEnvService(context: context).load()
         serverURL = env["MATTERMOST_URL"] ?? ""
         token = env["MATTERMOST_TOKEN"] ?? ""
         allowedUsers = env["MATTERMOST_ALLOWED_USERS"] ?? ""
@@ -26,7 +29,7 @@ final class MattermostSetupViewModel {
         freeResponseChannels = env["MATTERMOST_FREE_RESPONSE_CHANNELS"] ?? ""
         replyMode = env["MATTERMOST_REPLY_MODE"] ?? "off"
 
-        let cfg = HermesFileService().loadConfig().mattermost
+        let cfg = HermesFileService(context: context).loadConfig().mattermost
         requireMention = cfg.requireMention
     }
 
@@ -40,7 +43,7 @@ final class MattermostSetupViewModel {
             "MATTERMOST_REPLY_MODE": replyMode == "off" ? "" : replyMode,
             "MATTERMOST_REQUIRE_MENTION": PlatformSetupHelpers.envBool(requireMention)
         ]
-        message = PlatformSetupHelpers.saveForm(envPairs: envPairs, configKV: [:])
+        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: [:])
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             self?.message = nil
         }

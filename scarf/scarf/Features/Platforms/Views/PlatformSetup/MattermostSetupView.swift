@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct MattermostSetupView: View {
-    @State private var viewModel = MattermostSetupViewModel()
+    @State private var viewModel: MattermostSetupViewModel
+    init(context: ServerContext) { _viewModel = State(initialValue: MattermostSetupViewModel(context: context)) }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

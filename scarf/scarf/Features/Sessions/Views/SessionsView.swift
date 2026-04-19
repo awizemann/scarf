@@ -1,8 +1,14 @@
 import SwiftUI
 
 struct SessionsView: View {
-    @State private var viewModel = SessionsViewModel()
+    @State private var viewModel: SessionsViewModel
     @Environment(AppCoordinator.self) private var coordinator
+    @Environment(HermesFileWatcher.self) private var fileWatcher
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: SessionsViewModel(context: context))
+    }
+
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,6 +38,9 @@ struct SessionsView: View {
                 await viewModel.selectSessionById(id)
                 coordinator.selectedSessionId = nil
             }
+        }
+        .onChange(of: fileWatcher.lastChangeDate) {
+            Task { await viewModel.load() }
         }
         .onDisappear { Task { await viewModel.cleanup() } }
         .sheet(isPresented: $viewModel.showRenameSheet) {

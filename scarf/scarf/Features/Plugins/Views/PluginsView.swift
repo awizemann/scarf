@@ -1,10 +1,15 @@
 import SwiftUI
 
 struct PluginsView: View {
-    @State private var viewModel = PluginsViewModel()
+    @State private var viewModel: PluginsViewModel
     @State private var installIdentifier = ""
     @State private var showInstall = false
     @State private var pendingRemove: HermesPlugin?
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: PluginsViewModel(context: context))
+    }
+
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,6 +24,11 @@ struct PluginsView: View {
             }
         }
         .navigationTitle("Plugins")
+        .loadingOverlay(
+            viewModel.isLoading,
+            label: "Loading plugins…",
+            isEmpty: viewModel.plugins.isEmpty
+        )
         .onAppear { viewModel.load() }
         .sheet(isPresented: $showInstall) { installSheet }
         .confirmationDialog(

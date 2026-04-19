@@ -2,8 +2,16 @@ import Foundation
 
 @Observable
 final class DashboardViewModel {
-    private let dataService = HermesDataService()
-    private let fileService = HermesFileService()
+    let context: ServerContext
+    private let dataService: HermesDataService
+    private let fileService: HermesFileService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.dataService = HermesDataService(context: context)
+        self.fileService = HermesFileService(context: context)
+    }
+
 
     var stats = HermesDataService.SessionStats.empty
     var recentSessions: [HermesSession] = []
@@ -15,16 +23,26 @@ final class DashboardViewModel {
 
     func load() async {
         isLoading = true
-        let opened = await dataService.open()
+        // refresh() = close + reopen, forces a fresh remote snapshot. Cheap
+        // on local (live DB reopen).
+        let opened = await dataService.refresh()
         if opened {
             stats = await dataService.fetchStats()
             recentSessions = await dataService.fetchSessions(limit: 5)
             sessionPreviews = await dataService.fetchSessionPreviews(limit: 5)
             await dataService.close()
         }
-        config = fileService.loadConfig()
-        gatewayState = fileService.loadGatewayState()
-        hermesRunning = fileService.isHermesRunning()
+        // The fileService methods are synchronous and route through the
+        // transport. For remote contexts each call is a blocking ssh
+        // round-trip — do them off the main thread to avoid spinning the
+        // beach ball during the load.
+        let svc = fileService
+        let (cfg, gw, running) = await Task.detached {
+            (svc.loadConfig(), svc.loadGatewayState(), svc.isHermesRunning())
+        }.value
+        config = cfg
+        gatewayState = gw
+        hermesRunning = running
         isLoading = false
     }
 }

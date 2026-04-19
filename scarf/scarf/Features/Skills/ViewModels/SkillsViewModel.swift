@@ -21,7 +21,14 @@ struct HermesSkillUpdate: Identifiable, Sendable, Equatable {
 @Observable
 final class SkillsViewModel {
     private let logger = Logger(subsystem: "com.scarf", category: "SkillsViewModel")
-    private let fileService = HermesFileService()
+    let context: ServerContext
+    private let fileService: HermesFileService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.fileService = HermesFileService(context: context)
+    }
+
 
     // MARK: - Installed skills (existing behavior)
     var categories: [HermesSkillCategory] = []
@@ -61,8 +68,16 @@ final class SkillsViewModel {
     }
 
     func load() {
-        categories = fileService.loadSkills()
-        currentConfig = fileService.loadConfig()
+        let svc = fileService
+        // loadSkills walks ~/.hermes/skills/* — many transport ops on remote.
+        Task.detached { [weak self] in
+            let cats = svc.loadSkills()
+            let cfg = svc.loadConfig()
+            await MainActor.run { [weak self] in
+                self?.categories = cats
+                self?.currentConfig = cfg
+            }
+        }
     }
 
     func selectSkill(_ skill: HermesSkill) {
@@ -80,7 +95,7 @@ final class SkillsViewModel {
 
     private func computeMissingConfig(for skill: HermesSkill) -> [String] {
         guard !skill.requiredConfig.isEmpty else { return [] }
-        guard let yaml = try? String(contentsOfFile: HermesPaths.configYAML, encoding: .utf8) else {
+        guard let yaml = context.readText(context.paths.configYAML) else {
             return skill.requiredConfig
         }
         return skill.requiredConfig.filter { key in

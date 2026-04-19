@@ -142,15 +142,16 @@ struct AdvancedTab: View {
     }
 
     private var pathsSection: some View {
-        SettingsSection(title: "Paths", icon: "folder") {
-            PathRow(label: "Hermes Home", path: HermesPaths.home)
-            PathRow(label: "State DB", path: HermesPaths.stateDB)
-            PathRow(label: "Config", path: HermesPaths.configYAML)
-            PathRow(label: "Memory", path: HermesPaths.memoriesDir)
-            PathRow(label: "Sessions", path: HermesPaths.sessionsDir)
-            PathRow(label: "Skills", path: HermesPaths.skillsDir)
-            PathRow(label: "Agent Log", path: HermesPaths.agentLog)
-            PathRow(label: "Error Log", path: HermesPaths.errorsLog)
+        let paths = viewModel.context.paths
+        return SettingsSection(title: "Paths", icon: "folder") {
+            PathRow(label: "Hermes Home", path: paths.home)
+            PathRow(label: "State DB", path: paths.stateDB)
+            PathRow(label: "Config", path: paths.configYAML)
+            PathRow(label: "Memory", path: paths.memoriesDir)
+            PathRow(label: "Sessions", path: paths.sessionsDir)
+            PathRow(label: "Skills", path: paths.skillsDir)
+            PathRow(label: "Agent Log", path: paths.agentLog)
+            PathRow(label: "Error Log", path: paths.errorsLog)
         }
     }
 

@@ -6,6 +6,9 @@ import Foundation
 @Observable
 @MainActor
 final class IMessageSetupViewModel {
+    let context: ServerContext
+    init(context: ServerContext = .local) { self.context = context }
+
     var serverURL: String = ""
     var password: String = ""
     var webhookHost: String = "127.0.0.1"
@@ -19,7 +22,7 @@ final class IMessageSetupViewModel {
     var message: String?
 
     func load() {
-        let env = HermesEnvService().load()
+        let env = HermesEnvService(context: context).load()
         serverURL = env["BLUEBUBBLES_SERVER_URL"] ?? ""
         password = env["BLUEBUBBLES_PASSWORD"] ?? ""
         webhookHost = env["BLUEBUBBLES_WEBHOOK_HOST"] ?? "127.0.0.1"
@@ -43,7 +46,7 @@ final class IMessageSetupViewModel {
             "BLUEBUBBLES_ALLOW_ALL_USERS": allowAllUsers ? "true" : "",
             "BLUEBUBBLES_SEND_READ_RECEIPTS": sendReadReceipts ? "true" : ""
         ]
-        message = PlatformSetupHelpers.saveForm(envPairs: envPairs, configKV: [:])
+        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: [:])
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             self?.message = nil
         }

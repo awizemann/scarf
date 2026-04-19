@@ -12,6 +12,11 @@ enum PlatformConnectivity: Sendable, Equatable {
 @Observable
 final class ToolsViewModel {
     private let logger = Logger(subsystem: "com.scarf", category: "ToolsViewModel")
+    let context: ServerContext
+
+    init(context: ServerContext = .local) {
+        self.context = context
+    }
 
     var selectedPlatform: HermesToolPlatform = KnownPlatforms.cli
     var toolsets: [HermesToolset] = []
@@ -59,12 +64,13 @@ final class ToolsViewModel {
     /// - `~/.hermes/config.yaml` top-level keys (`discord:`, `whatsapp:`, etc.) tell us which have been configured.
     @MainActor
     private func loadPlatforms() async {
+        let ctx = context
         let yaml: String = await Task.detached {
-            (try? String(contentsOfFile: HermesPaths.configYAML, encoding: .utf8)) ?? ""
+            ctx.readText(ctx.paths.configYAML) ?? ""
         }.value
 
         let gatewayState: GatewayState? = await Task.detached {
-            HermesFileService().loadGatewayState()
+            HermesFileService(context: ctx).loadGatewayState()
         }.value
 
         let configuredNames = Self.parseConfiguredPlatforms(yaml: yaml)
@@ -168,31 +174,7 @@ final class ToolsViewModel {
     }
 
     private nonisolated func runHermes(_ arguments: [String]) async -> (output: String, exitCode: Int32) {
-        await Task.detached {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: HermesPaths.hermesBinary)
-            process.arguments = arguments
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
-            process.standardOutput = stdoutPipe
-            process.standardError = stderrPipe
-            do {
-                try process.run()
-                process.waitUntilExit()
-                let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8) ?? ""
-                try? stdoutPipe.fileHandleForReading.close()
-                try? stdoutPipe.fileHandleForWriting.close()
-                try? stderrPipe.fileHandleForReading.close()
-                try? stderrPipe.fileHandleForWriting.close()
-                return (output, process.terminationStatus)
-            } catch {
-                try? stdoutPipe.fileHandleForReading.close()
-                try? stdoutPipe.fileHandleForWriting.close()
-                try? stderrPipe.fileHandleForReading.close()
-                try? stderrPipe.fileHandleForWriting.close()
-                return ("", -1)
-            }
-        }.value
+        let ctx = context
+        return await Task.detached { ctx.runHermes(arguments) }.value
     }
 }

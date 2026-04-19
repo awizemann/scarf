@@ -2,9 +2,14 @@ import SwiftUI
 import AppKit
 
 struct WebhooksView: View {
-    @State private var viewModel = WebhooksViewModel()
+    @State private var viewModel: WebhooksViewModel
     @State private var showAddSheet = false
     @State private var pendingRemove: HermesWebhook?
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: WebhooksViewModel(context: context))
+    }
+
 
     // Add form state
     @State private var addName = ""
@@ -90,7 +95,7 @@ struct WebhooksView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 Button {
-                    NSWorkspace.shared.open(URL(fileURLWithPath: HermesPaths.configYAML))
+                    viewModel.context.openInLocalEditor(viewModel.context.paths.configYAML)
                 } label: {
                     Label("Edit config.yaml", systemImage: "doc.text")
                 }
@@ -102,7 +107,10 @@ struct WebhooksView: View {
     }
 
     private func openGatewaySetupInTerminal() {
-        guard let hermes = HermesFileService().hermesBinaryPath() else { return }
+        // Always use the local hermes binary — Terminal launches on this Mac,
+        // not the remote. (Webhook setup is itself local Hermes anyway since
+        // the gateway runs on the machine talking to messaging platforms.)
+        let hermes = ServerContext.local.paths.hermesBinary
         let script = "tell application \"Terminal\"\n  activate\n  do script \"\(hermes) gateway setup\"\nend tell"
         let appleScript = NSAppleScript(source: script)
         var err: NSDictionary?

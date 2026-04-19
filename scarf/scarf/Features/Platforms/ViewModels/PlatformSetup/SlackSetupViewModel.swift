@@ -5,6 +5,9 @@ import Foundation
 @Observable
 @MainActor
 final class SlackSetupViewModel {
+    let context: ServerContext
+    init(context: ServerContext = .local) { self.context = context }
+
     var botToken: String = ""           // xoxb-...
     var appToken: String = ""           // xapp-...
     var allowedUsers: String = ""
@@ -21,14 +24,14 @@ final class SlackSetupViewModel {
     let replyToModeOptions = ["off", "first", "all"]
 
     func load() {
-        let env = HermesEnvService().load()
+        let env = HermesEnvService(context: context).load()
         botToken = env["SLACK_BOT_TOKEN"] ?? ""
         appToken = env["SLACK_APP_TOKEN"] ?? ""
         allowedUsers = env["SLACK_ALLOWED_USERS"] ?? ""
         homeChannel = env["SLACK_HOME_CHANNEL"] ?? ""
         homeChannelName = env["SLACK_HOME_CHANNEL_NAME"] ?? ""
 
-        let cfg = HermesFileService().loadConfig().slack
+        let cfg = HermesFileService(context: context).loadConfig().slack
         replyToMode = cfg.replyToMode
         requireMention = cfg.requireMention
         replyInThread = cfg.replyInThread
@@ -50,7 +53,7 @@ final class SlackSetupViewModel {
             "platforms.slack.extra.reply_in_thread": PlatformSetupHelpers.envBool(replyInThread),
             "platforms.slack.extra.reply_broadcast": PlatformSetupHelpers.envBool(replyBroadcast)
         ]
-        message = PlatformSetupHelpers.saveForm(envPairs: envPairs, configKV: configKV)
+        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             self?.message = nil
         }

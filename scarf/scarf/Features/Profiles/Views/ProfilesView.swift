@@ -3,13 +3,18 @@ import AppKit
 import UniformTypeIdentifiers
 
 struct ProfilesView: View {
-    @State private var viewModel = ProfilesViewModel()
+    @State private var viewModel: ProfilesViewModel
     @State private var selected: HermesProfile?
     @State private var showCreate = false
     @State private var createName = ""
     @State private var createCloneConfig = true
     @State private var createCloneAll = false
     @State private var showRename = false
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: ProfilesViewModel(context: context))
+    }
+
     @State private var renameTarget: HermesProfile?
     @State private var renameNewName = ""
     @State private var pendingDelete: HermesProfile?

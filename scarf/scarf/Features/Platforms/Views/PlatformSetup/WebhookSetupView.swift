@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct WebhookSetupView: View {
-    @State private var viewModel = WebhookSetupViewModel()
+    @State private var viewModel: WebhookSetupViewModel
+    init(context: ServerContext) { _viewModel = State(initialValue: WebhookSetupViewModel(context: context)) }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

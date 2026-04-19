@@ -8,6 +8,9 @@ import os
 @Observable
 @MainActor
 final class TelegramSetupViewModel {
+    let context: ServerContext
+    init(context: ServerContext = .local) { self.context = context }
+
     // Required
     var botToken: String = ""
     var allowedUsers: String = ""
@@ -23,7 +26,7 @@ final class TelegramSetupViewModel {
     var message: String?
 
     func load() {
-        let env = HermesEnvService().load()
+        let env = HermesEnvService(context: context).load()
         botToken = env["TELEGRAM_BOT_TOKEN"] ?? ""
         allowedUsers = env["TELEGRAM_ALLOWED_USERS"] ?? ""
         homeChannel = env["TELEGRAM_HOME_CHANNEL"] ?? ""
@@ -31,7 +34,7 @@ final class TelegramSetupViewModel {
         webhookPort = env["TELEGRAM_WEBHOOK_PORT"] ?? ""
         webhookSecret = env["TELEGRAM_WEBHOOK_SECRET"] ?? ""
 
-        let cfg = HermesFileService().loadConfig()
+        let cfg = HermesFileService(context: context).loadConfig()
         requireMention = cfg.telegram.requireMention
         reactions = cfg.telegram.reactions
     }
@@ -49,7 +52,7 @@ final class TelegramSetupViewModel {
             "telegram.require_mention": PlatformSetupHelpers.envBool(requireMention),
             "telegram.reactions": PlatformSetupHelpers.envBool(reactions)
         ]
-        message = PlatformSetupHelpers.saveForm(envPairs: envPairs, configKV: configKV)
+        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV)
         clearMessageAfterDelay()
     }
 

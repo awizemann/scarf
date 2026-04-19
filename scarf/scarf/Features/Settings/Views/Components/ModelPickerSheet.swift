@@ -21,7 +21,8 @@ struct ModelPickerSheet: View {
     @State private var customModelID: String = ""
     @State private var customProviderID: String = ""
 
-    private let catalog = ModelCatalogService()
+    @Environment(\.serverContext) private var serverContext
+    private var catalog: ModelCatalogService { ModelCatalogService(context: serverContext) }
 
     var body: some View {
         VStack(spacing: 0) {

@@ -53,9 +53,17 @@ struct HermesProviderInfo: Sendable, Identifiable, Hashable {
 struct ModelCatalogService: Sendable {
     private let logger = Logger(subsystem: "com.scarf", category: "ModelCatalogService")
     let path: String
+    let transport: any ServerTransport
 
-    init(path: String = HermesPaths.home + "/models_dev_cache.json") {
+    nonisolated init(context: ServerContext = .local) {
+        self.path = context.paths.home + "/models_dev_cache.json"
+        self.transport = context.makeTransport()
+    }
+
+    /// Escape hatch for tests.
+    init(path: String) {
         self.path = path
+        self.transport = LocalTransport()
     }
 
     /// All providers, sorted by display name.
@@ -159,7 +167,7 @@ struct ModelCatalogService: Sendable {
     // MARK: - Decoding
 
     private func loadCatalog() -> [String: ProviderEntry]? {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
+        guard let data = try? transport.readFile(path) else {
             return nil
         }
         do {

@@ -6,10 +6,15 @@ private enum DashboardTab: String, CaseIterable {
 }
 
 struct ProjectsView: View {
-    @State private var viewModel = ProjectsViewModel()
+    @State private var viewModel: ProjectsViewModel
     @Environment(AppCoordinator.self) private var coordinator
     @Environment(HermesFileWatcher.self) private var fileWatcher
     @State private var showingAddSheet = false
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: ProjectsViewModel(context: context))
+    }
+
     @State private var selectedTab: DashboardTab = .dashboard
 
     var body: some View {
@@ -209,7 +214,10 @@ struct ProjectsView: View {
     }
 
     private func openInFinder(_ path: String) {
-        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+        // Project paths come from the registry on the active server. For
+        // remote, the path is on that machine's filesystem and can't be
+        // shown in this Mac's Finder — no-op via the helper.
+        viewModel.context.openInLocalEditor(path)
     }
 }
 

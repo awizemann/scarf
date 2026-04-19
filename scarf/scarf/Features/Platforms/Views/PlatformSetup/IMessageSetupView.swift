@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct IMessageSetupView: View {
-    @State private var viewModel = IMessageSetupViewModel()
+    @State private var viewModel: IMessageSetupViewModel
+    init(context: ServerContext) { _viewModel = State(initialValue: IMessageSetupViewModel(context: context)) }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

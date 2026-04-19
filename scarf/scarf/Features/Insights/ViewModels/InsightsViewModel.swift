@@ -56,7 +56,14 @@ struct NotableSession: Identifiable {
 
 @Observable
 final class InsightsViewModel {
-    private let dataService = HermesDataService()
+    let context: ServerContext
+    private let dataService: HermesDataService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.dataService = HermesDataService(context: context)
+    }
+
 
     var period: InsightsPeriod = .month
     var isLoading = true
@@ -85,7 +92,9 @@ final class InsightsViewModel {
 
     func load() async {
         isLoading = true
-        let opened = await dataService.open()
+        // refresh() forces a fresh remote snapshot each load. On local it's
+        // a cheap reopen of the live DB.
+        let opened = await dataService.refresh()
         guard opened else {
             isLoading = false
             return

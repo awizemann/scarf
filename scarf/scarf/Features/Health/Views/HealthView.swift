@@ -1,11 +1,16 @@
 import SwiftUI
 
 struct HealthView: View {
-    @State private var viewModel = HealthViewModel()
+    @State private var viewModel: HealthViewModel
     @State private var expandedSection: UUID?
     @State private var selectedTab = 0
     @State private var showShareConfirm = false
     @State private var showDiagnostics = false
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: HealthViewModel(context: context))
+    }
+
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,6 +48,11 @@ struct HealthView: View {
             }
         }
         .navigationTitle("Health")
+        .loadingOverlay(
+            viewModel.isLoading,
+            label: "Running health checks…",
+            isEmpty: viewModel.statusSections.isEmpty && viewModel.doctorSections.isEmpty
+        )
         .onAppear { viewModel.load() }
         .confirmationDialog("Upload debug report?", isPresented: $showShareConfirm) {
             Button("Upload", role: .destructive) {

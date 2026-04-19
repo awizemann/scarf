@@ -1,7 +1,12 @@
 import SwiftUI
 
 struct LogsView: View {
-    @State private var viewModel = LogsViewModel()
+    @State private var viewModel: LogsViewModel
+
+    init(context: ServerContext) {
+        _viewModel = State(initialValue: LogsViewModel(context: context))
+    }
+
 
     var body: some View {
         VStack(spacing: 0) {

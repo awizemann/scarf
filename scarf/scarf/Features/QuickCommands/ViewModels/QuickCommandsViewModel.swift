@@ -13,31 +13,39 @@ struct HermesQuickCommand: Identifiable, Sendable, Equatable {
 @Observable
 final class QuickCommandsViewModel {
     private let logger = Logger(subsystem: "com.scarf", category: "QuickCommandsViewModel")
+    let context: ServerContext
+
+    init(context: ServerContext = .local) {
+        self.context = context
+    }
 
     var commands: [HermesQuickCommand] = []
     var message: String?
 
     func load() {
-        guard let yaml = try? String(contentsOfFile: HermesPaths.configYAML, encoding: .utf8) else {
-            commands = []
-            return
+        let ctx = context
+        Task.detached { [weak self] in
+            let yaml = ctx.readText(ctx.paths.configYAML)
+            let result: [HermesQuickCommand] = {
+                guard let yaml else { return [] }
+                let parsed = HermesFileService.parseNestedYAML(yaml)
+                var byName: [String: (type: String, command: String)] = [:]
+                for (key, value) in parsed.values where key.hasPrefix("quick_commands.") {
+                    let parts = key.split(separator: ".", maxSplits: 2, omittingEmptySubsequences: false)
+                    guard parts.count == 3 else { continue }
+                    let name = String(parts[1])
+                    let field = String(parts[2])
+                    var existing = byName[name] ?? (type: "exec", command: "")
+                    let stripped = HermesFileService.stripYAMLQuotes(value)
+                    if field == "type" { existing.type = stripped }
+                    if field == "command" { existing.command = stripped }
+                    byName[name] = existing
+                }
+                return byName.map { HermesQuickCommand(name: $0.key, type: $0.value.type, command: $0.value.command) }
+                    .sorted { $0.name < $1.name }
+            }()
+            await MainActor.run { [weak self] in self?.commands = result }
         }
-        let parsed = HermesFileService.parseNestedYAML(yaml)
-        // Each quick command is `quick_commands.<name>.type` + `quick_commands.<name>.command`.
-        var byName: [String: (type: String, command: String)] = [:]
-        for (key, value) in parsed.values where key.hasPrefix("quick_commands.") {
-            let parts = key.split(separator: ".", maxSplits: 2, omittingEmptySubsequences: false)
-            guard parts.count == 3 else { continue }
-            let name = String(parts[1])
-            let field = String(parts[2])
-            var existing = byName[name] ?? (type: "exec", command: "")
-            let stripped = HermesFileService.stripYAMLQuotes(value)
-            if field == "type" { existing.type = stripped }
-            if field == "command" { existing.command = stripped }
-            byName[name] = existing
-        }
-        commands = byName.map { HermesQuickCommand(name: $0.key, type: $0.value.type, command: $0.value.command) }
-            .sorted { $0.name < $1.name }
     }
 
     /// Check for obviously destructive shell strings. Display-only; we do not block.
@@ -70,25 +78,11 @@ final class QuickCommandsViewModel {
     /// Removal requires editing config.yaml directly — `hermes config set` has no
     /// unset for nested keys. Open the file in the editor for manual removal.
     func openConfigForRemoval() {
-        NSWorkspace.shared.open(URL(fileURLWithPath: HermesPaths.configYAML))
+        context.openInLocalEditor(context.paths.configYAML)
     }
 
     @discardableResult
     private func runHermes(_ arguments: [String]) -> (output: String, exitCode: Int32) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: HermesPaths.hermesBinary)
-        process.arguments = arguments
-        process.environment = HermesFileService.enrichedEnvironment()
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return (String(data: data, encoding: .utf8) ?? "", process.terminationStatus)
-        } catch {
-            return ("", -1)
-        }
+        context.runHermes(arguments)
     }
 }

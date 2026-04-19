@@ -9,7 +9,14 @@ import os
 @MainActor
 final class PlatformsViewModel {
     private let logger = Logger(subsystem: "com.scarf", category: "PlatformsViewModel")
-    private let fileService = HermesFileService()
+    let context: ServerContext
+    private let fileService: HermesFileService
+
+    init(context: ServerContext = .local) {
+        self.context = context
+        self.fileService = HermesFileService(context: context)
+    }
+
 
     var gatewayState: GatewayState?
     var selected: HermesToolPlatform = KnownPlatforms.cli
@@ -41,14 +48,14 @@ final class PlatformsViewModel {
     /// until the first YAML edit.
     func hasConfigBlock(for platform: HermesToolPlatform) -> Bool {
         if platform.name == "cli" { return true }
-        let yaml = (try? String(contentsOfFile: HermesPaths.configYAML, encoding: .utf8)) ?? ""
+        let yaml = context.readText(context.paths.configYAML) ?? ""
         for line in yaml.components(separatedBy: "\n") where !line.hasPrefix(" ") && !line.hasPrefix("\t") {
             if line.trimmingCharacters(in: .whitespaces) == "\(platform.name):" { return true }
         }
         // Env-var fallback: any identifying env var for this platform counts
         // as "configured". Uses the shared `identifyingEnvVar(for:)` mapping.
         if let key = Self.identifyingEnvVar(for: platform.name) {
-            let env = HermesEnvService().load()
+            let env = HermesEnvService(context: context).load()
             if let value = env[key], !value.isEmpty { return true }
         }
         return false
