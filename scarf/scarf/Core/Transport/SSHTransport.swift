@@ -97,6 +97,31 @@ struct SSHTransport: ServerTransport {
         }
     }
 
+    /// Remove ControlMaster socket files older than `staleAfter` seconds.
+    ///
+    /// Socket basenames are %C hashes (not ServerIDs), so we can't keep "still
+    /// registered" sockets the way `sweepOrphanSnapshots` does. But
+    /// `ControlPersist` is 600s — anything older than 30 minutes is guaranteed
+    /// to be a dead orphan from a crashed master, an unclean app exit, or a
+    /// server removed while another Scarf instance was holding the dir.
+    /// Wiping these on launch keeps `/tmp/scarf-ssh-<uid>/` from accumulating
+    /// indefinitely until reboot, while leaving any concurrent Scarf
+    /// instance's live sockets (always <600s old) untouched.
+    static func sweepStaleControlSockets(staleAfter: TimeInterval = 1800) {
+        let root = controlDirPath()
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: root) else { return }
+        let cutoff = Date().addingTimeInterval(-staleAfter)
+        for name in entries {
+            let path = root + "/" + name
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+                  let mtime = attrs[.modificationDate] as? Date
+            else { continue }
+            if mtime < cutoff {
+                try? FileManager.default.removeItem(atPath: path)
+            }
+        }
+    }
+
     /// Ask OpenSSH to shut down this host's ControlMaster socket, so the TCP
     /// session isn't held open after the user removes this server. If no
     /// master is currently running, `ssh -O exit` exits non-zero — we ignore
@@ -140,13 +165,47 @@ struct SSHTransport: ServerTransport {
         return args
     }
 
-    /// Ensure the ControlMaster socket directory exists. Called before every
-    /// ssh invocation. Cheap — `createDirectory(withIntermediateDirectories: true)`
-    /// is a no-op when present.
+    /// Ensure the ControlMaster socket directory exists, is a real directory
+    /// (not a symlink), is owned by us, and has mode 0700. Called before every
+    /// ssh invocation.
+    ///
+    /// Defensive against `/tmp` pre-creation: any local user can create
+    /// `/tmp/scarf-ssh-<uid>` before Scarf launches. Plain `mkdir -p` plus
+    /// `setAttributes` would silently accept a hostile dir (since the chmod
+    /// fails when we don't own it, and the Foundation API swallows that). So
+    /// we use POSIX `mkdir` (atomic, sets perms at create time, doesn't
+    /// follow symlinks) and `lstat` to verify ownership when the entry
+    /// already exists.
     nonisolated private func ensureControlDir() {
-        try? FileManager.default.createDirectory(atPath: controlDir, withIntermediateDirectories: true)
-        // 0700 so socket files aren't visible to other users on the Mac.
-        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: controlDir)
+        let path = controlDir
+
+        let mkResult = path.withCString { mkdir($0, 0o700) }
+        if mkResult == 0 { return }
+
+        let mkErr = errno
+        if mkErr != EEXIST {
+            Self.logger.error("Failed to create ControlDir \(path, privacy: .public): errno=\(mkErr)")
+            return
+        }
+
+        var st = Darwin.stat()
+        let lstatResult = path.withCString { lstat($0, &st) }
+        guard lstatResult == 0 else {
+            Self.logger.error("Could not lstat existing ControlDir \(path, privacy: .public): errno=\(errno)")
+            return
+        }
+        guard (st.st_mode & S_IFMT) == S_IFDIR else {
+            Self.logger.error("ControlDir \(path, privacy: .public) exists but is not a directory (possibly a symlink) — refusing to use")
+            return
+        }
+        guard st.st_uid == getuid() else {
+            Self.logger.error("ControlDir \(path, privacy: .public) owned by uid \(st.st_uid), expected \(getuid()) — refusing to use")
+            return
+        }
+        if (st.st_mode & 0o777) != 0o700 {
+            Self.logger.warning("ControlDir \(path, privacy: .public) had mode \(String(st.st_mode & 0o777, radix: 8), privacy: .public), repairing to 700")
+            _ = path.withCString { chmod($0, 0o700) }
+        }
     }
 
     /// Shell-quote a single argument for remote execution. The remote shell

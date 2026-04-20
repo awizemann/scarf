@@ -129,6 +129,7 @@ final class ServerRegistry {
         var keep: Set<ServerID> = [ServerContext.local.id]
         for entry in entries { keep.insert(entry.id) }
         SSHTransport.sweepOrphanSnapshots(keeping: keep)
+        SSHTransport.sweepStaleControlSockets()
     }
 
     // MARK: - Persistence
