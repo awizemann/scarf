@@ -1591,9 +1591,34 @@ struct HermesFileService: Sendable {
             let data = try transport.readFile(path)
             return .success(data)
         } catch {
-            Self.logger.warning("readFile(\(path, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
+            // Don't log "No such file" — that's a routine, expected case
+            // for optional files (skill.yaml, gateway_state.json before
+            // Hermes starts, ~/.hermes/memories/USER.md on fresh installs,
+            // etc.). The caller still gets the Result.failure so it can
+            // distinguish missing from present-but-unreadable.
+            // Log everything else — permission denied, connection drops,
+            // sqlite3 missing — since those are actionable diagnostics.
+            if !Self.isFileNotFound(error) {
+                Self.logger.warning("readFile(\(path, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
+            }
             return .failure(error)
         }
+    }
+
+    /// `true` iff the error represents "file does not exist" as opposed to
+    /// a permission / transport / parse failure. Used to suppress routine
+    /// logging for optional files while still surfacing real problems.
+    nonisolated private static func isFileNotFound(_ error: Error) -> Bool {
+        if let transportErr = error as? TransportError,
+           case .fileIO(_, let underlying) = transportErr {
+            return underlying.lowercased().contains("no such file")
+        }
+        // Cocoa NSFileNoSuchFileError (returned by LocalTransport when
+        // reading a missing file via FileManager).
+        let ns = error as NSError
+        if ns.domain == NSCocoaErrorDomain && ns.code == 260 { return true }
+        if ns.domain == NSPOSIXErrorDomain && ns.code == 2 { return true }   // ENOENT
+        return false
     }
 
     /// Write a UTF-8 text file atomically through the transport. Matches the
