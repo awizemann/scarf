@@ -101,6 +101,13 @@ final class RemoteDiagnosticsViewModel {
     private(set) var isRunning: Bool = false
     private(set) var startedAt: Date?
     private(set) var finishedAt: Date?
+    /// Raw stdout/stderr from the most recent run, preserved so the UI can
+    /// surface them in a disclosure panel when things look wrong. This is
+    /// how we debug cases where the script ran but no probes were parsed
+    /// (e.g. transport-quoting bugs, dash-vs-bash incompatibilities).
+    private(set) var rawStdout: String = ""
+    private(set) var rawStderr: String = ""
+    private(set) var rawExitCode: Int32 = 0
 
     init(context: ServerContext) {
         self.context = context
@@ -119,12 +126,18 @@ final class RemoteDiagnosticsViewModel {
 
         switch captured {
         case .connectFailure(let msg):
+            rawStdout = ""
+            rawStderr = msg
+            rawExitCode = -1
             probes = [
                 Probe(id: .connectivity, passed: false, detail: msg)
             ] + ProbeID.allCases
                 .filter { $0 != .connectivity }
                 .map { Probe(id: $0, passed: false, detail: "(skipped — SSH didn't connect)") }
         case .completed(let stdout, let stderr, let exitCode):
+            rawStdout = stdout
+            rawStderr = stderr
+            rawExitCode = exitCode
             probes = Self.parse(stdout: stdout, stderr: stderr, exitCode: exitCode)
         }
 
@@ -274,25 +287,135 @@ final class RemoteDiagnosticsViewModel {
     }
 
     private static func execute(script: String, context: ServerContext) async -> Captured {
-        let transport = context.makeTransport()
+        // Can't use `transport.runProcess(executable: "/bin/sh", args: ["-c", script])`
+        // here: SSHTransport.runProcess pipes every argument through
+        // `remotePathArg` (which double-quotes to rewrite `~/` → `$HOME/`),
+        // which mangles a multi-line shell script containing `"$1"`,
+        // nested quotes, and `printf` escape sequences. The result on the
+        // remote is a scrambled string and every probe fails to emit.
+        //
+        // Mirror TestConnectionProbe's approach: build the ssh argv
+        // directly so the script travels as a single opaque argv entry
+        // that ssh forwards to the remote shell unchanged.
+        switch context.kind {
+        case .local:
+            return await runLocally(script: script)
+        case .ssh(let config):
+            return await runOverSSH(script: script, config: config)
+        }
+    }
+
+    /// Direct ssh invocation — same style as TestConnectionProbe. Uses the
+    /// connection's ControlMaster socket so this is cheap (~5ms) after the
+    /// first connection is warm.
+    private static func runOverSSH(script: String, config: SSHConfig) async -> Captured {
+        var sshArgv: [String] = [
+            "-o", "ControlMaster=auto",
+            "-o", "ControlPath=\(controlDirPath())/%C",
+            "-o", "ControlPersist=600",
+            "-o", "ServerAliveInterval=30",
+            "-o", "ConnectTimeout=10",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "LogLevel=QUIET",
+            "-o", "BatchMode=yes"
+        ]
+        if let port = config.port { sshArgv += ["-p", String(port)] }
+        if let id = config.identityFile, !id.isEmpty {
+            sshArgv += ["-i", id]
+        }
+        let hostSpec: String
+        if let user = config.user, !user.isEmpty { hostSpec = "\(user)@\(config.host)" }
+        else { hostSpec = config.host }
+        sshArgv.append(hostSpec)
+        sshArgv.append("--")
+        sshArgv.append("/bin/sh")
+        sshArgv.append("-c")
+        sshArgv.append(script)
+
         return await Task.detached { () -> Captured in
-            do {
-                let result = try transport.runProcess(
-                    executable: "/bin/sh",
-                    args: ["-c", script],
-                    stdin: nil,
-                    timeout: 30
-                )
-                return .completed(
-                    stdout: result.stdoutString,
-                    stderr: result.stderrString,
-                    exitCode: result.exitCode
-                )
-            } catch {
-                let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                return .connectFailure(desc)
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+            proc.arguments = sshArgv
+
+            // Inherit the shell's SSH_AUTH_SOCK so ssh can reach the
+            // agent — same pattern as SSHTransport + TestConnectionProbe.
+            var env = ProcessInfo.processInfo.environment
+            let shellEnv = HermesFileService.enrichedEnvironment()
+            for key in ["SSH_AUTH_SOCK", "SSH_AGENT_PID"] {
+                if env[key] == nil, let v = shellEnv[key], !v.isEmpty {
+                    env[key] = v
+                }
             }
+            proc.environment = env
+
+            let stdoutPipe = Pipe()
+            let stderrPipe = Pipe()
+            proc.standardOutput = stdoutPipe
+            proc.standardError = stderrPipe
+            do {
+                try proc.run()
+            } catch {
+                return .connectFailure("Failed to launch ssh: \(error.localizedDescription)")
+            }
+            let deadline = Date().addingTimeInterval(30)
+            while proc.isRunning && Date() < deadline {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            if proc.isRunning {
+                proc.terminate()
+                return .connectFailure("Diagnostics timed out after 30s")
+            }
+            let out = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
+            let err = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
+            return .completed(
+                stdout: String(data: out, encoding: .utf8) ?? "",
+                stderr: String(data: err, encoding: .utf8) ?? "",
+                exitCode: proc.terminationStatus
+            )
         }.value
+    }
+
+    /// Local Shell invocation — runs the diagnostic script against the
+    /// user's own Mac. Less useful than the remote form (most checks will
+    /// trivially pass), but lets the same UI work for both contexts.
+    private static func runLocally(script: String) async -> Captured {
+        return await Task.detached { () -> Captured in
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+            proc.arguments = ["-c", script]
+
+            let stdoutPipe = Pipe()
+            let stderrPipe = Pipe()
+            proc.standardOutput = stdoutPipe
+            proc.standardError = stderrPipe
+            do {
+                try proc.run()
+            } catch {
+                return .connectFailure("Failed to launch /bin/sh: \(error.localizedDescription)")
+            }
+            let deadline = Date().addingTimeInterval(10)
+            while proc.isRunning && Date() < deadline {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            if proc.isRunning {
+                proc.terminate()
+                return .connectFailure("Local diagnostics timed out (should be <1s)")
+            }
+            let out = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
+            let err = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
+            return .completed(
+                stdout: String(data: out, encoding: .utf8) ?? "",
+                stderr: String(data: err, encoding: .utf8) ?? "",
+                exitCode: proc.terminationStatus
+            )
+        }.value
+    }
+
+    /// Same cache directory used by SSHTransport — shared so the diagnostic
+    /// probe reuses the connection's ControlMaster socket when it already
+    /// exists (no second TCP handshake, no second auth).
+    private static func controlDirPath() -> String {
+        SSHTransport.controlDirPath()
     }
 
     private static func parse(stdout: String, stderr: String, exitCode: Int32) -> [Probe] {

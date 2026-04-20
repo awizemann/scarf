@@ -128,14 +128,51 @@ struct RemoteDiagnosticsView: View {
     }
 
     private var footer: some View {
-        HStack {
-            Text("Scarf runs these over a single SSH session that mirrors the shell your dashboard reads from, so a green row here means Scarf can actually read that file at runtime.")
+        VStack(alignment: .leading, spacing: 8) {
+            // Raw-output disclosure. Shown when EVERY probe fails, since
+            // that's the signature of a script-quoting / transport-level
+            // issue rather than a real remote problem. Hidden in the normal
+            // case so it doesn't distract.
+            if !viewModel.probes.isEmpty, viewModel.passingCount == 0 {
+                DisclosureGroup("Raw remote output (for debugging)") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("exit code: \(viewModel.rawExitCode)")
+                            .font(.caption.monospaced())
+                        if !viewModel.rawStdout.isEmpty {
+                            Text("stdout:").font(.caption).foregroundStyle(.secondary)
+                            ScrollView {
+                                Text(viewModel.rawStdout)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(maxHeight: 140)
+                        }
+                        if !viewModel.rawStderr.isEmpty {
+                            Text("stderr:").font(.caption).foregroundStyle(.secondary)
+                            ScrollView {
+                                Text(viewModel.rawStderr)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(maxHeight: 140)
+                        }
+                    }
+                    .padding(8)
+                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                }
                 .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer()
-            Button("Done") { dismiss() }
-                .keyboardShortcut(.defaultAction)
+            }
+            HStack {
+                Text("Scarf runs these over a single SSH session that mirrors the shell your dashboard reads from, so a green row here means Scarf can actually read that file at runtime.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
         }
         .padding(16)
     }
