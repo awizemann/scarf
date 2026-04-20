@@ -23,6 +23,9 @@ struct ConnectionStatusPill: View {
                 status.retry()
             }
         } label: {
+            // No explicit background — the SwiftUI toolbar gives the item
+            // its own bezel, and painting a second capsule on top looked
+            // doubly-framed. Just the colored dot + label reads cleanly.
             HStack(spacing: 4) {
                 Circle()
                     .fill(color)
@@ -32,9 +35,6 @@ struct ConnectionStatusPill: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color.secondary.opacity(0.08), in: Capsule())
         }
         .buttonStyle(.plain)
         .help(tooltip)
