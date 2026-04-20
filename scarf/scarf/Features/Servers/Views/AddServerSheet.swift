@@ -81,11 +81,15 @@ struct AddServerSheet: View {
                 }
             }
 
-            LabeledField("Remote ~/.hermes override") {
-                TextField("Leave blank for default", text: $viewModel.remoteHome)
+            LabeledField("Hermes data directory") {
+                TextField("Default: ~/.hermes", text: $viewModel.remoteHome)
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
             }
+            Text("Leave blank unless Hermes is installed at a non-default path (systemd services often live at /var/lib/hermes/.hermes; Docker sidecars vary). Test Connection auto-suggests a value when it detects one of the known alternates.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             Text("Scarf uses ssh-agent for authentication. If your key has a passphrase, run `ssh-add` before connecting — Scarf never prompts for or stores passphrases.")
                 .font(.caption)
@@ -113,14 +117,43 @@ struct AddServerSheet: View {
 
             if let result = viewModel.testResult {
                 switch result {
-                case .success(let path, let dbFound):
-                    VStack(alignment: .leading, spacing: 4) {
+                case .success(let path, let dbFound, let suggestedHome):
+                    VStack(alignment: .leading, spacing: 6) {
                         Label("Connected", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                         Text("hermes at \(path)").font(.caption).monospaced()
-                        Text(dbFound ? "state.db found" : "state.db not found — Hermes may not have run yet on the remote")
-                            .font(.caption)
-                            .foregroundStyle(dbFound ? Color.secondary : Color.orange)
+                        if dbFound {
+                            Text("state.db readable")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else if let suggestion = suggestedHome {
+                            // Scarf found Hermes data at one of the common
+                            // alternate paths. One-click fill the
+                            // remoteHome field so the user doesn't have to
+                            // know this is a convention thing.
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("state.db not found at the default location, but Scarf found one at:")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                HStack {
+                                    Text(suggestion)
+                                        .font(.caption.monospaced())
+                                        .textSelection(.enabled)
+                                    Spacer()
+                                    Button("Use this") {
+                                        viewModel.remoteHome = suggestion
+                                    }
+                                    .controlSize(.small)
+                                }
+                                .padding(8)
+                                .background(Color.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                            }
+                        } else {
+                            Text("state.db not found at the configured path. Either Hermes hasn't run yet on this server, or it's installed at a non-default location — set the Hermes data directory field above.")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 case .failure(let message, let stderr, let command):
                     VStack(alignment: .leading, spacing: 6) {

@@ -1,5 +1,6 @@
 import Foundation
 import SQLite3
+import os
 
 /// Dedupes concurrent `snapshotSQLite` calls for the same server. When the
 /// file watcher ticks, Dashboard + Sessions + Activity (+ Chat's loadHistory)
@@ -29,11 +30,18 @@ actor SnapshotCoordinator {
 }
 
 actor HermesDataService {
+    private static let logger = Logger(subsystem: "com.scarf", category: "HermesDataService")
+
     private var db: OpaquePointer?
     private var hasV07Schema = false
     /// Local filesystem path we last opened. For remote contexts this is
     /// the cached snapshot under `~/Library/Caches/scarf/snapshots/<id>/`.
     private var openedAtPath: String?
+    /// Last error from `open()` / `refresh()`, user-presentable. `nil` means
+    /// the last attempt succeeded. Views surface this when their own load
+    /// path fails, so the user sees "Permission denied reading state.db"
+    /// instead of an empty Dashboard with no explanation.
+    private(set) var lastOpenError: String?
 
     let context: ServerContext
     private let transport: any ServerTransport
@@ -52,16 +60,25 @@ actor HermesDataService {
             // corrupt. Routed through SnapshotCoordinator so concurrent
             // view models don't each spawn a parallel SSH backup for the
             // same server.
-            let url = try? await SnapshotCoordinator.shared.snapshot(
-                remotePath: context.paths.stateDB,
-                contextID: context.id,
-                transport: transport
-            )
-            guard let url else { return false }
-            localPath = url.path
+            do {
+                let url = try await SnapshotCoordinator.shared.snapshot(
+                    remotePath: context.paths.stateDB,
+                    contextID: context.id,
+                    transport: transport
+                )
+                localPath = url.path
+                lastOpenError = nil
+            } catch {
+                lastOpenError = humanize(error)
+                Self.logger.warning("snapshotSQLite failed: \(error.localizedDescription, privacy: .public)")
+                return false
+            }
         } else {
             localPath = context.paths.stateDB
-            guard FileManager.default.fileExists(atPath: localPath) else { return false }
+            guard FileManager.default.fileExists(atPath: localPath) else {
+                lastOpenError = "Hermes state database not found at \(localPath)."
+                return false
+            }
         }
         // Remote snapshots are point-in-time copies that no one writes to;
         // opening them with `immutable=1` tells SQLite to skip WAL/SHM and
@@ -81,12 +98,39 @@ actor HermesDataService {
         }
         let result = sqlite3_open_v2(openPath, &db, flags, nil)
         guard result == SQLITE_OK else {
+            let msg: String
+            if let db {
+                msg = String(cString: sqlite3_errmsg(db))
+            } else {
+                msg = "sqlite3_open_v2 returned \(result)"
+            }
+            lastOpenError = "Couldn't open state.db: \(msg)"
+            Self.logger.warning("sqlite3_open_v2 failed (\(result)) at \(localPath, privacy: .public): \(msg, privacy: .public)")
             db = nil
             return false
         }
         openedAtPath = localPath
+        lastOpenError = nil
         detectSchema()
         return true
+    }
+
+    /// Turn a transport error into the one-line string Dashboard shows. Adds
+    /// hints for the common "sqlite3 not installed" and "permission denied"
+    /// cases so users know what to do.
+    private nonisolated func humanize(_ error: Error) -> String {
+        let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        let lower = desc.lowercased()
+        if lower.contains("sqlite3: command not found") || lower.contains("sqlite3: not found") {
+            return "sqlite3 is not installed on \(context.displayName). Install it with `apt install sqlite3` (Ubuntu/Debian) or `yum install sqlite` (RHEL/Fedora)."
+        }
+        if lower.contains("permission denied") {
+            return "Permission denied reading Hermes state on \(context.displayName). The SSH user may not have read access to ~/.hermes/state.db — try Run Diagnostics."
+        }
+        if lower.contains("no such file") {
+            return "Hermes state not found at ~/.hermes on \(context.displayName). If Hermes is installed elsewhere, set its data directory in Manage Servers."
+        }
+        return desc
     }
 
     /// Force a fresh snapshot pull + reopen. Used on session-load and in

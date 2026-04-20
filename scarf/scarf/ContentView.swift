@@ -21,6 +21,10 @@ struct ContentView: View {
                         ServerSwitcherToolbar()
                     }
                     if serverContext.isRemote {
+                        // `.principal` centers the pill in the toolbar —
+                        // the native emphasis bezel is the intended frame;
+                        // the pill's own visual content (icon + label, no
+                        // background) sits inside it in balance.
                         ToolbarItem(placement: .principal) {
                             ConnectionStatusPill(status: connectionStatus)
                         }

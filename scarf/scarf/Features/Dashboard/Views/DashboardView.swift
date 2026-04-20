@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DashboardView: View {
     @State private var viewModel: DashboardViewModel
+    @State private var showDiagnostics = false
     @Environment(AppCoordinator.self) private var coordinator
     @Environment(HermesFileWatcher.self) private var fileWatcher
 
@@ -13,6 +14,9 @@ struct DashboardView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                if let err = viewModel.lastReadError {
+                    readErrorBanner(err)
+                }
                 statusSection
                 statsSection
                 recentSessionsSection
@@ -30,6 +34,44 @@ struct DashboardView: View {
         .onChange(of: fileWatcher.lastChangeDate) {
             Task { await viewModel.load() }
         }
+        .sheet(isPresented: $showDiagnostics) {
+            RemoteDiagnosticsView(context: viewModel.context)
+        }
+    }
+
+    /// Banner shown above the Dashboard when one or more remote reads
+    /// failed (permission denied, missing sqlite3, wrong home dir, etc.).
+    /// Replaces the old silent-failure mode where empty values just
+    /// appeared as "Stopped / unknown / 0" with no explanation.
+    private func readErrorBanner(_ err: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Can't read Hermes state on \(viewModel.context.displayName)")
+                        .font(.headline)
+                    Text(err)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Button {
+                    showDiagnostics = true
+                } label: {
+                    Label("Run Diagnostics…", systemImage: "stethoscope")
+                }
+                .controlSize(.regular)
+            }
+        }
+        .padding(12)
+        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.orange.opacity(0.3), lineWidth: 1)
+        )
     }
 
     private var statusSection: some View {

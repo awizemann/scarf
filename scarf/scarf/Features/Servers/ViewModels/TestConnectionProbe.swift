@@ -47,6 +47,26 @@ struct TestConnectionProbe {
         //      Scarf's local resolution.
         // The matched absolute path is stored as `hermesBinaryHint` on the
         // SSHConfig so subsequent CLI/ACP invocations don't have to re-probe.
+        // If the user already typed a remoteHome override, use it; otherwise
+        // default to $HOME/.hermes. Either way, the script also probes a
+        // short list of well-known alternates when the primary path doesn't
+        // have state.db — systemd/docker/VPS installs tend to live at
+        // /var/lib/hermes/.hermes or /home/hermes/.hermes, and SSHing in as
+        // a different user than the Hermes daemon is the leading cause of
+        // "connection green, data empty" bug reports (issue #19).
+        let primary: String
+        if let override = config.remoteHome, !override.isEmpty {
+            if override.hasPrefix("~/") {
+                primary = "$HOME/\(override.dropFirst(2))"
+            } else if override == "~" {
+                primary = "$HOME"
+            } else {
+                primary = override
+            }
+        } else {
+            primary = "$HOME/.hermes"
+        }
+
         let script = #"""
         hpath=$(command -v hermes 2>/dev/null)
         if [ -z "$hpath" ]; then
@@ -61,7 +81,21 @@ struct TestConnectionProbe {
             done
         fi
         echo "HERMES:$hpath"
-        if [ -e "$HOME/.hermes/state.db" ]; then echo DB:ok; else echo DB:missing; fi
+        PRIMARY="\#(primary)"
+        if [ -r "$PRIMARY/state.db" ]; then
+            echo "DB:ok"
+            echo "HOME_USED:$PRIMARY"
+        else
+            echo "DB:missing"
+            # Probe well-known alternates. Emit the first one that has a
+            # readable state.db so the UI can offer a one-click fill.
+            for alt in "/var/lib/hermes/.hermes" "/opt/hermes/.hermes" "/home/hermes/.hermes" "/root/.hermes"; do
+                if [ -r "$alt/state.db" ]; then
+                    echo "SUGGEST:$alt"
+                    break
+                fi
+            done
+        fi
         """#
         sshArgs.append("/bin/sh")
         sshArgs.append("-c")
@@ -133,6 +167,8 @@ struct TestConnectionProbe {
             let hermesPath = lines.first(where: { $0.hasPrefix("HERMES:") })?
                 .dropFirst("HERMES:".count).trimmingCharacters(in: .whitespaces) ?? ""
             let dbFound = lines.contains(where: { $0 == "DB:ok" })
+            let suggestedHome = lines.first(where: { $0.hasPrefix("SUGGEST:") })
+                .map { String($0.dropFirst("SUGGEST:".count)).trimmingCharacters(in: .whitespaces) }
             if hermesPath.isEmpty {
                 return .failure(
                     message: "hermes binary not found in remote $PATH",
@@ -140,7 +176,7 @@ struct TestConnectionProbe {
                     command: displayCommand
                 )
             }
-            return .success(hermesPath: String(hermesPath), dbFound: dbFound)
+            return .success(hermesPath: String(hermesPath), dbFound: dbFound, suggestedRemoteHome: suggestedHome)
         }
 
         // Classify common failures by scanning the stderr trace.

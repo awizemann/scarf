@@ -6,6 +6,7 @@ struct ManageServersView: View {
     @Environment(ServerRegistry.self) private var registry
     @State private var showAddSheet = false
     @State private var pendingRemoveID: ServerID?
+    @State private var diagnosticsContext: ServerContext?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -17,11 +18,17 @@ struct ManageServersView: View {
                 list
             }
         }
-        .frame(width: 380, height: 360)
+        .frame(width: 440, height: 380)
         .sheet(isPresented: $showAddSheet) {
             AddServerSheet { name, config in
                 _ = registry.addServer(displayName: name, config: config)
             }
+        }
+        .sheet(item: Binding(
+            get: { diagnosticsContext.map { IdentifiableContext(context: $0) } },
+            set: { diagnosticsContext = $0?.context }
+        )) { wrapper in
+            RemoteDiagnosticsView(context: wrapper.context)
         }
         .confirmationDialog(
             "Remove this server?",
@@ -40,6 +47,13 @@ struct ManageServersView: View {
                 Text("The server's SSH configuration is removed from Scarf. Your remote files are untouched.")
             }
         )
+    }
+
+    /// Wrapper because `ServerContext` isn't `Identifiable` against the sheet
+    /// item API in a way that preserves display-ordering stability.
+    private struct IdentifiableContext: Identifiable {
+        var id: ServerID { context.id }
+        let context: ServerContext
     }
 
     private var header: some View {
@@ -88,12 +102,20 @@ struct ManageServersView: View {
                     }
                     Spacer()
                     Button {
+                        diagnosticsContext = entry.context
+                    } label: {
+                        Image(systemName: "stethoscope")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Run remote diagnostics — check exactly which files are readable on this server.")
+                    Button {
                         pendingRemoveID = entry.id
                     } label: {
                         Image(systemName: "trash")
                     }
                     .buttonStyle(.borderless)
                     .foregroundStyle(.red)
+                    .help("Remove this server from Scarf.")
                 }
                 .padding(.vertical, 4)
             }

@@ -8,47 +8,72 @@ import SwiftUI
 struct ConnectionStatusPill: View {
     let status: ConnectionStatusViewModel
     @State private var showDetails = false
+    @State private var showDiagnostics = false
 
     var body: some View {
         Button {
             switch status.status {
             case .error:
                 showDetails = true
+            case .degraded:
+                // Yellow "can't read" state — open the diagnostics sheet
+                // so the user can see exactly which files fail and why.
+                showDiagnostics = true
             case .connected, .idle:
                 status.retry()
             }
         } label: {
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(color)
-                    .frame(width: 8, height: 8)
+            // Leading SF Symbol does double duty: its color is the status
+            // signal (green/orange/yellow/red), and its shape reads as a
+            // clickable toolbar tool. No custom background — the toolbar's
+            // `.principal` emphasis bezel is the frame.
+            HStack(spacing: 5) {
+                Image(systemName: iconName)
+                    .foregroundStyle(color)
+                    .symbolRenderingMode(.hierarchical)
                 Text(label)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color.secondary.opacity(0.08), in: Capsule())
+            .padding(.horizontal, 4)
         }
         .buttonStyle(.plain)
         .help(tooltip)
         .popover(isPresented: $showDetails, arrowEdge: .bottom) {
             errorDetails.frame(width: 400)
         }
+        .sheet(isPresented: $showDiagnostics) {
+            RemoteDiagnosticsView(context: status.context)
+        }
     }
 
     private var color: Color {
         switch status.status {
         case .connected: return .green
+        case .degraded: return .orange
         case .idle: return .yellow
         case .error: return .red
+        }
+    }
+
+    /// State-specific SF Symbol. The icon shape itself signals what the
+    /// click will do: checkmark for connected (click to re-probe),
+    /// stethoscope for degraded (click to run diagnostics), spinning
+    /// arrows for probing, triangle for error.
+    private var iconName: String {
+        switch status.status {
+        case .connected: return "checkmark.circle.fill"
+        case .degraded: return "stethoscope"
+        case .idle: return "arrow.triangle.2.circlepath"
+        case .error: return "exclamationmark.triangle.fill"
         }
     }
 
     private var label: String {
         switch status.status {
         case .connected: return "Connected"
+        case .degraded: return "Connected — can't read Hermes state"
         case .idle: return "Checking…"
         case .error(let message, _): return message
         }
@@ -62,6 +87,8 @@ struct ConnectionStatusPill: View {
                 return "Last probe: \(fmt.localizedString(for: ts, relativeTo: Date()))"
             }
             return "Connected"
+        case .degraded(let reason):
+            return "SSH works but \(reason). Click for diagnostics."
         case .idle: return "Waiting for first probe"
         case .error(_, _): return "Click for details"
         }
