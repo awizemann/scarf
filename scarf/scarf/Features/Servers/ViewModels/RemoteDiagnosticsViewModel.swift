@@ -305,9 +305,19 @@ final class RemoteDiagnosticsViewModel {
         }
     }
 
-    /// Direct ssh invocation — same style as TestConnectionProbe. Uses the
-    /// connection's ControlMaster socket so this is cheap (~5ms) after the
-    /// first connection is warm.
+    /// Direct ssh invocation. Pipes the script into `sh` on stdin rather
+    /// than passing it as `sh -c <script>` argv — because ssh concatenates
+    /// argv with spaces and sends that as a single command string to the
+    /// remote's LOGIN shell, which then parses newlines as command
+    /// separators. A multi-line `sh -c <script>` would run only the first
+    /// line inside the `sh` subprocess (any variables set there die when
+    /// `sh` exits), and the rest would run in the login shell with no
+    /// access to those variables. Symptom: `$H=""` everywhere downstream.
+    ///
+    /// Feeding the script via stdin avoids the split entirely — `sh -s`
+    /// consumes the whole stream in one process, so variable scope is
+    /// preserved and the script runs exactly the same way it would from
+    /// a local `cat script.sh | sh`.
     private static func runOverSSH(script: String, config: SSHConfig) async -> Captured {
         var sshArgv: [String] = [
             "-o", "ControlMaster=auto",
@@ -317,7 +327,8 @@ final class RemoteDiagnosticsViewModel {
             "-o", "ConnectTimeout=10",
             "-o", "StrictHostKeyChecking=accept-new",
             "-o", "LogLevel=QUIET",
-            "-o", "BatchMode=yes"
+            "-o", "BatchMode=yes",
+            "-T"  // no pty — keep stdin/stdout a clean byte stream
         ]
         if let port = config.port { sshArgv += ["-p", String(port)] }
         if let id = config.identityFile, !id.isEmpty {
@@ -329,8 +340,7 @@ final class RemoteDiagnosticsViewModel {
         sshArgv.append(hostSpec)
         sshArgv.append("--")
         sshArgv.append("/bin/sh")
-        sshArgv.append("-c")
-        sshArgv.append(script)
+        sshArgv.append("-s")   // read script from stdin
 
         return await Task.detached { () -> Captured in
             let proc = Process()
@@ -348,15 +358,26 @@ final class RemoteDiagnosticsViewModel {
             }
             proc.environment = env
 
+            let stdinPipe = Pipe()
             let stdoutPipe = Pipe()
             let stderrPipe = Pipe()
+            proc.standardInput = stdinPipe
             proc.standardOutput = stdoutPipe
             proc.standardError = stderrPipe
+
             do {
                 try proc.run()
             } catch {
                 return .connectFailure("Failed to launch ssh: \(error.localizedDescription)")
             }
+
+            // Write the script to ssh's stdin, then close the write end so
+            // remote sh sees EOF and exits after executing the whole script.
+            if let data = script.data(using: .utf8) {
+                try? stdinPipe.fileHandleForWriting.write(contentsOf: data)
+            }
+            try? stdinPipe.fileHandleForWriting.close()
+
             let deadline = Date().addingTimeInterval(30)
             while proc.isRunning && Date() < deadline {
                 try? await Task.sleep(nanoseconds: 100_000_000)

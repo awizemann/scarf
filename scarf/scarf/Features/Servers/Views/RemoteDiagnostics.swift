@@ -129,11 +129,11 @@ struct RemoteDiagnosticsView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Raw-output disclosure. Shown when EVERY probe fails, since
-            // that's the signature of a script-quoting / transport-level
-            // issue rather than a real remote problem. Hidden in the normal
-            // case so it doesn't distract.
-            if !viewModel.probes.isEmpty, viewModel.passingCount == 0 {
+            // Raw-output disclosure. Shown whenever anything fails — we need
+            // this visible for partial failures too since the raw stdout is
+            // the only way to see WHY a check returned its detail. Hidden
+            // only when 14/14 pass (script worked, nothing to debug).
+            if !viewModel.probes.isEmpty, !viewModel.allPassed {
                 DisclosureGroup("Raw remote output (for debugging)") {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("exit code: \(viewModel.rawExitCode)")
