@@ -8,12 +8,17 @@ import SwiftUI
 struct ConnectionStatusPill: View {
     let status: ConnectionStatusViewModel
     @State private var showDetails = false
+    @State private var showDiagnostics = false
 
     var body: some View {
         Button {
             switch status.status {
             case .error:
                 showDetails = true
+            case .degraded:
+                // Yellow "can't read" state — open the diagnostics sheet
+                // so the user can see exactly which files fail and why.
+                showDiagnostics = true
             case .connected, .idle:
                 status.retry()
             }
@@ -36,11 +41,15 @@ struct ConnectionStatusPill: View {
         .popover(isPresented: $showDetails, arrowEdge: .bottom) {
             errorDetails.frame(width: 400)
         }
+        .sheet(isPresented: $showDiagnostics) {
+            RemoteDiagnosticsView(context: status.context)
+        }
     }
 
     private var color: Color {
         switch status.status {
         case .connected: return .green
+        case .degraded: return .orange
         case .idle: return .yellow
         case .error: return .red
         }
@@ -49,6 +58,7 @@ struct ConnectionStatusPill: View {
     private var label: String {
         switch status.status {
         case .connected: return "Connected"
+        case .degraded: return "Connected — can't read Hermes state"
         case .idle: return "Checking…"
         case .error(let message, _): return message
         }
@@ -62,6 +72,8 @@ struct ConnectionStatusPill: View {
                 return "Last probe: \(fmt.localizedString(for: ts, relativeTo: Date()))"
             }
             return "Connected"
+        case .degraded(let reason):
+            return "SSH works but \(reason). Click for diagnostics."
         case .idle: return "Waiting for first probe"
         case .error(_, _): return "Click for details"
         }

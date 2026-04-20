@@ -22,7 +22,12 @@ final class AddServerViewModel {
     var testResult: TestResult?
 
     enum TestResult: Equatable {
-        case success(hermesPath: String, dbFound: Bool)
+        /// `suggestedRemoteHome` is non-nil when the probe didn't find
+        /// state.db at the configured (or default) path but did find a
+        /// `state.db` at one of the well-known alternates (e.g. a systemd
+        /// install in `/var/lib/hermes/.hermes`). UI offers a one-click
+        /// fill so the user doesn't have to know the convention.
+        case success(hermesPath: String, dbFound: Bool, suggestedRemoteHome: String?)
         /// `command` is the full ssh invocation we attempted (so the user can
         /// paste it into Terminal to see what their shell does with it).
         /// `stderr` is whatever ssh / the remote shell wrote to stderr.
@@ -95,7 +100,7 @@ final class AddServerViewModel {
     /// `hermesBinaryHint` so subsequent calls don't need to re-resolve it.
     func configForSave() -> SSHConfig {
         var cfg = draftConfig
-        if case .success(let path, _) = testResult {
+        if case .success(let path, _, _) = testResult {
             cfg.hermesBinaryHint = path
         }
         return cfg

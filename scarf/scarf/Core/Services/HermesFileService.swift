@@ -1,6 +1,9 @@
 import Foundation
+import os
 
 struct HermesFileService: Sendable {
+
+    nonisolated static let logger = Logger(subsystem: "com.scarf", category: "HermesFileService")
 
     let context: ServerContext
     let transport: any ServerTransport
@@ -15,6 +18,14 @@ struct HermesFileService: Sendable {
     nonisolated func loadConfig() -> HermesConfig {
         guard let content = readFile(context.paths.configYAML) else { return .empty }
         return parseConfig(content)
+    }
+
+    /// Error-surfacing config load. Used by Dashboard to show the user a
+    /// specific reason when config.yaml can't be read on a remote host
+    /// (permission denied, missing file, sqlite3 not installed, etc.)
+    /// instead of silently falling back to `.empty`.
+    nonisolated func loadConfigResult() -> Result<HermesConfig, Error> {
+        readFileResult(context.paths.configYAML).map { parseConfig($0) }
     }
 
     nonisolated private func parseConfig(_ yaml: String) -> HermesConfig {
@@ -385,8 +396,31 @@ struct HermesFileService: Sendable {
         do {
             return try JSONDecoder().decode(GatewayState.self, from: data)
         } catch {
-            print("[Scarf] Failed to decode gateway state: \(error.localizedDescription)")
+            Self.logger.warning("Failed to decode gateway state: \(error.localizedDescription, privacy: .public)")
             return nil
+        }
+    }
+
+    /// Error-surfacing gateway-state load. `.success(nil)` means the file
+    /// doesn't exist yet (gateway hasn't written state — normal when Hermes
+    /// is stopped). `.failure` means the file exists but couldn't be read
+    /// (permission denied, connection down, JSON corruption).
+    nonisolated func loadGatewayStateResult() -> Result<GatewayState?, Error> {
+        // Distinguish "file doesn't exist yet" (normal, returns .success(nil))
+        // from "file exists but we can't read or parse it" (error).
+        if !transport.fileExists(context.paths.gatewayStateJSON) {
+            return .success(nil)
+        }
+        switch readFileDataResult(context.paths.gatewayStateJSON) {
+        case .success(let data):
+            do {
+                return .success(try JSONDecoder().decode(GatewayState.self, from: data))
+            } catch {
+                Self.logger.warning("Failed to decode gateway state: \(error.localizedDescription, privacy: .public)")
+                return .failure(error)
+            }
+        case .failure(let err):
+            return .failure(err)
         }
     }
 
@@ -1173,22 +1207,45 @@ struct HermesFileService: Sendable {
     }
 
     nonisolated func hermesPID() -> pid_t? {
-        // Run `pgrep -f hermes` either locally or via the transport. On
-        // remote hosts we trust `pgrep` to be present — it's standard on
-        // Linux and macOS. On failure we conservatively return nil rather
-        // than pretending Hermes is down: the caller will see
-        // isHermesRunning==false, which is already the "unknown" UX.
-        let result = try? transport.runProcess(
-            executable: "/usr/bin/pgrep",
-            args: ["-f", "hermes"],
-            stdin: nil,
-            timeout: 5
-        )
-        guard let result, let firstLine = result.stdoutString
-            .components(separatedBy: "\n")
-            .first(where: { !$0.isEmpty }),
-              let pid = pid_t(firstLine.trimmingCharacters(in: .whitespaces)) else { return nil }
-        return pid
+        switch hermesPIDResult() {
+        case .success(let pid): return pid
+        case .failure: return nil
+        }
+    }
+
+    /// Error-surfacing variant. `.success(nil)` means `pgrep` ran successfully
+    /// and found no hermes process (Hermes is genuinely not running).
+    /// `.failure` means we couldn't probe at all (pgrep missing, connection
+    /// down, permission issue) — a *different* UX from "not running".
+    nonisolated func hermesPIDResult() -> Result<pid_t?, Error> {
+        do {
+            let result = try transport.runProcess(
+                executable: "/usr/bin/pgrep",
+                args: ["-f", "hermes"],
+                stdin: nil,
+                timeout: 5
+            )
+            // pgrep exits 1 when nothing matches — that's "not running", NOT an
+            // error. Anything else (127=command not found, 255=ssh failure) is.
+            if result.exitCode == 0 {
+                if let firstLine = result.stdoutString
+                    .components(separatedBy: "\n")
+                    .first(where: { !$0.isEmpty }),
+                   let pid = pid_t(firstLine.trimmingCharacters(in: .whitespaces)) {
+                    return .success(pid)
+                }
+                return .success(nil)
+            } else if result.exitCode == 1 {
+                return .success(nil)   // genuinely not running
+            } else {
+                let err = TransportError.commandFailed(exitCode: result.exitCode, stderr: result.stderrString)
+                Self.logger.warning("pgrep failed (exit \(result.exitCode)): \(result.stderrString, privacy: .public)")
+                return .failure(err)
+            }
+        } catch {
+            Self.logger.warning("pgrep transport error: \(error.localizedDescription, privacy: .public)")
+            return .failure(error)
+        }
     }
 
     @discardableResult
@@ -1488,15 +1545,55 @@ struct HermesFileService: Sendable {
     // MARK: - File I/O
 
     /// Read a UTF-8 text file through the transport. Missing files and any
-    /// transport error surface as `nil` — callers treat missing/unreadable
-    /// the same way they always have.
+    /// transport error surface as `nil` — callers that don't need the
+    /// specific error reason keep using this. New call sites that want to
+    /// show a user-actionable message should use `readFileResult`.
     nonisolated private func readFile(_ path: String) -> String? {
-        guard let data = try? transport.readFile(path) else { return nil }
-        return String(data: data, encoding: .utf8)
+        switch readFileResult(path) {
+        case .success(let s):
+            return s
+        case .failure:
+            return nil
+        }
     }
 
     nonisolated private func readFileData(_ path: String) -> Data? {
-        try? transport.readFile(path)
+        switch readFileDataResult(path) {
+        case .success(let d):
+            return d
+        case .failure:
+            return nil
+        }
+    }
+
+    /// Error-surfacing read. Returns the decoded text on success, or the
+    /// underlying `TransportError` (or raw error for local failures) on
+    /// failure. Every failure is also logged via `os.Logger` — the warning
+    /// trail in Console.app is how we diagnose "connection green, data
+    /// empty" bug reports without needing to wire the error through every
+    /// existing call site.
+    nonisolated func readFileResult(_ path: String) -> Result<String, Error> {
+        switch readFileDataResult(path) {
+        case .success(let data):
+            guard let s = String(data: data, encoding: .utf8) else {
+                let err = TransportError.fileIO(path: path, underlying: "file is not valid UTF-8")
+                Self.logger.warning("readFile(\(path, privacy: .public)): not UTF-8")
+                return .failure(err)
+            }
+            return .success(s)
+        case .failure(let err):
+            return .failure(err)
+        }
+    }
+
+    nonisolated func readFileDataResult(_ path: String) -> Result<Data, Error> {
+        do {
+            let data = try transport.readFile(path)
+            return .success(data)
+        } catch {
+            Self.logger.warning("readFile(\(path, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
+            return .failure(error)
+        }
     }
 
     /// Write a UTF-8 text file atomically through the transport. Matches the
