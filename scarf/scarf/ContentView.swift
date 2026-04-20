@@ -21,12 +21,11 @@ struct ContentView: View {
                         ServerSwitcherToolbar()
                     }
                     if serverContext.isRemote {
-                        // `.principal` placement renders the item inside a
-                        // centered emphasis bezel on macOS, which reads as
-                        // an unwanted capsule-with-shadow around the pill.
-                        // `.primaryAction` (right side of the toolbar) has
-                        // no decorative background — what we want.
-                        ToolbarItem(placement: .primaryAction) {
+                        // `.principal` centers the pill in the toolbar —
+                        // the native emphasis bezel is the intended frame;
+                        // the pill's own visual content (icon + label, no
+                        // background) sits inside it in balance.
+                        ToolbarItem(placement: .principal) {
                             ConnectionStatusPill(status: connectionStatus)
                         }
                     }

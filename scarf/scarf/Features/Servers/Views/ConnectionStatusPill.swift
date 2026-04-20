@@ -23,18 +23,20 @@ struct ConnectionStatusPill: View {
                 status.retry()
             }
         } label: {
-            // No explicit background — the SwiftUI toolbar gives the item
-            // its own bezel, and painting a second capsule on top looked
-            // doubly-framed. Just the colored dot + label reads cleanly.
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(color)
-                    .frame(width: 8, height: 8)
+            // Leading SF Symbol does double duty: its color is the status
+            // signal (green/orange/yellow/red), and its shape reads as a
+            // clickable toolbar tool. No custom background — the toolbar's
+            // `.principal` emphasis bezel is the frame.
+            HStack(spacing: 5) {
+                Image(systemName: iconName)
+                    .foregroundStyle(color)
+                    .symbolRenderingMode(.hierarchical)
                 Text(label)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+            .padding(.horizontal, 4)
         }
         .buttonStyle(.plain)
         .help(tooltip)
@@ -52,6 +54,19 @@ struct ConnectionStatusPill: View {
         case .degraded: return .orange
         case .idle: return .yellow
         case .error: return .red
+        }
+    }
+
+    /// State-specific SF Symbol. The icon shape itself signals what the
+    /// click will do: checkmark for connected (click to re-probe),
+    /// stethoscope for degraded (click to run diagnostics), spinning
+    /// arrows for probing, triangle for error.
+    private var iconName: String {
+        switch status.status {
+        case .connected: return "checkmark.circle.fill"
+        case .degraded: return "stethoscope"
+        case .idle: return "arrow.triangle.2.circlepath"
+        case .error: return "exclamationmark.triangle.fill"
         }
     }
 
