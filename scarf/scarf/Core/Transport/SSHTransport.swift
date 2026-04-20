@@ -52,10 +52,13 @@ struct SSHTransport: ServerTransport {
     /// per-host via OpenSSH's `%C` token). Exposed as a static so
     /// cleanup paths (`ServerRegistry.removeServer`, app-launch sweep) can
     /// compute it without instantiating a transport.
+    ///
+    /// Uses a short path under /tmp to stay within the 104-byte macOS
+    /// Unix domain socket limit. The Caches path
+    /// (~/Library/Caches/scarf/ssh/%C) can exceed this limit when the
+    /// username is long, causing ssh to exit 255.
     nonisolated static func controlDirPath() -> String {
-        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.path
-            ?? NSHomeDirectory() + "/Library/Caches"
-        return base + "/scarf/ssh"
+        return "/tmp/scarf-ssh-\(getuid())"
     }
 
     /// Snapshot cache directory for a given server. Stable per-ID so repeated
