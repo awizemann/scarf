@@ -6,27 +6,27 @@ struct RichChatMessageList: View {
     /// External trigger to force a scroll-to-bottom (e.g., from "Return to Active Session").
     var scrollTrigger: UUID = UUID()
 
-    /// Why `.defaultScrollAnchor(.bottom)` *alone* and no `proxy.scrollTo`.
+    /// Scrolling strategy: plain `VStack` (not `LazyVStack`) plus
+    /// `.defaultScrollAnchor(.bottom)`.
     ///
-    /// `.defaultScrollAnchor(.bottom)` tells SwiftUI to pin the viewport to
-    /// the bottom of the content automatically — as messages stream in or
-    /// new turns arrive, the scroll position tracks the bottom edge.
+    /// `LazyVStack` was causing the classic "loaded session shows whitespace
+    /// and the chat is above" bug: lazy rows return estimated heights before
+    /// they render, `.defaultScrollAnchor(.bottom)` positions the viewport
+    /// at the *estimated* bottom (which overshoots the real content), and
+    /// when rows materialize and real heights land, the viewport ends up
+    /// past the content. Attempts to correct via `proxy.scrollTo(lastID)`
+    /// failed because unrendered rows have no resolvable ID.
     ///
-    /// We used to also call `proxy.scrollTo(lastID, anchor: .bottom)` from
-    /// six different `onChange` handlers during streaming. The two
-    /// mechanisms fought each other: the ScrollViewReader can resolve an ID
-    /// to a position **before** LazyVStack has finished laying out that
-    /// row, so `scrollTo` would land past the actual content — the
-    /// "viewport showing whitespace, chat is above" symptom. Removing the
-    /// manual scroll and trusting `defaultScrollAnchor` eliminates the race.
-    ///
-    /// The only remaining explicit scroll is `scrollTrigger` for the "Return
-    /// to Active Session" button; that fires rarely, after layout has
-    /// settled, so the overshoot doesn't happen.
+    /// Switching to `VStack` materializes every row immediately, so
+    /// `.defaultScrollAnchor(.bottom)` has real heights to work with and
+    /// can't overshoot. For typical Hermes sessions (<500 messages) the
+    /// first-render cost is acceptable. If ever needed for huge sessions
+    /// we can reintroduce lazy with a preference-key-based height
+    /// measurement, but that's a much larger change.
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 16) {
                     if groups.isEmpty && !isWorking {
                         emptyState
                     }

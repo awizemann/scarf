@@ -31,6 +31,7 @@ final class RichChatViewModel {
     init(context: ServerContext = .local) {
         self.context = context
         self.dataService = HermesDataService(context: context)
+        loadQuickCommands()
     }
 
 
@@ -49,9 +50,21 @@ final class RichChatViewModel {
     private(set) var acpCachedReadTokens = 0
 
     /// Slash commands advertised by the ACP server via `available_commands_update`.
-    private(set) var availableCommandNames: Set<String> = []
+    private(set) var acpCommands: [HermesSlashCommand] = []
+    /// User-defined commands parsed from `config.yaml` `quick_commands`.
+    private(set) var quickCommands: [HermesSlashCommand] = []
 
-    var supportsCompress: Bool { availableCommandNames.contains("compress") }
+    /// Merged list, ACP-first, de-duplicated by name.
+    var availableCommands: [HermesSlashCommand] {
+        let acpNames = Set(acpCommands.map(\.name))
+        return acpCommands + quickCommands.filter { !acpNames.contains($0.name) }
+    }
+
+    var supportsCompress: Bool { availableCommands.contains { $0.name == "compress" } }
+
+    /// True when the menu carries more than just `/compress` — used to hide
+    /// the dedicated compress button in favor of the full slash menu.
+    var hasBroaderCommandMenu: Bool { availableCommands.count > 1 }
 
     var hasMessages: Bool { !messages.isEmpty }
 
@@ -105,8 +118,9 @@ final class RichChatViewModel {
         acpOutputTokens = 0
         acpThoughtTokens = 0
         acpCachedReadTokens = 0
-        availableCommandNames = []
+        acpCommands = []
         pendingPermission = nil
+        loadQuickCommands()
     }
 
     func setSessionId(_ id: String?) {
@@ -181,16 +195,56 @@ final class RichChatViewModel {
         case .connectionLost(let reason):
             handleConnectionLost(reason: reason)
         case .availableCommands(_, let commands):
-            var names: Set<String> = []
-            for entry in commands {
-                if let name = entry["name"] as? String {
-                    // Hermes sends names either as "compress" or "/compress"
-                    names.insert(name.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
-                }
-            }
-            availableCommandNames = names
+            acpCommands = parseACPCommands(commands)
         case .unknown:
             break
+        }
+    }
+
+    private func parseACPCommands(_ commands: [[String: Any]]) -> [HermesSlashCommand] {
+        var result: [HermesSlashCommand] = []
+        for entry in commands {
+            guard let rawName = entry["name"] as? String else { continue }
+            // Hermes sends names either as "compress" or "/compress"
+            let name = rawName.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard !name.isEmpty else { continue }
+            let description = (entry["description"] as? String) ?? ""
+            var hint: String? = nil
+            if let input = entry["input"] as? [String: Any],
+               let h = input["hint"] as? String,
+               !h.isEmpty {
+                hint = h
+            }
+            result.append(HermesSlashCommand(
+                name: name,
+                description: description,
+                argumentHint: hint,
+                source: .acp
+            ))
+        }
+        return result
+    }
+
+    /// Load `quick_commands` from `config.yaml` off the main actor and publish
+    /// them as slash commands. Safe to call repeatedly — replaces the existing list.
+    func loadQuickCommands() {
+        let ctx = context
+        Task.detached { [weak self] in
+            let loaded = QuickCommandsViewModel.loadQuickCommands(context: ctx)
+            let mapped = loaded.map { qc -> HermesSlashCommand in
+                let truncated = qc.command.count > 60
+                    ? String(qc.command.prefix(60)) + "…"
+                    : qc.command
+                return HermesSlashCommand(
+                    name: qc.name,
+                    description: "Run: \(truncated)",
+                    argumentHint: nil,
+                    source: .quickCommand
+                )
+            }
+            await MainActor.run { [weak self] in
+                self?.quickCommands = mapped
+            }
         }
     }
 
