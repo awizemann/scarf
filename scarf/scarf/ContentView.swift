@@ -21,7 +21,12 @@ struct ContentView: View {
                         ServerSwitcherToolbar()
                     }
                     if serverContext.isRemote {
-                        ToolbarItem(placement: .principal) {
+                        // `.principal` placement renders the item inside a
+                        // centered emphasis bezel on macOS, which reads as
+                        // an unwanted capsule-with-shadow around the pill.
+                        // `.primaryAction` (right side of the toolbar) has
+                        // no decorative background — what we want.
+                        ToolbarItem(placement: .primaryAction) {
                             ConnectionStatusPill(status: connectionStatus)
                         }
                     }
