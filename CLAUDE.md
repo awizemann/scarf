@@ -59,6 +59,29 @@ The script bumps version, archives Universal (arm64 + x86_64) + ARM64-only varia
 
 **Prerequisites (one-time, already set up on Alan's machine):** Developer ID Application cert in login Keychain (team `3Q6X2L86C4`), notarytool keychain profile `scarf-notary`, Sparkle EdDSA private key in Keychain item `https://sparkle-project.org`, `gh-pages` branch + GitHub Pages enabled. See the header of [scripts/release.sh](scripts/release.sh) and the Releases section in [README.md](README.md) for details.
 
+## Wiki
+
+Public documentation lives in the GitHub wiki at https://github.com/awizemann/scarf/wiki. The wiki is a separate git repo cloned to `.wiki-worktree/` in the repo root (gitignored, sibling to `.gh-pages-worktree/`). Internal dev notes stay in `scarf/docs/`; the wiki is for public-facing reference.
+
+**Update the wiki when:**
+- A new feature module is added under `scarf/scarf/scarf/Features/` → extend the relevant User Guide page.
+- A new core service is added under `Core/Services/` → extend `Core-Services.md`.
+- Architecture changes (AppCoordinator, transport, MVVM-F rule, sandbox) → `Architecture-Overview.md` + the specific sub-page.
+- Hermes version bumps in this file → `Hermes-Version-Compatibility.md`.
+- `scripts/release.sh` completes a full (non-draft) release → bump latest-version on `Home.md` + append to `Release-Notes-Index.md`.
+- Keyboard shortcut or sidebar section changes → `Keyboard-Shortcuts.md` / `Sidebar-and-Navigation.md`.
+
+**Skip for:** bug fixes with no user-observable change, pure refactors, typos, test-only changes, internal cleanups.
+
+```bash
+./scripts/wiki.sh pull                         # always first
+# edit .wiki-worktree/*.md with normal tools
+./scripts/wiki.sh commit "docs: describe X"   # runs secret-scan
+./scripts/wiki.sh push                         # runs secret-scan again, then push
+```
+
+**Never** commit API keys, tokens, `.env` files, private keys, or real hostnames/IPs to the wiki. The script's two-pass secret-scan blocks common token patterns and a user-maintained blocklist at `scripts/wiki-blocklist.txt` (gitignored). Do not bypass without explicit approval. Full workflow on the wiki itself at `.wiki-worktree/Wiki-Maintenance.md`.
+
 ## Hermes Version
 
 Targets Hermes v0.9.0 (v2026.4.13). Log lines may carry an optional `[session_id]` tag between the level and logger name — `HermesLogService.parseLine` treats the session tag as an optional capture group, so older untagged lines still parse.

@@ -1,6 +1,7 @@
 # Xcode
 build/
 .gh-pages-worktree/
+.wiki-worktree/
 DerivedData/
 *.pbxuser
 !default.pbxuser
@@ -52,3 +53,6 @@ scarf/standards/backups/
 # history. RELEASE_NOTES.md stays tracked (committed with the version bump).
 releases/v*/*.zip
 releases/v*/appcast-entry.xml
+
+# Wiki helper: personal patterns (hostnames, IPs) blocked from the wiki push.
+scripts/wiki-blocklist.txt

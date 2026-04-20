@@ -33,6 +33,10 @@ Rules:
 - The app only reads from `~/.hermes/state.db` (never writes). Memory files are the exception.
 - Swift 6 strict concurrency: `@MainActor` default isolation, `nonisolated` for service methods.
 
+## Documentation
+
+Public docs live in the [GitHub wiki](https://github.com/awizemann/scarf/wiki). Small fixes (typos, clarifications) can be made via the "Edit" button on any wiki page — you need push access to the main repo. For larger changes, clone the wiki locally (`git clone git@github.com:awizemann/scarf.wiki.git`) or open an issue describing the proposed change.
+
 ## Reporting Issues
 
 Open an issue with:
