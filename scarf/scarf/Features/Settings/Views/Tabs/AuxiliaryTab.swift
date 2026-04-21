@@ -6,7 +6,7 @@ struct AuxiliaryTab: View {
     @Bindable var viewModel: SettingsViewModel
 
     // Keyed by the config path name — matches `auxiliary.<task>.*` in config.yaml.
-    private let tasks: [(key: String, title: String, icon: String)] = [
+    private let tasks: [(key: String, title: LocalizedStringKey, icon: String)] = [
         ("vision", "Vision", "eye"),
         ("web_extract", "Web Extract", "doc.richtext"),
         ("compression", "Compression", "arrow.down.right.and.arrow.up.left.circle"),

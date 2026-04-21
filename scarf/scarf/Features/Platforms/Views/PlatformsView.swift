@@ -139,7 +139,7 @@ struct PlatformsView: View {
         case "homeassistant":  HomeAssistantSetupView(context: ctx)
         case "webhook":        WebhookSetupView(context: ctx)
         default:
-            SettingsSection(title: viewModel.selected.displayName, icon: KnownPlatforms.icon(for: viewModel.selected.name)) {
+            SettingsSection(title: LocalizedStringKey(viewModel.selected.displayName), icon: KnownPlatforms.icon(for: viewModel.selected.name)) {
                 ReadOnlyRow(label: "Setup", value: "No setup form for this platform yet.")
             }
         }

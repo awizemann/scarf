@@ -26,6 +26,22 @@ struct SettingsView: View {
         case advanced = "Advanced"
 
         var id: String { rawValue }
+
+        var displayName: LocalizedStringResource {
+            switch self {
+            case .general: return "General"
+            case .display: return "Display"
+            case .agent: return "Agent"
+            case .terminal: return "Terminal"
+            case .browser: return "Browser"
+            case .voice: return "Voice"
+            case .memory: return "Memory"
+            case .auxiliary: return "Aux Models"
+            case .security: return "Security"
+            case .advanced: return "Advanced"
+            }
+        }
+
         var icon: String {
             switch self {
             case .general: return "gear"
@@ -56,7 +72,11 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                     }
                     .tabItem {
-                        Label(tab.rawValue, systemImage: tab.icon)
+                        Label {
+                            Text(tab.displayName)
+                        } icon: {
+                            Image(systemName: tab.icon)
+                        }
                     }
                     .tag(tab)
                 }

@@ -8,32 +8,52 @@ struct SidebarView: View {
         List(selection: $coordinator.selectedSection) {
             Section("Monitor") {
                 ForEach([SidebarSection.dashboard, .insights, .sessions, .activity]) { section in
-                    Label(section.rawValue, systemImage: section.icon)
-                        .tag(section)
+                    Label {
+                        Text(section.displayName)
+                    } icon: {
+                        Image(systemName: section.icon)
+                    }
+                    .tag(section)
                 }
             }
             Section("Projects") {
                 ForEach([SidebarSection.projects]) { section in
-                    Label(section.rawValue, systemImage: section.icon)
-                        .tag(section)
+                    Label {
+                        Text(section.displayName)
+                    } icon: {
+                        Image(systemName: section.icon)
+                    }
+                    .tag(section)
                 }
             }
             Section("Interact") {
                 ForEach([SidebarSection.chat, .memory, .skills]) { section in
-                    Label(section.rawValue, systemImage: section.icon)
-                        .tag(section)
+                    Label {
+                        Text(section.displayName)
+                    } icon: {
+                        Image(systemName: section.icon)
+                    }
+                    .tag(section)
                 }
             }
             Section("Configure") {
                 ForEach([SidebarSection.platforms, .personalities, .quickCommands, .credentialPools, .plugins, .webhooks, .profiles]) { section in
-                    Label(section.rawValue, systemImage: section.icon)
-                        .tag(section)
+                    Label {
+                        Text(section.displayName)
+                    } icon: {
+                        Image(systemName: section.icon)
+                    }
+                    .tag(section)
                 }
             }
             Section("Manage") {
                 ForEach([SidebarSection.tools, .mcpServers, .gateway, .cron, .health, .logs, .settings]) { section in
-                    Label(section.rawValue, systemImage: section.icon)
-                        .tag(section)
+                    Label {
+                        Text(section.displayName)
+                    } icon: {
+                        Image(systemName: section.icon)
+                    }
+                    .tag(section)
                 }
             }
         }

@@ -5,10 +5,46 @@
       "comment" : "Shown by macOS when Scarf first requests microphone access for Hermes voice chat.",
       "extractionState" : "manual",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf verwendet das Mikrofon für den Hermes-Sprach-Chat."
+          }
+        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Scarf uses the microphone for Hermes voice chat."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf usa el micrófono para el chat de voz de Hermes."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf utilise le microphone pour le chat vocal de Hermes."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf は Hermes の音声チャットのためにマイクを使用します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Scarf usa o microfone para o chat de voz do Hermes."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf 使用麦克风进行 Hermes 语音聊天。"
           }
         }
       }

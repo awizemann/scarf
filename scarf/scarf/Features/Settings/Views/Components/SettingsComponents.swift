@@ -6,7 +6,7 @@ import AppKit
 /// on large view bodies (per project guidance in CLAUDE.md).
 
 struct SettingsSection<Content: View>: View {
-    let title: String
+    let title: LocalizedStringKey
     let icon: String
     @ViewBuilder let content: Content
 
