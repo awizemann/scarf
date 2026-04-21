@@ -61,10 +61,10 @@ struct InsightsView: View {
                 InsightCard(label: "Cache Write", value: formatTokens(viewModel.totalCacheWriteTokens))
                 InsightCard(label: "Reasoning Tokens", value: formatTokens(viewModel.totalReasoningTokens))
                 InsightCard(label: "Total Tokens", value: formatTokens(viewModel.totalTokens))
-                InsightCard(label: "Total Cost", value: String(format: "$%.2f", viewModel.totalCost))
+                InsightCard(label: "Total Cost", value: viewModel.totalCost.formatted(.currency(code: "USD").precision(.fractionLength(2))))
                 InsightCard(label: "Active Time", value: formatDuration(viewModel.activeTime))
                 InsightCard(label: "Avg Session", value: formatDuration(viewModel.avgSessionDuration))
-                InsightCard(label: "Avg Msgs/Session", value: viewModel.sessions.isEmpty ? "0" : String(format: "%.1f", Double(viewModel.totalMessages) / Double(viewModel.sessions.count)))
+                InsightCard(label: "Avg Msgs/Session", value: viewModel.sessions.isEmpty ? "0" : (Double(viewModel.totalMessages) / Double(viewModel.sessions.count)).formatted(.number.precision(.fractionLength(1))))
             }
         }
     }

@@ -86,8 +86,8 @@ enum WidgetValue: Codable, Sendable, Hashable {
         case .string(let s): return s
         case .number(let n):
             return n.truncatingRemainder(dividingBy: 1) == 0
-                ? String(Int(n))
-                : String(format: "%.1f", n)
+                ? Int(n).formatted(.number)
+                : n.formatted(.number.precision(.fractionLength(1)))
         }
     }
 

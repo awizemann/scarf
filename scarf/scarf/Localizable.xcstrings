@@ -1,0 +1,1669 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "" : {
+
+    },
+    "#%lld" : {
+
+    },
+    "%@ in / %@ out" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ in / %2$@ out"
+          }
+        }
+      }
+    },
+    "%@ reasoning" : {
+
+    },
+    "%@ · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "%@ → %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ → %2$@"
+          }
+        }
+      }
+    },
+    "%lld" : {
+
+    },
+    "%lld %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld %2$@"
+          }
+        }
+      }
+    },
+    "%lld chars" : {
+
+    },
+    "%lld delivery failure%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld delivery failure%2$@"
+          }
+        }
+      }
+    },
+    "%lld entries" : {
+
+    },
+    "%lld files" : {
+
+    },
+    "%lld messages" : {
+
+    },
+    "%lld msgs" : {
+
+    },
+    "%lld of %lld enabled" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld of %2$lld enabled"
+          }
+        }
+      }
+    },
+    "%lld reasoning" : {
+
+    },
+    "%lld req" : {
+
+    },
+    "%lld required config" : {
+
+    },
+    "%lld sessions" : {
+
+    },
+    "%lld tokens" : {
+
+    },
+    "%lld tools" : {
+
+    },
+    "%lld." : {
+
+    },
+    "(%lld tokens)" : {
+
+    },
+    "/%@" : {
+
+    },
+    "22" : {
+
+    },
+    "A QR code will appear below. Scan it with WhatsApp on your phone. The session is saved to ~/.hermes/platforms/whatsapp/ so you won't need to scan again after restarts." : {
+
+    },
+    "API Key" : {
+
+    },
+    "API keys are never displayed in full. Scarf only shows the last 4 characters for identification. Full key values are stored by hermes in ~/.hermes/auth.json." : {
+
+    },
+    "Actions" : {
+
+    },
+    "Active profile" : {
+
+    },
+    "Activity" : {
+
+    },
+    "Activity Patterns" : {
+
+    },
+    "Add" : {
+
+    },
+    "Add Command" : {
+
+    },
+    "Add Credential" : {
+
+    },
+    "Add Custom" : {
+
+    },
+    "Add Custom MCP Server" : {
+
+    },
+    "Add Project" : {
+
+    },
+    "Add Quick Command" : {
+
+    },
+    "Add Remote Server" : {
+
+    },
+    "Add Server" : {
+
+    },
+    "Add a project folder to get started. Create a .scarf/dashboard.json file in your project to define widgets." : {
+
+    },
+    "Add credentials in **Configure → Credential Pools**, set `ANTHROPIC_API_KEY` (or similar) in `~/.hermes/.env`, or export it in your shell profile, then restart Scarf." : {
+
+    },
+    "Add from Preset" : {
+
+    },
+    "Add rotation credentials so hermes can failover between keys when one hits rate limits." : {
+
+    },
+    "Add your first command" : {
+
+    },
+    "After approving in your browser, the provider shows a code. Paste it below and submit." : {
+
+    },
+    "All Levels" : {
+
+    },
+    "All Sessions" : {
+
+    },
+    "All installed hub skills are up to date." : {
+
+    },
+    "Approve" : {
+
+    },
+    "Archive" : {
+
+    },
+    "Args (one per line)" : {
+
+    },
+    "Arguments" : {
+
+    },
+    "Assistant Message" : {
+
+    },
+    "Auth" : {
+
+    },
+    "Authentication uses ssh-agent" : {
+
+    },
+    "Authorization Code" : {
+
+    },
+    "Authorization URL" : {
+
+    },
+    "Auxiliary tasks use separate, typically cheaper models. Leave Provider as `auto` to inherit the main provider." : {
+
+    },
+    "Back" : {
+
+    },
+    "Back to Catalog" : {
+
+    },
+    "Backup Now" : {
+
+    },
+    "Becomes the key under mcp_servers: in config.yaml." : {
+
+    },
+    "BlueBubbles Docs" : {
+
+    },
+    "Browse" : {
+
+    },
+    "Browse the Hub" : {
+
+    },
+    "Browse..." : {
+
+    },
+    "By Day" : {
+
+    },
+    "By Hour" : {
+
+    },
+    "Call timeout" : {
+
+    },
+    "Can't read Hermes state on %@" : {
+
+    },
+    "Cancel" : {
+
+    },
+    "Changes won't take effect until Hermes reloads the config." : {
+
+    },
+    "Chat" : {
+
+    },
+    "Chat Messages" : {
+
+    },
+    "Check" : {
+
+    },
+    "Check Now" : {
+
+    },
+    "Check for Updates" : {
+
+    },
+    "Check for Updates…" : {
+
+    },
+    "Choose a cron job from the list" : {
+
+    },
+    "Choose a profile to inspect." : {
+
+    },
+    "Choose a project from the sidebar to view its dashboard." : {
+
+    },
+    "Choose a session from the list" : {
+
+    },
+    "Choose a skill from the list" : {
+
+    },
+    "Choose an entry from the list" : {
+
+    },
+    "Choose…" : {
+
+    },
+    "Clear Token" : {
+
+    },
+    "Clear all skills on save" : {
+
+    },
+    "Click Add to connect to a remote Hermes installation over SSH." : {
+
+    },
+    "Clicking Start OAuth opens the provider's authorization page in your browser. After you approve, copy the code the provider displays and paste it back into the terminal that appears next." : {
+
+    },
+    "Clone config, .env, SOUL.md from active profile" : {
+
+    },
+    "Close" : {
+
+    },
+    "Close Window" : {
+
+    },
+    "Code: %@" : {
+
+    },
+    "Command" : {
+
+    },
+    "Command looks destructive. Double-check before saving." : {
+
+    },
+    "Component" : {
+
+    },
+    "Compress" : {
+
+    },
+    "Compress Conversation" : {
+
+    },
+    "Compress conversation (/compress)" : {
+
+    },
+    "Configure" : {
+
+    },
+    "Connect timeout" : {
+
+    },
+    "Connected" : {
+
+    },
+    "Connection" : {
+
+    },
+    "Continue Last Session" : {
+
+    },
+    "Copied" : {
+
+    },
+    "Copy" : {
+
+    },
+    "Copy Full Report" : {
+
+    },
+    "Copy a plain-text summary of every check (passes and fails) — paste into GitHub issues so we can see everything at once." : {
+
+    },
+    "Copy code" : {
+
+    },
+    "Copy error details" : {
+
+    },
+    "Create" : {
+
+    },
+    "Create Profile" : {
+
+    },
+    "Create Subscription" : {
+
+    },
+    "Create a Slack app at api.slack.com/apps, enable Socket Mode, grant bot scopes (chat:write, app_mentions:read, channels:history, etc.), then copy the Bot User OAuth Token (xoxb-) and the App-Level Token (xapp-)." : {
+
+    },
+    "Create a bot via @BotFather and get your numeric user ID from @userinfobot. Paste the token and your user ID below — the bot will only respond to allowed users." : {
+
+    },
+    "Create a long-lived access token in Home Assistant (Profile → Security → Long-Lived Access Tokens). By default, no events are forwarded — enable Watch All Changes, or add entity filters below." : {
+
+    },
+    "Create a personal access token under Profile → Security → Personal Access Tokens, or create a bot account. Use the token as the MATTERMOST_TOKEN value." : {
+
+    },
+    "Create a profile to isolate config and skills." : {
+
+    },
+    "Create an app in Discord's Developer Portal, enable Message Content and Server Members intents, and copy the bot token. Invite the bot to your server via the OAuth2 URL generator." : {
+
+    },
+    "Create an app in the Feishu/Lark Developer Console, enable Interactive Card if you need button responses, and copy the App ID and App Secret. WebSocket mode (recommended) doesn't need a public endpoint." : {
+
+    },
+    "Credential Pools" : {
+
+    },
+    "Credential Type" : {
+
+    },
+    "Credentials" : {
+
+    },
+    "Cron Jobs" : {
+
+    },
+    "Current: %@" : {
+
+    },
+    "Custom…" : {
+
+    },
+    "Daemon running" : {
+
+    },
+    "Dashboard" : {
+
+    },
+    "Default" : {
+
+    },
+    "Default: ~/.hermes" : {
+
+    },
+    "Defaults to ~/.ssh/config or current user" : {
+
+    },
+    "Delete" : {
+
+    },
+    "Delete %@?" : {
+
+    },
+    "Delete Session?" : {
+
+    },
+    "Delete profile '%@'?" : {
+
+    },
+    "Delete..." : {
+
+    },
+    "Deliver: %@" : {
+
+    },
+    "Diagnostic Output" : {
+
+    },
+    "Diagnostics" : {
+
+    },
+    "Disable" : {
+
+    },
+    "Disabled" : {
+
+    },
+    "Discord Setup Docs" : {
+
+    },
+    "Docs" : {
+
+    },
+    "Done" : {
+
+    },
+    "Edit" : {
+
+    },
+    "Edit %@" : {
+
+    },
+    "Edit /%@" : {
+
+    },
+    "Edit Agent Memory" : {
+
+    },
+    "Edit User Profile" : {
+
+    },
+    "Edit config.yaml" : {
+
+    },
+    "Email Setup Docs" : {
+
+    },
+    "Empty" : {
+
+    },
+    "Enable" : {
+
+    },
+    "Enable 2FA on your email account and generate an app password. Regular account passwords will fail. Always set allowed senders — otherwise anyone knowing the address can message the agent." : {
+
+    },
+    "Enable the webhook platform to accept event-driven agent triggers. The HMAC secret is used as a fallback when individual routes don't provide their own." : {
+
+    },
+    "Enabled" : {
+
+    },
+    "Env vars, headers, and tool filters can be edited after the server is added." : {
+
+    },
+    "Environment Variables" : {
+
+    },
+    "Error" : {
+
+    },
+    "Exclude" : {
+
+    },
+    "Expected at %@" : {
+
+    },
+    "Export All" : {
+
+    },
+    "Export..." : {
+
+    },
+    "Export…" : {
+
+    },
+    "Expose prompts" : {
+
+    },
+    "Expose resources" : {
+
+    },
+    "Feishu Setup Docs" : {
+
+    },
+    "Files" : {
+
+    },
+    "Filter logs..." : {
+
+    },
+    "Filter servers..." : {
+
+    },
+    "Filter skills..." : {
+
+    },
+    "Filter to session %@" : {
+
+    },
+    "Focus topic (optional)" : {
+
+    },
+    "Full copy of active profile (all state)" : {
+
+    },
+    "Gateway" : {
+
+    },
+    "Gateway Running" : {
+
+    },
+    "Gateway Stopped" : {
+
+    },
+    "Gateway restart required" : {
+
+    },
+    "Header" : {
+
+    },
+    "Headers" : {
+
+    },
+    "Health" : {
+
+    },
+    "Hermes" : {
+
+    },
+    "Hermes Not Found" : {
+
+    },
+    "Hermes Running" : {
+
+    },
+    "Hermes Stopped" : {
+
+    },
+    "Hermes binary not found" : {
+
+    },
+    "Hermes needs a global webhook secret and port before subscriptions can receive traffic. Run the gateway setup wizard or edit ~/.hermes/config.yaml manually." : {
+
+    },
+    "Hide" : {
+
+    },
+    "Hide Output" : {
+
+    },
+    "Hide details" : {
+
+    },
+    "Home Assistant Docs" : {
+
+    },
+    "Host key changed" : {
+
+    },
+    "ID: %@" : {
+
+    },
+    "If this is the first connection, ensure your key is loaded with `ssh-add` and that the remote accepts it." : {
+
+    },
+    "If you trust the change, remove the stale entry and reconnect:" : {
+
+    },
+    "Import" : {
+
+    },
+    "Inactive" : {
+
+    },
+    "Include (comma-separated — if set, only these are exposed)" : {
+
+    },
+    "Insights" : {
+
+    },
+    "Install" : {
+
+    },
+    "Install BlueBubbles Server" : {
+
+    },
+    "Install Plugin" : {
+
+    },
+    "Install a Plugin" : {
+
+    },
+    "Install signal-cli" : {
+
+    },
+    "Interact" : {
+
+    },
+    "Invalid URL" : {
+
+    },
+    "KEY" : {
+
+    },
+    "Label (optional)" : {
+
+    },
+    "Last Output" : {
+
+    },
+    "Last run: %@" : {
+
+    },
+    "Last updated: %@" : {
+
+    },
+    "Leave blank to infer from the model ID's prefix (\"openai/...\" → openai)." : {
+
+    },
+    "Leave blank unless Hermes is installed at a non-default path (systemd services often live at /var/lib/hermes/.hermes; Docker sidecars vary). Test Connection auto-suggests a value when it detects one of the known alternates." : {
+
+    },
+    "Level" : {
+
+    },
+    "Link Device" : {
+
+    },
+    "Link the device first to generate and scan a QR code. Once linked, start the daemon — it must keep running for hermes to send/receive messages." : {
+
+    },
+    "Linking…" : {
+
+    },
+    "Loaded" : {
+
+    },
+    "Local" : {
+
+    },
+    "Local (stdio)" : {
+
+    },
+    "Log File" : {
+
+    },
+    "Logs" : {
+
+    },
+    "MCP Servers" : {
+
+    },
+    "MCP Servers (%lld)" : {
+
+    },
+    "Manage" : {
+
+    },
+    "Manage Servers…" : {
+
+    },
+    "Manage in Credential Pools" : {
+
+    },
+    "Matrix Setup Docs" : {
+
+    },
+    "Matrix uses either an access token (preferred) or username/password. Get an access token from Element: Settings → Help & About → Access Token." : {
+
+    },
+    "Mattermost Setup Docs" : {
+
+    },
+    "Memory" : {
+
+    },
+    "Memory is managed by %@. File contents shown here may be stale." : {
+
+    },
+    "Message Hermes..." : {
+
+    },
+    "Messages will appear here as the conversation progresses." : {
+
+    },
+    "Migrate" : {
+
+    },
+    "Missing required config:" : {
+
+    },
+    "Model ID" : {
+
+    },
+    "Models" : {
+
+    },
+    "Monitor" : {
+
+    },
+    "Name" : {
+
+    },
+    "Name (no leading slash)" : {
+
+    },
+    "New Session" : {
+
+    },
+    "New Webhook Subscription" : {
+
+    },
+    "New name for '%@'" : {
+
+    },
+    "Next run: %@" : {
+
+    },
+    "No AI provider credentials detected" : {
+
+    },
+    "No Active Session" : {
+
+    },
+    "No Activity" : {
+
+    },
+    "No Cron Jobs" : {
+
+    },
+    "No Dashboard" : {
+
+    },
+    "No MCP servers configured" : {
+
+    },
+    "No Models" : {
+
+    },
+    "No Profiles" : {
+
+    },
+    "No Projects" : {
+
+    },
+    "No Updates" : {
+
+    },
+    "No active session" : {
+
+    },
+    "No additional output. Check ~/.ssh/config and ssh-agent." : {
+
+    },
+    "No credential pools configured" : {
+
+    },
+    "No data" : {
+
+    },
+    "No env vars configured." : {
+
+    },
+    "No env vars. Add one with the button below." : {
+
+    },
+    "No headers configured." : {
+
+    },
+    "No headers. Add one with the button below." : {
+
+    },
+    "No paired users" : {
+
+    },
+    "No platforms connected" : {
+
+    },
+    "No plugins installed" : {
+
+    },
+    "No quick commands configured" : {
+
+    },
+    "No remote servers" : {
+
+    },
+    "No scheduled jobs configured" : {
+
+    },
+    "No servers configured yet" : {
+
+    },
+    "No sessions found" : {
+
+    },
+    "No tool calls found" : {
+
+    },
+    "No webhook subscriptions" : {
+
+    },
+    "None" : {
+
+    },
+    "Notable Sessions" : {
+
+    },
+    "OAuth" : {
+
+    },
+    "OAuth 2.1" : {
+
+    },
+    "OAuth login for %@" : {
+
+    },
+    "OK" : {
+
+    },
+    "Open BotFather" : {
+
+    },
+    "Open Developer Portal" : {
+
+    },
+    "Open Local" : {
+
+    },
+    "Open Other Server…" : {
+
+    },
+    "Open Scarf" : {
+
+    },
+    "Open Server" : {
+
+    },
+    "Open Slack API" : {
+
+    },
+    "Open in Browser" : {
+
+    },
+    "Open in Editor" : {
+
+    },
+    "Open in new window" : {
+
+    },
+    "Open session" : {
+
+    },
+    "Optional — defaults to hostname" : {
+
+    },
+    "Optionally focus the summary on a specific topic. Leave blank to compress evenly." : {
+
+    },
+    "Output" : {
+
+    },
+    "Overview" : {
+
+    },
+    "PID %d" : {
+
+    },
+    "PID %lld" : {
+
+    },
+    "Pair Device" : {
+
+    },
+    "Paired Users" : {
+
+    },
+    "Paste code here…" : {
+
+    },
+    "Pause" : {
+
+    },
+    "Pending Approvals" : {
+
+    },
+    "Per-route subscriptions (events, prompt template, delivery target) are managed in the Webhooks sidebar — not here. This panel only controls whether the webhook platform is listening at all." : {
+
+    },
+    "Period" : {
+
+    },
+    "Personalities" : {
+
+    },
+    "Pick one from the list, or add a new server from the toolbar." : {
+
+    },
+    "Platforms" : {
+
+    },
+    "Plugins" : {
+
+    },
+    "Plugins extend hermes with custom tools, providers, or memory backends." : {
+
+    },
+    "Pre-Run Script" : {
+
+    },
+    "Preset:" : {
+
+    },
+    "Probe" : {
+
+    },
+    "Profile" : {
+
+    },
+    "Profiles" : {
+
+    },
+    "Project Name" : {
+
+    },
+    "Project Path" : {
+
+    },
+    "Projects" : {
+
+    },
+    "Prompt" : {
+
+    },
+    "Provide a Git URL (https://github.com/...) or a shorthand like `owner/repo`." : {
+
+    },
+    "Provider" : {
+
+    },
+    "Push to Talk" : {
+
+    },
+    "Push to talk (Ctrl+B)" : {
+
+    },
+    "Quick Commands" : {
+
+    },
+    "Quick commands are shell shortcuts hermes exposes in chat as `/command_name`. They live under `quick_commands:` in config.yaml." : {
+
+    },
+    "Quit Scarf" : {
+
+    },
+    "Raw Config" : {
+
+    },
+    "Raw remote output (for debugging)" : {
+
+    },
+    "Re-run" : {
+
+    },
+    "Reasoning" : {
+
+    },
+    "Recent Sessions" : {
+
+    },
+    "Reconnect" : {
+
+    },
+    "Recording..." : {
+
+    },
+    "Refresh" : {
+
+    },
+    "Reload" : {
+
+    },
+    "Remote (HTTP)" : {
+
+    },
+    "Remote Diagnostics — %@" : {
+
+    },
+    "Remove" : {
+
+    },
+    "Remove %@?" : {
+
+    },
+    "Remove credential for %@?" : {
+
+    },
+    "Remove this server from Scarf." : {
+
+    },
+    "Remove this server?" : {
+
+    },
+    "Remove via config.yaml…" : {
+
+    },
+    "Remove webhook %@?" : {
+
+    },
+    "Rename" : {
+
+    },
+    "Rename Profile" : {
+
+    },
+    "Rename Session" : {
+
+    },
+    "Rename..." : {
+
+    },
+    "Requires: %@" : {
+
+    },
+    "Reset Cooldowns" : {
+
+    },
+    "Restart" : {
+
+    },
+    "Restart Gateway" : {
+
+    },
+    "Restart Hermes" : {
+
+    },
+    "Restart Now" : {
+
+    },
+    "Restore" : {
+
+    },
+    "Restore from backup?" : {
+
+    },
+    "Restore…" : {
+
+    },
+    "Result" : {
+
+    },
+    "Resume" : {
+
+    },
+    "Resume Session" : {
+
+    },
+    "Retry" : {
+
+    },
+    "Return to Active Session (%@...)" : {
+
+    },
+    "Reveal" : {
+
+    },
+    "Revoke" : {
+
+    },
+    "Rich Chat" : {
+
+    },
+    "Run Diagnostics…" : {
+
+    },
+    "Run Dump" : {
+
+    },
+    "Run Now" : {
+
+    },
+    "Run Setup in Terminal" : {
+
+    },
+    "Run `hermes memory setup` in Terminal for full provider configuration." : {
+
+    },
+    "Run remote diagnostics — check exactly which files are readable on this server." : {
+
+    },
+    "Running a single shell session on %@ that exercises every path Scarf reads…" : {
+
+    },
+    "Running checks…" : {
+
+    },
+    "SILENT" : {
+
+    },
+    "SOUL.md" : {
+
+    },
+    "SOUL.md describes the agent's voice, values, and personality at ~/.hermes/SOUL.md. It is injected into every session's context." : {
+
+    },
+    "Save" : {
+
+    },
+    "Scarf" : {
+
+    },
+    "Scarf never prompts for passphrases. Add your key to ssh-agent in Terminal, then click Retry. If your key isn't `id_ed25519`, swap the path:" : {
+
+    },
+    "Scarf runs these over a single SSH session that mirrors the shell your dashboard reads from, so a green row here means Scarf can actually read that file at runtime." : {
+
+    },
+    "Scarf uses ssh-agent for authentication. If your key has a passphrase, run `ssh-add` before connecting — Scarf never prompts for or stores passphrases." : {
+
+    },
+    "Scarf — %@" : {
+
+    },
+    "Search" : {
+
+    },
+    "Search Results (%lld)" : {
+
+    },
+    "Search messages..." : {
+
+    },
+    "Search or browse skills published to registries like skills.sh, GitHub, and the official hub." : {
+
+    },
+    "Search registries" : {
+
+    },
+    "Search…" : {
+
+    },
+    "Select" : {
+
+    },
+    "Select Model" : {
+
+    },
+    "Select a Job" : {
+
+    },
+    "Select a Profile" : {
+
+    },
+    "Select a Project" : {
+
+    },
+    "Select a Session" : {
+
+    },
+    "Select a Skill" : {
+
+    },
+    "Select a Tool Call" : {
+
+    },
+    "Select an MCP Server" : {
+
+    },
+    "Send message (Enter)" : {
+
+    },
+    "Series" : {
+
+    },
+    "Server No Longer Exists" : {
+
+    },
+    "Server name" : {
+
+    },
+    "Servers" : {
+
+    },
+    "Service" : {
+
+    },
+    "Service definition stale" : {
+
+    },
+    "Session" : {
+
+    },
+    "Session title" : {
+
+    },
+    "Sessions" : {
+
+    },
+    "Settings" : {
+
+    },
+    "Setup" : {
+
+    },
+    "Share Debug Report…" : {
+
+    },
+    "Shell Command" : {
+
+    },
+    "Show" : {
+
+    },
+    "Show Output" : {
+
+    },
+    "Show all %lld lines" : {
+
+    },
+    "Show details" : {
+
+    },
+    "Show less" : {
+
+    },
+    "Show values" : {
+
+    },
+    "Signal Setup Docs" : {
+
+    },
+    "Signal integration requires signal-cli (Java-based) installed locally. Link this Mac as a Signal device, then keep the daemon running so hermes can send/receive messages." : {
+
+    },
+    "Skills" : {
+
+    },
+    "Skills (%lld)" : {
+
+    },
+    "Slack Setup Docs" : {
+
+    },
+    "Source" : {
+
+    },
+    "Start" : {
+
+    },
+    "Start Daemon" : {
+
+    },
+    "Start Hermes" : {
+
+    },
+    "Start OAuth" : {
+
+    },
+    "Start Pairing" : {
+
+    },
+    "Start a new session or resume an existing one from the Session menu above." : {
+
+    },
+    "Status" : {
+
+    },
+    "Stop" : {
+
+    },
+    "Stop Hermes" : {
+
+    },
+    "Subagent" : {
+
+    },
+    "Subagent Sessions (%lld)" : {
+
+    },
+    "Submit" : {
+
+    },
+    "Subscribe" : {
+
+    },
+    "Succeeded" : {
+
+    },
+    "Switch to This Profile" : {
+
+    },
+    "Switching the active profile changes the `~/.hermes` directory hermes uses. Restart Scarf after switching so it re-reads from the new profile's files." : {
+
+    },
+    "TTS Off" : {
+
+    },
+    "TTS On" : {
+
+    },
+    "Telegram Setup Docs" : {
+
+    },
+    "Terminal" : {
+
+    },
+    "Test" : {
+
+    },
+    "Test All" : {
+
+    },
+    "Test Connection" : {
+
+    },
+    "Test failed" : {
+
+    },
+    "Test passed" : {
+
+    },
+    "The remote's SSH fingerprint no longer matches what your `~/.ssh/known_hosts` file expected. This usually means the remote was reinstalled — or, less commonly, that someone is intercepting the connection." : {
+
+    },
+    "The server this window was opened with has been removed from your registry." : {
+
+    },
+    "The server's SSH configuration is removed from Scarf. Your remote files are untouched." : {
+
+    },
+    "The terminal is a real TTY — paste with ⌘V, press Return, and wait for the process to exit with \"login succeeded\"." : {
+
+    },
+    "These list fields must be edited directly in config.yaml." : {
+
+    },
+    "This provider has no catalogued models." : {
+
+    },
+    "This removes the credential from hermes. The upstream provider key is not revoked." : {
+
+    },
+    "This removes the profile directory and all data within it. This cannot be undone." : {
+
+    },
+    "This removes the scheduled job permanently." : {
+
+    },
+    "This removes the server from config.yaml and deletes any OAuth token." : {
+
+    },
+    "This uploads logs, config (with secrets redacted), and system info to Nous Research support infrastructure. Review the output below before sharing the returned URL." : {
+
+    },
+    "This will overwrite files under ~/.hermes/ with the archive contents." : {
+
+    },
+    "This will permanently delete the session and all its messages." : {
+
+    },
+    "Timeout: %llds (%@)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Timeout: %1$llds (%2$@)"
+          }
+        }
+      }
+    },
+    "Timeouts" : {
+
+    },
+    "To skip the passphrase prompt at every reboot, add `--apple-use-keychain` to cache it in macOS Keychain." : {
+
+    },
+    "Toggle text-to-speech (/voice tts)" : {
+
+    },
+    "Toggle voice mode (/voice)" : {
+
+    },
+    "Token on disk. Clear to re-authenticate next time the gateway connects." : {
+
+    },
+    "Tool Approval Required" : {
+
+    },
+    "Tool Filters" : {
+
+    },
+    "Tools" : {
+
+    },
+    "Top Tools" : {
+
+    },
+    "URL" : {
+
+    },
+    "Uninstall" : {
+
+    },
+    "Unknown: %@" : {
+
+    },
+    "Update" : {
+
+    },
+    "Update All" : {
+
+    },
+    "Updated: %@" : {
+
+    },
+    "Upload" : {
+
+    },
+    "Upload debug report?" : {
+
+    },
+    "Usage Stats" : {
+
+    },
+    "Use" : {
+
+    },
+    "Use a model not in the catalog. Hermes accepts any string the provider recognizes, including provider-prefixed forms like \"openrouter/anthropic/claude-opus-4.6\"." : {
+
+    },
+    "Use this" : {
+
+    },
+    "Use {dot.notation} to reference fields in the webhook payload." : {
+
+    },
+    "Used as the YAML key. Lowercase, no spaces." : {
+
+    },
+    "View" : {
+
+    },
+    "View All" : {
+
+    },
+    "Voice Off" : {
+
+    },
+    "Voice On" : {
+
+    },
+    "Waiting for authorization URL…" : {
+
+    },
+    "Waiting for hermes to prompt for the code…" : {
+
+    },
+    "Webhook Setup Docs" : {
+
+    },
+    "Webhook platform not enabled" : {
+
+    },
+    "Webhooks" : {
+
+    },
+    "Webhooks let external services trigger agent responses. Each subscription gets its own URL endpoint." : {
+
+    },
+    "WhatsApp Setup Docs" : {
+
+    },
+    "WhatsApp uses the Baileys library to emulate a WhatsApp Web session. Pair this Mac as a linked device by running the pairing wizard and scanning the QR code with your phone (Settings → Linked Devices → Link a Device)." : {
+
+    },
+    "Working" : {
+
+    },
+    "X" : {
+
+    },
+    "Y" : {
+
+    },
+    "active" : {
+
+    },
+    "dangerous" : {
+
+    },
+    "default" : {
+
+    },
+    "e.g. anthropic" : {
+
+    },
+    "e.g. deploy" : {
+
+    },
+    "e.g. experimental" : {
+
+    },
+    "e.g. github" : {
+
+    },
+    "e.g. openai" : {
+
+    },
+    "e.g. openai/gpt-4o" : {
+
+    },
+    "e.g. team-prod" : {
+
+    },
+    "exit code: %d" : {
+
+    },
+    "github.com/owner/plugin-repo  or  owner/repo" : {
+
+    },
+    "hermes at %@" : {
+
+    },
+    "hermes profile show" : {
+
+    },
+    "hermes.example.com or a ~/.ssh/config alias" : {
+
+    },
+    "https://..." : {
+
+    },
+    "iMessage integration runs through BlueBubbles Server. You need a Mac that stays on with Messages.app signed in — install BlueBubbles Server on it, then point hermes at that server's URL." : {
+
+    },
+    "my_server" : {
+
+    },
+    "new-name" : {
+
+    },
+    "npx" : {
+
+    },
+    "required" : {
+
+    },
+    "signal-cli Terminal" : {
+
+    },
+    "signal-cli is available on PATH" : {
+
+    },
+    "signal-cli not found on PATH — install it first" : {
+
+    },
+    "sk-…" : {
+
+    },
+    "ssh trace" : {
+
+    },
+    "ssh-agent (leave blank)" : {
+
+    },
+    "state.db not found at the configured path. Either Hermes hasn't run yet on this server, or it's installed at a non-default location — set the Hermes data directory field above." : {
+
+    },
+    "state.db not found at the default location, but Scarf found one at:" : {
+
+    },
+    "state.db readable" : {
+
+    },
+    "stderr:" : {
+
+    },
+    "stdout:" : {
+
+    },
+    "tool_a, tool_b" : {
+
+    },
+    "tool_c" : {
+
+    },
+    "value" : {
+
+    },
+    "·" : {
+
+    },
+    "— or use user/password login —" : {
+
+    },
+    "•" : {
+
+    }
+  },
+  "version" : "1.0"
+}

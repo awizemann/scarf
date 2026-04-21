@@ -20,7 +20,8 @@ struct HermesModelInfo: Sendable, Identifiable, Hashable {
     /// Display-friendly cost string, or nil if cost is unknown.
     var costDisplay: String? {
         guard let input = costInput, let output = costOutput else { return nil }
-        return String(format: "$%.2f / $%.2f", input, output)
+        let currency = FloatingPointFormatStyle<Double>.Currency.currency(code: "USD").precision(.fractionLength(2))
+        return "\(input.formatted(currency)) / \(output.formatted(currency))"
     }
 
     /// Display-friendly context window ("200K", "1M", etc.).

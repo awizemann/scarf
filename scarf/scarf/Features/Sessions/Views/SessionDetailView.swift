@@ -60,7 +60,8 @@ struct SessionDetailView: View {
                     Label("\(session.reasoningTokens) reasoning", systemImage: "brain")
                 }
                 if let cost = session.displayCostUSD {
-                    Label(String(format: "$%.4f%@", cost, session.costIsActual ? "" : " est."), systemImage: "dollarsign.circle")
+                    let formattedCost = cost.formatted(.currency(code: "USD").precision(.fractionLength(4)))
+                    Label(session.costIsActual ? formattedCost : "\(formattedCost) est.", systemImage: "dollarsign.circle")
                 }
                 if let date = session.startedAt {
                     Label(date.formatted(.dateTime.month().day().hour().minute()), systemImage: "calendar")

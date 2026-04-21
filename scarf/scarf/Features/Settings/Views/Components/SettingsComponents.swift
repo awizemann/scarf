@@ -224,7 +224,7 @@ struct DoubleStepperRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(width: 160, alignment: .trailing)
-            Text(String(format: "%.2f", value))
+            Text(value.formatted(.number.precision(.fractionLength(2))))
                 .font(.system(.caption, design: .monospaced))
                 .frame(width: 70, alignment: .leading)
             Stepper("", value: Binding(
