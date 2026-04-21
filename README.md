@@ -13,18 +13,29 @@
   <img src="https://img.shields.io/badge/macOS-14.6+%20Sonoma-blue" alt="macOS">
   <img src="https://img.shields.io/badge/Swift-6-orange" alt="Swift">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+  <br>
+  <em>Available in English, 简体中文, Deutsch, Français, Español, 日本語, and Português (Brasil).</em>
   <br><br>
   <a href="https://www.buymeacoffee.com/awizemann"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="28"></a>
 </p>
 
-## What's New in 2.0
+## What's New in 2.1
+
+- **Seven languages** — Full UI translations for Simplified Chinese, German, French, Spanish, Japanese, and Brazilian Portuguese on top of English. Scarf respects the system language by default; override per-app via **System Settings → Language & Region → Apps → Scarf**. Contributor workflow for adding more locales is documented in [CONTRIBUTING.md → Adding a Language](CONTRIBUTING.md#adding-a-language).
+- **Locale-aware number formatting** — Currency, byte sizes, compact token counts (`15K`, `1.5M`), and day-of-week charts now follow the user's locale instead of POSIX / English defaults.
+- **Chat slash-command menu** — Type `/` in Rich Chat to browse every command the agent has advertised plus any user-defined `quick_commands:` from config.yaml. ↑/↓ to navigate, Tab/Enter to complete, Esc to dismiss.
+- **Chat polish** — Auto-scroll on send and on prompt completion, a non-blocking loading spinner during session reconnects, properly centered empty state, and the long-standing "session loads with whitespace" bug fixed (LazyVStack → VStack in the message list).
+
+See the full [v2.1.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.1.0).
+
+### Previously, in 2.0
 
 - **Multi-server** — Manage multiple Hermes installations (local + any number of remotes) from one app. Each window binds to one server; open them side-by-side.
 - **Remote Hermes over SSH** — Every feature that worked against your local `~/.hermes/` now works against a remote host. File I/O routes through `scp`/`sftp`; chat ACP runs over `ssh -T`; SQLite is served from atomic `.backup` snapshots pulled on file-watcher ticks.
 - **Chat UX overhaul** — No more white-screen flash on first message, no more scroll jumping into whitespace during streaming, failed prompts explain themselves instead of silently spinning forever.
 - **Correctness pass** — Fixed remote WAL error spam, stale-snapshot session resume, auto-resume of dead cron sessions, 230+ Swift 6 concurrency warnings.
 
-See the full [v2.0.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.0.0).
+See the [v2.0.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.0.0) for the full 2.0 series.
 
 ### Previously, in 1.6
 
