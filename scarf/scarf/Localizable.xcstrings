@@ -118,6 +118,9 @@
     "22" : {
 
     },
+    "<%@>" : {
+
+    },
     "A QR code will appear below. Scan it with WhatsApp on your phone. The session is saved to ~/.hermes/platforms/whatsapp/ so you won't need to scan again after restarts." : {
 
     },
@@ -670,6 +673,9 @@
     "KEY" : {
 
     },
+    "Keep typing to send as a message, or press Esc." : {
+
+    },
     "Label (optional)" : {
 
     },
@@ -701,6 +707,9 @@
 
     },
     "Loaded" : {
+
+    },
+    "Loading session…" : {
 
     },
     "Local" : {
@@ -820,6 +829,9 @@
     "No additional output. Check ~/.ssh/config and ssh-agent." : {
 
     },
+    "No commands available" : {
+
+    },
     "No credential pools configured" : {
 
     },
@@ -836,6 +848,9 @@
 
     },
     "No headers. Add one with the button below." : {
+
+    },
+    "No matching commands" : {
 
     },
     "No paired users" : {
@@ -1387,6 +1402,9 @@
     "Test passed" : {
 
     },
+    "The agent hasn't advertised any slash commands yet. Keep typing to send as a message, or press Esc." : {
+
+    },
     "The remote's SSH fingerprint no longer matches what your `~/.ssh/known_hosts` file expected. This usually means the remote was reinstalled — or, less commonly, that someone is intercepting the connection." : {
 
     },
@@ -1650,6 +1668,9 @@
 
     },
     "tool_c" : {
+
+    },
+    "user" : {
 
     },
     "value" : {
