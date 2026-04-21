@@ -170,6 +170,11 @@ final class RichChatViewModel {
         streamingThinkingText = ""
         streamingToolCalls = []
         buildMessageGroups()
+        // User just submitted — jump to the bottom so they see their message
+        // and the incoming response. `.defaultScrollAnchor(.bottom)` handles
+        // slow streaming fine, but rapid responses (slash commands especially)
+        // arrive faster than the anchor can track.
+        requestScrollToBottom()
     }
 
     /// Process a streaming ACP event and update the message list.
@@ -337,6 +342,10 @@ final class RichChatViewModel {
         acpCachedReadTokens += response.cachedReadTokens
         isAgentWorking = false
         buildMessageGroups()
+        // Final position after the prompt settles. Catches fast responses
+        // (slash commands, short replies) where `.defaultScrollAnchor(.bottom)`
+        // didn't quite track the abrupt content growth.
+        requestScrollToBottom()
     }
 
     private func handleConnectionLost(reason: String) {

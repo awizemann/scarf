@@ -28,6 +28,7 @@ struct RichChatView: View {
             RichChatMessageList(
                 groups: richChat.messageGroups,
                 isWorking: richChat.isAgentWorking,
+                isLoadingSession: chatViewModel.isPreparingSession,
                 scrollTrigger: richChat.scrollTrigger
             )
 

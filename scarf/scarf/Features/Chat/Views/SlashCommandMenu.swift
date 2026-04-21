@@ -1,29 +1,27 @@
 import SwiftUI
 
 /// Floating menu of available slash commands shown above the chat input when
-/// the user types `/` as the first character. Read-only list — the parent
-/// owns selection state and insertion.
+/// the user types `/` as the first character. Purely presentational — the
+/// parent filters the list and owns selection state.
 struct SlashCommandMenu: View {
+    /// Pre-filtered commands to display.
     let commands: [HermesSlashCommand]
-    let query: String
+    /// Whether the agent advertised any commands at all. Lets us distinguish
+    /// "agent hasn't sent commands yet" from "filter matched nothing".
+    let agentHasCommands: Bool
     @Binding var selectedIndex: Int
     var onSelect: (HermesSlashCommand) -> Void
 
-    var filtered: [HermesSlashCommand] {
-        Self.filter(commands: commands, query: query)
-    }
-
+    /// Case-insensitive prefix match on the command name. Exposed as a static
+    /// helper so the parent can share filter logic with its key handlers.
     static func filter(commands: [HermesSlashCommand], query: String) -> [HermesSlashCommand] {
         let q = query.lowercased()
         if q.isEmpty { return commands }
-        let prefix = commands.filter { $0.name.lowercased().hasPrefix(q) }
-        if !prefix.isEmpty { return prefix }
-        return commands.filter { $0.description.lowercased().contains(q) }
+        return commands.filter { $0.name.lowercased().hasPrefix(q) }
     }
 
     var body: some View {
-        let items = filtered
-        if commands.isEmpty {
+        if !agentHasCommands {
             VStack(alignment: .leading, spacing: 4) {
                 Text("No commands available")
                     .font(.callout)
@@ -34,7 +32,7 @@ struct SlashCommandMenu: View {
             }
             .padding(12)
             .frame(minWidth: 360, alignment: .leading)
-        } else if items.isEmpty {
+        } else if commands.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 Text("No matching commands")
                     .font(.callout)
@@ -49,7 +47,7 @@ struct SlashCommandMenu: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(Array(items.enumerated()), id: \.element.id) { index, command in
+                        ForEach(Array(commands.enumerated()), id: \.element.id) { index, command in
                             SlashCommandRow(
                                 command: command,
                                 isSelected: index == selectedIndex

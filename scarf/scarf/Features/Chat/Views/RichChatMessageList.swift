@@ -3,6 +3,10 @@ import SwiftUI
 struct RichChatMessageList: View {
     let groups: [MessageGroup]
     let isWorking: Bool
+    /// True while the ACP session is being established or restored — used to
+    /// swap the empty-state placeholder for a progress indicator so the user
+    /// knows something is happening while history loads.
+    var isLoadingSession: Bool = false
     /// External trigger to force a scroll-to-bottom (e.g., from "Return to Active Session").
     var scrollTrigger: UUID = UUID()
 
@@ -28,7 +32,23 @@ struct RichChatMessageList: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if groups.isEmpty && !isWorking {
-                        emptyState
+                        // Fill the scroll view's visible height so Spacers
+                        // can vertically center the placeholder. Previously
+                        // `.padding(.vertical, 80)` left the placeholder
+                        // floating at whatever y-offset `.defaultScrollAnchor(.bottom)`
+                        // settled on — usually near the bottom of the pane.
+                        VStack {
+                            Spacer(minLength: 0)
+                            if isLoadingSession {
+                                loadingState
+                            } else {
+                                emptyState
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .containerRelativeFrame(.vertical)
+                        .transition(.opacity)
                     }
 
                     ForEach(groups) { group in
@@ -42,6 +62,8 @@ struct RichChatMessageList: View {
                     }
                 }
                 .padding()
+                .animation(.easeInOut(duration: 0.15), value: isLoadingSession)
+                .animation(.easeInOut(duration: 0.15), value: groups.isEmpty)
             }
             .defaultScrollAnchor(.bottom)
             .onChange(of: scrollTrigger) {
@@ -75,8 +97,16 @@ struct RichChatMessageList: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 80)
+    }
+
+    private var loadingState: some View {
+        VStack(spacing: 14) {
+            ProgressView()
+                .controlSize(.large)
+            Text("Loading session…")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var typingIndicator: some View {

@@ -50,6 +50,23 @@ final class ChatViewModel {
     private var isHandlingDisconnect = false
     var isACPConnected: Bool { acpClient != nil && hasActiveProcess }
     var acpStatus: String = ""
+
+    /// True while a session is being established or restored — from the user
+    /// kicking off "start chat" or "resume session" until the ACP session is
+    /// ready for messages. The chat pane uses this to show a loader in place
+    /// of the empty-state placeholder.
+    var isPreparingSession: Bool {
+        guard hasActiveProcess else { return false }
+        switch acpStatus {
+        case "Starting...",
+             "Creating session...",
+             "Creating new session...",
+             "Loading session...":
+            return true
+        default:
+            return acpStatus.hasPrefix("Reconnecting")
+        }
+    }
     var acpError: String?
     /// Human-readable hint derived from error + stderr (e.g. "set ANTHROPIC_API_KEY").
     /// Shown above the raw error in the UI when present.

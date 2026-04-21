@@ -17,11 +17,12 @@ struct RichChatInputBar: View {
         VStack(alignment: .leading, spacing: 0) {
             if showMenu {
                 SlashCommandMenu(
-                    commands: commands,
-                    query: menuQuery,
+                    commands: filteredCommands,
+                    agentHasCommands: !commands.isEmpty,
                     selectedIndex: $selectedIndex,
                     onSelect: insertCommand
                 )
+                .id(menuQuery)
                 .background(.regularMaterial)
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
