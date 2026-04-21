@@ -40,7 +40,7 @@ struct PlatformsView: View {
                     HStack(spacing: 8) {
                         Image(systemName: KnownPlatforms.icon(for: platform.name))
                             .frame(width: 20)
-                        Text(platform.displayName)
+                        Text(verbatim: platform.displayName)
                         Spacer()
                         Circle()
                             .fill(statusColor(viewModel.connectivity(for: platform)))
@@ -88,7 +88,7 @@ struct PlatformsView: View {
             Image(systemName: KnownPlatforms.icon(for: viewModel.selected.name))
                 .font(.title)
             VStack(alignment: .leading) {
-                Text(viewModel.selected.displayName)
+                Text(verbatim: viewModel.selected.displayName)
                     .font(.title2.bold())
                 Text(statusDescription(viewModel.connectivity(for: viewModel.selected)))
                     .font(.caption)

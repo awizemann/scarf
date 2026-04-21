@@ -10,9 +10,9 @@ struct MCPServerTestResultView: View {
                 Image(systemName: result.succeeded ? "checkmark.seal.fill" : "xmark.seal.fill")
                     .foregroundStyle(result.succeeded ? .green : .red)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(result.succeeded ? "Test passed" : "Test failed")
+                    (result.succeeded ? Text("Test passed") : Text("Test failed"))
                         .font(.subheadline.bold())
-                    Text(String(format: "%.1fs · %d tools", result.elapsed, result.tools.count))
+                    Text("\(result.elapsed.formatted(.number.precision(.fractionLength(1))))s · \(result.tools.count) tools")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -20,8 +20,12 @@ struct MCPServerTestResultView: View {
                 Button {
                     showOutput.toggle()
                 } label: {
-                    Label(showOutput ? "Hide Output" : "Show Output", systemImage: showOutput ? "chevron.up" : "chevron.down")
-                        .font(.caption)
+                    Label {
+                        showOutput ? Text("Hide Output") : Text("Show Output")
+                    } icon: {
+                        Image(systemName: showOutput ? "chevron.up" : "chevron.down")
+                    }
+                    .font(.caption)
                 }
                 .buttonStyle(.borderless)
             }

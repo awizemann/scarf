@@ -145,7 +145,7 @@ private struct QuickCommandEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(initial == nil ? "Add Quick Command" : "Edit /\(initial!.name)")
+            (initial == nil ? Text("Add Quick Command") : Text("Edit /\(initial!.name)"))
                 .font(.headline)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Name (no leading slash)")

@@ -128,7 +128,7 @@ struct MCPServersView: View {
             } else if let result = viewModel.testResults[server.name] {
                 Image(systemName: result.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill")
                     .foregroundStyle(result.succeeded ? .green : .red)
-                    .help(result.succeeded ? "\(result.tools.count) tools" : "Test failed")
+                    .help(result.succeeded ? Text("\(result.tools.count) tools") : Text("Test failed"))
             }
         }
     }

@@ -51,7 +51,9 @@ struct SignalSetupView: View {
         HStack(spacing: 8) {
             Image(systemName: viewModel.signalCLIInstalled ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                 .foregroundStyle(viewModel.signalCLIInstalled ? .green : .orange)
-            Text(viewModel.signalCLIInstalled ? "signal-cli is available on PATH" : "signal-cli not found on PATH — install it first")
+            (viewModel.signalCLIInstalled
+                ? Text("signal-cli is available on PATH")
+                : Text("signal-cli not found on PATH — install it first"))
                 .font(.caption)
                 .foregroundStyle(viewModel.signalCLIInstalled ? Color.primary : Color.orange)
             Spacer()

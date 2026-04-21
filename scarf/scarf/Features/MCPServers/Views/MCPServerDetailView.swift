@@ -154,7 +154,7 @@ struct MCPServerDetailView: View {
                         Text(key)
                             .font(.system(.caption, design: .monospaced))
                         Spacer()
-                        Text(String(repeating: "•", count: 10))
+                        Text("••••••••••")
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
                     }
@@ -182,7 +182,7 @@ struct MCPServerDetailView: View {
                         Text(key)
                             .font(.system(.caption, design: .monospaced))
                         Spacer()
-                        Text(String(repeating: "•", count: 10))
+                        Text("••••••••••")
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
                     }

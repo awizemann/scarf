@@ -8,6 +8,15 @@ enum InsightsPeriod: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var displayName: LocalizedStringResource {
+        switch self {
+        case .week: return "7 Days"
+        case .month: return "30 Days"
+        case .quarter: return "90 Days"
+        case .all: return "All Time"
+        }
+    }
+
     var sinceDate: Date {
         let calendar = Calendar.current
         switch self {

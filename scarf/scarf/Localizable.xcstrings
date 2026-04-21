@@ -7,6 +7,9 @@
     "#%lld" : {
 
     },
+    "%@ ctx" : {
+
+    },
     "%@ in / %@ out" : {
       "localizations" : {
         "en" : {
@@ -18,6 +21,9 @@
       }
     },
     "%@ reasoning" : {
+
+    },
+    "%@ tokens" : {
 
     },
     "%@ · %@" : {
@@ -36,6 +42,16 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "%1$@ → %2$@"
+          }
+        }
+      }
+    },
+    "%@s · %lld tools" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@s · %2$lld tools"
           }
         }
       }
@@ -118,6 +134,15 @@
     "22" : {
 
     },
+    "30 Days" : {
+
+    },
+    "7 Days" : {
+
+    },
+    "90 Days" : {
+
+    },
     "<%@>" : {
 
     },
@@ -131,6 +156,9 @@
 
     },
     "Actions" : {
+
+    },
+    "Active" : {
 
     },
     "Active profile" : {
@@ -187,10 +215,19 @@
     "After approving in your browser, the provider shows a code. Paste it below and submit." : {
 
     },
+    "Agent" : {
+
+    },
+    "All" : {
+
+    },
     "All Levels" : {
 
     },
     "All Sessions" : {
+
+    },
+    "All Time" : {
 
     },
     "All installed hub skills are up to date." : {
@@ -244,16 +281,25 @@
     "Browse" : {
 
     },
+    "Browse Hub" : {
+
+    },
     "Browse the Hub" : {
 
     },
     "Browse..." : {
 
     },
+    "Browser" : {
+
+    },
     "By Day" : {
 
     },
     "By Hour" : {
+
+    },
+    "CLI" : {
 
     },
     "Call timeout" : {
@@ -286,6 +332,9 @@
     "Check for Updates…" : {
 
     },
+    "Checking…" : {
+
+    },
     "Choose a cron job from the list" : {
 
     },
@@ -314,6 +363,9 @@
 
     },
     "Click Add to connect to a remote Hermes installation over SSH." : {
+
+    },
+    "Click for details" : {
 
     },
     "Clicking Start OAuth opens the provider's authorization page in your browser. After you approve, copy the code the provider displays and paste it back into the terminal that appears next." : {
@@ -356,6 +408,9 @@
 
     },
     "Connected" : {
+
+    },
+    "Connected — can't read Hermes state" : {
 
     },
     "Connection" : {
@@ -419,6 +474,9 @@
 
     },
     "Credentials" : {
+
+    },
+    "Cron" : {
 
     },
     "Cron Jobs" : {
@@ -529,7 +587,13 @@
     "Error" : {
 
     },
+    "Errors" : {
+
+    },
     "Exclude" : {
+
+    },
+    "Execute" : {
 
     },
     "Expected at %@" : {
@@ -551,6 +615,9 @@
 
     },
     "Feishu Setup Docs" : {
+
+    },
+    "Fetch" : {
 
     },
     "Files" : {
@@ -664,6 +731,9 @@
     "Install signal-cli" : {
 
     },
+    "Installed" : {
+
+    },
     "Interact" : {
 
     },
@@ -680,6 +750,9 @@
 
     },
     "Last Output" : {
+
+    },
+    "Last probe: %@" : {
 
     },
     "Last run: %@" : {
@@ -940,6 +1013,9 @@
     "Optionally focus the summary on a specific topic. Leave blank to compress evenly." : {
 
     },
+    "Other" : {
+
+    },
     "Output" : {
 
     },
@@ -974,6 +1050,9 @@
 
     },
     "Personalities" : {
+
+    },
+    "Pick an MCP server to add." : {
 
     },
     "Pick one from the list, or add a new server from the toolbar." : {
@@ -1045,6 +1124,9 @@
     "Re-run" : {
 
     },
+    "Read" : {
+
+    },
     "Reasoning" : {
 
     },
@@ -1054,7 +1136,7 @@
     "Reconnect" : {
 
     },
-    "Recording..." : {
+    "Recording…" : {
 
     },
     "Refresh" : {
@@ -1186,6 +1268,9 @@
     "SOUL.md describes the agent's voice, values, and personality at ~/.hermes/SOUL.md. It is injected into every session's context." : {
 
     },
+    "SSH works but %@. Click for diagnostics." : {
+
+    },
     "Save" : {
 
     },
@@ -1313,6 +1398,9 @@
 
     },
     "Signal integration requires signal-cli (Java-based) installed locally. Link this Mac as a Signal device, then keep the daemon running so hermes can send/receive messages." : {
+
+    },
+    "Site" : {
 
     },
     "Skills" : {
@@ -1499,6 +1587,9 @@
     "Updated: %@" : {
 
     },
+    "Updates" : {
+
+    },
     "Upload" : {
 
     },
@@ -1536,6 +1627,9 @@
 
     },
     "Waiting for authorization URL…" : {
+
+    },
+    "Waiting for first probe" : {
 
     },
     "Waiting for hermes to prompt for the code…" : {
@@ -1683,6 +1777,9 @@
 
     },
     "•" : {
+
+    },
+    "••••••••••" : {
 
     }
   },

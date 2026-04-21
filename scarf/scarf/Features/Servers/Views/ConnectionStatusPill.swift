@@ -31,7 +31,7 @@ struct ConnectionStatusPill: View {
                 Image(systemName: iconName)
                     .foregroundStyle(color)
                     .symbolRenderingMode(.hierarchical)
-                Text(label)
+                labelText
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -39,7 +39,7 @@ struct ConnectionStatusPill: View {
             .padding(.horizontal, 4)
         }
         .buttonStyle(.plain)
-        .help(tooltip)
+        .help(tooltipText)
         .popover(isPresented: $showDetails, arrowEdge: .bottom) {
             errorDetails.frame(width: 400)
         }
@@ -70,27 +70,27 @@ struct ConnectionStatusPill: View {
         }
     }
 
-    private var label: String {
+    private var labelText: Text {
         switch status.status {
-        case .connected: return "Connected"
-        case .degraded: return "Connected — can't read Hermes state"
-        case .idle: return "Checking…"
-        case .error(let message, _): return message
+        case .connected: return Text("Connected")
+        case .degraded: return Text("Connected — can't read Hermes state")
+        case .idle: return Text("Checking…")
+        case .error(let message, _): return Text(verbatim: message)
         }
     }
 
-    private var tooltip: String {
+    private var tooltipText: Text {
         switch status.status {
         case .connected:
             if let ts = status.lastSuccess {
                 let fmt = RelativeDateTimeFormatter()
-                return "Last probe: \(fmt.localizedString(for: ts, relativeTo: Date()))"
+                return Text("Last probe: \(fmt.localizedString(for: ts, relativeTo: Date()))")
             }
-            return "Connected"
+            return Text("Connected")
         case .degraded(let reason):
-            return "SSH works but \(reason). Click for diagnostics."
-        case .idle: return "Waiting for first probe"
-        case .error(_, _): return "Click for details"
+            return Text("SSH works but \(reason). Click for diagnostics.")
+        case .idle: return Text("Waiting for first probe")
+        case .error: return Text("Click for details")
         }
     }
 

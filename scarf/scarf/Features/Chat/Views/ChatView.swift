@@ -122,7 +122,7 @@ struct ChatView: View {
                 Circle()
                     .fill(.green)
                     .frame(width: 6, height: 6)
-                Text(viewModel.acpStatus.isEmpty ? "Active" : viewModel.acpStatus)
+                (viewModel.acpStatus.isEmpty ? Text("Active") : Text(viewModel.acpStatus))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -238,7 +238,7 @@ struct ChatView: View {
                 HStack(spacing: 4) {
                     Image(systemName: viewModel.voiceEnabled ? "mic.fill" : "mic.slash")
                         .foregroundStyle(viewModel.voiceEnabled ? .green : .secondary)
-                    Text(viewModel.voiceEnabled ? "Voice On" : "Voice Off")
+                    (viewModel.voiceEnabled ? Text("Voice On") : Text("Voice Off"))
                         .font(.caption)
                         .foregroundStyle(viewModel.voiceEnabled ? .primary : .secondary)
                 }
@@ -253,7 +253,7 @@ struct ChatView: View {
                     HStack(spacing: 4) {
                         Image(systemName: viewModel.ttsEnabled ? "speaker.wave.2.fill" : "speaker.slash")
                             .foregroundStyle(viewModel.ttsEnabled ? .green : .secondary)
-                        Text(viewModel.ttsEnabled ? "TTS On" : "TTS Off")
+                        (viewModel.ttsEnabled ? Text("TTS On") : Text("TTS Off"))
                             .font(.caption)
                             .foregroundStyle(viewModel.ttsEnabled ? .primary : .secondary)
                     }
@@ -268,7 +268,7 @@ struct ChatView: View {
                         Image(systemName: viewModel.isRecording ? "waveform.circle.fill" : "waveform.circle")
                             .foregroundStyle(viewModel.isRecording ? .red : Color.accentColor)
                             .symbolEffect(.pulse, isActive: viewModel.isRecording)
-                        Text(viewModel.isRecording ? "Recording..." : "Push to Talk")
+                        (viewModel.isRecording ? Text("Recording…") : Text("Push to Talk"))
                             .font(.caption)
                     }
                 }

@@ -102,7 +102,7 @@ struct GatewayView: View {
                             Image(systemName: platform.icon)
                                 .font(.title2)
                                 .foregroundStyle(platform.isConnected ? Color.accentColor : .secondary)
-                            Text(platform.name.capitalized)
+                            Text(verbatim: platform.name.capitalized)
                                 .font(.caption.bold())
                             StatusBadge(
                                 label: platform.state,

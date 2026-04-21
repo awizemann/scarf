@@ -142,7 +142,7 @@ struct ProfilesView: View {
                             .font(.title)
                         VStack(alignment: .leading) {
                             Text(profile.name).font(.title2.bold())
-                            Text(profile.isActive ? "Active profile" : "Inactive")
+                            (profile.isActive ? Text("Active profile") : Text("Inactive"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

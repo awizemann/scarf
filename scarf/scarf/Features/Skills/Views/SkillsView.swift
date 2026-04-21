@@ -14,6 +14,14 @@ struct SkillsView: View {
         case hub = "Browse Hub"
         case updates = "Updates"
         var id: String { rawValue }
+
+        var displayName: LocalizedStringResource {
+            switch self {
+            case .installed: return "Installed"
+            case .hub: return "Browse Hub"
+            case .updates: return "Updates"
+            }
+        }
     }
 
     var body: some View {
@@ -34,7 +42,7 @@ struct SkillsView: View {
         HStack {
             Picker("", selection: $currentTab) {
                 ForEach(Tab.allCases) { tab in
-                    Text(tab.rawValue).tag(tab)
+                    Text(tab.displayName).tag(tab)
                 }
             }
             .pickerStyle(.segmented)
