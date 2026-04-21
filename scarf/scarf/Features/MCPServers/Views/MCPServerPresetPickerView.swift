@@ -33,9 +33,9 @@ struct MCPServerPresetPickerView: View {
                 }
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(selectedPreset?.displayName ?? "Add from Preset")
+                (selectedPreset.map { Text(verbatim: $0.displayName) } ?? Text("Add from Preset"))
                     .font(.headline)
-                Text(selectedPreset?.description ?? "Pick an MCP server to add.")
+                (selectedPreset.map { Text(verbatim: $0.description) } ?? Text("Pick an MCP server to add."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -83,14 +83,14 @@ struct MCPServerPresetPickerView: View {
                     Image(systemName: preset.iconSystemName)
                         .font(.title3)
                         .foregroundStyle(Color.accentColor)
-                    Text(preset.displayName)
+                    Text(verbatim: preset.displayName)
                         .font(.body.bold())
                     Spacer()
                     Image(systemName: preset.transport == .http ? "network" : "terminal")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Text(preset.description)
+                Text(verbatim: preset.description)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)

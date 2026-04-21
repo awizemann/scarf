@@ -3,6 +3,13 @@ import SwiftUI
 private enum DashboardTab: String, CaseIterable {
     case dashboard = "Dashboard"
     case site = "Site"
+
+    var displayName: LocalizedStringResource {
+        switch self {
+        case .dashboard: return "Dashboard"
+        case .site: return "Site"
+        }
+    }
 }
 
 struct ProjectsView: View {
@@ -150,7 +157,7 @@ struct ProjectsView: View {
                     HStack(spacing: 4) {
                         Image(systemName: tab == .dashboard ? "square.grid.2x2" : "globe")
                             .font(.caption)
-                        Text(tab.rawValue)
+                        Text(tab.displayName)
                             .font(.subheadline)
                     }
                     .padding(.horizontal, 12)

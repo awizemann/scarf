@@ -93,7 +93,7 @@ struct ManageServersView: View {
                     Image(systemName: "server.rack")
                         .foregroundStyle(.blue)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(entry.displayName).font(.body)
+                        Text(verbatim: entry.displayName).font(.body)
                         if case .ssh(let config) = entry.kind {
                             Text(summary(for: config))
                                 .font(.caption)

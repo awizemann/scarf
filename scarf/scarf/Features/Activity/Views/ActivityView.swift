@@ -114,7 +114,7 @@ struct ActivityView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(entry.toolName)
                                 .font(.title3.bold().monospaced())
-                            Text(entry.kind.rawValue.capitalized)
+                            Text(entry.kind.displayName)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

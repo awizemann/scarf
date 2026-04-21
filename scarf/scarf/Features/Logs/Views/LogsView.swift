@@ -27,7 +27,7 @@ struct LogsView: View {
                 set: { file in Task { await viewModel.switchLogFile(file) } }
             )) {
                 ForEach(LogsViewModel.LogFile.allCases) { file in
-                    Text(file.rawValue).tag(file)
+                    Text(file.displayName).tag(file)
                 }
             }
             .pickerStyle(.segmented)
@@ -35,7 +35,7 @@ struct LogsView: View {
 
             Picker("Component", selection: $viewModel.selectedComponent) {
                 ForEach(LogsViewModel.LogComponent.allCases) { component in
-                    Text(component.rawValue).tag(component)
+                    Text(component.displayName).tag(component)
                 }
             }
             .frame(maxWidth: 140)
@@ -45,7 +45,7 @@ struct LogsView: View {
             Picker("Level", selection: $viewModel.filterLevel) {
                 Text("All Levels").tag(LogEntry.LogLevel?.none)
                 ForEach(LogEntry.LogLevel.allCases, id: \.rawValue) { level in
-                    Text(level.rawValue).tag(LogEntry.LogLevel?.some(level))
+                    Text(verbatim: level.rawValue).tag(LogEntry.LogLevel?.some(level))
                 }
             }
             .frame(maxWidth: 150)
@@ -66,7 +66,7 @@ struct LogsView: View {
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
                         .frame(width: 140, alignment: .leading)
-                    Text(entry.level.rawValue)
+                    Text(verbatim: entry.level.rawValue)
                         .font(.caption.monospaced().bold())
                         .foregroundStyle(colorForLevel(entry.level))
                         .frame(width: 60, alignment: .leading)

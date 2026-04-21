@@ -194,6 +194,13 @@ private struct AddCredentialSheet: View {
         case apiKey = "API Key"
         case oauth = "OAuth"
         var id: String { rawValue }
+
+        var displayName: LocalizedStringResource {
+            switch self {
+            case .apiKey: return "API Key"
+            case .oauth: return "OAuth"
+            }
+        }
     }
 
     @State private var providerID: String = ""
@@ -262,7 +269,7 @@ private struct AddCredentialSheet: View {
                 Text("Credential Type").font(.caption).foregroundStyle(.secondary)
                 Picker("", selection: $authType) {
                     ForEach(AuthType.allCases) { type in
-                        Text(type.rawValue).tag(type)
+                        Text(type.displayName).tag(type)
                     }
                 }
                 .pickerStyle(.segmented)

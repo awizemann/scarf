@@ -132,7 +132,7 @@ struct HealthView: View {
                     Circle()
                         .fill(viewModel.hermesRunning ? .green : .red)
                         .frame(width: 8, height: 8)
-                    Text(viewModel.hermesRunning ? "Hermes Running" : "Hermes Stopped")
+                    (viewModel.hermesRunning ? Text("Hermes Running") : Text("Hermes Stopped"))
                         .font(.caption.bold())
                     if let pid = viewModel.hermesPID {
                         Text("PID \(pid)")

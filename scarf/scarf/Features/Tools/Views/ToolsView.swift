@@ -43,7 +43,7 @@ struct ToolsView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: KnownPlatforms.icon(for: viewModel.selectedPlatform.name))
-                    Text(viewModel.selectedPlatform.displayName)
+                    Text(verbatim: viewModel.selectedPlatform.displayName)
                         .fontWeight(.medium)
                     statusDot(for: viewModel.connectivity[viewModel.selectedPlatform.name] ?? .notConfigured)
                     Image(systemName: "chevron.down")

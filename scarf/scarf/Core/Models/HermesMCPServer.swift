@@ -6,7 +6,7 @@ enum MCPTransport: String, Sendable, Equatable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var displayName: String {
+    var displayName: LocalizedStringResource {
         switch self {
         case .stdio: return "Local (stdio)"
         case .http: return "Remote (HTTP)"

@@ -37,7 +37,7 @@ struct InsightsView: View {
     private var periodPicker: some View {
         Picker("Period", selection: $viewModel.period) {
             ForEach(InsightsPeriod.allCases) { period in
-                Text(period.rawValue).tag(period)
+                Text(period.displayName).tag(period)
             }
         }
         .pickerStyle(.segmented)
@@ -90,7 +90,7 @@ struct InsightsView: View {
                         VStack(alignment: .trailing, spacing: 2) {
                             Text("\(model.sessions) sessions")
                                 .font(.caption)
-                            Text(formatTokens(model.totalTokens) + " tokens")
+                            Text("\(formatTokens(model.totalTokens)) tokens")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -164,7 +164,7 @@ struct InsightsView: View {
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
                             .frame(width: 40, alignment: .trailing)
-                        Text(String(format: "%.1f%%", tool.percentage))
+                        Text((tool.percentage / 100).formatted(.percent.precision(.fractionLength(1))))
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                             .frame(width: 50, alignment: .trailing)
@@ -193,12 +193,12 @@ struct InsightsView: View {
             Text("By Day")
                 .font(.caption.bold())
                 .foregroundStyle(.secondary)
-            let dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            let dayNames = Calendar.current.shortWeekdaySymbols
             let maxVal = max(1, viewModel.dailyActivity.values.max() ?? 1)
             ForEach(0..<7, id: \.self) { day in
                 let count = viewModel.dailyActivity[day] ?? 0
                 HStack(spacing: 6) {
-                    Text(dayNames[day])
+                    Text(verbatim: dayNames[(day + 1) % 7])
                         .font(.caption.monospaced())
                         .frame(width: 30, alignment: .trailing)
                     RoundedRectangle(cornerRadius: 2)

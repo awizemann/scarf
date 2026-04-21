@@ -37,7 +37,7 @@ struct ServerSwitcherToolbar: View {
                 Circle()
                     .fill(current.isRemote ? Color.blue : Color.green)
                     .frame(width: 8, height: 8)
-                Text(current.displayName)
+                Text(verbatim: current.displayName)
                     .font(.callout)
                     .lineLimit(1)
                 Image(systemName: "chevron.down")

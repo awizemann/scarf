@@ -99,6 +99,17 @@ enum ToolKind: String, Sendable, CaseIterable {
     case browser
     case other
 
+    var displayName: LocalizedStringResource {
+        switch self {
+        case .read: return "Read"
+        case .edit: return "Edit"
+        case .execute: return "Execute"
+        case .fetch: return "Fetch"
+        case .browser: return "Browser"
+        case .other: return "Other"
+        }
+    }
+
     var icon: String {
         switch self {
         case .read: return "doc.text.magnifyingglass"

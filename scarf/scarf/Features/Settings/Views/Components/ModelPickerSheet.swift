@@ -102,7 +102,7 @@ struct ModelPickerSheet: View {
                             .font(.system(.body, design: .default, weight: .medium))
                         Spacer()
                         if let ctx = model.contextDisplay {
-                            Text(ctx + " ctx")
+                            Text("\(ctx) ctx")
                                 .font(.caption2.monospaced())
                                 .foregroundStyle(.secondary)
                         }

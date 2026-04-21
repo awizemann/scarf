@@ -23,6 +23,14 @@ final class LogsViewModel {
         case gateway = "gateway.log"
 
         var id: String { rawValue }
+
+        var displayName: LocalizedStringResource {
+            switch self {
+            case .agent: return "Agent"
+            case .errors: return "Errors"
+            case .gateway: return "Gateway"
+            }
+        }
     }
 
     private func path(for file: LogFile) -> String {
@@ -42,6 +50,17 @@ final class LogsViewModel {
         case cron = "Cron"
 
         var id: String { rawValue }
+
+        var displayName: LocalizedStringResource {
+            switch self {
+            case .all: return "All"
+            case .gateway: return "Gateway"
+            case .agent: return "Agent"
+            case .tools: return "Tools"
+            case .cli: return "CLI"
+            case .cron: return "Cron"
+            }
+        }
 
         var loggerPrefix: String? {
             switch self {
