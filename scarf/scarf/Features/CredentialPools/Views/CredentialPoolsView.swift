@@ -106,7 +106,7 @@ struct CredentialPoolsView: View {
 
     @ViewBuilder
     private func poolSection(_ pool: HermesCredentialPool) -> some View {
-        SettingsSection(title: pool.provider, icon: "key.horizontal") {
+        SettingsSection(title: LocalizedStringKey(pool.provider), icon: "key.horizontal") {
             PickerRow(label: "Rotation", selection: pool.strategy, options: viewModel.strategyOptions) { strategy in
                 viewModel.setStrategy(strategy, for: pool.provider)
             }

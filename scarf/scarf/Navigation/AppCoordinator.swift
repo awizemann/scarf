@@ -31,6 +31,33 @@ enum SidebarSection: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var displayName: LocalizedStringResource {
+        switch self {
+        case .dashboard: return "Dashboard"
+        case .insights: return "Insights"
+        case .sessions: return "Sessions"
+        case .activity: return "Activity"
+        case .projects: return "Projects"
+        case .chat: return "Chat"
+        case .memory: return "Memory"
+        case .skills: return "Skills"
+        case .platforms: return "Platforms"
+        case .personalities: return "Personalities"
+        case .quickCommands: return "Quick Commands"
+        case .credentialPools: return "Credential Pools"
+        case .plugins: return "Plugins"
+        case .webhooks: return "Webhooks"
+        case .profiles: return "Profiles"
+        case .tools: return "Tools"
+        case .mcpServers: return "MCP Servers"
+        case .gateway: return "Gateway"
+        case .cron: return "Cron"
+        case .health: return "Health"
+        case .logs: return "Logs"
+        case .settings: return "Settings"
+        }
+    }
+
     var icon: String {
         switch self {
         case .dashboard: return "gauge.with.dots.needle.33percent"
