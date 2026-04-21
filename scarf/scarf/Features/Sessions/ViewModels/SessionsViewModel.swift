@@ -159,12 +159,7 @@ final class SessionsViewModel {
         let dbPath = context.paths.stateDB
         let fileSize: String
         if let stat = context.makeTransport().stat(dbPath) {
-            let size = Double(stat.size)
-            if size >= FileSizeUnit.megabyte {
-                fileSize = String(format: "%.1f MB", size / FileSizeUnit.megabyte)
-            } else {
-                fileSize = String(format: "%.0f KB", size / FileSizeUnit.kilobyte)
-            }
+            fileSize = Int64(stat.size).formatted(.byteCount(style: .file))
         } else {
             fileSize = "unknown"
         }

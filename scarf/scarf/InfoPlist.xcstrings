@@ -1,0 +1,18 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "NSMicrophoneUsageDescription" : {
+      "comment" : "Shown by macOS when Scarf first requests microphone access for Hermes voice chat.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scarf uses the microphone for Hermes voice chat."
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

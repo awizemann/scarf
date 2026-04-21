@@ -114,7 +114,7 @@ struct DashboardView: View {
                 StatCard(label: "Tokens", value: formatTokens(viewModel.stats.totalInputTokens + viewModel.stats.totalOutputTokens))
                 let cost = viewModel.stats.totalActualCostUSD > 0 ? viewModel.stats.totalActualCostUSD : viewModel.stats.totalCostUSD
                 if cost > 0 {
-                    StatCard(label: "Cost", value: String(format: "$%.2f", cost))
+                    StatCard(label: "Cost", value: cost.formatted(.currency(code: "USD").precision(.fractionLength(2))))
                 }
             }
         }
@@ -217,7 +217,7 @@ struct SessionRow: View {
                 Label("\(session.messageCount)", systemImage: "bubble.left")
                 Label("\(session.toolCallCount)", systemImage: "wrench")
                 if let cost = session.displayCostUSD, cost > 0 {
-                    Label(String(format: "$%.4f", cost), systemImage: "dollarsign.circle")
+                    Label(cost.formatted(.currency(code: "USD").precision(.fractionLength(4))), systemImage: "dollarsign.circle")
                 }
             }
             .font(.caption)
