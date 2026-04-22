@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SidebarView: View {
     @Environment(AppCoordinator.self) private var coordinator
+    @Environment(\.serverContext) private var serverContext
 
     var body: some View {
         @Bindable var coordinator = coordinator
@@ -59,6 +60,6 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .navigationTitle("Scarf")
-        .splitViewAutosaveName("ScarfMainSidebar")
+        .splitViewAutosaveName("ScarfMainSidebar.\(serverContext.id)")
     }
 }

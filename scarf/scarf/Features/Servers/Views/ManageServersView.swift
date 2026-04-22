@@ -143,19 +143,20 @@ struct ManageServersView: View {
     }
 
     /// A star button that marks the open-on-launch default. Filled + yellow
-    /// on the current default row (and non-interactive — clicking it is a
-    /// no-op since the flag is already set); outline + secondary elsewhere,
-    /// clicking promotes that row to default.
+    /// on the current default row (disabled, since clicking would be a
+    /// no-op); outline + secondary elsewhere, clicking promotes that row
+    /// to default.
     @ViewBuilder
     private func defaultStar(for id: ServerID, currentDefault: ServerID) -> some View {
         let isDefault = id == currentDefault
         Button {
-            if !isDefault { registry.setDefaultServer(id) }
+            registry.setDefaultServer(id)
         } label: {
             Image(systemName: isDefault ? "star.fill" : "star")
                 .foregroundStyle(isDefault ? .yellow : .secondary)
         }
         .buttonStyle(.borderless)
+        .disabled(isDefault)
         .help(isDefault ? "Opens on launch" : "Set as default — open this server when Scarf launches.")
     }
 
