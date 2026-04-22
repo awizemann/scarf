@@ -490,7 +490,7 @@ import Foundation
 @Suite struct ProjectTemplateExampleTemplateTests {
 
     @Test func siteStatusCheckerParsesAndPlans() throws {
-        let bundle = try Self.locateExample(name: "site-status-checker")
+        let bundle = try Self.locateExample(author: "awizemann", name: "site-status-checker")
 
         let service = ProjectTemplateService(context: .local)
         let inspection = try service.inspect(zipPath: bundle)
@@ -547,17 +547,19 @@ import Foundation
     /// Resolve the example bundle path robustly. Unit-test working dirs
     /// differ between `xcodebuild test` (project root) and an Xcode IDE
     /// run (build-output dir), so we walk up from this source file until
-    /// we find the repo root.
-    nonisolated private static func locateExample(name: String) throws -> String {
+    /// we find the repo root. Templates live at
+    /// `templates/<author>/<name>/<name>.scarftemplate` per the catalog
+    /// layout (see `templates/README.md`).
+    nonisolated private static func locateExample(author: String, name: String) throws -> String {
         var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         for _ in 0..<6 {
-            let candidate = dir.appendingPathComponent("examples/templates/\(name)/\(name).scarftemplate")
+            let candidate = dir.appendingPathComponent("templates/\(author)/\(name)/\(name).scarftemplate")
             if FileManager.default.fileExists(atPath: candidate.path) {
                 return candidate.path
             }
             dir = dir.deletingLastPathComponent()
         }
-        throw ProjectTemplateError.requiredFileMissing("examples/templates/\(name)/\(name).scarftemplate")
+        throw ProjectTemplateError.requiredFileMissing("templates/\(author)/\(name)/\(name).scarftemplate")
     }
 }
 
