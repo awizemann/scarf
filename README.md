@@ -19,7 +19,15 @@
   <a href="https://www.buymeacoffee.com/awizemann"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="28"></a>
 </p>
 
-## What's New in 2.1
+## What's New in 2.2
+
+- **Project Templates** — Scarf projects can now travel. Package a project's dashboard, agent instructions, skills, and cron jobs into a `.scarftemplate` bundle, hand it to anyone, and they install it in one click. Every bundle ships with a cross-agent `AGENTS.md` ([agents.md](https://agents.md/) standard) so the instructions work in Claude Code, Cursor, Codex, Aider, and the 20+ other agents that read it natively. Browser-based one-click install via `scarf://install?url=…` deep links. Export / Install from File / Install from URL live under the new **Templates** menu in the Projects toolbar.
+- **Preview-before-apply** — Every install shows a preview sheet listing the exact project directory that will be created, every file inside it, every skill that will be namespaced, every cron job that will be registered (paused by default), and a live diff of any memory appendix. Nothing writes until you click Install.
+- **Safe-by-design** — Skills install into `~/.hermes/skills/templates/<slug>/` so they never collide with your own. Cron jobs carry a `[tmpl:<id>]` tag and start paused. A `template.lock.json` records everything written for easy uninstall. Templates **never** touch `config.yaml`, `auth.json`, sessions, or credentials.
+
+See the full [v2.2.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.2.0).
+
+### Previously, in 2.1
 
 - **Seven languages** — Full UI translations for Simplified Chinese, German, French, Spanish, Japanese, and Brazilian Portuguese on top of English. Scarf respects the system language by default; override per-app via **System Settings → Language & Region → Apps → Scarf**. Contributor workflow for adding more locales is documented in [CONTRIBUTING.md → Adding a Language](CONTRIBUTING.md#adding-a-language).
 - **Locale-aware number formatting** — Currency, byte sizes, compact token counts (`15K`, `1.5M`), and day-of-week charts now follow the user's locale instead of POSIX / English defaults.

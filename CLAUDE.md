@@ -85,3 +85,22 @@ Public documentation lives in the GitHub wiki at https://github.com/awizemann/sc
 ## Hermes Version
 
 Targets Hermes v0.9.0 (v2026.4.13). Log lines may carry an optional `[session_id]` tag between the level and logger name — `HermesLogService.parseLine` treats the session tag as an optional capture group, so older untagged lines still parse.
+
+## Project Templates
+
+Scarf ships a `.scarftemplate` format (v1 as of 2.2.0) for sharing pre-packaged projects across users and machines. A bundle is a zip containing:
+
+- `template.json` — manifest (id, name, version, `contents` claim)
+- `README.md` — shown in the install preview sheet
+- `AGENTS.md` — required; the [Linux Foundation cross-agent instructions standard](https://agents.md/) — every template is agent-portable out of the box
+- `dashboard.json` — copied to `<project>/.scarf/dashboard.json`
+- `instructions/…` — optional per-agent shims (`CLAUDE.md`, `GEMINI.md`, `.cursorrules`, `.github/copilot-instructions.md`)
+- `skills/<name>/…` — optional; installed to `~/.hermes/skills/templates/<slug>/` (namespaced so uninstall is `rm -rf` on one folder)
+- `cron/jobs.json` — optional; registered via `hermes cron create` with a `[tmpl:<id>] …` name prefix and immediately paused
+- `memory/append.md` — optional; appended to `~/.hermes/memories/MEMORY.md` between `<!-- scarf-template:<id>:begin/end -->` markers
+
+Key services: [ProjectTemplateService.swift](scarf/scarf/Core/Services/ProjectTemplateService.swift) (inspect + validate + plan), [ProjectTemplateInstaller.swift](scarf/scarf/Core/Services/ProjectTemplateInstaller.swift) (execute a plan), [ProjectTemplateExporter.swift](scarf/scarf/Core/Services/ProjectTemplateExporter.swift) (build a bundle from a project), [ProjectTemplateUninstaller.swift](scarf/scarf/Core/Services/ProjectTemplateUninstaller.swift) (reverse an install using the lock file). UI in [Features/Templates/](scarf/scarf/Features/Templates/). The `scarf://install?url=<https URL>` deep link + `file://` URLs for `.scarftemplate` files are handled by [TemplateURLRouter.swift](scarf/scarf/Core/Services/TemplateURLRouter.swift) and `onOpenURL` in `scarfApp.swift`. A `<project>/.scarf/template.lock.json` uninstall manifest is written after every install and drives the uninstall flow.
+
+**Uninstall semantics:** driven by the lock file. Only files listed in `lock.projectFiles` are removed from the project dir; user-added files (e.g. a `sites.txt` created on first run) are preserved. If every file in the dir was installed by the template, the dir is removed too; otherwise the dir stays with just the user's files. Skills namespace is always removed wholesale (it's isolated). Cron jobs are removed via `hermes cron remove <id>` after resolving each lock-recorded name. Memory block is stripped between the `begin`/`end` markers, leaving the rest of MEMORY.md intact. No "undo" — uninstall is destructive; to re-install, run the install flow again. Uninstall UI lives on the project-list context menu and the dashboard header (only shown when the selected project has a lock file).
+
+**Never** let a template write to `config.yaml`, `auth.json`, sessions, or any credential path — the v1 installer refuses. If you extend the format, treat the preview sheet as load-bearing: the user's only trust boundary is that the sheet is honest about everything that's about to be written.
