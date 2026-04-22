@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct PlatformsView: View {
     @State private var viewModel: PlatformsViewModel

@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// Manages a `hermes acp` subprocess and communicates via JSON-RPC over stdio.

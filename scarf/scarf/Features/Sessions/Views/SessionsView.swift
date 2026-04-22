@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct SessionsView: View {
     @State private var viewModel: SessionsViewModel

@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct DashboardView: View {
     @State private var viewModel: DashboardViewModel

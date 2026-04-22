@@ -1,22 +1,54 @@
 import Foundation
 
-struct MCPServerPreset: Identifiable, Sendable, Equatable {
-    let id: String
-    let displayName: String
-    let description: String
-    let category: String
-    let iconSystemName: String
-    let transport: MCPTransport
-    let command: String?
-    let args: [String]
-    let url: String?
-    let auth: String?
-    let requiredEnvKeys: [String]
-    let optionalEnvKeys: [String]
-    let pathArgPrompt: String?
-    let docsURL: String
+public struct MCPServerPreset: Identifiable, Sendable, Equatable {
+    public let id: String
+    public let displayName: String
+    public let description: String
+    public let category: String
+    public let iconSystemName: String
+    public let transport: MCPTransport
+    public let command: String?
+    public let args: [String]
+    public let url: String?
+    public let auth: String?
+    public let requiredEnvKeys: [String]
+    public let optionalEnvKeys: [String]
+    public let pathArgPrompt: String?
+    public let docsURL: String
 
-    static let gallery: [MCPServerPreset] = [
+
+    public init(
+        id: String,
+        displayName: String,
+        description: String,
+        category: String,
+        iconSystemName: String,
+        transport: MCPTransport,
+        command: String?,
+        args: [String],
+        url: String?,
+        auth: String?,
+        requiredEnvKeys: [String],
+        optionalEnvKeys: [String],
+        pathArgPrompt: String?,
+        docsURL: String
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.description = description
+        self.category = category
+        self.iconSystemName = iconSystemName
+        self.transport = transport
+        self.command = command
+        self.args = args
+        self.url = url
+        self.auth = auth
+        self.requiredEnvKeys = requiredEnvKeys
+        self.optionalEnvKeys = optionalEnvKeys
+        self.pathArgPrompt = pathArgPrompt
+        self.docsURL = docsURL
+    }
+    public static let gallery: [MCPServerPreset] = [
         MCPServerPreset(
             id: "filesystem",
             displayName: "Filesystem",
@@ -163,12 +195,12 @@ struct MCPServerPreset: Identifiable, Sendable, Equatable {
         )
     ]
 
-    static var categories: [String] {
+    public static var categories: [String] {
         var seen = Set<String>()
         return gallery.compactMap { p in seen.insert(p.category).inserted ? p.category : nil }
     }
 
-    static func byCategory(_ category: String) -> [MCPServerPreset] {
+    public static func byCategory(_ category: String) -> [MCPServerPreset] {
         gallery.filter { $0.category == category }
     }
 }

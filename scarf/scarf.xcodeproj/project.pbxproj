@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		53495AB62F7B992C00BD31AD /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 53SWIFTTERM0001 /* SwiftTerm */; };
+		53SCARFCORE0010 /* ScarfCore in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFCORE0001 /* ScarfCore */; };
 		53SPARKLE00010 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 53SPARKLE00011 /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -71,6 +72,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				53495AB62F7B992C00BD31AD /* SwiftTerm in Frameworks */,
+				53SCARFCORE0010 /* ScarfCore in Frameworks */,
 				53SPARKLE00010 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -133,6 +135,7 @@
 			name = scarf;
 			packageProductDependencies = (
 				53SWIFTTERM0001 /* SwiftTerm */,
+				53SCARFCORE0001 /* ScarfCore */,
 				53SPARKLE00011 /* Sparkle */,
 			);
 			productName = scarf;
@@ -225,6 +228,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				53SWIFTTERM0002 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+				53SCARFCORE0020 /* XCLocalSwiftPackageReference "Packages/ScarfCore" */,
 				53SPARKLE00012 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -622,6 +626,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		53SCARFCORE0020 /* XCLocalSwiftPackageReference "Packages/ScarfCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ScarfCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		53SPARKLE00012 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -642,6 +653,10 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		53SCARFCORE0001 /* ScarfCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ScarfCore;
+		};
 		53SPARKLE00011 /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 53SPARKLE00012 /* XCRemoteSwiftPackageReference "Sparkle" */;

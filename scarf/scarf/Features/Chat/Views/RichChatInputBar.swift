@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct RichChatInputBar: View {
     let onSend: (String) -> Void

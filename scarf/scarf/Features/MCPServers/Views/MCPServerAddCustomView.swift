@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct MCPServerAddCustomView: View {
     let viewModel: MCPServersViewModel

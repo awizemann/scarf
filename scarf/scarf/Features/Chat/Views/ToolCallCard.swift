@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct ToolCallCard: View {
     let call: HermesToolCall

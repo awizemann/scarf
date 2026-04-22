@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 import UniformTypeIdentifiers
 
 private enum DashboardTab: String, CaseIterable {

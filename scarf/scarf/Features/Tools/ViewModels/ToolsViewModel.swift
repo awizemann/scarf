@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// Connection/configuration status for a messaging platform, used for indicator dots in the picker.

@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct MCPServerPresetPickerView: View {
     let viewModel: MCPServersViewModel

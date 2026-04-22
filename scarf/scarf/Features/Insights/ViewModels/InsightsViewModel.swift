@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 
 enum InsightsPeriod: String, CaseIterable, Identifiable {
     case week = "7 Days"

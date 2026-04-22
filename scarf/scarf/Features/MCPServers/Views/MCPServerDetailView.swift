@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct MCPServerDetailView: View {
     let server: HermesMCPServer

@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 
 struct GatewayInfo {
     let pid: Int?

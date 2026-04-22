@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct RichChatMessageList: View {
     let groups: [MessageGroup]
