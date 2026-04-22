@@ -207,7 +207,7 @@ final class ChatViewModel {
         Task { @MainActor in
             let sessionToResume = richChatViewModel.sessionId
 
-            let client = ACPClient(context: context)
+            let client = ACPClient.forMacApp(context: context)
             self.acpClient = client
 
             do {
@@ -295,7 +295,7 @@ final class ChatViewModel {
         clearACPErrorState()
         acpStatus = "Starting..."
 
-        let client = ACPClient(context: context)
+        let client = ACPClient.forMacApp(context: context)
         self.acpClient = client
 
         Task { @MainActor in
@@ -433,7 +433,7 @@ final class ChatViewModel {
                     guard !Task.isCancelled else { return }
                 }
 
-                let client = ACPClient(context: context)
+                let client = ACPClient.forMacApp(context: context)
                 do {
                     try await client.start()
 

@@ -1,17 +1,35 @@
 import Foundation
-import ScarfCore
+#if canImport(os)
 import os
+#endif
 
-/// Manages a `hermes acp` subprocess and communicates via JSON-RPC over stdio.
-/// Provides an async event stream for real-time session updates.
-actor ACPClient {
+/// Manages an ACP (Agent Client Protocol) session with a backing Hermes
+/// agent. Talks JSON-RPC over an `ACPChannel` — the channel itself owns
+/// the transport (subprocess for macOS, SSH exec session for iOS via
+/// Citadel in M4+). This actor is transport-agnostic.
+///
+/// **Channel factory injection.** Construction takes a closure that
+/// builds a channel on demand. The Mac target wires this at app launch
+/// to produce a `ProcessACPChannel` configured with the enriched
+/// shell env (PATH, credentials). iOS will wire a `SSHExecACPChannel`
+/// factory at app launch.
+///
+/// Under iOS the `ProcessACPChannel` implementation is skipped at
+/// compile time (`#if !os(iOS)`) — an iOS `ACPClient` that tried to
+/// spawn a subprocess would be a build error, not a runtime bug.
+public actor ACPClient {
+    #if canImport(os)
     private let logger = Logger(subsystem: "com.scarf", category: "ACPClient")
+    #endif
 
-    private var process: Process?
-    private var stdinPipe: Pipe?
-    private var stdoutPipe: Pipe?
-    private var stderrPipe: Pipe?
-    private var stdinFd: Int32 = -1
+    /// Returns a fresh ACPChannel connected to `hermes acp` for this
+    /// context. Mac wires this to spawn a `ProcessACPChannel` with the
+    /// enriched env (so `hermes` can find Homebrew/nvm/asdf binaries
+    /// on PATH). iOS wires a Citadel-backed channel in M4+.
+    public typealias ChannelFactory = @Sendable (ServerContext) async throws -> any ACPChannel
+
+    private var channel: (any ACPChannel)?
+    private let channelFactory: ChannelFactory
 
     private var nextRequestId = 1
     private var pendingRequests: [Int: CheckedContinuation<AnyCodable?, Error>] = [:]
@@ -21,27 +39,29 @@ actor ACPClient {
     private var eventContinuation: AsyncStream<ACPEvent>.Continuation?
     private var _eventStream: AsyncStream<ACPEvent>?
 
-    private(set) var isConnected = false
-    private(set) var currentSessionId: String?
-    private(set) var statusMessage = ""
+    public private(set) var isConnected = false
+    public private(set) var currentSessionId: String?
+    public private(set) var statusMessage = ""
 
-    let context: ServerContext
-    private let transport: any ServerTransport
+    public let context: ServerContext
 
-    init(context: ServerContext = .local) {
+    public init(
+        context: ServerContext = .local,
+        channelFactory: @escaping ChannelFactory
+    ) {
         self.context = context
-        self.transport = context.makeTransport()
+        self.channelFactory = channelFactory
     }
 
-    /// Ring buffer of recent stderr lines from `hermes acp` — used to attach
-    /// a diagnostic tail to user-visible errors. Capped to avoid unbounded
-    /// growth when the subprocess logs heavily.
+    /// Ring buffer of recent stderr lines from the ACP channel — used to
+    /// attach a diagnostic tail to user-visible errors. Capped to avoid
+    /// unbounded growth when the subprocess logs heavily.
     private var stderrBuffer: [String] = []
     private static let stderrBufferMaxLines = 50
 
-    /// Returns the last ~`stderrBufferMaxLines` stderr lines captured from the
-    /// `hermes acp` subprocess, joined by newlines.
-    var recentStderr: String {
+    /// Returns the last ~`stderrBufferMaxLines` stderr lines captured
+    /// from the ACP channel, joined by newlines.
+    public var recentStderr: String {
         stderrBuffer.joined(separator: "\n")
     }
 
@@ -54,121 +74,79 @@ actor ACPClient {
         }
     }
 
-    /// Check if the underlying process is still alive and connected.
-    var isHealthy: Bool {
-        guard isConnected, let process else { return false }
-        return process.isRunning
+    /// True while the underlying channel is alive. Equivalent to the
+    /// old `process.isRunning` check.
+    public var isHealthy: Bool {
+        isConnected && channel != nil
     }
 
     // MARK: - Event Stream
 
-    /// Access the event stream. Must call `start()` first.
-    var events: AsyncStream<ACPEvent> {
-        guard let stream = _eventStream else {
-            // Return an empty stream if not started
-            return AsyncStream { $0.finish() }
-        }
-        return stream
+    /// Access the event stream. Must call `start()` first. Before start,
+    /// returns an immediately-finished stream so callers can iterate
+    /// without a nil check.
+    public var events: AsyncStream<ACPEvent> {
+        _eventStream ?? AsyncStream { $0.finish() }
     }
 
     // MARK: - Lifecycle
 
-    func start() async throws {
-        guard process == nil else { return }
+    public func start() async throws {
+        guard channel == nil else { return }
 
-        // Ignore SIGPIPE so broken-pipe writes return EPIPE instead of crashing
-        signal(SIGPIPE, SIG_IGN)
-
-        // Create the event stream BEFORE anything else so no events are lost
+        // Create the event stream BEFORE anything else so no events are
+        // lost while the channel is handshaking.
         let (stream, continuation) = AsyncStream.makeStream(of: ACPEvent.self)
         self._eventStream = stream
         self.eventContinuation = continuation
 
-        // For local: Process is `hermes acp` directly.
-        // For remote: the transport returns a Process configured as
-        // `/usr/bin/ssh -T <opts> host -- <hermes> acp`. ACP's JSON-RPC
-        // over stdio works identically because `-T` keeps the ssh channel
-        // byte-clean and stdin/stdout travel end-to-end unmodified.
-        let proc = transport.makeProcess(
-            executable: context.paths.hermesBinary,
-            args: ["acp"]
-        )
-
-        let stdin = Pipe()
-        let stdout = Pipe()
-        let stderr = Pipe()
-
-        proc.standardInput = stdin
-        proc.standardOutput = stdout
-        proc.standardError = stderr
-
-        // ACP uses JSON-RPC over pipes — do NOT set TERM to avoid terminal escape pollution.
-        if context.isRemote {
-            // Remote: this is the LOCAL ssh process spawning `ssh host …
-            // hermes acp`. We don't forward our local PATH/credentials to
-            // the remote (hermes runs under the remote user's login env),
-            // but the ssh binary itself needs SSH_AUTH_SOCK to reach the
-            // local ssh-agent for key-based auth.
-            var env = ProcessInfo.processInfo.environment
-            let shellEnv = HermesFileService.enrichedEnvironment()
-            for key in ["SSH_AUTH_SOCK", "SSH_AGENT_PID"] {
-                if env[key] == nil, let v = shellEnv[key], !v.isEmpty {
-                    env[key] = v
-                }
-            }
-            env.removeValue(forKey: "TERM")
-            proc.environment = env
-        } else {
-            // Local: enriched env so any tools hermes spawns (MCP servers,
-            // shell commands) can find brew/nvm/asdf binaries on PATH.
-            var env = HermesFileService.enrichedEnvironment()
-            env.removeValue(forKey: "TERM")
-            proc.environment = env
-        }
-
-        proc.terminationHandler = { [weak self] proc in
-            Task { await self?.handleTermination(exitCode: proc.terminationStatus) }
-        }
-
         statusMessage = "Starting hermes acp..."
 
+        let ch: any ACPChannel
         do {
-            try proc.run()
+            ch = try await channelFactory(context)
         } catch {
             statusMessage = "Failed to start: \(error.localizedDescription)"
-            logger.error("Failed to start hermes acp: \(error.localizedDescription)")
+            #if canImport(os)
+            logger.error("Failed to open ACP channel: \(error.localizedDescription)")
+            #endif
             continuation.finish()
             throw error
         }
 
-        self.process = proc
-        self.stdinPipe = stdin
-        self.stdoutPipe = stdout
-        self.stderrPipe = stderr
-        self.stdinFd = stdin.fileHandleForWriting.fileDescriptor
+        self.channel = ch
         self.isConnected = true
 
-        // Start reading stdout BEFORE sending initialize (so we catch the response)
-        startReadLoop(stdout: stdout, stderr: stderr)
-        logger.info("hermes acp process started (pid: \(proc.processIdentifier))")
+        // Start reading incoming JSON-RPC BEFORE sending initialize so
+        // we catch the response.
+        startReadLoops(channel: ch)
+        #if canImport(os)
+        if let id = await ch.diagnosticID {
+            logger.info("ACP channel opened (\(id, privacy: .public))")
+        } else {
+            logger.info("ACP channel opened")
+        }
+        #endif
         statusMessage = "Initializing..."
 
-        // Initialize the ACP connection
+        // Initialize the ACP connection.
         let initParams: [String: AnyCodable] = [
             "protocolVersion": AnyCodable(1),
             "clientCapabilities": AnyCodable([String: Any]()),
             "clientInfo": AnyCodable([
                 "name": "Scarf",
-                "version": "1.0"
-            ] as [String: Any])
+                "version": "1.0",
+            ] as [String: Any]),
         ]
         _ = try await sendRequest(method: "initialize", params: initParams)
         statusMessage = "Connected"
+        #if canImport(os)
         logger.info("ACP connection initialized")
+        #endif
         startKeepalive()
     }
 
-    func stop() async {
+    public func stop() async {
         readTask?.cancel()
         readTask = nil
         stderrTask?.cancel()
@@ -184,34 +162,16 @@ actor ACPClient {
         }
         pendingRequests.removeAll()
 
-        // Close stdin first so the subprocess sees EOF and can shut down gracefully
-        stdinPipe?.fileHandleForWriting.closeFile()
-
-        if let process, process.isRunning {
-            // SIGINT for graceful Python shutdown (raises KeyboardInterrupt cleanly)
-            process.interrupt()
-            // Watchdog: force-kill if still running after 2 seconds
-            let watchdogProcess = process
-            Task.detached {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                if watchdogProcess.isRunning {
-                    watchdogProcess.terminate()
-                }
-            }
+        if let ch = channel {
+            await ch.close()
         }
-        stdinPipe?.fileHandleForReading.closeFile()
-        stdoutPipe?.fileHandleForReading.closeFile()
-        stderrPipe?.fileHandleForReading.closeFile()
-
-        process = nil
-        stdinPipe = nil
-        stdoutPipe = nil
-        stderrPipe = nil
-        stdinFd = -1
+        channel = nil
         isConnected = false
         currentSessionId = nil
         statusMessage = "Disconnected"
+        #if canImport(os)
         logger.info("ACP client stopped")
+        #endif
     }
 
     // MARK: - Keepalive
@@ -226,89 +186,94 @@ actor ACPClient {
         }
     }
 
-    /// Valid JSON-RPC notification used as a keepalive probe.
-    /// Sending bare newlines causes `json.loads("")` errors in the ACP library.
-    private static let keepalivePayload: Data = {
-        let json = #"{"jsonrpc":"2.0","method":"$/ping"}"# + "\n"
-        return Data(json.utf8)
-    }()
+    /// Valid JSON-RPC notification used as a keepalive probe. Plain
+    /// newlines upstream produce `json.loads("")` errors in the ACP
+    /// server so we send a real method.
+    private static let keepalivePayload: String = #"{"jsonrpc":"2.0","method":"$/ping"}"#
 
-    private func sendKeepalive() {
-        let fd = stdinFd
-        guard fd >= 0 else { return }
-        Task.detached { [weak self] in
-            let ok = Self.safeWrite(fd: fd, data: Self.keepalivePayload)
-            if !ok {
-                await self?.handleWriteFailed()
-            }
+    private func sendKeepalive() async {
+        guard let ch = channel else { return }
+        do {
+            try await ch.send(Self.keepalivePayload)
+        } catch {
+            await handleWriteFailed()
         }
     }
 
     // MARK: - Session Management
 
-    func newSession(cwd: String) async throws -> String {
+    public func newSession(cwd: String) async throws -> String {
         statusMessage = "Creating session..."
         let params: [String: AnyCodable] = [
             "cwd": AnyCodable(cwd),
-            "mcpServers": AnyCodable([Any]())
+            "mcpServers": AnyCodable([Any]()),
         ]
         let result = try await sendRequest(method: "session/new", params: params)
         guard let dict = result?.dictValue,
-              let sessionId = dict["sessionId"] as? String else {
+              let sessionId = dict["sessionId"] as? String
+        else {
             throw ACPClientError.invalidResponse("Missing sessionId in session/new response")
         }
         currentSessionId = sessionId
         statusMessage = "Session ready"
+        #if canImport(os)
         logger.info("Created new ACP session: \(sessionId)")
+        #endif
         return sessionId
     }
 
-    func loadSession(cwd: String, sessionId: String) async throws -> String {
+    public func loadSession(cwd: String, sessionId: String) async throws -> String {
         statusMessage = "Loading session \(sessionId.prefix(12))..."
         let params: [String: AnyCodable] = [
             "cwd": AnyCodable(cwd),
             "sessionId": AnyCodable(sessionId),
-            "mcpServers": AnyCodable([Any]())
+            "mcpServers": AnyCodable([Any]()),
         ]
         let result = try await sendRequest(method: "session/load", params: params)
-        // ACP returns {} on success (no sessionId echoed), or an error if not found.
-        // If we got here without throwing, the session was loaded. Use the ID we sent.
+        // ACP returns {} on success (no sessionId echoed), or an error if
+        // not found. If we got here without throwing, the session was
+        // loaded — use the ID we sent.
         let loadedId = (result?.dictValue?["sessionId"] as? String) ?? sessionId
         currentSessionId = loadedId
         statusMessage = "Session loaded"
+        #if canImport(os)
         logger.info("Loaded ACP session: \(loadedId)")
+        #endif
         return loadedId
     }
 
-    func resumeSession(cwd: String, sessionId: String) async throws -> String {
+    public func resumeSession(cwd: String, sessionId: String) async throws -> String {
         statusMessage = "Resuming session..."
         let params: [String: AnyCodable] = [
             "cwd": AnyCodable(cwd),
             "sessionId": AnyCodable(sessionId),
-            "mcpServers": AnyCodable([Any]())
+            "mcpServers": AnyCodable([Any]()),
         ]
         let result = try await sendRequest(method: "session/resume", params: params)
         guard let dict = result?.dictValue,
-              let resumedId = dict["sessionId"] as? String else {
+              let resumedId = dict["sessionId"] as? String
+        else {
             throw ACPClientError.invalidResponse("Missing sessionId in session/resume response")
         }
         currentSessionId = resumedId
         statusMessage = "Session resumed"
+        #if canImport(os)
         logger.info("Resumed ACP session: \(resumedId)")
+        #endif
         return resumedId
     }
 
     // MARK: - Messaging
 
-    func sendPrompt(sessionId: String, text: String) async throws -> ACPPromptResult {
+    public func sendPrompt(sessionId: String, text: String) async throws -> ACPPromptResult {
         statusMessage = "Sending prompt..."
         let messageId = UUID().uuidString
         let params: [String: AnyCodable] = [
             "sessionId": AnyCodable(sessionId),
             "messageId": AnyCodable(messageId),
             "prompt": AnyCodable([
-                ["type": "text", "text": text] as [String: Any]
-            ] as [Any])
+                ["type": "text", "text": text] as [String: Any],
+            ] as [Any]),
         ]
         let result = try await sendRequest(method: "session/prompt", params: params)
         let dict = result?.dictValue ?? [:]
@@ -324,26 +289,26 @@ actor ACPClient {
         )
     }
 
-    func cancel(sessionId: String) async throws {
+    public func cancel(sessionId: String) async throws {
         let params: [String: AnyCodable] = [
-            "sessionId": AnyCodable(sessionId)
+            "sessionId": AnyCodable(sessionId),
         ]
         _ = try await sendRequest(method: "session/cancel", params: params)
         statusMessage = "Cancelled"
     }
 
-    func respondToPermission(requestId: Int, optionId: String) {
+    public func respondToPermission(requestId: Int, optionId: String) async {
         let response: [String: Any] = [
             "jsonrpc": "2.0",
             "id": requestId,
             "result": [
                 "outcome": [
                     "kind": optionId == "deny" ? "rejected" : "allowed",
-                    "optionId": optionId
-                ] as [String: Any]
-            ] as [String: Any]
+                    "optionId": optionId,
+                ] as [String: Any],
+            ] as [String: Any],
         ]
-        writeJSON(response)
+        await writeJSON(response)
     }
 
     // MARK: - JSON-RPC Transport
@@ -353,15 +318,18 @@ actor ACPClient {
         nextRequestId += 1
 
         let request = ACPRequest(id: requestId, method: method, params: params)
-
-        guard let data = try? JSONEncoder().encode(request) else {
+        guard let data = try? JSONEncoder().encode(request),
+              let line = String(data: data, encoding: .utf8)
+        else {
             throw ACPClientError.encodingFailed
         }
 
+        #if canImport(os)
         logger.debug("Sending: \(method) (id: \(requestId))")
+        #endif
 
-        // session/prompt streams events and can run for minutes — no hard timeout.
-        // Control messages get a 30s watchdog.
+        // session/prompt streams events and can run for minutes — no hard
+        // timeout. Control messages get a 30s watchdog.
         let timeoutTask: Task<Void, Error>? = if method != "session/prompt" {
             Task { [weak self] in
                 try await Task.sleep(nanoseconds: 30 * 1_000_000_000)
@@ -370,26 +338,23 @@ actor ACPClient {
         } else {
             nil
         }
-
         defer { timeoutTask?.cancel() }
 
-        let fd = stdinFd
+        guard let ch = channel else {
+            throw ACPClientError.notConnected
+        }
+
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AnyCodable?, Error>) in
             pendingRequests[requestId] = continuation
 
-            guard fd >= 0 else {
-                pendingRequests.removeValue(forKey: requestId)
-                continuation.resume(throwing: ACPClientError.notConnected)
-                return
-            }
-
-            var payload = data
-            payload.append(contentsOf: "\n".utf8)
-            // Write in a detached task to avoid blocking the actor's executor.
-            // The continuation is already stored; the response arrives via the read loop.
+            // Write in a detached task so the actor can process incoming
+            // response messages while we're awaiting the send. The
+            // continuation is already stored; the response arrives via
+            // the read loop.
             Task.detached { [weak self] in
-                let ok = Self.safeWrite(fd: fd, data: payload)
-                if !ok {
+                do {
+                    try await ch.send(line)
+                } catch {
                     await self?.handleWriteFailedForRequest(id: requestId)
                 }
             }
@@ -398,93 +363,97 @@ actor ACPClient {
 
     private func timeoutRequest(id: Int, method: String) {
         guard let continuation = pendingRequests.removeValue(forKey: id) else { return }
+        #if canImport(os)
         logger.error("Request timed out: \(method) (id: \(id))")
+        #endif
         statusMessage = "Request timed out"
         continuation.resume(throwing: ACPClientError.requestTimeout(method: method))
     }
 
-    private func writeJSON(_ dict: [String: Any]) {
-        let fd = stdinFd
-        guard fd >= 0,
-              let data = try? JSONSerialization.data(withJSONObject: dict) else { return }
-        var payload = data
-        payload.append(contentsOf: "\n".utf8)
-        Task.detached { [weak self] in
-            let ok = Self.safeWrite(fd: fd, data: payload)
-            if !ok {
-                await self?.handleWriteFailed()
-            }
+    private func writeJSON(_ dict: [String: Any]) async {
+        guard let ch = channel,
+              let data = try? JSONSerialization.data(withJSONObject: dict),
+              let line = String(data: data, encoding: .utf8)
+        else { return }
+        do {
+            try await ch.send(line)
+        } catch {
+            await handleWriteFailed()
         }
     }
 
-    // MARK: - Read Loop
+    // MARK: - Read Loops
 
-    private func startReadLoop(stdout: Pipe, stderr: Pipe) {
-        // Read stdout for JSON-RPC messages
-        readTask = Task.detached { [weak self] in
-            let handle = stdout.fileHandleForReading
-            var buffer = Data()
-
-            while !Task.isCancelled {
-                let chunk = handle.availableData
-                if chunk.isEmpty { break } // EOF
-                buffer.append(chunk)
-
-                while let newlineIndex = buffer.firstIndex(of: UInt8(ascii: "\n")) {
-                    let lineData = Data(buffer[buffer.startIndex..<newlineIndex])
-                    buffer = Data(buffer[buffer.index(after: newlineIndex)...])
-
-                    guard !lineData.isEmpty else { continue }
-
-                    if let lineStr = String(data: lineData, encoding: .utf8) {
-                        self?.logger.debug("ACP recv: \(lineStr.prefix(200))")
-                    }
-
+    private func startReadLoops(channel ch: any ACPChannel) {
+        // Consume incoming JSON-RPC lines from the channel.
+        readTask = Task { [weak self] in
+            do {
+                for try await line in ch.incoming {
+                    guard let data = line.data(using: .utf8) else { continue }
                     do {
-                        let message = try JSONDecoder().decode(ACPRawMessage.self, from: lineData)
+                        let message = try JSONDecoder().decode(ACPRawMessage.self, from: data)
                         await self?.handleMessage(message)
                     } catch {
-                        self?.logger.warning("Failed to decode ACP message: \(error.localizedDescription)")
+                        #if canImport(os)
+                        await self?.logParseFailure(error, line: line)
+                        #endif
                     }
                 }
+                await self?.handleReadLoopEnded(cleanly: true)
+            } catch {
+                await self?.handleReadLoopEnded(cleanly: false, error: error)
             }
-            await self?.handleReadLoopEnded()
         }
 
-        // Read stderr in background for diagnostic logging AND ring-buffer
-        // capture so we can attach a tail to user-visible errors.
-        stderrTask = Task.detached { [weak self] in
-            let handle = stderr.fileHandleForReading
-            while !Task.isCancelled {
-                let data = handle.availableData
-                if data.isEmpty { break }
-                if let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !text.isEmpty {
-                    self?.logger.info("ACP stderr: \(text.prefix(500))")
+        // Mirror stderr into the diagnostic ring buffer.
+        stderrTask = Task { [weak self] in
+            do {
+                for try await text in ch.stderr {
                     await self?.appendStderr(text)
+                    #if canImport(os)
+                    await self?.logStderrLine(text)
+                    #endif
                 }
+            } catch {
+                // Stderr errors don't matter — we already handle EOF on
+                // the incoming stream.
             }
         }
     }
+
+    #if canImport(os)
+    private func logParseFailure(_ error: Error, line: String) {
+        logger.warning("Failed to decode ACP message: \(error.localizedDescription)")
+    }
+
+    private func logStderrLine(_ text: String) {
+        logger.info("ACP stderr: \(text.prefix(500))")
+    }
+    #endif
 
     private func handleMessage(_ message: ACPRawMessage) {
         if message.isResponse {
             if let requestId = message.id,
                let continuation = pendingRequests.removeValue(forKey: requestId) {
                 if let error = message.error {
+                    #if canImport(os)
                     logger.error("ACP RPC error (id: \(requestId)): \(error.message)")
+                    #endif
                     statusMessage = "Error: \(error.message)"
                     continuation.resume(throwing: ACPClientError.rpcError(code: error.code, message: error.message))
                 } else {
+                    #if canImport(os)
                     logger.debug("ACP response (id: \(requestId))")
+                    #endif
                     continuation.resume(returning: message.result)
                 }
             } else {
+                #if canImport(os)
                 logger.warning("ACP response for unknown request id: \(message.id ?? -1)")
+                #endif
             }
         } else if message.isNotification {
             if let event = ACPEventParser.parse(notification: message) {
-                logger.debug("ACP event: \(String(describing: event).prefix(100))")
                 eventContinuation?.yield(event)
             }
         } else if message.isRequest {
@@ -501,7 +470,9 @@ actor ACPClient {
     /// Single idempotent cleanup path for all disconnect scenarios.
     private func performDisconnectCleanup(reason: String) {
         guard isConnected else { return }
+        #if canImport(os)
         logger.warning("ACP disconnecting: \(reason)")
+        #endif
         isConnected = false
         statusMessage = "Connection lost"
         for (_, continuation) in pendingRequests {
@@ -512,12 +483,9 @@ actor ACPClient {
         eventContinuation = nil
     }
 
-    private func handleReadLoopEnded() {
-        performDisconnectCleanup(reason: "read loop ended (EOF)")
-    }
-
-    private func handleTermination(exitCode: Int32) {
-        performDisconnectCleanup(reason: "process exited (\(exitCode))")
+    private func handleReadLoopEnded(cleanly: Bool, error: Error? = nil) {
+        let reason = cleanly ? "read loop ended (EOF)" : "read loop failed: \(error?.localizedDescription ?? "unknown")"
+        performDisconnectCleanup(reason: reason)
     }
 
     private func handleWriteFailed() {
@@ -530,29 +498,11 @@ actor ACPClient {
         }
         performDisconnectCleanup(reason: "write failed (broken pipe)")
     }
-
-    // MARK: - Safe POSIX Write
-
-    /// Write data to a file descriptor using POSIX write(), returning false on error.
-    /// Handles partial writes and returns false on EPIPE or other errors.
-    private static func safeWrite(fd: Int32, data: Data) -> Bool {
-        data.withUnsafeBytes { buf in
-            guard let base = buf.baseAddress else { return false }
-            var written = 0
-            let total = buf.count
-            while written < total {
-                let result = Darwin.write(fd, base.advanced(by: written), total - written)
-                if result <= 0 { return false }
-                written += result
-            }
-            return true
-        }
-    }
 }
 
 // MARK: - Errors
 
-enum ACPClientError: Error, LocalizedError {
+public enum ACPClientError: Error, LocalizedError {
     case notConnected
     case encodingFailed
     case invalidResponse(String)
@@ -560,7 +510,7 @@ enum ACPClientError: Error, LocalizedError {
     case processTerminated
     case requestTimeout(method: String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .notConnected: return "ACP client is not connected"
         case .encodingFailed: return "Failed to encode JSON-RPC request"
@@ -575,8 +525,8 @@ enum ACPClientError: Error, LocalizedError {
 /// Maps a raw error message (RPC message or captured stderr) to a short
 /// human-readable hint for the chat UI. Pattern-matches the most common
 /// fresh-install failure modes. Returns nil when no known pattern matches.
-enum ACPErrorHint {
-    static func classify(errorMessage: String, stderrTail: String) -> String? {
+public enum ACPErrorHint {
+    public static func classify(errorMessage: String, stderrTail: String) -> String? {
         let haystack = errorMessage + "\n" + stderrTail
         if haystack.range(of: #"No\s+(Anthropic|OpenAI|OpenRouter|Gemini|Google|Groq|Mistral|XAI)?\s*credentials\s+found"#,
                           options: .regularExpression) != nil

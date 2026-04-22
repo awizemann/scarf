@@ -410,7 +410,51 @@ stderr patterns, and round-trip an actual local file through
 - Types used only from the Mac app target (`GatewayInfo`, `PlatformInfo`, etc.) should NOT be marked `public` — keep them internal. My sed sometimes adds `public` to main-target-internal types when I'm reverting a move; strip those back with a second sed pass.
 - Views are deliberately **not** in ScarfCore. iOS will build its own Views against the shared ViewModels. M3 is where iOS's ViewRegistry / tab bar / NavigationStack composition happens.
 
-### M1 — pending
+### M0 verification — shipped (commit `f399579`)
+
+Two real regressions caught by a pre-M1 audit, both silent:
+
+1. **`GatewayViewModel.swift` lost its `import ScarfCore`** during the M0d revert. It references `ServerContext` throughout — would not have compiled in Xcode without the import. Added back.
+2. **`SSHTransport.sshSubprocessEnvironment()` regressed in M0b.** The original Mac code ran `HermesFileService.enrichedEnvironment()` which probes `zsh -l -i` first (sources `.zshrc` — where 1Password / Secretive / manual `ssh-add` export `SSH_AUTH_SOCK`), falling back to `zsh -l`. My M0b replacement used only `zsh -l`, so users with agents in `.zshrc` would have seen "Permission denied" (exit 255) on every remote SSH attempt. Fixed by **reverting to dependency injection**: `SSHTransport.environmentEnricher` is a `(@Sendable () -> [String: String])?` static wired at app startup to the Mac's full `HermesFileService.enrichedEnvironment()` — same exact code path as pre-M0b. iOS leaves it nil. Test pins the injection-point shape.
+
+### M1 — shipped
+
+**Shipped:**
+
+- New `Packages/ScarfCore/Sources/ScarfCore/ACP/` directory with:
+  - **`ACPChannel.swift`** — protocol + error enum. Line-oriented bidirectional transport that `ACPClient` speaks JSON-RPC over. Channel implementations own subprocess / SSH lifecycle; ACPClient never touches `Process`, `Pipe`, file descriptors, or SSH sessions directly.
+  - **`ProcessACPChannel.swift`** — Mac/Linux impl, gated on `#if !os(iOS)` (iOS can't spawn subprocesses). Wraps the `Process` + `Pipe` + raw POSIX `write(2)` path that the old ACPClient used inline. Handles SIGPIPE-ignore, partial-write loops, EPIPE → `.writeEndClosed`, graceful SIGINT shutdown with a 2s SIGKILL watchdog. Available on both `Darwin` (macOS) and `Glibc` (Linux CI) via per-platform `#if canImport` on the raw write.
+  - **`ACPClient.swift`** — moved from the Mac target and refactored to be channel-agnostic. `Process`/`Pipe`/`stdinFd`/`Darwin.write` state replaced with a single `channel: any ACPChannel` reference. Channel creation goes through a caller-provided `ChannelFactory` closure so Mac can wire `ProcessACPChannel` and iOS can (in M4+) wire a Citadel-backed `SSHExecACPChannel` the same way.
+- **`scarf/Core/Services/ACPClient+Mac.swift`** (new Mac-target sibling file) — carries the `ACPClient.forMacApp(context:)` factory that constructs an `ACPClient` pre-wired with the Mac channel factory. The channel factory closure:
+  - Local: spawns `hermes acp` with `HermesFileService.enrichedEnvironment()` (full PATH + credentials) minus `TERM`.
+  - Remote: uses `SSHTransport.makeProcess` to get `ssh -T host -- hermes acp`, merging just `SSH_AUTH_SOCK` / `SSH_AGENT_PID` into the local ssh subprocess's env.
+  - Both paths identical to pre-M1 behavior — no behavior change.
+- **`ChatViewModel`** call sites updated from `ACPClient(context:)` to `ACPClient.forMacApp(context:)` (3 sites).
+- The old `scarf/Core/Services/ACPClient.swift` (605 lines) deleted.
+
+**Public API changes ACPClient callers need to know about:**
+
+- `respondToPermission(requestId:optionId:)` is now `async`. `ChatViewModel` already awaited it, so the upgrade is a no-op there.
+
+**Test coverage (`M1ACPTests`):** 10 new tests using a `MockACPChannel` actor to script JSON-RPC deterministically — no real subprocess or SSH, so the tests exercise the state machine alone:
+
+- `ACPChannel` protocol — mock basic send/receive, write-after-close fails with `.writeEndClosed`, error-description strings.
+- `ACPClient` initial state (disconnected, unhealthy).
+- `start()` happy path — sends `initialize`, flips `isConnected` on reply.
+- `start()` with an RPC error reply — surfaces as `ACPClientError.rpcError`.
+- Mid-flight channel close — pending request resolves with `.processTerminated`, `isConnected` flips false.
+- `session/update` notification routes into the `events` stream as `.messageChunk`.
+- Stderr lines feed `recentStderr` ring buffer.
+- `ACPErrorHint.classify` across credential / missing-binary / rate-limit / unknown cases.
+
+**Rules next phases can rely on:**
+
+- **iOS M2–M4:** The iOS target will provide a sibling `ACPClient+iOS.swift` with its own `ACPClient.forIOS(context:session:)` factory that returns a Citadel-backed `SSHExecACPChannel`. Everything above that layer — session lifecycle, event routing, permission requests, keepalive, recentStderr, token counting — runs unchanged.
+- **ProcessACPChannel is test-less on Linux** (spawning real subprocesses in CI is brittle). Every meaningful ACP test uses `MockACPChannel` via protocol dependency injection. If you need to exercise the real subprocess path, do it on the Mac smoke-test side.
+- **The `ChannelFactory` closure is `@Sendable` and async.** Any per-context setup (env enrichment, SSH handshake) happens inside the factory — not inside `ACPClient.start()`. That keeps `start()` boring and portable.
+- **`ACPClient` does not handle subprocess spontaneous exits via `terminationHandler`** anymore — it notices via channel-stream EOF. Pipe-EOF fires reliably when a Mac subprocess exits (OS closes the pipe). If a future phase sees "session hangs after crash" symptoms, add a `terminationHandler` inside `ProcessACPChannel` that explicitly finishes the `incoming` continuation.
+
+### M2 — pending
 ### M2 — pending
 ### M3 — pending
 ### M4 — pending
