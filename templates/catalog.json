@@ -1,0 +1,34 @@
+{
+  "generated": true,
+  "schemaVersion": 1,
+  "templates": [
+    {
+      "author": {
+        "name": "Alan Wizemann",
+        "url": "https://github.com/awizemann/scarf"
+      },
+      "bundleSha256": "32b8c12706de8596be63dcdda32d46fc5bf478d5b9f7c1fc4c6d96ced251186a",
+      "bundleSize": 5410,
+      "category": "monitoring",
+      "contents": {
+        "agentsMd": true,
+        "cron": 1,
+        "dashboard": true
+      },
+      "description": "A daily uptime check for a short list of URLs. Writes status to status-log.md and updates the dashboard with current counts.",
+      "detailSlug": "awizemann-site-status-checker",
+      "id": "awizemann/site-status-checker",
+      "installUrl": "https://raw.githubusercontent.com/awizemann/scarf/main/templates/awizemann/site-status-checker/site-status-checker.scarftemplate",
+      "minHermesVersion": "0.9.0",
+      "minScarfVersion": "2.2.0",
+      "name": "Site Status Checker",
+      "tags": [
+        "monitoring",
+        "uptime",
+        "cron",
+        "starter"
+      ],
+      "version": "1.0.0"
+    }
+  ]
+}
