@@ -18,6 +18,10 @@ final class TemplateInstallerViewModel {
         case fetching(sourceDescription: String)
         case inspecting
         case awaitingParentDirectory
+        /// Template declared a non-empty config schema; the sheet
+        /// presents `TemplateConfigSheet` before continuing to the
+        /// preview. Schema-less templates skip this stage entirely.
+        case awaitingConfig
         case planned
         case installing
         case succeeded(installed: ProjectEntry)
@@ -139,14 +143,20 @@ final class TemplateInstallerViewModel {
         guard let inspection else { return }
         chosenParentDirectory = parentDir
         let service = templateService
-        let context = context
         Task.detached { [weak self] in
             do {
                 let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
-                _ = context
                 await MainActor.run { [weak self] in
-                    self?.plan = plan
-                    self?.stage = .planned
+                    guard let self else { return }
+                    self.plan = plan
+                    // If the template declares a non-empty config
+                    // schema, insert the configure step before the
+                    // preview sheet. Otherwise go straight to .planned.
+                    if let schema = plan.configSchema, !schema.isEmpty {
+                        self.stage = .awaitingConfig
+                    } else {
+                        self.stage = .planned
+                    }
                 }
             } catch {
                 await MainActor.run { [weak self] in
@@ -154,6 +164,26 @@ final class TemplateInstallerViewModel {
                 }
             }
         }
+    }
+
+    /// Called by `TemplateInstallSheet` once the user has filled in
+    /// the configure form and `TemplateConfigViewModel.commit()`
+    /// succeeded. Stashes the values in the plan and advances to the
+    /// preview stage (`.planned`). Secrets in `values` are already
+    /// `.keychainRef(...)` — the VM's commit step wrote them to the
+    /// Keychain.
+    func submitConfig(values: [String: TemplateConfigValue]) {
+        guard var plan else { return }
+        plan.configValues = values
+        self.plan = plan
+        stage = .planned
+    }
+
+    /// Called when the user cancels out of the configure step without
+    /// committing. Returns to `.awaitingParentDirectory` so they can
+    /// try again (or dismiss the whole sheet).
+    func cancelConfig() {
+        stage = .awaitingParentDirectory
     }
 
     func confirmInstall() {

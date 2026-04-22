@@ -21,6 +21,8 @@ struct TemplateInstallSheet: View {
                 progress("Inspecting template…")
             case .awaitingParentDirectory:
                 pickParentView
+            case .awaitingConfig:
+                configureView
             case .planned:
                 if let plan = viewModel.plan {
                     plannedView(plan: plan)
@@ -85,6 +87,39 @@ struct TemplateInstallSheet: View {
         }
     }
 
+    /// Configure step for schemaful templates. Inlines
+    /// `TemplateConfigSheet` into the install flow rather than pushing
+    /// a second sheet on top — keeps the user in one window. The
+    /// nested VM is created freshly each time `.awaitingConfig` is
+    /// entered so a Cancel + retry doesn't carry stale form state.
+    @ViewBuilder
+    private var configureView: some View {
+        if let plan = viewModel.plan,
+           let schema = plan.configSchema,
+           let manifest = viewModel.inspection?.manifest {
+            TemplateConfigSheet(
+                viewModel: TemplateConfigViewModel(
+                    schema: schema,
+                    templateId: manifest.id,
+                    templateSlug: manifest.slug,
+                    initialValues: plan.configValues,
+                    mode: .install
+                ),
+                title: "Configure \(manifest.name)",
+                commitLabel: "Continue",
+                project: ProjectEntry(name: plan.projectRegistryName, path: plan.projectDir),
+                onCommit: { values in
+                    viewModel.submitConfig(values: values)
+                },
+                onCancel: {
+                    viewModel.cancelConfig()
+                }
+            )
+        } else {
+            progress("Preparing…")
+        }
+    }
+
     private func plannedView(plan: TemplateInstallPlan) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             manifestHeader(plan.manifest)
@@ -101,6 +136,9 @@ struct TemplateInstallSheet: View {
                     }
                     if plan.memoryAppendix != nil {
                         memorySection(plan: plan)
+                    }
+                    if let schema = plan.configSchema, !schema.isEmpty {
+                        configurationSection(plan: plan, schema: schema)
                     }
                     readmeSection
                 }
@@ -210,6 +248,50 @@ struct TemplateInstallSheet: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .frame(maxHeight: 160)
+        }
+    }
+
+    /// Configuration values the user entered in the configure step.
+    /// Secrets display masked so the preview never echoes a freshly
+    /// typed API key back on screen.
+    private func configurationSection(plan: TemplateInstallPlan, schema: TemplateConfigSchema) -> some View {
+        section(title: "Configuration", subtitle: "written to \(plan.projectDir)/.scarf/config.json") {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(schema.fields) { field in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(field.key)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .frame(minWidth: 120, alignment: .leading)
+                        Text(displayValue(for: field, in: plan.configValues))
+                            .font(.caption)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+            }
+        }
+    }
+
+    /// One-line display form for a value in the preview. Secrets are
+    /// always masked; lists show a count + first entry; strings are
+    /// truncated by `.lineLimit(1)` at the view level.
+    private func displayValue(
+        for field: TemplateConfigField,
+        in values: [String: TemplateConfigValue]
+    ) -> String {
+        switch field.type {
+        case .secret:
+            return values[field.key] == nil ? "(not set)" : "••••••• (Keychain)"
+        case .list:
+            if case .list(let items) = values[field.key] {
+                if items.isEmpty { return "(none)" }
+                if items.count == 1 { return items[0] }
+                return "\(items[0]) + \(items.count - 1) more"
+            }
+            return "(none)"
+        default:
+            return values[field.key]?.displayString ?? "(not set)"
         }
     }
 

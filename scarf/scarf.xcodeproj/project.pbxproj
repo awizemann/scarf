@@ -12,6 +12,20 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		4EAC233A2F99930100654F42 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 534959382F7B83B600BD31AD /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4EAC23282F99930000654F42;
+			remoteInfo = "Scarf iOS";
+		};
+		4EAC23442F99930100654F42 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 534959382F7B83B600BD31AD /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4EAC23282F99930000654F42;
+			remoteInfo = "Scarf iOS";
+		};
 		534959502F7B83B700BD31AD /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 534959382F7B83B600BD31AD /* Project object */;
@@ -29,12 +43,22 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		4EAC23292F99930000654F42 /* scarf mobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "scarf mobile.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		4EAC23392F99930100654F42 /* Scarf iOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Scarf iOSTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		4EAC23432F99930100654F42 /* Scarf iOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Scarf iOSUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		534959402F7B83B600BD31AD /* scarf.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = scarf.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5349594F2F7B83B700BD31AD /* scarfTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = scarfTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		534959592F7B83B700BD31AD /* scarfUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = scarfUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		4EAC234B2F99930100654F42 /* Exceptions for "Scarf iOS" folder in "scarf mobile" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 4EAC23282F99930000654F42 /* scarf mobile */;
+		};
 		534959AA2F7B83B600BD31AD /* Exceptions for "scarf" folder in "scarf" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -45,6 +69,24 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		4EAC232A2F99930000654F42 /* Scarf iOS */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				4EAC234B2F99930100654F42 /* Exceptions for "Scarf iOS" folder in "scarf mobile" target */,
+			);
+			path = "Scarf iOS";
+			sourceTree = "<group>";
+		};
+		4EAC233C2F99930100654F42 /* Scarf iOSTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Scarf iOSTests";
+			sourceTree = "<group>";
+		};
+		4EAC23462F99930100654F42 /* Scarf iOSUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Scarf iOSUITests";
+			sourceTree = "<group>";
+		};
 		534959422F7B83B600BD31AD /* scarf */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -66,6 +108,27 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		4EAC23262F99930000654F42 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4EAC23362F99930100654F42 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4EAC23402F99930100654F42 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5349593D2F7B83B600BD31AD /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -98,6 +161,9 @@
 				534959422F7B83B600BD31AD /* scarf */,
 				534959522F7B83B700BD31AD /* scarfTests */,
 				5349595C2F7B83B700BD31AD /* scarfUITests */,
+				4EAC232A2F99930000654F42 /* Scarf iOS */,
+				4EAC233C2F99930100654F42 /* Scarf iOSTests */,
+				4EAC23462F99930100654F42 /* Scarf iOSUITests */,
 				534959412F7B83B600BD31AD /* Products */,
 			);
 			sourceTree = "<group>";
@@ -108,6 +174,9 @@
 				534959402F7B83B600BD31AD /* scarf.app */,
 				5349594F2F7B83B700BD31AD /* scarfTests.xctest */,
 				534959592F7B83B700BD31AD /* scarfUITests.xctest */,
+				4EAC23292F99930000654F42 /* scarf mobile.app */,
+				4EAC23392F99930100654F42 /* Scarf iOSTests.xctest */,
+				4EAC23432F99930100654F42 /* Scarf iOSUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -115,6 +184,74 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		4EAC23282F99930000654F42 /* scarf mobile */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4EAC234C2F99930100654F42 /* Build configuration list for PBXNativeTarget "scarf mobile" */;
+			buildPhases = (
+				4EAC23252F99930000654F42 /* Sources */,
+				4EAC23262F99930000654F42 /* Frameworks */,
+				4EAC23272F99930000654F42 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				4EAC232A2F99930000654F42 /* Scarf iOS */,
+			);
+			name = "scarf mobile";
+			packageProductDependencies = (
+			);
+			productName = "Scarf iOS";
+			productReference = 4EAC23292F99930000654F42 /* scarf mobile.app */;
+			productType = "com.apple.product-type.application";
+		};
+		4EAC23382F99930100654F42 /* Scarf iOSTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4EAC234F2F99930100654F42 /* Build configuration list for PBXNativeTarget "Scarf iOSTests" */;
+			buildPhases = (
+				4EAC23352F99930100654F42 /* Sources */,
+				4EAC23362F99930100654F42 /* Frameworks */,
+				4EAC23372F99930100654F42 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4EAC233B2F99930100654F42 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				4EAC233C2F99930100654F42 /* Scarf iOSTests */,
+			);
+			name = "Scarf iOSTests";
+			packageProductDependencies = (
+			);
+			productName = "Scarf iOSTests";
+			productReference = 4EAC23392F99930100654F42 /* Scarf iOSTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		4EAC23422F99930100654F42 /* Scarf iOSUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4EAC23522F99930100654F42 /* Build configuration list for PBXNativeTarget "Scarf iOSUITests" */;
+			buildPhases = (
+				4EAC233F2F99930100654F42 /* Sources */,
+				4EAC23402F99930100654F42 /* Frameworks */,
+				4EAC23412F99930100654F42 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4EAC23452F99930100654F42 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				4EAC23462F99930100654F42 /* Scarf iOSUITests */,
+			);
+			name = "Scarf iOSUITests";
+			packageProductDependencies = (
+			);
+			productName = "Scarf iOSUITests";
+			productReference = 4EAC23432F99930100654F42 /* Scarf iOSUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		5349593F2F7B83B600BD31AD /* scarf */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 534959632F7B83B700BD31AD /* Build configuration list for PBXNativeTarget "scarf" */;
@@ -192,9 +329,20 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2630;
+				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2630;
 				TargetAttributes = {
+					4EAC23282F99930000654F42 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					4EAC23382F99930100654F42 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 4EAC23282F99930000654F42;
+					};
+					4EAC23422F99930100654F42 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 4EAC23282F99930000654F42;
+					};
 					5349593F2F7B83B600BD31AD = {
 						CreatedOnToolsVersion = 26.3;
 					};
@@ -235,11 +383,35 @@
 				5349593F2F7B83B600BD31AD /* scarf */,
 				5349594E2F7B83B700BD31AD /* scarfTests */,
 				534959582F7B83B700BD31AD /* scarfUITests */,
+				4EAC23282F99930000654F42 /* scarf mobile */,
+				4EAC23382F99930100654F42 /* Scarf iOSTests */,
+				4EAC23422F99930100654F42 /* Scarf iOSUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		4EAC23272F99930000654F42 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4EAC23372F99930100654F42 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4EAC23412F99930100654F42 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5349593E2F7B83B600BD31AD /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -264,6 +436,27 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		4EAC23252F99930000654F42 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4EAC23352F99930100654F42 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4EAC233F2F99930100654F42 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5349593C2F7B83B600BD31AD /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -288,6 +481,16 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		4EAC233B2F99930100654F42 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4EAC23282F99930000654F42 /* scarf mobile */;
+			targetProxy = 4EAC233A2F99930100654F42 /* PBXContainerItemProxy */;
+		};
+		4EAC23452F99930100654F42 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4EAC23282F99930000654F42 /* scarf mobile */;
+			targetProxy = 4EAC23442F99930100654F42 /* PBXContainerItemProxy */;
+		};
 		534959512F7B83B700BD31AD /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 5349593F2F7B83B600BD31AD /* scarf */;
@@ -301,6 +504,175 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		4EAC234D2F99930100654F42 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Scarf iOS/Scarf_iOS.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3Q6X2L86C4;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Scarf iOS/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Scarf Mobile";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.scarf-mobile.app";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		4EAC234E2F99930100654F42 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Scarf iOS/Scarf_iOS.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3Q6X2L86C4;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Scarf iOS/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Scarf Mobile";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.scarf-mobile.app";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		4EAC23502F99930100654F42 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3Q6X2L86C4;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "alanwizemann.Scarf-iOSTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Scarf iOS.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Scarf iOS";
+			};
+			name = Debug;
+		};
+		4EAC23512F99930100654F42 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3Q6X2L86C4;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "alanwizemann.Scarf-iOSTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Scarf iOS.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Scarf iOS";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		4EAC23532F99930100654F42 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3Q6X2L86C4;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "alanwizemann.Scarf-iOSUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "Scarf iOS";
+			};
+			name = Debug;
+		};
+		4EAC23542F99930100654F42 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3Q6X2L86C4;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "alanwizemann.Scarf-iOSUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "Scarf iOS";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 		534959612F7B83B700BD31AD /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -444,6 +816,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = scarf/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Scarf;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -479,6 +852,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = scarf/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Scarf;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -584,6 +958,33 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		4EAC234C2F99930100654F42 /* Build configuration list for PBXNativeTarget "scarf mobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4EAC234D2F99930100654F42 /* Debug */,
+				4EAC234E2F99930100654F42 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4EAC234F2F99930100654F42 /* Build configuration list for PBXNativeTarget "Scarf iOSTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4EAC23502F99930100654F42 /* Debug */,
+				4EAC23512F99930100654F42 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4EAC23522F99930100654F42 /* Build configuration list for PBXNativeTarget "Scarf iOSUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4EAC23532F99930100654F42 /* Debug */,
+				4EAC23542F99930100654F42 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		5349593B2F7B83B600BD31AD /* Build configuration list for PBXProject "scarf" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

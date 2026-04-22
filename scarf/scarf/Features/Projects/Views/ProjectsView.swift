@@ -26,6 +26,7 @@ struct ProjectsView: View {
     @State private var showingInstallURLPrompt = false
     @State private var installURLInput = ""
     @State private var showingUninstallSheet = false
+    @State private var configEditorProject: ProjectEntry?
 
     private let uninstaller: ProjectTemplateUninstaller
 
@@ -34,6 +35,14 @@ struct ProjectsView: View {
         _installerViewModel = State(initialValue: TemplateInstallerViewModel(context: context))
         _uninstallerViewModel = State(initialValue: TemplateUninstallerViewModel(context: context))
         self.uninstaller = ProjectTemplateUninstaller(context: context)
+    }
+
+    /// True when the given project has a cached manifest (i.e. was
+    /// installed from a schemaful template). Cheap — just a file
+    /// existence check via the transport.
+    private func isConfigurable(_ project: ProjectEntry) -> Bool {
+        let path = ProjectConfigService.manifestCachePath(for: project)
+        return serverContext.makeTransport().fileExists(path)
     }
 
     @State private var selectedTab: DashboardTab = .dashboard
