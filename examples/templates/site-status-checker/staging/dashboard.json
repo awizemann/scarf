@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "title": "Site Status",
+  "description": "Daily uptime check for your watched URLs. The stat widgets and list update automatically when the cron job runs.",
+  "theme": { "accent": "green" },
+  "sections": [
+    {
+      "title": "Current Status",
+      "columns": 3,
+      "widgets": [
+        {
+          "type": "stat",
+          "title": "Sites Up",
+          "value": 0,
+          "icon": "checkmark.circle.fill",
+          "color": "green",
+          "subtitle": "responded 2xx/3xx"
+        },
+        {
+          "type": "stat",
+          "title": "Sites Down",
+          "value": 0,
+          "icon": "xmark.circle.fill",
+          "color": "red",
+          "subtitle": "non-2xx, timeout, DNS"
+        },
+        {
+          "type": "stat",
+          "title": "Last Checked",
+          "value": "never",
+          "icon": "clock",
+          "color": "blue",
+          "subtitle": "ISO-8601 timestamp"
+        }
+      ]
+    },
+    {
+      "title": "Watched Sites",
+      "columns": 1,
+      "widgets": [
+        {
+          "type": "list",
+          "title": "Configured Sites (from sites.txt)",
+          "items": [
+            { "text": "https://example.com", "status": "unknown" },
+            { "text": "https://example.org", "status": "unknown" }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "How to Use",
+      "columns": 1,
+      "widgets": [
+        {
+          "type": "text",
+          "title": "Quick Start",
+          "format": "markdown",
+          "content": "**1.** Enable the `[tmpl:awizemann/site-status-checker] Check site status` cron job in the Cron sidebar. It ships paused — nothing runs until you say so.\n\n**2.** Edit `sites.txt` in this project's folder to replace the placeholder URLs with the sites you actually want to watch.\n\n**3.** Ask your agent: *\"Run the site status check now.\"* The dashboard refreshes and a new entry appears at the top of `status-log.md`.\n\n**4.** Daily at 9 AM the cron job fires automatically. Change the schedule in the Cron sidebar if you want a different cadence.\n\nSee `README.md` and `AGENTS.md` in the project root for the full spec."
+        }
+      ]
+    }
+  ]
+}
