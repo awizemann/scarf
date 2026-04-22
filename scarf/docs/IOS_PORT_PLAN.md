@@ -617,7 +617,41 @@ the 3 ScarfIOS tests.
 - **`CitadelServerTransport.streamLines` is a stub (M3).** When the iOS Chat feature lands in M4+, implement it using Citadel's raw exec channel API (not `executeCommand`, which buffers the entire output). That'll also unlock iOS log tailing.
 - **`HermesFileService` still hasn't moved to ScarfCore.** iOS's Dashboard is minimal because of this; no config.yaml / gateway-state / pgrep checks. A future phase can either port HermesFileService (requires iOS-compatible shell-env story) or replicate the narrow subset iOS needs.
 
-### M4 — pending
-### M4 — pending
+### M4 — shipped (on `claude/ios-m4-chat` branch, separate PR, stacked on M3)
+
+**What shipped:** iOS Chat via Citadel's 8-bit-safe SSH exec channel + the Xcode target reconciliation work (pulling Alan's target creation from `template-configuration` into the iOS-port stack, merging pbxproj with M3's ScarfCore wiring, consolidating source layout into `scarf/Scarf iOS/`, wiring ScarfIOS as a local SPM package).
+
+**ScarfIOS additions:**
+- `SSHExecACPChannel.swift` — iOS counterpart to `ProcessACPChannel`. Uses `SSHClient.withExec(_:perform:)` for bidirectional exec (RFC 4254), line-frames stdout / stderr, Cancel-driven teardown.
+- `ACPClient+iOS.swift` — `ACPClient.forIOSApp(context:keyProvider:)` factory that opens a dedicated `SSHClient` per ACP session (separate from the transport's client so ACP's long channel doesn't multiplex-compete with SFTP). Shared ed25519 auth helper via the key bundle stored in Keychain.
+
+**iOS Chat view:**
+- `Scarf iOS/Chat/ChatView.swift` + `ChatController` (`@Observable @MainActor`). Three-state lifecycle (connecting / ready / failed), auto-scroll message list, SwiftUI composer, "+" toolbar for a fresh session. Reuses ScarfCore's `RichChatViewModel` unchanged.
+- `DashboardView` gains a NavigationLink into Chat.
+- `RichChatViewModel.sessionId` promoted `public private(set)` so `ChatController` can route `sendPrompt`.
+
+**Xcode target reconciliation** (carried in the same PR — they can't easily be separated without breaking the build):
+- Merged `b289a83`'s iOS-target pbxproj additions on top of my M3 pbxproj via `git merge-file` (zero conflicts, 658 → 1074 lines). Added ScarfIOS as a new `XCLocalSwiftPackageReference`, wired both ScarfCore + ScarfIOS to the `scarf mobile` target's `packageProductDependencies` + Frameworks build phase.
+- Source layout: moved `scarf/scarf-ios/*` into `scarf/Scarf iOS/` (matching Xcode's synced group path). Deleted Xcode's scaffolded `ContentView.swift` / `Item.swift` / `Scarf_iOSApp.swift` defaults (my M2 code supersedes).
+- `scarf/docs/iOS-SETUP.md` — rewrote as a project-layout reference + troubleshooting doc, dropping the "how to create the target" walkthrough now that the target exists.
+
+**Tests:** 2 new in `M4ACPIOSTests`:
+- Streaming prompt end-to-end: initialize handshake + session/new + two agent_message_chunk notifications + session/prompt response with usage tokens. Verify both chunks arrive as `.messageChunk` events, the prompt resolves with correct stopReason + input/output token counts.
+- Permission-request round-trip: remote `session/request_permission` request → `.permissionRequest` event → `respondToPermission` writes a proper JSON response back on the channel.
+
+**96 → 98 tests passing on Linux.**
+
+**Manual validation still needed on Mac:**
+1. iOS compile cleanly against the merged pbxproj.
+2. Chat end-to-end: Dashboard → Chat → "hello" → streaming response from a real Hermes install.
+3. Tool-call events visible (even without fancy cards — M5 polish).
+4. No leaked SSH connections across Disconnect / re-onboard cycles.
+
+**Rules next phases can rely on:**
+- **Two separate `SSHClient`s per Scarf session** — one in `CitadelServerTransport` (SFTP + one-shot exec), one in `SSHExecACPChannel` (long-running ACP). Don't pool; OpenSSH caps concurrent channels per connection at ~10.
+- **`ACPClient.forIOSApp`** is the iOS factory. Any future iOS feature that needs ACP uses it — don't construct `ACPClient` directly.
+- **Chat is rich-chat-only on iOS in v1.** Terminal mode (embedded SwiftTerm) deferred.
+- **Message markdown / tool-call cards / permission sheets** are M5 polish.
+
 ### M5 — pending
 ### M6 — pending

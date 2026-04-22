@@ -78,7 +78,7 @@ public final class RichChatViewModel {
         scrollTrigger = UUID()
     }
 
-    private(set) var sessionId: String?
+    public private(set) var sessionId: String?
     /// The original CLI session ID when resuming a CLI session via ACP.
     /// Used to combine old CLI messages with new ACP messages.
     private(set) var originSessionId: String?
