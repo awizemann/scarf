@@ -1,6 +1,8 @@
 import Foundation
-import ScarfCore
+import Observation
+#if canImport(os)
 import os
+#endif
 
 /// Tracks connection health for the current window's server. Remote contexts
 /// get a lightweight 15s heartbeat (a no-op `true` remote command) that
@@ -8,10 +10,12 @@ import os
 /// green since there's no connection to lose.
 @Observable
 @MainActor
-final class ConnectionStatusViewModel {
+public final class ConnectionStatusViewModel {
+    #if canImport(os)
     private let logger = Logger(subsystem: "com.scarf", category: "ConnectionStatus")
+    #endif
 
-    enum Status: Equatable {
+    public enum Status: Equatable {
         /// Healthy: SSH connected AND we can read `~/.hermes/config.yaml`.
         case connected
         /// SSH connects but the follow-up read-access probe failed. Data
@@ -37,11 +41,11 @@ final class ConnectionStatusViewModel {
     private(set) var consecutiveFailures = 0
     private let consecutiveFailureThreshold = 2
 
-    let context: ServerContext
+    public let context: ServerContext
     private let transport: any ServerTransport
     private var probeTask: Task<Void, Never>?
 
-    init(context: ServerContext) {
+    public init(context: ServerContext) {
         self.context = context
         self.transport = context.makeTransport()
         if !context.isRemote {
@@ -54,7 +58,7 @@ final class ConnectionStatusViewModel {
 
     /// Kick off a background heartbeat loop. Safe to call multiple times;
     /// subsequent calls cancel the prior task and restart.
-    func startMonitoring() {
+    public func startMonitoring() {
         guard context.isRemote else { return }
         probeTask?.cancel()
         probeTask = Task { [weak self] in
@@ -65,13 +69,13 @@ final class ConnectionStatusViewModel {
         }
     }
 
-    func stopMonitoring() {
+    public func stopMonitoring() {
         probeTask?.cancel()
         probeTask = nil
     }
 
     /// Manual probe — also invoked by the toolbar "Retry" button on error.
-    func retry() {
+    public func retry() {
         Task { await probeOnce() }
     }
 

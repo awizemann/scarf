@@ -1,48 +1,53 @@
-import Foundation
-import ScarfCore
+// Gated on `canImport(SQLite3)` — `RichChatViewModel` reads message
+// history from `HermesDataService`, which is SQLite-gated. iOS + macOS
+// compile this unchanged; Linux CI skips it.
+#if canImport(SQLite3)
 
-enum ChatDisplayMode: String, CaseIterable {
+import Foundation
+import Observation
+
+public enum ChatDisplayMode: String, CaseIterable {
     case terminal
     case richChat
 }
 
-struct MessageGroup: Identifiable {
-    let id: Int
-    let userMessage: HermesMessage?
-    let assistantMessages: [HermesMessage]
-    let toolResults: [String: HermesMessage]
+public struct MessageGroup: Identifiable {
+    public let id: Int
+    public let userMessage: HermesMessage?
+    public let assistantMessages: [HermesMessage]
+    public let toolResults: [String: HermesMessage]
 
-    var allMessages: [HermesMessage] {
+    public var allMessages: [HermesMessage] {
         var result: [HermesMessage] = []
         if let user = userMessage { result.append(user) }
         result.append(contentsOf: assistantMessages)
         return result
     }
 
-    var toolCallCount: Int {
+    public var toolCallCount: Int {
         assistantMessages.reduce(0) { $0 + $1.toolCalls.count }
     }
 }
 
 @Observable
-final class RichChatViewModel {
-    let context: ServerContext
+public final class RichChatViewModel {
+    public let context: ServerContext
     private let dataService: HermesDataService
 
-    init(context: ServerContext = .local) {
+    public init(context: ServerContext = .local) {
         self.context = context
         self.dataService = HermesDataService(context: context)
         loadQuickCommands()
     }
 
 
-    var messages: [HermesMessage] = []
-    var currentSession: HermesSession?
-    var messageGroups: [MessageGroup] = []
-    var isAgentWorking = false
-    var pendingPermission: PendingPermission?
+    public var messages: [HermesMessage] = []
+    public var currentSession: HermesSession?
+    public var messageGroups: [MessageGroup] = []
+    public var isAgentWorking = false
+    public var pendingPermission: PendingPermission?
     /// Mutated to trigger a scroll-to-bottom in the message list.
-    var scrollTrigger = UUID()
+    public var scrollTrigger = UUID()
 
     // Cumulative ACP token tracking (ACP returns tokens per prompt but DB has none)
     private(set) var acpInputTokens = 0
@@ -56,20 +61,20 @@ final class RichChatViewModel {
     private(set) var quickCommands: [HermesSlashCommand] = []
 
     /// Merged list, ACP-first, de-duplicated by name.
-    var availableCommands: [HermesSlashCommand] {
+    public var availableCommands: [HermesSlashCommand] {
         let acpNames = Set(acpCommands.map(\.name))
         return acpCommands + quickCommands.filter { !acpNames.contains($0.name) }
     }
 
-    var supportsCompress: Bool { availableCommands.contains { $0.name == "compress" } }
+    public var supportsCompress: Bool { availableCommands.contains { $0.name == "compress" } }
 
     /// True when the menu carries more than just `/compress` — used to hide
     /// the dedicated compress button in favor of the full slash menu.
-    var hasBroaderCommandMenu: Bool { availableCommands.count > 1 }
+    public var hasBroaderCommandMenu: Bool { availableCommands.count > 1 }
 
-    var hasMessages: Bool { !messages.isEmpty }
+    public var hasMessages: Bool { !messages.isEmpty }
 
-    func requestScrollToBottom() {
+    public func requestScrollToBottom() {
         scrollTrigger = UUID()
     }
 
@@ -89,7 +94,7 @@ final class RichChatViewModel {
     private var userSendPending = false
     private var activePollingTimer: Timer?
 
-    struct PendingPermission {
+    public struct PendingPermission {
         let requestId: Int
         let title: String
         let kind: String
@@ -98,7 +103,7 @@ final class RichChatViewModel {
 
     // MARK: - Reset
 
-    func reset() {
+    public func reset() {
         debounceTask?.cancel()
         stopActivePolling()
         Task { await dataService.close() }
@@ -124,19 +129,19 @@ final class RichChatViewModel {
         loadQuickCommands()
     }
 
-    func setSessionId(_ id: String?) {
+    public func setSessionId(_ id: String?) {
         sessionId = id
         lastKnownFingerprint = nil
     }
 
-    func cleanup() async {
+    public func cleanup() async {
         stopActivePolling()
         debounceTask?.cancel()
         await dataService.close()
     }
 
     /// Re-fetch session metadata from DB to pick up cost/token updates.
-    func refreshSessionFromDB() async {
+    public func refreshSessionFromDB() async {
         guard let sessionId else { return }
         let opened = await dataService.open()
         guard opened else { return }
@@ -149,7 +154,7 @@ final class RichChatViewModel {
     // MARK: - ACP Event Handling
 
     /// Add a user message immediately (before DB write) for instant UI feedback.
-    func addUserMessage(text: String) {
+    public func addUserMessage(text: String) {
         let id = nextLocalId
         nextLocalId -= 1
         let message = HermesMessage(
@@ -179,7 +184,7 @@ final class RichChatViewModel {
     }
 
     /// Process a streaming ACP event and update the message list.
-    func handleACPEvent(_ event: ACPEvent) {
+    public func handleACPEvent(_ event: ACPEvent) {
         switch event {
         case .messageChunk(_, let text):
             appendMessageChunk(text: text)
@@ -233,7 +238,7 @@ final class RichChatViewModel {
 
     /// Load `quick_commands` from `config.yaml` off the main actor and publish
     /// them as slash commands. Safe to call repeatedly — replaces the existing list.
-    func loadQuickCommands() {
+    public func loadQuickCommands() {
         let ctx = context
         Task.detached { [weak self] in
             let loaded = QuickCommandsViewModel.loadQuickCommands(context: ctx)
@@ -439,7 +444,7 @@ final class RichChatViewModel {
 
     /// Finalize streaming state on disconnect, before reconnection attempts begin.
     /// Saves partial content as a permanent message without adding a system message.
-    func finalizeOnDisconnect() {
+    public func finalizeOnDisconnect() {
         finalizeStreamingMessage()
         isAgentWorking = false
         pendingPermission = nil
@@ -449,7 +454,7 @@ final class RichChatViewModel {
     /// Reconcile in-memory messages with DB state after a successful reconnection.
     /// Merges DB-persisted messages with any local-only messages (e.g., user messages
     /// that the ACP process may not have persisted before crashing).
-    func reconcileWithDB(sessionId: String) async {
+    public func reconcileWithDB(sessionId: String) async {
         let opened = await dataService.open()
         guard opened else { return }
 
@@ -497,7 +502,7 @@ final class RichChatViewModel {
 
     /// Load message history from the DB, optionally combining an origin session
     /// (e.g., CLI session) with the current ACP session.
-    func loadSessionHistory(sessionId: String, acpSessionId: String? = nil) async {
+    public func loadSessionHistory(sessionId: String, acpSessionId: String? = nil) async {
         self.sessionId = sessionId
         // Force a fresh snapshot pull on remote contexts. An earlier open()
         // would have cached a stale copy — on resume we need whatever
@@ -530,13 +535,13 @@ final class RichChatViewModel {
 
     // MARK: - DB Polling (terminal mode fallback)
 
-    func markAgentWorking() {
+    public func markAgentWorking() {
         isAgentWorking = true
         userSendPending = true
         startActivePolling()
     }
 
-    func scheduleRefresh() {
+    public func scheduleRefresh() {
         debounceTask?.cancel()
         debounceTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(100))
@@ -545,7 +550,7 @@ final class RichChatViewModel {
         }
     }
 
-    func refreshMessages() async {
+    public func refreshMessages() async {
         // Polling tick (terminal mode): pull a fresh snapshot so remote
         // reflects Hermes writes since the last tick. On local this is a
         // cheap reopen of the live DB.
@@ -668,3 +673,5 @@ final class RichChatViewModel {
         messageGroups = groups
     }
 }
+
+#endif // canImport(SQLite3)

@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// Small colored pill shown in the toolbar reflecting the server's reach-
 /// ability. Green = connected, yellow = probing, red = unreachable.

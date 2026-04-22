@@ -1,37 +1,39 @@
 import Foundation
-import ScarfCore
+import Observation
 
 @Observable
-final class LogsViewModel {
-    let context: ServerContext
+public final class LogsViewModel {
+    public let context: ServerContext
     private let logService: HermesLogService
 
-    init(context: ServerContext = .local) {
+    public init(context: ServerContext = .local) {
         self.context = context
         self.logService = HermesLogService(context: context)
     }
 
-    var entries: [LogEntry] = []
-    var selectedLogFile: LogFile = .agent
-    var filterLevel: LogEntry.LogLevel?
-    var selectedComponent: LogComponent = .all
-    var searchText = ""
+    public var entries: [LogEntry] = []
+    public var selectedLogFile: LogFile = .agent
+    public var filterLevel: LogEntry.LogLevel?
+    public var selectedComponent: LogComponent = .all
+    public var searchText = ""
     private var pollTimer: Timer?
 
-    enum LogFile: String, CaseIterable, Identifiable {
+    public enum LogFile: String, CaseIterable, Identifiable {
         case agent = "agent.log"
         case errors = "errors.log"
         case gateway = "gateway.log"
 
-        var id: String { rawValue }
+        public var id: String { rawValue }
 
-        var displayName: LocalizedStringResource {
+        #if canImport(Darwin)
+        public var displayName: LocalizedStringResource {
             switch self {
             case .agent: return "Agent"
             case .errors: return "Errors"
             case .gateway: return "Gateway"
             }
         }
+        #endif
     }
 
     private func path(for file: LogFile) -> String {
@@ -42,7 +44,7 @@ final class LogsViewModel {
         }
     }
 
-    enum LogComponent: String, CaseIterable, Identifiable {
+    public enum LogComponent: String, CaseIterable, Identifiable {
         case all = "All"
         case gateway = "Gateway"
         case agent = "Agent"
@@ -50,9 +52,10 @@ final class LogsViewModel {
         case cli = "CLI"
         case cron = "Cron"
 
-        var id: String { rawValue }
+        public var id: String { rawValue }
 
-        var displayName: LocalizedStringResource {
+        #if canImport(Darwin)
+        public var displayName: LocalizedStringResource {
             switch self {
             case .all: return "All"
             case .gateway: return "Gateway"
@@ -62,8 +65,9 @@ final class LogsViewModel {
             case .cron: return "Cron"
             }
         }
+        #endif
 
-        var loggerPrefix: String? {
+        public var loggerPrefix: String? {
             switch self {
             case .all: return nil
             case .gateway: return "gateway"
@@ -75,7 +79,7 @@ final class LogsViewModel {
         }
     }
 
-    var filteredEntries: [LogEntry] {
+    public var filteredEntries: [LogEntry] {
         entries.filter { entry in
             let levelOk = filterLevel == nil || entry.level == filterLevel
             let searchOk = searchText.isEmpty || entry.raw.localizedCaseInsensitiveContains(searchText)
@@ -87,14 +91,14 @@ final class LogsViewModel {
         }
     }
 
-    func load() async {
+    public func load() async {
         await logService.openLog(path: path(for: selectedLogFile))
         entries = await logService.readLastLines(count: 500)
         await logService.seekToEnd()
         startPolling()
     }
 
-    func switchLogFile(_ file: LogFile) async {
+    public func switchLogFile(_ file: LogFile) async {
         selectedLogFile = file
         entries = []
         await logService.openLog(path: path(for: file))
@@ -102,7 +106,7 @@ final class LogsViewModel {
         await logService.seekToEnd()
     }
 
-    func startPolling() {
+    public func startPolling() {
         pollTimer?.invalidate()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -115,12 +119,12 @@ final class LogsViewModel {
         }
     }
 
-    func stopPolling() {
+    public func stopPolling() {
         pollTimer?.invalidate()
         pollTimer = nil
     }
 
-    func cleanup() async {
+    public func cleanup() async {
         stopPolling()
         await logService.closeLog()
     }

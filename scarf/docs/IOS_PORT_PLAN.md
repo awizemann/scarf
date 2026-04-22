@@ -369,7 +369,47 @@ stderr patterns, and round-trip an actual local file through
   `ServerContext.local.id`. Test helpers in ScarfCoreTests lean on this
   heavily.
 
-### M0d — pending
+### M0d — shipped
+
+**Scope decision:** ViewModels only; **Views stay in the Mac target** for now. SwiftUI Views have heavy cross-feature coupling (AppCoordinator navigation, sidebar integration), AppKit-dependent widgets (NSOpenPanel, NSWorkspace.open for "reveal in Finder"), and platform-specific layout idioms that iPhone should re-implement rather than inherit. The Mac target will keep its current Views; M3+ builds fresh iOS Views on top of the shared ViewModels.
+
+**Moved (6 ViewModels):**
+
+- `ActivityViewModel.swift` — wraps `HermesDataService.fetchToolCalls`. Gated on `#if canImport(SQLite3)`.
+- `ConnectionStatusViewModel.swift` — heartbeat for remote SSH health; `@MainActor @Observable`.
+- `InsightsViewModel.swift` — aggregates over sessions via `HermesDataService`. Also exports `InsightsPeriod`, `ModelUsage`, `PlatformUsage`, `ToolUsage`, `NotableSession` and the free functions `formatDuration(_:)` / `formatTokens(_:)`. Gated on `#if canImport(SQLite3)`.
+- `LogsViewModel.swift` — log tail + filter state (level, component, search). Uses only `HermesLogService`; no SQLite3 gate needed. Exposes `LogFile` and `LogComponent` nested enums with `#if canImport(Darwin)`-guarded `LocalizedStringResource` display names.
+- `ProjectsViewModel.swift` — wraps `ProjectDashboardService`. Fully portable.
+- `RichChatViewModel.swift` — ~700 lines of ACP-event + message-group handling. Gated on `#if canImport(SQLite3)` because it pulls message history from `HermesDataService`. Also exports `ChatDisplayMode` and `MessageGroup`.
+
+**Reverted during M0d** (wasn't actually portable):
+
+- `GatewayViewModel.swift` — my initial audit grepped for service-type names but missed that this VM calls `context.runHermes()`, which is a Mac-target-only extension (`ServerContext+Mac.swift`). Moving the extension would require dragging `HermesFileService` too. Left in the Mac target; a later phase can revisit once `HermesFileService` moves or a different CLI-invocation surface lands.
+
+**Discovered while moving:**
+
+- The sed transform needs a `s/^@Observable$/@Observable/` neutralization — earlier I was accidentally producing `@Observable public` which is a Swift syntax error (the stray `public` has no target). Post-fix, the `public` lives on the `public final class X` line as intended.
+- Swift's `Observation` framework (for `@Observable`) needs an explicit `import Observation` in ScarfCore files because ScarfCore doesn't pull in SwiftUI. The Mac target gets `Observation` implicitly through SwiftUI, but a pure ScarfCore file doesn't. `Observation` is in the Swift toolchain from 5.9 onwards and compiles fine on Linux too.
+- Nested enums inside a public enclosing type do **not** inherit `public` for their `Identifiable.id` requirement — that property has to be `public var id` explicitly when the enum declares `Identifiable` conformance. My sed didn't touch deeper indent levels (nested types at indent 4 inside a class at indent 0) so these had to be fixed by hand.
+- `CharacterSet.whitespaces` is present in swift-corelibs-foundation on Linux — no guard needed there. The build error I saw was cascaded from `runHermes` not existing.
+
+**Test coverage (`M0dViewModelsTests`):**
+
+- `ConnectionStatusViewModel`: local context always-connected invariant; remote context idle-start; `Status` `Equatable`.
+- `LogsViewModel`: init defaults, `filteredEntries` across level / search / component filters, nested enum `Identifiable` ids and `loggerPrefix` routing.
+- `ProjectsViewModel`: init binding to `.local`.
+- `ActivityViewModel`, `InsightsViewModel`, `RichChatViewModel`: construction + key initial state. Tests wrapped in `#if canImport(SQLite3)` so they only run on Apple-target CI.
+- `MessageGroup.allMessages` / `toolCallCount` (also SQLite3-gated).
+- `InsightsPeriod.sinceDate` ordering.
+- `ChatDisplayMode` case coverage.
+
+**Rules next phases can rely on:**
+
+- When moving a file with `@Observable`, **remember to add `import Observation`** and to fix the stray `@Observable public` that sed produces.
+- ViewModels that call `context.runHermes(...)` or `context.openInLocalEditor(...)` are **not** portable to ScarfCore — those methods live in `ServerContext+Mac.swift`. Either leave the VM in the Mac target, or add the specific extension method to ScarfCore with a platform-neutral implementation path.
+- Types used only from the Mac app target (`GatewayInfo`, `PlatformInfo`, etc.) should NOT be marked `public` — keep them internal. My sed sometimes adds `public` to main-target-internal types when I'm reverting a move; strip those back with a second sed pass.
+- Views are deliberately **not** in ScarfCore. iOS will build its own Views against the shared ViewModels. M3 is where iOS's ViewRegistry / tab bar / NavigationStack composition happens.
+
 ### M1 — pending
 ### M2 — pending
 ### M3 — pending

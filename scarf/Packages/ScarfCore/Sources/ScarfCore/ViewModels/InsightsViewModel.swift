@@ -1,15 +1,21 @@
-import Foundation
-import ScarfCore
+// Gated on `canImport(SQLite3)` because every non-trivial code path calls
+// into `HermesDataService`, which itself is only compiled on Apple
+// platforms (SQLite3 is not a system module on Linux swift-corelibs).
+// iOS + macOS compile this unchanged; Linux CI skips it.
+#if canImport(SQLite3)
 
-enum InsightsPeriod: String, CaseIterable, Identifiable {
+import Foundation
+import Observation
+
+public enum InsightsPeriod: String, CaseIterable, Identifiable {
     case week = "7 Days"
     case month = "30 Days"
     case quarter = "90 Days"
     case all = "All Time"
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
-    var displayName: LocalizedStringResource {
+    public var displayName: LocalizedStringResource {
         switch self {
         case .week: return "7 Days"
         case .month: return "30 Days"
@@ -18,7 +24,7 @@ enum InsightsPeriod: String, CaseIterable, Identifiable {
         }
     }
 
-    var sinceDate: Date {
+    public var sinceDate: Date {
         let calendar = Calendar.current
         switch self {
         case .week: return calendar.date(byAdding: .day, value: -7, to: Date()) ?? Date()
@@ -29,78 +35,78 @@ enum InsightsPeriod: String, CaseIterable, Identifiable {
     }
 }
 
-struct ModelUsage: Identifiable {
-    var id: String { model }
-    let model: String
-    let sessions: Int
-    let inputTokens: Int
-    let outputTokens: Int
-    let cacheReadTokens: Int
-    let cacheWriteTokens: Int
-    let reasoningTokens: Int
-    var totalTokens: Int { inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens + reasoningTokens }
+public struct ModelUsage: Identifiable {
+    public var id: String { model }
+    public let model: String
+    public let sessions: Int
+    public let inputTokens: Int
+    public let outputTokens: Int
+    public let cacheReadTokens: Int
+    public let cacheWriteTokens: Int
+    public let reasoningTokens: Int
+    public var totalTokens: Int { inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens + reasoningTokens }
 }
 
-struct PlatformUsage: Identifiable {
-    var id: String { platform }
-    let platform: String
-    let sessions: Int
-    let messages: Int
-    let tokens: Int
+public struct PlatformUsage: Identifiable {
+    public var id: String { platform }
+    public let platform: String
+    public let sessions: Int
+    public let messages: Int
+    public let tokens: Int
 }
 
-struct ToolUsage: Identifiable {
-    var id: String { name }
-    let name: String
-    let count: Int
-    let percentage: Double
+public struct ToolUsage: Identifiable {
+    public var id: String { name }
+    public let name: String
+    public let count: Int
+    public let percentage: Double
 }
 
-struct NotableSession: Identifiable {
-    var id: String { "\(session.id)-\(label)" }
-    let label: String
-    let value: String
-    let session: HermesSession
-    let preview: String
+public struct NotableSession: Identifiable {
+    public var id: String { "\(session.id)-\(label)" }
+    public let label: String
+    public let value: String
+    public let session: HermesSession
+    public let preview: String
 }
 
 @Observable
-final class InsightsViewModel {
-    let context: ServerContext
+public final class InsightsViewModel {
+    public let context: ServerContext
     private let dataService: HermesDataService
 
-    init(context: ServerContext = .local) {
+    public init(context: ServerContext = .local) {
         self.context = context
         self.dataService = HermesDataService(context: context)
     }
 
 
-    var period: InsightsPeriod = .month
-    var isLoading = true
+    public var period: InsightsPeriod = .month
+    public var isLoading = true
 
-    var sessions: [HermesSession] = []
-    var sessionPreviews: [String: String] = [:]
-    var userMessageCount = 0
-    var totalMessages = 0
-    var totalToolCalls = 0
-    var totalInputTokens = 0
-    var totalOutputTokens = 0
-    var totalCacheReadTokens = 0
-    var totalCacheWriteTokens = 0
-    var totalReasoningTokens = 0
-    var totalTokens = 0
-    var totalCost: Double = 0
-    var activeTime: TimeInterval = 0
-    var avgSessionDuration: TimeInterval = 0
+    public var sessions: [HermesSession] = []
+    public var sessionPreviews: [String: String] = [:]
+    public var userMessageCount = 0
+    public var totalMessages = 0
+    public var totalToolCalls = 0
+    public var totalInputTokens = 0
+    public var totalOutputTokens = 0
+    public var totalCacheReadTokens = 0
+    public var totalCacheWriteTokens = 0
+    public var totalReasoningTokens = 0
+    public var totalTokens = 0
+    public var totalCost: Double = 0
+    public var activeTime: TimeInterval = 0
+    public var avgSessionDuration: TimeInterval = 0
 
-    var modelUsage: [ModelUsage] = []
-    var platformUsage: [PlatformUsage] = []
-    var toolUsage: [ToolUsage] = []
-    var hourlyActivity: [Int: Int] = [:]
-    var dailyActivity: [Int: Int] = [:]
-    var notableSessions: [NotableSession] = []
+    public var modelUsage: [ModelUsage] = []
+    public var platformUsage: [PlatformUsage] = []
+    public var toolUsage: [ToolUsage] = []
+    public var hourlyActivity: [Int: Int] = [:]
+    public var dailyActivity: [Int: Int] = [:]
+    public var notableSessions: [NotableSession] = []
 
-    func load() async {
+    public func load() async {
         isLoading = true
         // refresh() forces a fresh remote snapshot each load. On local it's
         // a cheap reopen of the live DB.
@@ -128,7 +134,7 @@ final class InsightsViewModel {
         isLoading = false
     }
 
-    func previewFor(_ session: HermesSession) -> String {
+    public func previewFor(_ session: HermesSession) -> String {
         if let title = session.title, !title.isEmpty { return title }
         if let preview = sessionPreviews[session.id], !preview.isEmpty { return preview }
         return session.id
@@ -240,7 +246,7 @@ final class InsightsViewModel {
     }
 }
 
-func formatDuration(_ interval: TimeInterval) -> String {
+public func formatDuration(_ interval: TimeInterval) -> String {
     let hours = Int(interval) / 3600
     let minutes = (Int(interval) % 3600) / 60
     if hours > 0 {
@@ -249,7 +255,7 @@ func formatDuration(_ interval: TimeInterval) -> String {
     return "\(minutes)m"
 }
 
-func formatTokens(_ count: Int) -> String {
+public func formatTokens(_ count: Int) -> String {
     if count >= 1_000_000 {
         return String(format: "%.1fM", Double(count) / 1_000_000)
     } else if count >= 1_000 {
@@ -257,3 +263,5 @@ func formatTokens(_ count: Int) -> String {
     }
     return "\(count)"
 }
+
+#endif // canImport(SQLite3)
