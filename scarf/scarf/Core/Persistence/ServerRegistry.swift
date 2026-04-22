@@ -82,6 +82,11 @@ final class ServerRegistry {
     /// Flip the default server to `id`. Passing `ServerContext.local.id`
     /// clears the flag on every remote entry, making Local the implicit
     /// default. Passing an unknown ID is a no-op. Persisted on return.
+    ///
+    /// Intentionally doesn't fire `onEntriesChanged` — that hook means "the
+    /// set of servers changed" and drives the menu-bar fanout rebuild. A
+    /// default-flag flip doesn't change the set; SwiftUI views reading
+    /// `defaultServerID` redraw via `@Observable`'s tracking of `entries`.
     func setDefaultServer(_ id: ServerID) {
         var changed = false
         for idx in entries.indices {
@@ -93,7 +98,6 @@ final class ServerRegistry {
         }
         if changed {
             save()
-            onEntriesChanged?()
         }
     }
 
