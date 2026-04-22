@@ -21,7 +21,12 @@ xcuserdata/
 
 # Swift Package Manager
 .build/
+# `Packages/` is the historical SwiftPM checkout dir for downloaded deps
+# (pre-Xcode-14). We keep it ignored — but NOT our local-package checkout
+# at scarf/Packages/, which is part of the source tree (ScarfCore, etc.)
+# and must ship in the repo.
 Packages/
+!scarf/Packages/
 Package.pins
 Package.resolved
 *.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/

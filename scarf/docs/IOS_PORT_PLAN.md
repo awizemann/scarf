@@ -160,25 +160,69 @@ the Mac app in a working state:
 
 ## Progress Log
 
-### M0a — in progress
-**Goal:** Create `Packages/ScarfCore` scaffolding and migrate the 13 leaf
-Model files to it. `ServerContext.swift` stays in the Mac target (it
-depends on Transport + HermesFileService and is not a leaf).
+### M0a — shipped in PR #31
 
-Expected artifacts when done:
-- `Packages/ScarfCore/Package.swift` exists.
-- 13 model files moved under `Sources/ScarfCore/Models/`.
-- `HermesConstants.swift` split: portable parts (`sqliteTransient`,
-  `QueryDefaults`, `FileSizeUnit`) move to ScarfCore; the deprecated
-  `HermesPaths` enum stays behind (it references `ServerContext.local`).
-- Every moved type annotated `public` with explicit `public init`.
-- `scarf.xcodeproj/project.pbxproj` gains one `XCLocalSwiftPackageReference`
-  for `Packages/ScarfCore` and one `XCSwiftPackageProductDependency` on the
-  `scarf` target (and `scarfTests` + `scarfUITests` inherit via the target).
-- 35 main-target files get `import ScarfCore` added.
-- Mac app builds and runs identically to before.
+**Shipped:**
 
-(This section will be finalized when M0a is merged.)
+- `Packages/ScarfCore/Package.swift` (Swift tools 6.0, targets macOS 14 +
+  iOS 18). **Language mode pinned at `.v5`** to match the Mac app's
+  `SWIFT_VERSION = 5.0`. Two types (`ACPEvent.availableCommands` and
+  `ACPToolCallEvent.rawInput`) claim `Sendable` while carrying
+  `[String: Any]` payloads — strict Swift 6 rejects that. A future
+  cleanup phase should replace those with typed payloads and bump to
+  `.v6`.
+- 13 leaf model files moved under `Sources/ScarfCore/Models/`.
+- `HermesConstants.swift` split: `sqliteTransient` + `QueryDefaults` +
+  `FileSizeUnit` are in ScarfCore; the deprecated `HermesPaths` enum is
+  parked in the Mac target at `HermesPaths+Deprecated.swift`. Zero
+  callers in-tree — it can be deleted in M0b alongside `ServerContext`.
+- Every moved type, member, and (where needed) nested `CodingKeys` is
+  `public`. Every struct got an explicit `public init(...)` — Swift's
+  synthesized memberwise init is `internal` and would have broken
+  cross-module construction. A throwaway Python generator did the
+  mechanical work; tests in `ScarfCoreTests` exercise every generated
+  init so parameter drift would fail CI, not a reviewer.
+- `scarf.xcodeproj/project.pbxproj` gains one
+  `XCLocalSwiftPackageReference` for `Packages/ScarfCore` and links the
+  product into the `scarf` target.
+- 49 main-target files (not 35 as originally estimated — many `View`
+  files only `import SwiftUI` without `Foundation`) got
+  `import ScarfCore`.
+
+**Linux-CI compatibility additions (for `swift test` in containers):**
+
+- `SQLite3` system module exists on macOS/iOS but not on Linux
+  swift-corelibs. `sqliteTransient` in `HermesConstants.swift` is
+  wrapped in `#if canImport(SQLite3)`. Apple platforms compile it
+  unchanged; Linux just doesn't see it (no one on Linux will execute
+  Hermes DB code anyway).
+- `LocalizedStringResource` is an Apple-only Foundation type.
+  `ToolKind.displayName` (in `HermesMessage.swift`) and
+  `MCPTransport.displayName` (in `HermesMCPServer.swift`) are wrapped
+  in `#if canImport(Darwin)`. Apple platforms compile them unchanged;
+  Linux builds skip them.
+
+**Test coverage (`ScarfCoreTests`):** 16 tests that construct every
+moved type via its `public init`, verify computed properties, round-trip
+Codable (`HermesCronJob`, `WidgetValue`), exercise nested config
+`.empty` chains, and assert `KnownPlatforms` / `MCPServerPreset.gallery`
+statics are readable. Run via `docker run --rm -v
+$PWD/scarf/Packages/ScarfCore:/work -w /work swift:6.0 swift test`.
+
+**Rules next phases can rely on:**
+
+- The `public init` pattern is now established for ScarfCore structs.
+  M0b+ should add explicit `public init(...)` to every new struct moved
+  into the package.
+- `#if canImport(Darwin)` is the package's "Apple-only API" guard.
+  Prefer this over `os(iOS) || os(macOS) || ...` — it's shorter and
+  catches the same platforms.
+- `#if canImport(SQLite3)` is the pattern for anything that needs
+  Apple's built-in SQLite. When HermesDataService moves in M0c, use
+  this same guard for the actual Swift-SQLite bindings.
+- The Mac app still uses Swift 5 language mode. Do **not** add
+  `nonisolated` to new ScarfCore APIs pre-emptively; match the
+  surrounding conventions.
 
 ### M0b — pending
 ### M0c — pending

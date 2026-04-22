@@ -6,12 +6,14 @@ public enum MCPTransport: String, Sendable, Equatable, CaseIterable, Identifiabl
 
     public var id: String { rawValue }
 
+    #if canImport(Darwin)
     public var displayName: LocalizedStringResource {
         switch self {
         case .stdio: return "Local (stdio)"
         case .http: return "Remote (HTTP)"
         }
     }
+    #endif
 }
 
 public struct HermesMCPServer: Identifiable, Sendable, Equatable {
