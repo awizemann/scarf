@@ -183,6 +183,24 @@ struct ProjectTemplateUninstaller: Sendable {
             try stripMemoryBlock(blockId: blockId, memoryPath: plan.memoryPath, transport: transport)
         }
 
+        // 4a. Config Keychain items — remove every secret the template's
+        // install step stashed in the login Keychain. Items that were
+        // already deleted (e.g. user cleaned them with Keychain Access)
+        // hit the `errSecItemNotFound` no-op path inside the wrapper, so
+        // a stale lock doesn't abort the rest of the uninstall.
+        let keychain = ProjectConfigKeychain()
+        for uri in plan.lock.configKeychainItems ?? [] {
+            guard let ref = TemplateKeychainRef.parse(uri) else {
+                Self.logger.warning("lock recorded unparseable keychain uri \(uri, privacy: .public); skipping")
+                continue
+            }
+            do {
+                try keychain.delete(ref: ref)
+            } catch {
+                Self.logger.warning("couldn't delete keychain item \(uri, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+
         // 5. Projects registry — remove the entry by path (more stable
         // than name: user may have renamed the project in the UI).
         let dashboardService = ProjectDashboardService(context: context)

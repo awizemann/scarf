@@ -52,8 +52,25 @@ struct ProjectTemplateService: Sendable {
             throw ProjectTemplateError.manifestParseFailed(error.localizedDescription)
         }
 
-        guard manifest.schemaVersion == 1 else {
+        // schemaVersion 1 is the original v2.2 bundle; 2 adds the
+        // optional `config` block. Both are valid. Newer versions get
+        // refused so the installer never silently misinterprets a
+        // future-shape bundle.
+        guard manifest.schemaVersion == 1 || manifest.schemaVersion == 2 else {
             throw ProjectTemplateError.unsupportedSchemaVersion(manifest.schemaVersion)
+        }
+
+        // Validate the optional config schema at inspect time — a
+        // malformed schema (duplicate keys, secret-with-default, etc.)
+        // gets rejected before the user ever sees the preview sheet.
+        if let schema = manifest.config {
+            do {
+                try ProjectConfigService.validateSchema(schema)
+            } catch {
+                throw ProjectTemplateError.manifestParseFailed(
+                    "invalid config schema: \(error.localizedDescription)"
+                )
+            }
         }
 
         let files = try Self.walk(unpackedDir)
@@ -179,6 +196,37 @@ struct ProjectTemplateService: Sendable {
             )
         }
 
+        // Configuration schema + manifest cache. The installer writes
+        // `.scarf/config.json` (non-secret values) + `.scarf/manifest.json`
+        // (schema cache used by the post-install editor) when the
+        // template declares a non-empty schema. Both paths go into
+        // projectFiles so the uninstaller picks them up via the lock.
+        var configSchema: TemplateConfigSchema? = nil
+        var manifestCachePath: String? = nil
+        if let schema = manifest.config, !schema.isEmpty {
+            configSchema = schema
+            let configPath = projectDir + "/.scarf/config.json"
+            projectFiles.append(
+                // Source is synthesized by the installer from configValues;
+                // no file in the unpacked bundle maps to this entry. We use
+                // an empty `sourceRelativePath` as the "no physical source"
+                // sentinel — the installer special-cases it below (see
+                // ProjectTemplateInstaller.createProjectFiles).
+                TemplateFileCopy(
+                    sourceRelativePath: "",
+                    destinationPath: configPath
+                )
+            )
+            let cachePath = projectDir + "/.scarf/manifest.json"
+            manifestCachePath = cachePath
+            projectFiles.append(
+                TemplateFileCopy(
+                    sourceRelativePath: "template.json",
+                    destinationPath: cachePath
+                )
+            )
+        }
+
         return TemplateInstallPlan(
             manifest: manifest,
             unpackedDir: inspection.unpackedDir,
@@ -189,7 +237,10 @@ struct ProjectTemplateService: Sendable {
             cronJobs: cronJobs,
             memoryAppendix: memoryAppendix,
             memoryPath: context.paths.memoryMD,
-            projectRegistryName: Self.uniqueProjectName(preferred: manifest.name, context: context)
+            projectRegistryName: Self.uniqueProjectName(preferred: manifest.name, context: context),
+            configSchema: configSchema,
+            configValues: [:],   // filled in by TemplateInstallerViewModel before install()
+            manifestCachePath: manifestCachePath
         )
     }
 
@@ -416,6 +467,18 @@ struct ProjectTemplateService: Sendable {
         if claimsMemory != hasMemoryFile {
             throw ProjectTemplateError.contentClaimMismatch(
                 "manifest.contents.memory.append=\(claimsMemory) disagrees with memory/append.md presence=\(hasMemoryFile)"
+            )
+        }
+
+        // Config claim must match the schema's actual field count so
+        // the preview sheet is honest about the size of the configure
+        // step. `nil` in contents means "no schema" just like `0`;
+        // we normalise both to 0 before comparing.
+        let claimedConfig = manifest.contents.config ?? 0
+        let actualConfig = manifest.config?.fields.count ?? 0
+        if claimedConfig != actualConfig {
+            throw ProjectTemplateError.contentClaimMismatch(
+                "manifest.contents.config=\(claimedConfig) but config.schema has \(actualConfig) field(s)"
             )
         }
     }

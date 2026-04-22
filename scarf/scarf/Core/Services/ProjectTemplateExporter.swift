@@ -182,9 +182,25 @@ struct ProjectTemplateExporter: Sendable {
             try data.write(to: URL(fileURLWithPath: memDir + "/append.md"))
         }
 
+        // If the source project was itself installed from a schemaful
+        // template, its `.scarf/manifest.json` carries the schema we
+        // want to forward to the exported bundle. We carry only the
+        // SCHEMA — never user values. Exporting must be safe on a
+        // project with live config: the schema is author-supplied
+        // metadata; the values in `config.json` are the current user's
+        // secrets or personal settings.
+        let forwardedSchema: TemplateConfigSchema? = try Self.readCachedSchema(
+            from: plan.projectDir
+        )
+
+        // Bump schemaVersion to 2 when a schema is carried through;
+        // remain on 1 otherwise so schema-less exports stay
+        // byte-compatible with existing v2.2 catalog validators.
+        let schemaVersion = forwardedSchema == nil ? 1 : 2
+
         // Manifest — claims exactly what we just wrote
         let manifest = ProjectTemplateManifest(
-            schemaVersion: 1,
+            schemaVersion: schemaVersion,
             id: inputs.templateId,
             name: inputs.templateName,
             version: inputs.templateVersion,
@@ -204,8 +220,10 @@ struct ProjectTemplateExporter: Sendable {
                 instructions: plan.instructionFiles.isEmpty ? nil : plan.instructionFiles,
                 skills: plan.skillIds.isEmpty ? nil : plan.skillIds.compactMap { $0.split(separator: "/").last.map(String.init) },
                 cron: plan.cronJobs.isEmpty ? nil : plan.cronJobs.count,
-                memory: (inputs.memoryAppendix?.isEmpty == false) ? TemplateMemoryClaim(append: true) : nil
-            )
+                memory: (inputs.memoryAppendix?.isEmpty == false) ? TemplateMemoryClaim(append: true) : nil,
+                config: forwardedSchema?.fields.count
+            ),
+            config: forwardedSchema
         )
         let manifestEncoder = JSONEncoder()
         manifestEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -237,6 +255,23 @@ struct ProjectTemplateExporter: Sendable {
         if !FileManager.default.fileExists(atPath: parent) {
             try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
         }
+    }
+
+    /// Read the cached manifest from `<project>/.scarf/manifest.json` (if
+    /// present) and pull out just the config schema. Values in
+    /// `.scarf/config.json` are intentionally ignored — an exported
+    /// bundle carries the schema's shape, never the current user's
+    /// configured values.
+    nonisolated private static func readCachedSchema(from projectDir: String) throws -> TemplateConfigSchema? {
+        let manifestPath = projectDir + "/.scarf/manifest.json"
+        guard FileManager.default.fileExists(atPath: manifestPath) else { return nil }
+        let data = try Data(contentsOf: URL(fileURLWithPath: manifestPath))
+        // Use a bespoke decode rather than ProjectTemplateManifest so
+        // this helper stays resilient if the manifest shape evolves
+        // incompatibly in a future release.
+        struct OnlyConfig: Decodable { let config: TemplateConfigSchema? }
+        let onlyConfig = try JSONDecoder().decode(OnlyConfig.self, from: data)
+        return onlyConfig.config
     }
 
     /// Convert a live cron job (with runtime state) into the spec the

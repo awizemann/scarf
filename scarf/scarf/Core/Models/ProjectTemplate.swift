@@ -23,6 +23,12 @@ struct ProjectTemplateManifest: Codable, Sendable, Equatable {
     let icon: String?
     let screenshots: [String]?
     let contents: TemplateContents
+    /// Optional configuration schema (added in manifest schemaVersion 2).
+    /// When present, the installer presents a form during install and
+    /// writes values to `<project>/.scarf/config.json` + the Keychain.
+    /// Schema-v1 manifests omit this field entirely — Codable's
+    /// optional-field decoding keeps them working unchanged.
+    let config: TemplateConfigSchema?
 
     /// Filesystem-safe slug derived from `id` (`"owner/name"` → `"owner-name"`).
     /// Used for the install directory name, skills namespace, and cron-job tag.
@@ -51,6 +57,11 @@ struct TemplateContents: Codable, Sendable, Equatable {
     let skills: [String]?
     let cron: Int?
     let memory: TemplateMemoryClaim?
+    /// Number of configuration fields the template ships (schemaVersion 2+).
+    /// Cross-checked against `manifest.config?.fields.count` by the
+    /// validator so a bundle can't hide a schema from the preview.
+    /// `nil` or `0` means schema-less (v1-compatible behaviour).
+    let config: Int?
 }
 
 struct TemplateMemoryClaim: Codable, Sendable, Equatable {
@@ -130,10 +141,39 @@ struct TemplateInstallPlan: Sendable {
     /// `ProjectEntry.name` that will be appended to the projects registry.
     let projectRegistryName: String
 
+    /// Configuration schema declared by the template (manifest schemaVersion 2).
+    /// `nil` means the template is schema-less — the installer skips the
+    /// config sheet and writes no `.scarf/config.json` or manifest cache.
+    let configSchema: TemplateConfigSchema?
+
+    /// Values the user entered in the configure sheet. Populated by the
+    /// VM just before `install()` runs; empty when `configSchema` is nil.
+    /// Secrets appear here as `.keychainRef(...)` — the bytes themselves
+    /// were routed straight from the form field into the Keychain and
+    /// never held in memory past that point.
+    var configValues: [String: TemplateConfigValue]
+
+    /// Path at which the installer will stash a copy of `template.json`
+    /// so the post-install Configuration editor can render the form
+    /// offline. `nil` when `configSchema` is nil.
+    let manifestCachePath: String?
+
     /// Convenience: total number of writes (files + cron jobs + optional
-    /// memory append + registry append). Displayed in the preview sheet.
+    /// memory append + registry append + optional config.json + one
+    /// entry per secret written to the Keychain). Displayed in the
+    /// preview sheet.
     nonisolated var totalWriteCount: Int {
-        projectFiles.count + skillsFiles.count + cronJobs.count + (memoryAppendix == nil ? 0 : 1) + 1
+        let configFileCount = (configSchema?.isEmpty ?? true) ? 0 : 1
+        let secretCount = configValues.values.filter {
+            if case .keychainRef = $0 { return true } else { return false }
+        }.count
+        return projectFiles.count
+            + skillsFiles.count
+            + cronJobs.count
+            + (memoryAppendix == nil ? 0 : 1)
+            + 1  // registry entry
+            + configFileCount
+            + secretCount
     }
 }
 
@@ -161,6 +201,17 @@ struct TemplateLock: Codable, Sendable {
     let skillsFiles: [String]
     let cronJobNames: [String]
     let memoryBlockId: String?
+    /// Every `keychain://service/account` URI the installer stored in
+    /// the Keychain for this project's secret fields. Empty/nil for
+    /// schema-less (v1-style) installs. The uninstaller iterates this
+    /// list and calls `SecItemDelete` for each entry; absent on older
+    /// lock files so Codable's optional decoding keeps pre-2.3 installs
+    /// uninstallable.
+    let configKeychainItems: [String]?
+    /// Field keys the installer wrote to `<project>/.scarf/config.json`.
+    /// Informational — the actual removal of config.json rides on
+    /// `projectFiles`. Optional for back-compat.
+    let configFields: [String]?
 
     enum CodingKeys: String, CodingKey {
         case templateId = "template_id"
@@ -172,6 +223,8 @@ struct TemplateLock: Codable, Sendable {
         case skillsFiles = "skills_files"
         case cronJobNames = "cron_job_names"
         case memoryBlockId = "memory_block_id"
+        case configKeychainItems = "config_keychain_items"
+        case configFields = "config_fields"
     }
 }
 

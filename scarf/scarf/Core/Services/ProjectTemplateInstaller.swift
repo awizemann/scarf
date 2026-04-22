@@ -87,12 +87,44 @@ struct ProjectTemplateInstaller: Sendable {
         let transport = context.makeTransport()
         try transport.createDirectory(plan.projectDir)
         for copy in plan.projectFiles {
-            let source = plan.unpackedDir + "/" + copy.sourceRelativePath
-            let data = try Data(contentsOf: URL(fileURLWithPath: source))
             let parent = (copy.destinationPath as NSString).deletingLastPathComponent
             try transport.createDirectory(parent)
+
+            // Empty `sourceRelativePath` is the "synthesized content"
+            // sentinel used by `buildPlan` for `.scarf/config.json`.
+            // The installer materialises config.json from
+            // `plan.configValues` here rather than copying a bundle
+            // file that doesn't exist.
+            if copy.sourceRelativePath.isEmpty {
+                if copy.destinationPath.hasSuffix("/.scarf/config.json") {
+                    let data = try encodeConfigFile(plan: plan)
+                    try transport.writeFile(copy.destinationPath, data: data)
+                    continue
+                }
+                throw ProjectTemplateError.requiredFileMissing(
+                    "synthesized file with unknown destination: \(copy.destinationPath)"
+                )
+            }
+
+            let source = plan.unpackedDir + "/" + copy.sourceRelativePath
+            let data = try Data(contentsOf: URL(fileURLWithPath: source))
             try transport.writeFile(copy.destinationPath, data: data)
         }
+    }
+
+    /// Serialise `plan.configValues` into the `<project>/.scarf/config.json`
+    /// shape. Secrets appear as `keychainRef` URIs — the raw bytes were
+    /// routed into the Keychain by the VM before `install()` was called.
+    nonisolated private func encodeConfigFile(plan: TemplateInstallPlan) throws -> Data {
+        let file = ProjectConfigFile(
+            schemaVersion: 2,
+            templateId: plan.manifest.id,
+            values: plan.configValues,
+            updatedAt: ISO8601DateFormatter().string(from: Date())
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(file)
     }
 
     // MARK: - Skills
@@ -189,6 +221,21 @@ struct ProjectTemplateInstaller: Sendable {
         plan: TemplateInstallPlan,
         cronJobNames: [String]
     ) throws {
+        // Every value that ended up as a keychainRef in config.json gets
+        // tracked in the lock so the uninstaller can SecItemDelete each
+        // entry. Field keys are recorded separately for informational
+        // display in the uninstall preview sheet.
+        let keychainItems: [String]? = {
+            let refs = plan.configValues.compactMap { (_, value) -> String? in
+                if case .keychainRef(let uri) = value { return uri } else { return nil }
+            }
+            return refs.isEmpty ? nil : refs.sorted()
+        }()
+        let configFields: [String]? = {
+            guard let schema = plan.configSchema, !schema.isEmpty else { return nil }
+            return schema.fields.map(\.key)
+        }()
+
         let lock = TemplateLock(
             templateId: plan.manifest.id,
             templateVersion: plan.manifest.version,
@@ -198,7 +245,9 @@ struct ProjectTemplateInstaller: Sendable {
             skillsNamespaceDir: plan.skillsNamespaceDir,
             skillsFiles: plan.skillsFiles.map(\.destinationPath),
             cronJobNames: cronJobNames,
-            memoryBlockId: plan.memoryAppendix == nil ? nil : plan.manifest.id
+            memoryBlockId: plan.memoryAppendix == nil ? nil : plan.manifest.id,
+            configKeychainItems: keychainItems,
+            configFields: configFields
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

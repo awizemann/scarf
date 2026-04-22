@@ -106,10 +106,15 @@ import Foundation
         id: String = "test/example",
         cron: Int? = nil,
         skills: [String]? = nil,
-        instructions: [String]? = nil
+        instructions: [String]? = nil,
+        configFieldCount: Int? = nil,
+        configSchema: TemplateConfigSchema? = nil
     ) -> ProjectTemplateManifest {
-        ProjectTemplateManifest(
-            schemaVersion: 1,
+        // schemaVersion auto-bumps to 2 when a schema is present so tests
+        // that exercise the schema path mirror real manifest behaviour.
+        let version = (configSchema != nil) ? 2 : 1
+        return ProjectTemplateManifest(
+            schemaVersion: version,
             id: id,
             name: "Example",
             version: "1.0.0",
@@ -127,8 +132,10 @@ import Foundation
                 instructions: instructions,
                 skills: skills,
                 cron: cron,
-                memory: nil
-            )
+                memory: nil,
+                config: configFieldCount ?? configSchema?.fields.count
+            ),
+            config: configSchema
         )
     }
 
@@ -468,6 +475,283 @@ import Foundation
     // MARK: - Registry snapshot helpers (dup'd intentionally from
     // ProjectTemplateInstallerTests — small helper, not worth a shared
     // fixture file for one more suite).
+
+    nonisolated private static func snapshotRegistry() -> Data? {
+        let path = ServerContext.local.paths.projectsRegistry
+        return try? Data(contentsOf: URL(fileURLWithPath: path))
+    }
+
+    nonisolated private static func restoreRegistry(_ snapshot: Data?) {
+        let path = ServerContext.local.paths.projectsRegistry
+        if let snapshot {
+            try? snapshot.write(to: URL(fileURLWithPath: path))
+        } else {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+    }
+}
+
+/// End-to-end tests for manifest schemaVersion 2 (template configuration).
+/// Exercises the full cycle: inspect → buildPlan → install → uninstall
+/// against a synthesized schemaful bundle. Uses an isolated Keychain
+/// service suffix so no leftover login-Keychain items remain after the
+/// test — every secret we write is deleted on teardown.
+@Suite struct ProjectTemplateConfigInstallTests {
+
+    /// Minimal schemaful manifest with one non-secret field + one
+    /// secret field. Written into the synthesized `.scarftemplate`
+    /// bundle for the round-trip tests.
+    static func makeSchemafulManifest() -> ProjectTemplateManifest {
+        ProjectTemplateServiceTests.sampleManifest(
+            id: "tester/configured",
+            configSchema: TemplateConfigSchema(
+                fields: [
+                    .init(key: "site_url", type: .string, label: "Site URL",
+                          description: "where to ping", required: true, placeholder: nil,
+                          defaultValue: nil, options: nil, minLength: nil,
+                          maxLength: nil, pattern: nil, minNumber: nil,
+                          maxNumber: nil, step: nil, itemType: nil,
+                          minItems: nil, maxItems: nil),
+                    .init(key: "api_token", type: .secret, label: "API Token",
+                          description: nil, required: true, placeholder: nil,
+                          defaultValue: nil, options: nil, minLength: nil,
+                          maxLength: nil, pattern: nil, minNumber: nil,
+                          maxNumber: nil, step: nil, itemType: nil,
+                          minItems: nil, maxItems: nil),
+                ],
+                modelRecommendation: nil
+            )
+        )
+    }
+
+    @Test func inspectAcceptsSchemaV2Bundle() throws {
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+
+        let manifest = Self.makeSchemafulManifest()
+        let manifestData = try JSONEncoder().encode(manifest)
+        let manifestString = String(data: manifestData, encoding: .utf8)!
+
+        let bundle = try ProjectTemplateServiceTests.makeBundle(dir: scratch, files: [
+            "template.json": manifestString,
+            "README.md": "# r",
+            "AGENTS.md": "# a",
+            "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
+        ], includeManifest: false)
+
+        let service = ProjectTemplateService(context: .local)
+        let inspection = try service.inspect(zipPath: bundle)
+        defer { service.cleanupTempDir(inspection.unpackedDir) }
+
+        #expect(inspection.manifest.schemaVersion == 2)
+        #expect(inspection.manifest.config?.fields.count == 2)
+    }
+
+    @Test func buildPlanSurfacesSchemaAndQueuesConfigFiles() throws {
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+
+        let manifest = Self.makeSchemafulManifest()
+        let manifestJSON = String(data: try JSONEncoder().encode(manifest), encoding: .utf8)!
+        let bundle = try ProjectTemplateServiceTests.makeBundle(dir: scratch, files: [
+            "template.json": manifestJSON,
+            "README.md": "# r", "AGENTS.md": "# a",
+            "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
+        ], includeManifest: false)
+
+        let service = ProjectTemplateService(context: .local)
+        let inspection = try service.inspect(zipPath: bundle)
+        defer { service.cleanupTempDir(inspection.unpackedDir) }
+        let plan = try service.buildPlan(inspection: inspection, parentDir: scratch)
+
+        // Schema carried through the plan.
+        #expect(plan.configSchema?.fields.count == 2)
+        #expect(plan.manifestCachePath?.hasSuffix("/.scarf/manifest.json") == true)
+        // config.json + manifest.json entries in projectFiles.
+        let destinations = plan.projectFiles.map(\.destinationPath)
+        #expect(destinations.contains { $0.hasSuffix("/.scarf/config.json") })
+        #expect(destinations.contains { $0.hasSuffix("/.scarf/manifest.json") })
+    }
+
+    @Test func verifyClaimsRejectsConfigCountMismatch() throws {
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+
+        // Hand-build a manifest whose contents.config claim (2) doesn't
+        // match its schema.fields.count (1) — validator should reject.
+        let schema = TemplateConfigSchema(
+            fields: [
+                .init(key: "only", type: .string, label: "Only",
+                      description: nil, required: false, placeholder: nil,
+                      defaultValue: nil, options: nil, minLength: nil,
+                      maxLength: nil, pattern: nil, minNumber: nil,
+                      maxNumber: nil, step: nil, itemType: nil,
+                      minItems: nil, maxItems: nil)
+            ],
+            modelRecommendation: nil
+        )
+        let bogus = ProjectTemplateServiceTests.sampleManifest(
+            id: "tester/mismatch",
+            configFieldCount: 2,                // claim lies
+            configSchema: schema                // reality is 1
+        )
+        let manifestJSON = String(data: try JSONEncoder().encode(bogus), encoding: .utf8)!
+        let bundle = try ProjectTemplateServiceTests.makeBundle(dir: scratch, files: [
+            "template.json": manifestJSON,
+            "README.md": "# r", "AGENTS.md": "# a",
+            "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
+        ], includeManifest: false)
+
+        let service = ProjectTemplateService(context: .local)
+        #expect(throws: ProjectTemplateError.self) {
+            try service.inspect(zipPath: bundle)
+        }
+    }
+
+    @Test func installWritesConfigJsonAndManifestCache() throws {
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        let parentDir = scratch + "/parent"
+        try FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
+
+        let manifest = Self.makeSchemafulManifest()
+        let manifestJSON = String(data: try JSONEncoder().encode(manifest), encoding: .utf8)!
+        let bundle = try ProjectTemplateServiceTests.makeBundle(dir: scratch, files: [
+            "template.json": manifestJSON,
+            "README.md": "# r", "AGENTS.md": "# a",
+            "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
+        ], includeManifest: false)
+
+        let service = ProjectTemplateService(context: .local)
+        let inspection = try service.inspect(zipPath: bundle)
+        defer { service.cleanupTempDir(inspection.unpackedDir) }
+        var plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
+
+        // Isolated Keychain service suffix so the test doesn't touch
+        // the real login Keychain.
+        let suffix = "tests-" + UUID().uuidString
+        let keychain = ProjectConfigKeychain(testServiceSuffix: suffix)
+        let configService = ProjectConfigService(keychain: keychain)
+
+        // Store secret via the service (VM would do this before install).
+        let project = ProjectEntry(name: manifest.name, path: plan.projectDir)
+        let secretRef = try configService.storeSecret(
+            templateSlug: manifest.slug,
+            fieldKey: "api_token",
+            project: project,
+            secret: Data("sk-top-secret".utf8)
+        )
+        plan.configValues = [
+            "site_url": .string("https://example.com"),
+            "api_token": secretRef
+        ]
+
+        let registryBefore = Self.snapshotRegistry()
+        defer { Self.restoreRegistry(registryBefore) }
+
+        let installer = ProjectTemplateInstaller(context: .local)
+        _ = try installer.install(plan: plan)
+
+        // config.json landed with non-secret values + keychain ref.
+        let configPath = plan.projectDir + "/.scarf/config.json"
+        #expect(FileManager.default.fileExists(atPath: configPath))
+        let configData = try Data(contentsOf: URL(fileURLWithPath: configPath))
+        let configFile = try JSONDecoder().decode(ProjectConfigFile.self, from: configData)
+        #expect(configFile.values["site_url"] == .string("https://example.com"))
+        if case .keychainRef(let uri) = configFile.values["api_token"] {
+            #expect(uri.hasPrefix("keychain://"))
+        } else {
+            Issue.record("api_token should have been stored as keychainRef")
+        }
+
+        // manifest.json cache landed for the post-install editor.
+        let cachePath = plan.projectDir + "/.scarf/manifest.json"
+        #expect(FileManager.default.fileExists(atPath: cachePath))
+        let cachedManifest = try JSONDecoder().decode(
+            ProjectTemplateManifest.self,
+            from: Data(contentsOf: URL(fileURLWithPath: cachePath))
+        )
+        #expect(cachedManifest.config?.fields.count == 2)
+
+        // Lock file records the keychain item so uninstall can clean up.
+        let lockPath = plan.projectDir + "/.scarf/template.lock.json"
+        let lockData = try Data(contentsOf: URL(fileURLWithPath: lockPath))
+        let lock = try JSONDecoder().decode(TemplateLock.self, from: lockData)
+        #expect(lock.configKeychainItems?.count == 1)
+        #expect(lock.configFields == ["site_url", "api_token"])
+
+        // Clean up the real Keychain entry we created outside the
+        // test-suffixed namespace (storeSecret uses real service name
+        // because the test's config-service wasn't isolated for this
+        // call's secret; we manually delete via our test keychain).
+        if let ref = TemplateKeychainRef.parse(
+            (configFile.values["api_token"].flatMap { v -> String? in
+                if case .keychainRef(let u) = v { return u } else { return nil }
+            }) ?? ""
+        ) {
+            try? ProjectConfigKeychain().delete(ref: ref)
+        }
+    }
+
+    @Test func uninstallDeletesKeychainItemsViaLock() throws {
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        let parentDir = scratch + "/parent"
+        try FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
+
+        let manifest = Self.makeSchemafulManifest()
+        let manifestJSON = String(data: try JSONEncoder().encode(manifest), encoding: .utf8)!
+        let bundle = try ProjectTemplateServiceTests.makeBundle(dir: scratch, files: [
+            "template.json": manifestJSON,
+            "README.md": "# r", "AGENTS.md": "# a",
+            "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
+        ], includeManifest: false)
+
+        let service = ProjectTemplateService(context: .local)
+        let inspection = try service.inspect(zipPath: bundle)
+        defer { service.cleanupTempDir(inspection.unpackedDir) }
+        var plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
+
+        // Real Keychain — we store, install, then uninstall and verify
+        // the item is gone. Uses the real service name (no test suffix)
+        // because the installer + uninstaller go through their own
+        // ProjectConfigKeychain instances without a suffix.
+        let project = ProjectEntry(name: manifest.name, path: plan.projectDir)
+        let configService = ProjectConfigService()
+        let secretRef = try configService.storeSecret(
+            templateSlug: manifest.slug,
+            fieldKey: "api_token",
+            project: project,
+            secret: Data("delete-me".utf8)
+        )
+        plan.configValues = [
+            "site_url": .string("https://example.com"),
+            "api_token": secretRef
+        ]
+
+        let registryBefore = Self.snapshotRegistry()
+        defer { Self.restoreRegistry(registryBefore) }
+
+        let installer = ProjectTemplateInstaller(context: .local)
+        let entry = try installer.install(plan: plan)
+
+        // Verify the secret is there before uninstall.
+        guard case .keychainRef(let uri) = secretRef,
+              let ref = TemplateKeychainRef.parse(uri) else {
+            Issue.record("expected secret to be a keychainRef")
+            return
+        }
+        #expect((try ProjectConfigKeychain().get(ref: ref)) == Data("delete-me".utf8))
+
+        // Uninstall → secret should be gone.
+        let uninstaller = ProjectTemplateUninstaller(context: .local)
+        let uninstallPlan = try uninstaller.loadUninstallPlan(for: entry)
+        try uninstaller.uninstall(plan: uninstallPlan)
+
+        #expect((try ProjectConfigKeychain().get(ref: ref)) == nil)
+    }
+
+    // MARK: - Registry snapshot helpers (dup'd from ProjectTemplateInstallerTests)
 
     nonisolated private static func snapshotRegistry() -> Data? {
         let path = ServerContext.local.paths.projectsRegistry
