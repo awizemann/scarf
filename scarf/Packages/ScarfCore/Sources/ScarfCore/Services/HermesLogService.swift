@@ -1,16 +1,33 @@
 import Foundation
-import ScarfCore
 
-struct LogEntry: Identifiable, Sendable {
-    let id: Int
-    let timestamp: String
-    let level: LogLevel
-    let sessionId: String?
-    let logger: String
-    let message: String
-    let raw: String
+public struct LogEntry: Identifiable, Sendable {
+    public let id: Int
+    public let timestamp: String
+    public let level: LogLevel
+    public let sessionId: String?
+    public let logger: String
+    public let message: String
+    public let raw: String
 
-    enum LogLevel: String, Sendable, CaseIterable {
+
+    public init(
+        id: Int,
+        timestamp: String,
+        level: LogLevel,
+        sessionId: String?,
+        logger: String,
+        message: String,
+        raw: String
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.level = level
+        self.sessionId = sessionId
+        self.logger = logger
+        self.message = message
+        self.raw = raw
+    }
+    public enum LogLevel: String, Sendable, CaseIterable {
         case debug = "DEBUG"
         case info = "INFO"
         case warning = "WARNING"
@@ -29,7 +46,7 @@ struct LogEntry: Identifiable, Sendable {
     }
 }
 
-actor HermesLogService {
+public actor HermesLogService {
     private var fileHandle: FileHandle?
     private var currentPath: String?
     private var entryCounter = 0
@@ -40,15 +57,15 @@ actor HermesLogService {
     private var remoteTailProcess: Process?
     private var remoteTailBuffer: String = ""
 
-    let context: ServerContext
+    public let context: ServerContext
     private let transport: any ServerTransport
 
-    init(context: ServerContext = .local) {
+    public init(context: ServerContext = .local) {
         self.context = context
         self.transport = context.makeTransport()
     }
 
-    func openLog(path: String) {
+    public func openLog(path: String) {
         closeLog()
         currentPath = path
         if context.isRemote {
@@ -76,7 +93,7 @@ actor HermesLogService {
         }
     }
 
-    func closeLog() {
+    public func closeLog() {
         do {
             try fileHandle?.close()
         } catch {
@@ -91,7 +108,7 @@ actor HermesLogService {
         remoteTailBuffer = ""
     }
 
-    func readLastLines(count: Int = QueryDefaults.logLineLimit) -> [LogEntry] {
+    public func readLastLines(count: Int = QueryDefaults.logLineLimit) -> [LogEntry] {
         guard let path = currentPath else { return [] }
         if context.isRemote {
             // For the initial load we bypass the streaming tail and run a
@@ -113,7 +130,7 @@ actor HermesLogService {
         return lastLines.map { parseLine($0) }
     }
 
-    func readNewLines() -> [LogEntry] {
+    public func readNewLines() -> [LogEntry] {
         guard let handle = fileHandle else { return [] }
         let data = handle.availableData
         guard !data.isEmpty else { return [] }
@@ -134,7 +151,7 @@ actor HermesLogService {
         return lines.map { parseLine($0) }
     }
 
-    func seekToEnd() {
+    public func seekToEnd() {
         // Only meaningful for local FileHandles — remote tail starts at the
         // end implicitly after `readLastLines` drained the initial load.
         if !context.isRemote {

@@ -1,7 +1,19 @@
+// MARK: - Platform gate
+//
+// `SQLite3` is a system module on macOS/iOS but not on Linux
+// swift-corelibs-foundation. Everything below depends on it heavily, so the
+// whole file is gated on `canImport(SQLite3)`. On Linux the types
+// (`HermesDataService`, `SnapshotCoordinator`, and helpers) simply don't
+// exist — nothing in ScarfCore compiled for Linux references them, so
+// there's no downstream breakage. Apple platforms — the only real runtime
+// targets — get the full implementation unchanged.
+#if canImport(SQLite3)
+
 import Foundation
-import ScarfCore
 import SQLite3
+#if canImport(os)
 import os
+#endif
 
 /// Dedupes concurrent `snapshotSQLite` calls for the same server. When the
 /// file watcher ticks, Dashboard + Sessions + Activity (+ Chat's loadHistory)
@@ -9,11 +21,11 @@ import os
 /// coordination they each spawn their own `ssh host sqlite3 .backup; scp`
 /// round-trip, three parallel backups of the same DB. Callers in flight for
 /// the same `ServerID` await the first caller's Task and share its result.
-actor SnapshotCoordinator {
-    static let shared = SnapshotCoordinator()
+public actor SnapshotCoordinator {
+    public static let shared = SnapshotCoordinator()
     private var inFlight: [ServerID: Task<URL, Error>] = [:]
 
-    func snapshot(
+    public func snapshot(
         remotePath: String,
         contextID: ServerID,
         transport: any ServerTransport
@@ -30,7 +42,7 @@ actor SnapshotCoordinator {
     }
 }
 
-actor HermesDataService {
+public actor HermesDataService {
     private static let logger = Logger(subsystem: "com.scarf", category: "HermesDataService")
 
     private var db: OpaquePointer?
@@ -44,15 +56,15 @@ actor HermesDataService {
     /// instead of an empty Dashboard with no explanation.
     private(set) var lastOpenError: String?
 
-    let context: ServerContext
+    public let context: ServerContext
     private let transport: any ServerTransport
 
-    init(context: ServerContext = .local) {
+    public init(context: ServerContext = .local) {
         self.context = context
         self.transport = context.makeTransport()
     }
 
-    func open() async -> Bool {
+    public func open() async -> Bool {
         if db != nil { return true }
         let localPath: String
         if context.isRemote {
@@ -142,12 +154,12 @@ actor HermesDataService {
     /// written. Local contexts pay essentially nothing: close+reopen on a
     /// live DB is a no-op.
     @discardableResult
-    func refresh() async -> Bool {
+    public func refresh() async -> Bool {
         close()
         return await open()
     }
 
-    func close() {
+    public func close() {
         if let db {
             sqlite3_close(db)
         }
@@ -184,7 +196,7 @@ actor HermesDataService {
         return cols
     }
 
-    func fetchSessions(limit: Int = QueryDefaults.sessionLimit) -> [HermesSession] {
+    public func fetchSessions(limit: Int = QueryDefaults.sessionLimit) -> [HermesSession] {
         guard let db else { return [] }
         let sql = "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id IS NULL ORDER BY started_at DESC LIMIT ?"
         var stmt: OpaquePointer?
@@ -199,7 +211,7 @@ actor HermesDataService {
         return sessions
     }
 
-    func fetchSessionsInPeriod(since: Date) -> [HermesSession] {
+    public func fetchSessionsInPeriod(since: Date) -> [HermesSession] {
         guard let db else { return [] }
         let sql = "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id IS NULL AND started_at >= ? ORDER BY started_at DESC"
         var stmt: OpaquePointer?
@@ -214,7 +226,7 @@ actor HermesDataService {
         return sessions
     }
 
-    func fetchSubagentSessions(parentId: String) -> [HermesSession] {
+    public func fetchSubagentSessions(parentId: String) -> [HermesSession] {
         guard let db else { return [] }
         let sql = "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id = ? ORDER BY started_at ASC"
         var stmt: OpaquePointer?
@@ -242,7 +254,7 @@ actor HermesDataService {
         return cols
     }
 
-    func fetchMessages(sessionId: String) -> [HermesMessage] {
+    public func fetchMessages(sessionId: String) -> [HermesMessage] {
         guard let db else { return [] }
         let sql = "SELECT \(messageColumns) FROM messages WHERE session_id = ? ORDER BY timestamp ASC"
         var stmt: OpaquePointer?
@@ -257,7 +269,7 @@ actor HermesDataService {
         return messages
     }
 
-    func searchMessages(query: String, limit: Int = QueryDefaults.messageSearchLimit) -> [HermesMessage] {
+    public func searchMessages(query: String, limit: Int = QueryDefaults.messageSearchLimit) -> [HermesMessage] {
         guard let db else { return [] }
         let sanitized = sanitizeFTSQuery(query)
         guard !sanitized.isEmpty else { return [] }
@@ -285,7 +297,7 @@ actor HermesDataService {
         return messages
     }
 
-    func fetchToolResult(callId: String) -> String? {
+    public func fetchToolResult(callId: String) -> String? {
         guard let db else { return nil }
         let sql = "SELECT content FROM messages WHERE role = 'tool' AND tool_call_id = ? LIMIT 1"
         var stmt: OpaquePointer?
@@ -296,7 +308,7 @@ actor HermesDataService {
         return columnText(stmt!, 0)
     }
 
-    func fetchRecentToolCalls(limit: Int = QueryDefaults.toolCallLimit) -> [HermesMessage] {
+    public func fetchRecentToolCalls(limit: Int = QueryDefaults.toolCallLimit) -> [HermesMessage] {
         guard let db else { return [] }
         let sql = """
             SELECT \(messageColumns)
@@ -317,7 +329,7 @@ actor HermesDataService {
         return messages
     }
 
-    func fetchSessionPreviews(limit: Int = QueryDefaults.sessionPreviewLimit) -> [String: String] {
+    public func fetchSessionPreviews(limit: Int = QueryDefaults.sessionPreviewLimit) -> [String: String] {
         guard let db else { return [:] }
         let sql = """
             SELECT m.session_id, substr(m.content, 1, \(QueryDefaults.previewContentLength))
@@ -347,7 +359,7 @@ actor HermesDataService {
 
     // MARK: - Single-Row Queries
 
-    struct MessageFingerprint: Equatable, Sendable {
+    public struct MessageFingerprint: Equatable, Sendable {
         let count: Int
         let maxId: Int
         let maxTimestamp: Double
@@ -355,7 +367,7 @@ actor HermesDataService {
         static let empty = MessageFingerprint(count: 0, maxId: 0, maxTimestamp: 0)
     }
 
-    func fetchMessageFingerprint(sessionId: String) -> MessageFingerprint {
+    public func fetchMessageFingerprint(sessionId: String) -> MessageFingerprint {
         guard let db else { return .empty }
         let sql = "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(timestamp), 0) FROM messages WHERE session_id = ?"
         var stmt: OpaquePointer?
@@ -370,7 +382,7 @@ actor HermesDataService {
         )
     }
 
-    func fetchMessageCount(sessionId: String) -> Int {
+    public func fetchMessageCount(sessionId: String) -> Int {
         guard let db else { return 0 }
         let sql = "SELECT COUNT(*) FROM messages WHERE session_id = ?"
         var stmt: OpaquePointer?
@@ -381,7 +393,7 @@ actor HermesDataService {
         return Int(sqlite3_column_int(stmt, 0))
     }
 
-    func fetchSession(id: String) -> HermesSession? {
+    public func fetchSession(id: String) -> HermesSession? {
         guard let db else { return nil }
         let sql = "SELECT \(sessionColumns) FROM sessions WHERE id = ? LIMIT 1"
         var stmt: OpaquePointer?
@@ -392,7 +404,7 @@ actor HermesDataService {
         return sessionFromRow(stmt!)
     }
 
-    func fetchMostRecentlyActiveSessionId() -> String? {
+    public func fetchMostRecentlyActiveSessionId() -> String? {
         guard let db else { return nil }
         let sql = "SELECT session_id FROM messages ORDER BY timestamp DESC LIMIT 1"
         var stmt: OpaquePointer?
@@ -402,7 +414,7 @@ actor HermesDataService {
         return columnText(stmt!, 0)
     }
 
-    func fetchMostRecentlyStartedSessionId(after: Date? = nil) -> String? {
+    public func fetchMostRecentlyStartedSessionId(after: Date? = nil) -> String? {
         guard let db else { return nil }
         let sql: String
         if after != nil {
@@ -422,7 +434,7 @@ actor HermesDataService {
 
     // MARK: - Stats
 
-    struct SessionStats: Sendable {
+    public struct SessionStats: Sendable {
         let totalSessions: Int
         let totalMessages: Int
         let totalToolCalls: Int
@@ -439,7 +451,7 @@ actor HermesDataService {
         )
     }
 
-    func fetchStats() -> SessionStats {
+    public func fetchStats() -> SessionStats {
         guard let db else { return .empty }
         let sql: String
         if hasV07Schema {
@@ -476,7 +488,7 @@ actor HermesDataService {
 
     // MARK: - Insights Queries
 
-    func fetchUserMessageCount(since: Date) -> Int {
+    public func fetchUserMessageCount(since: Date) -> Int {
         guard let db else { return 0 }
         let sql = """
             SELECT COUNT(*) FROM messages m
@@ -491,7 +503,7 @@ actor HermesDataService {
         return Int(sqlite3_column_int(stmt, 0))
     }
 
-    func fetchToolUsage(since: Date) -> [(name: String, count: Int)] {
+    public func fetchToolUsage(since: Date) -> [(name: String, count: Int)] {
         guard let db else { return [] }
         let sql = """
             SELECT m.tool_name, COUNT(*) as cnt
@@ -515,7 +527,7 @@ actor HermesDataService {
         return results
     }
 
-    func fetchSessionStartHours(since: Date) -> [Int: Int] {
+    public func fetchSessionStartHours(since: Date) -> [Int: Int] {
         guard let db else { return [:] }
         let sql = """
             SELECT started_at FROM sessions WHERE parent_session_id IS NULL AND started_at >= ?
@@ -536,7 +548,7 @@ actor HermesDataService {
         return hours
     }
 
-    func fetchSessionDaysOfWeek(since: Date) -> [Int: Int] {
+    public func fetchSessionDaysOfWeek(since: Date) -> [Int: Int] {
         guard let db else { return [:] }
         let sql = """
             SELECT started_at FROM sessions WHERE parent_session_id IS NULL AND started_at >= ?
@@ -557,7 +569,7 @@ actor HermesDataService {
         return days
     }
 
-    func stateDBModificationDate() -> Date? {
+    public func stateDBModificationDate() -> Date? {
         // For remote contexts we stat the remote paths. For local it's the
         // same FileManager lookup as before, just via the transport.
         let walDate = transport.stat(context.paths.stateDB + "-wal")?.mtime
@@ -656,3 +668,5 @@ actor HermesDataService {
             .joined(separator: " ")
     }
 }
+
+#endif // canImport(SQLite3)
