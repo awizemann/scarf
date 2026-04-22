@@ -125,6 +125,7 @@ public enum ToolKind: String, Sendable, CaseIterable {
     case browser
     case other
 
+    #if canImport(Darwin)
     public var displayName: LocalizedStringResource {
         switch self {
         case .read: return "Read"
@@ -135,6 +136,7 @@ public enum ToolKind: String, Sendable, CaseIterable {
         case .other: return "Other"
         }
     }
+    #endif
 
     public var icon: String {
         switch self {
