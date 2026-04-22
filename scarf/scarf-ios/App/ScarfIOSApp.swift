@@ -12,6 +12,41 @@ struct ScarfIOSApp: App {
         configStore: UserDefaultsIOSServerConfigStore()
     )
 
+    init() {
+        // Wire ScarfCore's transport factory to produce Citadel-backed
+        // `ServerTransport`s for every `.ssh` context. Without this,
+        // `ServerContext.makeTransport()` would fall back to the
+        // Mac-only `SSHTransport` which shells out to `/usr/bin/ssh`
+        // — not present on iOS.
+        //
+        // Each call builds a fresh `CitadelServerTransport`. The
+        // transport itself lazily opens + caches a single long-lived
+        // SSH connection internally, so the per-call overhead is
+        // just the factory invocation, not a new SSH handshake.
+        ServerContext.sshTransportFactory = { id, config, displayName in
+            CitadelServerTransport(
+                contextID: id,
+                config: config,
+                displayName: displayName,
+                keyProvider: {
+                    // The transport needs the SSH key every time it
+                    // (re)opens an SSH session. We re-read from the
+                    // Keychain each time rather than caching in memory
+                    // so Keychain-level access controls (After First
+                    // Unlock) are honoured.
+                    let store = KeychainSSHKeyStore()
+                    guard let key = try await store.load() else {
+                        throw SSHKeyStoreError.backendFailure(
+                            message: "No SSH key in Keychain — re-run onboarding.",
+                            osStatus: nil
+                        )
+                    }
+                    return key
+                }
+            )
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView(model: root)

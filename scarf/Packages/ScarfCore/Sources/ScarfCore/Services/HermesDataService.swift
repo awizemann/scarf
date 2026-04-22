@@ -54,7 +54,7 @@ public actor HermesDataService {
     /// the last attempt succeeded. Views surface this when their own load
     /// path fails, so the user sees "Permission denied reading state.db"
     /// instead of an empty Dashboard with no explanation.
-    private(set) var lastOpenError: String?
+    public private(set) var lastOpenError: String?
 
     public let context: ServerContext
     private let transport: any ServerTransport
@@ -435,16 +435,36 @@ public actor HermesDataService {
     // MARK: - Stats
 
     public struct SessionStats: Sendable {
-        let totalSessions: Int
-        let totalMessages: Int
-        let totalToolCalls: Int
-        let totalInputTokens: Int
-        let totalOutputTokens: Int
-        let totalCostUSD: Double
-        let totalReasoningTokens: Int
-        let totalActualCostUSD: Double
+        public let totalSessions: Int
+        public let totalMessages: Int
+        public let totalToolCalls: Int
+        public let totalInputTokens: Int
+        public let totalOutputTokens: Int
+        public let totalCostUSD: Double
+        public let totalReasoningTokens: Int
+        public let totalActualCostUSD: Double
 
-        static let empty = SessionStats(
+        public init(
+            totalSessions: Int,
+            totalMessages: Int,
+            totalToolCalls: Int,
+            totalInputTokens: Int,
+            totalOutputTokens: Int,
+            totalCostUSD: Double,
+            totalReasoningTokens: Int,
+            totalActualCostUSD: Double
+        ) {
+            self.totalSessions = totalSessions
+            self.totalMessages = totalMessages
+            self.totalToolCalls = totalToolCalls
+            self.totalInputTokens = totalInputTokens
+            self.totalOutputTokens = totalOutputTokens
+            self.totalCostUSD = totalCostUSD
+            self.totalReasoningTokens = totalReasoningTokens
+            self.totalActualCostUSD = totalActualCostUSD
+        }
+
+        public static let empty = SessionStats(
             totalSessions: 0, totalMessages: 0, totalToolCalls: 0,
             totalInputTokens: 0, totalOutputTokens: 0, totalCostUSD: 0,
             totalReasoningTokens: 0, totalActualCostUSD: 0

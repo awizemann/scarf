@@ -12,9 +12,10 @@ import Foundation
 ///
 /// The primitives are deliberately **synchronous where possible** (file I/O,
 /// process `run` + wait) so services don't need to become `async` end-to-end.
-/// The two naturally-streaming cases — log tail and ACP stdio — use
-/// `makeProcess` which returns a configured `Process`; services own the
-/// stdio pipes and lifecycle exactly as they do today.
+/// Streaming stdio (log tail, ACP JSON-RPC) goes through the
+/// `streamLines(...)` async-stream variant so `Foundation.Process` never
+/// appears in the public protocol — that's iOS-unavailable and would break
+/// the ScarfCore compile for the iOS app target.
 public protocol ServerTransport: Sendable {
     /// Identifies the context this transport serves. Used for cache
     /// namespacing (e.g. per-server SQLite snapshot directories).
@@ -52,12 +53,33 @@ public protocol ServerTransport: Sendable {
 
     /// Return a `Process` configured for the target — already pointed at the
     /// right executable with the right arguments, but **not yet started**.
-    /// Callers attach their own `Pipe`s and call `run()`. Used by ACPClient
-    /// (JSON-RPC over stdio) and by `HermesLogService`'s streaming tail.
+    /// Callers attach their own `Pipe`s and call `run()`. Used by the Mac
+    /// app's ACPClient+Mac factory and (historically) by HermesLogService's
+    /// streaming tail.
     ///
-    /// Local: `executable` + `args` verbatim.
-    /// Remote: `/usr/bin/ssh` + connection flags + `[host, "--", executable, args…]`.
+    /// **Platform-gated.** `Foundation.Process` is macOS/Linux-only — it is
+    /// NOT available on iOS. The iOS app uses `streamLines(...)` for any
+    /// streaming-stdio need; `makeProcess` exists solely for the Mac /
+    /// Linux-CI code paths that already depended on it.
+    #if !os(iOS)
     nonisolated func makeProcess(executable: String, args: [String]) -> Process
+    #endif
+
+    /// Platform-neutral streaming exec. Runs `executable args…` on the target
+    /// and yields one stdout line per `AsyncThrowingStream` element (newline
+    /// framing, stripped). The stream finishes on EOF / clean exit and errors
+    /// with `TransportError.commandFailed` on non-zero exit.
+    ///
+    /// Callers must iterate the stream to consume bytes — the underlying
+    /// subprocess / SSH channel is started lazily on first iteration and
+    /// torn down when the iterator is dropped.
+    ///
+    /// Replaces the stdout-pipe dance that `makeProcess` required; services
+    /// like `HermesLogService` migrated here in M3.
+    nonisolated func streamLines(
+        executable: String,
+        args: [String]
+    ) -> AsyncThrowingStream<String, Error>
 
     // MARK: - SQLite
 

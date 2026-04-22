@@ -149,11 +149,66 @@ public struct LocalTransport: ServerTransport {
         return ProcessResult(exitCode: proc.terminationStatus, stdout: out, stderr: err)
     }
 
+    #if !os(iOS)
     public func makeProcess(executable: String, args: [String]) -> Process {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: executable)
         proc.arguments = args
         return proc
+    }
+    #endif
+
+    public func streamLines(executable: String, args: [String]) -> AsyncThrowingStream<String, Error> {
+        #if os(iOS)
+        // LocalTransport doesn't run on iOS at runtime — the iOS app
+        // talks only to remote hosts via `CitadelServerTransport` — but
+        // we still need this method to satisfy the `ServerTransport`
+        // protocol for the compile. Return an immediately-finished
+        // stream so any accidental iOS caller gets a no-op.
+        return AsyncThrowingStream { $0.finish() }
+        #else
+        return AsyncThrowingStream { continuation in
+            Task.detached {
+                let proc = Process()
+                proc.executableURL = URL(fileURLWithPath: executable)
+                proc.arguments = args
+                let outPipe = Pipe()
+                let errPipe = Pipe()
+                proc.standardOutput = outPipe
+                proc.standardError = errPipe
+                do {
+                    try proc.run()
+                } catch {
+                    continuation.finish(throwing: error)
+                    return
+                }
+                let handle = outPipe.fileHandleForReading
+                var buffer = Data()
+                while true {
+                    let chunk = handle.availableData
+                    if chunk.isEmpty { break } // EOF
+                    buffer.append(chunk)
+                    while let nl = buffer.firstIndex(of: 0x0A) {
+                        let lineData = Data(buffer[buffer.startIndex..<nl])
+                        buffer = Data(buffer[buffer.index(after: nl)...])
+                        if let text = String(data: lineData, encoding: .utf8) {
+                            continuation.yield(text)
+                        }
+                    }
+                }
+                proc.waitUntilExit()
+                if proc.terminationStatus != 0 {
+                    let stderr = (try? errPipe.fileHandleForReading.readToEnd())
+                        .flatMap { String(data: $0 ?? Data(), encoding: .utf8) } ?? ""
+                    continuation.finish(throwing: TransportError.commandFailed(
+                        exitCode: proc.terminationStatus, stderr: stderr
+                    ))
+                } else {
+                    continuation.finish()
+                }
+            }
+        }
+        #endif
     }
 
     // MARK: - SQLite
