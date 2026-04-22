@@ -487,7 +487,10 @@ minutes.
 
 **Shipped — new `Packages/ScarfIOS` local SPM package:**
 
-- Depends on local ScarfCore + remote Citadel (`from: "0.7.0"`).
+- Depends on local ScarfCore + remote Citadel
+  (`.upToNextMinor(from: "0.12.0")` — tight pin because Citadel's
+  pre-1.0 authentication-method variant names have changed between
+  minors; explicit bump → review → smoke-test is the flow).
 - `KeychainSSHKeyStore.swift` — real iOS Keychain impl
   (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, no iCloud sync).
 - `UserDefaultsIOSServerConfigStore.swift` — JSON in UserDefaults.
@@ -498,10 +501,11 @@ minutes.
   `Curve25519.Signing.PrivateKey`.
 - `CitadelSSHService.swift` — `SSHConnectionTester` conformance +
   key-generation wrapper. Runs a one-shot SSH exec (`echo scarf-ok`)
-  for the onboarding probe. Clearly-marked FIXME on the Citadel
-  authentication-method call site because 0.7→0.9 has shifted the
-  variant name; other than that one line, everything is
-  Citadel-version-independent.
+  for the onboarding probe. Every Citadel API call in the file was
+  cross-checked against the `0.12.1` tag (SSHAuthenticationMethod.
+  ed25519, SSHClientSettings init, SSHHostKeyValidator.acceptAnything,
+  SSHClient.connect, executeCommand, close) — should build clean on
+  first try.
 
 **Shipped — `scarf/scarf-ios/` iOS app source tree:**
 
@@ -535,11 +539,14 @@ the 3 ScarfIOS tests.
 
 **Manual validation needed on Mac:**
 
-1. Xcode project creation per SETUP.md.
-2. Citadel 0.9.x `SSHAuthenticationMethod.ed25519(...)` variant name
-   — verify and fix if it's been renamed.
-3. Onboarding end-to-end: simulator → physical iPhone via TestFlight
+1. Xcode project creation per SETUP.md. The `Assets.xcassets/` is
+   pre-built (1024×1024 icon copied from the Mac app's set;
+   Scarf-teal AccentColor with light + dark variants) so the target
+   should ship with a real icon on first archive.
+2. Onboarding end-to-end: simulator → physical iPhone via TestFlight
    → real SSH host with the public key added to `authorized_keys`.
+   Citadel 0.12.1 APIs were verified in source; no expected Citadel
+   drift.
 
 **Rules next phases can rely on:**
 
