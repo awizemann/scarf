@@ -421,6 +421,7 @@ public struct SSHTransport: ServerTransport {
         return try runLocal(executable: sshBinary, args: sshArgv, stdin: stdin, timeout: timeout)
     }
 
+    #if !os(iOS)
     public func makeProcess(executable: String, args: [String]) -> Process {
         ensureControlDir()
         // `-T` disables pty allocation — critical for binary-clean stdin/stdout
@@ -438,6 +439,68 @@ public struct SSHTransport: ServerTransport {
         proc.arguments = sshArgv
         proc.environment = Self.sshSubprocessEnvironment()
         return proc
+    }
+    #endif
+
+    public func streamLines(executable: String, args: [String]) -> AsyncThrowingStream<String, Error> {
+        #if os(iOS)
+        // SSHTransport is not a runtime choice on iOS — the iOS app
+        // uses `CitadelServerTransport` instead. This conformance
+        // exists so ScarfCore compiles for iOS; actual streaming SSH
+        // exec on iOS is Citadel's job.
+        return AsyncThrowingStream { $0.finish() }
+        #else
+        return AsyncThrowingStream { continuation in
+            Task.detached { [self] in
+                ensureControlDir()
+                let cmd = ([executable] + args).map { Self.remotePathArg($0) }.joined(separator: " ")
+                var sshArgv = sshArgs()
+                sshArgv.insert("-T", at: 0)
+                sshArgv.append(hostSpec)
+                sshArgv.append("sh")
+                sshArgv.append("-c")
+                sshArgv.append(Self.shellQuote(cmd))
+                let proc = Process()
+                proc.executableURL = URL(fileURLWithPath: sshBinary)
+                proc.arguments = sshArgv
+                proc.environment = Self.sshSubprocessEnvironment()
+                let outPipe = Pipe()
+                let errPipe = Pipe()
+                proc.standardOutput = outPipe
+                proc.standardError = errPipe
+                do {
+                    try proc.run()
+                } catch {
+                    continuation.finish(throwing: error)
+                    return
+                }
+                let handle = outPipe.fileHandleForReading
+                var buffer = Data()
+                while true {
+                    let chunk = handle.availableData
+                    if chunk.isEmpty { break } // EOF
+                    buffer.append(chunk)
+                    while let nl = buffer.firstIndex(of: 0x0A) {
+                        let lineData = Data(buffer[buffer.startIndex..<nl])
+                        buffer = Data(buffer[buffer.index(after: nl)...])
+                        if let text = String(data: lineData, encoding: .utf8) {
+                            continuation.yield(text)
+                        }
+                    }
+                }
+                proc.waitUntilExit()
+                if proc.terminationStatus != 0 {
+                    let stderr = (try? errPipe.fileHandleForReading.readToEnd())
+                        .flatMap { String(data: $0 ?? Data(), encoding: .utf8) } ?? ""
+                    continuation.finish(throwing: TransportError.classifySSHFailure(
+                        host: config.host, exitCode: proc.terminationStatus, stderr: stderr
+                    ))
+                } else {
+                    continuation.finish()
+                }
+            }
+        }
+        #endif
     }
 
     /// Injection point for ssh/scp subprocess environment enrichment.

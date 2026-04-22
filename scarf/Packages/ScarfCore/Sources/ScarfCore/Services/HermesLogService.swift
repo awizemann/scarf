@@ -47,15 +47,18 @@ public struct LogEntry: Identifiable, Sendable {
 }
 
 public actor HermesLogService {
-    private var fileHandle: FileHandle?
+    /// Local file handle for local contexts. `nil` when following a remote
+    /// log or when no log is open.
+    private var localHandle: FileHandle?
     private var currentPath: String?
     private var entryCounter = 0
 
-    /// Remote tailing state. When set, we're reading from `ssh host tail -F`
-    /// instead of a local file. Process stdout pipe drives `readNewLines()`;
-    /// process lifecycle is the actor's responsibility.
-    private var remoteTailProcess: Process?
-    private var remoteTailBuffer: String = ""
+    /// Remote-tail state. Streaming exec via `transport.streamLines(...)`
+    /// yields one stdout line per element; the pump task pushes them into
+    /// `remoteTailBuffer` for `readNewLines()` to drain. The task is
+    /// cancelled on `closeLog()` and when re-opening to a different path.
+    private var remoteTailTask: Task<Void, Never>?
+    private var remoteTailBuffer: [LogEntry] = []
 
     public let context: ServerContext
     private let transport: any ServerTransport
@@ -69,43 +72,44 @@ public actor HermesLogService {
         closeLog()
         currentPath = path
         if context.isRemote {
-            // Spawn `ssh host tail -F` and pipe stdout into our buffer. `-F`
-            // follows the file through rotations — important for remote
-            // log rotation setups (logrotate).
-            let proc = transport.makeProcess(
+            // Streaming tail via the transport's `streamLines`. This works
+            // on every platform: Mac/Linux drive it through a local `ssh`
+            // subprocess; iOS drives it through a Citadel exec channel.
+            // We don't hold a FileHandle anymore — the AsyncThrowingStream
+            // owns the lifecycle and our pump Task pulls lines off it.
+            let stream = transport.streamLines(
                 executable: "/usr/bin/tail",
                 args: ["-n", String(QueryDefaults.logLineLimit), "-F", path]
             )
-            let outPipe = Pipe()
-            proc.standardOutput = outPipe
-            proc.standardError = Pipe()
-            do {
-                try proc.run()
-                remoteTailProcess = proc
-                fileHandle = outPipe.fileHandleForReading
-            } catch {
-                print("[Scarf] Failed to start remote tail: \(error.localizedDescription)")
-                remoteTailProcess = nil
-                fileHandle = nil
+            remoteTailTask = Task { [weak self] in
+                do {
+                    for try await line in stream {
+                        await self?.appendRemoteTailLine(line)
+                    }
+                } catch {
+                    // Transient disconnects / command failures: surface once
+                    // and stop. Callers typically re-open the log on retry.
+                    #if DEBUG
+                    print("[Scarf] remote tail ended: \(error.localizedDescription)")
+                    #endif
+                }
             }
         } else {
-            fileHandle = FileHandle(forReadingAtPath: path)
+            localHandle = FileHandle(forReadingAtPath: path)
         }
     }
 
     public func closeLog() {
         do {
-            try fileHandle?.close()
+            try localHandle?.close()
         } catch {
             print("[Scarf] Failed to close log handle: \(error.localizedDescription)")
         }
-        fileHandle = nil
+        localHandle = nil
         currentPath = nil
-        if let proc = remoteTailProcess, proc.isRunning {
-            proc.terminate()
-        }
-        remoteTailProcess = nil
-        remoteTailBuffer = ""
+        remoteTailTask?.cancel()
+        remoteTailTask = nil
+        remoteTailBuffer.removeAll(keepingCapacity: false)
     }
 
     public func readLastLines(count: Int = QueryDefaults.logLineLimit) -> [LogEntry] {
@@ -131,22 +135,19 @@ public actor HermesLogService {
     }
 
     public func readNewLines() -> [LogEntry] {
-        guard let handle = fileHandle else { return [] }
+        if context.isRemote {
+            // Drain whatever the streaming tail has accumulated since the
+            // last call. The async pump task above does the line framing
+            // and parsing; we just hand the batch back.
+            guard !remoteTailBuffer.isEmpty else { return [] }
+            let batch = remoteTailBuffer
+            remoteTailBuffer.removeAll(keepingCapacity: true)
+            return batch
+        }
+        guard let handle = localHandle else { return [] }
         let data = handle.availableData
         guard !data.isEmpty else { return [] }
         let chunk = String(data: data, encoding: .utf8) ?? ""
-        if context.isRemote {
-            // Remote tail emits bytes as they arrive — not line-aligned.
-            // Buffer partials across reads so we don't split a line mid-way.
-            remoteTailBuffer += chunk
-            guard let lastNewline = remoteTailBuffer.lastIndex(of: "\n") else {
-                return []
-            }
-            let complete = String(remoteTailBuffer[..<lastNewline])
-            remoteTailBuffer = String(remoteTailBuffer[remoteTailBuffer.index(after: lastNewline)...])
-            let lines = complete.components(separatedBy: "\n").filter { !$0.isEmpty }
-            return lines.map { parseLine($0) }
-        }
         let lines = chunk.components(separatedBy: "\n").filter { !$0.isEmpty }
         return lines.map { parseLine($0) }
     }
@@ -155,8 +156,16 @@ public actor HermesLogService {
         // Only meaningful for local FileHandles — remote tail starts at the
         // end implicitly after `readLastLines` drained the initial load.
         if !context.isRemote {
-            fileHandle?.seekToEndOfFile()
+            localHandle?.seekToEndOfFile()
         }
+    }
+
+    /// Called from the remote-tail pump Task when the AsyncStream yields a
+    /// line. Parses and enqueues into the buffer that `readNewLines()`
+    /// drains on the next poll from the ViewModel's timer.
+    private func appendRemoteTailLine(_ line: String) {
+        guard !line.isEmpty else { return }
+        remoteTailBuffer.append(parseLine(line))
     }
 
     private func parseLine(_ line: String) -> LogEntry {

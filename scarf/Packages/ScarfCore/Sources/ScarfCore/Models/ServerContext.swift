@@ -108,16 +108,46 @@ public struct ServerContext: Sendable, Hashable, Identifiable {
 
     /// Construct the `ServerTransport` for this context. Local contexts get
     /// a `LocalTransport`; SSH contexts get an `SSHTransport` configured
-    /// from `SSHConfig`. Each call returns a fresh value — transports are
-    /// cheap and stateless beyond disk caches.
+    /// from `SSHConfig` by default, OR whatever `sshTransportFactory`
+    /// returns if the host app has wired one. Each call returns a fresh
+    /// value — transports are cheap and stateless beyond disk caches.
+    ///
+    /// **Cross-platform wiring.** On the Mac app the default
+    /// `SSHTransport` (fork + exec `/usr/bin/ssh`) is the right thing,
+    /// so `sshTransportFactory` stays `nil`. On iOS the Mac SSH binary
+    /// doesn't exist, so `scarf-ios` wires this factory at launch to
+    /// produce a Citadel-backed `ServerTransport`. All downstream
+    /// services (`HermesDataService`, `HermesLogService`,
+    /// `ProjectDashboardService`, …) then work on iOS unchanged.
     public nonisolated func makeTransport() -> any ServerTransport {
         switch kind {
         case .local:
             return LocalTransport(contextID: id)
         case .ssh(let config):
+            if let factory = ServerContext.sshTransportFactory {
+                return factory(id, config, displayName)
+            }
             return SSHTransport(contextID: id, config: config, displayName: displayName)
         }
     }
+
+    /// Override for `.ssh` transports. The iOS app sets this at launch to
+    /// `{ id, cfg, name in CitadelServerTransport(contextID: id, config: cfg, displayName: name) }`
+    /// so every `ServerContext.makeTransport()` call on a Citadel-backed
+    /// iOS app returns the Citadel impl instead of the Mac/Linux
+    /// `SSHTransport`. Mac leaves this `nil`.
+    ///
+    /// Set once, before any `makeTransport()` call is made. The
+    /// `nonisolated(unsafe)` annotation mirrors the same pattern
+    /// `SSHTransport.environmentEnricher` uses — single-write at app
+    /// startup, many-read afterwards.
+    public typealias SSHTransportFactory = @Sendable (
+        _ id: ServerID,
+        _ config: SSHConfig,
+        _ displayName: String
+    ) -> any ServerTransport
+
+    nonisolated(unsafe) public static var sshTransportFactory: SSHTransportFactory?
 
     // MARK: - Well-known singletons
 

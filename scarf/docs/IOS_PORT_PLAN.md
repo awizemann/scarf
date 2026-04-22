@@ -561,7 +561,63 @@ the 3 ScarfIOS tests.
 - Source tree stays **pure SwiftUI + Foundation + ScarfCore + ScarfIOS**;
   `#if canImport(UIKit)` fine for pasteboard but keep it minimal.
 
-### M3 — pending
+### M3 — shipped (on `claude/ios-m3-transport` branch, separate PR, stacked on M2)
+
+**Three things this phase ships:**
+
+1. **Critical iOS-compile fix** — `ServerTransport.makeProcess(...) -> Process` was iOS-unavailable at compile time but my Linux CI didn't catch it (swift-corelibs-foundation has `Process`; Apple iOS does not). Wrapped `makeProcess` in `#if !os(iOS)` on the protocol + both `LocalTransport` / `SSHTransport` impls. Without this fix, Alan's first `⌘B` on the M2 iOS target would have failed with "Cannot find 'Process' in scope".
+
+2. **New platform-neutral `streamLines(...)` on the protocol** — `AsyncThrowingStream<String, Error>` emitting one stdout line per element, newline-framed, stream finishes on EOF and throws `TransportError.commandFailed` on non-zero exit. Mac/Linux use a `Process` + `Pipe` internally; iOS (Citadel) returns an empty stream for M3 and gets a real impl in M4+.
+
+3. **`CitadelServerTransport`** (new, in ScarfIOS) — full `ServerTransport` conformance backed by Citadel SFTP + exec. Every iOS dashboard / file / process primitive now routes through this.
+
+**Shipped — ScarfCore changes:**
+
+- `Transport/ServerTransport.swift`: `makeProcess` guarded with `#if !os(iOS)`; new `streamLines(_:args:)` method on the protocol. Comment updated to call out the platform gate explicitly.
+- `Transport/LocalTransport.swift`: matching `#if !os(iOS)` around `makeProcess`; full `streamLines` impl on Mac/Linux (Task.detached → Process + Pipe → line-framing loop → exit-code check); iOS stub returns an empty stream.
+- `Transport/SSHTransport.swift`: same pattern for `makeProcess`; `streamLines` impl on Mac/Linux spawns `ssh -T host -- sh -c '<cmd>'` and pumps stdout line-by-line (identical to the old inline code in HermesLogService.openLog).
+- `Services/HermesLogService.swift`: refactored remote-tail path to use `transport.streamLines(...)` instead of `transport.makeProcess` + raw `Pipe`. The `remoteTailProcess: Process?` / `fileHandle: FileHandle?` state collapses into a single `remoteTailTask: Task<Void, Never>?`. Parsed-line ring buffer is drained synchronously by `readNewLines()` — semantically identical to the old behaviour on Mac, and now works on iOS (where it'll get real streaming once `CitadelServerTransport.streamLines` is wired in M4+).
+- `Models/ServerContext.swift`: new `ServerContext.sshTransportFactory: SSHTransportFactory?` static. When non-nil, `makeTransport()` routes `.ssh` contexts through this factory instead of constructing `SSHTransport` directly. iOS wires it; Mac leaves nil.
+- `Services/HermesDataService.swift`: `SessionStats` member fields + `.empty` static promoted to `public` (sed missed them — nested inside the outer type). `lastOpenError` accessor promoted to `public private(set)`.
+
+**Shipped — new in ScarfIOS:**
+
+- `CitadelServerTransport.swift` — full `ServerTransport` impl backed by Citadel. Uses `SSHClient.openSFTP()` for file I/O, `SSHClient.executeCommand(_:)` for `runProcess`, and a remote `sqlite3 .backup` + SFTP-download for `snapshotSQLite`. Maintains a single long-lived SSH + SFTP connection per transport instance (lazy, reconnecting) via a nested `ConnectionHolder` actor. Blocks the caller thread via `DispatchSemaphore` to bridge the async Citadel API to `ServerTransport`'s synchronous protocol — same pattern the Mac `SSHTransport` uses to block on subprocess lifecycle. `streamLines(...)` returns an empty stream for M3 (iOS log tailing is M4+).
+- `IOSDashboardViewModel.swift` — minimal iOS Dashboard view model. Unlike Mac's `DashboardViewModel` which uses `HermesFileService` (still Mac-target), iOS's version reads only from `HermesDataService`. Shows session count, token totals, recent sessions. `lastError` is surfaced in a banner with a Retry button.
+
+**Shipped — scarf-ios app changes:**
+
+- `App/ScarfIOSApp.swift`: `init()` now wires `ServerContext.sshTransportFactory = { ... CitadelServerTransport(keyProvider: { KeychainSSHKeyStore().load() }) }`. The key is re-read from the Keychain per connection (honors the Keychain's access-control policy — `AfterFirstUnlockThisDeviceOnly`).
+- `Dashboard/DashboardView.swift`: replaces the M2 placeholder with a real list view showing session stats, token usage, and the most recent sessions. Pull-to-refresh triggers `vm.refresh()`. Loading state + error banner.
+
+**Test coverage (M3TransportTests, 8 new tests, `@Suite(.serialized)`):**
+
+- `LocalTransport.streamLines` yields one line per newline from a scripted `printf`.
+- `streamLines` finishes on EOF even without a trailing newline (partial tail dropped — documented behaviour).
+- Non-zero subprocess exit surfaces as `TransportError.commandFailed` with the correct exit code.
+- `ServerContext.sshTransportFactory` override is consulted for `.ssh` contexts + ignored for `.local`.
+- Nil factory falls back to default `SSHTransport`.
+- `HermesLogService` remote tail pumps scripted `streamLines` output through to `readNewLines()`'s ring buffer.
+- `HermesLogService.readLastLines` uses the transport's `runProcess` for the one-shot initial load.
+
+**Real bug caught in development:** first pass of the M3 test suite had two tests that both set `ServerContext.sshTransportFactory` + restored in `defer`. Swift-testing runs tests in parallel by default — they raced, one test's scripted transport bled into the other, producing "entries[2].message is 'z' not 'boom'". Fixed with `@Suite(.serialized)` + a note explaining why.
+
+**Now 96 / 96 passing on Linux** (88 pre-M3 + 8 new).
+
+**Manual validation needed on Mac (after M2 target exists):**
+
+1. **iOS build with the new protocol guards.** Hit ⌘B on the iOS simulator target — should compile cleanly. If `Cannot find 'Process' in scope` still appears, search for any remaining unguarded `Process` reference (grep `Process\(\)` / `.isRunning` / `terminationHandler`).
+2. **Dashboard end-to-end against a real Hermes host.** iPhone simulator with the public key in remote `authorized_keys`, connect through onboarding, land on Dashboard — it should fetch + show session stats via Citadel SFTP + exec. Pull-to-refresh should work.
+3. **SQLite snapshot pulls.** Dashboard load triggers `HermesDataService.refresh()` → `CitadelServerTransport.snapshotSQLite(...)` → remote `sqlite3 .backup` + SFTP download to `<Caches>/scarf/snapshots/<id>/state.db`. Verify the local file appears and HermesDataService opens it read-only.
+
+**Rules next phases can rely on:**
+
+- **`streamLines` is the portable way to stream subprocess stdout.** Every future feature that needs line-by-line stdout (log tailing, `git` output, `ps`-style probes) should use `streamLines`. `makeProcess` is Mac/Linux-only by design.
+- **`ServerContext.sshTransportFactory` is already wired on iOS.** M4 (ACP over Citadel) should reuse the same CitadelServerTransport via `context.makeTransport()` for its exec channel — don't build a parallel Citadel session management path.
+- **`CitadelServerTransport.streamLines` is a stub (M3).** When the iOS Chat feature lands in M4+, implement it using Citadel's raw exec channel API (not `executeCommand`, which buffers the entire output). That'll also unlock iOS log tailing.
+- **`HermesFileService` still hasn't moved to ScarfCore.** iOS's Dashboard is minimal because of this; no config.yaml / gateway-state / pgrep checks. A future phase can either port HermesFileService (requires iOS-compatible shell-env story) or replicate the narrow subset iOS needs.
+
+### M4 — pending
 ### M4 — pending
 ### M5 — pending
 ### M6 — pending
