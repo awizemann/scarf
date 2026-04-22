@@ -27,6 +27,14 @@ struct ScarfApp: App {
         // wasn't running. Cheap: just an `ls` of the snapshots root.
         registry.sweepOrphanCaches()
 
+        // Wire ScarfCore's SSHTransport to the Mac-target login-shell env
+        // probe. Without this, `ssh`/`scp` subprocesses spawned from Scarf
+        // can't reach 1Password / Secretive / `.zshrc`-exported ssh-agent
+        // sockets and auth fails with "Permission denied" (exit 255) even
+        // though terminal ssh works fine. iOS leaves this unset — Citadel
+        // owns the agent there.
+        SSHTransport.environmentEnricher = { HermesFileService.enrichedEnvironment() }
+
         // Warm up the login-shell env probe off-main at launch. Without
         // this, the first MainActor caller (chat preflight, OAuth flow,
         // signal-cli detect, etc.) blocks for 5-8 seconds while

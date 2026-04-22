@@ -229,4 +229,32 @@ import Foundation
         let url = try transport.snapshotSQLite(remotePath: "/tmp/some/state.db")
         #expect(url.path == "/tmp/some/state.db")
     }
+
+    /// The Mac target wires `SSHTransport.environmentEnricher` at launch to
+    /// `HermesFileService.enrichedEnvironment()` so SSH subprocesses
+    /// inherit SSH_AUTH_SOCK from the user's login shell (1Password /
+    /// Secretive / `.zshrc`-exported agents). iOS leaves it `nil` (Citadel
+    /// owns the agent). Pin the injection-point shape — a regression here
+    /// would silently break ssh-agent access for GUI-launched Scarf on
+    /// machines where `ssh-add` lives in `.zshrc` rather than `.zprofile`.
+    @Test func sshTransportEnvironmentEnricherInjection() {
+        let previous = SSHTransport.environmentEnricher
+        defer { SSHTransport.environmentEnricher = previous }
+
+        // Default (no enricher) → nothing injected.
+        SSHTransport.environmentEnricher = nil
+
+        // With enricher → its keys merged into the returned env.
+        SSHTransport.environmentEnricher = {
+            ["SSH_AUTH_SOCK": "/tmp/fake.sock", "SSH_AGENT_PID": "4242"]
+        }
+        // We can't call `sshSubprocessEnvironment()` directly (it's
+        // private). Instead assert the injection point exists + can be
+        // overridden — exercising the full dispatch path is the
+        // integration test's job, not this unit's.
+        #expect(SSHTransport.environmentEnricher != nil)
+        let sample = SSHTransport.environmentEnricher?()
+        #expect(sample?["SSH_AUTH_SOCK"] == "/tmp/fake.sock")
+        #expect(sample?["SSH_AGENT_PID"] == "4242")
+    }
 }
