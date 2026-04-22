@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct ContentView: View {
     @Environment(AppCoordinator.self) private var coordinator

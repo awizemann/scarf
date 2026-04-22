@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct RichChatView: View {
     @Bindable var richChat: RichChatViewModel

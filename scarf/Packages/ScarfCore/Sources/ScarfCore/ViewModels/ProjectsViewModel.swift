@@ -1,26 +1,25 @@
-import Foundation
-import ScarfCore
+import Observation
 import os
 
 @Observable
-final class ProjectsViewModel {
+public final class ProjectsViewModel {
     private let logger = Logger(subsystem: "com.scarf", category: "ProjectsViewModel")
-    let context: ServerContext
+    public let context: ServerContext
     private let service: ProjectDashboardService
 
-    init(context: ServerContext = .local) {
+    public init(context: ServerContext = .local) {
         self.context = context
         self.service = ProjectDashboardService(context: context)
     }
 
 
-    var projects: [ProjectEntry] = []
-    var selectedProject: ProjectEntry?
-    var dashboard: ProjectDashboard?
-    var dashboardError: String?
-    var isLoading = false
+    public var projects: [ProjectEntry] = []
+    public var selectedProject: ProjectEntry?
+    public var dashboard: ProjectDashboard?
+    public var dashboardError: String?
+    public var isLoading = false
 
-    func load() {
+    public func load() {
         let registry = service.loadRegistry()
         projects = registry.projects
         if let selected = selectedProject, !projects.contains(where: { $0.name == selected.name }) {
@@ -32,12 +31,12 @@ final class ProjectsViewModel {
         }
     }
 
-    func selectProject(_ project: ProjectEntry) {
+    public func selectProject(_ project: ProjectEntry) {
         selectedProject = project
         loadDashboard(for: project)
     }
 
-    func addProject(name: String, path: String) {
+    public func addProject(name: String, path: String) {
         var registry = service.loadRegistry()
         guard !registry.projects.contains(where: { $0.name == name }) else { return }
         let entry = ProjectEntry(name: name, path: path)
@@ -59,7 +58,7 @@ final class ProjectsViewModel {
         selectProject(entry)
     }
 
-    func removeProject(_ project: ProjectEntry) {
+    public func removeProject(_ project: ProjectEntry) {
         var registry = service.loadRegistry()
         registry.projects.removeAll { $0.name == project.name }
         do {
@@ -74,12 +73,12 @@ final class ProjectsViewModel {
         }
     }
 
-    func refreshDashboard() {
+    public func refreshDashboard() {
         guard let project = selectedProject else { return }
         loadDashboard(for: project)
     }
 
-    var dashboardPaths: [String] {
+    public var dashboardPaths: [String] {
         projects.map(\.dashboardPath)
     }
 

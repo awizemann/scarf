@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct ChatView: View {
     @Environment(ChatViewModel.self) private var viewModel

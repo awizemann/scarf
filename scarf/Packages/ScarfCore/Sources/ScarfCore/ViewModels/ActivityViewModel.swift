@@ -1,26 +1,30 @@
+// Gated on `canImport(SQLite3)` — `HermesDataService` only exists on
+// Apple platforms (SQLite3 isn't a system module on Linux swift-corelibs).
+#if canImport(SQLite3)
+
 import Foundation
-import ScarfCore
+import Observation
 
 @Observable
-final class ActivityViewModel {
-    let context: ServerContext
+public final class ActivityViewModel {
+    public let context: ServerContext
     private let dataService: HermesDataService
 
-    init(context: ServerContext = .local) {
+    public init(context: ServerContext = .local) {
         self.context = context
         self.dataService = HermesDataService(context: context)
     }
 
 
-    var toolMessages: [HermesMessage] = []
-    var filterKind: ToolKind?
-    var filterSessionId: String?
-    var selectedEntry: ActivityEntry?
-    var toolResult: String?
-    var sessionPreviews: [String: String] = [:]
-    var isLoading = true
+    public var toolMessages: [HermesMessage] = []
+    public var filterKind: ToolKind?
+    public var filterSessionId: String?
+    public var selectedEntry: ActivityEntry?
+    public var toolResult: String?
+    public var sessionPreviews: [String: String] = [:]
+    public var isLoading = true
 
-    var availableSessions: [(id: String, label: String)] {
+    public var availableSessions: [(id: String, label: String)] {
         var seen = Set<String>()
         return toolMessages.compactMap { message in
             guard seen.insert(message.sessionId).inserted else { return nil }
@@ -29,7 +33,7 @@ final class ActivityViewModel {
         }
     }
 
-    var filteredActivity: [ActivityEntry] {
+    public var filteredActivity: [ActivityEntry] {
         let entries = toolMessages.flatMap { message in
             message.toolCalls.map { call in
                 ActivityEntry(
@@ -51,7 +55,7 @@ final class ActivityViewModel {
         }
     }
 
-    func load() async {
+    public func load() async {
         isLoading = true
         // refresh() = close + reopen, which forces a fresh snapshot pull on
         // remote contexts. Using open() here would short-circuit after the
@@ -68,7 +72,7 @@ final class ActivityViewModel {
         isLoading = false
     }
 
-    func selectEntry(_ entry: ActivityEntry?) async {
+    public func selectEntry(_ entry: ActivityEntry?) async {
         selectedEntry = entry
         if let entry {
             toolResult = await dataService.fetchToolResult(callId: entry.id)
@@ -77,22 +81,22 @@ final class ActivityViewModel {
         }
     }
 
-    func cleanup() async {
+    public func cleanup() async {
         await dataService.close()
     }
 }
 
-struct ActivityEntry: Identifiable, Sendable {
-    let id: String
-    let sessionId: String
-    let toolName: String
-    let kind: ToolKind
-    let summary: String
-    let arguments: String
-    let messageContent: String
-    let timestamp: Date?
+public struct ActivityEntry: Identifiable, Sendable {
+    public let id: String
+    public let sessionId: String
+    public let toolName: String
+    public let kind: ToolKind
+    public let summary: String
+    public let arguments: String
+    public let messageContent: String
+    public let timestamp: Date?
 
-    var prettyArguments: String {
+    public var prettyArguments: String {
         guard let data = arguments.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data, options: []),
               let pretty = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]),
@@ -102,3 +106,5 @@ struct ActivityEntry: Identifiable, Sendable {
         return str
     }
 }
+
+#endif // canImport(SQLite3)
