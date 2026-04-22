@@ -89,6 +89,14 @@ struct DashboardView: View {
                     }
                 }
 
+                Section {
+                    NavigationLink {
+                        ChatView(config: config, key: key)
+                    } label: {
+                        Label("Chat", systemImage: "bubble.left.and.bubble.right.fill")
+                    }
+                }
+
                 Section("Connected to") {
                     LabeledContent("Host", value: config.host)
                     if let user = config.user {
