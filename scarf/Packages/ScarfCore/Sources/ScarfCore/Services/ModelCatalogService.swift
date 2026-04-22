@@ -1,32 +1,59 @@
 import Foundation
-import ScarfCore
+#if canImport(os)
 import os
+#endif
 
 /// A single model from the models.dev catalog shipped with hermes.
-struct HermesModelInfo: Sendable, Identifiable, Hashable {
-    var id: String { providerID + ":" + modelID }
+public struct HermesModelInfo: Sendable, Identifiable, Hashable {
+    public var id: String { providerID + ":" + modelID }
 
-    let providerID: String
-    let providerName: String
-    let modelID: String
-    let modelName: String
-    let contextWindow: Int?
-    let maxOutput: Int?
-    let costInput: Double?      // USD per 1M input tokens
-    let costOutput: Double?     // USD per 1M output tokens
-    let reasoning: Bool
-    let toolCall: Bool
-    let releaseDate: String?
+    public let providerID: String
+    public let providerName: String
+    public let modelID: String
+    public let modelName: String
+    public let contextWindow: Int?
+    public let maxOutput: Int?
+    public let costInput: Double?      // USD per 1M input tokens
+    public let costOutput: Double?     // USD per 1M output tokens
+    public let reasoning: Bool
+    public let toolCall: Bool
+    public let releaseDate: String?
 
     /// Display-friendly cost string, or nil if cost is unknown.
-    var costDisplay: String? {
+
+    public init(
+        providerID: String,
+        providerName: String,
+        modelID: String,
+        modelName: String,
+        contextWindow: Int?,
+        maxOutput: Int?,
+        costInput: Double?,
+        costOutput: Double?,
+        reasoning: Bool,
+        toolCall: Bool,
+        releaseDate: String?
+    ) {
+        self.providerID = providerID
+        self.providerName = providerName
+        self.modelID = modelID
+        self.modelName = modelName
+        self.contextWindow = contextWindow
+        self.maxOutput = maxOutput
+        self.costInput = costInput
+        self.costOutput = costOutput
+        self.reasoning = reasoning
+        self.toolCall = toolCall
+        self.releaseDate = releaseDate
+    }
+    public var costDisplay: String? {
         guard let input = costInput, let output = costOutput else { return nil }
         let currency = FloatingPointFormatStyle<Double>.Currency.currency(code: "USD").precision(.fractionLength(2))
         return "\(input.formatted(currency)) / \(output.formatted(currency))"
     }
 
     /// Display-friendly context window ("200K", "1M", etc.).
-    var contextDisplay: String? {
+    public var contextDisplay: String? {
         guard let ctx = contextWindow else { return nil }
         if ctx >= 1_000_000 { return "\(ctx / 1_000_000)M" }
         if ctx >= 1_000 { return "\(ctx / 1_000)K" }
@@ -35,14 +62,28 @@ struct HermesModelInfo: Sendable, Identifiable, Hashable {
 }
 
 /// Provider summary — one row in the left column of the picker.
-struct HermesProviderInfo: Sendable, Identifiable, Hashable {
-    var id: String { providerID }
+public struct HermesProviderInfo: Sendable, Identifiable, Hashable {
+    public var id: String { providerID }
 
-    let providerID: String
-    let providerName: String
-    let envVars: [String]       // e.g. ["ANTHROPIC_API_KEY"]
-    let docURL: String?
-    let modelCount: Int
+    public let providerID: String
+    public let providerName: String
+    public let envVars: [String]       // e.g. ["ANTHROPIC_API_KEY"]
+    public let docURL: String?
+    public let modelCount: Int
+
+    public init(
+        providerID: String,
+        providerName: String,
+        envVars: [String],
+        docURL: String?,
+        modelCount: Int
+    ) {
+        self.providerID = providerID
+        self.providerName = providerName
+        self.envVars = envVars
+        self.docURL = docURL
+        self.modelCount = modelCount
+    }
 }
 
 /// Reads the models.dev catalog that hermes caches at
@@ -52,24 +93,26 @@ struct HermesProviderInfo: Sendable, Identifiable, Hashable {
 /// We decode a trimmed subset so unknown fields don't break loading. Every
 /// field we care about is optional on disk — providers may omit cost, context
 /// limits, etc.
-struct ModelCatalogService: Sendable {
+public struct ModelCatalogService: Sendable {
+    #if canImport(os)
     private let logger = Logger(subsystem: "com.scarf", category: "ModelCatalogService")
-    let path: String
-    let transport: any ServerTransport
+    #endif
+    public let path: String
+    public let transport: any ServerTransport
 
-    nonisolated init(context: ServerContext = .local) {
+    public nonisolated init(context: ServerContext = .local) {
         self.path = context.paths.home + "/models_dev_cache.json"
         self.transport = context.makeTransport()
     }
 
     /// Escape hatch for tests.
-    init(path: String) {
+    public init(path: String) {
         self.path = path
         self.transport = LocalTransport()
     }
 
     /// All providers, sorted by display name.
-    func loadProviders() -> [HermesProviderInfo] {
+    public func loadProviders() -> [HermesProviderInfo] {
         guard let catalog = loadCatalog() else { return [] }
         return catalog
             .map { (id, p) in
@@ -85,7 +128,7 @@ struct ModelCatalogService: Sendable {
     }
 
     /// Models for one provider, sorted by release date (newest first), then name.
-    func loadModels(for providerID: String) -> [HermesModelInfo] {
+    public func loadModels(for providerID: String) -> [HermesModelInfo] {
         guard let catalog = loadCatalog(), let provider = catalog[providerID] else { return [] }
         let providerName = provider.name ?? providerID
         let models = (provider.models ?? [:]).map { (id, m) in
@@ -115,7 +158,7 @@ struct ModelCatalogService: Sendable {
 
     /// Find the provider that ships a given model ID. Useful for auto-syncing
     /// provider when the user picks a model from a flat list or types one in.
-    func provider(for modelID: String) -> HermesProviderInfo? {
+    public func provider(for modelID: String) -> HermesProviderInfo? {
         guard let catalog = loadCatalog() else { return nil }
         for (providerID, p) in catalog {
             if p.models?[modelID] != nil {
@@ -147,7 +190,7 @@ struct ModelCatalogService: Sendable {
 
     /// Look up a specific model by provider + ID. Returns nil if not in the
     /// catalog (e.g., free-typed custom model).
-    func model(providerID: String, modelID: String) -> HermesModelInfo? {
+    public func model(providerID: String, modelID: String) -> HermesModelInfo? {
         guard let catalog = loadCatalog(),
               let provider = catalog[providerID],
               let raw = provider.models?[modelID] else { return nil }
@@ -175,7 +218,9 @@ struct ModelCatalogService: Sendable {
         do {
             return try JSONDecoder().decode([String: ProviderEntry].self, from: data)
         } catch {
+            #if canImport(os)
             logger.error("Failed to decode models_dev_cache.json: \(error.localizedDescription)")
+            #endif
             return nil
         }
     }

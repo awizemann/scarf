@@ -1,21 +1,20 @@
 import Foundation
-import ScarfCore
 import os
 
-struct ProjectDashboardService: Sendable {
+public struct ProjectDashboardService: Sendable {
     private static let logger = Logger(subsystem: "com.scarf", category: "ProjectDashboardService")
 
-    let context: ServerContext
-    let transport: any ServerTransport
+    public let context: ServerContext
+    public let transport: any ServerTransport
 
-    nonisolated init(context: ServerContext = .local) {
+    public nonisolated init(context: ServerContext = .local) {
         self.context = context
         self.transport = context.makeTransport()
     }
 
     // MARK: - Registry
 
-    func loadRegistry() -> ProjectRegistry {
+    public func loadRegistry() -> ProjectRegistry {
         guard let data = try? transport.readFile(context.paths.projectsRegistry) else {
             return ProjectRegistry(projects: [])
         }
@@ -37,7 +36,7 @@ struct ProjectDashboardService: Sendable {
     /// success screen, then be invisible in the sidebar). Callers that
     /// want fire-and-forget behaviour can still use `try?`, but the
     /// choice is now theirs.
-    func saveRegistry(_ registry: ProjectRegistry) throws {
+    public func saveRegistry(_ registry: ProjectRegistry) throws {
         let dir = context.paths.scarfDir
         if !transport.fileExists(dir) {
             try transport.createDirectory(dir)
@@ -56,7 +55,7 @@ struct ProjectDashboardService: Sendable {
 
     // MARK: - Dashboard
 
-    func loadDashboard(for project: ProjectEntry) -> ProjectDashboard? {
+    public func loadDashboard(for project: ProjectEntry) -> ProjectDashboard? {
         guard let data = try? transport.readFile(project.dashboardPath) else {
             return nil
         }
@@ -68,11 +67,11 @@ struct ProjectDashboardService: Sendable {
         }
     }
 
-    func dashboardExists(for project: ProjectEntry) -> Bool {
+    public func dashboardExists(for project: ProjectEntry) -> Bool {
         transport.fileExists(project.dashboardPath)
     }
 
-    func dashboardModificationDate(for project: ProjectEntry) -> Date? {
+    public func dashboardModificationDate(for project: ProjectEntry) -> Date? {
         transport.stat(project.dashboardPath)?.mtime
     }
 }

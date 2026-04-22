@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// Two-column model browser sheet. Left column lists providers, right column
 /// lists models for the selected provider. Supports filtering and a "Custom…"

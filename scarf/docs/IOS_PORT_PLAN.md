@@ -303,7 +303,72 @@ stderr patterns, and round-trip an actual local file through
   iOS's Citadel-based transport lands (M4), it will provide its own env
   story — the existing macOS helper stays untouched.
 
-### M0c — pending
+### M0c — shipped
+
+**Shipped:**
+
+- 4 portable Services moved to `Packages/ScarfCore/Sources/ScarfCore/Services/`:
+  - `HermesDataService.swift` (658 lines, SQLite3-backed session/message/activity reader + `SnapshotCoordinator` actor)
+  - `HermesLogService.swift` (log tailing + parsing, `LogEntry` + `LogLevel`)
+  - `ModelCatalogService.swift` (models.dev cache reader, `HermesModelInfo` + `HermesProviderInfo`)
+  - `ProjectDashboardService.swift` (per-project dashboard JSON I/O)
+- `HermesFileService.swift`, `HermesEnvService.swift`, `HermesFileWatcher.swift`,
+  `ACPClient.swift`, and `UpdaterService.swift` stay in the Mac target.
+  `HermesFileService` holds the big shell-enrichment logic and is the only
+  non-portable heavyweight — a later phase can port it once iOS has a
+  clearer story for shell-env-less ACP spawning. `ACPClient` is M1's job
+  (the `ACPChannel` refactor). `UpdaterService` wraps Sparkle and stays
+  Mac-only forever.
+- The one remaining external consumer that wasn't already importing
+  ScarfCore (`Features/Settings/Views/Components/ModelPickerSheet.swift`)
+  now has `import ScarfCore` added.
+
+**Platform guards:**
+
+- **`HermesDataService.swift` is wrapped in `#if canImport(SQLite3)` /
+  `#endif`** — the whole file. SQLite3 isn't a system module on Linux
+  swift-corelibs-foundation, and the service is unusable without it.
+  Apple platforms (the real runtime targets) compile it unchanged. Linux
+  builds just skip it. Nothing in ScarfCore references
+  `HermesDataService` from outside that file, so there's no downstream
+  fallout.
+- `ModelCatalogService.swift` — `import os` / logger definition / logger
+  call sites all guarded with `#if canImport(os)`. Linux gets silent
+  logging.
+
+**Test coverage (`M0cServicesTests`):** 8 new tests.
+
+- `HermesLogService.parseLine` exercised via `readLastLines` against a
+  real local log file with three lines (v0.9.0+ format with session tag,
+  older format without, and a garbage fallback line). Verifies the
+  optional session tag handling called out in CLAUDE.md.
+- `LogEntry.LogLevel` colour strings pinned (SwiftUI views depend on
+  them matching colour names).
+- `HermesModelInfo.contextDisplay` tested across `1M`, `200K`, `500`,
+  and `nil` cases; `costDisplay` tested with and without costs.
+- `ModelCatalogService` load path exercised end-to-end against a
+  synthetic `models_dev_cache.json` lookalike — providers sorted
+  alphabetically, models filtered by provider, `provider(for:)` finds
+  models both by full scan AND via `provider/model` slash-prefix
+  fallback.
+- Malformed + missing file paths return empty results, no crash.
+- `ProjectDashboardService` round-trips a `ProjectRegistry` to disk and
+  reads back a synthetic `.scarf/dashboard.json`.
+
+**Rules next phases can rely on:**
+
+- The `#if canImport(SQLite3)` gate pattern is established — any future
+  ScarfCore code that touches SQLite3 directly should use the same
+  whole-file or whole-block guard rather than trying to abstract SQLite
+  behind a protocol (overkill; SQLite is reliably available on every
+  target that can run Hermes client code).
+- Services take `ServerContext` in their init and construct their own
+  transport via `context.makeTransport()`. M0d ViewModels should follow
+  the same convention when they move to ScarfCore.
+- `LocalTransport()` (no-arg init) is the fast path for tests — uses
+  `ServerContext.local.id`. Test helpers in ScarfCoreTests lean on this
+  heavily.
+
 ### M0d — pending
 ### M1 — pending
 ### M2 — pending
