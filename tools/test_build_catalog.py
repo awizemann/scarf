@@ -364,6 +364,75 @@ class CatalogJsonTests(unittest.TestCase):
             self.assertEqual(entry["detailSlug"], "tester-shape")
 
 
+class SiteRenderingTests(unittest.TestCase):
+    """Verify the regenerator produces usable HTML + copies dashboard.json
+    + README.md into each detail dir for widgets.js to fetch. No browser
+    automation — just shape checks so we catch silly breakages
+    (missing tokens, stale templates, broken copy)."""
+
+    def test_render_site_end_to_end(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_fake_repo(Path(tmp))
+            # Build a couple templates so the grid has more than one card.
+            make_template_dir(repo, "alice", "alpha")
+            make_template_dir(repo, "bob", "beta")
+
+            # Give the fake repo a site/ dir so render_site produces HTML.
+            site_src = repo / "site"
+            site_src.mkdir()
+            (site_src / "index.html.tmpl").write_text(
+                "<h1>Catalog ({{COUNT}} template{{COUNT_PLURAL}})</h1>{{CARDS}}"
+            )
+            (site_src / "template.html.tmpl").write_text(
+                "<h1>{{NAME}}</h1><p>{{DESC}}</p>"
+                "<a href=\"{{SCARF_INSTALL_URL}}\">install</a>"
+                "<a href=\"{{INSTALL_URL_ENCODED}}\">download</a>"
+            )
+            (site_src / "widgets.js").write_text("/* test widgets */")
+            (site_src / "styles.css").write_text("/* test styles */")
+
+            records = []
+            for tdir in build_catalog._iter_templates(repo):
+                r, errors = build_catalog.validate_template(tdir)
+                self.assertEqual(errors, [])
+                records.append(r)
+
+            out = Path(tmp) / "out"
+            build_catalog.render_site(records, out, repo)
+
+            # Index: both cards present, plural form flipped for count=2.
+            idx = (out / "index.html").read_text()
+            self.assertIn("Catalog (2 templates)", idx)
+            self.assertIn("alice-alpha/", idx)
+            self.assertIn("bob-beta/", idx)
+
+            # Static assets copied.
+            self.assertTrue((out / "widgets.js").exists())
+            self.assertTrue((out / "styles.css").exists())
+            self.assertTrue((out / "catalog.json").exists())
+
+            # Each detail dir has index.html + dashboard.json + README.md.
+            alpha = out / "alice-alpha"
+            self.assertTrue((alpha / "index.html").exists())
+            self.assertTrue((alpha / "dashboard.json").exists())
+            self.assertTrue((alpha / "README.md").exists())
+
+            alpha_html = (alpha / "index.html").read_text()
+            # Install URL wires through the scarf:// scheme + raw GH URL.
+            self.assertIn("scarf://install?url=https://raw.githubusercontent.com/", alpha_html)
+
+    def test_render_index_singular_form_for_one_template(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_fake_repo(Path(tmp))
+            make_template_dir(repo, "alice", "alpha")
+            records = []
+            for tdir in build_catalog._iter_templates(repo):
+                r, _ = build_catalog.validate_template(tdir)
+                records.append(r)
+            html = build_catalog.render_index("{{COUNT}} template{{COUNT_PLURAL}}", records)
+            self.assertEqual(html, "1 template")
+
+
 class RealBundleTest(unittest.TestCase):
     """Run the validator against the actual shipped Site Status Checker
     bundle. Catches drift between validator + real-world author

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{NAME}} — Scarf Templates</title>
+  <meta name="description" content="{{DESC}}">
+  <link rel="stylesheet" href="../styles.css">
+  <link rel="icon" type="image/png" href="../assets/icon.png">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="..">
+      <img src="../assets/icon.png" alt="" width="40" height="40">
+      <span class="brand-name">Scarf Templates</span>
+    </a>
+    <nav class="site-nav">
+      <a href="..">Catalog</a>
+      <a href="https://github.com/awizemann/scarf">GitHub</a>
+      <a href="https://github.com/awizemann/scarf/blob/main/templates/CONTRIBUTING.md">Contribute</a>
+    </nav>
+  </header>
+
+  <main class="detail">
+    <section class="detail-header">
+      <div>
+        <h1>{{NAME}} <span class="version">v{{VERSION}}</span></h1>
+        <p class="desc">{{DESC}}</p>
+        <p class="meta">
+          <span class="author">by {{AUTHOR_HTML}}</span>
+          <span class="id">{{ID}}</span>
+          <span class="category">{{CATEGORY}}</span>
+        </p>
+        <p class="tags">{{TAGS_HTML}}</p>
+      </div>
+      <div class="install-actions">
+        <a class="btn btn-primary" href="{{SCARF_INSTALL_URL}}">Install with Scarf</a>
+        <a class="btn btn-secondary" href="{{INSTALL_URL_ENCODED}}">Download .scarftemplate</a>
+      </div>
+    </section>
+
+    <section class="detail-dashboard">
+      <h2>Live dashboard preview</h2>
+      <p class="detail-dashboard-note">
+        Exactly what you'll see inside Scarf after install. Values shown here are
+        placeholders; the agent updates them each time the cron job runs.
+      </p>
+      <div id="dashboard-preview"></div>
+    </section>
+
+    <section class="detail-readme">
+      <h2>README</h2>
+      <div id="readme-body"></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>
+      Scarf is open source:
+      <a href="https://github.com/awizemann/scarf">github.com/awizemann/scarf</a>.
+    </p>
+  </footer>
+
+  <script src="../widgets.js"></script>
+  <script>
+    // Fetch + render dashboard + README at page load. Both files live
+    // alongside index.html in this template's detail dir.
+    (async function () {
+      const dashboardEl = document.getElementById("dashboard-preview");
+      const readmeEl = document.getElementById("readme-body");
+      try {
+        const d = await fetch("dashboard.json").then(r => r.json());
+        ScarfWidgets.renderDashboard(dashboardEl, d);
+      } catch (e) {
+        dashboardEl.textContent = "Could not load dashboard preview.";
+      }
+      try {
+        const md = await fetch("README.md").then(r => r.text());
+        readmeEl.innerHTML = ScarfWidgets.renderMarkdown(md);
+      } catch (e) {
+        readmeEl.textContent = "Could not load README.";
+      }
+    })();
+  </script>
+</body>
+</html>

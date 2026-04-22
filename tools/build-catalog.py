@@ -603,7 +603,12 @@ def render_index(tmpl: str, records: list[TemplateRecord]) -> str:
                 tags=tags_html,
             )
         )
-    return tmpl.replace("{{CARDS}}", "\n".join(cards)).replace("{{COUNT}}", str(len(records)))
+    count = len(records)
+    return (
+        tmpl.replace("{{CARDS}}", "\n".join(cards))
+            .replace("{{COUNT}}", str(count))
+            .replace("{{COUNT_PLURAL}}", "" if count == 1 else "s")
+    )
 
 
 def render_detail(tmpl: str, record: TemplateRecord) -> str:
