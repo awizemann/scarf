@@ -7,6 +7,7 @@
 
 import Testing
 import Darwin
+import ScarfCore
 @testable import scarf
 
 @Suite struct ControlPathTests {

@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// A single model from the models.dev catalog shipped with hermes.

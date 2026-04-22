@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct EmailSetupView: View {
     @State private var viewModel: EmailSetupViewModel

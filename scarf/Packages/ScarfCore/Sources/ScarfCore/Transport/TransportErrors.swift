@@ -4,7 +4,7 @@ import Foundation
 /// distinguishes these so user-visible messages can be specific
 /// ("authentication failed" vs. "command failed") without having to grep
 /// stderr strings.
-enum TransportError: LocalizedError {
+public enum TransportError: LocalizedError {
     /// `ssh`/`scp` could not reach the host or hit a protocol-level issue
     /// (name resolution, connection refused, route error).
     case hostUnreachable(host: String, stderr: String)
@@ -26,7 +26,7 @@ enum TransportError: LocalizedError {
     /// for a bug report.
     case other(message: String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .hostUnreachable(let host, _):
             return "Can't reach \(host). Check the hostname, network, and SSH config."
@@ -50,7 +50,7 @@ enum TransportError: LocalizedError {
 
     /// Full stderr (if any) for display in a disclosure view. Empty string
     /// when there's no additional detail worth showing.
-    var diagnosticStderr: String {
+    public var diagnosticStderr: String {
         switch self {
         case .hostUnreachable(_, let s),
              .authenticationFailed(_, let s),
@@ -66,7 +66,7 @@ enum TransportError: LocalizedError {
     /// into a specific `TransportError`. Used by `SSHTransport` after a
     /// non-zero exit. Defaults to `.commandFailed` when no known marker
     /// matches.
-    static func classifySSHFailure(host: String, exitCode: Int32, stderr: String) -> TransportError {
+    public static func classifySSHFailure(host: String, exitCode: Int32, stderr: String) -> TransportError {
         let s = stderr.lowercased()
         if s.contains("permission denied") || s.contains("authentication failed")
             || s.contains("publickey") && s.contains("denied") {

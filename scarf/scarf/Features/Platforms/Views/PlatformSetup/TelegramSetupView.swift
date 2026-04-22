@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct TelegramSetupView: View {
     @State private var viewModel: TelegramSetupViewModel

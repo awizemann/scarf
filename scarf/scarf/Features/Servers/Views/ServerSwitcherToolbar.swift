@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// Toolbar control that shows the current window's server and exposes a
 /// menu for opening *other* servers in additional windows. Multi-window is

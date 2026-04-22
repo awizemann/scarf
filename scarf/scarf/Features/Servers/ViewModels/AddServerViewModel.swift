@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import AppKit
 
 /// Drives the Add Server sheet. Exposed state maps 1:1 to form fields, plus

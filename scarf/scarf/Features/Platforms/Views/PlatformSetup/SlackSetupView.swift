@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct SlackSetupView: View {
     @State private var viewModel: SlackSetupViewModel

@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(os)
 import os
+#endif
 
 /// `ServerTransport` that reaches a remote Hermes installation through the
 /// system `ssh`, `scp`, and `sftp` binaries.
@@ -15,16 +17,18 @@ import os
 /// calls reuse the same TCP/crypto session at ~5ms each. We point the
 /// control socket at `~/Library/Caches/scarf/ssh/%C` so multiple Scarf
 /// windows pointed at the same host share one session cleanly.
-struct SSHTransport: ServerTransport {
+public struct SSHTransport: ServerTransport {
+    #if canImport(os)
     nonisolated private static let logger = Logger(subsystem: "com.scarf", category: "SSHTransport")
+    #endif
 
-    let contextID: ServerID
-    let isRemote: Bool = true
+    public let contextID: ServerID
+    public let isRemote: Bool = true
 
-    let config: SSHConfig
-    let displayName: String
+    public let config: SSHConfig
+    public let displayName: String
 
-    nonisolated init(contextID: ServerID, config: SSHConfig, displayName: String) {
+    public nonisolated init(contextID: ServerID, config: SSHConfig, displayName: String) {
         self.contextID = contextID
         self.config = config
         self.displayName = displayName
@@ -57,14 +61,14 @@ struct SSHTransport: ServerTransport {
     /// Unix domain socket limit. The Caches path
     /// (~/Library/Caches/scarf/ssh/%C) can exceed this limit when the
     /// username is long, causing ssh to exit 255.
-    nonisolated static func controlDirPath() -> String {
+    public nonisolated static func controlDirPath() -> String {
         return "/tmp/scarf-ssh-\(getuid())"
     }
 
     /// Snapshot cache directory for a given server. Stable per-ID so repeated
     /// connections to the same server share the cache, and so cleanup can
     /// find it from the ID alone.
-    nonisolated static func snapshotDirPath(for contextID: ServerID) -> String {
+    public nonisolated static func snapshotDirPath(for contextID: ServerID) -> String {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.path
             ?? NSHomeDirectory() + "/Library/Caches"
         return base + "/scarf/snapshots/\(contextID.uuidString)"
@@ -72,7 +76,7 @@ struct SSHTransport: ServerTransport {
 
     /// Root of the snapshot cache (all servers). Used by the app-launch sweep
     /// that prunes dirs whose UUID no longer appears in the registry.
-    nonisolated static func snapshotRootPath() -> String {
+    public nonisolated static func snapshotRootPath() -> String {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.path
             ?? NSHomeDirectory() + "/Library/Caches"
         return base + "/scarf/snapshots"
@@ -80,7 +84,7 @@ struct SSHTransport: ServerTransport {
 
     /// Remove the snapshot directory for a server (no-op if absent). Called
     /// on `removeServer` and on app-launch for orphaned dirs.
-    static func pruneSnapshotCache(for contextID: ServerID) {
+    public static func pruneSnapshotCache(for contextID: ServerID) {
         let dir = snapshotDirPath(for: contextID)
         try? FileManager.default.removeItem(atPath: dir)
     }
@@ -88,7 +92,7 @@ struct SSHTransport: ServerTransport {
     /// Walk the snapshot root and delete any directory whose UUID isn't in
     /// `keep`. Called once at app launch so snapshots from servers the user
     /// removed while the app was closed don't linger.
-    static func sweepOrphanSnapshots(keeping keep: Set<ServerID>) {
+    public static func sweepOrphanSnapshots(keeping keep: Set<ServerID>) {
         let root = snapshotRootPath()
         guard let entries = try? FileManager.default.contentsOfDirectory(atPath: root) else { return }
         for name in entries {
@@ -107,7 +111,7 @@ struct SSHTransport: ServerTransport {
     /// Wiping these on launch keeps `/tmp/scarf-ssh-<uid>/` from accumulating
     /// indefinitely until reboot, while leaving any concurrent Scarf
     /// instance's live sockets (always <600s old) untouched.
-    static func sweepStaleControlSockets(staleAfter: TimeInterval = 1800) {
+    public static func sweepStaleControlSockets(staleAfter: TimeInterval = 1800) {
         let root = controlDirPath()
         guard let entries = try? FileManager.default.contentsOfDirectory(atPath: root) else { return }
         let cutoff = Date().addingTimeInterval(-staleAfter)
@@ -127,7 +131,7 @@ struct SSHTransport: ServerTransport {
     /// master is currently running, `ssh -O exit` exits non-zero — we ignore
     /// the exit code because the desired end state (no master) is reached
     /// either way.
-    func closeControlMaster() {
+    public func closeControlMaster() {
         ensureControlDir()
         let args = sshArgs(extra: ["-O", "exit", hostSpec])
         _ = try? runLocal(executable: sshBinary, args: args, stdin: nil, timeout: 10)
@@ -177,6 +181,7 @@ struct SSHTransport: ServerTransport {
     /// follow symlinks) and `lstat` to verify ownership when the entry
     /// already exists.
     nonisolated private func ensureControlDir() {
+        #if canImport(Darwin)
         let path = controlDir
 
         let mkResult = path.withCString { mkdir($0, 0o700) }
@@ -206,6 +211,12 @@ struct SSHTransport: ServerTransport {
             Self.logger.warning("ControlDir \(path, privacy: .public) had mode \(String(st.st_mode & 0o777, radix: 8), privacy: .public), repairing to 700")
             _ = path.withCString { chmod($0, 0o700) }
         }
+        #else
+        // Linux (CI-only) stub: SSH isn't exercised at runtime on Linux, so
+        // we don't need a real ControlMaster setup. A best-effort mkdir is
+        // enough for any tests that poke at `controlDir`.
+        try? FileManager.default.createDirectory(atPath: controlDir, withIntermediateDirectories: true)
+        #endif
     }
 
     /// Shell-quote a single argument for remote execution. The remote shell
@@ -262,7 +273,7 @@ struct SSHTransport: ServerTransport {
 
     // MARK: - Files
 
-    func readFile(_ path: String) throws -> Data {
+    public func readFile(_ path: String) throws -> Data {
         // `cat` is the simplest portable "give me file bytes" command; we
         // don't need scp's progress machinery for typical config/memory
         // files (<1 MB each).
@@ -280,7 +291,7 @@ struct SSHTransport: ServerTransport {
         return result.stdout
     }
 
-    func writeFile(_ path: String, data: Data) throws {
+    public func writeFile(_ path: String, data: Data) throws {
         // Atomic pattern:
         //   1. scp to `<path>.scarf.tmp` on the remote
         //   2. ssh `mv <tmp> <path>` — atomic on POSIX within the same FS
@@ -329,14 +340,14 @@ struct SSHTransport: ServerTransport {
         }
     }
 
-    func fileExists(_ path: String) -> Bool {
+    public func fileExists(_ path: String) -> Bool {
         guard let result = try? runRemoteShell("test -e \(Self.remotePathArg(path))") else {
             return false
         }
         return result.exitCode == 0
     }
 
-    func stat(_ path: String) -> FileStat? {
+    public func stat(_ path: String) -> FileStat? {
         // macOS and Linux `stat` differ in flags. `stat -f` is macOS's BSD
         // form; `stat -c` is GNU/Linux. We try the GNU form first (typical
         // remote target) and fall back to BSD. The format strings use
@@ -366,7 +377,7 @@ struct SSHTransport: ServerTransport {
         return FileStat(size: size, mtime: Date(timeIntervalSince1970: mtimeSecs), isDirectory: isDir)
     }
 
-    func listDirectory(_ path: String) throws -> [String] {
+    public func listDirectory(_ path: String) throws -> [String] {
         // `ls -A` lists all entries (incl. dotfiles) except `.`/`..`, one per
         // line. Sort order matches local FileManager.contentsOfDirectory.
         let result = try runRemoteShell("ls -A \(Self.remotePathArg(path))")
@@ -381,14 +392,14 @@ struct SSHTransport: ServerTransport {
             .map(String.init)
     }
 
-    func createDirectory(_ path: String) throws {
+    public func createDirectory(_ path: String) throws {
         let result = try runRemoteShell("mkdir -p \(Self.remotePathArg(path))")
         if result.exitCode != 0 {
             throw TransportError.classifySSHFailure(host: config.host, exitCode: result.exitCode, stderr: result.stderrString)
         }
     }
 
-    func removeFile(_ path: String) throws {
+    public func removeFile(_ path: String) throws {
         let result = try runRemoteShell("rm -f \(Self.remotePathArg(path))")
         if result.exitCode != 0 {
             throw TransportError.classifySSHFailure(host: config.host, exitCode: result.exitCode, stderr: result.stderrString)
@@ -397,7 +408,7 @@ struct SSHTransport: ServerTransport {
 
     // MARK: - Processes
 
-    func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+    public func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
         // Wrap in `sh -c '<exe> <arg> <arg>'` with `~/`-rewritten paths so
         // home-relative args expand on the remote. The executable might be
         // `~/.local/bin/hermes` or just `hermes`; either survives.
@@ -410,7 +421,7 @@ struct SSHTransport: ServerTransport {
         return try runLocal(executable: sshBinary, args: sshArgv, stdin: stdin, timeout: timeout)
     }
 
-    func makeProcess(executable: String, args: [String]) -> Process {
+    public func makeProcess(executable: String, args: [String]) -> Process {
         ensureControlDir()
         // `-T` disables pty allocation — critical for binary-clean stdin/stdout
         // (ACP JSON-RPC, log tail bytes). Same sh -c wrapping as runProcess
@@ -433,20 +444,76 @@ struct SSHTransport: ServerTransport {
     /// SSH_AUTH_SOCK / SSH_AGENT_PID harvested from the user's login shell.
     /// Without this, GUI-launched Scarf can't reach 1Password / Secretive /
     /// `ssh-add`'d keys that the user's terminal sees fine.
+    ///
+    /// **macOS-only enrichment.** On iOS there's no user login shell — SSH
+    /// agent is provided by the app itself (Citadel) in M4, not by a
+    /// `ssh-add`'d key loaded via `.zshrc`. On Linux CI there's no SSH
+    /// invocation actually happening, just compilation checks. Both cases
+    /// fall back to `ProcessInfo.processInfo.environment` verbatim.
     nonisolated private static func sshSubprocessEnvironment() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
-        let shellEnv = HermesFileService.enrichedEnvironment()
+        #if os(macOS)
+        let shellEnv = Self.macLoginShellSSHAgent()
         for key in ["SSH_AUTH_SOCK", "SSH_AGENT_PID"] {
             if env[key] == nil, let value = shellEnv[key], !value.isEmpty {
                 env[key] = value
             }
         }
+        #endif
         return env
     }
 
+    /// macOS-only: probe `/bin/zsh -l -c` for `SSH_AUTH_SOCK` and
+    /// `SSH_AGENT_PID`. GUI-launched apps don't inherit the user's shell
+    /// env, so without this, `ssh` spawned from Scarf can't reach the
+    /// ssh-agent and authentication fails with "Permission denied"
+    /// (exit 255) even though terminal ssh works fine.
+    ///
+    /// Scoped down from the broader `HermesFileService.enrichedEnvironment()`
+    /// — we only need two vars here, no PATH/credentials harvesting — so
+    /// SSHTransport can live in `ScarfCore` without a main-target
+    /// dependency. Cached after first probe for the process lifetime.
+    #if os(macOS)
+    nonisolated private static let macLoginShellSSHAgentCache: [String: String] = {
+        let pipe = Pipe()
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        proc.arguments = ["-l", "-c", #"printf '%s\0%s\0%s\0%s\0' "SSH_AUTH_SOCK" "$SSH_AUTH_SOCK" "SSH_AGENT_PID" "$SSH_AGENT_PID""#]
+        proc.standardOutput = pipe
+        proc.standardError = Pipe()
+        do {
+            try proc.run()
+        } catch {
+            return [:]
+        }
+        // Bounded wait so a broken login shell doesn't hang app launch.
+        let deadline = Date().addingTimeInterval(3.0)
+        while proc.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if proc.isRunning {
+            proc.terminate()
+            return [:]
+        }
+        let data = (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
+        let parts = data.split(separator: 0).map { String(data: Data($0), encoding: .utf8) ?? "" }
+        var out: [String: String] = [:]
+        var i = 0
+        while i + 1 < parts.count {
+            out[parts[i]] = parts[i + 1]
+            i += 2
+        }
+        return out
+    }()
+
+    nonisolated private static func macLoginShellSSHAgent() -> [String: String] {
+        macLoginShellSSHAgentCache
+    }
+    #endif
+
     // MARK: - SQLite snapshot
 
-    func snapshotSQLite(remotePath: String) throws -> URL {
+    public func snapshotSQLite(remotePath: String) throws -> URL {
         try? FileManager.default.createDirectory(atPath: snapshotDir, withIntermediateDirectories: true)
         let localPath = snapshotDir + "/state.db"
         // `.backup` is WAL-safe: sqlite takes a consistent snapshot without
@@ -501,7 +568,7 @@ struct SSHTransport: ServerTransport {
 
     // MARK: - Watching
 
-    func watchPaths(_ paths: [String]) -> AsyncStream<WatchEvent> {
+    public func watchPaths(_ paths: [String]) -> AsyncStream<WatchEvent> {
         // Polling: call `stat -c %Y` on all paths every 3s and yield a single
         // `.anyChanged` when any mtime changed vs. the prior tick. ControlMaster
         // makes each stat ~5ms so the cost is bounded.
@@ -526,7 +593,9 @@ struct SSHTransport: ServerTransport {
                         }
                     } catch {
                         // Transient failure (connection drop) — skip this tick.
+                        #if canImport(os)
                         Self.logger.debug("watchPaths poll failed: \(String(describing: error))")
+                        #endif
                     }
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
                 }

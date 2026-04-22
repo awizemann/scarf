@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// Telegram platform setup. Credentials live in `.env` (`TELEGRAM_*`); mention /

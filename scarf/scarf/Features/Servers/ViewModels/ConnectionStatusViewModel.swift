@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// Tracks connection health for the current window's server. Remote contexts

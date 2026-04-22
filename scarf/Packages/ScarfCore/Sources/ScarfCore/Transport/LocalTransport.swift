@@ -1,22 +1,33 @@
 import Foundation
+#if canImport(os)
 import os
+#endif
 
 /// `ServerTransport` over the local filesystem. Thin wrapper around
 /// `FileManager`, `Process`, and `DispatchSourceFileSystemObject` — the APIs
 /// services were already using before Phase 2.
-struct LocalTransport: ServerTransport {
+///
+/// **Platform note.** All Hermes code paths that actually construct a
+/// `LocalTransport` run on macOS (iOS uses `SSHTransport` exclusively). The
+/// `#if canImport(Darwin)` guards below exist only so ScarfCore still
+/// compiles on Linux for `swift test` CI — on Linux, file-watching is a
+/// no-op stream and the subprocess spawn still works via Foundation's
+/// `Process`.
+public struct LocalTransport: ServerTransport {
+    #if canImport(os)
     nonisolated private static let logger = Logger(subsystem: "com.scarf", category: "LocalTransport")
+    #endif
 
-    let contextID: ServerID
-    let isRemote: Bool = false
+    public let contextID: ServerID
+    public let isRemote: Bool = false
 
-    nonisolated init(contextID: ServerID = ServerContext.local.id) {
+    public nonisolated init(contextID: ServerID = ServerContext.local.id) {
         self.contextID = contextID
     }
 
     // MARK: - Files
 
-    func readFile(_ path: String) throws -> Data {
+    public func readFile(_ path: String) throws -> Data {
         do {
             return try Data(contentsOf: URL(fileURLWithPath: path))
         } catch {
@@ -24,7 +35,7 @@ struct LocalTransport: ServerTransport {
         }
     }
 
-    func writeFile(_ path: String, data: Data) throws {
+    public func writeFile(_ path: String, data: Data) throws {
         let tmp = path + ".scarf.tmp"
         do {
             try data.write(to: URL(fileURLWithPath: tmp))
@@ -54,11 +65,11 @@ struct LocalTransport: ServerTransport {
         }
     }
 
-    func fileExists(_ path: String) -> Bool {
+    public func fileExists(_ path: String) -> Bool {
         FileManager.default.fileExists(atPath: path)
     }
 
-    func stat(_ path: String) -> FileStat? {
+    public func stat(_ path: String) -> FileStat? {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: path) else {
             return nil
         }
@@ -68,7 +79,7 @@ struct LocalTransport: ServerTransport {
         return FileStat(size: size, mtime: mtime, isDirectory: isDir)
     }
 
-    func listDirectory(_ path: String) throws -> [String] {
+    public func listDirectory(_ path: String) throws -> [String] {
         do {
             return try FileManager.default.contentsOfDirectory(atPath: path)
         } catch {
@@ -76,7 +87,7 @@ struct LocalTransport: ServerTransport {
         }
     }
 
-    func createDirectory(_ path: String) throws {
+    public func createDirectory(_ path: String) throws {
         do {
             try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
         } catch {
@@ -84,7 +95,7 @@ struct LocalTransport: ServerTransport {
         }
     }
 
-    func removeFile(_ path: String) throws {
+    public func removeFile(_ path: String) throws {
         guard FileManager.default.fileExists(atPath: path) else { return }
         do {
             try FileManager.default.removeItem(atPath: path)
@@ -95,7 +106,7 @@ struct LocalTransport: ServerTransport {
 
     // MARK: - Processes
 
-    func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+    public func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: executable)
         proc.arguments = args
@@ -138,7 +149,7 @@ struct LocalTransport: ServerTransport {
         return ProcessResult(exitCode: proc.terminationStatus, stdout: out, stderr: err)
     }
 
-    func makeProcess(executable: String, args: [String]) -> Process {
+    public func makeProcess(executable: String, args: [String]) -> Process {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: executable)
         proc.arguments = args
@@ -147,14 +158,15 @@ struct LocalTransport: ServerTransport {
 
     // MARK: - SQLite
 
-    func snapshotSQLite(remotePath: String) throws -> URL {
+    public func snapshotSQLite(remotePath: String) throws -> URL {
         // Local case: no copy needed. Services open the path directly.
         URL(fileURLWithPath: remotePath)
     }
 
     // MARK: - Watching
 
-    func watchPaths(_ paths: [String]) -> AsyncStream<WatchEvent> {
+    #if canImport(Darwin)
+    public func watchPaths(_ paths: [String]) -> AsyncStream<WatchEvent> {
         AsyncStream { continuation in
             // Build the source list immutably, then hand a value-typed copy
             // to onTermination. Swift 6's concurrent-capture rule rejects a
@@ -178,6 +190,18 @@ struct LocalTransport: ServerTransport {
             }
         }
     }
+    #else
+    /// Linux stub: no FSEvents, no inotify wiring for now. Returns an empty
+    /// stream so callers that `for await _ in transport.watchPaths(...)`
+    /// simply never tick. Real Linux deployment would switch this to an
+    /// inotify implementation, but Linux is a CI-only target for us, not a
+    /// runtime target — the stub suffices.
+    public func watchPaths(_ paths: [String]) -> AsyncStream<WatchEvent> {
+        AsyncStream { continuation in
+            continuation.finish()
+        }
+    }
+    #endif
 
     // MARK: - Helpers
 

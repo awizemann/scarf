@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct QuickCommandsView: View {
     @State private var viewModel: QuickCommandsViewModel

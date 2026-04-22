@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 struct HermesWebhook: Identifiable, Sendable, Equatable {

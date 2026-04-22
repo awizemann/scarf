@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 
 struct HealthCheck: Identifiable {
     let id = UUID()

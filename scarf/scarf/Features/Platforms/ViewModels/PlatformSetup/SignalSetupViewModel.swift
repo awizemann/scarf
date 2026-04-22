@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 
 /// Signal setup. Users must install `signal-cli` externally (needs Java), link
 /// their account via `signal-cli link -n ...`, and run a daemon on an HTTP port

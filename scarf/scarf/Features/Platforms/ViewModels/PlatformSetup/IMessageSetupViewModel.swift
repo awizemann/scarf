@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 
 /// iMessage via BlueBubbles. Requires a BlueBubbles Server running on a Mac
 /// that's always on, with an Apple ID signed into Messages.app.

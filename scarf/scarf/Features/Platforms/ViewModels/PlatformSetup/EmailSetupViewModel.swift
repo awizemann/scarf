@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 
 /// Email setup. IMAP/SMTP with app passwords — no OAuth.
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/email

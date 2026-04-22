@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct HealthView: View {
     @State private var viewModel: HealthViewModel

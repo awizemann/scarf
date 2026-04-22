@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct MattermostSetupView: View {
     @State private var viewModel: MattermostSetupViewModel

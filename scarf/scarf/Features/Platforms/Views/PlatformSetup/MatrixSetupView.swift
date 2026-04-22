@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct MatrixSetupView: View {
     @State private var viewModel: MatrixSetupViewModel

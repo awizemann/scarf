@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import AppKit
 
 /// Home Assistant setup. Long-lived access token in `.env`, scalar filters via

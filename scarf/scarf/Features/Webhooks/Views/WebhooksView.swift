@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 import AppKit
 
 struct WebhooksView: View {
