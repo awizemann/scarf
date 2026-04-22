@@ -115,6 +115,12 @@ struct ProjectsView: View {
                 fileWatcher.updateProjectWatches(viewModel.dashboardPaths)
             }
         }
+        .sheet(item: $configEditorProject) { project in
+            ConfigEditorSheet(
+                context: serverContext,
+                project: project
+            )
+        }
     }
 
     // MARK: - Toolbar
@@ -230,6 +236,11 @@ struct ProjectsView: View {
                 }
                 .tag(project)
                 .contextMenu {
+                    if isConfigurable(project) {
+                        Button("Configuration…", systemImage: "slider.horizontal.3") {
+                            configEditorProject = project
+                        }
+                    }
                     if uninstaller.isTemplateInstalled(project: project) {
                         Button("Uninstall Template…", systemImage: "trash") {
                             uninstallerViewModel.begin(project: project)
@@ -392,6 +403,15 @@ struct ProjectsView: View {
                     Image(systemName: "folder")
                 }
                 .buttonStyle(.borderless)
+                if isConfigurable(project) {
+                    Button {
+                        configEditorProject = project
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Edit configuration")
+                }
                 if uninstaller.isTemplateInstalled(project: project) {
                     Button {
                         uninstallerViewModel.begin(project: project)
