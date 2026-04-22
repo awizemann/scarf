@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct ProgressWidgetView: View {
     let widget: DashboardWidget

@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// Auxiliary tab — the 8 sub-model tasks hermes delegates to cheaper models.
 /// Each follows the same provider/model/base_url/api_key/timeout pattern.

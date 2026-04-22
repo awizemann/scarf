@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct InsightsView: View {
     @State private var viewModel: InsightsViewModel

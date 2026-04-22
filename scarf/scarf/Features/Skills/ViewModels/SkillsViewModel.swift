@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// A single search/browse result from a skill registry.

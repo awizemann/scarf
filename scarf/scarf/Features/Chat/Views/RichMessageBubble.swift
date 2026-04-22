@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct RichMessageBubble: View {
     let message: HermesMessage

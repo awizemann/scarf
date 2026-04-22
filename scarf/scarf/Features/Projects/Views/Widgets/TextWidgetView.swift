@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct TextWidgetView: View {
     let widget: DashboardWidget

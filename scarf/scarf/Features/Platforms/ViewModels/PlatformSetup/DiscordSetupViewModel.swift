@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// Discord setup. Bot token + user IDs in `.env`, behavior knobs in `discord.*`.

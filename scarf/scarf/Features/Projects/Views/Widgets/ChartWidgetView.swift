@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 import Charts
 
 // Flattened data point for Charts to avoid complex nested generic inference

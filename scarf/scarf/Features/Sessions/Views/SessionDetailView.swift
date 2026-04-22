@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct SessionDetailView: View {
     let session: HermesSession

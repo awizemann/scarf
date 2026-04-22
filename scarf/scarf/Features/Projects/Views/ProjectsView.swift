@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 private enum DashboardTab: String, CaseIterable {
     case dashboard = "Dashboard"

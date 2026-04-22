@@ -1,48 +1,74 @@
 import Foundation
 
-struct HermesMessage: Identifiable, Sendable {
-    let id: Int
-    let sessionId: String
-    let role: String
-    let content: String
-    let toolCallId: String?
-    let toolCalls: [HermesToolCall]
-    let toolName: String?
-    let timestamp: Date?
-    let tokenCount: Int?
-    let finishReason: String?
-    let reasoning: String?
+public struct HermesMessage: Identifiable, Sendable {
+    public let id: Int
+    public let sessionId: String
+    public let role: String
+    public let content: String
+    public let toolCallId: String?
+    public let toolCalls: [HermesToolCall]
+    public let toolName: String?
+    public let timestamp: Date?
+    public let tokenCount: Int?
+    public let finishReason: String?
+    public let reasoning: String?
 
-    var isUser: Bool { role == "user" }
-    var isAssistant: Bool { role == "assistant" }
-    var isToolResult: Bool { role == "tool" }
-    var hasReasoning: Bool { reasoning != nil && !(reasoning?.isEmpty ?? true) }
+
+    public init(
+        id: Int,
+        sessionId: String,
+        role: String,
+        content: String,
+        toolCallId: String?,
+        toolCalls: [HermesToolCall],
+        toolName: String?,
+        timestamp: Date?,
+        tokenCount: Int?,
+        finishReason: String?,
+        reasoning: String?
+    ) {
+        self.id = id
+        self.sessionId = sessionId
+        self.role = role
+        self.content = content
+        self.toolCallId = toolCallId
+        self.toolCalls = toolCalls
+        self.toolName = toolName
+        self.timestamp = timestamp
+        self.tokenCount = tokenCount
+        self.finishReason = finishReason
+        self.reasoning = reasoning
+    }
+    public var isUser: Bool { role == "user" }
+    public var isAssistant: Bool { role == "assistant" }
+    public var isToolResult: Bool { role == "tool" }
+    public var hasReasoning: Bool { reasoning != nil && !(reasoning?.isEmpty ?? true) }
 }
 
-struct HermesToolCall: Identifiable, Sendable, Codable {
-    var id: String { callId }
-    let callId: String
-    let functionName: String
-    let arguments: String
+public struct HermesToolCall: Identifiable, Sendable, Codable {
+    public var id: String { callId }
+    public let callId: String
+    public let functionName: String
+    public let arguments: String
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case callId = "id"
         case type
         case function
     }
 
-    enum FunctionKeys: String, CodingKey {
+    public enum FunctionKeys: String, CodingKey {
         case name
         case arguments
     }
 
-    init(callId: String, functionName: String, arguments: String) {
+    public init(callId: String, functionName: String, arguments: String) {
         self.callId = callId
         self.functionName = functionName
         self.arguments = arguments
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         callId = try container.decode(String.self, forKey: .callId)
         let funcContainer = try container.nestedContainer(keyedBy: FunctionKeys.self, forKey: .function)
@@ -50,7 +76,7 @@ struct HermesToolCall: Identifiable, Sendable, Codable {
         arguments = try funcContainer.decode(String.self, forKey: .arguments)
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(callId, forKey: .callId)
         try container.encode("function", forKey: .type)
@@ -59,7 +85,7 @@ struct HermesToolCall: Identifiable, Sendable, Codable {
         try funcContainer.encode(arguments, forKey: .arguments)
     }
 
-    var toolKind: ToolKind {
+    public var toolKind: ToolKind {
         switch functionName {
         case "read_file", "search_files", "vision_analyze": return .read
         case "write_file", "patch": return .edit
@@ -70,7 +96,7 @@ struct HermesToolCall: Identifiable, Sendable, Codable {
         }
     }
 
-    var argumentsSummary: String {
+    public var argumentsSummary: String {
         guard let data = arguments.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return arguments
@@ -91,7 +117,7 @@ struct HermesToolCall: Identifiable, Sendable, Codable {
     }
 }
 
-enum ToolKind: String, Sendable, CaseIterable {
+public enum ToolKind: String, Sendable, CaseIterable {
     case read
     case edit
     case execute
@@ -99,7 +125,7 @@ enum ToolKind: String, Sendable, CaseIterable {
     case browser
     case other
 
-    var displayName: LocalizedStringResource {
+    public var displayName: LocalizedStringResource {
         switch self {
         case .read: return "Read"
         case .edit: return "Edit"
@@ -110,7 +136,7 @@ enum ToolKind: String, Sendable, CaseIterable {
         }
     }
 
-    var icon: String {
+    public var icon: String {
         switch self {
         case .read: return "doc.text.magnifyingglass"
         case .edit: return "pencil"
@@ -121,7 +147,7 @@ enum ToolKind: String, Sendable, CaseIterable {
         }
     }
 
-    var color: String {
+    public var color: String {
         switch self {
         case .read: return "green"
         case .edit: return "blue"

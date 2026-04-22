@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct ToolsView: View {
     @State private var viewModel: ToolsViewModel

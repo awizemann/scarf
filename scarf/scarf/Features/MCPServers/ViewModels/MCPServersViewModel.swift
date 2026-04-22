@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 
 @Observable
 final class MCPServersViewModel {

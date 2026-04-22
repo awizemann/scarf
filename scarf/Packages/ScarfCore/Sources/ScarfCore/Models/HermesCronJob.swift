@@ -1,26 +1,26 @@
 import Foundation
 
-struct HermesCronJob: Identifiable, Sendable, Codable {
-    nonisolated let id: String
-    nonisolated let name: String
-    nonisolated let prompt: String
-    nonisolated let skills: [String]?
-    nonisolated let model: String?
-    nonisolated let schedule: CronSchedule
-    nonisolated let enabled: Bool
-    nonisolated let state: String
-    nonisolated let deliver: String?
-    nonisolated let nextRunAt: String?
-    nonisolated let lastRunAt: String?
-    nonisolated let lastError: String?
-    nonisolated let preRunScript: String?
-    nonisolated let deliveryFailures: Int?
-    nonisolated let lastDeliveryError: String?
-    nonisolated let timeoutType: String?
-    nonisolated let timeoutSeconds: Int?
-    nonisolated let silent: Bool?
+public struct HermesCronJob: Identifiable, Sendable, Codable {
+    public nonisolated let id: String
+    public nonisolated let name: String
+    public nonisolated let prompt: String
+    public nonisolated let skills: [String]?
+    public nonisolated let model: String?
+    public nonisolated let schedule: CronSchedule
+    public nonisolated let enabled: Bool
+    public nonisolated let state: String
+    public nonisolated let deliver: String?
+    public nonisolated let nextRunAt: String?
+    public nonisolated let lastRunAt: String?
+    public nonisolated let lastError: String?
+    public nonisolated let preRunScript: String?
+    public nonisolated let deliveryFailures: Int?
+    public nonisolated let lastDeliveryError: String?
+    public nonisolated let timeoutType: String?
+    public nonisolated let timeoutSeconds: Int?
+    public nonisolated let silent: Bool?
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case id, name, prompt, skills, model, schedule, enabled, state, deliver, silent
         case nextRunAt = "next_run_at"
         case lastRunAt = "last_run_at"
@@ -32,7 +32,7 @@ struct HermesCronJob: Identifiable, Sendable, Codable {
         case timeoutSeconds = "timeout_seconds"
     }
 
-    nonisolated init(from decoder: any Decoder) throws {
+    public nonisolated init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id                = try c.decode(String.self, forKey: .id)
         self.name              = try c.decode(String.self, forKey: .name)
@@ -54,7 +54,7 @@ struct HermesCronJob: Identifiable, Sendable, Codable {
         self.silent            = try c.decodeIfPresent(Bool.self, forKey: .silent)
     }
 
-    nonisolated func encode(to encoder: any Encoder) throws {
+    public nonisolated func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
@@ -76,7 +76,7 @@ struct HermesCronJob: Identifiable, Sendable, Codable {
         try c.encodeIfPresent(silent, forKey: .silent)
     }
 
-    nonisolated var stateIcon: String {
+    public nonisolated var stateIcon: String {
         switch state {
         case "scheduled": return "clock"
         case "running": return "play.circle"
@@ -86,7 +86,7 @@ struct HermesCronJob: Identifiable, Sendable, Codable {
         }
     }
 
-    nonisolated var deliveryDisplay: String? {
+    public nonisolated var deliveryDisplay: String? {
         guard let deliver, !deliver.isEmpty else { return nil }
         // v0.9.0 extends Discord routing to threads: `discord:<chat>:<thread>`.
         if deliver.hasPrefix("discord:") {
@@ -102,20 +102,20 @@ struct HermesCronJob: Identifiable, Sendable, Codable {
     }
 }
 
-struct CronSchedule: Sendable, Codable {
-    nonisolated let kind: String
-    nonisolated let runAt: String?
-    nonisolated let display: String?
-    nonisolated let expression: String?
+public struct CronSchedule: Sendable, Codable {
+    public nonisolated let kind: String
+    public nonisolated let runAt: String?
+    public nonisolated let display: String?
+    public nonisolated let expression: String?
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case kind
         case runAt = "run_at"
         case display
         case expression
     }
 
-    nonisolated init(from decoder: any Decoder) throws {
+    public nonisolated init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.kind       = try c.decode(String.self, forKey: .kind)
         self.runAt      = try c.decodeIfPresent(String.self, forKey: .runAt)
@@ -123,7 +123,7 @@ struct CronSchedule: Sendable, Codable {
         self.expression = try c.decodeIfPresent(String.self, forKey: .expression)
     }
 
-    nonisolated func encode(to encoder: any Encoder) throws {
+    public nonisolated func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(kind, forKey: .kind)
         try c.encodeIfPresent(runAt, forKey: .runAt)
@@ -135,22 +135,22 @@ struct CronSchedule: Sendable, Codable {
 // Hand-written `init(from:)` / `encode(to:)` so Swift 6 doesn't synthesize a
 // MainActor-isolated Codable conformance — `HermesFileService.loadCronJobs`
 // is nonisolated and needs to decode this from a background task.
-struct CronJobsFile: Sendable, Codable {
-    nonisolated let jobs: [HermesCronJob]
-    nonisolated let updatedAt: String?
+public struct CronJobsFile: Sendable, Codable {
+    public nonisolated let jobs: [HermesCronJob]
+    public nonisolated let updatedAt: String?
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case jobs
         case updatedAt = "updated_at"
     }
 
-    nonisolated init(from decoder: any Decoder) throws {
+    public nonisolated init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.jobs      = try c.decode([HermesCronJob].self, forKey: .jobs)
         self.updatedAt = try c.decodeIfPresent(String.self, forKey: .updatedAt)
     }
 
-    nonisolated func encode(to encoder: any Encoder) throws {
+    public nonisolated func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(jobs, forKey: .jobs)
         try c.encodeIfPresent(updatedAt, forKey: .updatedAt)

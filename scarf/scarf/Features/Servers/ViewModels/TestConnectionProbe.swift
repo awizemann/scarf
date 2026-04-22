@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 
 /// Bypasses `SSHTransport`'s normal terse-error path so the Add Server sheet
 /// can show the user a full diagnostic on failure: the exact ssh command we

@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// Platform list/selection coordinator. Per-platform configuration now lives in

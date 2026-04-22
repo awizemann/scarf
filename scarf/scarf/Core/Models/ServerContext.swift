@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import SwiftUI
 import AppKit
 

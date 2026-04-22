@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct MCPServerTestResultView: View {
     let result: MCPTestResult

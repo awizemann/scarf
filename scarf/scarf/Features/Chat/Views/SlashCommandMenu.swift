@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// Floating menu of available slash commands shown above the chat input when
 /// the user types `/` as the first character. Purely presentational — the

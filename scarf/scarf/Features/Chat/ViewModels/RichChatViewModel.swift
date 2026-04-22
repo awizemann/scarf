@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 
 enum ChatDisplayMode: String, CaseIterable {
     case terminal

@@ -1,23 +1,45 @@
 import Foundation
 
-struct HermesToolset: Identifiable, Sendable {
-    var id: String { name }
-    let name: String
-    let description: String
-    let icon: String
-    var enabled: Bool
+public struct HermesToolset: Identifiable, Sendable {
+    public var id: String { name }
+    public let name: String
+    public let description: String
+    public let icon: String
+    public var enabled: Bool
+
+    public init(
+        name: String,
+        description: String,
+        icon: String,
+        enabled: Bool
+    ) {
+        self.name = name
+        self.description = description
+        self.icon = icon
+        self.enabled = enabled
+    }
 }
 
-struct HermesToolPlatform: Identifiable, Sendable {
-    var id: String { name }
-    let name: String
-    let displayName: String
-    let icon: String
+public struct HermesToolPlatform: Identifiable, Sendable {
+    public var id: String { name }
+    public let name: String
+    public let displayName: String
+    public let icon: String
+
+    public init(
+        name: String,
+        displayName: String,
+        icon: String
+    ) {
+        self.name = name
+        self.displayName = displayName
+        self.icon = icon
+    }
 }
 
-enum KnownPlatforms {
-    static let cli = HermesToolPlatform(name: "cli", displayName: "CLI", icon: "terminal")
-    static let all: [HermesToolPlatform] = [
+public enum KnownPlatforms {
+    public static let cli = HermesToolPlatform(name: "cli", displayName: "CLI", icon: "terminal")
+    public static let all: [HermesToolPlatform] = [
         cli,
         HermesToolPlatform(name: "telegram", displayName: "Telegram", icon: "paperplane"),
         HermesToolPlatform(name: "discord", displayName: "Discord", icon: "bubble.left.and.bubble.right"),
@@ -33,7 +55,7 @@ enum KnownPlatforms {
         HermesToolPlatform(name: "imessage", displayName: "iMessage", icon: "message.fill"),
     ]
 
-    static func icon(for platform: String) -> String {
+    public static func icon(for platform: String) -> String {
         switch platform {
         case "cli": return "terminal"
         case "telegram": return "paperplane"

@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct GatewayView: View {
     @State private var viewModel: GatewayViewModel

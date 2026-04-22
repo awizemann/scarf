@@ -8,15 +8,25 @@ import Foundation
 // decoded inside `ACPClient`'s actor context (the JSON-RPC read/write loop).
 // The member list must stay in sync with the stored properties above.
 
-struct ACPRequest: Encodable, Sendable {
-    nonisolated let jsonrpc = "2.0"
-    nonisolated let id: Int
-    nonisolated let method: String
-    nonisolated let params: [String: AnyCodable]
+public struct ACPRequest: Encodable, Sendable {
+    public nonisolated let jsonrpc = "2.0"
+    public nonisolated let id: Int
+    public nonisolated let method: String
+    public nonisolated let params: [String: AnyCodable]
 
-    enum CodingKeys: String, CodingKey { case jsonrpc, id, method, params }
 
-    nonisolated func encode(to encoder: any Encoder) throws {
+    public init(
+        id: Int,
+        method: String,
+        params: [String: AnyCodable]
+    ) {
+        self.id = id
+        self.method = method
+        self.params = params
+    }
+    public enum CodingKeys: String, CodingKey { case jsonrpc, id, method, params }
+
+    public nonisolated func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(jsonrpc, forKey: .jsonrpc)
         try c.encode(id, forKey: .id)
@@ -25,21 +35,21 @@ struct ACPRequest: Encodable, Sendable {
     }
 }
 
-struct ACPRawMessage: Decodable, Sendable {
-    nonisolated let jsonrpc: String?
-    nonisolated let id: Int?
-    nonisolated let method: String?
-    nonisolated let result: AnyCodable?
-    nonisolated let error: ACPError?
-    nonisolated let params: AnyCodable?
+public struct ACPRawMessage: Decodable, Sendable {
+    public nonisolated let jsonrpc: String?
+    public nonisolated let id: Int?
+    public nonisolated let method: String?
+    public nonisolated let result: AnyCodable?
+    public nonisolated let error: ACPError?
+    public nonisolated let params: AnyCodable?
 
-    nonisolated var isResponse: Bool { id != nil && method == nil }
-    nonisolated var isNotification: Bool { method != nil && id == nil }
-    nonisolated var isRequest: Bool { method != nil && id != nil }
+    public nonisolated var isResponse: Bool { id != nil && method == nil }
+    public nonisolated var isNotification: Bool { method != nil && id == nil }
+    public nonisolated var isRequest: Bool { method != nil && id != nil }
 
-    enum CodingKeys: String, CodingKey { case jsonrpc, id, method, result, error, params }
+    public enum CodingKeys: String, CodingKey { case jsonrpc, id, method, result, error, params }
 
-    nonisolated init(from decoder: any Decoder) throws {
+    public nonisolated init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.jsonrpc = try c.decodeIfPresent(String.self, forKey: .jsonrpc)
         self.id      = try c.decodeIfPresent(Int.self, forKey: .id)
@@ -50,13 +60,13 @@ struct ACPRawMessage: Decodable, Sendable {
     }
 }
 
-struct ACPError: Decodable, Sendable {
-    nonisolated let code: Int
-    nonisolated let message: String
+public struct ACPError: Decodable, Sendable {
+    public nonisolated let code: Int
+    public nonisolated let message: String
 
-    enum CodingKeys: String, CodingKey { case code, message }
+    public enum CodingKeys: String, CodingKey { case code, message }
 
-    nonisolated init(from decoder: any Decoder) throws {
+    public nonisolated init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.code = try c.decode(Int.self, forKey: .code)
         self.message = try c.decode(String.self, forKey: .message)
@@ -65,10 +75,10 @@ struct ACPError: Decodable, Sendable {
 
 // MARK: - AnyCodable (for dynamic JSON)
 
-struct AnyCodable: Codable, @unchecked Sendable {
-    nonisolated let value: Any
+public struct AnyCodable: Codable, @unchecked Sendable {
+    public nonisolated let value: Any
 
-    nonisolated init(_ value: Any) { self.value = value }
+    public nonisolated init(_ value: Any) { self.value = value }
 
     // NOT marked `nonisolated`: Swift's default-isolation treats writes to a
     // `let value: Any` stored property as MainActor-isolated even when the
@@ -78,7 +88,7 @@ struct AnyCodable: Codable, @unchecked Sendable {
     // conformance is still usable from ACPClient's nonisolated read loop
     // because all callers are already @preconcurrency with respect to
     // `AnyCodable` (it's @unchecked Sendable).
-    init(from decoder: any Decoder) throws {
+    public init(from decoder: any Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() {
             value = NSNull()
@@ -99,7 +109,7 @@ struct AnyCodable: Codable, @unchecked Sendable {
         }
     }
 
-    func encode(to encoder: any Encoder) throws {
+    public func encode(to encoder: any Encoder) throws {
         var container = encoder.singleValueContainer()
         switch value {
         case is NSNull:
@@ -123,15 +133,15 @@ struct AnyCodable: Codable, @unchecked Sendable {
 
     // MARK: - Accessors
 
-    nonisolated var stringValue: String? { value as? String }
-    nonisolated var intValue: Int? { value as? Int }
-    nonisolated var dictValue: [String: Any]? { value as? [String: Any] }
-    nonisolated var arrayValue: [Any]? { value as? [Any] }
+    public nonisolated var stringValue: String? { value as? String }
+    public nonisolated var intValue: Int? { value as? Int }
+    public nonisolated var dictValue: [String: Any]? { value as? [String: Any] }
+    public nonisolated var arrayValue: [Any]? { value as? [Any] }
 }
 
 // MARK: - ACP Events (parsed from session/update notifications)
 
-enum ACPEvent: Sendable {
+public enum ACPEvent: Sendable {
     case messageChunk(sessionId: String, text: String)
     case thoughtChunk(sessionId: String, text: String)
     case toolCallStart(sessionId: String, call: ACPToolCallEvent)
@@ -143,21 +153,37 @@ enum ACPEvent: Sendable {
     case unknown(sessionId: String, type: String)
 }
 
-struct ACPToolCallEvent: Sendable {
-    let toolCallId: String
-    let title: String
-    let kind: String
-    let status: String
-    let content: String
-    let rawInput: [String: Any]?
+public struct ACPToolCallEvent: Sendable {
+    public let toolCallId: String
+    public let title: String
+    public let kind: String
+    public let status: String
+    public let content: String
+    public let rawInput: [String: Any]?
 
-    var functionName: String {
+
+    public init(
+        toolCallId: String,
+        title: String,
+        kind: String,
+        status: String,
+        content: String,
+        rawInput: [String: Any]?
+    ) {
+        self.toolCallId = toolCallId
+        self.title = title
+        self.kind = kind
+        self.status = status
+        self.content = content
+        self.rawInput = rawInput
+    }
+    public var functionName: String {
         // title format is "functionName: summary" or just "functionName"
         let parts = title.split(separator: ":", maxSplits: 1)
         return String(parts.first ?? Substring(title)).trimmingCharacters(in: .whitespaces)
     }
 
-    var argumentsSummary: String {
+    public var argumentsSummary: String {
         let parts = title.split(separator: ":", maxSplits: 1)
         if parts.count > 1 {
             return String(parts[1]).trimmingCharacters(in: .whitespaces)
@@ -165,7 +191,7 @@ struct ACPToolCallEvent: Sendable {
         return ""
     }
 
-    var argumentsJSON: String {
+    public var argumentsJSON: String {
         guard let input = rawInput,
               let data = try? JSONSerialization.data(withJSONObject: input),
               let str = String(data: data, encoding: .utf8) else { return "{}" }
@@ -173,32 +199,70 @@ struct ACPToolCallEvent: Sendable {
     }
 }
 
-struct ACPToolCallUpdateEvent: Sendable {
-    let toolCallId: String
-    let kind: String
-    let status: String
-    let content: String
-    let rawOutput: String?
+public struct ACPToolCallUpdateEvent: Sendable {
+    public let toolCallId: String
+    public let kind: String
+    public let status: String
+    public let content: String
+    public let rawOutput: String?
+
+    public init(
+        toolCallId: String,
+        kind: String,
+        status: String,
+        content: String,
+        rawOutput: String?
+    ) {
+        self.toolCallId = toolCallId
+        self.kind = kind
+        self.status = status
+        self.content = content
+        self.rawOutput = rawOutput
+    }
 }
 
-struct ACPPermissionRequestEvent: Sendable {
-    let toolCallTitle: String
-    let toolCallKind: String
-    let options: [(optionId: String, name: String)]
+public struct ACPPermissionRequestEvent: Sendable {
+    public let toolCallTitle: String
+    public let toolCallKind: String
+    public let options: [(optionId: String, name: String)]
+
+    public init(
+        toolCallTitle: String,
+        toolCallKind: String,
+        options: [(optionId: String, name: String)]
+    ) {
+        self.toolCallTitle = toolCallTitle
+        self.toolCallKind = toolCallKind
+        self.options = options
+    }
 }
 
-struct ACPPromptResult: Sendable {
-    let stopReason: String
-    let inputTokens: Int
-    let outputTokens: Int
-    let thoughtTokens: Int
-    let cachedReadTokens: Int
+public struct ACPPromptResult: Sendable {
+    public let stopReason: String
+    public let inputTokens: Int
+    public let outputTokens: Int
+    public let thoughtTokens: Int
+    public let cachedReadTokens: Int
+
+    public init(
+        stopReason: String,
+        inputTokens: Int,
+        outputTokens: Int,
+        thoughtTokens: Int,
+        cachedReadTokens: Int
+    ) {
+        self.stopReason = stopReason
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.thoughtTokens = thoughtTokens
+        self.cachedReadTokens = cachedReadTokens
+    }
 }
 
 // MARK: - Event Parsing
 
-enum ACPEventParser {
-    nonisolated static func parse(notification: ACPRawMessage) -> ACPEvent? {
+public enum ACPEventParser {
+    public nonisolated static func parse(notification: ACPRawMessage) -> ACPEvent? {
         guard notification.method == "session/update",
               let params = notification.params?.dictValue,
               let sessionId = params["sessionId"] as? String,
@@ -246,7 +310,7 @@ enum ACPEventParser {
         }
     }
 
-    nonisolated static func parsePermissionRequest(_ message: ACPRawMessage) -> ACPEvent? {
+    public nonisolated static func parsePermissionRequest(_ message: ACPRawMessage) -> ACPEvent? {
         guard message.method == "session/request_permission",
               let params = message.params?.dictValue,
               let sessionId = params["sessionId"] as? String,

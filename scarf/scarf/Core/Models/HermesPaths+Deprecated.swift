@@ -1,11 +1,17 @@
 import Foundation
-import SQLite3
+import ScarfCore
 
 /// Deprecated module-level path statics. Preserved as thin forwarders to
 /// `ServerContext.local.paths` so existing call sites continue to compile
 /// while Phase 1 migrates them to a per-server `ServerContext`.
 ///
 /// New code should accept a `ServerContext` and read `context.paths.<field>`.
+///
+/// **Staying behind in the Mac target**: this enum references
+/// `ServerContext.local`, which currently lives in the Mac target (not yet
+/// extracted to `ScarfCore` — that move is part of M0b). Once `ServerContext`
+/// moves, this file can be deleted or moved alongside it. Until then, leaving
+/// it here keeps the Mac build behavior unchanged.
 enum HermesPaths: Sendable {
     @available(*, deprecated, message: "use ServerContext.paths.home")
     nonisolated static var home: String { ServerContext.local.paths.home }
@@ -65,29 +71,4 @@ enum HermesPaths: Sendable {
 
     @available(*, deprecated, message: "use ServerContext.paths.hermesBinary")
     nonisolated static var hermesBinary: String { ServerContext.local.paths.hermesBinary }
-}
-
-// MARK: - SQLite Constants
-
-/// SQLITE_TRANSIENT tells SQLite to make its own copy of bound string data.
-/// The C macro is defined as ((sqlite3_destructor_type)-1) which can't be imported directly into Swift.
-nonisolated let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-
-// MARK: - Query Defaults
-
-enum QueryDefaults: Sendable {
-    nonisolated static let sessionLimit = 100
-    nonisolated static let messageSearchLimit = 50
-    nonisolated static let toolCallLimit = 50
-    nonisolated static let sessionPreviewLimit = 10
-    nonisolated static let previewContentLength = 100
-    nonisolated static let logLineLimit = 200
-    nonisolated static let defaultSilenceThreshold = 200
-}
-
-// MARK: - File Size Formatting
-
-enum FileSizeUnit: Sendable {
-    nonisolated static let kilobyte = 1_024.0
-    nonisolated static let megabyte = 1_048_576.0
 }
