@@ -63,7 +63,11 @@ struct ScarfApp: App {
                     .environment(updater)
             }
         } defaultValue: {
-            ServerContext.local.id
+            // Honour the user's "open on launch" choice from the Manage
+            // Servers popover. Falls back to Local when no entry is flagged
+            // (the default behaviour for fresh installs) or when the
+            // flagged entry was removed while the app was closed.
+            registry.defaultServerID
         }
         .defaultSize(width: 1100, height: 700)
         .commands {

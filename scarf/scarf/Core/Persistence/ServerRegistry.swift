@@ -9,8 +9,10 @@ struct ServerEntry: Identifiable, Codable, Hashable, Sendable {
     var id: ServerID
     var displayName: String
     var kind: ServerKind
-    /// User preference: open this server in a window on launch. Phase 3
-    /// multi-window uses this; Phase 2 ignores it.
+    /// User preference: this server is the one Scarf opens into when a
+    /// fresh window has no prior binding (first launch or File → New).
+    /// At most one entry should have this set — `ServerRegistry` enforces
+    /// mutual exclusivity. If none do, Local is the implicit default.
     var openOnLaunch: Bool = false
 
     var context: ServerContext {
@@ -67,6 +69,32 @@ final class ServerRegistry {
             return entry.context
         }
         return nil
+    }
+
+    /// The server a fresh window should open into. Returns the ID of the
+    /// remote entry flagged `openOnLaunch`, or Local's ID if none is
+    /// flagged (or if the flagged entry was removed out from under us).
+    /// Consumed by the `WindowGroup`'s `defaultValue` closure.
+    var defaultServerID: ServerID {
+        entries.first(where: { $0.openOnLaunch })?.id ?? ServerContext.local.id
+    }
+
+    /// Flip the default server to `id`. Passing `ServerContext.local.id`
+    /// clears the flag on every remote entry, making Local the implicit
+    /// default. Passing an unknown ID is a no-op. Persisted on return.
+    func setDefaultServer(_ id: ServerID) {
+        var changed = false
+        for idx in entries.indices {
+            let shouldBeDefault = (entries[idx].id == id)
+            if entries[idx].openOnLaunch != shouldBeDefault {
+                entries[idx].openOnLaunch = shouldBeDefault
+                changed = true
+            }
+        }
+        if changed {
+            save()
+            onEntriesChanged?()
+        }
     }
 
     // MARK: - Mutations
