@@ -36,9 +36,10 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          # Stdlib-only script; any modern Python works. 3.9 matches the
-          # system Python on current macOS so we exercise the same code
-          # path maintainers hit locally.
+          # The validator is stdlib-only and tested against 3.9+ (the
+          # system Python on current macOS, what most maintainers run
+          # locally). CI uses 3.11 for faster cold-cache times on
+          # GitHub Actions runners — same stdlib APIs, same code paths.
           python-version: '3.11'
 
       - name: Run validator unit tests

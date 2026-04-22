@@ -104,3 +104,26 @@ Key services: [ProjectTemplateService.swift](scarf/scarf/Core/Services/ProjectTe
 **Uninstall semantics:** driven by the lock file. Only files listed in `lock.projectFiles` are removed from the project dir; user-added files (e.g. a `sites.txt` created on first run) are preserved. If every file in the dir was installed by the template, the dir is removed too; otherwise the dir stays with just the user's files. Skills namespace is always removed wholesale (it's isolated). Cron jobs are removed via `hermes cron remove <id>` after resolving each lock-recorded name. Memory block is stripped between the `begin`/`end` markers, leaving the rest of MEMORY.md intact. No "undo" — uninstall is destructive; to re-install, run the install flow again. Uninstall UI lives on the project-list context menu and the dashboard header (only shown when the selected project has a lock file).
 
 **Never** let a template write to `config.yaml`, `auth.json`, sessions, or any credential path — the v1 installer refuses. If you extend the format, treat the preview sheet as load-bearing: the user's only trust boundary is that the sheet is honest about everything that's about to be written.
+
+## Template Catalog
+
+Shipped community templates live at `templates/<author>/<name>/` (one level down — `templates/CONTRIBUTING.md` explains the submission flow for authors). The catalog site is generated from this directory and served at `awizemann.github.io/scarf/templates/` alongside the Sparkle appcast — the two coexist on the `gh-pages` branch but touch completely disjoint paths.
+
+Pipeline:
+
+- **Validator + regenerator:** [tools/build-catalog.py](tools/build-catalog.py) is stdlib-only Python (3.9+). It walks `templates/*/*/`, validates every `.scarftemplate` against its manifest claim (mirrors the Swift `ProjectTemplateService.verifyClaims` invariants), enforces a 5 MB bundle-size cap, scans for high-confidence secret patterns, checks `staging/` matches the built bundle byte-for-byte, and emits `templates/catalog.json`. Tested by [tools/test_build_catalog.py](tools/test_build_catalog.py) — 16 tests covering every validation path.
+- **Wrapper:** [scripts/catalog.sh](scripts/catalog.sh) mirrors the `scripts/wiki.sh` shape with `check / build / preview / serve / publish` subcommands. `publish` runs a second-pass secret-scan against the rendered site before committing + pushing `gh-pages`.
+- **Site source:** `site/index.html.tmpl` + `site/template.html.tmpl` are `{{TOKEN}}`-substitution templates. `site/widgets.js` (~300 lines of vanilla JS) is the dogfood — renders a `ProjectDashboard` JSON into HTML using the same widget vocabulary the Swift app uses, so each template's detail page shows a live preview of its post-install dashboard.
+- **Install-URL hosting:** raw-served from `main` at `https://raw.githubusercontent.com/awizemann/scarf/main/templates/<author>/<name>/<name>.scarftemplate`. No per-template Releases ceremony.
+- **CI gate:** [.github/workflows/validate-template-pr.yml](.github/workflows/validate-template-pr.yml) runs the Python validator + its own test suite on every PR that touches `templates/`, the validator, or its tests. Failures post a comment on the PR with the last 3 KB of the validator log.
+
+Maintainer workflow on merge to main:
+
+```bash
+./scripts/catalog.sh build       # regenerate templates/catalog.json + .gh-pages-worktree/templates/
+./scripts/catalog.sh publish     # secret-scan rendered output + commit + push gh-pages
+```
+
+Same cadence as `scripts/release.sh` (manual, auditable, no auto-deploy). Runs stay isolated: release.sh only touches `appcast.xml` on gh-pages; catalog.sh only touches `templates/` on gh-pages. Never push catalog output on a release cadence or vice versa.
+
+**Schema is Swift-primary.** When `ProjectDashboardWidget.type` gains a new case or `ProjectTemplateManifest` adds a field, update Swift first, then mirror into `tools/build-catalog.py` (`SUPPORTED_WIDGET_TYPES`, `_validate_manifest`, `_validate_contents_claim`) so the web validator stays honest. The Python test suite's real-bundle test catches drift on the example template but not on the full widget vocabulary — add a synthetic fixture to `test_build_catalog.py` for any new widget type.

@@ -484,9 +484,9 @@ import Foundation
     }
 }
 
-/// Validates every `.scarftemplate` shipped under `examples/templates/` in
-/// the repo. A template whose manifest, `contents` claim, or file set is
-/// out of sync will fail here — so the examples can't silently rot.
+/// Validates every `.scarftemplate` shipped under `templates/<author>/<name>/`
+/// in the repo. A template whose manifest, `contents` claim, or file set is
+/// out of sync will fail here — so shipped templates can't silently rot.
 @Suite struct ProjectTemplateExampleTemplateTests {
 
     @Test func siteStatusCheckerParsesAndPlans() throws {
