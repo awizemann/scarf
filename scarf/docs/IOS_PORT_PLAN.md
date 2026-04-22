@@ -454,8 +454,106 @@ Two real regressions caught by a pre-M1 audit, both silent:
 - **The `ChannelFactory` closure is `@Sendable` and async.** Any per-context setup (env enrichment, SSH handshake) happens inside the factory — not inside `ACPClient.start()`. That keeps `start()` boring and portable.
 - **`ACPClient` does not handle subprocess spontaneous exits via `terminationHandler`** anymore — it notices via channel-stream EOF. Pipe-EOF fires reliably when a Mac subprocess exits (OS closes the pipe). If a future phase sees "session hangs after crash" symptoms, add a `terminationHandler` inside `ProcessACPChannel` that explicitly finishes the `incoming` continuation.
 
-### M2 — pending
-### M2 — pending
+### M2 — shipped (on `claude/ios-m2-skeleton` branch, separate PR from M0+M1)
+
+**Scope note:** M2 delivers all the **code** needed for TestFlight
+(onboarding, Keychain, Citadel, Dashboard placeholder, unit tests) but
+**not** the `scarf-ios.xcodeproj`. Hand-editing ~600 lines of pbxproj
+from scratch is too high-risk without an iOS SDK to build against, so
+the Xcode target is created once in Xcode's UI following the written
+instructions in `scarf/scarf-ios/SETUP.md`. Total setup time: ~5
+minutes.
+
+**Shipped — ScarfCore additions (testable on Linux):**
+
+- `Security/SSHKey.swift` — `SSHKeyBundle` struct, `SSHKeyStore`
+  protocol, `InMemorySSHKeyStore` test actor.
+- `Security/IOSServerConfig.swift` — `IOSServerConfig` struct
+  (single-server v1), `IOSServerConfigStore` protocol,
+  `InMemoryIOSServerConfigStore`. `toServerContext(id:)` bridges to
+  the existing `ServerContext` type so the rest of ScarfCore's
+  services work against an iOS-configured server unchanged.
+- `Security/OnboardingState.swift` — `OnboardingStep` enum,
+  `OnboardingKeyChoice`, `OnboardingServerDetailsValidation`, pure
+  functions `OnboardingLogic.validateServerDetails` /
+  `authorizedKeysLine(for:)` / `isLikelyValidOpenSSHPrivateKey` /
+  `parseOpenSSHPublicKeyLine`.
+- `Security/SSHConnectionTester.swift` — protocol +
+  `SSHConnectionTestError` enum + `MockSSHConnectionTester`.
+- `Security/OnboardingViewModel.swift` — `@Observable @MainActor`
+  state machine. Dependency-injects `SSHKeyStore`,
+  `IOSServerConfigStore`, `SSHConnectionTester`, and a `KeyGenerator`
+  closure so every transition is testable with mocks.
+
+**Shipped — new `Packages/ScarfIOS` local SPM package:**
+
+- Depends on local ScarfCore + remote Citadel (`from: "0.7.0"`).
+- `KeychainSSHKeyStore.swift` — real iOS Keychain impl
+  (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, no iCloud sync).
+- `UserDefaultsIOSServerConfigStore.swift` — JSON in UserDefaults.
+- `Ed25519KeyGenerator.swift` — mints fresh Ed25519 keypairs via
+  CryptoKit, emits standard OpenSSH public-key lines, stores the
+  private half in a compact custom PEM that
+  `CitadelSSHService` decodes back into
+  `Curve25519.Signing.PrivateKey`.
+- `CitadelSSHService.swift` — `SSHConnectionTester` conformance +
+  key-generation wrapper. Runs a one-shot SSH exec (`echo scarf-ok`)
+  for the onboarding probe. Clearly-marked FIXME on the Citadel
+  authentication-method call site because 0.7→0.9 has shifted the
+  variant name; other than that one line, everything is
+  Citadel-version-independent.
+
+**Shipped — `scarf/scarf-ios/` iOS app source tree:**
+
+- `App/ScarfIOSApp.swift` — `@main` + `RootModel` routing to
+  onboarding / dashboard based on stored state.
+- `Onboarding/OnboardingRootView.swift` — 8 sub-views, one per
+  `OnboardingStep`. Validated server-details form, key-source
+  picker, generate / show / import / test / retry / connected.
+- `Dashboard/DashboardView.swift` — M2 placeholder: connected
+  server details + Disconnect. M3 replaces with real data.
+
+**Shipped — `scarf/scarf-ios/SETUP.md`:**
+
+Step-by-step Xcode project creation + troubleshooting. Alan runs
+this once on a Mac (~5 minutes).
+
+**Test coverage:**
+
+- **ScarfCore (Linux):** 26 new tests covering key-bundle memberwise,
+  both in-memory stores, config-to-ServerContext bridging, all
+  `OnboardingLogic` validators (empty / whitespace / port range /
+  legacy-RSA rejection), mock tester, and 10 end-to-end
+  `OnboardingViewModel` paths (happy, bad import,
+  connection-failure → retry-success, reset).
+- **ScarfIOS (Apple-only):** 3 smoke tests for the Ed25519 generator,
+  OpenSSH public-key wire format (byte-length pinned at 51), and
+  corrupted-PEM rejection on round-trip decode.
+
+Total: **88 passing on Linux** (62 pre-M2 + 26 new). Apple CI adds
+the 3 ScarfIOS tests.
+
+**Manual validation needed on Mac:**
+
+1. Xcode project creation per SETUP.md.
+2. Citadel 0.9.x `SSHAuthenticationMethod.ed25519(...)` variant name
+   — verify and fix if it's been renamed.
+3. Onboarding end-to-end: simulator → physical iPhone via TestFlight
+   → real SSH host with the public key added to `authorized_keys`.
+
+**Rules next phases can rely on:**
+
+- **M3** adds a Citadel-backed `ServerTransport` in ScarfIOS; iOS
+  `IOSServerConfig.toServerContext(...).makeTransport()` dispatches to
+  it automatically.
+- **M4** adds `SSHExecACPChannel` in ScarfIOS; iOS wires the
+  `ACPClient.ChannelFactory` hook (from M1) to produce it — sibling
+  to Mac's `ACPClient+Mac.swift`.
+- iOS is single-server in v1 — don't prematurely generalize the
+  onboarding flow.
+- Source tree stays **pure SwiftUI + Foundation + ScarfCore + ScarfIOS**;
+  `#if canImport(UIKit)` fine for pasteboard but keep it minimal.
+
 ### M3 — pending
 ### M4 — pending
 ### M5 — pending
