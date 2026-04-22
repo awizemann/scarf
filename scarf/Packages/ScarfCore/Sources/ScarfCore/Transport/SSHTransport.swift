@@ -440,76 +440,39 @@ public struct SSHTransport: ServerTransport {
         return proc
     }
 
-    /// Environment for an ssh/scp subprocess: process env merged with
-    /// SSH_AUTH_SOCK / SSH_AGENT_PID harvested from the user's login shell.
-    /// Without this, GUI-launched Scarf can't reach 1Password / Secretive /
-    /// `ssh-add`'d keys that the user's terminal sees fine.
+    /// Injection point for ssh/scp subprocess environment enrichment.
     ///
-    /// **macOS-only enrichment.** On iOS there's no user login shell — SSH
-    /// agent is provided by the app itself (Citadel) in M4, not by a
-    /// `ssh-add`'d key loaded via `.zshrc`. On Linux CI there's no SSH
-    /// invocation actually happening, just compilation checks. Both cases
-    /// fall back to `ProcessInfo.processInfo.environment` verbatim.
+    /// On the Mac app, this is wired at startup to
+    /// `HermesFileService.enrichedEnvironment()` — the full two-attempt
+    /// login-shell probe (`zsh -l -i` with prompt defangs, fallback to
+    /// `zsh -l`) that harvests SSH_AUTH_SOCK + SSH_AGENT_PID from
+    /// 1Password / Secretive / `.zshrc`-exported agents. Without this
+    /// harvesting, a GUI-launched Scarf can't reach ssh-agent sockets
+    /// that the user's Terminal sees fine — auth fails with "Permission
+    /// denied" / exit 255.
+    ///
+    /// On iOS the agent comes from Citadel (M4+), not from a login shell
+    /// probe — leave this `nil` and iOS falls back to
+    /// `ProcessInfo.processInfo.environment` alone.
+    ///
+    /// Set once at app launch (startup is single-threaded). Tests may
+    /// inject a stub.
+    nonisolated(unsafe) public static var environmentEnricher: (@Sendable () -> [String: String])?
+
+    /// Environment for an ssh/scp subprocess: process env merged with
+    /// anything the configured `environmentEnricher` produces. The enricher
+    /// only wins for keys the process env doesn't already have, so an
+    /// explicit `SSH_AUTH_SOCK=…` in the Xcode scheme / launchd plist
+    /// survives.
     nonisolated private static func sshSubprocessEnvironment() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
-        #if os(macOS)
-        let shellEnv = Self.macLoginShellSSHAgent()
-        for key in ["SSH_AUTH_SOCK", "SSH_AGENT_PID"] {
-            if env[key] == nil, let value = shellEnv[key], !value.isEmpty {
-                env[key] = value
-            }
+        guard let enricher = Self.environmentEnricher else { return env }
+        let extra = enricher()
+        for (key, value) in extra where env[key] == nil && !value.isEmpty {
+            env[key] = value
         }
-        #endif
         return env
     }
-
-    /// macOS-only: probe `/bin/zsh -l -c` for `SSH_AUTH_SOCK` and
-    /// `SSH_AGENT_PID`. GUI-launched apps don't inherit the user's shell
-    /// env, so without this, `ssh` spawned from Scarf can't reach the
-    /// ssh-agent and authentication fails with "Permission denied"
-    /// (exit 255) even though terminal ssh works fine.
-    ///
-    /// Scoped down from the broader `HermesFileService.enrichedEnvironment()`
-    /// — we only need two vars here, no PATH/credentials harvesting — so
-    /// SSHTransport can live in `ScarfCore` without a main-target
-    /// dependency. Cached after first probe for the process lifetime.
-    #if os(macOS)
-    nonisolated private static let macLoginShellSSHAgentCache: [String: String] = {
-        let pipe = Pipe()
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        proc.arguments = ["-l", "-c", #"printf '%s\0%s\0%s\0%s\0' "SSH_AUTH_SOCK" "$SSH_AUTH_SOCK" "SSH_AGENT_PID" "$SSH_AGENT_PID""#]
-        proc.standardOutput = pipe
-        proc.standardError = Pipe()
-        do {
-            try proc.run()
-        } catch {
-            return [:]
-        }
-        // Bounded wait so a broken login shell doesn't hang app launch.
-        let deadline = Date().addingTimeInterval(3.0)
-        while proc.isRunning && Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-        if proc.isRunning {
-            proc.terminate()
-            return [:]
-        }
-        let data = (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
-        let parts = data.split(separator: 0).map { String(data: Data($0), encoding: .utf8) ?? "" }
-        var out: [String: String] = [:]
-        var i = 0
-        while i + 1 < parts.count {
-            out[parts[i]] = parts[i + 1]
-            i += 2
-        }
-        return out
-    }()
-
-    nonisolated private static func macLoginShellSSHAgent() -> [String: String] {
-        macLoginShellSSHAgentCache
-    }
-    #endif
 
     // MARK: - SQLite snapshot
 
