@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct WebhookSetupView: View {
     @State private var viewModel: WebhookSetupViewModel

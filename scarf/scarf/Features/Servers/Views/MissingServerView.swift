@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// Shown when a window is restored after the user removed the server it
 /// was bound to. Lets them open Local or any remaining registered server

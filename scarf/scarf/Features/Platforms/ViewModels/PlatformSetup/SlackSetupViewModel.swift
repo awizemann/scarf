@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 
 /// Slack setup. Requires two tokens (bot + app-level for Socket Mode).
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/slack

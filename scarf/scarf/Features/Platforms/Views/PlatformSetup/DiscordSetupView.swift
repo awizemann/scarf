@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct DiscordSetupView: View {
     @State private var viewModel: DiscordSetupViewModel

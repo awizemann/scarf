@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct MemoryView: View {
     @State private var viewModel: MemoryViewModel

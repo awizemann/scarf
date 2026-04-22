@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 
 /// Feishu/Lark setup. Choose domain (feishu = China, lark = international).
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/feishu

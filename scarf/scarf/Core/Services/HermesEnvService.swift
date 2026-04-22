@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// Read/write `~/.hermes/.env` while preserving comments, blank lines, and the

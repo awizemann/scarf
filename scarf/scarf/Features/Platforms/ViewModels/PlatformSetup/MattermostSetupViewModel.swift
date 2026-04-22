@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 
 /// Mattermost setup. Server URL + personal access token (or bot token).
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/mattermost

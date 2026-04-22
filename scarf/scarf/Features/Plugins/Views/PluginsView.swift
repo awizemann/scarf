@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct PluginsView: View {
     @State private var viewModel: PluginsViewModel

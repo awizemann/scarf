@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// List of registered remote servers with add/remove actions. Rendered as a
 /// popover from the toolbar switcher.

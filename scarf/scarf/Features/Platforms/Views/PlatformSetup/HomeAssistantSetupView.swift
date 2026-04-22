@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct HomeAssistantSetupView: View {
     @State private var viewModel: HomeAssistantSetupViewModel

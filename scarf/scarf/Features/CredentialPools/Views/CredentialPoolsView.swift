@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct CredentialPoolsView: View {
     @State private var viewModel: CredentialPoolsViewModel

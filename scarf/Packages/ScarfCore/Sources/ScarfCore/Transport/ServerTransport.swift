@@ -15,7 +15,7 @@ import Foundation
 /// The two naturally-streaming cases — log tail and ACP stdio — use
 /// `makeProcess` which returns a configured `Process`; services own the
 /// stdio pipes and lifecycle exactly as they do today.
-protocol ServerTransport: Sendable {
+public protocol ServerTransport: Sendable {
     /// Identifies the context this transport serves. Used for cache
     /// namespacing (e.g. per-server SQLite snapshot directories).
     nonisolated var contextID: ServerID { get }
@@ -77,23 +77,43 @@ protocol ServerTransport: Sendable {
 
 /// Stat-style file metadata. `nil` (return value) means the file does not
 /// exist or couldn't be queried.
-struct FileStat: Sendable, Hashable {
-    let size: Int64
-    let mtime: Date
-    let isDirectory: Bool
+public struct FileStat: Sendable, Hashable {
+    public let size: Int64
+    public let mtime: Date
+    public let isDirectory: Bool
+
+    public init(
+        size: Int64,
+        mtime: Date,
+        isDirectory: Bool
+    ) {
+        self.size = size
+        self.mtime = mtime
+        self.isDirectory = isDirectory
+    }
 }
 
 /// Result of a one-shot process invocation.
-struct ProcessResult: Sendable {
-    let exitCode: Int32
-    let stdout: Data
-    let stderr: Data
+public struct ProcessResult: Sendable {
+    public let exitCode: Int32
+    public let stdout: Data
+    public let stderr: Data
 
-    nonisolated var stdoutString: String { String(data: stdout, encoding: .utf8) ?? "" }
-    nonisolated var stderrString: String { String(data: stderr, encoding: .utf8) ?? "" }
+
+    public init(
+        exitCode: Int32,
+        stdout: Data,
+        stderr: Data
+    ) {
+        self.exitCode = exitCode
+        self.stdout = stdout
+        self.stderr = stderr
+    }
+    public nonisolated var stdoutString: String { String(data: stdout, encoding: .utf8) ?? "" }
+    public nonisolated var stderrString: String { String(data: stderr, encoding: .utf8) ?? "" }
 }
 
-enum WatchEvent: Sendable {
+public enum WatchEvent: Sendable {
     /// Any path in the watched set changed; implementations may coalesce
     /// rapid changes into one event. Consumers should treat this as "refresh
     /// whatever you were displaying" rather than expecting fine-grained

@@ -224,7 +224,85 @@ $PWD/scarf/Packages/ScarfCore:/work -w /work swift:6.0 swift test`.
   `nonisolated` to new ScarfCore APIs pre-emptively; match the
   surrounding conventions.
 
-### M0b — pending
+### M0b — shipped
+
+**Shipped:**
+
+- 4 Transport files moved to `Packages/ScarfCore/Sources/ScarfCore/Transport/`:
+  `ServerTransport.swift`, `LocalTransport.swift`, `SSHTransport.swift`,
+  `TransportErrors.swift`.
+- `ServerContext.swift` moved to `Packages/ScarfCore/Sources/ScarfCore/Models/`.
+  The `runHermes(_:timeout:stdin:)` and `openInLocalEditor(_:)` extension
+  methods — the only two that depend on main-target `HermesFileService` or
+  on AppKit's `NSWorkspace` — are split out into a new main-target file
+  `scarf/Core/Models/ServerContext+Mac.swift`.
+- `HermesFileService.enrichedEnvironment()` reference inside
+  `SSHTransport.sshSubprocessEnvironment()` replaced with a local
+  `#if os(macOS)` helper `macLoginShellSSHAgent()` that does a narrow
+  `zsh -l -c` probe for only `SSH_AUTH_SOCK` / `SSH_AGENT_PID` (instead
+  of the broader PATH + credentials harvest that still lives in
+  `HermesFileService`). This breaks the Mac-target dependency from
+  ScarfCore. Behavior-identical on macOS; a no-op on iOS (where the SSH
+  agent comes from Citadel in M4, not the user's shell) and on Linux CI.
+- `HermesPaths+Deprecated.swift` deleted. Its only justification was that
+  `ServerContext` was in the Mac target; with `ServerContext` in ScarfCore
+  now, the deprecated forwarders are both unreachable AND unused (zero
+  callers). Good riddance.
+- Added `import ScarfCore` to 54 more consumer files that reference
+  Transport types or `ServerContext` but weren't already importing
+  ScarfCore from M0a. `scarfTests/scarfTests.swift` also gets the import
+  — its `ControlPathTests` now hits the public `SSHTransport` via
+  ScarfCore.
+
+**Platform guards applied in ScarfCore:**
+
+- `#if canImport(os)` — Apple's `os.Logger` (`import os` + every call
+  site). Linux gets silent logging. **Exception:** the large block in
+  `SSHTransport.ensureControlDir()` uses `Darwin.stat` / `lstat` / `mkdir`
+  / `chmod` alongside its Logger calls — the whole method body is wrapped
+  in `#if canImport(Darwin)` with a simple `FileManager.createDirectory`
+  fallback for Linux (stubbed because SSH isn't exercised at runtime on
+  Linux anyway).
+- `#if canImport(Darwin)` — `Darwin.open`/`Darwin.close` + FSEvents-based
+  `DispatchSourceFileSystemObject` in `LocalTransport.watchPaths`. Linux
+  gets a no-op empty stream.
+- `#if canImport(SwiftUI)` — `EnvironmentKey` / `EnvironmentValues`
+  plumbing in `ServerContext.swift`.
+- `#if canImport(AppKit)` — only in the split-out
+  `ServerContext+Mac.swift`, where `NSWorkspace.shared.open` lives. iOS
+  will provide its own equivalent (`UIApplication.open(_:)`) when the
+  target lands in M2.
+
+**Bug fixed while moving:** the sed transform in M0a accidentally promoted
+`protocol ServerTransport` requirements to `public nonisolated var contextID ...`.
+Protocol requirements inherit the protocol's access level and **must
+not** carry an explicit modifier — that's a Swift compile error. Fixed
+in this PR's ServerTransport.swift.
+
+**Test coverage (`M0bTransportTests`):** 18 new tests that construct
+`SSHConfig` with and without defaults, round-trip it through Codable,
+verify `ServerKind` pattern-matching, pin `ServerContext.local`'s
+hard-coded UUID, assert local-vs-remote path derivation, verify
+`makeTransport()` dispatches to the right impl, exercise `FileStat` /
+`ProcessResult` / `WatchEvent` / `TransportError` shapes + error-classifier
+stderr patterns, and round-trip an actual local file through
+`LocalTransport` (write → read → stat → remove).
+
+**Rules next phases can rely on:**
+
+- `ServerContext` is the canonical multi-server entry point. Any new
+  service added in M0c or later takes a `ServerContext` in its init.
+- `ServerContext+Mac.swift` is the pattern for Mac-only methods on
+  ScarfCore types. iOS will have a sibling `ServerContext+iOS.swift`
+  when the iOS target lands. Keep platform-specific methods out of
+  ScarfCore itself and in these sibling files.
+- Logger pattern: `#if canImport(os) ... #endif` around each call site.
+  If there are 3+ sites in one method, consider wrapping the whole method
+  body in `#if canImport(Darwin)` with a Linux-safe fallback.
+- SSH env enrichment is now self-contained in `SSHTransport.swift`. When
+  iOS's Citadel-based transport lands (M4), it will provide its own env
+  story — the existing macOS helper stays untouched.
+
 ### M0c — pending
 ### M0d — pending
 ### M1 — pending

@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 
 /// WhatsApp setup. Unlike other platforms, pairing requires scanning a QR code
 /// via the `hermes whatsapp` CLI wizard — we expose that as an embedded

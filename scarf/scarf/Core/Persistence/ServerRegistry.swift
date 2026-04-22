@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// Persisted entry for a user-added server. `ServerContext` itself is a value

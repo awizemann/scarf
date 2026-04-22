@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 import AppKit
 
 /// Per-server diagnostics sheet. Shown from Manage Servers and from the

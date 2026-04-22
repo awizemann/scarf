@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// Runs a fixed check-list against a remote server and reports per-probe

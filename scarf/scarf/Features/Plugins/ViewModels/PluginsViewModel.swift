@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 struct HermesPlugin: Identifiable, Sendable, Equatable {

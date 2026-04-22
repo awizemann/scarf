@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct SignalSetupView: View {
     @State private var viewModel: SignalSetupViewModel

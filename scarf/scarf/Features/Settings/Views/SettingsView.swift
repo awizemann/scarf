@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// Settings is now organized into tabs because the full Hermes config surface is far
 /// too large for a single scrolling form (~70 config fields). Each tab has its own

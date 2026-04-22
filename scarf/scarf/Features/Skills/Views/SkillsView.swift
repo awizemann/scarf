@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct SkillsView: View {
     @State private var viewModel: SkillsViewModel

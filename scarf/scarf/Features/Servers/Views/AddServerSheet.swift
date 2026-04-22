@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// Sheet for adding a new remote server. Collects SSH connection details,
 /// runs a "Test Connection" probe, and — on save — hands the persisted

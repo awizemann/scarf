@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct FeishuSetupView: View {
     @State private var viewModel: FeishuSetupViewModel

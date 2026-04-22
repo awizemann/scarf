@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct IMessageSetupView: View {
     @State private var viewModel: IMessageSetupViewModel

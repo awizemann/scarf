@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 
 /// Webhook platform setup. Just the global enable/port/secret — per-subscription
 /// routes live in the Webhooks sidebar feature.

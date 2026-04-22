@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 
 /// Matrix setup. Supports both access-token and password auth. No SSO.
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/matrix

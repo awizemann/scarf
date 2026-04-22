@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct WhatsAppSetupView: View {
     @State private var viewModel: WhatsAppSetupViewModel
