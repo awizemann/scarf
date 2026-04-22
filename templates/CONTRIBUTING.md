@@ -121,7 +121,9 @@ gh pr create
 
 **Do not modify `templates/catalog.json`** — the maintainer regenerates it after merge to keep PR diffs small.
 
-GitHub Actions runs the validator on your PR. A green check means the bundle structure is sound; it doesn't mean the content is approved. Expect a maintainer pass for content quality (is the `AGENTS.md` clear, does the prompt do what you describe, is the scope reasonable).
+The scarf repo ships a tailored submission checklist at [.github/PULL_REQUEST_TEMPLATE/template-submission.md](../.github/PULL_REQUEST_TEMPLATE/template-submission.md). To apply it to your PR, append `?template=template-submission.md` to the compare URL when opening the PR in the browser, or copy the checkbox list into the body manually.
+
+GitHub Actions runs the validator on your PR (see [.github/workflows/validate-template-pr.yml](../.github/workflows/validate-template-pr.yml)). A green check means the bundle structure is sound; it doesn't mean the content is approved. Expect a maintainer pass for content quality (is the `AGENTS.md` clear, does the prompt do what you describe, is the scope reasonable).
 
 ### 8. Iterate + ship
 
