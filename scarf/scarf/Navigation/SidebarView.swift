@@ -59,5 +59,6 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .navigationTitle("Scarf")
+        .splitViewAutosaveName("ScarfMainSidebar")
     }
 }
