@@ -87,9 +87,28 @@ struct ManageServersView: View {
     }
 
     private var list: some View {
-        List {
+        let defaultID = registry.defaultServerID
+        return List {
+            // Local sits at the top so users can mark it as the open-on-launch
+            // default alongside remote servers. It's synthesized (not in
+            // `registry.entries`), so render it explicitly.
+            HStack(spacing: 10) {
+                defaultStar(for: ServerContext.local.id, currentDefault: defaultID)
+                Image(systemName: "laptopcomputer")
+                    .foregroundStyle(.blue)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Local").font(.body)
+                    Text("This Mac")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.vertical, 4)
+
             ForEach(registry.entries) { entry in
                 HStack(spacing: 10) {
+                    defaultStar(for: entry.id, currentDefault: defaultID)
                     Image(systemName: "server.rack")
                         .foregroundStyle(.blue)
                     VStack(alignment: .leading, spacing: 2) {
@@ -121,6 +140,23 @@ struct ManageServersView: View {
             }
         }
         .listStyle(.inset)
+    }
+
+    /// A star button that marks the open-on-launch default. Filled + yellow
+    /// on the current default row (and non-interactive — clicking it is a
+    /// no-op since the flag is already set); outline + secondary elsewhere,
+    /// clicking promotes that row to default.
+    @ViewBuilder
+    private func defaultStar(for id: ServerID, currentDefault: ServerID) -> some View {
+        let isDefault = id == currentDefault
+        Button {
+            if !isDefault { registry.setDefaultServer(id) }
+        } label: {
+            Image(systemName: isDefault ? "star.fill" : "star")
+                .foregroundStyle(isDefault ? .yellow : .secondary)
+        }
+        .buttonStyle(.borderless)
+        .help(isDefault ? "Opens on launch" : "Set as default — open this server when Scarf launches.")
     }
 
     private func summary(for config: SSHConfig) -> String {
