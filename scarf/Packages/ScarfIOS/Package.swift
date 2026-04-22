@@ -32,11 +32,15 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../ScarfCore"),
-        // Pinned to the 0.7 minor line until the API stabilizes at 1.0.
-        // When we bump, re-run onboarding smoke tests against at least:
+        // Pinned tight to the 0.12 minor line. Citadel pre-1.0 has
+        // changed its authentication-method variant names between
+        // minor versions (0.7 → 0.9 → 0.12) — letting the version
+        // float to 0.13+ without a code review risks a silent build
+        // break in `CitadelSSHService.buildClientSettings(...)`. When
+        // bumping the minor, smoke test onboarding against:
         //   (a) a real host with 1Password SSH agent
         //   (b) a real host with a hand-edited `authorized_keys`
-        .package(url: "https://github.com/orlandos-nl/Citadel", from: "0.7.0"),
+        .package(url: "https://github.com/orlandos-nl/Citadel", .upToNextMinor(from: "0.12.0")),
     ],
     targets: [
         .target(

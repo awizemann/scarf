@@ -61,22 +61,36 @@ In the **scarf-ios** project (target of the same name):
    Xcode created for you:
    - `scarf_iosApp.swift` (or `scarf-iosApp.swift`)
    - `ContentView.swift`
-   - `Assets.xcassets` (keep this one — we'll reuse)
-2. In Finder, open `<repo>/scarf/scarf-ios/`. Drag the **App/**,
-   **Onboarding/**, and **Dashboard/** folders onto the `scarf-ios`
-   target in Xcode's navigator.
+   - **`Assets.xcassets`** — yes, delete this one too. We ship a
+     pre-built `Assets.xcassets/` with the app icon + accent
+     color inside `<repo>/scarf/scarf-ios/` that we'll add in the
+     next step.
+2. In Finder, open `<repo>/scarf/scarf-ios/`. Drag **App/**,
+   **Onboarding/**, **Dashboard/**, and **`Assets.xcassets/`** onto
+   the `scarf-ios` target in Xcode's navigator.
    - In the import sheet: **Create groups**, **Add to target:
      scarf-ios**.
-3. Build (`⌘B`). It should compile cleanly. If Citadel's
-   authentication-method variant has changed since I wrote
-   `CitadelSSHService`, adjust `buildClientSettings(...)` — see the
-   FIXME comment in that file.
+3. Build (`⌘B`). It should compile cleanly against Citadel 0.12.1
+   — every API call in `CitadelSSHService` was cross-checked
+   against the 0.12.1 tag in April 2026. If you've bumped the pin
+   to 0.13+ and something fails here, the likeliest culprit is
+   `SSHAuthenticationMethod.ed25519(username:privateKey:)` being
+   renamed or refactored; check the current
+   `Sources/Citadel/SSHAuthenticationMethod.swift` in the new
+   release.
 
-## One-time: app icon + accent color
+## App icon + accent color
 
-The `Assets.xcassets` that Xcode scaffolded already has a blank
-`AppIcon` and `AccentColor`. Drop your icon asset + pick an accent
-color in the Inspector. Nothing else to configure.
+The `Assets.xcassets/` inside `<repo>/scarf/scarf-ios/` ships with:
+
+- **`AppIcon.appiconset/AppIcon-1024.png`** — the 1024×1024 Scarf
+  icon from the Mac app's icon set. iOS 14+ renders all smaller
+  sizes automatically from the single 1024 image.
+- **`AccentColor.colorset`** — a custom Scarf teal (`RGB
+  0.227 / 0.525 / 0.722` in light mode; lighter `0.400 / 0.690
+  / 0.902` in dark mode). If you want a different accent, swap
+  the sRGB components in `Contents.json` or edit in Xcode's
+  color picker.
 
 ## Info.plist additions for M2
 
@@ -135,9 +149,11 @@ If you want to publish to TestFlight in M2, add these under
 **Citadel fails to resolve.** Delete derived data (`~/Library/Developer/Xcode/DerivedData/scarf-ios-*`)
 and `File → Packages → Reset Package Caches`, then rebuild.
 
-**`SSHAuthenticationMethod` has no member `ed25519`.** Citadel's
-private-key auth has changed variant names between 0.7 and 0.9. See
-`CitadelSSHService.buildClientSettings(...)` — there's one line to
+**`SSHAuthenticationMethod` has no member `ed25519`.** Shouldn't
+happen against Citadel 0.12.1 (verified), but historically the
+private-key variant names have changed between minor versions
+(0.7 → 0.9 → 0.12). See `CitadelSSHService.buildClientSettings(...)`
+— there's one line to
 update. Keep the protocol conformance intact.
 
 **Keychain reads empty after relaunch.** Check that you haven't

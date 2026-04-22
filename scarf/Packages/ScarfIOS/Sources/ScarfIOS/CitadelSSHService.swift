@@ -20,14 +20,15 @@ import ScarfCore
 ///     (file transport, SQLite snapshot pulls, ACP channel) will
 ///     layer on top.
 ///
-/// **Citadel API disclaimer.** Citadel 0.9's exact authentication-
-/// method spelling for Ed25519 private keys is evolving across
-/// 0.7 → 0.9. The `runOneShotProbe(...)` helper below is written
-/// against the documented `SSHClientSettings` + `.privateKey(...)`
-/// pattern; if Citadel has renamed or refactored that variant,
-/// adjust `buildClientSettings(...)` — everything else (the retry
-/// loop, the error classification, the exit-code handling) is
-/// Citadel-version-independent.
+/// **Citadel 0.12.1 API verified.** Every call below (`SSHAuthentication
+/// Method.ed25519(username:privateKey:)`, `SSHClientSettings(host:
+/// authenticationMethod:hostKeyValidator:)`, `SSHHostKeyValidator.
+/// acceptAnything()`, `SSHClient.connect(to:)`, `client.executeCommand
+/// (_:)`, `client.close()`) was cross-checked against the 0.12.1 tag in
+/// April 2026. If Citadel's package pin is bumped to a new minor
+/// (0.13+), re-verify these against
+/// `Sources/Citadel/SSHAuthenticationMethod.swift` and
+/// `Sources/Citadel/ClientSession.swift` in the new release.
 public struct CitadelSSHService: SSHConnectionTester {
     /// Seconds to wait for the probe exec. Set tight so onboarding
     /// doesn't hang on a silently-dropped connection.
@@ -116,15 +117,10 @@ public struct CitadelSSHService: SSHConnectionTester {
     // MARK: - Citadel glue
 
     /// Translate our in-house `SSHKeyBundle` (raw 32+32 byte Ed25519)
-    /// into Citadel's authentication method.
-    ///
-    /// **FIXME when updating Citadel.** The exact function name below
-    /// is my best read of Citadel 0.7–0.9's API surface — private-key
-    /// auth has gone through several iterations. If the build fails
-    /// here with "no member `ed25519`" or similar, check the current
-    /// `SSHAuthenticationMethod.swift` in the pinned Citadel version
-    /// and adjust. Everything else (key decode, error classification,
-    /// timeout) is independent.
+    /// into Citadel's authentication method. Verified against Citadel
+    /// 0.12.1 — see `Sources/Citadel/SSHAuthenticationMethod.swift`
+    /// for the full set of `.passwordBased(...)` / `.ed25519(...)` /
+    /// `.p256(...)` / etc. variants.
     private func buildClientSettings(
         config: IOSServerConfig,
         key: SSHKeyBundle
@@ -138,9 +134,6 @@ public struct CitadelSSHService: SSHConnectionTester {
             throw SSHConnectionTestError.other("Stored private key is malformed")
         }
         let username = config.user ?? "root"
-        // See FIXME above — the `.ed25519(...)` method name is the
-        // shape I expect based on Citadel 0.7–0.9 docs; double-check
-        // on Mac once the pod is resolved.
         let auth: SSHAuthenticationMethod = .ed25519(
             username: username,
             privateKey: ck
