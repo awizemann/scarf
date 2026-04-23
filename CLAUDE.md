@@ -105,6 +105,43 @@ Key services: [ProjectTemplateService.swift](scarf/scarf/Core/Services/ProjectTe
 
 **Never** let a template write to `config.yaml`, `auth.json`, sessions, or any credential path — the v1 installer refuses. If you extend the format, treat the preview sheet as load-bearing: the user's only trust boundary is that the sheet is honest about everything that's about to be written.
 
+### Template configuration (v2.3, schemaVersion 2)
+
+Templates can declare a typed configuration schema in `template.json`'s new `config` block. The installer renders a **Configure** step between the parent-directory pick and the preview sheet; values land at `<project>/.scarf/config.json` (non-secret) and in the login Keychain (secret). A post-install **Configuration** button on the dashboard header (shown when `<project>/.scarf/manifest.json` exists) opens the same form pre-filled for editing.
+
+Manifest shape:
+
+```json
+{
+  "schemaVersion": 2,
+  "contents": { "dashboard": true, "agentsMd": true, "config": 2 },
+  "config": {
+    "schema": [
+      {"key": "site_url", "type": "string", "label": "Site URL", "required": true},
+      {"key": "api_token", "type": "secret", "label": "API Token", "required": true}
+    ],
+    "modelRecommendation": {
+      "preferred": "claude-sonnet-4.5",
+      "rationale": "Tool-heavy workload — reasoning helps."
+    }
+  }
+}
+```
+
+Supported field types: `string`, `text`, `number`, `bool`, `enum` (with `options: [{value, label}]`), `list` (itemType `"string"` only in v1), `secret`. Type-specific constraints (`pattern`, `min`/`max`, `minLength`/`maxLength`, `minItems`/`maxItems`) are optional. `secret` fields **must not** declare a `default` — the validator refuses.
+
+Key services: [TemplateConfig.swift](scarf/scarf/Core/Models/TemplateConfig.swift) (schema + value models + Keychain ref helpers), [ProjectConfigKeychain.swift](scarf/scarf/Core/Services/ProjectConfigKeychain.swift) (thin `SecItemAdd`/`Copy`/`Delete` wrapper; the only Keychain user in Scarf today), [ProjectConfigService.swift](scarf/scarf/Core/Services/ProjectConfigService.swift) (load/save config.json, resolve secrets, cache manifest, validate schema + values). UI in [Features/Templates/ViewModels/TemplateConfigViewModel.swift](scarf/scarf/Features/Templates/ViewModels/TemplateConfigViewModel.swift) + [Features/Templates/Views/TemplateConfigSheet.swift](scarf/scarf/Features/Templates/Views/TemplateConfigSheet.swift).
+
+**Secret storage.** Keychain service name is `com.scarf.template.<slug>`, account is `<fieldKey>:<project-path-hash-short>`. The path-hash suffix means two installs of the same template in different dirs don't collide on Keychain entries. Values in `config.json` are `"keychain://service/account"` URIs — never plaintext. The bytes hit the Keychain only on form commit, so cancelling never leaves orphan entries.
+
+**Uninstall.** `TemplateLock` v2 gains `config_keychain_items` and `config_fields` arrays. The uninstaller iterates each URI through `SecItemDelete` before removing the lock file. Absent items (user hand-cleaned) are no-ops.
+
+**Exporter.** Carries the *schema* from `<project>/.scarf/manifest.json` through into exported bundles, never values. Exporting never leaks anyone's secrets. `schemaVersion` bumps to 2 only when a schema is forwarded; schema-less exports stay at 1.
+
+**Catalog site.** [tools/build-catalog.py](tools/build-catalog.py) mirrors the Swift schema validator. Each v2 template's `template.json` is copied into `.gh-pages-worktree/templates/<slug>/manifest.json` and the site's `widgets.js` calls `ScarfWidgets.renderConfigSchema` to display the schema on the detail page (display-only — the form lives in-app).
+
+**Schema is Swift-primary.** If `TemplateConfigField.FieldType` gains a new case, update in order: `TemplateConfig.swift` (model + validation), `tools/build-catalog.py` (`SUPPORTED_CONFIG_FIELD_TYPES` + type-specific rules), `widgets.js` (`summariseConstraint`), `TemplateConfigSheet.swift` (new control subview), tests on both sides. Schema drift between validator + installer is the kind of bug users only notice after shipping.
+
 ## Template Catalog
 
 Shipped community templates live at `templates/<author>/<name>/` (one level down — `templates/CONTRIBUTING.md` explains the submission flow for authors). The catalog site is generated from this directory and served at `awizemann.github.io/scarf/templates/` alongside the Sparkle appcast — the two coexist on the `gh-pages` branch but touch completely disjoint paths.
