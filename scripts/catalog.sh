@@ -45,7 +45,12 @@ need_builder() {
 }
 
 need_ghpages() {
-  [[ -d "$GHPAGES_DIR/.git" ]] || die "no gh-pages worktree at $GHPAGES_DIR
+  # `.git` is a directory in a regular clone but a pointer FILE in a
+  # `git worktree add` worktree — `-e` covers both. The earlier `-d`
+  # check falsely rejected worktrees, so the script's own error
+  # message told users to re-run `git worktree add` on a worktree
+  # that was already there and valid.
+  [[ -e "$GHPAGES_DIR/.git" ]] || die "no gh-pages worktree at $GHPAGES_DIR
   Run: git worktree add .gh-pages-worktree gh-pages"
 }
 
