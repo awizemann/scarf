@@ -22,7 +22,13 @@ struct ChatView: View {
         // push the whole window past the screen. Same pattern as
         // the Sessions tab fix in the v2.3 branch.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle("Chat")
+        // v2.3: reflect the active Scarf project in the nav title
+        // so the user can see at a glance that the chat is scoped
+        // (complements the folder chip in SessionInfoBar). Falls
+        // back to the plain "Chat" label for global chats.
+        .navigationTitle(
+            viewModel.currentProjectName.map { "Chat · \($0)" } ?? "Chat"
+        )
         .task {
             await viewModel.loadRecentSessions()
             viewModel.refreshCredentialPreflight()

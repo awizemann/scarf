@@ -41,6 +41,20 @@ final class ChatViewModel {
     let richChatViewModel: RichChatViewModel
     private var coordinator: Coordinator?
 
+    /// Absolute project path for the current session, when the chat is
+    /// project-scoped (either started via a project's "New Chat" button
+    /// or resumed from a session that was previously attributed via the
+    /// v2.3 sidecar). Nil for plain global chats. Drives the project
+    /// indicator in SessionInfoBar + the `Chat · <Name>` nav title.
+    private(set) var currentProjectPath: String?
+
+    /// Human-readable name of the active project, resolved from the
+    /// projects registry at session-start time. Stored alongside the
+    /// path so the view renders without hitting disk on every update.
+    /// Nil when `currentProjectPath` is nil OR the path isn't in the
+    /// registry (project was removed after the session was attributed).
+    private(set) var currentProjectName: String?
+
     // ACP state
     private var acpClient: ACPClient?
     private var acpEventTask: Task<Void, Never>?
@@ -361,6 +375,37 @@ final class ChatViewModel {
                         sessionID: resolvedSessionId,
                         toProjectPath: projectPath
                     )
+                }
+
+                // Resolve which project (if any) this session belongs
+                // to, so SessionInfoBar + nav title can surface it.
+                // Two inputs — use whichever is non-nil:
+                //   * `projectPath` — the caller asked for a project
+                //     scope (fresh project chat). Just-attributed;
+                //     definitely in the sidecar.
+                //   * `attribution.projectPath(for: resolvedSessionId)`
+                //     — the resumed session was previously attributed.
+                //     Covers "click an old project-attributed session
+                //     from the global Sessions sidebar / Resume menu"
+                //     where projectPath isn't known at the call site.
+                let attributedPath = projectPath
+                    ?? attribution.projectPath(for: resolvedSessionId)
+                if let path = attributedPath {
+                    // Look up a human-readable name from the projects
+                    // registry. Missing project (path in the sidecar,
+                    // project since removed) → show the path as a
+                    // fallback label so the chip still renders and the
+                    // user sees *something* rather than silently losing
+                    // the indicator.
+                    let registry = ProjectDashboardService(context: context).loadRegistry()
+                    let name = registry.projects.first(where: { $0.path == path })?.name
+                    self.currentProjectPath = path
+                    self.currentProjectName = name ?? path
+                } else {
+                    // Explicit clear on non-project sessions so the
+                    // indicator doesn't leak from a previous chat.
+                    self.currentProjectPath = nil
+                    self.currentProjectName = nil
                 }
 
                 // Refresh session list so the new ACP session appears in the Resume menu

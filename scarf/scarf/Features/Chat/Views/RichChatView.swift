@@ -17,7 +17,13 @@ struct RichChatView: View {
                 isWorking: richChat.isAgentWorking,
                 acpInputTokens: richChat.acpInputTokens,
                 acpOutputTokens: richChat.acpOutputTokens,
-                acpThoughtTokens: richChat.acpThoughtTokens
+                acpThoughtTokens: richChat.acpThoughtTokens,
+                // v2.3: surface the active Scarf project (if any) as
+                // a folder chip at the start of the bar. Driven by
+                // ChatViewModel.currentProjectName which is set in
+                // startACPSession on both new project chats and
+                // resumed project-attributed sessions.
+                projectName: chatViewModel.currentProjectName
             )
             Divider()
 
