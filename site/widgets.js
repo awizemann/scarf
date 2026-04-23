@@ -409,11 +409,115 @@
   }
 
   // ---------------------------------------------------------------------
+  // Config-schema display (v2.3 — template configuration).
+  // ---------------------------------------------------------------------
+  //
+  // Renders the author-declared schema as a read-only listing on the
+  // catalog detail page. The site itself never collects values — the
+  // form UI lives inside the Scarf app. This is purely informational
+  // so visitors know what they'll need to fill in before installing.
+
+  /**
+   * Render a manifest.config block into `container` as a summary.
+   * Safe to call with a null schema (no-op).
+   * @param {HTMLElement} container
+   * @param {{schema: Array, modelRecommendation?: object} | null | undefined} config
+   */
+  function renderConfigSchema(container, config) {
+    container.innerHTML = "";
+    if (!config || !Array.isArray(config.schema) || config.schema.length === 0) {
+      return;
+    }
+    const wrap = elt("div", "config-schema");
+    const header = elt("h3", "config-schema-header", "Configuration");
+    wrap.appendChild(header);
+    const desc = elt("p", "config-schema-desc",
+      "Fields you'll fill in during install. Secrets are stored in the macOS Keychain; non-secret values live at <project>/.scarf/config.json.");
+    wrap.appendChild(desc);
+
+    const list = elt("dl", "config-schema-list");
+    for (const field of config.schema) {
+      const dt = elt("dt", "config-field-header");
+      dt.appendChild(elt("span", "config-field-key", field.key || ""));
+      dt.appendChild(elt("span", "config-field-type", field.type || ""));
+      if (field.required) {
+        const req = elt("span", "config-field-required", "required");
+        dt.appendChild(req);
+      }
+      list.appendChild(dt);
+
+      const dd = elt("dd", "config-field-body");
+      if (field.label) {
+        dd.appendChild(elt("div", "config-field-label", field.label));
+      }
+      if (field.description) {
+        const descEl = elt("div", "config-field-description");
+        descEl.innerHTML = renderInline(field.description);
+        dd.appendChild(descEl);
+      }
+      const constraint = summariseConstraint(field);
+      if (constraint) {
+        dd.appendChild(elt("div", "config-field-constraint", constraint));
+      }
+      list.appendChild(dd);
+    }
+    wrap.appendChild(list);
+
+    if (config.modelRecommendation) {
+      const rec = config.modelRecommendation;
+      const recBlock = elt("div", "config-model-rec");
+      recBlock.appendChild(elt("div", "config-model-label", "Recommended model"));
+      recBlock.appendChild(elt("div", "config-model-preferred", rec.preferred || ""));
+      if (rec.rationale) {
+        recBlock.appendChild(elt("div", "config-model-rationale", rec.rationale));
+      }
+      if (Array.isArray(rec.alternatives) && rec.alternatives.length > 0) {
+        recBlock.appendChild(elt("div", "config-model-alternatives",
+          "Also works: " + rec.alternatives.join(", ")));
+      }
+      wrap.appendChild(recBlock);
+    }
+
+    container.appendChild(wrap);
+  }
+
+  /** One-line human summary of a field's type-specific constraints.
+   * Empty string if nothing noteworthy to say. */
+  function summariseConstraint(field) {
+    const type = field.type;
+    if (type === "enum") {
+      const opts = Array.isArray(field.options) ? field.options : [];
+      const values = opts.map(o => o && o.label ? o.label : (o && o.value) || "").filter(Boolean);
+      if (values.length > 0) return "Choices: " + values.join(", ");
+    } else if (type === "list") {
+      const min = field.minItems, max = field.maxItems;
+      if (min && max) return `${min}–${max} items`;
+      if (min) return `At least ${min} item${min === 1 ? "" : "s"}`;
+      if (max) return `At most ${max} item${max === 1 ? "" : "s"}`;
+    } else if (type === "string" || type === "text") {
+      if (field.pattern) return `Pattern: ${field.pattern}`;
+      const min = field.minLength, max = field.maxLength;
+      if (min && max) return `${min}–${max} characters`;
+      if (min) return `At least ${min} characters`;
+      if (max) return `At most ${max} characters`;
+    } else if (type === "number") {
+      const min = field.min, max = field.max;
+      if (min !== undefined && max !== undefined) return `${min}–${max}`;
+      if (min !== undefined) return `≥ ${min}`;
+      if (max !== undefined) return `≤ ${max}`;
+    } else if (type === "secret") {
+      return "Stored in the macOS Keychain on install — never in git, never in config.json.";
+    }
+    return "";
+  }
+
+  // ---------------------------------------------------------------------
   // Public API
   // ---------------------------------------------------------------------
 
   global.ScarfWidgets = {
     renderDashboard,
-    renderMarkdown,   // exposed for the template detail page's README block
+    renderMarkdown,      // used by the detail page's README block
+    renderConfigSchema,  // used by the detail page's Configuration block
   };
 })(typeof window !== "undefined" ? window : this);

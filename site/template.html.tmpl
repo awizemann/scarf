@@ -48,6 +48,10 @@
       <div id="dashboard-preview"></div>
     </section>
 
+    <section class="detail-config">
+      <div id="config-schema"></div>
+    </section>
+
     <section class="detail-readme">
       <h2>README</h2>
       <div id="readme-body"></div>
@@ -63,11 +67,14 @@
 
   <script src="../widgets.js"></script>
   <script>
-    // Fetch + render dashboard + README at page load. Both files live
-    // alongside index.html in this template's detail dir.
+    // Fetch + render dashboard + README + config schema at page load.
+    // Dashboard + README live next to index.html in this template's
+    // detail dir; the config schema comes from the sibling manifest.json
+    // that the build-catalog renderer also copies in.
     (async function () {
       const dashboardEl = document.getElementById("dashboard-preview");
       const readmeEl = document.getElementById("readme-body");
+      const configEl = document.getElementById("config-schema");
       try {
         const d = await fetch("dashboard.json").then(r => r.json());
         ScarfWidgets.renderDashboard(dashboardEl, d);
@@ -79,6 +86,17 @@
         readmeEl.innerHTML = ScarfWidgets.renderMarkdown(md);
       } catch (e) {
         readmeEl.textContent = "Could not load README.";
+      }
+      try {
+        // manifest.json may not exist for schema-less templates — that's
+        // fine, we just leave the config section empty.
+        const res = await fetch("manifest.json");
+        if (res.ok) {
+          const manifest = await res.json();
+          ScarfWidgets.renderConfigSchema(configEl, manifest.config);
+        }
+      } catch (e) {
+        // Silent — config-schema display is optional.
       }
     })();
   </script>
