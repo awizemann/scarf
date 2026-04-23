@@ -1019,7 +1019,9 @@ final class TestRegistryLock: @unchecked Sendable {
         let dashboardData = try Data(contentsOf: URL(fileURLWithPath: dashboardPath))
         let dashboard = try JSONDecoder().decode(ProjectDashboard.self, from: dashboardData)
         #expect(dashboard.title == "Site Status")
-        #expect(dashboard.sections.count == 3)
+        // Four sections: Current Status (stats), Watched Sites (list),
+        // Live Site Preview (webview — drives the Site tab), How to Use (text).
+        #expect(dashboard.sections.count == 4)
 
         // First section should have three stat widgets that the cron job
         // updates by value. Assert titles + types so the AGENTS.md contract
@@ -1030,6 +1032,19 @@ final class TestRegistryLock: @unchecked Sendable {
         #expect(statTitles.contains("Sites Up"))
         #expect(statTitles.contains("Sites Down"))
         #expect(statTitles.contains("Last Checked"))
+
+        // Live Site Preview section must contain exactly one webview
+        // widget. The presence of any webview widget is what makes Scarf
+        // expose the Site tab next to Dashboard, so losing this section
+        // would silently drop a user-visible feature. The cron job
+        // rewrites this widget's `url` to the first configured site on
+        // every run — AGENTS.md documents the contract.
+        let previewSection = dashboard.sections[2]
+        #expect(previewSection.title == "Live Site Preview")
+        let webviews = previewSection.widgets.filter { $0.type == "webview" }
+        #expect(webviews.count == 1)
+        #expect(webviews.first?.title == "First Watched Site")
+        #expect((webviews.first?.url ?? "").isEmpty == false)
 
         // Cron prompt references .scarf/config.json (where values.sites
         // + values.timeout_seconds live), the dashboard/log it writes,
