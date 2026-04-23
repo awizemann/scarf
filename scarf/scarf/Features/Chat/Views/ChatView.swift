@@ -15,6 +15,13 @@ struct ChatView: View {
             errorBanner
             chatArea
         }
+        // Clamp the outer VStack to the detail column's offered
+        // space. Without this, the chat area's intrinsic height (a
+        // RichChatView whose message list grows with content) can
+        // bubble up through NavigationSplitView's detail slot and
+        // push the whole window past the screen. Same pattern as
+        // the Sessions tab fix in the v2.3 branch.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("Chat")
         .task {
             await viewModel.loadRecentSessions()

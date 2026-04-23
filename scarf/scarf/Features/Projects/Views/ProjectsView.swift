@@ -367,6 +367,16 @@ struct ProjectsView: View {
                     }
                 }
             }
+            // Clamp the container VStack to the detail column's
+            // offered space. Without it, any tab whose content is
+            // taller than the window (long Sessions list, tall
+            // README block in a dashboard's text widget, etc.) can
+            // bubble its intrinsic height up through
+            // NavigationSplitView's detail slot and push the whole
+            // window past the screen. widgetsTab's own ScrollView
+            // and siteTab's explicit maxHeight both cooperate; the
+            // sessions tab needs this as well.
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let error = viewModel.dashboardError {
             ContentUnavailableView {
                 Label("No Dashboard", systemImage: "square.grid.2x2")
