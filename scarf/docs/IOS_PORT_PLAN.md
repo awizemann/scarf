@@ -696,4 +696,57 @@ Total **98 → 108 tests passing on Linux** via `docker run --rm -v $PWD/Package
 - **Editing Cron, adding Skills** — both are deferred. Cron editing needs atomic JSON rewrites (doable). Skills install needs git-clone + schema validation (larger).
 - **Settings tab on iOS is still missing** — requires a YAML parser in ScarfCore or porting `HermesFileService.loadConfig`. Next phase's job.
 
-### M6 — pending
+### M6 — shipped (on `claude/ios-m6-settings-polish` branch, separate PR, stacked on M5)
+
+Ports the Mac app's YAML parser into ScarfCore (unblocking iOS Settings), adds Settings browsing + Cron editing, consolidates the test-serialization story. App Store submission is deferred to a later task after real-device testing.
+
+**Shipped — ScarfCore:**
+
+- `Parsing/HermesYAML.swift` — `HermesYAML.parseNestedYAML(_:)` + `stripYAMLQuotes(_:)`. Lifted verbatim from `HermesFileService.parseNestedYAML` / `stripYAMLQuotes` but hoisted into a standalone enum for reuse. Scope unchanged: indent-based block nesting, scalar values, bullet lists, nested maps. Not full YAML-spec compliance; matches exactly what Hermes's `config.yaml` actually uses.
+- `Parsing/HermesConfig+YAML.swift` — `HermesConfig.init(yaml:)`. Lifted from `HermesFileService.parseConfig` one-for-one. Every default, every key, every legacy fallback (e.g., `platforms.slack.*` vs `slack.*`) tracked to the Mac implementation. Forgiving: malformed YAML produces a partial-state `HermesConfig` rather than throwing.
+- `ViewModels/IOSSettingsViewModel.swift` — `@Observable @MainActor` VM. Reads `~/.hermes/config.yaml` via transport, parses with the new loader, surfaces both the parsed `HermesConfig` and the raw text (so Settings view can offer a "View source" disclosure). M6 Settings is READ-ONLY — edit-path deferred until a round-trip-preserving YAML writer lands (commits, key order, whitespace would need preservation for a clean edit UX).
+- `ViewModels/IOSCronViewModel.swift` — added write paths: `toggleEnabled(id:)`, `delete(id:)`, `upsert(_:)`. All funnel through `saveJobs(_:)` which re-encodes the full `CronJobsFile` (`.prettyPrinted + .sortedKeys`) and writes atomically via the transport (Data.write-atomic semantics from M5). Creates the `cron/` directory on fresh installs.
+- Both `HermesCronJob` and `CronJobsFile` gained real memberwise inits (previously only hand-written `init(from:)` — Swift's synthesis was suppressed). Also `HermesCronJob.withEnabled(_:)` — clean field-passthrough instead of the JSON-roundtrip hack my first draft used.
+
+**Shipped — iOS app:**
+
+- `Scarf iOS/Settings/SettingsView.swift` — read-only browser grouped into sections that mirror the Mac app's tabs: Model, Agent, Display, Terminal, Memory, Voice, Security, Compression, Logging, Platforms. `DisclosureGroup` at the bottom reveals the raw YAML source for diagnostics.
+- `Scarf iOS/Cron/CronListView.swift` rewritten: toggle-enabled circle (tap to flip), swipe-to-delete, "+" toolbar for new-job, row-tap opens the editor sheet. New `CronEditorView` form handles name / prompt / enabled / schedule (kind + display + expression + run_at) / optional model / comma-separated skills / delivery route. Preserves runtime state fields (nextRunAt, lastRunAt, deliveryFailures, etc.) when editing — no resetting the cron's observed history on a field edit.
+- Dashboard's Surfaces section gets a 5th row: Settings.
+
+**Test-suite reorganization:**
+
+Discovered (and fixed) a cross-suite race: swift-testing's `.serialized` trait scopes to one @Suite, not globally. M5's serialized suite installed `ServerContext.sshTransportFactory`, M6's serialized suite did the same, and the M0b non-serialized `serverContextMakeTransportDispatches` test asserted the DEFAULT factory (nil) returned `SSHTransport` — all three raced on the shared static.
+
+Fix: keep the YAML-parse + memberwise tests in a plain (non-serialized) `M6ConfigCronTests` suite since they're pure. **Move every factory-touching test into the single `.serialized` `M5FeatureVMTests`** — including M6's Cron write-path tests, Settings-load tests, AND the M0b default-factory test (with explicit `factory = nil` reset for race-freedom). Single serialization domain eliminates the race.
+
+**Test counts:** 108 → **134 passing on Linux**.
+
+| Suite | New in M6 | Total |
+|---|--:|--:|
+| `ScarfCoreSmokeTests` | 0 | 1 |
+| `M0aPublicInitTests` | 0 | 15 |
+| `M0bTransportTests` | 0 (1 split out + moved) | 18 |
+| `M0cServicesTests` | 0 | 8 |
+| `M0dViewModelsTests` | 0 | 9 |
+| `M1ACPTests` | 0 | 10 |
+| `M2OnboardingTests` | 0 | 26 |
+| `M3TransportTests` | 0 | 5 |
+| `M4ACPIOSTests` | 0 | 2 |
+| `M5FeatureVMTests` | **+7** (cron write paths + settings load + default-factory guard) | 21 |
+| `M6ConfigCronTests` | **+19** (YAML parsing + HermesConfig decode + memberwise inits) | 19 |
+
+**Manual validation needed on Mac:**
+1. Xcode compile clean.
+2. Settings → confirm every section populates from your real `config.yaml`. Tap the "View source" disclosure to verify the raw text matches what's on the remote.
+3. Cron: toggle a job's enabled flag, verify it survives a full refresh + relaunch. Swipe-to-delete a job. Tap "+" to create a new job; verify prompt + schedule + skills round-trip. Tap an existing job to edit; verify runtime fields (lastRunAt, deliveryFailures) aren't reset.
+4. Skills: unchanged from M5, still browse-only.
+
+**Rules next phases can rely on:**
+- **Any test that touches `ServerContext.sshTransportFactory` or any other global mutable state MUST live in `M5FeatureVMTests`** (the single `.serialized` suite) — or introduce a new cross-suite synchronization primitive. Swift-testing's `.serialized` does NOT serialize across suites.
+- **YAML parser in ScarfCore is a hard ceiling** — it handles the Hermes config subset, not arbitrary YAML. If a future Hermes version adds constructs the parser doesn't cover (flow-style `[...]`, anchors, `&` references, multi-line `|` blocks), port them on both sides simultaneously.
+- **Settings writes stay deferred** until a round-trip-preserving YAML writer ships. Options: (a) hand-write one, (b) adopt a YAML lib (adds dependency), (c) delegate to `hermes config set` via ACP.
+- **Cron editing on iOS is atomic per-save** — full jobs.json rewrites on every change. Fine for current cron sizes (dozens of jobs). If that grows into the thousands, consider partial updates via `hermes cron add/rm/toggle` over ACP.
+- **Skills install (git-clone + validation over SSH)** remains deferred — it's its own project. The iOS Skills list is read-only; users install from the Mac app or by cloning directly to the remote.
+
+### M7 — pending (post-testing App Store submission + any polish that surfaces)

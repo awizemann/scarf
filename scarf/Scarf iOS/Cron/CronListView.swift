@@ -1,13 +1,14 @@
 import SwiftUI
 import ScarfCore
 
-/// iOS Cron screen. Read-only list of scheduled jobs pulled from
-/// `~/.hermes/cron/jobs.json`. Editing is deferred to a later phase —
-/// see `IOSCronViewModel`'s header for the scope rationale.
+/// iOS Cron screen. M6 gained: toggle-enabled, swipe-to-delete,
+/// "+" toolbar → editor sheet, and row-tap → edit existing job.
 struct CronListView: View {
     let config: IOSServerConfig
 
     @State private var vm: IOSCronViewModel
+    @State private var editingJob: HermesCronJob?
+    @State private var showingNewJob = false
 
     private static let sharedContextID: ServerID = ServerID(
         uuidString: "00000000-0000-0000-0000-0000000000A1"
@@ -33,7 +34,7 @@ struct CronListView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("No cron jobs yet.")
                             .font(.headline)
-                        Text("Create cron jobs from the Mac app or by editing `~/.hermes/cron/jobs.json` directly. iOS will display them here.")
+                        Text("Tap \(Image(systemName: "plus.circle.fill")) to create one, or manage them from the Mac app.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -42,13 +43,34 @@ struct CronListView: View {
             } else {
                 Section {
                     ForEach(vm.jobs) { job in
-                        CronRow(job: job)
+                        CronRow(job: job) {
+                            Task { await vm.toggleEnabled(id: job.id) }
+                        } onTap: {
+                            editingJob = job
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                Task { await vm.delete(id: job.id) }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
                     }
                 }
             }
         }
         .navigationTitle("Cron jobs")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showingNewJob = true
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                }
+                .disabled(vm.isSaving)
+            }
+        }
         .overlay {
             if vm.isLoading && vm.jobs.isEmpty {
                 ProgressView("Loading jobs…")
@@ -59,29 +81,42 @@ struct CronListView: View {
         }
         .refreshable { await vm.load() }
         .task { await vm.load() }
+        .sheet(item: $editingJob) { job in
+            CronEditorView(initial: job, title: "Edit cron job") { edited in
+                Task { await vm.upsert(edited) }
+            }
+        }
+        .sheet(isPresented: $showingNewJob) {
+            CronEditorView(initial: nil, title: "New cron job") { created in
+                Task { await vm.upsert(created) }
+            }
+        }
     }
 }
 
 private struct CronRow: View {
     let job: HermesCronJob
+    let onToggle: () -> Void
+    let onTap: () -> Void
 
     var body: some View {
-        NavigationLink {
-            CronDetailView(job: job)
-        } label: {
-            HStack(alignment: .top, spacing: 12) {
-                VStack {
-                    Image(systemName: job.stateIcon)
-                        .foregroundStyle(stateColor)
-                        .font(.body)
-                }
-                .frame(width: 22)
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: onToggle) {
+                Image(systemName: job.enabled
+                    ? "checkmark.circle.fill"
+                    : "circle")
+                    .font(.title3)
+                    .foregroundStyle(job.enabled ? Color.accentColor : Color.secondary)
+            }
+            .buttonStyle(.plain)
 
+            Button(action: onTap) {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
                         Text(job.name)
                             .font(.body)
                             .fontWeight(.medium)
+                            .foregroundStyle(.primary)
                         if !job.enabled {
                             Text("DISABLED")
                                 .font(.caption2)
@@ -108,86 +143,171 @@ private struct CronRow: View {
                             .foregroundStyle(.tertiary)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.vertical, 2)
+            .buttonStyle(.plain)
         }
-    }
-
-    private var stateColor: Color {
-        switch job.state {
-        case "running":   return .blue
-        case "completed": return .green
-        case "failed":    return .red
-        default:          return .secondary
-        }
+        .padding(.vertical, 2)
     }
 }
 
-private struct CronDetailView: View {
-    let job: HermesCronJob
+// MARK: - Editor
+
+/// Sheet for creating or editing a single `HermesCronJob`. Scoped
+/// to the fields a user typically sets; runtime state fields
+/// (delivery_failures, last_run_at, etc.) pass through untouched
+/// when editing an existing job.
+struct CronEditorView: View {
+    let title: String
+    let onSave: (HermesCronJob) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    // Form-backing state.
+    @State private var id: String
+    @State private var name: String
+    @State private var prompt: String
+    @State private var model: String
+    @State private var skills: String  // comma-separated
+    @State private var deliver: String
+    @State private var enabled: Bool
+
+    @State private var scheduleKind: String
+    @State private var scheduleDisplay: String
+    @State private var scheduleRunAt: String
+    @State private var scheduleExpression: String
+
+    private let existing: HermesCronJob?
+
+    init(
+        initial: HermesCronJob?,
+        title: String,
+        onSave: @escaping (HermesCronJob) -> Void
+    ) {
+        self.title = title
+        self.onSave = onSave
+        self.existing = initial
+        _id = State(initialValue: initial?.id ?? "job_\(UUID().uuidString.prefix(8))")
+        _name = State(initialValue: initial?.name ?? "")
+        _prompt = State(initialValue: initial?.prompt ?? "")
+        _model = State(initialValue: initial?.model ?? "")
+        _skills = State(initialValue: (initial?.skills ?? []).joined(separator: ", "))
+        _deliver = State(initialValue: initial?.deliver ?? "")
+        _enabled = State(initialValue: initial?.enabled ?? true)
+        _scheduleKind = State(initialValue: initial?.schedule.kind ?? "cron")
+        _scheduleDisplay = State(initialValue: initial?.schedule.display ?? "")
+        _scheduleRunAt = State(initialValue: initial?.schedule.runAt ?? "")
+        _scheduleExpression = State(initialValue: initial?.schedule.expression ?? "")
+    }
 
     var body: some View {
-        Form {
-            Section("Prompt") {
-                Text(job.prompt)
-                    .font(.body)
-                    .textSelection(.enabled)
-            }
+        NavigationStack {
+            Form {
+                Section("Job") {
+                    TextField("Name", text: $name)
+                        .autocorrectionDisabled()
+                    Toggle("Enabled", isOn: $enabled)
+                }
 
-            Section("Schedule") {
-                LabeledContent("Kind", value: job.schedule.kind)
-                if let display = job.schedule.display {
-                    LabeledContent("When", value: display)
+                Section("Prompt") {
+                    TextEditor(text: $prompt)
+                        .frame(minHeight: 120)
+                        .font(.body)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
                 }
-                if let expr = job.schedule.expression {
-                    LabeledContent("Expression", value: expr)
-                }
-            }
 
-            Section("State") {
-                LabeledContent("Enabled", value: job.enabled ? "yes" : "no")
-                LabeledContent("State", value: job.state)
-                if let last = job.lastRunAt {
-                    LabeledContent("Last run", value: last)
-                }
-                if let next = job.nextRunAt {
-                    LabeledContent("Next run", value: next)
-                }
-                if let err = job.lastError {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Last error")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(err)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.red)
-                            .textSelection(.enabled)
+                Section("Schedule") {
+                    Picker("Kind", selection: $scheduleKind) {
+                        Text("cron").tag("cron")
+                        Text("interval").tag("interval")
+                        Text("once").tag("once")
+                    }
+                    TextField("Display (e.g. \"9am weekdays\")", text: $scheduleDisplay)
+                        .autocorrectionDisabled()
+                    if scheduleKind == "cron" {
+                        TextField("Expression (e.g. \"0 9 * * 1-5\")", text: $scheduleExpression)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                    }
+                    if scheduleKind == "once" {
+                        TextField("Run at (ISO8601)", text: $scheduleRunAt)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
                     }
                 }
-            }
 
-            if let delivery = job.deliveryDisplay {
-                Section("Delivery") {
-                    LabeledContent("Route", value: delivery)
+                Section("Optional") {
+                    TextField("Model (leave blank to use default)", text: $model)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    TextField("Skills (comma-separated)", text: $skills)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    TextField("Deliver (e.g. discord:channel)", text: $deliver)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
                 }
             }
-
-            if let skills = job.skills, !skills.isEmpty {
-                Section("Skills") {
-                    ForEach(skills, id: \.self) { s in
-                        Text(s)
-                            .font(.caption.monospaced())
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") {
+                        onSave(buildJob())
+                        dismiss()
                     }
-                }
-            }
-
-            if let model = job.model {
-                Section("Model") {
-                    Text(model).font(.caption.monospaced())
+                    .disabled(!isValid)
+                    .bold()
                 }
             }
         }
-        .navigationTitle(job.name)
-        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var isValid: Bool {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let p = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !n.isEmpty && !p.isEmpty
+    }
+
+    private func buildJob() -> HermesCronJob {
+        let skillList = skills
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let emptyToNil: (String) -> String? = { s in
+            let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            return t.isEmpty ? nil : t
+        }
+        let schedule = CronSchedule(
+            kind: scheduleKind,
+            runAt: emptyToNil(scheduleRunAt),
+            display: emptyToNil(scheduleDisplay),
+            expression: emptyToNil(scheduleExpression)
+        )
+        return HermesCronJob(
+            id: id,
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
+            skills: skillList.isEmpty ? nil : skillList,
+            model: emptyToNil(model),
+            schedule: schedule,
+            enabled: enabled,
+            state: existing?.state ?? "scheduled",
+            deliver: emptyToNil(deliver),
+            // Preserve runtime state fields from the existing job so
+            // an edit doesn't reset last_run_at, failure counts, etc.
+            nextRunAt: existing?.nextRunAt,
+            lastRunAt: existing?.lastRunAt,
+            lastError: existing?.lastError,
+            preRunScript: existing?.preRunScript,
+            deliveryFailures: existing?.deliveryFailures,
+            lastDeliveryError: existing?.lastDeliveryError,
+            timeoutType: existing?.timeoutType,
+            timeoutSeconds: existing?.timeoutSeconds,
+            silent: existing?.silent
+        )
     }
 }

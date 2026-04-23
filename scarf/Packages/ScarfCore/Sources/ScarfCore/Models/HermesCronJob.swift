@@ -32,6 +32,49 @@ public struct HermesCronJob: Identifiable, Sendable, Codable {
         case timeoutSeconds = "timeout_seconds"
     }
 
+    /// Memberwise init. Swift doesn't synthesize one for us because
+    /// of the hand-written Codable conformance. The iOS Cron editor
+    /// uses this to rebuild jobs from user-edited fields.
+    public nonisolated init(
+        id: String,
+        name: String,
+        prompt: String,
+        skills: [String]? = nil,
+        model: String? = nil,
+        schedule: CronSchedule,
+        enabled: Bool,
+        state: String,
+        deliver: String? = nil,
+        nextRunAt: String? = nil,
+        lastRunAt: String? = nil,
+        lastError: String? = nil,
+        preRunScript: String? = nil,
+        deliveryFailures: Int? = nil,
+        lastDeliveryError: String? = nil,
+        timeoutType: String? = nil,
+        timeoutSeconds: Int? = nil,
+        silent: Bool? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.prompt = prompt
+        self.skills = skills
+        self.model = model
+        self.schedule = schedule
+        self.enabled = enabled
+        self.state = state
+        self.deliver = deliver
+        self.nextRunAt = nextRunAt
+        self.lastRunAt = lastRunAt
+        self.lastError = lastError
+        self.preRunScript = preRunScript
+        self.deliveryFailures = deliveryFailures
+        self.lastDeliveryError = lastDeliveryError
+        self.timeoutType = timeoutType
+        self.timeoutSeconds = timeoutSeconds
+        self.silent = silent
+    }
+
     public nonisolated init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id                = try c.decode(String.self, forKey: .id)
@@ -115,6 +158,18 @@ public struct CronSchedule: Sendable, Codable {
         case expression
     }
 
+    public nonisolated init(
+        kind: String,
+        runAt: String? = nil,
+        display: String? = nil,
+        expression: String? = nil
+    ) {
+        self.kind = kind
+        self.runAt = runAt
+        self.display = display
+        self.expression = expression
+    }
+
     public nonisolated init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.kind       = try c.decode(String.self, forKey: .kind)
@@ -142,6 +197,11 @@ public struct CronJobsFile: Sendable, Codable {
     public enum CodingKeys: String, CodingKey {
         case jobs
         case updatedAt = "updated_at"
+    }
+
+    public nonisolated init(jobs: [HermesCronJob], updatedAt: String?) {
+        self.jobs = jobs
+        self.updatedAt = updatedAt
     }
 
     public nonisolated init(from decoder: any Decoder) throws {

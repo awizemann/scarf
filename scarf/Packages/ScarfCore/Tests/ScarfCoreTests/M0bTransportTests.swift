@@ -76,21 +76,16 @@ import Foundation
         #expect(remoteDefault.paths.home == "~/.hermes")
     }
 
-    @Test func serverContextMakeTransportDispatches() {
+    @Test func serverContextMakeTransportDispatchesLocal() {
+        // Only assert the .local path here. The .ssh → SSHTransport
+        // default-factory assertion lives in the serialized
+        // M5FeatureVMTests suite because it depends on
+        // `ServerContext.sshTransportFactory` being nil, which races
+        // with any other parallel test installing a custom factory.
         let local = ServerContext.local.makeTransport()
         #expect(local is LocalTransport)
         #expect(local.isRemote == false)
         #expect(local.contextID == ServerContext.local.id)
-
-        let remoteCtx = ServerContext(
-            id: UUID(),
-            displayName: "r",
-            kind: .ssh(SSHConfig(host: "h"))
-        )
-        let remote = remoteCtx.makeTransport()
-        #expect(remote is SSHTransport)
-        #expect(remote.isRemote == true)
-        #expect(remote.contextID == remoteCtx.id)
     }
 
     @Test func fileStatMemberwise() {
