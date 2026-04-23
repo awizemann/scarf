@@ -312,24 +312,23 @@ private struct EnumControl: View {
     let options: [TemplateConfigField.EnumOption]
     @Binding var value: String
     var body: some View {
-        // Segmented for ≤ 4 options, dropdown otherwise — fits Scarf's
-        // existing settings UI.
-        if options.count <= 4 {
-            Picker("", selection: $value) {
-                ForEach(options) { opt in
-                    Text(opt.label).tag(opt.value)
-                }
+        // Always use the default Menu picker (dropdown). An earlier
+        // version switched to `.pickerStyle(.segmented)` when
+        // `options.count ≤ 4` for a more compact look, but on macOS
+        // segmented pickers size to the intrinsic width of all their
+        // labels concatenated — they refuse offered width constraints
+        // and refuse to wrap. A schema with three long labels like
+        // "Claude Opus 4 (Recommended - Most Capable)" produced a
+        // ~650pt picker that overflowed the 560pt sheet viewport,
+        // clipping the entire form. Menu pickers respect the fieldRow's
+        // offered width and show long labels in the popup list, so the
+        // sheet can't overflow regardless of label length.
+        Picker("", selection: $value) {
+            ForEach(options) { opt in
+                Text(opt.label).tag(opt.value)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-        } else {
-            Picker("", selection: $value) {
-                ForEach(options) { opt in
-                    Text(opt.label).tag(opt.value)
-                }
-            }
-            .labelsHidden()
         }
+        .labelsHidden()
     }
 }
 
