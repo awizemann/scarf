@@ -68,16 +68,26 @@ struct TemplateConfigSheet: View {
     private var footer: some View {
         HStack {
             Button("Cancel") {
+                // Caller owns dismissal — this view is used both as a
+                // standalone sheet (ConfigEditorSheet, where the caller
+                // wants dismissal) AND inlined inside the install sheet
+                // (TemplateInstallSheet.configureView, where calling
+                // .dismiss here would tear down the OUTER install sheet
+                // and abort the flow before .planned is reached).
                 onCancel()
-                dismiss()
             }
             .keyboardShortcut(.cancelAction)
             Spacer()
             Button(commitLabel) {
                 if let finalized = viewModel.commit(project: project) {
                     onCommit(finalized)
-                    dismiss()
                 }
+                // Same dismissal-is-caller's-responsibility rule as
+                // Cancel — inside the install sheet, onCommit transitions
+                // stage to .planned and the outer view re-renders to
+                // show the preview. In the edit sheet, onCommit
+                // transitions the editor VM and its state machine
+                // handles dismissal via the success view's Done button.
             }
             .keyboardShortcut(.defaultAction)
             .buttonStyle(.borderedProminent)

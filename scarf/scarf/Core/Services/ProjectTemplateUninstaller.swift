@@ -206,7 +206,17 @@ struct ProjectTemplateUninstaller: Sendable {
         let dashboardService = ProjectDashboardService(context: context)
         var registry = dashboardService.loadRegistry()
         registry.projects.removeAll { $0.path == plan.project.path }
-        dashboardService.saveRegistry(registry)
+        // saveRegistry throws now — log a write failure but don't abort
+        // the uninstall. Every earlier step already completed (files
+        // removed, skills removed, cron jobs removed, memory stripped,
+        // Keychain cleared); failing here leaves a stale registry row
+        // pointing at a deleted project — cosmetic and easy to fix
+        // from the sidebar.
+        do {
+            try dashboardService.saveRegistry(registry)
+        } catch {
+            Self.logger.warning("uninstall couldn't rewrite projects registry: \(error.localizedDescription, privacy: .public)")
+        }
 
         Self.logger.info("uninstalled template \(plan.lock.templateId, privacy: .public) from \(plan.project.path, privacy: .public)")
     }

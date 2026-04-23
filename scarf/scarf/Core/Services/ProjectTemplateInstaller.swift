@@ -211,7 +211,13 @@ struct ProjectTemplateInstaller: Sendable {
         var registry = service.loadRegistry()
         let entry = ProjectEntry(name: plan.projectRegistryName, path: plan.projectDir)
         registry.projects.append(entry)
-        service.saveRegistry(registry)
+        // Must throw on failure — silent failure here used to make the
+        // installer return a valid entry while the registry on disk
+        // never got updated, producing the "install completed but the
+        // project doesn't show up in the sidebar" bug. If the registry
+        // write fails, the whole install is surfaced as failed so the
+        // user can see + address the underlying problem.
+        try service.saveRegistry(registry)
         return entry
     }
 
