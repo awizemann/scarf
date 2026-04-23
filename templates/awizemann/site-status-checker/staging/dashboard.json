@@ -1,7 +1,7 @@
 {
   "version": 1,
   "title": "Site Status",
-  "description": "Daily uptime check for your watched URLs. The stat widgets and list update automatically when the cron job runs.",
+  "description": "Daily uptime check for your watched URLs. The stat widgets and the sites list populate after the first cron run; before that, the list mirrors what the agent last wrote.",
   "theme": { "accent": "green" },
   "sections": [
     {
@@ -40,10 +40,9 @@
       "widgets": [
         {
           "type": "list",
-          "title": "Configured Sites (from sites.txt)",
+          "title": "Watched Sites (populated after first run)",
           "items": [
-            { "text": "https://example.com", "status": "unknown" },
-            { "text": "https://example.org", "status": "unknown" }
+            { "text": "Run the check once to populate — the agent reads your Configuration and fills this list with live status.", "status": "pending" }
           ]
         }
       ]
@@ -56,7 +55,7 @@
           "type": "text",
           "title": "Quick Start",
           "format": "markdown",
-          "content": "**1.** Enable the `[tmpl:awizemann/site-status-checker] Check site status` cron job in the Cron sidebar. It ships paused — nothing runs until you say so.\n\n**2.** Edit `sites.txt` in this project's folder to replace the placeholder URLs with the sites you actually want to watch.\n\n**3.** Ask your agent: *\"Run the site status check now.\"* The dashboard refreshes and a new entry appears at the top of `status-log.md`.\n\n**4.** Daily at 9 AM the cron job fires automatically. Change the schedule in the Cron sidebar if you want a different cadence.\n\nSee `README.md` and `AGENTS.md` in the project root for the full spec."
+          "content": "**1.** Review your configuration — click the **slider icon** (top-right of this dashboard) to open Configuration. The sites you enter there are what the cron job will check.\n\n**2.** Enable the `[tmpl:awizemann/site-status-checker] Check site status` cron job in the Cron sidebar. It ships paused — nothing runs until you say so.\n\n**3.** Ask your agent: *\"Run the site status check now.\"* The Watched Sites list populates, the stat widgets update, and a new entry lands at the top of `status-log.md`.\n\n**4.** Daily at 9 AM the cron job fires automatically. Change the schedule in the Cron sidebar if you want a different cadence.\n\nSee `README.md` and `AGENTS.md` in the project root for the full spec."
         }
       ]
     }
