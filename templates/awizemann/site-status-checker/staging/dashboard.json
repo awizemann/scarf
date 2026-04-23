@@ -54,7 +54,7 @@
         {
           "type": "webview",
           "title": "First Watched Site",
-          "url": "https://github.com/awizemann/scarf/tree/main/templates/awizemann/site-status-checker",
+          "url": "https://awizemann.github.io/scarf/",
           "height": 420
         }
       ]
