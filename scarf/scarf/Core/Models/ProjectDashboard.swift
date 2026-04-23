@@ -11,7 +11,63 @@ struct ProjectEntry: Codable, Sendable, Identifiable, Hashable {
     let name: String
     let path: String
 
+    /// Folder path for sidebar grouping. `nil` means top-level (no
+    /// folder). Introduced in v2.3 — v2.2 registry files have no
+    /// `folder` key, which decodes cleanly as `nil` via
+    /// `decodeIfPresent` below.
+    ///
+    /// We leave shape flexible: today this is treated as an opaque
+    /// single-level label (e.g. "Clients"), and the sidebar renders
+    /// one DisclosureGroup per distinct value. If nesting becomes a
+    /// requirement later, we can interpret the string as a slash-
+    /// separated path without a migration (old single-label values
+    /// still mean a top-level folder with that name).
+    var folder: String?
+
+    /// Soft-archive flag. Archived projects are hidden from the
+    /// sidebar by default; a Show Archived toggle surfaces them.
+    /// Non-destructive — nothing is deleted on disk. Introduced in
+    /// v2.3; v2.2 registry files default to `false` via the custom
+    /// decoder below.
+    var archived: Bool
+
     var dashboardPath: String { path + "/.scarf/dashboard.json" }
+
+    init(name: String, path: String, folder: String? = nil, archived: Bool = false) {
+        self.name = name
+        self.path = path
+        self.folder = folder
+        self.archived = archived
+    }
+
+    // MARK: - Codable (custom for backward compat)
+
+    private enum CodingKeys: String, CodingKey {
+        case name, path, folder, archived
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.path = try c.decode(String.self, forKey: .path)
+        // Both new fields: tolerate absence for v2.2-era registries.
+        self.folder = try c.decodeIfPresent(String.self, forKey: .folder)
+        self.archived = try c.decodeIfPresent(Bool.self, forKey: .archived) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(name, forKey: .name)
+        try c.encode(path, forKey: .path)
+        // Only emit optional fields when they carry meaning — keeps
+        // registry files clean for the common (top-level, unarchived)
+        // case and means v2.2 Scarf can still load a v2.3-written
+        // registry of projects that never used the new features.
+        try c.encodeIfPresent(folder, forKey: .folder)
+        if archived {
+            try c.encode(archived, forKey: .archived)
+        }
+    }
 }
 
 // MARK: - Dashboard
