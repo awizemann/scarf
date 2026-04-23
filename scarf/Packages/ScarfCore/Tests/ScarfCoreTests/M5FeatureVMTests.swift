@@ -326,4 +326,201 @@ import Foundation
         #expect(p.options[0].optionId == "allow")
     }
     #endif
+
+    // MARK: - M0b default SSH transport factory path
+    //
+    // Moved here from M0bTransportTests because it asserts the
+    // default-factory (nil) behavior — which any other test in a
+    // parallel suite installing a custom factory would clobber.
+    // Living in a .serialized suite + explicitly resetting the
+    // factory makes the assertion race-free.
+
+    @Test @MainActor func defaultFactoryProducesSSHTransportForRemoteContext() {
+        let previous = ServerContext.sshTransportFactory
+        defer { ServerContext.sshTransportFactory = previous }
+        ServerContext.sshTransportFactory = nil
+
+        let remoteCtx = ServerContext(
+            id: UUID(),
+            displayName: "r",
+            kind: .ssh(SSHConfig(host: "h"))
+        )
+        let remote = remoteCtx.makeTransport()
+        #expect(remote is SSHTransport)
+        #expect(remote.isRemote == true)
+        #expect(remote.contextID == remoteCtx.id)
+    }
+
+    // MARK: - M6 Cron editing (write paths)
+    //
+    // Live in this suite (rather than M6ConfigCronTests) because they
+    // install the `ServerContext.sshTransportFactory` static — same
+    // pattern as the Memory/Cron/Skills read-path tests above. Mixing
+    // factory-users across multiple `.serialized` suites races on
+    // the static, so M6's factory-touching tests merge here.
+
+    @Test @MainActor func cronUpsertCreatesFileFromScratch() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            await vm.load()
+            #expect(vm.jobs.isEmpty)
+
+            let job = HermesCronJob(
+                id: "job_abc",
+                name: "Morning brief",
+                prompt: "summarize my calendar",
+                skills: ["calendar"],
+                model: nil,
+                schedule: CronSchedule(kind: "cron", display: "9am", expression: "0 9 * * *"),
+                enabled: true,
+                state: "scheduled"
+            )
+            let ok = await vm.upsert(job)
+            #expect(ok)
+            #expect(vm.jobs.count == 1)
+            #expect(vm.jobs[0].name == "Morning brief")
+
+            let vm2 = IOSCronViewModel(context: ctx)
+            await vm2.load()
+            #expect(vm2.jobs.count == 1)
+            #expect(vm2.jobs[0].id == "job_abc")
+            #expect(vm2.jobs[0].prompt == "summarize my calendar")
+            #expect(vm2.jobs[0].skills == ["calendar"])
+        }
+    }
+
+    @Test @MainActor func cronToggleEnabledPersists() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            await vm.upsert(HermesCronJob(
+                id: "j1", name: "A", prompt: "p",
+                schedule: CronSchedule(kind: "cron"),
+                enabled: true, state: "scheduled"
+            ))
+            #expect(vm.jobs[0].enabled)
+            let ok = await vm.toggleEnabled(id: "j1")
+            #expect(ok)
+            #expect(vm.jobs[0].enabled == false)
+
+            let vm2 = IOSCronViewModel(context: ctx)
+            await vm2.load()
+            #expect(vm2.jobs[0].enabled == false)
+        }
+    }
+
+    @Test @MainActor func cronDeleteRemovesJob() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            await vm.upsert(HermesCronJob(id: "a", name: "A", prompt: "p", schedule: CronSchedule(kind: "cron"), enabled: true, state: "scheduled"))
+            await vm.upsert(HermesCronJob(id: "b", name: "B", prompt: "q", schedule: CronSchedule(kind: "cron"), enabled: true, state: "scheduled"))
+            #expect(vm.jobs.count == 2)
+
+            let ok = await vm.delete(id: "a")
+            #expect(ok)
+            #expect(vm.jobs.count == 1)
+            #expect(vm.jobs[0].id == "b")
+
+            let vm2 = IOSCronViewModel(context: ctx)
+            await vm2.load()
+            #expect(vm2.jobs.count == 1)
+            #expect(vm2.jobs[0].id == "b")
+        }
+    }
+
+    @Test @MainActor func cronUpsertReplacesMatchingId() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            await vm.upsert(HermesCronJob(
+                id: "j1", name: "Original", prompt: "p1",
+                schedule: CronSchedule(kind: "cron"),
+                enabled: true, state: "scheduled"
+            ))
+            await vm.upsert(HermesCronJob(
+                id: "j1", name: "Renamed", prompt: "p2",
+                schedule: CronSchedule(kind: "interval"),
+                enabled: false, state: "scheduled"
+            ))
+            #expect(vm.jobs.count == 1)
+            #expect(vm.jobs[0].name == "Renamed")
+            #expect(vm.jobs[0].prompt == "p2")
+            #expect(vm.jobs[0].enabled == false)
+        }
+    }
+
+    @Test @MainActor func cronPreservesRuntimeFieldsAcrossReloads() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            await vm.upsert(HermesCronJob(
+                id: "j1", name: "Kept", prompt: "p",
+                skills: nil, model: "gpt-4",
+                schedule: CronSchedule(kind: "cron", display: "midnight"),
+                enabled: true,
+                state: "completed",
+                deliver: "discord:general",
+                nextRunAt: "2026-04-25T00:00:00Z",
+                lastRunAt: "2026-04-24T00:00:00Z",
+                deliveryFailures: 3,
+                lastDeliveryError: "rate limited",
+                timeoutType: "soft",
+                timeoutSeconds: 600,
+                silent: false
+            ))
+
+            let vm2 = IOSCronViewModel(context: ctx)
+            await vm2.load()
+            let j = vm2.jobs[0]
+            #expect(j.nextRunAt == "2026-04-25T00:00:00Z")
+            #expect(j.lastRunAt == "2026-04-24T00:00:00Z")
+            #expect(j.deliveryFailures == 3)
+            #expect(j.lastDeliveryError == "rate limited")
+            #expect(j.timeoutSeconds == 600)
+            #expect(j.state == "completed")
+        }
+    }
+
+    // MARK: - M6 Settings
+
+    @Test @MainActor func settingsLoadsFromConfigYAML() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, home) = try makeFakeHermes()
+            let yaml = """
+            model:
+              default: gpt-4o
+              provider: openai
+            display:
+              skin: solarized
+              compact: true
+            """
+            try yaml.write(
+                to: home.appendingPathComponent("config.yaml"),
+                atomically: true,
+                encoding: .utf8
+            )
+            let vm = IOSSettingsViewModel(context: ctx)
+            await vm.load()
+            #expect(vm.isLoading == false)
+            #expect(vm.config.model == "gpt-4o")
+            #expect(vm.config.provider == "openai")
+            #expect(vm.config.display.skin == "solarized")
+            #expect(vm.config.display.compact == true)
+            #expect(vm.rawYAML.contains("gpt-4o"))
+            #expect(vm.lastError == nil)
+        }
+    }
+
+    @Test @MainActor func settingsSurfacesMissingFile() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSSettingsViewModel(context: ctx)
+            await vm.load()
+            #expect(vm.isLoading == false)
+            #expect(vm.lastError != nil)
+            #expect(vm.config.model == "unknown")
+        }
+    }
 }

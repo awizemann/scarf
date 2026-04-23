@@ -110,6 +110,11 @@ struct DashboardView: View {
                     } label: {
                         Label("Skills", systemImage: "sparkles")
                     }
+                    NavigationLink {
+                        SettingsView(config: config)
+                    } label: {
+                        Label("Settings", systemImage: "gearshape.fill")
+                    }
                 }
 
                 Section("Connected to") {
