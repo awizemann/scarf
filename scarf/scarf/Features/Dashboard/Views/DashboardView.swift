@@ -95,7 +95,7 @@ struct DashboardView: View {
                 color: .purple
             )
             StatusCard(
-                title: "Gateway",
+                title: "Messaging Gateway",
                 value: viewModel.gatewayState?.statusText ?? "unknown",
                 icon: "network",
                 color: viewModel.gatewayState?.isRunning == true ? .green : .secondary

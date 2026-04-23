@@ -3,6 +3,12 @@ import SwiftUI
 /// Two-column model browser sheet. Left column lists providers, right column
 /// lists models for the selected provider. Supports filtering and a "Custom…"
 /// option for free-form model IDs not in the catalog.
+///
+/// Overlay-only providers (Nous Portal, OpenAI Codex, Qwen OAuth, …) have no
+/// models.dev catalog entry, so their right column renders an overlay detail
+/// view: subscription state for Nous, plus a free-form model-ID field for
+/// users who know what they want. This is how the picker keeps parity with
+/// `hermes model` on the CLI, which can reach these providers natively.
 struct ModelPickerSheet: View {
     let initialProvider: String
     let initialModel: String
@@ -21,8 +27,17 @@ struct ModelPickerSheet: View {
     @State private var customModelID: String = ""
     @State private var customProviderID: String = ""
 
+    // Overlay-provider model entry — distinct from `customMode` because the
+    // provider is pinned; only the model ID is user-editable.
+    @State private var overlayModelID: String = ""
+
+    // Subscription state for the Nous Portal row / detail view. Loaded on
+    // appear; stays in-memory for the life of the sheet.
+    @State private var subscription: NousSubscriptionState = .absent
+
     @Environment(\.serverContext) private var serverContext
     private var catalog: ModelCatalogService { ModelCatalogService(context: serverContext) }
+    private var subscriptionService: NousSubscriptionService { NousSubscriptionService(context: serverContext) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,6 +59,8 @@ struct ModelPickerSheet: View {
             providers = catalog.loadProviders()
             selectedProviderID = initialProvider.isEmpty ? (providers.first?.providerID ?? "") : initialProvider
             selectedModelID = initialModel
+            overlayModelID = initialModel
+            subscription = subscriptionService.loadState()
             loadModelsForSelection()
         }
     }
@@ -80,20 +97,39 @@ struct ModelPickerSheet: View {
             }
         )) {
             ForEach(filteredProviders) { provider in
-                HStack {
-                    Text(provider.providerName)
-                    Spacer()
-                    Text("\(provider.modelCount)")
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                }
-                .tag(provider.providerID)
+                providerRow(provider)
+                    .tag(provider.providerID)
             }
         }
         .listStyle(.inset)
     }
 
+    @ViewBuilder
+    private func providerRow(_ provider: HermesProviderInfo) -> some View {
+        HStack(spacing: 6) {
+            Text(provider.providerName)
+            if provider.subscriptionGated {
+                capsuleTag("Subscription", tint: .accentColor)
+            }
+            Spacer()
+            if !provider.isOverlay {
+                Text("\(provider.modelCount)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
     private var modelColumn: some View {
+        if let selected = providers.first(where: { $0.providerID == selectedProviderID }), selected.isOverlay {
+            overlayProviderDetail(selected)
+        } else {
+            cachedModelList
+        }
+    }
+
+    private var cachedModelList: some View {
         List(selection: $selectedModelID) {
             ForEach(filteredModels) { model in
                 VStack(alignment: .leading, spacing: 2) {
@@ -135,6 +171,104 @@ struct ModelPickerSheet: View {
             if filteredModels.isEmpty {
                 ContentUnavailableView("No Models", systemImage: "cpu", description: Text("This provider has no catalogued models."))
             }
+        }
+    }
+
+    /// Right-column detail for overlay-only providers (Nous Portal, OpenAI
+    /// Codex, Qwen OAuth, …). models.dev has no catalog for them, so the user
+    /// either trusts Hermes's default (subscription providers) or types a
+    /// model ID they know is valid for the provider's API.
+    @ViewBuilder
+    private func overlayProviderDetail(_ provider: HermesProviderInfo) -> some View {
+        let overlay = catalog.overlayMetadata(for: provider.providerID)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(provider.providerName).font(.title3.bold())
+                    if provider.subscriptionGated {
+                        capsuleTag("Subscription", tint: .accentColor)
+                    }
+                }
+                if provider.subscriptionGated {
+                    subscriptionSummary(provider: provider, overlay: overlay)
+                } else {
+                    Text(overlayInstruction(for: overlay?.authType))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Model ID").font(.caption).foregroundStyle(.secondary)
+                    TextField(modelIDPlaceholder(for: provider), text: $overlayModelID)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                    if provider.subscriptionGated {
+                        Text("Leave blank to use Hermes's default Nous model.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
+                if let docURL = overlay?.docURL, let url = URL(string: docURL) {
+                    Link(destination: url) {
+                        Label("Setup documentation", systemImage: "book")
+                            .font(.caption)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding()
+        }
+    }
+
+    @ViewBuilder
+    private func subscriptionSummary(provider: HermesProviderInfo, overlay: HermesProviderOverlay?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Paid Nous Portal subscribers route web search, image generation, TTS, and browser automation through their subscription — no separate API keys needed.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 6) {
+                Image(systemName: subscription.subscribed ? "checkmark.circle.fill" : "exclamationmark.circle")
+                    .foregroundStyle(subscription.subscribed ? Color.green : Color.secondary)
+                if subscription.subscribed {
+                    Text("Subscription active — active provider is Nous.")
+                } else if subscription.present {
+                    Text("Signed in to Nous, but another provider is active.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Not signed in. Run `hermes auth` and select Nous Portal.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(.callout)
+        }
+    }
+
+    private func overlayInstruction(for authType: HermesProviderOverlay.AuthType?) -> String {
+        switch authType {
+        case .oauthExternal:
+            return "Sign in through the provider's OAuth flow — run `hermes auth` from a terminal, then pick the provider to complete sign-in. Back here, set the model ID you want to use."
+        case .externalProcess:
+            return "Uses an external process (e.g. a local agent bridge). Run `hermes auth` from a terminal to complete the link, then set the model ID you want to use."
+        case .oauthDeviceCode:
+            return "Sign in via device-code flow — run `hermes auth` from a terminal and follow the printed URL."
+        default:
+            return "This provider isn't in the models.dev catalog. Enter the model ID you want to use — Hermes will pass it through to the provider verbatim."
+        }
+    }
+
+    private func modelIDPlaceholder(for provider: HermesProviderInfo) -> String {
+        switch provider.providerID {
+        case "nous":          return "e.g. hermes-3"
+        case "openai-codex":  return "e.g. gpt-5-codex"
+        case "qwen-oauth":    return "e.g. qwen3-coder-plus"
+        default:              return "e.g. model-name"
         }
     }
 
@@ -201,14 +335,35 @@ struct ModelPickerSheet: View {
         }
     }
 
+    private var isSelectedProviderOverlay: Bool {
+        providers.first(where: { $0.providerID == selectedProviderID })?.isOverlay ?? false
+    }
+
+    private var isSelectedProviderSubscriptionGated: Bool {
+        providers.first(where: { $0.providerID == selectedProviderID })?.subscriptionGated ?? false
+    }
+
     private var canSubmit: Bool {
         if customMode {
             return !customModelID.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        if isSelectedProviderOverlay {
+            // Subscription-gated providers can submit with an empty model ID
+            // (Hermes picks its default). Other overlays require a model ID.
+            if isSelectedProviderSubscriptionGated { return true }
+            return !overlayModelID.trimmingCharacters(in: .whitespaces).isEmpty
         }
         return !selectedModelID.isEmpty
     }
 
     private var selectedPreview: String? {
+        if isSelectedProviderOverlay {
+            let trimmed = overlayModelID.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty {
+                return selectedProviderID.isEmpty ? nil : "\(selectedProviderID) / (default)"
+            }
+            return "\(selectedProviderID) / \(trimmed)"
+        }
         guard !selectedModelID.isEmpty, !selectedProviderID.isEmpty else { return nil }
         return "\(selectedProviderID) / \(selectedModelID)"
     }
@@ -249,18 +404,21 @@ struct ModelPickerSheet: View {
             let model = customModelID.trimmingCharacters(in: .whitespaces)
             let provider = resolvedCustomProvider()
             onSelect(model, provider)
+        } else if isSelectedProviderOverlay {
+            let model = overlayModelID.trimmingCharacters(in: .whitespaces)
+            onSelect(model, selectedProviderID)
         } else {
             onSelect(selectedModelID, selectedProviderID)
         }
     }
 
-    private func capsuleTag(_ text: String) -> some View {
+    private func capsuleTag(_ text: String, tint: Color = .secondary) -> some View {
         Text(text)
             .font(.caption2)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(tint == .secondary ? AnyShapeStyle(.secondary) : AnyShapeStyle(tint))
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
-            .background(.quaternary)
+            .background(tint == .secondary ? AnyShapeStyle(.quaternary) : AnyShapeStyle(tint.opacity(0.15)))
             .clipShape(Capsule())
     }
 }

@@ -339,6 +339,15 @@ struct HermesConfig: Sendable {
     var prefillMessagesFile: String
     var skillsExternalDirs: [String]
 
+    /// Per-platform toolset allowlists as written by `hermes setup tools` /
+    /// `hermes tools`. Keyed by platform (`cli`, `slack`, `discord`, …) to a
+    /// list of enabled toolset identifiers (`browser`, `messaging`,
+    /// `nous-tools`, …). Hermes v0.10.0 introduced the Tool Gateway; enabling
+    /// the `nous-tools` toolset here is how subscribers opt-in per-platform.
+    /// Scarf reads this for display; edits go through `hermes setup tools`
+    /// rather than direct YAML writes to preserve Hermes-side validation.
+    var platformToolsets: [String: [String]]
+
     // Grouped blocks
     var display: DisplaySettings
     var terminal: TerminalSettings
@@ -397,6 +406,7 @@ struct HermesConfig: Sendable {
         cronWrapResponse: true,
         prefillMessagesFile: "",
         skillsExternalDirs: [],
+        platformToolsets: [:],
         display: .empty,
         terminal: .empty,
         browser: .empty,

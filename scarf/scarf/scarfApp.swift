@@ -378,7 +378,7 @@ struct MenuBarMenu: View {
                 systemImage: status.hermesRunning ? "circle.fill" : "circle"
             )
             Label(
-                status.gatewayRunning ? "Gateway Running" : "Gateway Stopped",
+                status.gatewayRunning ? "Messaging Gateway Running" : "Messaging Gateway Stopped",
                 systemImage: status.gatewayRunning ? "circle.fill" : "circle"
             )
             Button("Start Hermes") { status.startHermes() }

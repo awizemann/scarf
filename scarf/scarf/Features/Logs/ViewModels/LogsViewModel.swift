@@ -28,7 +28,7 @@ final class LogsViewModel {
             switch self {
             case .agent: return "Agent"
             case .errors: return "Errors"
-            case .gateway: return "Gateway"
+            case .gateway: return "Messaging Gateway"
             }
         }
     }
@@ -54,7 +54,7 @@ final class LogsViewModel {
         var displayName: LocalizedStringResource {
             switch self {
             case .all: return "All"
-            case .gateway: return "Gateway"
+            case .gateway: return "Messaging Gateway"
             case .agent: return "Agent"
             case .tools: return "Tools"
             case .cli: return "CLI"

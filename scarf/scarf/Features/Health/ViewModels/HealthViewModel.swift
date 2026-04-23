@@ -24,10 +24,12 @@ struct HealthSection: Identifiable {
 final class HealthViewModel {
     let context: ServerContext
     private let fileService: HermesFileService
+    private let subscriptionService: NousSubscriptionService
 
     init(context: ServerContext = .local) {
         self.context = context
         self.fileService = HermesFileService(context: context)
+        self.subscriptionService = NousSubscriptionService(context: context)
     }
 
 
@@ -52,6 +54,7 @@ final class HealthViewModel {
         isLoading = true
         let ctx = context
         let svc = fileService
+        let subSvc = subscriptionService
         // Health runs four sync transport-mediated commands plus a process
         // probe — that's 4-5 ssh round-trips on remote, easily 1-2s. Detach
         // the whole load.
@@ -60,6 +63,8 @@ final class HealthViewModel {
             let versionOutput = ctx.runHermes(["version"]).output
             let statusOutput = ctx.runHermes(["status"]).output
             let doctorOutput = ctx.runHermes(["doctor"]).output
+            let subscription = subSvc.loadState()
+            let config = svc.loadConfig()
 
             let lines = versionOutput.components(separatedBy: "\n")
             let version = lines.first ?? ""
@@ -68,6 +73,7 @@ final class HealthViewModel {
             let updateInfo = updateLine?.trimmingCharacters(in: .whitespaces) ?? ""
 
             let statusSections = Self.parseOutputStatic(statusOutput)
+                + [Self.toolGatewaySection(subscription: subscription, config: config)]
             let doctorSections = Self.parseOutputStatic(doctorOutput)
 
             await MainActor.run { [weak self] in
@@ -83,6 +89,80 @@ final class HealthViewModel {
                 self.isLoading = false
             }
         }
+    }
+
+    /// Synthesize a Tool Gateway health section from the subscription state +
+    /// `platform_toolsets` table. Runs alongside the other status sections so
+    /// the user sees at a glance whether their Nous Portal subscription is
+    /// wired up.
+    ///
+    /// This is distinct from the "Messaging Gateway" (inbound Slack/Discord/…
+    /// requests) — the two are unrelated systems that unfortunately share the
+    /// "gateway" name in Hermes's CLI output.
+    ///
+    /// `nonisolated` so `load()` can call it from `Task.detached` alongside
+    /// `parseOutputStatic` without hopping back to MainActor.
+    nonisolated private static func toolGatewaySection(subscription: NousSubscriptionState, config: HermesConfig) -> HealthSection {
+        var checks: [HealthCheck] = []
+
+        let subscriptionCheck: HealthCheck = {
+            if subscription.subscribed {
+                return HealthCheck(
+                    label: "Nous Portal subscription active",
+                    status: .ok,
+                    detail: "Tool requests route through the Nous Portal gateway."
+                )
+            }
+            if subscription.present {
+                return HealthCheck(
+                    label: "Signed in, but Nous isn't the active provider",
+                    status: .warning,
+                    detail: "Open Settings → General and pick Nous Portal to route tools through the gateway."
+                )
+            }
+            return HealthCheck(
+                label: "Not subscribed",
+                status: .warning,
+                detail: "Run `hermes auth` and pick Nous Portal to enable subscription-gated tools."
+            )
+        }()
+        checks.append(subscriptionCheck)
+
+        if !config.platformToolsets.isEmpty {
+            let platforms = config.platformToolsets.keys.sorted()
+            for platform in platforms {
+                let toolsets = config.platformToolsets[platform] ?? []
+                checks.append(HealthCheck(
+                    label: "\(platform): \(toolsets.count) toolset\(toolsets.count == 1 ? "" : "s")",
+                    status: .ok,
+                    detail: toolsets.joined(separator: ", ")
+                ))
+            }
+        }
+
+        let auxOnNous = [
+            ("vision", config.auxiliary.vision.provider),
+            ("web_extract", config.auxiliary.webExtract.provider),
+            ("compression", config.auxiliary.compression.provider),
+            ("session_search", config.auxiliary.sessionSearch.provider),
+            ("skills_hub", config.auxiliary.skillsHub.provider),
+            ("approval", config.auxiliary.approval.provider),
+            ("mcp", config.auxiliary.mcp.provider),
+            ("flush_memories", config.auxiliary.flushMemories.provider),
+        ].filter { $0.1 == "nous" }.map(\.0)
+        if !auxOnNous.isEmpty {
+            checks.append(HealthCheck(
+                label: "Auxiliary tasks routed through Nous",
+                status: subscription.subscribed ? .ok : .warning,
+                detail: auxOnNous.joined(separator: ", ")
+            ))
+        }
+
+        return HealthSection(
+            title: "Tool Gateway",
+            icon: "arrow.triangle.branch",
+            checks: checks
+        )
     }
 
     func refreshProcessStatus() {

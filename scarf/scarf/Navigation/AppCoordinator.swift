@@ -50,7 +50,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .profiles: return "Profiles"
         case .tools: return "Tools"
         case .mcpServers: return "MCP Servers"
-        case .gateway: return "Gateway"
+        case .gateway: return "Messaging Gateway"
         case .cron: return "Cron"
         case .health: return "Health"
         case .logs: return "Logs"

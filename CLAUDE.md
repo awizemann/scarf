@@ -84,7 +84,17 @@ Public documentation lives in the GitHub wiki at https://github.com/awizemann/sc
 
 ## Hermes Version
 
-Targets Hermes v0.9.0 (v2026.4.13). Log lines may carry an optional `[session_id]` tag between the level and logger name — `HermesLogService.parseLine` treats the session tag as an optional capture group, so older untagged lines still parse.
+Targets Hermes v0.10.0 (v2026.4.16). Log lines may carry an optional `[session_id]` tag between the level and logger name — `HermesLogService.parseLine` treats the session tag as an optional capture group, so older untagged lines still parse.
+
+v0.10.0 introduced the **Tool Gateway** — paid Nous Portal subscribers route web search, image generation, TTS, and browser automation through their subscription without separate API keys. In Scarf:
+
+- **Provider picker** ([ModelCatalogService.swift](scarf/scarf/Core/Services/ModelCatalogService.swift)) merges Hermes's `HERMES_OVERLAYS` so Nous Portal and other overlay-only providers (OpenAI Codex, Qwen OAuth, Google Gemini CLI, GitHub Copilot ACP, Arcee) appear alongside the models.dev catalog. Subscription-gated providers sort first and render a "Subscription" pill.
+- **Subscription detection** ([NousSubscriptionService.swift](scarf/scarf/Core/Services/NousSubscriptionService.swift)) reads `~/.hermes/auth.json` → `providers.nous`. Read-only; Hermes owns the write path.
+- **Per-task routing** (Auxiliary tab) toggles `auxiliary.<task>.provider` between `nous` and `auto`. Hermes derives gateway routing from provider selection — there is no separate `use_gateway` key.
+- **Health surface** ([HealthViewModel.swift](scarf/scarf/Features/Health/ViewModels/HealthViewModel.swift)) adds a synthetic "Tool Gateway" section showing subscription state + `platform_toolsets` mappings + which aux tasks are routed through Nous.
+- **Scarf's existing `Gateway` feature is renamed to "Messaging Gateway"** everywhere user-facing to disambiguate from the new Tool Gateway. The `SidebarSection.gateway` enum case and `gateway_state.json` / `gateway.log` paths are unchanged (not user-facing strings).
+
+**Keep `ModelCatalogService.overlayOnlyProviders` in sync** with `HERMES_OVERLAYS` in `~/.hermes/hermes-agent/hermes_cli/providers.py`. When Hermes adds a new overlay-only provider, mirror the entry (display name, base URL, auth type, subscription-gated flag, doc URL) or the picker won't reach it.
 
 ## Project Templates
 
