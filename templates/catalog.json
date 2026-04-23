@@ -7,8 +7,8 @@
         "name": "Alan Wizemann",
         "url": "https://github.com/awizemann/scarf"
       },
-      "bundleSha256": "a3c3a3b1cd1799443fa32ac5f1f643bf28b2e1b30c1b7786a1fa93ef227b0c7e",
-      "bundleSize": 7197,
+      "bundleSha256": "2a4e0aba5bd4d86be3153d87c6ce219b9068223daebfad6f9db2b82c3752fac5",
+      "bundleSize": 7583,
       "category": "monitoring",
       "config": {
         "modelRecommendation": {

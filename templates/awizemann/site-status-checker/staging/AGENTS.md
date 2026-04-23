@@ -56,6 +56,7 @@ The cron prompt Scarf registers for this project carries **absolute paths** (the
    - `Sites Down` stat widget: `value` = count of down results.
    - `Last Checked` stat widget: `value` = the ISO-8601 timestamp you just wrote.
    - `Watched Sites` list widget `items`: one entry per URL with `text` = URL and `status` = `"up"` or `"down"` (lowercase).
+   - `First Watched Site` **webview widget** (in the "Live Site Preview" section): set its `url` field to the **first** URL from `values.sites`. This is what the user sees rendered in the Scarf **Site** tab. If `values.sites` is empty, leave the webview's existing `url` alone.
 6. If the cron job has a `deliver` target set, emit a one-line summary (`3 up, 1 down — example.com timed out`) as the agent's final response so the delivery mechanism picks it up.
 
 ## What not to do
