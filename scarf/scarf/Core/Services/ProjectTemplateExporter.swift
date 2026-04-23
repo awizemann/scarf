@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// Builds a `.scarftemplate` bundle from an existing Scarf project plus the

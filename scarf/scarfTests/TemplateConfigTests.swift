@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import ScarfCore
 @testable import scarf
 
 // MARK: - Schema validation

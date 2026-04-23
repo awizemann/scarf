@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import ScarfCore
 @testable import scarf
 
 /// Cross-suite serialization lock for tests that touch the real

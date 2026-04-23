@@ -1,3 +1,4 @@
+import ScarfCore
 import SwiftUI
 
 /// Preview-and-confirm sheet for uninstalling a template-installed

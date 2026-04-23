@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// Drives the template-uninstall sheet. Mirrors the installer VM in

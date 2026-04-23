@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// Drives the template export sheet. Holds form state for the author-facing

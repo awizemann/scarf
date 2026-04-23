@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// Reads, validates, and plans the install of a `.scarftemplate` bundle. Pure

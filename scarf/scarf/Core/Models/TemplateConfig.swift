@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 
 // MARK: - Schema (ships inside template.json as manifest.config)
 

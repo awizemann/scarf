@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// Executes a `TemplateInstallPlan`. All writes happen in one pass with

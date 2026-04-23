@@ -1,5 +1,6 @@
-import SwiftUI
 import AppKit
+import ScarfCore
+import SwiftUI
 
 /// Preview-and-confirm sheet for installing a `.scarftemplate`. Honest
 /// accounting: shows every file that will be written, every cron job that

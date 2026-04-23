@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// Reverses the work of `ProjectTemplateInstaller`, driven by the

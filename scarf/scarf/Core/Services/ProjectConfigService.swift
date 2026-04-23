@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// Per-project configuration I/O: reads `<project>/.scarf/config.json`

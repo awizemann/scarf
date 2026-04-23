@@ -1,3 +1,4 @@
+import ScarfCore
 import SwiftUI
 
 /// Post-install configuration editor. Thin wrapper around the same

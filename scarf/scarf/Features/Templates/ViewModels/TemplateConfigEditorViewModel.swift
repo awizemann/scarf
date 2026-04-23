@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import ScarfCore
 import os
 
 /// Drives the post-install "Configuration" button on the project

@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import os
 
 /// Drives the template install sheet. Handles three entry points:

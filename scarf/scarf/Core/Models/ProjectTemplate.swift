@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 
 // MARK: - Manifest (what lives inside the .scarftemplate zip)
 

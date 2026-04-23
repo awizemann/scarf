@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import ScarfCore
 import os
 
 /// Drives the configure form for template install + post-install editing.

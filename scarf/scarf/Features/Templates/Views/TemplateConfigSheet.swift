@@ -1,3 +1,4 @@
+import ScarfCore
 import SwiftUI
 
 /// The configure form rendered for template install + post-install
