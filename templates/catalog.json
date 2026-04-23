@@ -10,6 +10,7 @@
       "bundleSha256": "32b8c12706de8596be63dcdda32d46fc5bf478d5b9f7c1fc4c6d96ced251186a",
       "bundleSize": 5410,
       "category": "monitoring",
+      "config": null,
       "contents": {
         "agentsMd": true,
         "cron": 1,

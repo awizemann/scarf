@@ -233,6 +233,106 @@ h1, h2, h3 { line-height: 1.25; }
   padding: 24px;
 }
 
+/* ---------- config schema panel (v2.3) ---------- */
+
+.detail-config { margin-bottom: 32px; }
+.detail-config:empty, .detail-config > div:empty { display: none; }
+
+.config-schema {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+.config-schema-header { margin-top: 0; }
+.config-schema-desc {
+  color: var(--fg-muted);
+  font-size: 13px;
+  margin-top: 4px;
+  margin-bottom: 16px;
+}
+.config-schema-list {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+.config-field-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 4px;
+  font-weight: 500;
+}
+.config-field-key { font-family: var(--mono); font-size: 13px; }
+.config-field-type {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(0,0,0,0.08);
+  color: var(--fg-muted);
+}
+.config-field-required {
+  font-size: 11px;
+  color: var(--red);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(217,83,79,0.12);
+}
+.config-field-body {
+  margin: 0 0 4px 0;
+  padding-left: 0;
+  font-size: 14px;
+}
+.config-field-label {
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+.config-field-description {
+  color: var(--fg-muted);
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.config-field-constraint {
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+.config-model-rec {
+  margin-top: 20px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: rgba(42,168,118,0.08);
+  border: 1px solid rgba(42,168,118,0.2);
+}
+.config-model-label {
+  font-size: 11px;
+  color: var(--accent-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.config-model-preferred {
+  font-family: var(--mono);
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+.config-model-rationale {
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+.config-model-alternatives {
+  color: var(--fg-muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
 /* ---------- dashboard preview ---------- */
 
 .dashboard-header h1.dashboard-title { margin: 0 0 4px; font-size: 22px; }

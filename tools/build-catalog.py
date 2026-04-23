@@ -45,10 +45,17 @@ from typing import Iterable
 # Schema + invariants
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION_V1 = 1   # original v2.2 bundle
+SCHEMA_VERSION_V2 = 2   # v2.3 — adds optional manifest.config block
+SUPPORTED_SCHEMA_VERSIONS = {SCHEMA_VERSION_V1, SCHEMA_VERSION_V2}
 MAX_BUNDLE_BYTES = 5 * 1024 * 1024  # 5 MB cap on submissions; installer is 50 MB
 REQUIRED_BUNDLE_FILES = ("template.json", "README.md", "AGENTS.md", "dashboard.json")
 SUPPORTED_WIDGET_TYPES = {"stat", "progress", "text", "table", "chart", "list", "webview"}
+
+# Mirror of Swift's TemplateConfigField.FieldType. Order matters only
+# for error messages that echo this set.
+SUPPORTED_CONFIG_FIELD_TYPES = {"string", "text", "number", "bool", "enum", "list", "secret"}
+SUPPORTED_CONFIG_LIST_ITEM_TYPES = {"string"}
 
 # Common secret patterns — keep in sync with `scripts/wiki.sh` and reuse a
 # conservative subset. The validator rejects hard matches; the site's
@@ -100,7 +107,9 @@ class TemplateRecord:
 
     def to_catalog_entry(self) -> dict:
         """Subset suitable for catalog.json. Keep fields stable — the
-        site's widgets.js reads this shape."""
+        site's widgets.js reads this shape. The optional `config` key
+        mirrors the manifest's `config` block so the site can render
+        the Configuration section on the detail page."""
         m = self.manifest
         return {
             "id": m["id"],
@@ -111,6 +120,7 @@ class TemplateRecord:
             "category": m.get("category"),
             "tags": m.get("tags") or [],
             "contents": m["contents"],
+            "config": m.get("config"),          # None for schema-less
             "installUrl": self.install_url,
             "detailSlug": self.detail_slug,
             "bundleSha256": self.bundle_sha256,
@@ -154,8 +164,12 @@ def _validate_manifest(manifest: dict, template_dir: Path, errors: list[Validati
     for field in required:
         if field not in manifest:
             errors.append(ValidationError(template_dir, f"manifest missing required field: {field}"))
-    if manifest.get("schemaVersion") != SCHEMA_VERSION:
-        errors.append(ValidationError(template_dir, f"unsupported schemaVersion: {manifest.get('schemaVersion')}"))
+    if manifest.get("schemaVersion") not in SUPPORTED_SCHEMA_VERSIONS:
+        errors.append(ValidationError(
+            template_dir,
+            f"unsupported schemaVersion: {manifest.get('schemaVersion')} "
+            f"(supported: {sorted(SUPPORTED_SCHEMA_VERSIONS)})"
+        ))
     # Manifest id must match the directory layout.
     mid = manifest.get("id", "")
     if "/" not in mid:
@@ -231,6 +245,114 @@ def _validate_contents_claim(
             template_dir,
             f"contents.memory.append={claimed_memory} disagrees with memory/append.md presence={has_memory_file}"
         ))
+
+    # Config (schemaVersion 2+) — claim field-count must match schema
+    # field count. `None`/`0` on both sides means schema-less, which is
+    # always legal.
+    claimed_config = int(contents.get("config") or 0)
+    schema = manifest.get("config")
+    schema_field_count = len((schema or {}).get("schema") or []) if schema else 0
+    if claimed_config != schema_field_count:
+        errors.append(ValidationError(
+            template_dir,
+            f"contents.config={claimed_config} but config.schema has {schema_field_count} field(s)"
+        ))
+
+
+def _validate_config_schema(manifest: dict, template_dir: Path, errors: list[ValidationError]) -> None:
+    """Mirrors Swift `ProjectConfigService.validateSchema`. Structural
+    invariants only — user-value validation happens in the app at
+    commit time, not at catalog-build time."""
+    schema = manifest.get("config")
+    if schema is None:
+        return
+    if not isinstance(schema, dict):
+        errors.append(ValidationError(template_dir, "manifest.config must be an object"))
+        return
+    fields = schema.get("schema")
+    if not isinstance(fields, list):
+        errors.append(ValidationError(template_dir, "manifest.config.schema must be a list"))
+        return
+
+    seen_keys: set[str] = set()
+    for i, field in enumerate(fields):
+        if not isinstance(field, dict):
+            errors.append(ValidationError(template_dir, f"config.schema[{i}] must be an object"))
+            continue
+        key = field.get("key")
+        ftype = field.get("type")
+        label = field.get("label")
+        if not isinstance(key, str) or not key:
+            errors.append(ValidationError(template_dir, f"config.schema[{i}] missing/empty key"))
+            continue
+        if key in seen_keys:
+            errors.append(ValidationError(template_dir, f"config.schema has duplicate key: {key!r}"))
+            continue
+        seen_keys.add(key)
+        if not isinstance(label, str) or not label:
+            errors.append(ValidationError(template_dir, f"config.schema[{key}] missing/empty label"))
+        if ftype not in SUPPORTED_CONFIG_FIELD_TYPES:
+            errors.append(ValidationError(
+                template_dir,
+                f"config.schema[{key}] uses unsupported type {ftype!r} "
+                f"(supported: {sorted(SUPPORTED_CONFIG_FIELD_TYPES)})"
+            ))
+            continue
+        # Type-specific rules.
+        if ftype == "enum":
+            options = field.get("options") or []
+            if not isinstance(options, list) or not options:
+                errors.append(ValidationError(
+                    template_dir,
+                    f"config.schema[{key}] (enum) must declare at least one option"
+                ))
+            else:
+                seen_values: set[str] = set()
+                for opt in options:
+                    if not isinstance(opt, dict):
+                        errors.append(ValidationError(
+                            template_dir,
+                            f"config.schema[{key}] option must be an object"
+                        ))
+                        continue
+                    val = opt.get("value")
+                    if not isinstance(val, str) or not val:
+                        errors.append(ValidationError(
+                            template_dir,
+                            f"config.schema[{key}] option missing/empty value"
+                        ))
+                        continue
+                    if val in seen_values:
+                        errors.append(ValidationError(
+                            template_dir,
+                            f"config.schema[{key}] has duplicate option value: {val!r}"
+                        ))
+                    seen_values.add(val)
+        elif ftype == "list":
+            item_type = field.get("itemType", "string")
+            if item_type not in SUPPORTED_CONFIG_LIST_ITEM_TYPES:
+                errors.append(ValidationError(
+                    template_dir,
+                    f"config.schema[{key}] (list) uses unsupported itemType {item_type!r}"
+                ))
+        elif ftype == "secret":
+            if "default" in field:
+                errors.append(ValidationError(
+                    template_dir,
+                    f"config.schema[{key}] is a secret field and must not declare a default"
+                ))
+    # modelRecommendation — preferred must be non-empty when present.
+    rec = schema.get("modelRecommendation")
+    if rec is not None:
+        if not isinstance(rec, dict):
+            errors.append(ValidationError(template_dir, "config.modelRecommendation must be an object"))
+        else:
+            preferred = rec.get("preferred")
+            if not isinstance(preferred, str) or not preferred.strip():
+                errors.append(ValidationError(
+                    template_dir,
+                    "config.modelRecommendation.preferred must be a non-empty string"
+                ))
 
 
 def _validate_dashboard(zf: zipfile.ZipFile, template_dir: Path, errors: list[ValidationError]) -> None:
@@ -351,6 +473,7 @@ def validate_template(template_dir: Path) -> tuple[TemplateRecord | None, list[V
                 return None, errors
 
             _validate_manifest(manifest, template_dir, errors)
+            _validate_config_schema(manifest, template_dir, errors)
             cron_count = _parse_cron_jobs(zf, template_dir, errors)
             _validate_contents_claim(manifest, bundle_files, cron_count, template_dir, errors)
             _validate_dashboard(zf, template_dir, errors)
@@ -443,7 +566,10 @@ def _check_staging_matches_bundle(record: TemplateRecord) -> list[ValidationErro
 
 def write_catalog_json(records: list[TemplateRecord], out_path: Path) -> None:
     catalog = {
-        "schemaVersion": SCHEMA_VERSION,
+        # The aggregate catalog itself is versioned independently of
+        # individual bundle manifests — bumping template manifest schema
+        # from 1 → 2 doesn't change the catalog.json shape.
+        "schemaVersion": 1,
         "generated": True,  # human reminder; a timestamp would churn the diff every run
         "templates": [r.to_catalog_entry() for r in records],
     }
@@ -567,12 +693,20 @@ def render_site(records: list[TemplateRecord], out_dir: Path, repo_root: Path) -
             render_detail(template_tmpl, r),
             encoding="utf-8",
         )
-        # Copy the unpacked dashboard.json so widgets.js can fetch it
-        # without cross-directory relative paths.
+        # Copy the unpacked dashboard.json, README.md, and template.json
+        # (as manifest.json so the site can fetch the config schema for
+        # the Configuration section without conflicting with any file
+        # named `template.json` somewhere else in the served tree).
         with zipfile.ZipFile(r.bundle_path, "r") as zf:
             (detail_dir / "dashboard.json").write_bytes(zf.read("dashboard.json"))
             if "README.md" in zf.namelist():
                 (detail_dir / "README.md").write_bytes(zf.read("README.md"))
+            # Only copy the manifest when the template has a config
+            # schema — avoids bloating the served tree for schema-less
+            # templates and makes the 404 fallback in widgets.js a
+            # meaningful signal ("no config to show here").
+            if r.manifest.get("config"):
+                (detail_dir / "manifest.json").write_bytes(zf.read("template.json"))
 
     # The aggregate catalog.json is copied in so the frontend can fetch
     # /templates/catalog.json without reaching back into the repo.

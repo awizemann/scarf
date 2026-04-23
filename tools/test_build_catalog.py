@@ -335,6 +335,194 @@ class ValidationTests(unittest.TestCase):
         return records, errors
 
 
+class ConfigSchemaValidationTests(unittest.TestCase):
+    """Mirrors the Swift `ProjectConfigServiceTests` schema-validation
+    suite. Every rule enforced on the Swift side must be enforced on
+    the Python side — schema drift is a catastrophic failure for the
+    catalog (CI would accept bundles the app later refuses at install)."""
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.repo = make_fake_repo(Path(self._dir.name))
+        self.addCleanup(self._dir.cleanup)
+
+    def _make_schema_manifest(self, fields, cron: int = 0):
+        """Convenience — build a v2 manifest with the given config fields."""
+        return {
+            "schemaVersion": 2,
+            "id": "tester/configured",
+            "name": "Configured",
+            "version": "1.0.0",
+            "description": "test",
+            "contents": {
+                "dashboard": True,
+                "agentsMd": True,
+                "cron": cron,
+                "config": len(fields),
+            },
+            "config": {"schema": fields},
+        }
+
+    def test_accepts_schemaful_bundle(self):
+        manifest = self._make_schema_manifest([
+            {"key": "name", "type": "string", "label": "Name", "required": True},
+            {"key": "enabled", "type": "bool", "label": "Enabled"},
+        ])
+        make_template_dir(
+            self.repo, "tester", "configured",
+            manifest=manifest,
+            bundle_files={
+                "template.json": json.dumps(manifest).encode("utf-8"),
+                "README.md": b"# readme",
+                "AGENTS.md": b"# agents",
+                "dashboard.json": json.dumps(MINIMAL_DASHBOARD).encode("utf-8"),
+            },
+        )
+        records = []
+        errors = []
+        for tdir in build_catalog._iter_templates(self.repo):
+            rec, errs = build_catalog.validate_template(tdir)
+            errors.extend(errs)
+            if rec is not None:
+                records.append(rec)
+        self.assertEqual(errors, [])
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].manifest["schemaVersion"], 2)
+
+    def test_rejects_duplicate_keys(self):
+        manifest = self._make_schema_manifest([
+            {"key": "same", "type": "string", "label": "A"},
+            {"key": "same", "type": "bool", "label": "B"},
+        ])
+        make_template_dir(
+            self.repo, "tester", "dup",
+            manifest=manifest,
+            bundle_files={
+                "template.json": json.dumps(manifest).encode("utf-8"),
+                "README.md": b"# r", "AGENTS.md": b"# a",
+                "dashboard.json": json.dumps(MINIMAL_DASHBOARD).encode("utf-8"),
+            },
+        )
+        errors = self._collect_errors()
+        self.assertTrue(any("duplicate key" in str(e) for e in errors), errors)
+
+    def test_rejects_secret_with_default(self):
+        manifest = self._make_schema_manifest([
+            {
+                "key": "api_key", "type": "secret", "label": "API Key",
+                "required": True, "default": "sk-leaked-in-template"
+            },
+        ])
+        make_template_dir(
+            self.repo, "tester", "secret-default",
+            manifest=manifest,
+            bundle_files={
+                "template.json": json.dumps(manifest).encode("utf-8"),
+                "README.md": b"# r", "AGENTS.md": b"# a",
+                "dashboard.json": json.dumps(MINIMAL_DASHBOARD).encode("utf-8"),
+            },
+        )
+        errors = self._collect_errors()
+        self.assertTrue(any("must not declare a default" in str(e) for e in errors), errors)
+
+    def test_rejects_enum_without_options(self):
+        manifest = self._make_schema_manifest([
+            {"key": "choice", "type": "enum", "label": "Choice", "options": []},
+        ])
+        make_template_dir(
+            self.repo, "tester", "enum-empty",
+            manifest=manifest,
+            bundle_files={
+                "template.json": json.dumps(manifest).encode("utf-8"),
+                "README.md": b"# r", "AGENTS.md": b"# a",
+                "dashboard.json": json.dumps(MINIMAL_DASHBOARD).encode("utf-8"),
+            },
+        )
+        errors = self._collect_errors()
+        self.assertTrue(any("at least one option" in str(e) for e in errors), errors)
+
+    def test_rejects_unsupported_field_type(self):
+        manifest = self._make_schema_manifest([
+            {"key": "wat", "type": "hologram", "label": "W"},
+        ])
+        make_template_dir(
+            self.repo, "tester", "bad-type",
+            manifest=manifest,
+            bundle_files={
+                "template.json": json.dumps(manifest).encode("utf-8"),
+                "README.md": b"# r", "AGENTS.md": b"# a",
+                "dashboard.json": json.dumps(MINIMAL_DASHBOARD).encode("utf-8"),
+            },
+        )
+        errors = self._collect_errors()
+        self.assertTrue(any("unsupported type" in str(e) for e in errors), errors)
+
+    def test_rejects_contents_config_count_mismatch(self):
+        # Schema has 1 field; contents.config claims 2.
+        manifest = self._make_schema_manifest([
+            {"key": "only", "type": "string", "label": "Only"},
+        ])
+        manifest["contents"]["config"] = 2
+        make_template_dir(
+            self.repo, "tester", "mismatch",
+            manifest=manifest,
+            bundle_files={
+                "template.json": json.dumps(manifest).encode("utf-8"),
+                "README.md": b"# r", "AGENTS.md": b"# a",
+                "dashboard.json": json.dumps(MINIMAL_DASHBOARD).encode("utf-8"),
+            },
+        )
+        errors = self._collect_errors()
+        self.assertTrue(any("contents.config=2" in str(e) for e in errors), errors)
+
+    def test_rejects_unsupported_list_item_type(self):
+        manifest = self._make_schema_manifest([
+            {"key": "items", "type": "list", "label": "Items", "itemType": "number"},
+        ])
+        make_template_dir(
+            self.repo, "tester", "list-type",
+            manifest=manifest,
+            bundle_files={
+                "template.json": json.dumps(manifest).encode("utf-8"),
+                "README.md": b"# r", "AGENTS.md": b"# a",
+                "dashboard.json": json.dumps(MINIMAL_DASHBOARD).encode("utf-8"),
+            },
+        )
+        errors = self._collect_errors()
+        self.assertTrue(any("unsupported itemType" in str(e) for e in errors), errors)
+
+    def test_accepts_schemaless_v1_manifest_unchanged(self):
+        # Pre-v2.3 bundles without any config block should keep working.
+        manifest = {
+            "schemaVersion": 1,
+            "id": "tester/legacy",
+            "name": "Legacy",
+            "version": "1.0.0",
+            "description": "no config",
+            "contents": {"dashboard": True, "agentsMd": True},
+        }
+        make_template_dir(
+            self.repo, "tester", "legacy",
+            manifest=manifest,
+            bundle_files={
+                "template.json": json.dumps(manifest).encode("utf-8"),
+                "README.md": b"# r", "AGENTS.md": b"# a",
+                "dashboard.json": json.dumps(MINIMAL_DASHBOARD).encode("utf-8"),
+            },
+        )
+        errors = self._collect_errors()
+        self.assertEqual(errors, [])
+
+    def _collect_errors(self):
+        errors = []
+        for tdir in build_catalog._iter_templates(self.repo):
+            rec, errs = build_catalog.validate_template(tdir)
+            errors.extend(errs)
+            if rec is not None:
+                errors.extend(build_catalog._check_staging_matches_bundle(rec))
+        return errors
+
+
 class CatalogJsonTests(unittest.TestCase):
     """Shape of the emitted catalog.json must stay stable — the site's
     widgets.js reads these fields by name."""
