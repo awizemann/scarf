@@ -35,6 +35,16 @@ final class HermesFileWatcher {
             paths.errorsLog,
             paths.gatewayLog,
             paths.projectsRegistry,
+            // v2.3: sidecar attributing Hermes session IDs to Scarf project
+            // paths. Written by SessionAttributionService when a chat
+            // starts with a project context; read by
+            // ProjectSessionsViewModel to filter the session list. Without
+            // watching this file, the per-project Sessions tab would only
+            // pick up new sessions when the user re-entered the tab
+            // (triggering .task(id:) re-fire) — switching directly back
+            // to the project's Sessions tab after a chat left the tab
+            // stale.
+            paths.sessionProjectMap,
             paths.mcpTokensDir
         ]
     }
