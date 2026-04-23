@@ -382,6 +382,52 @@ final class TestRegistryLock: @unchecked Sendable {
         }
     }
 
+    // MARK: - Cron prompt token substitution
+
+    @Test func substituteCronTokensResolvesProjectDir() throws {
+        let plan = try TemplateInstallerViewModelTests.makePlanWithConfigSchema()
+        let raw = "Read {{PROJECT_DIR}}/.scarf/config.json"
+        let resolved = ProjectTemplateInstaller.substituteCronTokens(raw, plan: plan)
+        #expect(resolved == "Read \(plan.projectDir)/.scarf/config.json")
+        // Original placeholder must be fully replaced — a lingering
+        // {{PROJECT_DIR}} would leave the cron job trying to read a
+        // literal file named `{{PROJECT_DIR}}` which doesn't exist.
+        #expect(resolved.contains("{{PROJECT_DIR}}") == false)
+    }
+
+    @Test func substituteCronTokensResolvesIdAndSlug() throws {
+        let plan = try TemplateInstallerViewModelTests.makePlanWithConfigSchema()
+        let raw = "Log as {{TEMPLATE_ID}} (slug {{TEMPLATE_SLUG}})"
+        let resolved = ProjectTemplateInstaller.substituteCronTokens(raw, plan: plan)
+        #expect(resolved.contains(plan.manifest.id))
+        #expect(resolved.contains(plan.manifest.slug))
+        #expect(resolved.contains("{{TEMPLATE_ID}}") == false)
+        #expect(resolved.contains("{{TEMPLATE_SLUG}}") == false)
+    }
+
+    @Test func substituteCronTokensLeavesUnknownTokensUntouched() throws {
+        let plan = try TemplateInstallerViewModelTests.makePlanWithConfigSchema()
+        let raw = "{{PROJECT_DIR}} but keep {{UNSUPPORTED}} literal"
+        let resolved = ProjectTemplateInstaller.substituteCronTokens(raw, plan: plan)
+        #expect(resolved.contains(plan.projectDir))
+        // Unsupported placeholders pass through verbatim — template
+        // authors will notice in testing that their token didn't get
+        // replaced and either use a supported one or request a new one.
+        #expect(resolved.contains("{{UNSUPPORTED}}"))
+    }
+
+    @Test func substituteCronTokensRepeatsWithinString() throws {
+        let plan = try TemplateInstallerViewModelTests.makePlanWithConfigSchema()
+        let raw = "Read {{PROJECT_DIR}}/a and write {{PROJECT_DIR}}/b"
+        let resolved = ProjectTemplateInstaller.substituteCronTokens(raw, plan: plan)
+        // Both occurrences should be replaced — not just the first.
+        // A single-replace bug here would leave the second relative,
+        // causing the same CWD issue this whole feature was meant to
+        // fix.
+        let count = resolved.components(separatedBy: plan.projectDir).count - 1
+        #expect(count == 2)
+    }
+
     // MARK: - Registry snapshot helpers
 
     /// Read the raw bytes of the current projects.json so we can restore
@@ -986,14 +1032,20 @@ final class TestRegistryLock: @unchecked Sendable {
         #expect(statTitles.contains("Last Checked"))
 
         // Cron prompt references .scarf/config.json (where values.sites
-        // + values.timeout_seconds live) and the dashboard/log it writes.
-        // If either stops being referenced, the cron wouldn't know which
-        // data to read or where to write results.
+        // + values.timeout_seconds live), the dashboard/log it writes,
+        // and the {{PROJECT_DIR}} placeholder the installer resolves
+        // at install time. If either stops being referenced, the cron
+        // wouldn't know which data to read or where to write results.
         let cronPrompt = inspection.cronJobs.first?.prompt ?? ""
         #expect(cronPrompt.contains("config.json"))
         #expect(cronPrompt.contains("values.sites"))
         #expect(cronPrompt.contains("dashboard.json"))
         #expect(cronPrompt.contains("status-log.md"))
+        // {{PROJECT_DIR}} must remain UNRESOLVED in the bundle — the
+        // installer substitutes it at install time. If someone
+        // accidentally baked an absolute path into the template, that
+        // path would follow every install to every user's machine.
+        #expect(cronPrompt.contains("{{PROJECT_DIR}}"))
     }
 
     /// Resolve the example bundle path robustly. Unit-test working dirs
