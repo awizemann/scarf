@@ -20,6 +20,13 @@ struct ProjectSessionsView: View {
             Divider()
             content
         }
+        // Without this clamp the inner List's intrinsic height grows
+        // with its row count and the enclosing VStack pushes the
+        // window itself past the screen. Other tabs handle this via
+        // their own container (widgetsTab = ScrollView, siteTab =
+        // explicit maxHeight) — match the siteTab pattern here so
+        // the List scrolls internally.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: project.id) {
             // Rebuild the VM when the project changes so stale state
             // from a previously-selected project doesn't bleed
