@@ -126,6 +126,16 @@ struct TemplateInstallSheet: View {
                 .padding(.bottom, 8)
             Divider()
             ScrollView {
+                // `.frame(maxWidth: .infinity, alignment: .leading)` —
+                // without it, a subsection containing an unbreakable
+                // token (raw URL in a cron prompt or README block, a
+                // long file path in the project-files list, a schema
+                // description with a bare URL, etc.) sets the VStack's
+                // ideal width to that token's length; the sheet grows
+                // past its `.frame(minWidth: 620)` and gets clipped by
+                // the window. Same fix as `TemplateConfigSheet`'s
+                // inner VStack — propagate the ScrollView's width down
+                // so inner Text wraps instead of expanding outward.
                 VStack(alignment: .leading, spacing: 16) {
                     projectFilesSection(plan: plan)
                     if plan.skillsNamespaceDir != nil {
@@ -142,6 +152,7 @@ struct TemplateInstallSheet: View {
                     }
                     readmeSection
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical)
             }
             Divider()
