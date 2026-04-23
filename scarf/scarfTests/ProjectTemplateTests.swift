@@ -253,7 +253,7 @@ import Foundation
 /// are exhaustively tested; global-state side effects (skills namespace,
 /// cron CLI, memory append) are covered by manual verification per the
 /// plan's step 7.
-@Suite struct ProjectTemplateInstallerTests {
+@Suite(.serialized) struct ProjectTemplateInstallerTests {
 
     @Test func installsMinimalBundleAndWritesLockFile() throws {
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -370,7 +370,7 @@ import Foundation
 /// it, verify every tracked file is gone, the registry is restored to its
 /// pre-install state, and user-added files (if any) are preserved. Scoped
 /// to bundles with no skills/cron/memory so no global state is touched.
-@Suite struct ProjectTemplateUninstallerTests {
+@Suite(.serialized) struct ProjectTemplateUninstallerTests {
 
     @Test func roundTripsInstallThenUninstall() throws {
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
@@ -496,7 +496,7 @@ import Foundation
 /// against a synthesized schemaful bundle. Uses an isolated Keychain
 /// service suffix so no leftover login-Keychain items remain after the
 /// test — every secret we write is deleted on teardown.
-@Suite struct ProjectTemplateConfigInstallTests {
+@Suite(.serialized) struct ProjectTemplateConfigInstallTests {
 
     /// Minimal schemaful manifest with one non-secret field + one
     /// secret field. Written into the synthesized `.scarftemplate`
@@ -781,12 +781,30 @@ import Foundation
         defer { service.cleanupTempDir(inspection.unpackedDir) }
 
         #expect(inspection.manifest.id == "awizemann/site-status-checker")
+        #expect(inspection.manifest.schemaVersion == 2)  // config-enabled
         #expect(inspection.manifest.contents.dashboard)
         #expect(inspection.manifest.contents.agentsMd)
         #expect(inspection.manifest.contents.cron == 1)
+        #expect(inspection.manifest.contents.config == 2)
         #expect(inspection.cronJobs.count == 1)
         #expect(inspection.cronJobs.first?.name == "Check site status")
         #expect(inspection.cronJobs.first?.schedule == "0 9 * * *")
+
+        // Schema assertions — the two fields we declared should survive
+        // unzip + parse + validate with their constraints intact.
+        let schema = try #require(inspection.manifest.config)
+        #expect(schema.fields.count == 2)
+        let sitesField = try #require(schema.field(for: "sites"))
+        #expect(sitesField.type == .list)
+        #expect(sitesField.itemType == "string")
+        #expect(sitesField.required == true)
+        #expect(sitesField.minItems == 1)
+        #expect(sitesField.maxItems == 25)
+        let timeoutField = try #require(schema.field(for: "timeout_seconds"))
+        #expect(timeoutField.type == .number)
+        #expect(timeoutField.minNumber == 1)
+        #expect(timeoutField.maxNumber == 60)
+        #expect(schema.modelRecommendation?.preferred == "claude-haiku-4")
 
         let scratch = try ProjectTemplateServiceTests.makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: scratch) }
@@ -795,6 +813,12 @@ import Foundation
         #expect(plan.skillsFiles.isEmpty)
         #expect(plan.memoryAppendix == nil)
         #expect(plan.cronJobs.count == 1)
+        #expect(plan.configSchema?.fields.count == 2)
+        #expect(plan.manifestCachePath?.hasSuffix("/.scarf/manifest.json") == true)
+        // Plan queues both config.json + manifest.json in projectFiles.
+        let destinations = plan.projectFiles.map(\.destinationPath)
+        #expect(destinations.contains { $0.hasSuffix("/.scarf/config.json") })
+        #expect(destinations.contains { $0.hasSuffix("/.scarf/manifest.json") })
         // Cron job name gets prefixed with the template tag so users can
         // find + remove it later.
         #expect(plan.cronJobs.first?.name == "[tmpl:awizemann/site-status-checker] Check site status")
@@ -820,10 +844,13 @@ import Foundation
         #expect(statTitles.contains("Sites Down"))
         #expect(statTitles.contains("Last Checked"))
 
-        // The cron prompt mentions sites.txt and dashboard.json — if it
-        // ever stops doing that, the agent won't know what files to touch.
+        // Cron prompt references .scarf/config.json (where values.sites
+        // + values.timeout_seconds live) and the dashboard/log it writes.
+        // If either stops being referenced, the cron wouldn't know which
+        // data to read or where to write results.
         let cronPrompt = inspection.cronJobs.first?.prompt ?? ""
-        #expect(cronPrompt.contains("sites.txt"))
+        #expect(cronPrompt.contains("config.json"))
+        #expect(cronPrompt.contains("values.sites"))
         #expect(cronPrompt.contains("dashboard.json"))
         #expect(cronPrompt.contains("status-log.md"))
     }
