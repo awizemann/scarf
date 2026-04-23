@@ -2,6 +2,42 @@ import Testing
 import Foundation
 @testable import scarf
 
+/// Cross-suite serialization lock for tests that touch the real
+/// `~/.hermes/scarf/projects.json`. Swift Testing's `.serialized` trait
+/// only serializes tests WITHIN a suite — multiple suites still run in
+/// parallel. Three suites in this file write to the same file and
+/// previously raced each other silently (saveRegistry used to swallow
+/// write failures); now that saveRegistry throws, the race surfaces.
+///
+/// The lock is acquired by `acquireAndSnapshot()` at the top of each
+/// registry-touching test and released by `restore(_:)` via the test's
+/// `defer`. Asymmetric acquire-in-one-fn / release-in-another looks
+/// unusual but the snapshot/restore pairing is so tight (every test
+/// defers the restore) that it's reliable in practice.
+final class TestRegistryLock: @unchecked Sendable {
+    static let shared = TestRegistryLock()
+    private let lock = NSLock()
+
+    /// Acquire the cross-suite lock and snapshot the registry. Pair
+    /// every call with a `defer { TestRegistryLock.restore(snapshot) }`.
+    static func acquireAndSnapshot() -> Data? {
+        shared.lock.lock()
+        let path = ServerContext.local.paths.projectsRegistry
+        return try? Data(contentsOf: URL(fileURLWithPath: path))
+    }
+
+    /// Restore the registry from snapshot and release the lock.
+    static func restore(_ snapshot: Data?) {
+        defer { shared.lock.unlock() }
+        let path = ServerContext.local.paths.projectsRegistry
+        if let snapshot {
+            try? snapshot.write(to: URL(fileURLWithPath: path))
+        } else {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+    }
+}
+
 /// Exercises the service's ability to unpack, parse, and validate bundles.
 /// Doesn't touch the installer — see `ProjectTemplateInstallerTests` — so
 /// these don't need write access to ~/.hermes.
@@ -351,18 +387,18 @@ import Foundation
     /// Read the raw bytes of the current projects.json so we can restore
     /// it byte-for-byte after the test. `nil` means the file didn't exist
     /// — restore by deleting whatever got created.
+    // Delegates to TestRegistryLock so tests across this suite + the
+    // two other registry-touching suites share one lock. Every
+    // `snapshotRegistry()` call acquires; the paired
+    // `restoreRegistry(_:)` defer releases. Without this, parallel
+    // test runs race on `~/.hermes/scarf/projects.json` writes and
+    // the saveRegistry throw surfaces the collision as a test failure.
     nonisolated private static func snapshotRegistry() -> Data? {
-        let path = ServerContext.local.paths.projectsRegistry
-        return try? Data(contentsOf: URL(fileURLWithPath: path))
+        TestRegistryLock.acquireAndSnapshot()
     }
 
     nonisolated private static func restoreRegistry(_ snapshot: Data?) {
-        let path = ServerContext.local.paths.projectsRegistry
-        if let snapshot {
-            try? snapshot.write(to: URL(fileURLWithPath: path))
-        } else {
-            try? FileManager.default.removeItem(atPath: path)
-        }
+        TestRegistryLock.restore(snapshot)
     }
 }
 
@@ -476,18 +512,18 @@ import Foundation
     // ProjectTemplateInstallerTests — small helper, not worth a shared
     // fixture file for one more suite).
 
+    // Delegates to TestRegistryLock so tests across this suite + the
+    // two other registry-touching suites share one lock. Every
+    // `snapshotRegistry()` call acquires; the paired
+    // `restoreRegistry(_:)` defer releases. Without this, parallel
+    // test runs race on `~/.hermes/scarf/projects.json` writes and
+    // the saveRegistry throw surfaces the collision as a test failure.
     nonisolated private static func snapshotRegistry() -> Data? {
-        let path = ServerContext.local.paths.projectsRegistry
-        return try? Data(contentsOf: URL(fileURLWithPath: path))
+        TestRegistryLock.acquireAndSnapshot()
     }
 
     nonisolated private static func restoreRegistry(_ snapshot: Data?) {
-        let path = ServerContext.local.paths.projectsRegistry
-        if let snapshot {
-            try? snapshot.write(to: URL(fileURLWithPath: path))
-        } else {
-            try? FileManager.default.removeItem(atPath: path)
-        }
+        TestRegistryLock.restore(snapshot)
     }
 }
 
@@ -753,18 +789,18 @@ import Foundation
 
     // MARK: - Registry snapshot helpers (dup'd from ProjectTemplateInstallerTests)
 
+    // Delegates to TestRegistryLock so tests across this suite + the
+    // two other registry-touching suites share one lock. Every
+    // `snapshotRegistry()` call acquires; the paired
+    // `restoreRegistry(_:)` defer releases. Without this, parallel
+    // test runs race on `~/.hermes/scarf/projects.json` writes and
+    // the saveRegistry throw surfaces the collision as a test failure.
     nonisolated private static func snapshotRegistry() -> Data? {
-        let path = ServerContext.local.paths.projectsRegistry
-        return try? Data(contentsOf: URL(fileURLWithPath: path))
+        TestRegistryLock.acquireAndSnapshot()
     }
 
     nonisolated private static func restoreRegistry(_ snapshot: Data?) {
-        let path = ServerContext.local.paths.projectsRegistry
-        if let snapshot {
-            try? snapshot.write(to: URL(fileURLWithPath: path))
-        } else {
-            try? FileManager.default.removeItem(atPath: path)
-        }
+        TestRegistryLock.restore(snapshot)
     }
 }
 
