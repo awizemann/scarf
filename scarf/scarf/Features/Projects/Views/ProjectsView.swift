@@ -34,6 +34,16 @@ struct ProjectsView: View {
     /// drop from the registry.
     @State private var pendingRemoveFromList: ProjectEntry?
 
+    /// Project queued for the rename sheet (v2.3). Sheet state lives
+    /// on the parent view so the sidebar stays a pure presentation
+    /// layer; rename logic routes through `ProjectsViewModel.renameProject`.
+    @State private var renameTarget: ProjectEntry?
+
+    /// Project queued for the move-to-folder sheet (v2.3). Same
+    /// pattern as renameTarget: parent owns sheet state, sidebar
+    /// delegates up.
+    @State private var moveTarget: ProjectEntry?
+
     private let uninstaller: ProjectTemplateUninstaller
 
     init(context: ServerContext) {
@@ -263,77 +273,45 @@ struct ProjectsView: View {
     // MARK: - Project List
 
     private var projectList: some View {
-        VStack(spacing: 0) {
-            List(viewModel.projects, selection: Binding(
-                get: { viewModel.selectedProject },
-                set: { project in
-                    if let project {
-                        viewModel.selectProject(project)
-                    }
-                }
-            )) { project in
-                HStack {
-                    Image(systemName: viewModel.dashboard != nil && viewModel.selectedProject == project
-                          ? "square.grid.2x2.fill" : "square.grid.2x2")
-                        .foregroundStyle(.secondary)
-                    Text(project.name)
-                }
-                .tag(project)
-                .contextMenu {
-                    if isConfigurable(project) {
-                        Button("Configuration…", systemImage: "slider.horizontal.3") {
-                            configEditorProject = project
-                        }
-                    }
-                    if uninstaller.isTemplateInstalled(project: project) {
-                        // "Uninstall Template…" only appears for projects
-                        // installed from a `.scarftemplate`. Trailing
-                        // ellipsis signals a confirmation sheet follows
-                        // (macOS HIG convention); the sheet itself lists
-                        // every file/cron/skill that will be removed.
-                        Button("Uninstall Template (remove installed files)…", systemImage: "trash") {
-                            uninstallerViewModel.begin(project: project)
-                            showingUninstallSheet = true
-                        }
-                        Divider()
-                    }
-                    // "Remove from List" used to be "Remove from Scarf",
-                    // which users read as a full delete. Clarified label +
-                    // ellipsis + confirmation dialog all spell out that
-                    // this is registry-only; nothing on disk is touched.
-                    Button("Remove from List (keep files)…", systemImage: "minus.circle") {
-                        pendingRemoveFromList = project
-                    }
-                }
-            }
-            .listStyle(.sidebar)
-
-            Divider()
-            HStack {
-                Button(action: { showingAddSheet = true }) {
-                    Image(systemName: "plus")
-                }
-                .buttonStyle(.borderless)
-                Spacer()
-                if let selected = viewModel.selectedProject {
-                    // Route through the same confirmation dialog as the
-                    // context-menu "Remove from List" entry. The minus
-                    // icon is a drive-by click target right next to "+" —
-                    // confirming before mutating the registry stops the
-                    // "I clicked by accident and my project's gone" case.
-                    Button(action: { pendingRemoveFromList = selected }) {
-                        Image(systemName: "minus")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Remove \(selected.name) from Scarf's project list (files are kept on disk)")
-                }
-            }
-            .padding(8)
-        }
+        // Sidebar is an extracted view; this view stays the owner of
+        // sheet state (add / rename / move / uninstall / remove-from-
+        // list confirmation) and routes intents down as closures.
+        ProjectsSidebar(
+            viewModel: viewModel,
+            canConfigureProject: { isConfigurable($0) },
+            isTemplateInstalled: { uninstaller.isTemplateInstalled(project: $0) },
+            onConfigure: { configEditorProject = $0 },
+            onUninstallTemplate: { project in
+                uninstallerViewModel.begin(project: project)
+                showingUninstallSheet = true
+            },
+            onRemoveFromList: { pendingRemoveFromList = $0 },
+            onRename: { renameTarget = $0 },
+            onMoveToFolder: { moveTarget = $0 },
+            onAddProject: { showingAddSheet = true }
+        )
         .sheet(isPresented: $showingAddSheet) {
             AddProjectSheet { name, path in
                 viewModel.addProject(name: name, path: path)
                 fileWatcher.updateProjectWatches(viewModel.dashboardPaths)
+            }
+        }
+        .sheet(item: $renameTarget) { target in
+            RenameProjectSheet(
+                project: target,
+                existingNames: viewModel.projects
+                    .filter { $0.name != target.name }
+                    .map(\.name)
+            ) { newName in
+                viewModel.renameProject(target, to: newName)
+            }
+        }
+        .sheet(item: $moveTarget) { target in
+            MoveToFolderSheet(
+                project: target,
+                existingFolders: viewModel.folders
+            ) { newFolder in
+                viewModel.moveProject(target, toFolder: newFolder)
             }
         }
     }
