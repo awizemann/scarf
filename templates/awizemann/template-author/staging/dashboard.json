@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "title": "Template Author",
+  "description": "A Hermes skill that helps your agent scaffold new Scarf projects — ask in chat, answer a short interview, and land a working dashboard with the right shape to export as a .scarftemplate later. The Scaffolded Projects list below grows as you use the skill.",
+  "theme": { "accent": "blue" },
+  "sections": [
+    {
+      "title": "Quick Start",
+      "columns": 1,
+      "widgets": [
+        {
+          "type": "text",
+          "title": "Ask your agent",
+          "format": "markdown",
+          "content": "**This project gives you a skill, not a service.** There are no cron jobs running, no dashboards to maintain. The real value lives at `~/.hermes/skills/templates/awizemann-template-author/scarf-template-author/SKILL.md`.\n\n**Trigger phrases** your agent listens for:\n\n- *\"Create a new Scarf project that watches …\"*\n- *\"Scaffold a dashboard to track …\"*\n- *\"Set up a project that runs a daily check on …\"*\n- *\"Help me author a Scarf template.\"*\n\nThe agent will interview you (purpose → data source → cadence → widgets → config → secrets), write `<your-dir>/.scarf/dashboard.json`, `<your-dir>/.scarf/manifest.json`, `<your-dir>/AGENTS.md`, and `<your-dir>/README.md`, then tell you to click **+** in Scarf's Projects sidebar to register the directory.\n\nWhen you're happy with the result, **Projects → Templates → Export** turns it into a `.scarftemplate` you can share.\n\nSee the [Project Templates wiki page](https://github.com/awizemann/scarf/wiki/Project-Templates) for the full spec."
+        }
+      ]
+    },
+    {
+      "title": "Scaffolded Projects",
+      "columns": 1,
+      "widgets": [
+        {
+          "type": "list",
+          "title": "Projects this skill has built for you",
+          "items": [
+            { "text": "Nothing yet — ask your agent to scaffold a project and it'll optionally log entries here.", "status": "pending" }
+          ]
+        }
+      ]
+    }
+  ]
+}

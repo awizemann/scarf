@@ -1063,6 +1063,68 @@ final class TestRegistryLock: @unchecked Sendable {
         #expect(cronPrompt.contains("{{PROJECT_DIR}}"))
     }
 
+    /// Exercises the second shipped template — `awizemann/template-author` —
+    /// which is a skill-only bundle (no config, no cron, no memory). The
+    /// shape is deliberately different from site-status-checker so a
+    /// regression in the installer's "no config, no cron" path can't hide
+    /// behind the richer example template. Also asserts the skill lands
+    /// under the expected namespaced path so Hermes's recursive skill
+    /// discovery finds it.
+    @Test func templateAuthorParsesAndPlans() throws {
+        let bundle = try Self.locateExample(author: "awizemann", name: "template-author")
+
+        let service = ProjectTemplateService(context: .local)
+        let inspection = try service.inspect(zipPath: bundle)
+        defer { service.cleanupTempDir(inspection.unpackedDir) }
+
+        // Manifest shape: schemaVersion 2 (contains `skills` claim, which
+        // wasn't part of v1), no config, no cron, one skill.
+        #expect(inspection.manifest.id == "awizemann/template-author")
+        #expect(inspection.manifest.name == "Scarf Template Author")
+        #expect(inspection.manifest.version == "1.0.0")
+        #expect(inspection.manifest.schemaVersion == 2)
+        #expect(inspection.manifest.contents.dashboard)
+        #expect(inspection.manifest.contents.agentsMd)
+        #expect(inspection.manifest.contents.cron == nil)
+        #expect(inspection.manifest.contents.config == nil)
+        #expect(inspection.manifest.contents.memory == nil)
+        #expect(inspection.manifest.contents.skills == ["scarf-template-author"])
+        #expect(inspection.manifest.config == nil)
+        #expect(inspection.cronJobs.isEmpty)
+
+        // Plan: empty config, empty cron, but one skill queued for install
+        // under the template's namespaced dir. The namespace path has to
+        // match what the uninstaller wipes — `skills/templates/<slug>` —
+        // or uninstall leaves orphan skill files.
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        let plan = try service.buildPlan(inspection: inspection, parentDir: scratch)
+        #expect(plan.projectDir.hasSuffix("awizemann-template-author"))
+        #expect(plan.cronJobs.isEmpty)
+        #expect(plan.configSchema == nil)
+        #expect(plan.configValues.isEmpty)
+        #expect(plan.memoryAppendix == nil)
+
+        // The skill should land at
+        // `~/.hermes/skills/templates/awizemann-template-author/scarf-template-author/SKILL.md`
+        // — namespace dir + skill folder + SKILL.md. Anything else
+        // breaks Hermes's recursive discovery or the uninstaller's
+        // `rm -rf` on the namespace dir.
+        let namespaceDir = try #require(plan.skillsNamespaceDir)
+        #expect(namespaceDir.hasSuffix("/skills/templates/awizemann-template-author"))
+        #expect(plan.skillsFiles.count == 1)
+        let skillDest = try #require(plan.skillsFiles.first?.destinationPath)
+        #expect(skillDest.hasSuffix("/scarf-template-author/SKILL.md"))
+        #expect(skillDest.hasPrefix(namespaceDir))
+
+        // No-config templates deliberately skip the manifest cache —
+        // the dashboard's Configuration button only shows up when
+        // `.scarf/manifest.json` exists, so a skill-only template
+        // like this one correctly doesn't surface that button.
+        // (See ProjectTemplateService.buildPlan lines 198–227.)
+        #expect(plan.manifestCachePath == nil)
+    }
+
     /// Resolve the example bundle path robustly. Unit-test working dirs
     /// differ between `xcodebuild test` (project root) and an Xcode IDE
     /// run (build-output dir), so we walk up from this source file until

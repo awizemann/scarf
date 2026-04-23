@@ -63,6 +63,37 @@
         "configurable"
       ],
       "version": "1.1.0"
+    },
+    {
+      "author": {
+        "name": "Alan Wizemann",
+        "url": "https://github.com/awizemann"
+      },
+      "bundleSha256": "670b2e07ad9bb327c11fa64db1beacf86614a3d388de6fe6e2a19ac957e1346b",
+      "bundleSize": 13889,
+      "category": "developer-tools",
+      "config": null,
+      "contents": {
+        "agentsMd": true,
+        "dashboard": true,
+        "skills": [
+          "scarf-template-author"
+        ]
+      },
+      "description": "Install this to give your agent a skill that scaffolds new Scarf projects \u2014 dashboards, optional configuration schemas, cron jobs, and AGENTS.md \u2014 from a short conversational interview. Scaffolded projects are usable locally and cleanly exportable as .scarftemplate bundles.",
+      "detailSlug": "awizemann-template-author",
+      "id": "awizemann/template-author",
+      "installUrl": "https://raw.githubusercontent.com/awizemann/scarf/main/templates/awizemann/template-author/template-author.scarftemplate",
+      "minHermesVersion": null,
+      "minScarfVersion": "2.2.0",
+      "name": "Scarf Template Author",
+      "tags": [
+        "meta",
+        "authoring",
+        "skill",
+        "scaffolding"
+      ],
+      "version": "1.0.0"
     }
   ]
 }
