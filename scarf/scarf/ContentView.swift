@@ -17,32 +17,6 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 180, ideal: 240, max: 360)
         } detail: {
             detailView
-                // The detail column's size is what NavigationSplitView
-                // reports up to the window. Without a bound here, the
-                // reported ideal is derived from the currently-rendered
-                // section's natural intrinsic size — and some sections
-                // (Chat with a fully-materialized message list, the
-                // v2.3 per-project Sessions tab) have intrinsic heights
-                // that exceed the screen. With `.windowResizability
-                // (.contentMinSize)` in scarfApp, the window is forced
-                // at least that tall, pushing its bottom edge past the
-                // visible desktop and hiding the input bar.
-                //
-                // This frame pins the detail's reported ideal at a
-                // modest 900×600 — small enough to fit any reasonable
-                // screen — while allowing it to expand freely to
-                // whatever the user drags the window to. `minHeight: 0`
-                // is load-bearing: it overrides the "my child's min is
-                // huge" chain so NavigationSplitView doesn't carry a
-                // massive min up to the window.
-                .frame(
-                    minWidth: 500,
-                    idealWidth: 900,
-                    maxWidth: .infinity,
-                    minHeight: 300,
-                    idealHeight: 600,
-                    maxHeight: .infinity
-                )
                 .toolbar {
                     ToolbarItem(placement: .navigation) {
                         ServerSwitcherToolbar()

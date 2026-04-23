@@ -20,13 +20,17 @@ struct ProjectSessionsView: View {
             Divider()
             content
         }
-        // Without this clamp the inner List's intrinsic height grows
-        // with its row count and the enclosing VStack pushes the
-        // window itself past the screen. Other tabs handle this via
-        // their own container (widgetsTab = ScrollView, siteTab =
-        // explicit maxHeight) — match the siteTab pattern here so
-        // the List scrolls internally.
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // `idealHeight: 400` caps what this subtree reports as its
+        // ideal height. Without it, the inner List's row-materialised
+        // intrinsic height bubbles up through NavigationSplitView's
+        // detail slot and, under `.windowResizability(.contentMinSize)`,
+        // opens the window at a height that exceeds the screen on
+        // busy projects — the Sessions tab header + "New Chat" button
+        // end up below the visible desktop edge. `maxHeight: .infinity`
+        // still lets the List fill any taller offered space, and
+        // `minHeight: 0` allows it to shrink. Mirrors the same pattern
+        // applied in RichChatView.
+        .frame(minHeight: 0, idealHeight: 400, maxHeight: .infinity)
         .task(id: project.id) {
             // Rebuild the VM when the project changes so stale state
             // from a previously-selected project doesn't bleed
