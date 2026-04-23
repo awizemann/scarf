@@ -20,7 +20,6 @@ final class SettingsViewModel {
     var hermesRunning = false
     var rawConfigYAML = ""
     var personalities: [String] = []
-    var providers = ["anthropic", "openrouter", "nous", "openai-codex", "google-ai-studio", "xai", "ollama-cloud", "zai", "kimi-coding", "minimax"]
     var terminalBackends = ["local", "docker", "singularity", "modal", "daytona", "ssh"]
     var browserBackends = ["browseruse", "firecrawl", "local"]
     var ttsProviders = ["edge", "elevenlabs", "openai", "minimax", "mistral", "neutts"]
