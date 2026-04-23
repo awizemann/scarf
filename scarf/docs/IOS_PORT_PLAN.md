@@ -653,5 +653,47 @@ the 3 ScarfIOS tests.
 - **Chat is rich-chat-only on iOS in v1.** Terminal mode (embedded SwiftTerm) deferred.
 - **Message markdown / tool-call cards / permission sheets** are M5 polish.
 
-### M5 — pending
+### M5 — shipped (on `claude/ios-m5-polish-writes` branch, separate PR, stacked on M4)
+
+Chat polish + three new iOS feature surfaces — Memory (read + edit), Cron (read-only), Skills (read-only).
+
+**Chat polish:**
+- **Tool-call cards** — assistant messages with embedded `HermesToolCall`s now render each call as an expandable card (tapped → shows full JSON arguments). Tool-kind icon in the card header.
+- **Tool-result row** — messages with `role == "tool"` render as a compact "Tool output" disclosure beneath the assistant bubble they flowed from. Keeps the transcript scannable while letting users drill in.
+- **Permission sheet** — when the remote emits `session/request_permission`, a SwiftUI `.sheet(item:)` modal presents the title + kind + option buttons. Tapping an option dispatches `respondToPermission(requestId:optionId:)` through `ChatController` → `ACPClient`.
+- **Markdown rendering** — assistant messages (only) go through `AttributedString(markdown:options: .inlineOnlyPreservingWhitespace)`. Bold/italic/code/links render; unknown constructs fall through as plain text.
+- **Reasoning disclosure** — `HermesMessage.reasoning` (when present) renders as an "Thinking…" `DisclosureGroup` above the main bubble. Collapsed by default so chain-of-thought-heavy models don't dominate the scroll.
+
+**New feature surfaces** (all in `scarf/Scarf iOS/` + ScarfCore ViewModels):
+- **Memory** — `IOSMemoryViewModel` (ScarfCore) + `MemoryListView` / `MemoryEditorView`. Two rows: MEMORY.md and USER.md. TextEditor bound to `vm.text`; toolbar Save + Revert. "Saved" toast confirmation. VM uses `ServerContext.readText` / `writeText` — works through any transport.
+- **Cron** — `IOSCronViewModel` + `CronListView` + `CronDetailView`. Read-only. Decodes `jobs.json` via `CronJobsFile` (Codable, from ScarfCore M0a). Sorted enabled-first, then by `nextRunAt`. Missing file = empty list (no error — common on fresh installs).
+- **Skills** — `IOSSkillsViewModel` + `SkillsListView` + `SkillDetailView`. Read-only. Scans `~/.hermes/skills/<category>/<name>/` via `transport.listDirectory` + `stat` (no YAML frontmatter parsing — defer). Empty categories filtered. Dotfiles filtered.
+
+**Supporting changes:**
+- `RichChatViewModel.PendingPermission` fields promoted `public` — the iOS `PermissionSheet` needs to read `title` / `kind` / `options`.
+- `LocalTransport.writeFile` refactored to use `Data.write(options: .atomic)` instead of `FileManager.replaceItemAt`. replaceItemAt is Apple-only (Linux swift-corelibs doesn't implement it fully), which broke the M5 tests on Linux CI. The atomic-write option is cross-platform and has identical semantics. No behavior change on Mac/iOS; auto-creates the parent dir if missing.
+- Dashboard's single Chat-only Section became a **Surfaces** section with four `NavigationLink`s: Chat, Memory, Cron, Skills.
+
+**Test coverage (`M5FeatureVMTests`, 10 new tests):**
+- Memory: missing-file → empty state, full load+edit+save+reload round-trip, revert restores original, `Kind.path(on:)` routing.
+- Cron: missing jobs.json → empty (no error), full-load sorts (enabled-first + next-run ascending + disabled-last), decode-error surfaces via `lastError`.
+- Skills: missing skills dir → empty, directory scan extracts category/skill/files + filters dotfiles, empty categories excluded from list.
+- `PendingPermission.init` pinned (SQLite3-gated).
+
+Total **98 → 108 tests passing on Linux** via `docker run --rm -v $PWD/Packages/ScarfCore:/work -w /work swift:6.0 swift test`. All M5 tests use a `.serialized` suite + a `withLocalTransportFactory` helper so the shared `ServerContext.sshTransportFactory` static doesn't race.
+
+**Manual validation needed on Mac:**
+1. Xcode compile clean against M5 source additions.
+2. Chat: trigger a tool call (e.g., ask "list files in ~") → verify the card renders + expands. Trigger a permission request (e.g., ask to write a file) → verify the sheet presents + responding dispatches correctly.
+3. Markdown: ask for a bulleted list or bold/italic text → verify rendering.
+4. Memory: edit MEMORY.md from phone → save → verify on remote filesystem via `cat ~/.hermes/memories/MEMORY.md`.
+5. Cron: if you have existing cron jobs, verify they show up sorted correctly + the detail view is useful.
+6. Skills: browse the list, tap a skill, verify the file list matches `ls ~/.hermes/skills/<cat>/<name>/`.
+
+**Rules next phases can rely on:**
+- **`IOSMemoryViewModel`, `IOSCronViewModel`, `IOSSkillsViewModel`** live in ScarfCore (not ScarfIOS) because they only use `ServerContext.readText` / `writeText` / `makeTransport` — no iOS-only APIs. Tests on Linux with `LocalTransport` are legitimate coverage.
+- **`LocalTransport.writeFile` is atomic cross-platform** — services writing through it get POSIX rename-atomic semantics on every target. Don't reintroduce `replaceItemAt`.
+- **Editing Cron, adding Skills** — both are deferred. Cron editing needs atomic JSON rewrites (doable). Skills install needs git-clone + schema validation (larger).
+- **Settings tab on iOS is still missing** — requires a YAML parser in ScarfCore or porting `HermesFileService.loadConfig`. Next phase's job.
+
 ### M6 — pending

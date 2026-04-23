@@ -65,6 +65,17 @@ struct ChatView: View {
                 errorOverlay(msg)
             }
         }
+        .sheet(item: Binding(
+            get: { controller.vm.pendingPermission.map(PermissionWrapper.init) },
+            set: { if $0 == nil { controller.vm.pendingPermission = nil } }
+        )) { wrapper in
+            PermissionSheet(permission: wrapper.value) { optionId in
+                await controller.respondToPermission(
+                    requestId: wrapper.value.requestId,
+                    optionId: optionId
+                )
+            }
+        }
     }
 
     // MARK: - Subviews
@@ -302,6 +313,23 @@ final class ChatController {
         vm.reset()
         await start()
     }
+
+    /// Dispatch the user's answer to a pending permission request.
+    /// Called by `PermissionSheet`.
+    func respondToPermission(requestId: Int, optionId: String) async {
+        guard let client else { return }
+        await client.respondToPermission(requestId: requestId, optionId: optionId)
+        vm.pendingPermission = nil
+    }
+}
+
+/// `Identifiable` wrapper so SwiftUI's `.sheet(item:)` can key off
+/// the pending permission. Two permissions for the same request-id
+/// are treated as identical (rare — would only happen if the remote
+/// sends a duplicate).
+private struct PermissionWrapper: Identifiable {
+    let value: RichChatViewModel.PendingPermission
+    var id: Int { value.requestId }
 }
 
 // MARK: - Message bubble
@@ -310,30 +338,240 @@ private struct MessageBubble: View {
     let message: HermesMessage
 
     var body: some View {
-        HStack {
-            if message.isUser { Spacer(minLength: 40) }
-            VStack(alignment: message.isUser ? .trailing : .leading, spacing: 4) {
-                Text(message.content)
-                    .font(.body)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .foregroundStyle(message.isUser ? Color.white : Color.primary)
-                    .background(
-                        message.isUser ? Color.accentColor : Color(.secondarySystemBackground)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .textSelection(.enabled)
-                if message.hasReasoning, let r = message.reasoning, !r.isEmpty {
-                    Text("🧠 \(r)")
-                        .font(.caption2)
-                        .italic()
+        if message.isToolResult {
+            ToolResultRow(message: message)
+        } else {
+            HStack(alignment: .bottom) {
+                if message.isUser { Spacer(minLength: 40) }
+                VStack(alignment: message.isUser ? .trailing : .leading, spacing: 4) {
+                    if message.hasReasoning, let r = message.reasoning, !r.isEmpty {
+                        ReasoningDisclosure(reasoning: r)
+                    }
+                    bubbleContent
+                    if !message.toolCalls.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(message.toolCalls) { call in
+                                ToolCallCard(call: call)
+                            }
+                        }
+                    }
+                }
+                if !message.isUser { Spacer(minLength: 40) }
+            }
+            .padding(.horizontal)
+        }
+    }
+
+    @ViewBuilder
+    private var bubbleContent: some View {
+        // Render markdown on the assistant side so bold/code/links
+        // look right. User messages stay plain — no reason to parse
+        // what the user just typed. AttributedString(markdown:) is
+        // conservative — unknown constructs fall through as literal
+        // text, so the worst case is just "no formatting".
+        let text: Text = {
+            if message.isUser {
+                return Text(message.content)
+            }
+            if let attributed = try? AttributedString(
+                markdown: message.content,
+                options: AttributedString.MarkdownParsingOptions(
+                    interpretedSyntax: .inlineOnlyPreservingWhitespace
+                )
+            ) {
+                return Text(attributed)
+            }
+            return Text(message.content)
+        }()
+
+        text
+            .font(.body)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .foregroundStyle(message.isUser ? Color.white : Color.primary)
+            .background(
+                message.isUser ? Color.accentColor : Color(.secondarySystemBackground)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .textSelection(.enabled)
+    }
+}
+
+/// Inline, expandable "chain-of-thought" disclosure shown above the
+/// assistant's primary message when the remote surfaces `reasoning`.
+/// Collapsed by default so a chatty model doesn't dominate the scroll
+/// position.
+private struct ReasoningDisclosure: View {
+    let reasoning: String
+    @State private var isExpanded = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            Text(reasoning)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .italic()
+                .textSelection(.enabled)
+                .padding(.top, 4)
+        } label: {
+            Label("Thinking…", systemImage: "brain")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 6)
+    }
+}
+
+/// Expanding card for a single `HermesToolCall` — shows function name
+/// + summary collapsed; full JSON arguments expanded.
+private struct ToolCallCard: View {
+    let call: HermesToolCall
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: iconName)
+                        .foregroundStyle(.tint)
+                    Text(call.functionName)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.primary)
+                    Text(call.argumentsSummary.prefix(60))
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                        .padding(.horizontal, 12)
+                        .lineLimit(1)
+                    Spacer()
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
             }
-            if !message.isUser { Spacer(minLength: 40) }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                Text(call.arguments)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .padding(.top, 2)
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(.tertiarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color(.separator), lineWidth: 0.5)
+        )
+    }
+
+    private var iconName: String {
+        call.toolKind.icon
+    }
+}
+
+/// Row showing a tool-result (role="tool"). Styled as a small
+/// quoted block beneath whichever assistant message preceded it.
+private struct ToolResultRow: View {
+    let message: HermesMessage
+    @State private var isExpanded = false
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.turn.down.right")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("Tool output")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(message.content.prefix(80))
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                        Spacer()
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+                if isExpanded {
+                    Text(message.content)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .padding(.top, 2)
+                }
+            }
+            .padding(8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.tertiarySystemBackground))
+            )
+            Spacer(minLength: 40)
         }
         .padding(.horizontal)
+    }
+}
+
+// MARK: - Permission sheet
+
+/// Sheet presented when the remote asks for permission (e.g.,
+/// "allow write to /etc/hosts"). Renders the VM's `PendingPermission`
+/// options as tappable buttons. Tapping responds via the ChatController
+/// which dispatches the answer over the ACP channel.
+private struct PermissionSheet: View {
+    let permission: RichChatViewModel.PendingPermission
+    let onRespond: (_ optionId: String) async -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(permission.title)
+                            .font(.headline)
+                            .textSelection(.enabled)
+                        Text("Kind: \(permission.kind)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Section("Your response") {
+                    ForEach(permission.options, id: \.optionId) { opt in
+                        Button {
+                            Task {
+                                await onRespond(opt.optionId)
+                                dismiss()
+                            }
+                        } label: {
+                            HStack {
+                                Text(opt.name)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Agent permission")
+            .navigationBarTitleDisplayMode(.inline)
+        }
     }
 }
 

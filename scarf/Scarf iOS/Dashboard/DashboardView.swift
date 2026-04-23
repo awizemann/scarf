@@ -89,11 +89,26 @@ struct DashboardView: View {
                     }
                 }
 
-                Section {
+                Section("Surfaces") {
                     NavigationLink {
                         ChatView(config: config, key: key)
                     } label: {
                         Label("Chat", systemImage: "bubble.left.and.bubble.right.fill")
+                    }
+                    NavigationLink {
+                        MemoryListView(config: config)
+                    } label: {
+                        Label("Memory", systemImage: "brain.head.profile")
+                    }
+                    NavigationLink {
+                        CronListView(config: config)
+                    } label: {
+                        Label("Cron", systemImage: "clock.arrow.circlepath")
+                    }
+                    NavigationLink {
+                        SkillsListView(config: config)
+                    } label: {
+                        Label("Skills", systemImage: "sparkles")
                     }
                 }
 
