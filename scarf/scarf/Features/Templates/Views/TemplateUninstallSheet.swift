@@ -277,6 +277,19 @@ struct TemplateUninstallSheet: View {
                 .foregroundStyle(.green)
             Text("Removed \(removed.name)")
                 .font(.title2.bold())
+
+            // Preserved-files banner. Only renders when the project dir
+            // stayed and at least one file was left behind — that's the
+            // case the user keeps getting surprised by ("I uninstalled
+            // but my project folder is still there?"). Explicit
+            // explanation + file list makes it obvious the files the
+            // user (or the cron job) created are intentionally kept.
+            if let outcome = viewModel.preservedOutcome,
+               outcome.projectDirRemoved == false,
+               outcome.preservedPaths.isEmpty == false {
+                preservedFilesBanner(outcome: outcome)
+            }
+
             Button("Done") {
                 onCompleted(removed)
                 dismiss()
@@ -285,6 +298,53 @@ struct TemplateUninstallSheet: View {
             .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+    }
+
+    /// Orange informational banner listing the files the uninstaller
+    /// left in the project directory. Caps the visible list at 8 rows
+    /// with a "+N more…" tail so a long log (many runs = many status
+    /// file entries) doesn't blow out the sheet height.
+    private func preservedFilesBanner(
+        outcome: TemplateUninstallerViewModel.PreservedOutcome
+    ) -> some View {
+        let visible = Array(outcome.preservedPaths.prefix(8))
+        let overflow = outcome.preservedPaths.count - visible.count
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "folder.badge.questionmark")
+                    .foregroundStyle(.orange)
+                Text("Project folder kept")
+                    .font(.headline)
+            }
+            Text("These files weren't installed by the template (the agent or you created them after install), so Scarf left them in place along with the folder itself.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(visible, id: \.self) { path in
+                    Text(path)
+                        .font(.caption.monospaced())
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+                if overflow > 0 {
+                    Text("+ \(overflow) more…")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text("Delete \(outcome.projectDir) from Finder if you don't need these files anymore.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: 520, alignment: .leading)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.orange.opacity(0.10))
+        )
     }
 
     private func failureView(message: String) -> some View {

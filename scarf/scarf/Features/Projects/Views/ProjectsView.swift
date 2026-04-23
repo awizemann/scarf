@@ -27,6 +27,12 @@ struct ProjectsView: View {
     @State private var installURLInput = ""
     @State private var showingUninstallSheet = false
     @State private var configEditorProject: ProjectEntry?
+    /// Project queued for the "remove from list" confirmation dialog.
+    /// Non-nil while the dialog is up; the `confirmationDialog` binding
+    /// flips based on presence. We store the full entry (not just a
+    /// flag) so the dialog's action closure knows which project to
+    /// drop from the registry.
+    @State private var pendingRemoveFromList: ProjectEntry?
 
     private let uninstaller: ProjectTemplateUninstaller
 
@@ -121,6 +127,44 @@ struct ProjectsView: View {
                 project: project
             )
         }
+        // Confirmation dialog for the sidebar's "Remove from List" action.
+        // The action is registry-only (doesn't touch disk), but the name
+        // historically confused users into thinking it was a full delete.
+        // A confirmation with explicit wording clarifies scope before the
+        // click is destructive-looking but actually harmless.
+        .confirmationDialog(
+            removeFromListDialogTitle,
+            isPresented: Binding(
+                get: { pendingRemoveFromList != nil },
+                set: { if !$0 { pendingRemoveFromList = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingRemoveFromList
+        ) { project in
+            Button("Remove from List") {
+                viewModel.removeProject(project)
+                if coordinator.selectedProjectName == project.name {
+                    coordinator.selectedProjectName = nil
+                }
+                pendingRemoveFromList = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingRemoveFromList = nil
+            }
+        } message: { project in
+            Text(
+                "\(project.name) will be removed from Scarf's project list. " +
+                "Nothing on disk is touched — the folder, cron job, skills, and memory block all stay. " +
+                "To actually remove installed files, use \"Uninstall Template…\" instead."
+            )
+        }
+    }
+
+    /// Title string for the remove-from-list confirmation dialog. Kept
+    /// as a computed property so the dialog and any future reuse share
+    /// the exact same copy.
+    private var removeFromListDialogTitle: LocalizedStringKey {
+        "Remove from Scarf's project list?"
     }
 
     // MARK: - Toolbar
@@ -242,14 +286,23 @@ struct ProjectsView: View {
                         }
                     }
                     if uninstaller.isTemplateInstalled(project: project) {
-                        Button("Uninstall Template…", systemImage: "trash") {
+                        // "Uninstall Template…" only appears for projects
+                        // installed from a `.scarftemplate`. Trailing
+                        // ellipsis signals a confirmation sheet follows
+                        // (macOS HIG convention); the sheet itself lists
+                        // every file/cron/skill that will be removed.
+                        Button("Uninstall Template (remove installed files)…", systemImage: "trash") {
                             uninstallerViewModel.begin(project: project)
                             showingUninstallSheet = true
                         }
                         Divider()
                     }
-                    Button("Remove from Scarf", systemImage: "minus.circle") {
-                        viewModel.removeProject(project)
+                    // "Remove from List" used to be "Remove from Scarf",
+                    // which users read as a full delete. Clarified label +
+                    // ellipsis + confirmation dialog all spell out that
+                    // this is registry-only; nothing on disk is touched.
+                    Button("Remove from List (keep files)…", systemImage: "minus.circle") {
+                        pendingRemoveFromList = project
                     }
                 }
             }
@@ -263,10 +316,16 @@ struct ProjectsView: View {
                 .buttonStyle(.borderless)
                 Spacer()
                 if let selected = viewModel.selectedProject {
-                    Button(action: { viewModel.removeProject(selected) }) {
+                    // Route through the same confirmation dialog as the
+                    // context-menu "Remove from List" entry. The minus
+                    // icon is a drive-by click target right next to "+" —
+                    // confirming before mutating the registry stops the
+                    // "I clicked by accident and my project's gone" case.
+                    Button(action: { pendingRemoveFromList = selected }) {
                         Image(systemName: "minus")
                     }
                     .buttonStyle(.borderless)
+                    .help("Remove \(selected.name) from Scarf's project list (files are kept on disk)")
                 }
             }
             .padding(8)
