@@ -2,6 +2,6 @@
   {
     "name": "Check site status",
     "schedule": "0 9 * * *",
-    "prompt": "Run the site status check for this project. Follow the instructions in AGENTS.md: read sites.txt, HTTP GET each URL, prepend a results section to status-log.md, and update the three stat widgets plus the Watched Sites list items in .scarf/dashboard.json. When done, reply with a one-line summary like '3 up, 1 down — example.com timed out'."
+    "prompt": "Run the site status check for this project. Follow the instructions in AGENTS.md: read .scarf/config.json to get values.sites (the URL list) and values.timeout_seconds, HTTP GET each URL with the configured timeout, prepend a results section to status-log.md (creating it with the stub header if it doesn't exist yet), and update the three stat widgets plus the Watched Sites list items in .scarf/dashboard.json. When done, reply with a one-line summary like '3 up, 1 down — example.com timed out'."
   }
 ]

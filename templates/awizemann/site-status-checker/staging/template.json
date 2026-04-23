@@ -1,20 +1,50 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "awizemann/site-status-checker",
   "name": "Site Status Checker",
-  "version": "1.0.0",
-  "minScarfVersion": "2.2.0",
+  "version": "1.1.0",
+  "minScarfVersion": "2.3.0",
   "minHermesVersion": "0.9.0",
   "author": {
     "name": "Alan Wizemann",
     "url": "https://github.com/awizemann/scarf"
   },
-  "description": "A daily uptime check for a short list of URLs. Writes status to status-log.md and updates the dashboard with current counts.",
+  "description": "A daily uptime check for a list of URLs you configure on install. Writes status to status-log.md and updates the dashboard with current counts.",
   "category": "monitoring",
-  "tags": ["monitoring", "uptime", "cron", "starter"],
+  "tags": ["monitoring", "uptime", "cron", "starter", "configurable"],
   "contents": {
     "dashboard": true,
     "agentsMd": true,
-    "cron": 1
+    "cron": 1,
+    "config": 2
+  },
+  "config": {
+    "schema": [
+      {
+        "key": "sites",
+        "type": "list",
+        "itemType": "string",
+        "label": "Sites to Watch",
+        "description": "One URL per item. HTTP or HTTPS. You can add and remove entries after install via the Configuration button on the dashboard.",
+        "required": true,
+        "minItems": 1,
+        "maxItems": 25,
+        "default": ["https://example.com", "https://example.org"]
+      },
+      {
+        "key": "timeout_seconds",
+        "type": "number",
+        "label": "Request Timeout (seconds)",
+        "description": "How long to wait for each URL before giving up.",
+        "required": false,
+        "min": 1,
+        "max": 60,
+        "default": 10
+      }
+    ],
+    "modelRecommendation": {
+      "preferred": "claude-haiku-4",
+      "rationale": "Simple tool-use task — HTTP GETs + a short summary. Haiku is plenty and keeps cost low when the cron runs daily."
+    }
   }
 }
