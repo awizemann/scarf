@@ -44,6 +44,12 @@ struct ProjectSessionsView: View {
         .onChange(of: fileWatcher.lastChangeDate) {
             Task { await viewModel?.load() }
         }
+        .onDisappear {
+            // Release the SQLite handle so it doesn't dangle once
+            // the user leaves this tab. `load()` will re-open next
+            // time. Mirrors ActivityView's disappear cleanup.
+            Task { await viewModel?.close() }
+        }
     }
 
     // MARK: - Header

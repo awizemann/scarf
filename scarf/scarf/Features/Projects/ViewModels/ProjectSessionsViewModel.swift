@@ -51,6 +51,17 @@ final class ProjectSessionsViewModel {
             return
         }
 
+        // Open (or re-open for remote) the DB handle before querying.
+        // `HermesDataService` is an actor with a lazily-initialised
+        // SQLite pointer; every query method short-circuits to `[]`
+        // when `db == nil`. This VM constructs its own service
+        // instance (separate from ChatViewModel / InsightsVM /
+        // ActivityVM), so we have to open it ourselves. Same
+        // pattern used by those other VMs (`refresh()` rather than
+        // `open()` because refresh also re-pulls the remote-server
+        // snapshot on each call — local is a cheap no-op).
+        _ = await dataService.refresh()
+
         // Fetch a generous page; we filter client-side by attribution
         // map membership. The 200 ceiling matches other feature VMs
         // (ActivityViewModel, InsightsViewModel). HermesDataService
@@ -72,5 +83,14 @@ final class ProjectSessionsViewModel {
         } else {
             emptyStateHint = nil
         }
+    }
+
+    /// Release the underlying DB handle. Safe to call repeatedly; the
+    /// service re-opens on the next `load()`. Mirrors the pattern in
+    /// ActivityViewModel.swift:80 — view calls this on `.onDisappear`
+    /// so file descriptors and the SQLite cache don't dangle once
+    /// the tab isn't visible.
+    func close() async {
+        await dataService.close()
     }
 }
