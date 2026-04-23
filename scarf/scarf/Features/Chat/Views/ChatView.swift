@@ -40,6 +40,19 @@ struct ChatView: View {
                 coordinator.pendingProjectChat = nil
                 viewModel.startNewSession(projectPath: pending)
             }
+            // Same story for resume-session handoff: the user clicked
+            // a session in the Projects Sessions tab (routes to `.chat`
+            // rather than `.sessions` so the chat actually reopens).
+            // SessionsView consumes `selectedSessionId` for its own
+            // routing; Chat now consumes it too. Mutually exclusive at
+            // any given render because only one section is active per
+            // `coordinator.selectedSection`. `else if` makes precedence
+            // explicit — pendingProjectChat (new) outranks
+            // selectedSessionId (resume) when both are somehow set.
+            else if let pendingId = coordinator.selectedSessionId {
+                coordinator.selectedSessionId = nil
+                viewModel.resumeSession(pendingId)
+            }
         }
         .onChange(of: fileWatcher.lastChangeDate) {
             Task { await viewModel.loadRecentSessions() }
@@ -54,6 +67,17 @@ struct ChatView: View {
             if let projectPath = new {
                 coordinator.pendingProjectChat = nil
                 viewModel.startNewSession(projectPath: projectPath)
+            }
+        }
+        // Live handoff for resume: user clicked an existing session in
+        // the Projects Sessions tab while already in the Chat section
+        // (or switched back to Chat after). Project-chip rendering
+        // happens automatically inside ChatViewModel.resumeSession ->
+        // startACPSession via the attribution.projectPath(for:) lookup.
+        .onChange(of: coord.selectedSessionId) { _, new in
+            if let sessionId = new {
+                coordinator.selectedSessionId = nil
+                viewModel.resumeSession(sessionId)
             }
         }
     }
