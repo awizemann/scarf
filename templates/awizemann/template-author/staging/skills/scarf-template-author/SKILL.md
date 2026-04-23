@@ -397,6 +397,7 @@ Things to check before declaring the scaffold done:
 - [ ] `dashboard.json` has `version: 1` at the top.
 - [ ] `AGENTS.md` documents every config field, every updated widget, and the cron behaviour — the user relies on it as the source of truth when things drift.
 - [ ] **No raw URLs in field descriptions.** Use `[link text](https://…)` markdown syntax instead — raw URLs read as long unbreakable tokens in the Configuration sheet. Same rule for long paths and other unbreakable strings; wrap in `` ` `` if they must appear verbatim.
+- [ ] **Leave the `<!-- scarf-project:begin -->` / `<!-- scarf-project:end -->` region alone in the project's `AGENTS.md`.** As of Scarf v2.3, the app auto-injects a project-identity block at chat-start time (project name, directory, template id, configuration field names, cron jobs). Anything you write inside that region will be overwritten on the next chat start. Put template-specific agent instructions BELOW the block so they're preserved across refreshes.
 
 ## Reference — source of truth files
 

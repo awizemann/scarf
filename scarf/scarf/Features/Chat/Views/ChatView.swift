@@ -3,24 +3,82 @@ import SwiftUI
 struct ChatView: View {
     @Environment(ChatViewModel.self) private var viewModel
     @Environment(HermesFileWatcher.self) private var fileWatcher
+    @Environment(AppCoordinator.self) private var coordinator
     @State private var showErrorDetails = false
 
     var body: some View {
         @Bindable var vm = viewModel
+        @Bindable var coord = coordinator
         VStack(spacing: 0) {
             toolbar
             Divider()
             errorBanner
             chatArea
         }
-        .navigationTitle("Chat")
+        // Clamp the outer VStack to the detail column's offered
+        // space. Without this, the chat area's intrinsic height (a
+        // RichChatView whose message list grows with content) can
+        // bubble up through NavigationSplitView's detail slot and
+        // push the whole window past the screen. Same pattern as
+        // the Sessions tab fix in the v2.3 branch.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // v2.3: reflect the active Scarf project in the nav title
+        // so the user can see at a glance that the chat is scoped
+        // (complements the folder chip in SessionInfoBar). Falls
+        // back to the plain "Chat" label for global chats.
+        .navigationTitle(
+            viewModel.currentProjectName.map { "Chat · \($0)" } ?? "Chat"
+        )
         .task {
             await viewModel.loadRecentSessions()
             viewModel.refreshCredentialPreflight()
+            // Cold-launch handoff: if the user clicked "New Chat" on
+            // a project before ChatView had a chance to render, the
+            // coordinator was already populated. Consume the request
+            // here. The onChange below handles the live case.
+            if let pending = coordinator.pendingProjectChat {
+                coordinator.pendingProjectChat = nil
+                viewModel.startNewSession(projectPath: pending)
+            }
+            // Same story for resume-session handoff: the user clicked
+            // a session in the Projects Sessions tab (routes to `.chat`
+            // rather than `.sessions` so the chat actually reopens).
+            // SessionsView consumes `selectedSessionId` for its own
+            // routing; Chat now consumes it too. Mutually exclusive at
+            // any given render because only one section is active per
+            // `coordinator.selectedSection`. `else if` makes precedence
+            // explicit — pendingProjectChat (new) outranks
+            // selectedSessionId (resume) when both are somehow set.
+            else if let pendingId = coordinator.selectedSessionId {
+                coordinator.selectedSessionId = nil
+                viewModel.resumeSession(pendingId)
+            }
         }
         .onChange(of: fileWatcher.lastChangeDate) {
             Task { await viewModel.loadRecentSessions() }
             viewModel.refreshCredentialPreflight()
+        }
+        // Live handoff from the per-project Sessions tab: the tab
+        // sets `pendingProjectChat` + flips `selectedSection` to
+        // `.chat`; this view consumes the path and starts a fresh
+        // session with cwd=projectPath. Attribution happens inside
+        // ChatViewModel on successful session creation.
+        .onChange(of: coord.pendingProjectChat) { _, new in
+            if let projectPath = new {
+                coordinator.pendingProjectChat = nil
+                viewModel.startNewSession(projectPath: projectPath)
+            }
+        }
+        // Live handoff for resume: user clicked an existing session in
+        // the Projects Sessions tab while already in the Chat section
+        // (or switched back to Chat after). Project-chip rendering
+        // happens automatically inside ChatViewModel.resumeSession ->
+        // startACPSession via the attribution.projectPath(for:) lookup.
+        .onChange(of: coord.selectedSessionId) { _, new in
+            if let sessionId = new {
+                coordinator.selectedSessionId = nil
+                viewModel.resumeSession(sessionId)
+            }
         }
     }
 
