@@ -175,7 +175,10 @@ struct TemplateInstallSheet: View {
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
             }
-            Text(manifest.description)
+            // Inline-only markdown — descriptions are a sentence or two;
+            // bold/italic/code/links are all that reasonable template
+            // authors use there.
+            TemplateMarkdown.inlineText(manifest.description)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             if let author = manifest.author {
@@ -220,16 +223,40 @@ struct TemplateInstallSheet: View {
 
     private func cronSection(plan: TemplateInstallPlan) -> some View {
         section(title: "Cron jobs (created disabled — you can enable each one manually)", subtitle: nil) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 10) {
                 ForEach(plan.cronJobs, id: \.name) { job in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(job.name).font(.callout.monospaced())
-                            Text("schedule: \(job.schedule)")
-                                .font(.caption)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: "clock.arrow.circlepath")
                                 .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(job.name).font(.callout.monospaced())
+                                Text("schedule: \(job.schedule)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        // Prompt preview — disclosed in an expandable
+                        // group so the preview stays compact when the
+                        // user doesn't care to read it. Markdown-rendered
+                        // so prompts that include `code`, **bold**, or
+                        // enumerated steps look right. Tokens like
+                        // {{PROJECT_DIR}} are still visible here — they
+                        // get substituted when the installer calls
+                        // `hermes cron create`.
+                        if let prompt = job.prompt, !prompt.isEmpty {
+                            DisclosureGroup("Prompt") {
+                                ScrollView {
+                                    TemplateMarkdown.render(prompt)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .frame(maxHeight: 140)
+                                .padding(8)
+                                .background(.quaternary.opacity(0.4))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                            }
+                            .font(.caption)
+                            .padding(.leading, 26)
                         }
                     }
                 }
@@ -302,11 +329,10 @@ struct TemplateInstallSheet: View {
             if let readme = viewModel.readmeBody {
                 section(title: "README", subtitle: nil) {
                     ScrollView {
-                        Text(readme)
-                            .font(.callout)
+                        TemplateMarkdown.render(readme)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxHeight: 200)
+                    .frame(maxHeight: 260)
                 }
             }
         }

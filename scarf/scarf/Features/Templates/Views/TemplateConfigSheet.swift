@@ -113,7 +113,11 @@ struct TemplateConfigSheet: View {
                     .foregroundStyle(.secondary)
             }
             if let description = field.description, !description.isEmpty {
-                Text(description)
+                // Inline markdown so descriptions can include
+                // `[Create one](https://…)`-style links to token
+                // generation pages, **bold** emphasis on important
+                // prerequisites, etc.
+                TemplateMarkdown.inlineText(description)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
