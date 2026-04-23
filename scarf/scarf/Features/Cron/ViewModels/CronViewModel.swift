@@ -65,7 +65,38 @@ final class CronViewModel {
     }
 
     func runNow(_ job: HermesCronJob) {
-        runAndReload(["cron", "run", job.id], success: "Scheduled for next tick")
+        // `hermes cron run <id>` only marks the job as due on the next
+        // scheduler tick — it doesn't actually execute. If the Hermes
+        // gateway's scheduler isn't running (common during dev + right
+        // after install), the user's "Run now" click results in zero
+        // visible effect because the tick never comes. We follow up
+        // with `hermes cron tick` which runs all due jobs once and
+        // exits. Redundant-but-harmless when the gateway is running;
+        // the actual trigger when it isn't.
+        let svc = fileService
+        let jobID = job.id
+        Task.detached { [weak self] in
+            let runResult = svc.runHermesCLI(args: ["cron", "run", jobID], timeout: 30)
+            // Give `cron run` a moment to register the queue entry
+            // before forcing the tick. A few hundred ms is enough;
+            // longer only delays the user-visible feedback.
+            try? await Task.sleep(for: .milliseconds(250))
+            let tickResult = svc.runHermesCLI(args: ["cron", "tick"], timeout: 60)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                if runResult.exitCode == 0 && tickResult.exitCode == 0 {
+                    self.message = "Job executed (see Output panel for details)"
+                } else {
+                    let errOutput = runResult.exitCode != 0 ? runResult.output : tickResult.output
+                    self.message = "Run failed: \(errOutput.prefix(200))"
+                    self.logger.warning("cron runNow failed: run=\(runResult.exitCode), tick=\(tickResult.exitCode) output=\(errOutput)")
+                }
+                self.load()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                    self?.message = nil
+                }
+            }
+        }
     }
 
     func deleteJob(_ job: HermesCronJob) {
