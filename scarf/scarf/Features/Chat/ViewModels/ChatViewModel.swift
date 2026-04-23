@@ -317,6 +317,25 @@ final class ChatViewModel {
         self.acpClient = client
         let attribution = SessionAttributionService(context: context)
 
+        // If the caller passed a project path, refresh the Scarf-
+        // managed block in the project's AGENTS.md BEFORE starting
+        // ACP — Hermes auto-reads AGENTS.md at session boot, so the
+        // block has to land on disk first. Non-blocking on failure:
+        // we log and proceed without the block. Safe on bare
+        // projects (creates AGENTS.md with just the block); safe on
+        // template-installed projects (splices the block into
+        // existing AGENTS.md without touching template content).
+        if let projectPath {
+            let registry = ProjectDashboardService(context: context).loadRegistry()
+            if let project = registry.projects.first(where: { $0.path == projectPath }) {
+                do {
+                    try ProjectAgentContextService(context: context).refresh(for: project)
+                } catch {
+                    logger.warning("couldn't refresh project context block for \(project.name): \(error.localizedDescription)")
+                }
+            }
+        }
+
         Task { @MainActor in
             do {
                 // Start ACP process and event loop FIRST
