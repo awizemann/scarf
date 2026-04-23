@@ -118,15 +118,20 @@ final class ChatViewModel {
 
     // MARK: - Session Lifecycle
 
-    func startNewSession() {
+    func startNewSession(projectPath: String? = nil) {
         voiceEnabled = false
         ttsEnabled = false
         isRecording = false
         richChatViewModel.reset()
 
         if displayMode == .richChat {
-            startACPSession(resume: nil)
+            startACPSession(resume: nil, projectPath: projectPath)
         } else {
+            // Terminal mode doesn't surface project attribution today —
+            // `hermes chat` uses the shell's cwd, so starting a terminal
+            // chat from a project button would require changing the
+            // shell's cwd too. Out of scope for v2.3 — Rich Chat is
+            // the primary surface for project-scoped sessions.
             launchTerminal(arguments: ["chat"])
         }
     }
@@ -289,13 +294,14 @@ final class ChatViewModel {
 
     // MARK: - ACP Session Management
 
-    private func startACPSession(resume sessionId: String?) {
+    private func startACPSession(resume sessionId: String?, projectPath: String? = nil) {
         stopACP()
         clearACPErrorState()
         acpStatus = "Starting..."
 
         let client = ACPClient(context: context)
         self.acpClient = client
+        let attribution = SessionAttributionService(context: context)
 
         Task { @MainActor in
             do {
@@ -305,7 +311,19 @@ final class ChatViewModel {
                 startACPEventLoop(client: client)
                 startHealthMonitor(client: client)
 
-                let cwd = await context.resolvedUserHome()
+                // Project-scoped chats pass the project's absolute path
+                // as cwd so Hermes tool calls and subsequent ACP ops
+                // resolve relative paths against the project's files.
+                // Falls back to the user's home (existing v2.2 behavior)
+                // when the caller didn't request a project scope.
+                // `??` can't wrap an async autoclosure, so we
+                // materialize the fallback with an if-let.
+                let cwd: String
+                if let projectPath {
+                    cwd = projectPath
+                } else {
+                    cwd = await context.resolvedUserHome()
+                }
 
                 // Mark active BEFORE setting session ID so .task(id:) sees isACPMode=true
                 // and doesn't wipe messages with a DB refresh
@@ -333,6 +351,17 @@ final class ChatViewModel {
 
                 richChatViewModel.setSessionId(resolvedSessionId)
                 acpStatus = "Connected (\(resolvedSessionId.prefix(12)))"
+
+                // Attribute this session to the project it was started
+                // under, so the per-project Sessions tab can surface it
+                // without a user action. No-op when projectPath is nil.
+                // Idempotent: re-attribution of the same pair is free.
+                if let projectPath {
+                    attribution.attribute(
+                        sessionID: resolvedSessionId,
+                        toProjectPath: projectPath
+                    )
+                }
 
                 // Refresh session list so the new ACP session appears in the Resume menu
                 await loadRecentSessions()

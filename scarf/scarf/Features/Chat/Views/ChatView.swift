@@ -3,10 +3,12 @@ import SwiftUI
 struct ChatView: View {
     @Environment(ChatViewModel.self) private var viewModel
     @Environment(HermesFileWatcher.self) private var fileWatcher
+    @Environment(AppCoordinator.self) private var coordinator
     @State private var showErrorDetails = false
 
     var body: some View {
         @Bindable var vm = viewModel
+        @Bindable var coord = coordinator
         VStack(spacing: 0) {
             toolbar
             Divider()
@@ -17,10 +19,29 @@ struct ChatView: View {
         .task {
             await viewModel.loadRecentSessions()
             viewModel.refreshCredentialPreflight()
+            // Cold-launch handoff: if the user clicked "New Chat" on
+            // a project before ChatView had a chance to render, the
+            // coordinator was already populated. Consume the request
+            // here. The onChange below handles the live case.
+            if let pending = coordinator.pendingProjectChat {
+                coordinator.pendingProjectChat = nil
+                viewModel.startNewSession(projectPath: pending)
+            }
         }
         .onChange(of: fileWatcher.lastChangeDate) {
             Task { await viewModel.loadRecentSessions() }
             viewModel.refreshCredentialPreflight()
+        }
+        // Live handoff from the per-project Sessions tab: the tab
+        // sets `pendingProjectChat` + flips `selectedSection` to
+        // `.chat`; this view consumes the path and starts a fresh
+        // session with cwd=projectPath. Attribution happens inside
+        // ChatViewModel on successful session creation.
+        .onChange(of: coord.pendingProjectChat) { _, new in
+            if let projectPath = new {
+                coordinator.pendingProjectChat = nil
+                viewModel.startNewSession(projectPath: projectPath)
+            }
         }
     }
 

@@ -4,11 +4,21 @@ import UniformTypeIdentifiers
 private enum DashboardTab: String, CaseIterable {
     case dashboard = "Dashboard"
     case site = "Site"
+    case sessions = "Sessions"
 
     var displayName: LocalizedStringResource {
         switch self {
         case .dashboard: return "Dashboard"
         case .site: return "Site"
+        case .sessions: return "Sessions"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .dashboard: return "square.grid.2x2"
+        case .site: return "globe"
+        case .sessions: return "bubble.left.and.bubble.right"
         }
     }
 }
@@ -333,11 +343,13 @@ struct ProjectsView: View {
                     .padding(.horizontal)
                     .padding(.top)
                     .padding(.bottom, 8)
-                if siteWidget != nil {
-                    tabBar
-                        .padding(.horizontal)
-                        .padding(.bottom, 8)
-                }
+                // Sessions tab is always present in v2.3, so the tab
+                // bar always renders when a dashboard is loaded.
+                // Site tab filters out when there's no webview widget
+                // (existing v2.2 behavior preserved).
+                tabBar
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
                 switch selectedTab {
                 case .dashboard:
                     widgetsTab(dashboard)
@@ -346,6 +358,12 @@ struct ProjectsView: View {
                         siteTab(widget)
                     } else {
                         widgetsTab(dashboard)
+                    }
+                case .sessions:
+                    if let project = viewModel.selectedProject {
+                        ProjectSessionsView(project: project)
+                    } else {
+                        ContentUnavailableView("No project selected", systemImage: "bubble.left.and.bubble.right")
                     }
                 }
             }
@@ -372,14 +390,23 @@ struct ProjectsView: View {
         }
     }
 
+    /// Tabs that should appear for the current project. `.site` is
+    /// gated on the dashboard actually containing a webview widget,
+    /// per v2.2 behavior — the Site tab is meaningless without one.
+    private var visibleTabs: [DashboardTab] {
+        DashboardTab.allCases.filter { tab in
+            tab != .site || siteWidget != nil
+        }
+    }
+
     private var tabBar: some View {
         HStack(spacing: 0) {
-            ForEach(DashboardTab.allCases, id: \.self) { tab in
+            ForEach(visibleTabs, id: \.self) { tab in
                 Button {
                     selectedTab = tab
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: tab == .dashboard ? "square.grid.2x2" : "globe")
+                        Image(systemName: tab.systemImage)
                             .font(.caption)
                         Text(tab.displayName)
                             .font(.subheadline)

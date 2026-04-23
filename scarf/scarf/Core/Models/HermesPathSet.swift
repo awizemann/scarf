@@ -55,6 +55,18 @@ struct HermesPathSet: Sendable, Hashable {
     nonisolated var gatewayLog: String { home + "/logs/gateway.log" }
     nonisolated var scarfDir: String { home + "/scarf" }
     nonisolated var projectsRegistry: String { scarfDir + "/projects.json" }
+
+    /// Maps Hermes session IDs to the Scarf project path a chat was
+    /// started for. Written by `SessionAttributionService` when
+    /// Scarf spawns `hermes acp` with a project-scoped cwd; read by
+    /// the per-project Sessions tab (v2.3) to filter the session list
+    /// to just those attributed to a given project.
+    ///
+    /// Scarf-owned — Hermes never touches this file. Forward-only:
+    /// we only attribute sessions Scarf creates in a project context;
+    /// older / CLI-started sessions stay unattributed and surface in
+    /// the global Sessions sidebar unchanged.
+    nonisolated var sessionProjectMap: String { scarfDir + "/session_project_map.json" }
     nonisolated var mcpTokensDir: String { home + "/mcp-tokens" }
 
     // MARK: - Binary resolution
