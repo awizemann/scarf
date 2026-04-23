@@ -1,6 +1,8 @@
 import Foundation
+import os
 
 struct ProjectDashboardService: Sendable {
+    private static let logger = Logger(subsystem: "com.scarf", category: "ProjectDashboardService")
 
     let context: ServerContext
     let transport: any ServerTransport
@@ -19,23 +21,28 @@ struct ProjectDashboardService: Sendable {
         do {
             return try JSONDecoder().decode(ProjectRegistry.self, from: data)
         } catch {
-            print("[Scarf] Failed to decode project registry: \(error.localizedDescription)")
+            Self.logger.error("Failed to decode project registry: \(error.localizedDescription, privacy: .public)")
             return ProjectRegistry(projects: [])
         }
     }
 
-    func saveRegistry(_ registry: ProjectRegistry) {
+    /// Persist the project registry to `~/.hermes/scarf/projects.json`.
+    ///
+    /// **Throws** on every non-success path — the previous version of
+    /// this method silently swallowed `createDirectory` and `writeFile`
+    /// failures with `try?`, which meant the installer could return a
+    /// valid-looking `ProjectEntry` while the registry on disk never
+    /// received the new row (project would complete install, show a
+    /// success screen, then be invisible in the sidebar). Callers that
+    /// want fire-and-forget behaviour can still use `try?`, but the
+    /// choice is now theirs.
+    func saveRegistry(_ registry: ProjectRegistry) throws {
         let dir = context.paths.scarfDir
         if !transport.fileExists(dir) {
-            do {
-                try transport.createDirectory(dir)
-            } catch {
-                print("[Scarf] Failed to create scarf directory: \(error.localizedDescription)")
-                return
-            }
+            try transport.createDirectory(dir)
         }
-        guard let data = try? JSONEncoder().encode(registry) else { return }
-        // Pretty-print for readability (agents may read this file)
+        let data = try JSONEncoder().encode(registry)
+        // Pretty-print for readability (agents may read this file).
         let writeData: Data
         if let pretty = try? JSONSerialization.jsonObject(with: data),
            let formatted = try? JSONSerialization.data(withJSONObject: pretty, options: [.prettyPrinted, .sortedKeys]) {
@@ -43,7 +50,7 @@ struct ProjectDashboardService: Sendable {
         } else {
             writeData = data
         }
-        try? transport.writeFile(context.paths.projectsRegistry, data: writeData)
+        try transport.writeFile(context.paths.projectsRegistry, data: writeData)
     }
 
     // MARK: - Dashboard

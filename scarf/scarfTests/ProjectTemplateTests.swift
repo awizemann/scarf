@@ -768,6 +768,111 @@ import Foundation
     }
 }
 
+/// State-machine tests for `TemplateInstallerViewModel`. The install
+/// flow's configure step is driven entirely through the VM — the view
+/// transitions `.awaitingParentDirectory → .awaitingConfig → .planned`
+/// based on `submitConfig(values:)` / `cancelConfig()` calls. If those
+/// transitions break, the user lands on the wrong sheet stage (or no
+/// sheet at all, as in the v1.1.0 regression where the config sheet's
+/// internal `dismiss()` tore down the outer install sheet before
+/// submitConfig had a chance to fire).
+@Suite(.serialized) @MainActor struct TemplateInstallerViewModelTests {
+
+    @Test func submitConfigStashesValuesAndTransitionsToPlanned() throws {
+        let vm = TemplateInstallerViewModel(context: .local)
+        // Seed the VM with an awaiting-config plan (schema-ful).
+        let plan = try Self.makePlanWithConfigSchema()
+        vm.plan = plan
+        vm.stage = .awaitingConfig
+
+        let values: [String: TemplateConfigValue] = [
+            "site_url": .string("https://example.com")
+        ]
+        vm.submitConfig(values: values)
+
+        // Stage must advance past the configure step, values must land
+        // on the plan where install() will pick them up.
+        if case .planned = vm.stage {
+            // ok
+        } else {
+            Issue.record("expected .planned, got \(vm.stage)")
+        }
+        #expect(vm.plan?.configValues["site_url"] == .string("https://example.com"))
+    }
+
+    @Test func cancelConfigReturnsToAwaitingParentDirectory() throws {
+        let vm = TemplateInstallerViewModel(context: .local)
+        vm.plan = try Self.makePlanWithConfigSchema()
+        vm.stage = .awaitingConfig
+
+        vm.cancelConfig()
+
+        if case .awaitingParentDirectory = vm.stage {
+            // ok — user can re-pick the parent dir or fully cancel
+        } else {
+            Issue.record("expected .awaitingParentDirectory, got \(vm.stage)")
+        }
+        // Plan is preserved so re-entering the configure step doesn't
+        // re-run buildPlan.
+        #expect(vm.plan != nil)
+    }
+
+    @Test func submitConfigNoOpWhenPlanIsNil() {
+        let vm = TemplateInstallerViewModel(context: .local)
+        vm.plan = nil
+        vm.stage = .awaitingConfig
+        vm.submitConfig(values: ["k": .string("v")])
+        // With no plan, the call should be silent — no crash, stage
+        // stays where it was. (Defensive guard in submitConfig.)
+        if case .awaitingConfig = vm.stage {
+            // ok
+        } else {
+            Issue.record("expected stage to remain .awaitingConfig when plan is nil; got \(vm.stage)")
+        }
+    }
+
+    // MARK: - Fixture
+
+    /// Build a `TemplateInstallPlan` carrying a single-field config
+    /// schema. Exists as a local helper rather than a shared one
+    /// because no other suite needs it.
+    nonisolated static func makePlanWithConfigSchema() throws -> TemplateInstallPlan {
+        let schema = TemplateConfigSchema(
+            fields: [
+                .init(key: "site_url", type: .string, label: "Site URL",
+                      description: nil, required: true, placeholder: nil,
+                      defaultValue: nil, options: nil, minLength: nil,
+                      maxLength: nil, pattern: nil, minNumber: nil,
+                      maxNumber: nil, step: nil, itemType: nil,
+                      minItems: nil, maxItems: nil)
+            ],
+            modelRecommendation: nil
+        )
+        let manifest = ProjectTemplateServiceTests.sampleManifest(
+            id: "tester/vm-transitions",
+            configSchema: schema
+        )
+        let tmp = try ProjectTemplateServiceTests.makeTempDir()
+        // Not a real bundle dir — we never unzip or install from this
+        // plan, we only test state transitions that don't touch disk.
+        return TemplateInstallPlan(
+            manifest: manifest,
+            unpackedDir: tmp,
+            projectDir: tmp + "/project",
+            projectFiles: [],
+            skillsNamespaceDir: nil,
+            skillsFiles: [],
+            cronJobs: [],
+            memoryAppendix: nil,
+            memoryPath: ServerContext.local.paths.memoryMD,
+            projectRegistryName: "VM Transitions",
+            configSchema: schema,
+            configValues: [:],
+            manifestCachePath: tmp + "/project/.scarf/manifest.json"
+        )
+    }
+}
+
 /// Validates every `.scarftemplate` shipped under `templates/<author>/<name>/`
 /// in the repo. A template whose manifest, `contents` claim, or file set is
 /// out of sync will fail here — so shipped templates can't silently rot.
