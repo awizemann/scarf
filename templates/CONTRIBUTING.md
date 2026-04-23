@@ -73,7 +73,10 @@ Optional:
 
 - `instructions/CLAUDE.md`, `instructions/GEMINI.md`, `instructions/.cursorrules`, `instructions/.github/copilot-instructions.md` — agent-specific shims beyond `AGENTS.md`.
 - `skills/<skill-name>/SKILL.md` — shipped skills, installed into `~/.hermes/skills/templates/<slug>/` on the user's side.
-- `cron/jobs.json` — an array of cron job specs. Each has `name`, `schedule` (e.g. `0 9 * * *` or `every 2h`), `prompt`, optional `deliver`, `skills[]`, `repeat`.
+- `cron/jobs.json` — an array of cron job specs. Each has `name`, `schedule` (e.g. `0 9 * * *` or `every 2h`), `prompt`, optional `deliver`, `skills[]`, `repeat`. The prompt may use these install-time placeholders — the installer substitutes them before registering the cron job with Hermes:
+  - `{{PROJECT_DIR}}` — absolute path of the newly-installed project dir. **Required for any cron prompt that reads or writes project files** — Hermes doesn't set a CWD when firing cron jobs, so relative paths (`.scarf/config.json`) won't resolve. Write `{{PROJECT_DIR}}/.scarf/config.json` instead.
+  - `{{TEMPLATE_ID}}` — the `owner/name` id from your manifest.
+  - `{{TEMPLATE_SLUG}}` — the sanitised slug used for the project dir name + skills namespace.
 - `memory/append.md` — markdown appended to the user's `MEMORY.md` between template-specific markers. Use sparingly — most templates don't need this.
 
 ### 4. Build the bundle

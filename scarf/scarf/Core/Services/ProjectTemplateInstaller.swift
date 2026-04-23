@@ -179,7 +179,17 @@ struct ProjectTemplateInstaller: Sendable {
             }
             args.append(job.schedule)
             if let prompt = job.prompt, !prompt.isEmpty {
-                args.append(prompt)
+                // Substitute template-author tokens with install-time
+                // values. Hermes doesn't set a CWD for cron runs — when
+                // the agent fires the prompt, any relative path
+                // (`.scarf/config.json`, `status-log.md`, etc.) resolves
+                // against the agent's own dir, not the project. Templates
+                // use `{{PROJECT_DIR}}` as a placeholder for the absolute
+                // path; we swap in the real project dir here so the
+                // registered cron job carries a fully-qualified prompt
+                // that works regardless of CWD.
+                let resolvedPrompt = Self.substituteCronTokens(prompt, plan: plan)
+                args.append(resolvedPrompt)
             }
 
             let (output, exit) = context.runHermes(args)
@@ -219,6 +229,35 @@ struct ProjectTemplateInstaller: Sendable {
         // user can see + address the underlying problem.
         try service.saveRegistry(registry)
         return entry
+    }
+
+    // MARK: - Token substitution (install-time placeholder resolution)
+
+    /// Supported placeholders for template-author prompts. Keep the set
+    /// intentionally small — every token here becomes a load-bearing
+    /// part of the template format that we can't rename without
+    /// breaking existing bundles.
+    ///
+    /// - `{{PROJECT_DIR}}`: absolute path of the newly-created project
+    ///   directory. Required for cron prompts because Hermes doesn't
+    ///   establish a CWD when firing cron jobs; relative paths would
+    ///   resolve against whatever dir Hermes happens to be in.
+    ///
+    /// - `{{TEMPLATE_ID}}`: the `owner/name` id from the manifest.
+    ///   Less load-bearing; occasionally useful for tagging or
+    ///   delivery targets that reference the template.
+    ///
+    /// - `{{TEMPLATE_SLUG}}`: the sanitised slug the installer used
+    ///   for the skills namespace and project dir name.
+    nonisolated static func substituteCronTokens(
+        _ prompt: String,
+        plan: TemplateInstallPlan
+    ) -> String {
+        var out = prompt
+        out = out.replacingOccurrences(of: "{{PROJECT_DIR}}", with: plan.projectDir)
+        out = out.replacingOccurrences(of: "{{TEMPLATE_ID}}", with: plan.manifest.id)
+        out = out.replacingOccurrences(of: "{{TEMPLATE_SLUG}}", with: plan.manifest.slug)
+        return out
     }
 
     // MARK: - Lock file

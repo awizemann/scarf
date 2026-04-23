@@ -37,7 +37,7 @@ No `sites.txt` anymore — sites come from `.scarf/config.json`.
 
 ## What to do when the cron job fires
 
-The cron job runs this project's "Check site status" prompt. When invoked:
+The cron prompt Scarf registers for this project carries **absolute paths** (the installer substitutes `{{PROJECT_DIR}}` at install time) — you don't need to figure out the project's location yourself. Use whatever absolute paths appear in the prompt you received; if you're working in the project's interactive chat instead, the paths below are relative to the project root.
 
 1. Read `.scarf/config.json`. Extract `values.sites` (array of URLs) and `values.timeout_seconds` (number). If `sites` is empty or missing, write a `status-log.md` entry noting "no sites configured — open Configuration to add some" and leave the dashboard untouched.
 2. For each URL in `sites`, make an HTTP GET request with the configured timeout. Follow up to 3 redirects. Treat any 2xx or 3xx response as **up**, anything else (including timeouts and DNS failures) as **down**.
