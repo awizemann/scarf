@@ -57,7 +57,23 @@ struct ScarfApp: App {
                     // covers the case where the user added a server in
                     // another window since this one last opened.
                     .onAppear { liveRegistry.rebuild() }
+                    // scarf://install?url=… deep-link handler. Stages the
+                    // URL on the process-wide router; ProjectsView picks it
+                    // up and presents the install sheet. Activating the
+                    // app here ensures a cold launch from a browser click
+                    // surfaces the sheet without the user having to click
+                    // into Scarf first.
+                    .onOpenURL { url in
+                        TemplateURLRouter.shared.handle(url)
+                        NSApplication.shared.activate()
+                    }
             } else {
+                // MissingServerView is a dead-end "server was removed" pane
+                // with no ProjectsView — so no observer of the router's
+                // pendingInstallURL exists in this window. Routing a
+                // scarf://install URL here would silently drop it. Leave
+                // onOpenURL off this branch; ContextBoundRoot windows in
+                // the same app instance will still handle it.
                 MissingServerView(removedServerID: serverID)
                     .environment(registry)
                     .environment(updater)

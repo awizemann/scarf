@@ -1,0 +1,74 @@
+# Validates `.scarftemplate` bundles on PRs that touch templates/.
+#
+# Mirrors the invariants `ProjectTemplateService.verifyClaims` enforces at
+# install time. Runs the same Python script the maintainer uses locally
+# (tools/build-catalog.py --check) so a bundle can't reach main unless the
+# validator is happy.
+#
+# Also runs tools/test_build_catalog.py so drift between the validator and
+# its own test suite is caught on the same PR.
+
+name: Validate template submissions
+
+on:
+  pull_request:
+    paths:
+      - 'templates/**'
+      - 'tools/build-catalog.py'
+      - 'tools/test_build_catalog.py'
+      - '.github/workflows/validate-template-pr.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full clone so we can diff against the PR base and scope
+          # --only to just the changed templates if we want to later.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # The validator is stdlib-only and tested against 3.9+ (the
+          # system Python on current macOS, what most maintainers run
+          # locally). CI uses 3.11 for faster cold-cache times on
+          # GitHub Actions runners — same stdlib APIs, same code paths.
+          python-version: '3.11'
+
+      - name: Run validator unit tests
+        run: python3 tools/test_build_catalog.py -v
+
+      - name: Validate every template
+        id: validate
+        run: |
+          set -o pipefail
+          python3 tools/build-catalog.py --check 2>&1 | tee /tmp/validator.log
+
+      - name: Post failure comment
+        if: failure() && steps.validate.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = '## Template validation failed\n\n';
+            try {
+              const log = fs.readFileSync('/tmp/validator.log', 'utf8');
+              body += '```\n' + log.slice(-3000) + '\n```\n';
+            } catch (e) {
+              body += 'See the failed job log for details.\n';
+            }
+            body += '\nFix the issues above and push again — the check reruns automatically.\n';
+            body += '\nLocal reproduction: `python3 tools/build-catalog.py --check`\n';
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });

@@ -1,0 +1,68 @@
+{
+  "generated": true,
+  "schemaVersion": 1,
+  "templates": [
+    {
+      "author": {
+        "name": "Alan Wizemann",
+        "url": "https://github.com/awizemann/scarf"
+      },
+      "bundleSha256": "0a20802a8830a7cfdd1afa2888e42e113c9a17a37439384a3037d32ad1f24c1f",
+      "bundleSize": 7569,
+      "category": "monitoring",
+      "config": {
+        "modelRecommendation": {
+          "preferred": "claude-haiku-4",
+          "rationale": "Simple tool-use task \u2014 HTTP GETs + a short summary. Haiku is plenty and keeps cost low when the cron runs daily."
+        },
+        "schema": [
+          {
+            "default": [
+              "https://example.com",
+              "https://example.org"
+            ],
+            "description": "One URL per item. HTTP or HTTPS. You can add and remove entries after install via the Configuration button on the dashboard.",
+            "itemType": "string",
+            "key": "sites",
+            "label": "Sites to Watch",
+            "maxItems": 25,
+            "minItems": 1,
+            "required": true,
+            "type": "list"
+          },
+          {
+            "default": 10,
+            "description": "How long to wait for each URL before giving up.",
+            "key": "timeout_seconds",
+            "label": "Request Timeout (seconds)",
+            "max": 60,
+            "min": 1,
+            "required": false,
+            "type": "number"
+          }
+        ]
+      },
+      "contents": {
+        "agentsMd": true,
+        "config": 2,
+        "cron": 1,
+        "dashboard": true
+      },
+      "description": "A daily uptime check for a list of URLs you configure on install. Writes status to status-log.md and updates the dashboard with current counts.",
+      "detailSlug": "awizemann-site-status-checker",
+      "id": "awizemann/site-status-checker",
+      "installUrl": "https://raw.githubusercontent.com/awizemann/scarf/main/templates/awizemann/site-status-checker/site-status-checker.scarftemplate",
+      "minHermesVersion": "0.9.0",
+      "minScarfVersion": "2.3.0",
+      "name": "Site Status Checker",
+      "tags": [
+        "monitoring",
+        "uptime",
+        "cron",
+        "starter",
+        "configurable"
+      ],
+      "version": "1.1.0"
+    }
+  ]
+}

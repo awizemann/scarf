@@ -1,0 +1,7 @@
+[
+  {
+    "name": "Check site status",
+    "schedule": "0 9 * * *",
+    "prompt": "Run the site status check for the Scarf project at {{PROJECT_DIR}}. Read {{PROJECT_DIR}}/.scarf/config.json to get `values.sites` (the URL list) and `values.timeout_seconds` (the per-URL HTTP timeout). HTTP GET each URL with that timeout, following up to 3 redirects; treat 2xx/3xx as up and anything else (including timeouts and DNS failures) as down. Prepend a new timestamped results section to {{PROJECT_DIR}}/status-log.md — create the file with a one-line header if it doesn't exist yet. Update {{PROJECT_DIR}}/.scarf/dashboard.json: set the Sites Up / Sites Down / Last Checked stat widgets' `value` fields; replace the 'Watched Sites' list widget's `items` array with one entry per URL (text = URL, status = \"up\" or \"down\"); and if `values.sites` is non-empty, set the 'First Watched Site' webview widget's `url` field to the FIRST URL from `values.sites` (otherwise leave the webview's existing url alone). Preserve every other field in dashboard.json as-is. Reply with a one-line summary like '3 up, 1 down — example.com timed out'."
+  }
+]

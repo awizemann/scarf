@@ -1,7 +1,9 @@
 import Foundation
+import os
 
 @Observable
 final class ProjectsViewModel {
+    private let logger = Logger(subsystem: "com.scarf", category: "ProjectsViewModel")
     let context: ServerContext
     private let service: ProjectDashboardService
 
@@ -39,7 +41,19 @@ final class ProjectsViewModel {
         guard !registry.projects.contains(where: { $0.name == name }) else { return }
         let entry = ProjectEntry(name: name, path: path)
         registry.projects.append(entry)
-        service.saveRegistry(registry)
+        // saveRegistry throws now. The VM doesn't currently have a
+        // surface for user-visible errors (there's no alert/toast in
+        // the Projects view), so log at error level to the unified
+        // log and keep the in-memory state consistent with whatever
+        // landed on disk. If the write fails, the added entry won't
+        // persist across launches — the user sees it appear + work
+        // this session, then it's gone at relaunch. Not ideal, but
+        // matches today's UX and flagged for a proper alert later.
+        do {
+            try service.saveRegistry(registry)
+        } catch {
+            logger.error("addProject couldn't persist registry: \(error.localizedDescription, privacy: .public)")
+        }
         projects = registry.projects
         selectProject(entry)
     }
@@ -47,7 +61,11 @@ final class ProjectsViewModel {
     func removeProject(_ project: ProjectEntry) {
         var registry = service.loadRegistry()
         registry.projects.removeAll { $0.name == project.name }
-        service.saveRegistry(registry)
+        do {
+            try service.saveRegistry(registry)
+        } catch {
+            logger.error("removeProject couldn't persist registry: \(error.localizedDescription, privacy: .public)")
+        }
         projects = registry.projects
         if selectedProject?.name == project.name {
             selectedProject = nil

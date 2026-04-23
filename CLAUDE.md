@@ -85,3 +85,82 @@ Public documentation lives in the GitHub wiki at https://github.com/awizemann/sc
 ## Hermes Version
 
 Targets Hermes v0.9.0 (v2026.4.13). Log lines may carry an optional `[session_id]` tag between the level and logger name — `HermesLogService.parseLine` treats the session tag as an optional capture group, so older untagged lines still parse.
+
+## Project Templates
+
+Scarf ships a `.scarftemplate` format (v1 as of 2.2.0) for sharing pre-packaged projects across users and machines. A bundle is a zip containing:
+
+- `template.json` — manifest (id, name, version, `contents` claim)
+- `README.md` — shown in the install preview sheet
+- `AGENTS.md` — required; the [Linux Foundation cross-agent instructions standard](https://agents.md/) — every template is agent-portable out of the box
+- `dashboard.json` — copied to `<project>/.scarf/dashboard.json`
+- `instructions/…` — optional per-agent shims (`CLAUDE.md`, `GEMINI.md`, `.cursorrules`, `.github/copilot-instructions.md`)
+- `skills/<name>/…` — optional; installed to `~/.hermes/skills/templates/<slug>/` (namespaced so uninstall is `rm -rf` on one folder)
+- `cron/jobs.json` — optional; registered via `hermes cron create` with a `[tmpl:<id>] …` name prefix and immediately paused
+- `memory/append.md` — optional; appended to `~/.hermes/memories/MEMORY.md` between `<!-- scarf-template:<id>:begin/end -->` markers
+
+Key services: [ProjectTemplateService.swift](scarf/scarf/Core/Services/ProjectTemplateService.swift) (inspect + validate + plan), [ProjectTemplateInstaller.swift](scarf/scarf/Core/Services/ProjectTemplateInstaller.swift) (execute a plan), [ProjectTemplateExporter.swift](scarf/scarf/Core/Services/ProjectTemplateExporter.swift) (build a bundle from a project), [ProjectTemplateUninstaller.swift](scarf/scarf/Core/Services/ProjectTemplateUninstaller.swift) (reverse an install using the lock file). UI in [Features/Templates/](scarf/scarf/Features/Templates/). The `scarf://install?url=<https URL>` deep link + `file://` URLs for `.scarftemplate` files are handled by [TemplateURLRouter.swift](scarf/scarf/Core/Services/TemplateURLRouter.swift) and `onOpenURL` in `scarfApp.swift`. A `<project>/.scarf/template.lock.json` uninstall manifest is written after every install and drives the uninstall flow.
+
+**Uninstall semantics:** driven by the lock file. Only files listed in `lock.projectFiles` are removed from the project dir; user-added files (e.g. a `sites.txt` created on first run) are preserved. If every file in the dir was installed by the template, the dir is removed too; otherwise the dir stays with just the user's files. Skills namespace is always removed wholesale (it's isolated). Cron jobs are removed via `hermes cron remove <id>` after resolving each lock-recorded name. Memory block is stripped between the `begin`/`end` markers, leaving the rest of MEMORY.md intact. No "undo" — uninstall is destructive; to re-install, run the install flow again. Uninstall UI lives on the project-list context menu and the dashboard header (only shown when the selected project has a lock file).
+
+**Never** let a template write to `config.yaml`, `auth.json`, sessions, or any credential path — the v1 installer refuses. If you extend the format, treat the preview sheet as load-bearing: the user's only trust boundary is that the sheet is honest about everything that's about to be written.
+
+### Template configuration (v2.3, schemaVersion 2)
+
+Templates can declare a typed configuration schema in `template.json`'s new `config` block. The installer renders a **Configure** step between the parent-directory pick and the preview sheet; values land at `<project>/.scarf/config.json` (non-secret) and in the login Keychain (secret). A post-install **Configuration** button on the dashboard header (shown when `<project>/.scarf/manifest.json` exists) opens the same form pre-filled for editing.
+
+Manifest shape:
+
+```json
+{
+  "schemaVersion": 2,
+  "contents": { "dashboard": true, "agentsMd": true, "config": 2 },
+  "config": {
+    "schema": [
+      {"key": "site_url", "type": "string", "label": "Site URL", "required": true},
+      {"key": "api_token", "type": "secret", "label": "API Token", "required": true}
+    ],
+    "modelRecommendation": {
+      "preferred": "claude-sonnet-4.5",
+      "rationale": "Tool-heavy workload — reasoning helps."
+    }
+  }
+}
+```
+
+Supported field types: `string`, `text`, `number`, `bool`, `enum` (with `options: [{value, label}]`), `list` (itemType `"string"` only in v1), `secret`. Type-specific constraints (`pattern`, `min`/`max`, `minLength`/`maxLength`, `minItems`/`maxItems`) are optional. `secret` fields **must not** declare a `default` — the validator refuses.
+
+Key services: [TemplateConfig.swift](scarf/scarf/Core/Models/TemplateConfig.swift) (schema + value models + Keychain ref helpers), [ProjectConfigKeychain.swift](scarf/scarf/Core/Services/ProjectConfigKeychain.swift) (thin `SecItemAdd`/`Copy`/`Delete` wrapper; the only Keychain user in Scarf today), [ProjectConfigService.swift](scarf/scarf/Core/Services/ProjectConfigService.swift) (load/save config.json, resolve secrets, cache manifest, validate schema + values). UI in [Features/Templates/ViewModels/TemplateConfigViewModel.swift](scarf/scarf/Features/Templates/ViewModels/TemplateConfigViewModel.swift) + [Features/Templates/Views/TemplateConfigSheet.swift](scarf/scarf/Features/Templates/Views/TemplateConfigSheet.swift).
+
+**Secret storage.** Keychain service name is `com.scarf.template.<slug>`, account is `<fieldKey>:<project-path-hash-short>`. The path-hash suffix means two installs of the same template in different dirs don't collide on Keychain entries. Values in `config.json` are `"keychain://service/account"` URIs — never plaintext. The bytes hit the Keychain only on form commit, so cancelling never leaves orphan entries.
+
+**Uninstall.** `TemplateLock` v2 gains `config_keychain_items` and `config_fields` arrays. The uninstaller iterates each URI through `SecItemDelete` before removing the lock file. Absent items (user hand-cleaned) are no-ops.
+
+**Exporter.** Carries the *schema* from `<project>/.scarf/manifest.json` through into exported bundles, never values. Exporting never leaks anyone's secrets. `schemaVersion` bumps to 2 only when a schema is forwarded; schema-less exports stay at 1.
+
+**Catalog site.** [tools/build-catalog.py](tools/build-catalog.py) mirrors the Swift schema validator. Each v2 template's `template.json` is copied into `.gh-pages-worktree/templates/<slug>/manifest.json` and the site's `widgets.js` calls `ScarfWidgets.renderConfigSchema` to display the schema on the detail page (display-only — the form lives in-app).
+
+**Schema is Swift-primary.** If `TemplateConfigField.FieldType` gains a new case, update in order: `TemplateConfig.swift` (model + validation), `tools/build-catalog.py` (`SUPPORTED_CONFIG_FIELD_TYPES` + type-specific rules), `widgets.js` (`summariseConstraint`), `TemplateConfigSheet.swift` (new control subview), tests on both sides. Schema drift between validator + installer is the kind of bug users only notice after shipping.
+
+## Template Catalog
+
+Shipped community templates live at `templates/<author>/<name>/` (one level down — `templates/CONTRIBUTING.md` explains the submission flow for authors). The catalog site is generated from this directory and served at `awizemann.github.io/scarf/templates/` alongside the Sparkle appcast — the two coexist on the `gh-pages` branch but touch completely disjoint paths.
+
+Pipeline:
+
+- **Validator + regenerator:** [tools/build-catalog.py](tools/build-catalog.py) is stdlib-only Python (3.9+). It walks `templates/*/*/`, validates every `.scarftemplate` against its manifest claim (mirrors the Swift `ProjectTemplateService.verifyClaims` invariants), enforces a 5 MB bundle-size cap, scans for high-confidence secret patterns, checks `staging/` matches the built bundle byte-for-byte, and emits `templates/catalog.json`. Tested by [tools/test_build_catalog.py](tools/test_build_catalog.py) — 16 tests covering every validation path.
+- **Wrapper:** [scripts/catalog.sh](scripts/catalog.sh) mirrors the `scripts/wiki.sh` shape with `check / build / preview / serve / publish` subcommands. `publish` runs a second-pass secret-scan against the rendered site before committing + pushing `gh-pages`.
+- **Site source:** `site/index.html.tmpl` + `site/template.html.tmpl` are `{{TOKEN}}`-substitution templates. `site/widgets.js` (~300 lines of vanilla JS) is the dogfood — renders a `ProjectDashboard` JSON into HTML using the same widget vocabulary the Swift app uses, so each template's detail page shows a live preview of its post-install dashboard.
+- **Install-URL hosting:** raw-served from `main` at `https://raw.githubusercontent.com/awizemann/scarf/main/templates/<author>/<name>/<name>.scarftemplate`. No per-template Releases ceremony.
+- **CI gate:** [.github/workflows/validate-template-pr.yml](.github/workflows/validate-template-pr.yml) runs the Python validator + its own test suite on every PR that touches `templates/`, the validator, or its tests. Failures post a comment on the PR with the last 3 KB of the validator log.
+
+Maintainer workflow on merge to main:
+
+```bash
+./scripts/catalog.sh build       # regenerate templates/catalog.json + .gh-pages-worktree/templates/
+./scripts/catalog.sh publish     # secret-scan rendered output + commit + push gh-pages
+```
+
+Same cadence as `scripts/release.sh` (manual, auditable, no auto-deploy). Runs stay isolated: release.sh only touches `appcast.xml` on gh-pages; catalog.sh only touches `templates/` on gh-pages. Never push catalog output on a release cadence or vice versa.
+
+**Schema is Swift-primary.** When `ProjectDashboardWidget.type` gains a new case or `ProjectTemplateManifest` adds a field, update Swift first, then mirror into `tools/build-catalog.py` (`SUPPORTED_WIDGET_TYPES`, `_validate_manifest`, `_validate_contents_claim`) so the web validator stays honest. The Python test suite's real-bundle test catches drift on the example template but not on the full widget vocabulary — add a synthetic fixture to `test_build_catalog.py` for any new widget type.
