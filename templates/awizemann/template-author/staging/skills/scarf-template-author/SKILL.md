@@ -202,6 +202,22 @@ Note: `contents.config` is the **count of schema fields**, not a boolean. In the
 
 Every field takes `key` (required), `label` (required), `description` (optional — markdown), `required` (bool), `default` (optional; type matches the field type).
 
+### Writing good descriptions
+
+Descriptions render inline with markdown support (bold, italic, code, links). Keep them short — a single line or two is ideal.
+
+**Always use markdown link syntax for URLs**, never bare `https://…` — the Configuration sheet's inline text renderer doesn't word-break mid-URL, so a raw URL in a description will force that whole description's width to the URL's character length. Older Scarf versions clipped the sheet in that case; current versions wrap correctly, but the visible text is still cleaner with named links.
+
+```json
+// ✓ Good — short label, URL in the href
+"description": "Token with `repo` scope. Get one [from the GitHub tokens page](https://github.com/settings/tokens)."
+
+// ✗ Bad — raw URL bloats the visible text
+"description": "Token with `repo` scope. Get one at https://github.com/settings/tokens"
+```
+
+Same rule for long file paths, API endpoints, or any other unbreakable token — wrap them in inline code (backticks) if they have to appear verbatim, and prefer markdown links otherwise.
+
 ### Hard rules
 
 - **Secret fields MUST NOT have a `default`.** The validator rejects the manifest if they do — a default makes no sense because the Keychain entry doesn't exist yet at install time.
@@ -380,6 +396,7 @@ Things to check before declaring the scaffold done:
 - [ ] Every webview widget has an https URL that renders something meaningful even pre-first-run (Scarf homepage is a decent placeholder).
 - [ ] `dashboard.json` has `version: 1` at the top.
 - [ ] `AGENTS.md` documents every config field, every updated widget, and the cron behaviour — the user relies on it as the source of truth when things drift.
+- [ ] **No raw URLs in field descriptions.** Use `[link text](https://…)` markdown syntax instead — raw URLs read as long unbreakable tokens in the Configuration sheet. Same rule for long paths and other unbreakable strings; wrap in `` ` `` if they must appear verbatim.
 
 ## Reference — source of truth files
 
