@@ -95,10 +95,22 @@ public final class RichChatViewModel {
     private var activePollingTimer: Timer?
 
     public struct PendingPermission {
-        let requestId: Int
-        let title: String
-        let kind: String
-        let options: [(optionId: String, name: String)]
+        public let requestId: Int
+        public let title: String
+        public let kind: String
+        public let options: [(optionId: String, name: String)]
+
+        public init(
+            requestId: Int,
+            title: String,
+            kind: String,
+            options: [(optionId: String, name: String)]
+        ) {
+            self.requestId = requestId
+            self.title = title
+            self.kind = kind
+            self.options = options
+        }
     }
 
     // MARK: - Reset

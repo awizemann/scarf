@@ -36,31 +36,32 @@ public struct LocalTransport: ServerTransport {
     }
 
     public func writeFile(_ path: String, data: Data) throws {
-        let tmp = path + ".scarf.tmp"
         do {
-            try data.write(to: URL(fileURLWithPath: tmp))
-            // Preserve `0600` for dotfiles holding secrets (.env, .auth, ...).
-            // The existing files already use 0600 via HermesEnvService; we
-            // mirror that here so a brand-new file created via this write
-            // also starts with safe permissions.
-            if Self.shouldEnforcePrivateMode(for: path) {
-                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tmp)
+            // Ensure the parent dir exists — callers sometimes pass a
+            // path whose parent hasn't been mkdir'd yet (e.g.,
+            // `~/.hermes/memories/MEMORY.md` on a Hermes install that
+            // never wrote memories before).
+            let parent = (path as NSString).deletingLastPathComponent
+            if !parent.isEmpty, !FileManager.default.fileExists(atPath: parent) {
+                try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
             }
-            // Atomic swap onto the final path.
-            let destURL = URL(fileURLWithPath: path)
-            let tmpURL = URL(fileURLWithPath: tmp)
-            if FileManager.default.fileExists(atPath: path) {
-                _ = try FileManager.default.replaceItemAt(destURL, withItemAt: tmpURL)
-            } else {
-                // Ensure parent exists.
-                let parent = (path as NSString).deletingLastPathComponent
-                if !parent.isEmpty, !FileManager.default.fileExists(atPath: parent) {
-                    try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
-                }
-                try FileManager.default.moveItem(at: tmpURL, to: destURL)
+            // Atomic write: Data.write(options: .atomic) drops a temp
+            // file alongside the destination and rename(2)s it into
+            // place. Cross-platform (macOS + iOS + Linux CI for tests).
+            //
+            // Earlier this method used `FileManager.replaceItemAt`,
+            // which is Apple-only — Linux swift-corelibs would fail.
+            // Data.write-atomic works everywhere with identical
+            // semantics.
+            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+            // Preserve 0600 for files that conventionally hold secrets.
+            // The existing files use 0600 via HermesEnvService; apply
+            // the same to brand-new files so we never demote
+            // permissions on a rewrite.
+            if Self.shouldEnforcePrivateMode(for: path) {
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
             }
         } catch {
-            try? FileManager.default.removeItem(atPath: tmp)
             throw TransportError.fileIO(path: path, underlying: error.localizedDescription)
         }
     }
