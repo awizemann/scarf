@@ -123,7 +123,7 @@ import Foundation
     @Test @MainActor func activityViewModelInits() {
         let vm = ActivityViewModel(context: .local)
         #expect(vm.context.id == ServerContext.local.id)
-        #expect(vm.entries.isEmpty)
+        #expect(vm.toolMessages.isEmpty)
     }
 
     @Test @MainActor func insightsViewModelInits() {

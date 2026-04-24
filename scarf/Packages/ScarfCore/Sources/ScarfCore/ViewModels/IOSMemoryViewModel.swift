@@ -93,24 +93,39 @@ public final class IOSMemoryViewModel {
     public func load() async {
         isLoading = true
         lastError = nil
-        // Run the file read on a detached task — `ServerContext.readText`
+        // Run the file read on a detached task — `readTextThrowing`
         // blocks on transport I/O, and we don't want the MainActor
         // hanging during a remote SFTP fetch.
         let ctx = context
         let path = kind.path(on: context)
-        let loaded: String? = await Task.detached {
-            ctx.readText(path)
+        let result: Result<String?, Error> = await Task.detached {
+            do {
+                return .success(try ctx.readTextThrowing(path))
+            } catch {
+                return .failure(error)
+            }
         }.value
 
-        if let loaded {
+        switch result {
+        case .success(.some(let loaded)):
             text = loaded
             originalText = loaded
-        } else {
-            // `readText` returns nil on missing file — treat as
-            // empty (the user is creating the file for the first
-            // time) rather than an error.
+            lastError = nil
+        case .success(.none):
+            // Genuinely absent file — treat as empty (first-time
+            // create). Distinguished from transport error by the
+            // fileExists check inside readTextThrowing (pass-1 M7 #7/#8).
             text = ""
             originalText = ""
+            lastError = nil
+        case .failure(let error):
+            // Transport error (SSH timeout, auth failure, SFTP
+            // protocol issue). Surface to the UI so the user
+            // understands this isn't just "empty file" — something's
+            // genuinely broken with the connection.
+            text = ""
+            originalText = ""
+            lastError = "Couldn't load \(kind.displayName) — \(error.localizedDescription)"
         }
         isLoading = false
     }

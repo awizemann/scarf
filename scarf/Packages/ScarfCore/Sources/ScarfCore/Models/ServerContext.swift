@@ -233,10 +233,34 @@ extension ServerContext {
 /// the remote path doesn't exist on this Mac.
 extension ServerContext {
     /// Read a UTF-8 text file. `nil` on any error (missing, transport down,
-    /// invalid encoding).
+    /// invalid encoding). Use this when the caller genuinely can't tell
+    /// the difference (e.g. "if a manifest exists, parse it, otherwise
+    /// use defaults"). Prefer `readTextThrowing` when the UI needs to
+    /// distinguish "file doesn't exist" from "transport failed" — pass-1
+    /// M7 #8 showed that silent nils from transport errors masqueraded
+    /// as empty files in the Memory editor for ~1 minute before the
+    /// SFTP-tilde fix was found.
     public nonisolated func readText(_ path: String) -> String? {
-        guard let data = try? makeTransport().readFile(path) else { return nil }
-        return String(data: data, encoding: .utf8)
+        try? readTextThrowing(path)
+    }
+
+    /// Read a UTF-8 text file. Throws on transport errors. Returns:
+    /// - `.some(content)` when the file was read successfully,
+    /// - `.none` when the file is genuinely absent (the transport's
+    ///   `fileExists` returned false),
+    /// - throws the underlying transport error otherwise.
+    ///
+    /// This is the version to call from VMs that can surface a real
+    /// error to the UI — e.g. Memory, Settings, Cron. The nil-returning
+    /// shim above is fine for "probably there, probably not" cases.
+    public nonisolated func readTextThrowing(_ path: String) throws -> String? {
+        let transport = makeTransport()
+        guard transport.fileExists(path) else { return nil }
+        let data = try transport.readFile(path)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw TransportError.other(message: "File at \(path) is not valid UTF-8.")
+        }
+        return text
     }
 
     /// Read raw bytes. `nil` on any error.
