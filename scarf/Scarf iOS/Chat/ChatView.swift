@@ -63,6 +63,8 @@ struct ChatView: View {
         .overlay {
             if case .failed(let msg) = controller.state {
                 errorOverlay(msg)
+            } else if controller.state == .connecting {
+                connectingOverlay
             }
         }
         .sheet(item: Binding(
@@ -161,6 +163,24 @@ struct ChatView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.regularMaterial)
+    }
+
+    /// Shown while we're opening the SSH exec channel + spawning
+    /// `hermes acp` + creating the ACP session. Typically ~0.5–1.5 s
+    /// on a warm network — silent before this overlay existed, which
+    /// made the app feel frozen (pass-1 M7 #3).
+    @ViewBuilder
+    private var connectingOverlay: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.large)
+            Text("Connecting to \(config.displayName)…")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .padding(24)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     @ViewBuilder
