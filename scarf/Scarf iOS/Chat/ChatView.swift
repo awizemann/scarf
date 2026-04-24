@@ -23,6 +23,7 @@ struct ChatView: View {
     @Environment(\.scarfGoCoordinator) private var coordinator
     @Environment(\.serverContext) private var envContext
     @State private var controller: ChatController
+    @State private var showProjectPicker = false
 
     init(config: IOSServerConfig, key: SSHKeyBundle) {
         self.config = config
@@ -50,12 +51,23 @@ struct ChatView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    Task { await controller.resetAndStartNewSession() }
+                    showProjectPicker = true
                 } label: {
                     Image(systemName: "plus.bubble")
                 }
                 .disabled(controller.state == .connecting)
             }
+        }
+        .sheet(isPresented: $showProjectPicker) {
+            ProjectPickerSheet(
+                context: config.toServerContext(id: Self.sharedContextID),
+                onQuickChat: {
+                    Task { await controller.resetAndStartNewSession() }
+                },
+                onProject: { project in
+                    Task { await controller.resetAndStartInProject(project) }
+                }
+            )
         }
         .task {
             // Dashboard row taps set `pendingResumeSessionID` on the
@@ -451,6 +463,114 @@ final class ChatController {
         await stop()
         vm.reset()
         await start()
+    }
+
+    /// User tapped "In project… <project>". Stop, reset, and start
+    /// with the project's path as cwd. Writes the Scarf-managed
+    /// AGENTS.md block via ProjectContextBlock BEFORE spawning `hermes
+    /// acp`, so Hermes sees the project context at boot. Records the
+    /// returned session id in the attribution sidecar.
+    func resetAndStartInProject(_ project: ProjectEntry) async {
+        await stop()
+        vm.reset()
+        // Write the context block first. Non-fatal on failure — chat
+        // still starts, just without the managed block; the user sees
+        // the error via controller.state if it escalates.
+        let block = ProjectContextBlock.renderMinimalBlock(
+            projectName: project.name,
+            projectPath: project.path
+        )
+        let ctx = context
+        await Task.detached {
+            try? ProjectContextBlock.writeBlock(
+                block,
+                forProjectAt: project.path,
+                context: ctx
+            )
+        }.value
+        await start(projectPath: project.path, projectName: project.name)
+    }
+
+    /// Inline variant of `start()` that accepts a cwd + attribution
+    /// hooks. The default `start()` delegates to this with nil project
+    /// fields, so the ACP code path stays single-sourced.
+    private func startInternal(
+        projectPath: String?,
+        projectName: String?
+    ) async {
+        if state == .connecting || state == .ready { return }
+        state = .connecting
+        let client = ACPClient.forIOSApp(
+            context: context,
+            keyProvider: {
+                let store = KeychainSSHKeyStore()
+                guard let key = try await store.load() else {
+                    throw SSHKeyStoreError.backendFailure(
+                        message: "No SSH key in Keychain — re-run onboarding.",
+                        osStatus: nil
+                    )
+                }
+                return key
+            }
+        )
+        self.client = client
+        vm.acpStderrProvider = { [weak client] in
+            await client?.recentStderr ?? ""
+        }
+
+        do {
+            try await client.start()
+        } catch {
+            state = .failed(error.localizedDescription)
+            await vm.recordACPFailure(error, client: client)
+            return
+        }
+
+        let stream = await client.events
+        eventTask = Task { [weak self] in
+            for await event in stream {
+                guard let self else { break }
+                await MainActor.run {
+                    self.vm.handleACPEvent(event)
+                }
+            }
+        }
+
+        do {
+            // Use the project's path as cwd when provided; else the
+            // remote user's home, matching the pre-M9 default.
+            let cwd: String
+            if let projectPath {
+                cwd = projectPath
+            } else {
+                cwd = await context.resolvedUserHome()
+            }
+            let sessionId = try await client.newSession(cwd: cwd)
+            vm.setSessionId(sessionId)
+            state = .ready
+
+            // If this was a project-scoped session, record the
+            // attribution so the Mac's per-project Sessions tab picks
+            // it up. Best-effort — ACP session creation already won,
+            // a failed attribution write is cosmetic.
+            if let projectPath {
+                let ctx = context
+                Task.detached {
+                    SessionAttributionService(context: ctx)
+                        .attribute(sessionID: sessionId, toProjectPath: projectPath)
+                }
+            }
+            _ = projectName // reserved for future chat-header chip
+        } catch {
+            state = .failed(error.localizedDescription)
+            await vm.recordACPFailure(error, client: client)
+            await stop()
+        }
+    }
+
+    /// Public entry used internally by resetAndStartInProject.
+    func start(projectPath: String, projectName: String) async {
+        await startInternal(projectPath: projectPath, projectName: projectName)
     }
 
     /// Resume an existing ACP session. Called from ChatView when the

@@ -41,11 +41,10 @@ import ScarfCore
 struct ProjectAgentContextService: Sendable {
     private static let logger = Logger(subsystem: "com.scarf", category: "ProjectAgentContextService")
 
-    /// Marker strings. Load-bearing: the format must stay stable
-    /// across releases so existing project AGENTS.md files continue
-    /// to be recognized and rewritten cleanly.
-    static let beginMarker = "<!-- scarf-project:begin -->"
-    static let endMarker = "<!-- scarf-project:end -->"
+    /// Marker strings. Delegated to ScarfCore's `ProjectContextBlock`
+    /// in M9 #4.2 so both Mac and ScarfGo use identical markers.
+    static let beginMarker = ProjectContextBlock.beginMarker
+    static let endMarker = ProjectContextBlock.endMarker
 
     let context: ServerContext
 
@@ -115,44 +114,10 @@ struct ProjectAgentContextService: Sendable {
     ///    truncate to EOF (as the memory-block installer does)
     ///    because an orphaned begin on this file is more likely
     ///    hand-typed than a corrupt Scarf write.
+    /// Kept as a thin forwarder so pre-existing callers + tests keep
+    /// working. The logic lives in ScarfCore now (M9 #4.2).
     nonisolated static func applyBlock(block: String, to existing: String) -> String {
-        guard let beginRange = existing.range(of: beginMarker),
-              let endRange = existing.range(
-                of: endMarker,
-                range: beginRange.upperBound..<existing.endIndex
-              )
-        else {
-            // No well-formed Scarf block present — prepend.
-            let trimmedExisting = existing.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmedExisting.isEmpty {
-                return block + "\n"
-            }
-            return block + "\n\n" + existing
-        }
-        // Full span: from the begin marker through the end marker
-        // (inclusive). Consumes any trailing whitespace/newlines
-        // immediately following the end marker so a re-render of a
-        // shorter block doesn't leave a dangling blank line.
-        var upperBound = endRange.upperBound
-        while upperBound < existing.endIndex,
-              existing[upperBound].isNewline {
-            upperBound = existing.index(after: upperBound)
-        }
-        let before = String(existing[existing.startIndex..<beginRange.lowerBound])
-        let after = String(existing[upperBound..<existing.endIndex])
-        // Preserve the leading whitespace / content structure of
-        // `before` but ensure exactly one blank line separates it
-        // from the new block when there IS prior content.
-        let prefix = before.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? ""
-            : before.trimmingRightNewlines() + "\n\n"
-        // Suffix: a blank line BEFORE the remaining content, ensuring
-        // the template/user content is visually separated from the
-        // Scarf block.
-        let suffix = after.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "\n"
-            : "\n\n" + after.trimmingLeftNewlines()
-        return prefix + block + suffix
+        ProjectContextBlock.applyBlock(block, to: existing)
     }
 
     // MARK: - Block rendering
