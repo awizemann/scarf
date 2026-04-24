@@ -42,6 +42,7 @@ struct ChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             errorBanner
+            projectContextBar
             messageList
             Divider()
             composer
@@ -52,18 +53,6 @@ struct ChatView: View {
             // Principal: "Chat" title + small folder chip below when
             // the current session is project-attributed. iOS-native
             // equivalent of Mac's SessionInfoBar project-chip pattern.
-            ToolbarItem(placement: .principal) {
-                VStack(spacing: 1) {
-                    Text("Chat")
-                        .font(.headline)
-                    if let projectName = controller.currentProjectName, !projectName.isEmpty {
-                        Label(projectName, systemImage: "folder.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.tint)
-                            .lineLimit(1)
-                    }
-                }
-            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showProjectPicker = true
@@ -345,6 +334,41 @@ struct ChatView: View {
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.orange.opacity(0.12))
+        }
+    }
+
+    /// Contextual header rendered BELOW the navigation bar when the
+    /// current session is scoped to a Scarf project. Sits full-width
+    /// so the project name has room to breathe (the nav bar's
+    /// `.principal` slot gets squeezed to icon-only by adjacent
+    /// toolbar buttons on iPhone — exactly the pass-2 bug). Drawn as
+    /// a subtle tinted strip so it doesn't dominate but is clearly
+    /// informational.
+    @ViewBuilder
+    private var projectContextBar: some View {
+        if let projectName = controller.currentProjectName,
+           !projectName.isEmpty
+        {
+            HStack(spacing: 8) {
+                Image(systemName: "folder.fill")
+                    .foregroundStyle(.tint)
+                    .font(.caption)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Project chat")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(projectName)
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.tint.opacity(0.1))
         }
     }
 

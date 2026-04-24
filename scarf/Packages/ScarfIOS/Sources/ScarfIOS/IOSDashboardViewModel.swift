@@ -28,7 +28,12 @@ public final class IOSDashboardViewModel {
     // MARK: - Published state
 
     public var stats: HermesDataService.SessionStats = .empty
+    /// Recent 5 sessions for the Overview sub-tab (glance-only surface).
     public var recentSessions: [HermesSession] = []
+    /// Deeper session list for the Sessions sub-tab — larger window +
+    /// filterable by project. Default 25; enough to cover "what did I
+    /// work on this week" without paging.
+    public var allSessions: [HermesSession] = []
     public var sessionPreviews: [String: String] = [:]
     public var isLoading: Bool = true
 
@@ -38,6 +43,10 @@ public final class IOSDashboardViewModel {
     /// subsequent row renders are O(1) dict lookups. Empty when no
     /// sessions on screen are attributed.
     public private(set) var sessionProjectNames: [String: String] = [:]
+
+    /// Every configured project, for the filter picker in the
+    /// Sessions sub-tab. Populated alongside `sessionProjectNames`.
+    public private(set) var allProjects: [ProjectEntry] = []
 
     /// Surfaced when the SQLite snapshot or DB open fails. Shown in a
     /// yellow banner above the stats with a "Retry" button. `nil` means
@@ -63,7 +72,8 @@ public final class IOSDashboardViewModel {
 
         stats = await dataService.fetchStats()
         recentSessions = await dataService.fetchSessions(limit: 5)
-        sessionPreviews = await dataService.fetchSessionPreviews(limit: 5)
+        allSessions = await dataService.fetchSessions(limit: 25)
+        sessionPreviews = await dataService.fetchSessionPreviews(limit: 25)
 
         // Attribution lookup (pass-2 UX): load the session→project
         // sidecar + project registry once so Dashboard rows can show
@@ -72,7 +82,7 @@ public final class IOSDashboardViewModel {
         // cell. Failure is silent — the absence of project labels is
         // a cosmetic degradation, not a data-loss problem.
         let ctx = context
-        let attributions: [String: String] = await Task.detached {
+        let bundle: (names: [String: String], projects: [ProjectEntry]) = await Task.detached {
             let attribution = SessionAttributionService(context: ctx)
             let projectRegistry = ProjectDashboardService(context: ctx).loadRegistry()
             let pathToName = Dictionary(
@@ -85,12 +95,26 @@ public final class IOSDashboardViewModel {
                     result[sessionID] = name
                 }
             }
-            return result
+            return (names: result, projects: projectRegistry.projects)
         }.value
-        sessionProjectNames = attributions
+        sessionProjectNames = bundle.names
+        allProjects = bundle.projects
 
         await dataService.close()
         isLoading = false
+    }
+
+    /// Sessions matching the given project filter. `nil` returns
+    /// all 25 recent sessions (no filtering). `projectName` is the
+    /// ProjectEntry.name that's the key in `sessionProjectNames`, so
+    /// the filter is an O(n) dict lookup per session — cheap at our
+    /// 25-session window. Sorting is preserved (newest first) from
+    /// the upstream `fetchSessions(limit:)` query.
+    public func sessions(filteredBy projectName: String?) -> [HermesSession] {
+        guard let projectName, !projectName.isEmpty else { return allSessions }
+        return allSessions.filter { session in
+            sessionProjectNames[session.id] == projectName
+        }
     }
 
     /// Helper used by DashboardView rows. Returns the project display
