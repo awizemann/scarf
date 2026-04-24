@@ -35,6 +35,10 @@ struct ModelPickerSheet: View {
     // appear; stays in-memory for the life of the sheet.
     @State private var subscription: NousSubscriptionState = .absent
 
+    /// Drives presentation of the Nous sign-in sheet. Bound to the
+    /// "Sign in to Nous Portal" button in the subscription summary.
+    @State private var showNousSignIn: Bool = false
+
     @Environment(\.serverContext) private var serverContext
     private var catalog: ModelCatalogService { ModelCatalogService(context: serverContext) }
     private var subscriptionService: NousSubscriptionService { NousSubscriptionService(context: serverContext) }
@@ -62,6 +66,14 @@ struct ModelPickerSheet: View {
             overlayModelID = initialModel
             subscription = subscriptionService.loadState()
             loadModelsForSelection()
+        }
+        .sheet(isPresented: $showNousSignIn) {
+            NousSignInSheet {
+                // Refresh subscription immediately so the right-column
+                // status row flips to "active" without waiting for the
+                // picker to be re-opened.
+                subscription = subscriptionService.loadState()
+            }
         }
     }
 
@@ -242,11 +254,21 @@ struct ModelPickerSheet: View {
                     Text("Signed in to Nous, but another provider is active.")
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("Not signed in. Run `hermes auth` and select Nous Portal.")
+                    Text("Not signed in yet.")
                         .foregroundStyle(.secondary)
                 }
             }
             .font(.callout)
+
+            if !subscription.subscribed {
+                Button {
+                    showNousSignIn = true
+                } label: {
+                    Label("Sign in to Nous Portal", systemImage: "person.badge.key.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+            }
         }
     }
 

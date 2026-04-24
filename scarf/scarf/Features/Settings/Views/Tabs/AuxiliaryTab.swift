@@ -13,6 +13,7 @@ struct AuxiliaryTab: View {
 
     @Environment(\.serverContext) private var serverContext
     @State private var subscription: NousSubscriptionState = .absent
+    @State private var showNousSignIn: Bool = false
 
     // Keyed by the config path name — matches `auxiliary.<task>.*` in config.yaml.
     private let tasks: [(key: String, title: LocalizedStringKey, icon: String)] = [
@@ -41,6 +42,11 @@ struct AuxiliaryTab: View {
             .onAppear {
                 subscription = NousSubscriptionService(context: serverContext).loadState()
             }
+            .sheet(isPresented: $showNousSignIn) {
+                NousSignInSheet {
+                    subscription = NousSubscriptionService(context: serverContext).loadState()
+                }
+            }
     }
 
     @ViewBuilder
@@ -64,11 +70,17 @@ struct AuxiliaryTab: View {
             viewModel.setAuxiliary(key, field: "provider", value: wantsOn ? "nous" : "auto")
         }
         if !subscription.present && !isOn {
-            Text("Requires an active Nous Portal subscription. Run `hermes auth` to sign in.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 4)
+            HStack(spacing: 8) {
+                Text("Requires an active Nous Portal subscription.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Button("Sign in first") { showNousSignIn = true }
+                    .controlSize(.mini)
+                    .buttonStyle(.borderedProminent)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 4)
         }
     }
 

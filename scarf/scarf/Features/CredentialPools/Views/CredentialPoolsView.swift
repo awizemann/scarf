@@ -210,8 +210,17 @@ private struct AddCredentialSheet: View {
     @State private var providers: [HermesProviderInfo] = []
     @State private var oauthStarted: Bool = false
     @State private var authCode: String = ""
+    /// Drives presentation of the dedicated Nous sign-in sheet from inside
+    /// this add-credential sheet. Nous uses device-code, not PKCE — the
+    /// regular `OAuthFlowController` silently stalls, so we route Nous
+    /// through ``NousSignInSheet`` instead.
+    @State private var showNousSignIn: Bool = false
 
     private var catalog: ModelCatalogService { ModelCatalogService(context: viewModel.context) }
+
+    private func oauthGate(for rawID: String) -> CredentialPoolsOAuthGate {
+        CredentialPoolsOAuthGate.resolve(providerID: rawID, catalog: catalog)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -238,6 +247,17 @@ private struct AddCredentialSheet: View {
             guard newValue else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                 onDismiss()
+            }
+        }
+        // Nous sign-in is a parallel flow that bypasses OAuthFlowController.
+        // When it completes, the parent list refreshes from auth.json just
+        // like it does after a regular OAuth add — so we dismiss the
+        // AddCredentialSheet after a short delay.
+        .sheet(isPresented: $showNousSignIn) {
+            NousSignInSheet {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    onDismiss()
+                }
             }
         }
     }
@@ -290,8 +310,54 @@ private struct AddCredentialSheet: View {
                         .font(.system(.caption, design: .monospaced))
                 }
             } else {
-                oauthPreamble
+                oauthGuidance
             }
+        }
+    }
+
+    /// Renders either the standard PKCE preamble, the Nous-specific
+    /// "sign in with the dedicated sheet" affordance, or a CLI fallback —
+    /// whichever matches the provider the user has typed.
+    @ViewBuilder
+    private var oauthGuidance: some View {
+        switch oauthGate(for: providerID) {
+        case .ok, .providerEmpty:
+            oauthPreamble
+        case .useNousSignIn:
+            nousSignInPreamble
+        case .useCLI(let provider):
+            cliFallbackPreamble(for: provider)
+        }
+    }
+
+    private var nousSignInPreamble: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.tint)
+                Text("Nous Portal uses a dedicated sign-in flow.")
+                    .font(.caption)
+            }
+            Text("We'll open the Nous Portal approval page in your browser and show the device code here. No code-paste step.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func cliFallbackPreamble(for provider: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "terminal")
+                    .foregroundStyle(.secondary)
+                Text("`\(provider)` uses a different sign-in flow.")
+                    .font(.caption)
+            }
+            Text("Run `hermes auth add \(provider)` in a terminal to finish sign-in. In-app support for this provider is coming in a follow-up.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -476,14 +542,38 @@ private struct AddCredentialSheet: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(providerID.trimmingCharacters(in: .whitespaces).isEmpty || apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
                 } else {
-                    Button("Start OAuth") {
-                        viewModel.startOAuth(provider: providerID, label: label)
-                        oauthStarted = true
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(providerID.trimmingCharacters(in: .whitespaces).isEmpty)
+                    oauthActionButton
                 }
             }
+        }
+    }
+
+    /// Gate-aware OAuth primary action. For PKCE providers it's the
+    /// unchanged "Start OAuth" button; for Nous it's "Sign in to Nous
+    /// Portal" (opens ``NousSignInSheet``); for other device-code /
+    /// external providers it's a disabled button with a CLI hint inline.
+    @ViewBuilder
+    private var oauthActionButton: some View {
+        switch oauthGate(for: providerID) {
+        case .providerEmpty:
+            Button("Start OAuth") {}
+                .buttonStyle(.borderedProminent)
+                .disabled(true)
+        case .ok:
+            Button("Start OAuth") {
+                viewModel.startOAuth(provider: providerID, label: label)
+                oauthStarted = true
+            }
+            .buttonStyle(.borderedProminent)
+        case .useNousSignIn:
+            Button("Sign in to Nous Portal") {
+                showNousSignIn = true
+            }
+            .buttonStyle(.borderedProminent)
+        case .useCLI:
+            Button("Start OAuth") {}
+                .buttonStyle(.borderedProminent)
+                .disabled(true)
         }
     }
 }
