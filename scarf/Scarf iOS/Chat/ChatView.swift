@@ -49,6 +49,21 @@ struct ChatView: View {
         .navigationTitle("Chat")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            // Principal: "Chat" title + small folder chip below when
+            // the current session is project-attributed. iOS-native
+            // equivalent of Mac's SessionInfoBar project-chip pattern.
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 1) {
+                    Text("Chat")
+                        .font(.headline)
+                    if let projectName = controller.currentProjectName {
+                        Label(projectName, systemImage: "folder.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.tint)
+                            .lineLimit(1)
+                    }
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showProjectPicker = true
@@ -357,6 +372,13 @@ final class ChatController {
     private(set) var state: State = .idle
     var vm: RichChatViewModel
     var draft: String = ""
+    /// Display name of the Scarf project this session is scoped to,
+    /// or nil for "quick chat" / global sessions. Surfaced as a
+    /// subtitle under the "Chat" title in the nav bar so users can
+    /// see at a glance which project the agent is operating inside.
+    /// Set by `resetAndStartInProject` and by `startResuming` when
+    /// the resumed session is attributed to a registered project.
+    private(set) var currentProjectName: String?
 
     private let context: ServerContext
     private var client: ACPClient?
@@ -475,6 +497,7 @@ final class ChatController {
     func resetAndStartNewSession() async {
         await stop()
         vm.reset()
+        currentProjectName = nil
         await start()
     }
 
@@ -486,6 +509,7 @@ final class ChatController {
     func resetAndStartInProject(_ project: ProjectEntry) async {
         await stop()
         vm.reset()
+        currentProjectName = project.name
         // Write the context block first. Non-fatal on failure — chat
         // still starts, just without the managed block; the user sees
         // the error via controller.state if it escalates.
@@ -595,6 +619,19 @@ final class ChatController {
     func startResuming(sessionID: String) async {
         await stop()
         vm.reset()
+        // Resolve the project name for this session (if any) via the
+        // attribution sidecar + project registry. Set BEFORE the ACP
+        // handshake so the nav-bar subtitle is visible the moment the
+        // "Connecting…" overlay disappears. Run off-thread so we
+        // don't block while the SFTP reads happen.
+        let ctx = context
+        currentProjectName = await Task.detached {
+            let attribution = SessionAttributionService(context: ctx)
+            guard let path = attribution.projectPath(for: sessionID) else { return nil }
+            let registry = ProjectDashboardService(context: ctx).loadRegistry()
+            return registry.projects.first(where: { $0.path == path })?.name
+        }.value
+
         state = .connecting
         let client = ACPClient.forIOSApp(
             context: context,

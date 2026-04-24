@@ -89,6 +89,22 @@ struct DashboardView: View {
                                                 .foregroundStyle(.secondary)
                                         }
                                     }
+                                    // Project chip — only shows for
+                                    // attributed sessions. Small + tinted
+                                    // so it pops without dominating the
+                                    // row. Pass-2 UX recommendation:
+                                    // users wanted to see at a glance
+                                    // which project each session
+                                    // belongs to.
+                                    if let projectName = vm.projectName(for: session) {
+                                        Label(projectName, systemImage: "folder.fill")
+                                            .font(.caption2)
+                                            .foregroundStyle(.tint)
+                                            .labelStyle(.titleAndIcon)
+                                            .padding(.vertical, 2)
+                                            .padding(.horizontal, 6)
+                                            .background(.tint.opacity(0.12), in: Capsule())
+                                    }
                                 }
                                 .padding(.vertical, 2)
                                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -32,6 +32,13 @@ public final class IOSDashboardViewModel {
     public var sessionPreviews: [String: String] = [:]
     public var isLoading: Bool = true
 
+    /// session-id → project display name, for sessions attributed to
+    /// a registered Scarf project. Populated in `load()` by a single
+    /// SFTP read of `session_project_map.json` + the project registry;
+    /// subsequent row renders are O(1) dict lookups. Empty when no
+    /// sessions on screen are attributed.
+    public private(set) var sessionProjectNames: [String: String] = [:]
+
     /// Surfaced when the SQLite snapshot or DB open fails. Shown in a
     /// yellow banner above the stats with a "Retry" button. `nil` means
     /// the last load was healthy.
@@ -58,8 +65,39 @@ public final class IOSDashboardViewModel {
         recentSessions = await dataService.fetchSessions(limit: 5)
         sessionPreviews = await dataService.fetchSessionPreviews(limit: 5)
 
+        // Attribution lookup (pass-2 UX): load the session→project
+        // sidecar + project registry once so Dashboard rows can show
+        // which project each session belongs to. Batched (not per-row)
+        // so we don't pay a SFTP round-trip for every Recent Sessions
+        // cell. Failure is silent — the absence of project labels is
+        // a cosmetic degradation, not a data-loss problem.
+        let ctx = context
+        let attributions: [String: String] = await Task.detached {
+            let attribution = SessionAttributionService(context: ctx)
+            let projectRegistry = ProjectDashboardService(context: ctx).loadRegistry()
+            let pathToName = Dictionary(
+                uniqueKeysWithValues: projectRegistry.projects.map { ($0.path, $0.name) }
+            )
+            let map = attribution.load().mappings
+            var result: [String: String] = [:]
+            for (sessionID, path) in map {
+                if let name = pathToName[path] {
+                    result[sessionID] = name
+                }
+            }
+            return result
+        }.value
+        sessionProjectNames = attributions
+
         await dataService.close()
         isLoading = false
+    }
+
+    /// Helper used by DashboardView rows. Returns the project display
+    /// name a session is attributed to, or nil for unattributed
+    /// sessions (CLI-started, or started before v2.3).
+    public func projectName(for session: HermesSession) -> String? {
+        sessionProjectNames[session.id]
     }
 
     /// Called from the pull-to-refresh gesture.
