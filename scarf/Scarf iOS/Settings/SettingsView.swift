@@ -11,6 +11,7 @@ struct SettingsView: View {
 
     @State private var vm: IOSSettingsViewModel
     @State private var showRawYAML = false
+    @State private var editingSpec: SettingSpec?
 
     private static let sharedContextID: ServerID = ServerID(
         uuidString: "00000000-0000-0000-0000-0000000000A1"
@@ -32,6 +33,7 @@ struct SettingsView: View {
             }
 
             if !vm.isLoading || vm.config.model != "unknown" {
+                quickEditsSection
                 modelSection
                 agentSection
                 displaySection
@@ -45,6 +47,7 @@ struct SettingsView: View {
                 rawYAMLToggleSection
             }
         }
+        .scarfGoListDensity()
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await vm.load() }
@@ -56,6 +59,66 @@ struct SettingsView: View {
                     .background(.regularMaterial)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }
+        }
+        .sheet(item: $editingSpec) { spec in
+            SettingEditorSheet(
+                spec: spec,
+                currentValue: currentValue(for: spec.key),
+                vm: vm,
+                onDismiss: {}
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var quickEditsSection: some View {
+        Section {
+            ForEach(SettingSpec.v1Editable) { spec in
+                Button {
+                    editingSpec = spec
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(spec.displayName)
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                            Text(currentValue(for: spec.key))
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        Spacer()
+                        Image(systemName: "square.and.pencil")
+                            .font(.caption)
+                            .foregroundStyle(.tint)
+                    }
+                }
+                .buttonStyle(.plain)
+                .scarfGoCompactListRow()
+            }
+        } header: {
+            Text("Quick edits")
+        } footer: {
+            Text("These flip common config.yaml values via `hermes config set` on the remote. Other fields below are read-only; edit them from the Mac app.")
+                .font(.caption)
+        }
+    }
+
+    /// Map a config-set key to the current value from the parsed
+    /// HermesConfig. String-based so the Picker / Stepper / Toggle in
+    /// the editor sheet can pre-fill correctly. Unknown keys return
+    /// empty string (the sheet falls back to defaults).
+    private func currentValue(for key: String) -> String {
+        switch key {
+        case "model.default": return vm.config.model
+        case "model.provider": return vm.config.provider
+        case "approvals.mode": return vm.config.approvalMode
+        case "agent.max_turns": return String(vm.config.maxTurns)
+        case "display.show_cost": return vm.config.showCost ? "true" : "false"
+        case "display.show_reasoning": return vm.config.showReasoning ? "true" : "false"
+        case "display.streaming": return vm.config.streaming ? "true" : "false"
+        default: return ""
         }
     }
 
