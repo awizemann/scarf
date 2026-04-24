@@ -48,6 +48,7 @@ struct CronListView: View {
                         } onTap: {
                             editingJob = job
                         }
+                        .scarfGoCompactListRow()
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
                                 Task { await vm.delete(id: job.id) }
@@ -59,6 +60,7 @@ struct CronListView: View {
                 }
             }
         }
+        .scarfGoListDensity()
         .navigationTitle("Cron jobs")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

@@ -87,6 +87,7 @@ struct DashboardView: View {
                 }
 
         }
+        .scarfGoListDensity()
         .navigationTitle(config.displayName)
         .navigationBarTitleDisplayMode(.large)
         .refreshable {

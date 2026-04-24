@@ -111,16 +111,19 @@ private struct MoreTab: View {
                 } label: {
                     Label("Cron jobs", systemImage: "clock.arrow.circlepath")
                 }
+                .scarfGoCompactListRow()
                 NavigationLink {
                     SkillsListView(config: config)
                 } label: {
                     Label("Skills", systemImage: "sparkles")
                 }
+                .scarfGoCompactListRow()
                 NavigationLink {
                     SettingsView(config: config)
                 } label: {
                     Label("Settings", systemImage: "gearshape.fill")
                 }
+                .scarfGoCompactListRow()
             }
 
             Section {
@@ -143,6 +146,7 @@ private struct MoreTab: View {
                     .font(.caption)
             }
         }
+        .scarfGoListDensity()
         .navigationTitle("More")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(

@@ -54,11 +54,13 @@ struct SkillsListView: View {
                                         .foregroundStyle(.secondary)
                                 }
                             }
+                            .scarfGoCompactListRow()
                         }
                     }
                 }
             }
         }
+        .scarfGoListDensity()
         .navigationTitle("Skills")
         .navigationBarTitleDisplayMode(.inline)
         .overlay {

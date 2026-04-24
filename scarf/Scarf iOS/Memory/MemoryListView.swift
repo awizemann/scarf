@@ -19,13 +19,17 @@ struct MemoryListView: View {
         List {
             Section {
                 memoryRow(.memory, context: ctx)
+                    .scarfGoCompactListRow()
                 memoryRow(.user, context: ctx)
+                    .scarfGoCompactListRow()
                 memoryRow(.soul, context: ctx)
+                    .scarfGoCompactListRow()
             } footer: {
                 Text("MEMORY.md and USER.md live under `~/.hermes/memories/`. SOUL.md lives at `~/.hermes/SOUL.md`.")
                     .font(.caption)
             }
         }
+        .scarfGoListDensity()
         .navigationTitle("Memory")
         .navigationBarTitleDisplayMode(.inline)
     }
