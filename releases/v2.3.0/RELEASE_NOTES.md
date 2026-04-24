@@ -1,6 +1,6 @@
 ## What's New in 2.3.0
 
-The projects sidebar stops being a flat list and becomes a workspace. Folders, rename + archive + search + keyboard jumps, a per-project Sessions tab with a one-click New Chat button, and — the big architectural piece — every project-scoped chat now automatically carries Scarf-managed context into the agent itself, so the agent knows what project it's operating in without any user prompting.
+Two themes land together in this release. The projects sidebar stops being a flat list and becomes a workspace — folders, rename + archive + search + keyboard jumps, a per-project Sessions tab, and every project-scoped chat now automatically carries Scarf-managed context into the agent itself. And Scarf catches up to **Hermes v0.10.0's Tool Gateway**: paid Nous Portal subscribers can now route web search, image generation, TTS, and browser automation through their subscription without separate API keys — and they can sign in entirely from Scarf, no terminal needed.
 
 ### Projects sidebar grows up
 
@@ -81,11 +81,27 @@ Window now stays at a user-draggable size and persists across section switches.
 - New view models: `ProjectSessionsViewModel` (per-project session list with attribution filter), `ChatViewModel` gains `currentProjectPath` + `currentProjectName`.
 - `HermesFileWatcher` now watches the attribution sidecar — file-system events propagate through the VMs as they do for every other Scarf-written file.
 - `ProjectsViewModel` gains `moveProject / renameProject / archiveProject / unarchiveProject / folders` — rename preserves selection; archive clears it; reorders driven by `localizedCaseInsensitiveCompare` for locale-aware ordering.
-- **22 new Swift tests** across `ProjectRegistryMigrationTests`, `ProjectsViewModelTests`, `SessionAttributionServiceTests`, `ProjectAgentContextServiceTests`. Total: 93 tests.
+- **Tool Gateway services.** `NousSubscriptionService` reads `~/.hermes/auth.json` to detect the subscription state. `NousAuthFlow` spawns `hermes auth add nous --no-browser` (with `PYTHONUNBUFFERED=1` so the device-code block surfaces immediately — Python block-buffers otherwise), parses the verification URL + user code with two line-anchored regexes, auto-opens the approval page via `NSWorkspace`, and confirms success by re-reading `auth.json`. `NousSignInSheet` drives the four-state UI (starting / waiting-for-approval / success / failure-with-billing-link). `CredentialPoolsOAuthGate` is the testable helper that routes providers to the right OAuth flow based on their overlay auth-type.
+- **Catalog overlay merge.** `ModelCatalogService` gains a static `overlayOnlyProviders` table mirroring the 6 entries from `HERMES_OVERLAYS` in `hermes-agent/hermes_cli/providers.py`. `HermesProviderInfo` carries `isOverlay` and `subscriptionGated` flags so the picker can render them distinctly.
+- **Config parsing.** `HermesConfig` gains `platformToolsets: [String: [String]]`; `HermesFileService` parses the `platform_toolsets.<platform>` block from `config.yaml` as written by `hermes setup tools`.
+- **36 new Swift tests** across `ProjectRegistryMigrationTests`, `ProjectsViewModelTests`, `SessionAttributionServiceTests`, `ProjectAgentContextServiceTests` (22 for v2.3 projects work) + `ToolGatewayTests`, `NousAuthFlowParserTests`, `CredentialPoolsGatingTests` (14 for Tool Gateway). Total: 120 tests, all green against v2.3-projects + Tool Gateway combined.
 
 ### Icon tweak
 
 App icon files renamed from iOS-template suffixes to macOS-native filenames + paired `Contents.json` update. Pure naming; no visual change at any rendered size.
+
+### Tool Gateway — Nous Portal support
+
+Hermes v0.10.0 introduced a **Tool Gateway**: paid [Nous Portal](https://portal.nousresearch.com) subscribers route web search (Firecrawl), image generation (FAL / FLUX 2 Pro), text-to-speech (OpenAI TTS), and browser automation (Browser Use) through their subscription. No separate API keys, no credential pool juggling. Scarf 2.3 surfaces the whole flow natively.
+
+- **Nous Portal appears in the model picker.** Our picker used to read only the models.dev cache, which doesn't list Nous — so it was invisible. Scarf now merges Hermes's `HERMES_OVERLAYS` table on top of the cache, surfacing **six previously-hidden providers**: Nous Portal, OpenAI Codex, Qwen OAuth, Google Gemini CLI, GitHub Copilot ACP, and Arcee. Subscription-gated providers sort first, with a **Subscription** pill so they're visually distinct from BYO-key providers.
+- **In-app sign-in.** Click *Sign in to Nous Portal* in the picker (or in the Auxiliary tab's fallback, or Credential Pools for the `nous` provider) and Scarf runs the device-code flow: opens the approval page in your browser, shows the device code in a large monospaced badge you can copy, and auto-detects success by re-reading `~/.hermes/auth.json`. No six-step terminal dance. Subscription-required failures surface a **Subscribe** button that opens the portal's billing page directly.
+- **Per-task gateway routing.** The Auxiliary tab's 8 sub-model tasks (vision, web_extract, compression, session_search, skills_hub, approval, mcp, flush_memories) each gain a "Nous Portal" toggle. Enabling it flips `auxiliary.<task>.provider` to `nous` — Hermes derives gateway routing from that, no separate `use_gateway` key needed.
+- **Health surface.** A new **Tool Gateway** card in Health shows subscription state, `platform_toolsets` wiring, and which aux tasks are currently routed through Nous.
+- **Credential Pools dead-end fixed.** Before: selecting `nous` in the Add Credential sheet and clicking *Start OAuth* silently stalled (the PKCE URL regex never matched the device-code output). Now the sheet detects Nous and routes to the dedicated sign-in flow. For the other non-PKCE providers (OpenAI Codex, Qwen OAuth, Google Gemini CLI, GitHub Copilot ACP), the button disables with an inline hint pointing to `hermes auth add <provider>` — no more silent failures. PKCE providers (Anthropic, etc.) behave exactly as before.
+- **Messaging Gateway rename.** Scarf's pre-existing "Gateway" section (Slack / Discord / inbound messaging) is renamed throughout to **Messaging Gateway** to disambiguate from the new Tool Gateway. Same feature, clearer name. Sidebar, dashboard card, menu-bar status, log-source filter, and Settings → Agent section header all updated. Internal enum cases and file paths (`gateway_state.json`, `gateway.log`) are unchanged.
+
+If you don't use Hermes v0.10.0 or don't have a Nous subscription, nothing in your flow changes — the Tool Gateway surface only activates when it's relevant. Sign-in state reads `~/.hermes/auth.json` in read-only mode; Scarf never writes to the credential file.
 
 ### Migrating from 2.2.x
 
@@ -93,10 +109,14 @@ Sparkle will offer the update automatically. No config migration needed. Existin
 
 If you had any chat sessions attributed to projects in a pre-release v2.3 build, the forward-only attribution model means those sidecar entries surface correctly in the new Sessions tab on first launch.
 
+**Hermes version.** The Tool Gateway features target [Hermes v0.10.0](https://github.com/NousResearch/hermes-agent/releases/tag/v2026.4.16) or newer. If you're on v0.9.0 the rest of Scarf 2.3 works, but Nous Portal won't appear in the picker (it's sourced from `HERMES_OVERLAYS` in v0.10.0+) and the Tool Gateway card won't have subscription data to show. Updating Hermes is `pipx upgrade hermes-agent` or the equivalent for your install method.
+
 ### Documentation
 
 - **[Project Templates wiki page](https://github.com/awizemann/scarf/wiki/Project-Templates)** — gained a "How the agent sees the project" section covering the AGENTS.md injection pattern.
-- **Root `CLAUDE.md`** — new subsection "Project-scoped chat + Scarf-managed AGENTS.md context (v2.3)" under Project Templates, covering the sidecar, the marker contract, invariants, and the template-author contract.
+- **[Hermes Version Compatibility](https://github.com/awizemann/scarf/wiki/Hermes-Version-Compatibility)** — bumped recommended minimum to v0.10.0, new subsection covering Tool Gateway feature gating.
+- **[Core Services](https://github.com/awizemann/scarf/wiki/Core-Services)** — new rows for `NousSubscriptionService` and `NousAuthFlow`, updated `ModelCatalogService` entry noting overlay merge.
+- **Root `CLAUDE.md`** — new subsection "Project-scoped chat + Scarf-managed AGENTS.md context (v2.3)" under Project Templates, plus the Tool Gateway subsection under Hermes Version covering the overlay table and per-task gateway contract.
 - **`scarf-template-author` skill** — pitfall bullet added so future scaffolding agents preserve the marker region when authoring new templates.
 
 ### Thanks
