@@ -219,6 +219,13 @@ extension ServerContext {
     public static func invalidateCaches(for contextID: ServerID) async {
         await UserHomeCache.shared.invalidate(contextID: contextID)
     }
+
+    /// Static convenience for callers that have the ServerID but not
+    /// a full ServerContext (e.g. RootModel.softDisconnect). Mirrors
+    /// the instance method above.
+    public static func invalidateCachedHome(forServerID id: ServerID) async {
+        await UserHomeCache.shared.invalidate(contextID: id)
+    }
 }
 
 // MARK: - Convenience file I/O via the right transport

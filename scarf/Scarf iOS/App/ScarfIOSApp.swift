@@ -182,14 +182,19 @@ final class RootModel {
         state = .connected(id, config, key)
     }
 
-    /// Soft disconnect: close any live transport but keep stored
-    /// credentials. Returns to the server list so the user can tap
-    /// another server (or the same one again).
+    /// Soft disconnect: return to the server list without wiping
+    /// credentials. Per-view controllers (ChatController,
+    /// IOSDashboardViewModel, etc.) tear down their transports via
+    /// SwiftUI `.onDisappear` when ScarfGoTabRoot unmounts; on next
+    /// connect we get fresh transports. We also flush the shared
+    /// UserHomeCache entry for the server we're leaving so a future
+    /// reconnect doesn't reuse a stale `$HOME` probe (minor, but
+    /// matters if the remote user's home directory changed — rare
+    /// but possible on shared hosts).
     func softDisconnect() async {
-        // Transport teardown is owned by ConnectedServerRegistry
-        // (added in 3.3); for now the per-view controllers own their
-        // own lifecycles via .onDisappear, so this is mostly a state
-        // change. The registry commit will thread through here.
+        if case .connected(let id, _, _) = state {
+            await ServerContext.invalidateCachedHome(forServerID: id)
+        }
         state = .serverList
     }
 
