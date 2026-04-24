@@ -128,20 +128,12 @@ private struct CronRow: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 4))
                         }
                     }
-                    if let schedule = job.schedule.display, !schedule.isEmpty {
-                        Text(schedule)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else if !job.schedule.kind.isEmpty {
-                        Text(job.schedule.kind)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let nextRun = job.nextRunAt {
-                        Text("Next: \(nextRun)")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
+                    Text(CronScheduleFormatter.humanReadable(from: job.schedule))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Next: \(CronScheduleFormatter.formatNextRun(iso: job.nextRunAt))")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }

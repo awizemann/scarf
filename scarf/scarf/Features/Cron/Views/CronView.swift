@@ -107,7 +107,7 @@ struct CronView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(job.name)
                                 .lineLimit(1)
-                            Text(job.schedule.display ?? job.schedule.kind)
+                            Text(CronScheduleFormatter.humanReadable(from: job.schedule))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -173,7 +173,7 @@ struct CronView: View {
                 .font(.title2.bold())
             HStack(spacing: 16) {
                 Label(job.state, systemImage: job.stateIcon)
-                Label(job.schedule.display ?? job.schedule.kind, systemImage: "clock")
+                Label(CronScheduleFormatter.humanReadable(from: job.schedule), systemImage: "clock")
                 Label(job.enabled ? "Enabled" : "Disabled", systemImage: job.enabled ? "checkmark.circle" : "xmark.circle")
                 if let deliver = job.deliveryDisplay {
                     Label("Deliver: \(deliver)", systemImage: "paperplane")
@@ -255,15 +255,21 @@ struct CronView: View {
                 }
             }
         }
-        if let nextRun = job.nextRunAt {
-            Label("Next run: \(nextRun)", systemImage: "arrow.forward.circle")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        if job.nextRunAt != nil {
+            Label(
+                "Next run: \(CronScheduleFormatter.formatNextRun(iso: job.nextRunAt))",
+                systemImage: "arrow.forward.circle"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
-        if let lastRun = job.lastRunAt {
-            Label("Last run: \(lastRun)", systemImage: "arrow.backward.circle")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        if job.lastRunAt != nil {
+            Label(
+                "Last run: \(CronScheduleFormatter.formatNextRun(iso: job.lastRunAt))",
+                systemImage: "arrow.backward.circle"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
         if let error = job.lastError {
             Label(error, systemImage: "exclamationmark.triangle")
