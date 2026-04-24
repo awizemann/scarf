@@ -120,7 +120,19 @@ public final class RichChatViewModel {
     /// Populate the error triplet from a thrown Error + the ACPClient
     /// we can query for recent stderr. Safe to call from anywhere
     /// that catches an ACP op failure.
+    ///
+    /// Swallows `CancellationError` silently — it's how Swift's task
+    /// tree signals cooperative cleanup (e.g. when startResuming
+    /// tears down a prior live session via stop(), the event-task
+    /// awaits throw as they unwind). That's expected plumbing, not a
+    /// user-visible failure — showing "The operation couldn't be
+    /// completed (Swift.CancellationError)" in the chat banner would
+    /// alarm users whose session actually loaded fine. Pass-2 UX fix.
     public func recordACPFailure(_ error: Error, client: ACPClient?) async {
+        if error is CancellationError { return }
+        if (error as NSError).domain == NSURLErrorDomain, (error as NSError).code == NSURLErrorCancelled {
+            return
+        }
         let msg = error.localizedDescription
         let stderrTail = await client?.recentStderr ?? ""
         let hint = ACPErrorHint.classify(errorMessage: msg, stderrTail: stderrTail)
