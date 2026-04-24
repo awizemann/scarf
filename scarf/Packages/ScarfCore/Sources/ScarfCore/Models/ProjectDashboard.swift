@@ -17,15 +17,51 @@ public struct ProjectEntry: Codable, Sendable, Identifiable, Hashable {
     public let name: String
     public let path: String
 
+    /// Folder path for sidebar grouping. `nil` means top-level.
+    /// v2.3 registry schema v2; v2.2 files decode cleanly as `nil`.
+    public var folder: String?
+
+    /// Soft-archive flag. Archived projects are hidden from the sidebar
+    /// by default; non-destructive. v2.3 schema v2; defaults to `false`.
+    public var archived: Bool
 
     public init(
         name: String,
-        path: String
+        path: String,
+        folder: String? = nil,
+        archived: Bool = false
     ) {
         self.name = name
         self.path = path
+        self.folder = folder
+        self.archived = archived
     }
+
     public var dashboardPath: String { path + "/.scarf/dashboard.json" }
+
+    // MARK: - Codable (custom for backward compat)
+
+    private enum CodingKeys: String, CodingKey {
+        case name, path, folder, archived
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.path = try c.decode(String.self, forKey: .path)
+        self.folder = try c.decodeIfPresent(String.self, forKey: .folder)
+        self.archived = try c.decodeIfPresent(Bool.self, forKey: .archived) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(name, forKey: .name)
+        try c.encode(path, forKey: .path)
+        try c.encodeIfPresent(folder, forKey: .folder)
+        if archived {
+            try c.encode(archived, forKey: .archived)
+        }
+    }
 }
 
 // MARK: - Dashboard

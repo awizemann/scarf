@@ -5,11 +5,21 @@ import UniformTypeIdentifiers
 private enum DashboardTab: String, CaseIterable {
     case dashboard = "Dashboard"
     case site = "Site"
+    case sessions = "Sessions"
 
     var displayName: LocalizedStringResource {
         switch self {
         case .dashboard: return "Dashboard"
         case .site: return "Site"
+        case .sessions: return "Sessions"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .dashboard: return "square.grid.2x2"
+        case .site: return "globe"
+        case .sessions: return "bubble.left.and.bubble.right"
         }
     }
 }
@@ -34,6 +44,16 @@ struct ProjectsView: View {
     /// flag) so the dialog's action closure knows which project to
     /// drop from the registry.
     @State private var pendingRemoveFromList: ProjectEntry?
+
+    /// Project queued for the rename sheet (v2.3). Sheet state lives
+    /// on the parent view so the sidebar stays a pure presentation
+    /// layer; rename logic routes through `ProjectsViewModel.renameProject`.
+    @State private var renameTarget: ProjectEntry?
+
+    /// Project queued for the move-to-folder sheet (v2.3). Same
+    /// pattern as renameTarget: parent owns sheet state, sidebar
+    /// delegates up.
+    @State private var moveTarget: ProjectEntry?
 
     private let uninstaller: ProjectTemplateUninstaller
 
@@ -264,77 +284,45 @@ struct ProjectsView: View {
     // MARK: - Project List
 
     private var projectList: some View {
-        VStack(spacing: 0) {
-            List(viewModel.projects, selection: Binding(
-                get: { viewModel.selectedProject },
-                set: { project in
-                    if let project {
-                        viewModel.selectProject(project)
-                    }
-                }
-            )) { project in
-                HStack {
-                    Image(systemName: viewModel.dashboard != nil && viewModel.selectedProject == project
-                          ? "square.grid.2x2.fill" : "square.grid.2x2")
-                        .foregroundStyle(.secondary)
-                    Text(project.name)
-                }
-                .tag(project)
-                .contextMenu {
-                    if isConfigurable(project) {
-                        Button("Configuration…", systemImage: "slider.horizontal.3") {
-                            configEditorProject = project
-                        }
-                    }
-                    if uninstaller.isTemplateInstalled(project: project) {
-                        // "Uninstall Template…" only appears for projects
-                        // installed from a `.scarftemplate`. Trailing
-                        // ellipsis signals a confirmation sheet follows
-                        // (macOS HIG convention); the sheet itself lists
-                        // every file/cron/skill that will be removed.
-                        Button("Uninstall Template (remove installed files)…", systemImage: "trash") {
-                            uninstallerViewModel.begin(project: project)
-                            showingUninstallSheet = true
-                        }
-                        Divider()
-                    }
-                    // "Remove from List" used to be "Remove from Scarf",
-                    // which users read as a full delete. Clarified label +
-                    // ellipsis + confirmation dialog all spell out that
-                    // this is registry-only; nothing on disk is touched.
-                    Button("Remove from List (keep files)…", systemImage: "minus.circle") {
-                        pendingRemoveFromList = project
-                    }
-                }
-            }
-            .listStyle(.sidebar)
-
-            Divider()
-            HStack {
-                Button(action: { showingAddSheet = true }) {
-                    Image(systemName: "plus")
-                }
-                .buttonStyle(.borderless)
-                Spacer()
-                if let selected = viewModel.selectedProject {
-                    // Route through the same confirmation dialog as the
-                    // context-menu "Remove from List" entry. The minus
-                    // icon is a drive-by click target right next to "+" —
-                    // confirming before mutating the registry stops the
-                    // "I clicked by accident and my project's gone" case.
-                    Button(action: { pendingRemoveFromList = selected }) {
-                        Image(systemName: "minus")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Remove \(selected.name) from Scarf's project list (files are kept on disk)")
-                }
-            }
-            .padding(8)
-        }
+        // Sidebar is an extracted view; this view stays the owner of
+        // sheet state (add / rename / move / uninstall / remove-from-
+        // list confirmation) and routes intents down as closures.
+        ProjectsSidebar(
+            viewModel: viewModel,
+            canConfigureProject: { isConfigurable($0) },
+            isTemplateInstalled: { uninstaller.isTemplateInstalled(project: $0) },
+            onConfigure: { configEditorProject = $0 },
+            onUninstallTemplate: { project in
+                uninstallerViewModel.begin(project: project)
+                showingUninstallSheet = true
+            },
+            onRemoveFromList: { pendingRemoveFromList = $0 },
+            onRename: { renameTarget = $0 },
+            onMoveToFolder: { moveTarget = $0 },
+            onAddProject: { showingAddSheet = true }
+        )
         .sheet(isPresented: $showingAddSheet) {
             AddProjectSheet { name, path in
                 viewModel.addProject(name: name, path: path)
                 fileWatcher.updateProjectWatches(viewModel.dashboardPaths)
+            }
+        }
+        .sheet(item: $renameTarget) { target in
+            RenameProjectSheet(
+                project: target,
+                existingNames: viewModel.projects
+                    .filter { $0.name != target.name }
+                    .map(\.name)
+            ) { newName in
+                viewModel.renameProject(target, to: newName)
+            }
+        }
+        .sheet(item: $moveTarget) { target in
+            MoveToFolderSheet(
+                project: target,
+                existingFolders: viewModel.folders
+            ) { newFolder in
+                viewModel.moveProject(target, toFolder: newFolder)
             }
         }
     }
@@ -356,11 +344,13 @@ struct ProjectsView: View {
                     .padding(.horizontal)
                     .padding(.top)
                     .padding(.bottom, 8)
-                if siteWidget != nil {
-                    tabBar
-                        .padding(.horizontal)
-                        .padding(.bottom, 8)
-                }
+                // Sessions tab is always present in v2.3, so the tab
+                // bar always renders when a dashboard is loaded.
+                // Site tab filters out when there's no webview widget
+                // (existing v2.2 behavior preserved).
+                tabBar
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
                 switch selectedTab {
                 case .dashboard:
                     widgetsTab(dashboard)
@@ -370,8 +360,24 @@ struct ProjectsView: View {
                     } else {
                         widgetsTab(dashboard)
                     }
+                case .sessions:
+                    if let project = viewModel.selectedProject {
+                        ProjectSessionsView(project: project)
+                    } else {
+                        ContentUnavailableView("No project selected", systemImage: "bubble.left.and.bubble.right")
+                    }
                 }
             }
+            // Clamp the container VStack to the detail column's
+            // offered space. Without it, any tab whose content is
+            // taller than the window (long Sessions list, tall
+            // README block in a dashboard's text widget, etc.) can
+            // bubble its intrinsic height up through
+            // NavigationSplitView's detail slot and push the whole
+            // window past the screen. widgetsTab's own ScrollView
+            // and siteTab's explicit maxHeight both cooperate; the
+            // sessions tab needs this as well.
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let error = viewModel.dashboardError {
             ContentUnavailableView {
                 Label("No Dashboard", systemImage: "square.grid.2x2")
@@ -395,14 +401,23 @@ struct ProjectsView: View {
         }
     }
 
+    /// Tabs that should appear for the current project. `.site` is
+    /// gated on the dashboard actually containing a webview widget,
+    /// per v2.2 behavior — the Site tab is meaningless without one.
+    private var visibleTabs: [DashboardTab] {
+        DashboardTab.allCases.filter { tab in
+            tab != .site || siteWidget != nil
+        }
+    }
+
     private var tabBar: some View {
         HStack(spacing: 0) {
-            ForEach(DashboardTab.allCases, id: \.self) { tab in
+            ForEach(visibleTabs, id: \.self) { tab in
                 Button {
                     selectedTab = tab
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: tab == .dashboard ? "square.grid.2x2" : "globe")
+                        Image(systemName: tab.systemImage)
                             .font(.caption)
                         Text(tab.displayName)
                             .font(.subheadline)

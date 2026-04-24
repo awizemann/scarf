@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct SidebarView: View {
     @Environment(AppCoordinator.self) private var coordinator

@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// Display tab — streaming, reasoning, cost, skin, compact mode, inline diffs, bell, etc.
 struct DisplayTab: View {

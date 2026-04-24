@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// Browser tab — browser backend + automation timeouts + camofox.
 struct BrowserTab: View {

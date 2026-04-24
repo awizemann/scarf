@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import ScarfCore
 
 /// Author-facing sheet for exporting an existing project as a
 /// `.scarftemplate`. Mirrors the profile-export flow: fill in a few fields,

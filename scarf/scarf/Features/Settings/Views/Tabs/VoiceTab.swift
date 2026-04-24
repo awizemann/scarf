@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// Voice tab — push-to-talk + TTS + STT provider settings.
 struct VoiceTab: View {

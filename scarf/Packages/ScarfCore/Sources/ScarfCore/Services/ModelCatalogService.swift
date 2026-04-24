@@ -70,19 +70,32 @@ public struct HermesProviderInfo: Sendable, Identifiable, Hashable {
     public let envVars: [String]       // e.g. ["ANTHROPIC_API_KEY"]
     public let docURL: String?
     public let modelCount: Int
+    /// True when this provider is surfaced only by the Hermes overlay list —
+    /// i.e. no entry in `models_dev_cache.json`. The picker renders a
+    /// different right-column affordance (subscription CTA or free-form
+    /// model entry).
+    public let isOverlay: Bool
+    /// True for providers whose tool access is subscription-gated rather
+    /// than BYO API key. Nous Portal is the only such provider as of
+    /// hermes-agent v0.10.0.
+    public let subscriptionGated: Bool
 
     public init(
         providerID: String,
         providerName: String,
         envVars: [String],
         docURL: String?,
-        modelCount: Int
+        modelCount: Int,
+        isOverlay: Bool = false,
+        subscriptionGated: Bool = false
     ) {
         self.providerID = providerID
         self.providerName = providerName
         self.envVars = envVars
         self.docURL = docURL
         self.modelCount = modelCount
+        self.isOverlay = isOverlay
+        self.subscriptionGated = subscriptionGated
     }
 }
 
@@ -111,20 +124,49 @@ public struct ModelCatalogService: Sendable {
         self.transport = LocalTransport()
     }
 
-    /// All providers, sorted by display name.
+    /// All providers, sorted with subscription-gated providers first (Nous
+    /// Portal), then alphabetical by display name. Merges the models.dev
+    /// cache with `Self.overlayOnlyProviders` so Hermes-injected providers
+    /// (Nous Portal, OpenAI Codex, …) appear in the picker even when
+    /// they're absent from `models_dev_cache.json`.
     public func loadProviders() -> [HermesProviderInfo] {
-        guard let catalog = loadCatalog() else { return [] }
-        return catalog
-            .map { (id, p) in
-                HermesProviderInfo(
-                    providerID: id,
-                    providerName: p.name ?? id,
-                    envVars: p.env ?? [],
-                    docURL: p.doc,
-                    modelCount: p.models?.count ?? 0
-                )
+        let catalog = loadCatalog() ?? [:]
+        var byID: [String: HermesProviderInfo] = [:]
+        for (id, p) in catalog {
+            byID[id] = HermesProviderInfo(
+                providerID: id,
+                providerName: p.name ?? id,
+                envVars: p.env ?? [],
+                docURL: p.doc,
+                modelCount: p.models?.count ?? 0,
+                isOverlay: false,
+                subscriptionGated: false
+            )
+        }
+        for (id, overlay) in Self.overlayOnlyProviders where byID[id] == nil {
+            byID[id] = HermesProviderInfo(
+                providerID: id,
+                providerName: overlay.displayName,
+                envVars: [],
+                docURL: overlay.docURL,
+                modelCount: 0,
+                isOverlay: true,
+                subscriptionGated: overlay.subscriptionGated
+            )
+        }
+        return byID.values.sorted { lhs, rhs in
+            if lhs.subscriptionGated != rhs.subscriptionGated {
+                return lhs.subscriptionGated
             }
-            .sorted { $0.providerName.localizedCaseInsensitiveCompare($1.providerName) == .orderedAscending }
+            return lhs.providerName.localizedCaseInsensitiveCompare(rhs.providerName) == .orderedAscending
+        }
+    }
+
+    /// Overlay metadata for a provider that isn't in the models.dev catalog —
+    /// Scarf needs to surface these so the picker matches `hermes model` on
+    /// the CLI.
+    public func overlayMetadata(for providerID: String) -> HermesProviderOverlay? {
+        Self.overlayOnlyProviders[providerID]
     }
 
     /// Models for one provider, sorted by release date (newest first), then name.
@@ -167,7 +209,9 @@ public struct ModelCatalogService: Sendable {
                     providerName: p.name ?? providerID,
                     envVars: p.env ?? [],
                     docURL: p.doc,
-                    modelCount: p.models?.count ?? 0
+                    modelCount: p.models?.count ?? 0,
+                    isOverlay: false,
+                    subscriptionGated: false
                 )
             }
         }
@@ -181,9 +225,41 @@ public struct ModelCatalogService: Sendable {
                     providerName: p.name ?? prefix,
                     envVars: p.env ?? [],
                     docURL: p.doc,
-                    modelCount: p.models?.count ?? 0
+                    modelCount: p.models?.count ?? 0,
+                    isOverlay: false,
+                    subscriptionGated: false
                 )
             }
+        }
+        return nil
+    }
+
+    /// Look up a provider by ID, falling back to overlays when the cache has
+    /// no entry. Use this when resolving a stored `model.provider` to display
+    /// metadata — `nous` and other overlay-only IDs never appear in the
+    /// cache, so a plain catalog lookup returns nil for them.
+    public func providerByID(_ providerID: String) -> HermesProviderInfo? {
+        if let catalog = loadCatalog(), let p = catalog[providerID] {
+            return HermesProviderInfo(
+                providerID: providerID,
+                providerName: p.name ?? providerID,
+                envVars: p.env ?? [],
+                docURL: p.doc,
+                modelCount: p.models?.count ?? 0,
+                isOverlay: false,
+                subscriptionGated: false
+            )
+        }
+        if let overlay = Self.overlayOnlyProviders[providerID] {
+            return HermesProviderInfo(
+                providerID: providerID,
+                providerName: overlay.displayName,
+                envVars: [],
+                docURL: overlay.docURL,
+                modelCount: 0,
+                isOverlay: true,
+                subscriptionGated: overlay.subscriptionGated
+            )
         }
         return nil
     }
@@ -252,5 +328,94 @@ public struct ModelCatalogService: Sendable {
     private struct LimitEntry: Decodable {
         let context: Int?
         let output: Int?
+    }
+
+    // MARK: - Hermes overlay providers
+
+    /// The six providers Hermes surfaces via `hermes model` that have no
+    /// entry in `models_dev_cache.json` (models.dev doesn't mirror them).
+    /// Mirrors the overlay-only subset of `HERMES_OVERLAYS` in
+    /// `hermes-agent/hermes_cli/providers.py`. The other ~19 overlay entries
+    /// already ship in the cache and only add augmentation (base-URL
+    /// override, extra env vars) that Scarf doesn't currently display.
+    ///
+    /// Keep this in sync with the Python side on Hermes version bumps.
+    static let overlayOnlyProviders: [String: HermesProviderOverlay] = [
+        "nous": HermesProviderOverlay(
+            displayName: "Nous Portal",
+            baseURL: "https://inference-api.nousresearch.com/v1",
+            authType: .oauthDeviceCode,
+            subscriptionGated: true,
+            docURL: "https://hermes-agent.nousresearch.com/docs/user-guide/setup/nous-portal"
+        ),
+        "openai-codex": HermesProviderOverlay(
+            displayName: "OpenAI Codex",
+            baseURL: "https://chatgpt.com/backend-api/codex",
+            authType: .oauthExternal,
+            subscriptionGated: false,
+            docURL: nil
+        ),
+        "qwen-oauth": HermesProviderOverlay(
+            displayName: "Qwen (OAuth)",
+            baseURL: "https://portal.qwen.ai/v1",
+            authType: .oauthExternal,
+            subscriptionGated: false,
+            docURL: nil
+        ),
+        "google-gemini-cli": HermesProviderOverlay(
+            displayName: "Google Gemini CLI",
+            baseURL: "cloudcode-pa://google",
+            authType: .oauthExternal,
+            subscriptionGated: false,
+            docURL: nil
+        ),
+        "copilot-acp": HermesProviderOverlay(
+            displayName: "GitHub Copilot ACP",
+            baseURL: "acp://copilot",
+            authType: .externalProcess,
+            subscriptionGated: false,
+            docURL: nil
+        ),
+        "arcee": HermesProviderOverlay(
+            displayName: "Arcee",
+            baseURL: "https://api.arcee.ai/api/v1",
+            authType: .apiKey,
+            subscriptionGated: false,
+            docURL: nil
+        ),
+    ]
+}
+
+/// Scarf-side mirror of `HermesOverlay` from hermes-agent's
+/// `hermes_cli/providers.py`. Describes a provider that isn't in the
+/// models.dev catalog.
+public struct HermesProviderOverlay: Sendable {
+    public let displayName: String
+    public let baseURL: String?
+    public let authType: AuthType
+    /// True for providers whose tool access is subscription-gated rather than
+    /// BYO-API-key. Nous Portal is the only `true` entry today.
+    public let subscriptionGated: Bool
+    public let docURL: String?
+
+    public init(
+        displayName: String,
+        baseURL: String?,
+        authType: AuthType,
+        subscriptionGated: Bool,
+        docURL: String?
+    ) {
+        self.displayName = displayName
+        self.baseURL = baseURL
+        self.authType = authType
+        self.subscriptionGated = subscriptionGated
+        self.docURL = docURL
+    }
+
+    public enum AuthType: String, Sendable {
+        case apiKey
+        case oauthDeviceCode
+        case oauthExternal
+        case externalProcess
     }
 }

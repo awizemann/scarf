@@ -42,6 +42,20 @@ final class ChatViewModel {
     let richChatViewModel: RichChatViewModel
     private var coordinator: Coordinator?
 
+    /// Absolute project path for the current session, when the chat is
+    /// project-scoped (either started via a project's "New Chat" button
+    /// or resumed from a session that was previously attributed via the
+    /// v2.3 sidecar). Nil for plain global chats. Drives the project
+    /// indicator in SessionInfoBar + the `Chat · <Name>` nav title.
+    private(set) var currentProjectPath: String?
+
+    /// Human-readable name of the active project, resolved from the
+    /// projects registry at session-start time. Stored alongside the
+    /// path so the view renders without hitting disk on every update.
+    /// Nil when `currentProjectPath` is nil OR the path isn't in the
+    /// registry (project was removed after the session was attributed).
+    private(set) var currentProjectName: String?
+
     // ACP state
     private var acpClient: ACPClient?
     private var acpEventTask: Task<Void, Never>?
@@ -119,15 +133,20 @@ final class ChatViewModel {
 
     // MARK: - Session Lifecycle
 
-    func startNewSession() {
+    func startNewSession(projectPath: String? = nil) {
         voiceEnabled = false
         ttsEnabled = false
         isRecording = false
         richChatViewModel.reset()
 
         if displayMode == .richChat {
-            startACPSession(resume: nil)
+            startACPSession(resume: nil, projectPath: projectPath)
         } else {
+            // Terminal mode doesn't surface project attribution today —
+            // `hermes chat` uses the shell's cwd, so starting a terminal
+            // chat from a project button would require changing the
+            // shell's cwd too. Out of scope for v2.3 — Rich Chat is
+            // the primary surface for project-scoped sessions.
             launchTerminal(arguments: ["chat"])
         }
     }
@@ -290,13 +309,33 @@ final class ChatViewModel {
 
     // MARK: - ACP Session Management
 
-    private func startACPSession(resume sessionId: String?) {
+    private func startACPSession(resume sessionId: String?, projectPath: String? = nil) {
         stopACP()
         clearACPErrorState()
         acpStatus = "Starting..."
 
         let client = ACPClient.forMacApp(context: context)
         self.acpClient = client
+        let attribution = SessionAttributionService(context: context)
+
+        // If the caller passed a project path, refresh the Scarf-
+        // managed block in the project's AGENTS.md BEFORE starting
+        // ACP — Hermes auto-reads AGENTS.md at session boot, so the
+        // block has to land on disk first. Non-blocking on failure:
+        // we log and proceed without the block. Safe on bare
+        // projects (creates AGENTS.md with just the block); safe on
+        // template-installed projects (splices the block into
+        // existing AGENTS.md without touching template content).
+        if let projectPath {
+            let registry = ProjectDashboardService(context: context).loadRegistry()
+            if let project = registry.projects.first(where: { $0.path == projectPath }) {
+                do {
+                    try ProjectAgentContextService(context: context).refresh(for: project)
+                } catch {
+                    logger.warning("couldn't refresh project context block for \(project.name): \(error.localizedDescription)")
+                }
+            }
+        }
 
         Task { @MainActor in
             do {
@@ -306,7 +345,19 @@ final class ChatViewModel {
                 startACPEventLoop(client: client)
                 startHealthMonitor(client: client)
 
-                let cwd = await context.resolvedUserHome()
+                // Project-scoped chats pass the project's absolute path
+                // as cwd so Hermes tool calls and subsequent ACP ops
+                // resolve relative paths against the project's files.
+                // Falls back to the user's home (existing v2.2 behavior)
+                // when the caller didn't request a project scope.
+                // `??` can't wrap an async autoclosure, so we
+                // materialize the fallback with an if-let.
+                let cwd: String
+                if let projectPath {
+                    cwd = projectPath
+                } else {
+                    cwd = await context.resolvedUserHome()
+                }
 
                 // Mark active BEFORE setting session ID so .task(id:) sees isACPMode=true
                 // and doesn't wipe messages with a DB refresh
@@ -334,6 +385,48 @@ final class ChatViewModel {
 
                 richChatViewModel.setSessionId(resolvedSessionId)
                 acpStatus = "Connected (\(resolvedSessionId.prefix(12)))"
+
+                // Attribute this session to the project it was started
+                // under, so the per-project Sessions tab can surface it
+                // without a user action. No-op when projectPath is nil.
+                // Idempotent: re-attribution of the same pair is free.
+                if let projectPath {
+                    attribution.attribute(
+                        sessionID: resolvedSessionId,
+                        toProjectPath: projectPath
+                    )
+                }
+
+                // Resolve which project (if any) this session belongs
+                // to, so SessionInfoBar + nav title can surface it.
+                // Two inputs — use whichever is non-nil:
+                //   * `projectPath` — the caller asked for a project
+                //     scope (fresh project chat). Just-attributed;
+                //     definitely in the sidecar.
+                //   * `attribution.projectPath(for: resolvedSessionId)`
+                //     — the resumed session was previously attributed.
+                //     Covers "click an old project-attributed session
+                //     from the global Sessions sidebar / Resume menu"
+                //     where projectPath isn't known at the call site.
+                let attributedPath = projectPath
+                    ?? attribution.projectPath(for: resolvedSessionId)
+                if let path = attributedPath {
+                    // Look up a human-readable name from the projects
+                    // registry. Missing project (path in the sidecar,
+                    // project since removed) → show the path as a
+                    // fallback label so the chip still renders and the
+                    // user sees *something* rather than silently losing
+                    // the indicator.
+                    let registry = ProjectDashboardService(context: context).loadRegistry()
+                    let name = registry.projects.first(where: { $0.path == path })?.name
+                    self.currentProjectPath = path
+                    self.currentProjectName = name ?? path
+                } else {
+                    // Explicit clear on non-project sessions so the
+                    // indicator doesn't leak from a previous chat.
+                    self.currentProjectPath = nil
+                    self.currentProjectName = nil
+                }
 
                 // Refresh session list so the new ACP session appears in the Resume menu
                 await loadRecentSessions()

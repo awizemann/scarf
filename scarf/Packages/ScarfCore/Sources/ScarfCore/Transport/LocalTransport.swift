@@ -108,6 +108,11 @@ public struct LocalTransport: ServerTransport {
     // MARK: - Processes
 
     public func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+        #if os(iOS)
+        // iOS can't spawn processes. Callers on iOS use `CitadelServerTransport`
+        // (from the ScarfIOS package) instead; reaching here is a wiring bug.
+        throw TransportError.other(message: "LocalTransport.runProcess is unavailable on iOS")
+        #else
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: executable)
         proc.arguments = args
@@ -148,6 +153,7 @@ public struct LocalTransport: ServerTransport {
         try? stderrPipe.fileHandleForReading.close()
         try? stdinPipe.fileHandleForWriting.close()
         return ProcessResult(exitCode: proc.terminationStatus, stdout: out, stderr: err)
+        #endif
     }
 
     #if !os(iOS)

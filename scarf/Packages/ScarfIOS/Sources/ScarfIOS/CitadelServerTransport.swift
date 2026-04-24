@@ -302,7 +302,7 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         // Parallel to LocalTransport: no-op if the file doesn't exist.
         let exists = try await asyncFileExists(path)
         if !exists { return }
-        try await sftp.remove(atPath: path)
+        try await sftp.remove(at: path)
     }
 
     private func asyncRunProcess(

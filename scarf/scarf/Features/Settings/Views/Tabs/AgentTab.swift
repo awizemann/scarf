@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// Agent tab — turns, reasoning effort, tool use enforcement, approvals, gateway timing, service tier.
 struct AgentTab: View {
@@ -16,7 +17,7 @@ struct AgentTab: View {
             StepperRow(label: "Approval Timeout (s)", value: viewModel.config.approvalTimeout, range: 5...600, step: 5) { viewModel.setApprovalTimeout($0) }
         }
 
-        SettingsSection(title: "Gateway", icon: "antenna.radiowaves.left.and.right") {
+        SettingsSection(title: "Messaging Gateway", icon: "antenna.radiowaves.left.and.right") {
             ToggleRow(label: "Fast Mode", isOn: viewModel.config.serviceTier == "fast") { on in
                 viewModel.setServiceTier(on ? "fast" : "normal")
             }

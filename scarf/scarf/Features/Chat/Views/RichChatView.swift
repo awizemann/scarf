@@ -18,7 +18,13 @@ struct RichChatView: View {
                 isWorking: richChat.isAgentWorking,
                 acpInputTokens: richChat.acpInputTokens,
                 acpOutputTokens: richChat.acpOutputTokens,
-                acpThoughtTokens: richChat.acpThoughtTokens
+                acpThoughtTokens: richChat.acpThoughtTokens,
+                // v2.3: surface the active Scarf project (if any) as
+                // a folder chip at the start of the bar. Driven by
+                // ChatViewModel.currentProjectName which is set in
+                // startACPSession on both new project chats and
+                // resumed project-attributed sessions.
+                projectName: chatViewModel.currentProjectName
             )
             Divider()
 
@@ -43,6 +49,19 @@ struct RichChatView: View {
                 showCompressButton: richChat.supportsCompress && !richChat.hasBroaderCommandMenu
             )
         }
+        // `idealHeight: 500` caps what this subtree REPORTS as its ideal
+        // height. Load-bearing: RichChatMessageList uses a plain VStack
+        // (not LazyVStack — see RichChatMessageList.swift:13-24 for the
+        // rationale) inside a ScrollView, so its natural ideal grows
+        // with message count. Under the WindowGroup's
+        // `.windowResizability(.contentMinSize)` policy, that uncapped
+        // ideal would open the window at a height that exceeds the
+        // screen on long conversations, pushing the input bar below
+        // the visible desktop. `maxHeight: .infinity` still lets the
+        // view fill any larger offered space, and `minHeight: 0`
+        // allows it to shrink freely — the ideal cap only affects the
+        // initial-size hint reported up to the window.
+        .frame(minHeight: 0, idealHeight: 500, maxHeight: .infinity)
         // DB polling fallback for terminal mode only — never overwrite ACP messages
         .onChange(of: fileWatcher.lastChangeDate) {
             if !isACPMode, !richChat.hasMessages, richChat.sessionId != nil {

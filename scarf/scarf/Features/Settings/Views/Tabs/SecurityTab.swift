@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// Security tab — redaction, command allowlist (read-only), Tirith sandbox, website blocklist, human delay.
 struct SecurityTab: View {

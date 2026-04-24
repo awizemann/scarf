@@ -627,6 +627,13 @@ public struct HermesConfig: Sendable {
     public var prefillMessagesFile: String
     public var skillsExternalDirs: [String]
 
+    /// Per-platform toolset allowlists as written by `hermes setup tools`.
+    /// Keyed by platform (`cli`, `slack`, …) to enabled toolset identifiers
+    /// (`browser`, `messaging`, `nous-tools`, …). Hermes v0.10.0's Tool
+    /// Gateway; enabling `nous-tools` here is how subscribers opt-in per
+    /// platform. Scarf reads for display; edits go through Hermes CLI.
+    public var platformToolsets: [String: [String]]
+
     // Grouped blocks
     public var display: DisplaySettings
     public var terminal: TerminalSettings
@@ -686,6 +693,7 @@ public struct HermesConfig: Sendable {
         cronWrapResponse: Bool,
         prefillMessagesFile: String,
         skillsExternalDirs: [String],
+        platformToolsets: [String: [String]],
         display: DisplaySettings,
         terminal: TerminalSettings,
         browser: BrowserSettings,
@@ -742,6 +750,7 @@ public struct HermesConfig: Sendable {
         self.cronWrapResponse = cronWrapResponse
         self.prefillMessagesFile = prefillMessagesFile
         self.skillsExternalDirs = skillsExternalDirs
+        self.platformToolsets = platformToolsets
         self.display = display
         self.terminal = terminal
         self.browser = browser
@@ -799,6 +808,7 @@ public struct HermesConfig: Sendable {
         cronWrapResponse: true,
         prefillMessagesFile: "",
         skillsExternalDirs: [],
+        platformToolsets: [:],
         display: .empty,
         terminal: .empty,
         browser: .empty,

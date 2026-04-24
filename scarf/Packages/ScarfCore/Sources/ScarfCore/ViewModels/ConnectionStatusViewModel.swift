@@ -30,15 +30,15 @@ public final class ConnectionStatusViewModel {
         case error(message: String, stderr: String)
     }
 
-    private(set) var status: Status = .idle
+    public private(set) var status: Status = .idle
     /// Timestamp of the last successful probe. Used by the UI to show how
     /// fresh the status indicator is ("just now", "2m ago"…).
-    private(set) var lastSuccess: Date?
+    public private(set) var lastSuccess: Date?
     /// Number of consecutive probe failures. Surfaced as a yellow "Reconnecting…"
     /// state for the first failure (silent retry), then promoted to red after
     /// `consecutiveFailureThreshold` failures so flaky connections don't
     /// flap the indicator on every dropped packet.
-    private(set) var consecutiveFailures = 0
+    public private(set) var consecutiveFailures = 0
     private let consecutiveFailureThreshold = 2
 
     public let context: ServerContext

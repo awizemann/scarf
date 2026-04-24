@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// Memory tab — built-in memory settings + external provider picker.
 struct MemoryTab: View {

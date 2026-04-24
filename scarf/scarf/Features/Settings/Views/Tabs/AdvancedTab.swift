@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// Advanced tab — network, compression, checkpoints, logging, delegation, file read cap,
 /// cron wrap, config diagnostics, backup/restore, paths, raw config.

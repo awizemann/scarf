@@ -24,6 +24,20 @@ struct TemplateConfigSheet: View {
             header
             Divider()
             ScrollView {
+                // `.frame(maxWidth: .infinity, alignment: .leading)` is
+                // load-bearing: without it, SwiftUI resolves width
+                // bottom-up and an unbreakable token in a child (e.g. a
+                // raw URL inside a field description rendered via
+                // AttributedString markdown) sets the whole VStack's
+                // ideal width to that token's length. ScrollView's
+                // content then exceeds the sheet's viewport, the outer
+                // `.frame(minWidth: 560)` grows to content width, and
+                // the window clips the result with labels cut off on
+                // the left + URL spilling off the right. With the
+                // explicit maxWidth, the ScrollView's offered width
+                // propagates down and the description Text's
+                // `.fixedSize(horizontal: false, vertical: true)`
+                // wraps at whitespace boundaries as intended.
                 VStack(alignment: .leading, spacing: 18) {
                     if viewModel.schema.fields.isEmpty {
                         ContentUnavailableView(
@@ -41,6 +55,7 @@ struct TemplateConfigSheet: View {
                         modelRecommendation(rec)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(20)
             }
             Divider()
@@ -117,7 +132,11 @@ struct TemplateConfigSheet: View {
                 // Inline markdown so descriptions can include
                 // `[Create one](https://…)`-style links to token
                 // generation pages, **bold** emphasis on important
-                // prerequisites, etc.
+                // prerequisites, etc. Raw URLs (not wrapped in
+                // markdown link syntax) will still render but can't
+                // word-break mid-token — keep the parent maxWidth
+                // constraint below so a rogue raw URL wraps cleanly
+                // instead of expanding the entire sheet.
                 TemplateMarkdown.inlineText(description)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -130,6 +149,12 @@ struct TemplateConfigSheet: View {
                     .foregroundStyle(.red)
             }
         }
+        // maxWidth: .infinity forces this row to span the column's
+        // full width so its internal description Text wraps instead
+        // of expanding the outer VStack when a description contains
+        // a long unbreakable token (raw URL, path, etc.). See the
+        // comment on the parent ScrollView's inner VStack.
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 8)
@@ -288,24 +313,23 @@ private struct EnumControl: View {
     let options: [TemplateConfigField.EnumOption]
     @Binding var value: String
     var body: some View {
-        // Segmented for ≤ 4 options, dropdown otherwise — fits Scarf's
-        // existing settings UI.
-        if options.count <= 4 {
-            Picker("", selection: $value) {
-                ForEach(options) { opt in
-                    Text(opt.label).tag(opt.value)
-                }
+        // Always use the default Menu picker (dropdown). An earlier
+        // version switched to `.pickerStyle(.segmented)` when
+        // `options.count ≤ 4` for a more compact look, but on macOS
+        // segmented pickers size to the intrinsic width of all their
+        // labels concatenated — they refuse offered width constraints
+        // and refuse to wrap. A schema with three long labels like
+        // "Claude Opus 4 (Recommended - Most Capable)" produced a
+        // ~650pt picker that overflowed the 560pt sheet viewport,
+        // clipping the entire form. Menu pickers respect the fieldRow's
+        // offered width and show long labels in the popup list, so the
+        // sheet can't overflow regardless of label length.
+        Picker("", selection: $value) {
+            ForEach(options) { opt in
+                Text(opt.label).tag(opt.value)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-        } else {
-            Picker("", selection: $value) {
-                ForEach(options) { opt in
-                    Text(opt.label).tag(opt.value)
-                }
-            }
-            .labelsHidden()
         }
+        .labelsHidden()
     }
 }
 

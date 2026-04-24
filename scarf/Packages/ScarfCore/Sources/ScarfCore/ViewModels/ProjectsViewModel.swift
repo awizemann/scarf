@@ -73,6 +73,88 @@ public final class ProjectsViewModel {
         }
     }
 
+    // MARK: - v2.3 registry verbs (folder / archive / rename)
+
+    /// Move a project into a folder. `nil` folder returns the project
+    /// to the top level. No-op when the target already matches.
+    public func moveProject(_ project: ProjectEntry, toFolder folder: String?) {
+        mutateEntry(project) { $0.folder = folder }
+    }
+
+    /// Rename a project. `name` is the registry's unique key + the
+    /// Identifiable id; rejects renames that would collide with an
+    /// existing project's name. Returns true on success.
+    @discardableResult
+    public func renameProject(_ project: ProjectEntry, to newName: String) -> Bool {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        guard trimmed != project.name else { return true }
+        var registry = service.loadRegistry()
+        guard !registry.projects.contains(where: { $0.name == trimmed }) else { return false }
+        guard let index = registry.projects.firstIndex(where: { $0.name == project.name }) else { return false }
+        let old = registry.projects[index]
+        registry.projects[index] = ProjectEntry(
+            name: trimmed,
+            path: old.path,
+            folder: old.folder,
+            archived: old.archived
+        )
+        do {
+            try service.saveRegistry(registry)
+        } catch {
+            logger.error("renameProject couldn't persist registry: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+        projects = registry.projects
+        if selectedProject?.name == project.name {
+            selectedProject = registry.projects[index]
+        }
+        return true
+    }
+
+    /// Soft-archive a project. Stays on disk + in the registry; the
+    /// sidebar just hides it unless `showArchived` is on.
+    public func archiveProject(_ project: ProjectEntry) {
+        mutateEntry(project) { $0.archived = true }
+        if selectedProject?.name == project.name {
+            selectedProject = nil
+            dashboard = nil
+        }
+    }
+
+    /// Restore an archived project to the default view.
+    public func unarchiveProject(_ project: ProjectEntry) {
+        mutateEntry(project) { $0.archived = false }
+    }
+
+    /// Distinct folder labels across the current project set, sorted
+    /// alphabetically. Drives the sidebar's DisclosureGroups + the
+    /// Move-to-Folder sheet's existing-folder list.
+    public var folders: [String] {
+        let set = Set(projects.compactMap(\.folder).filter { !$0.isEmpty })
+        return set.sorted()
+    }
+
+    // MARK: - Helpers
+
+    private func mutateEntry(_ project: ProjectEntry, _ mutation: (inout ProjectEntry) -> Void) {
+        var registry = service.loadRegistry()
+        guard let index = registry.projects.firstIndex(where: { $0.name == project.name }) else { return }
+        var entry = registry.projects[index]
+        mutation(&entry)
+        registry.projects[index] = entry
+        do {
+            try service.saveRegistry(registry)
+        } catch {
+            logger.error("mutateEntry couldn't persist registry for \(project.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        projects = registry.projects
+        if selectedProject?.name == project.name {
+            selectedProject = entry
+        }
+    }
+
     public func refreshDashboard() {
         guard let project = selectedProject else { return }
         loadDashboard(for: project)

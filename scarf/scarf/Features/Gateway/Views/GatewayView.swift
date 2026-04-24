@@ -20,7 +20,7 @@ struct GatewayView: View {
             .padding()
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .navigationTitle("Gateway")
+        .navigationTitle("Messaging Gateway")
         .onAppear { viewModel.load() }
         .onChange(of: fileWatcher.lastChangeDate) { viewModel.load() }
     }

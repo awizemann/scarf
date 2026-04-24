@@ -65,6 +65,10 @@ public struct HermesPathSet: Sendable, Hashable {
     public nonisolated var gatewayLog: String { home + "/logs/gateway.log" }
     public nonisolated var scarfDir: String { home + "/scarf" }
     public nonisolated var projectsRegistry: String { scarfDir + "/projects.json" }
+
+    /// Maps Hermes session IDs to the Scarf project path a chat was
+    /// started for. Scarf-owned; Hermes never touches this file.
+    public nonisolated var sessionProjectMap: String { scarfDir + "/session_project_map.json" }
     public nonisolated var mcpTokensDir: String { home + "/mcp-tokens" }
 
     // MARK: - Binary resolution

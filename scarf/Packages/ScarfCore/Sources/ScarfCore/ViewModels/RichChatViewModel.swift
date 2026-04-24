@@ -50,15 +50,15 @@ public final class RichChatViewModel {
     public var scrollTrigger = UUID()
 
     // Cumulative ACP token tracking (ACP returns tokens per prompt but DB has none)
-    private(set) var acpInputTokens = 0
-    private(set) var acpOutputTokens = 0
-    private(set) var acpThoughtTokens = 0
-    private(set) var acpCachedReadTokens = 0
+    public private(set) var acpInputTokens = 0
+    public private(set) var acpOutputTokens = 0
+    public private(set) var acpThoughtTokens = 0
+    public private(set) var acpCachedReadTokens = 0
 
     /// Slash commands advertised by the ACP server via `available_commands_update`.
-    private(set) var acpCommands: [HermesSlashCommand] = []
+    public private(set) var acpCommands: [HermesSlashCommand] = []
     /// User-defined commands parsed from `config.yaml` `quick_commands`.
-    private(set) var quickCommands: [HermesSlashCommand] = []
+    public private(set) var quickCommands: [HermesSlashCommand] = []
 
     /// Merged list, ACP-first, de-duplicated by name.
     public var availableCommands: [HermesSlashCommand] {
@@ -81,7 +81,7 @@ public final class RichChatViewModel {
     public private(set) var sessionId: String?
     /// The original CLI session ID when resuming a CLI session via ACP.
     /// Used to combine old CLI messages with new ACP messages.
-    private(set) var originSessionId: String?
+    public private(set) var originSessionId: String?
     private var nextLocalId = -1
     private var streamingAssistantText = ""
     private var streamingThinkingText = ""
@@ -253,13 +253,13 @@ public final class RichChatViewModel {
     public func loadQuickCommands() {
         let ctx = context
         Task.detached { [weak self] in
-            let loaded = QuickCommandsViewModel.loadQuickCommands(context: ctx)
-            let mapped = loaded.map { qc -> HermesSlashCommand in
-                let truncated = qc.command.count > 60
-                    ? String(qc.command.prefix(60)) + "…"
-                    : qc.command
+            let loaded = Self.loadQuickCommands(context: ctx)
+            let mapped = loaded.map { (name, command) -> HermesSlashCommand in
+                let truncated = command.count > 60
+                    ? String(command.prefix(60)) + "…"
+                    : command
                 return HermesSlashCommand(
-                    name: qc.name,
+                    name: name,
                     description: "Run: \(truncated)",
                     argumentHint: nil,
                     source: .quickCommand
@@ -269,6 +269,33 @@ public final class RichChatViewModel {
                 self?.quickCommands = mapped
             }
         }
+    }
+
+    /// Parse `quick_commands` from `<context>/config.yaml`. Returns
+    /// `[(name, command)]` for every well-formed `type: exec` entry.
+    /// Mac-side `QuickCommandsViewModel` uses a richer model + adds
+    /// an `isDangerous` check; here we only need the slash-menu
+    /// projection, so we keep the parser minimal and ScarfCore-local.
+    nonisolated static func loadQuickCommands(context: ServerContext) -> [(name: String, command: String)] {
+        guard let yaml = context.readText(context.paths.configYAML) else { return [] }
+        let parsed = HermesYAML.parseNestedYAML(yaml)
+        var byName: [String: (type: String, command: String)] = [:]
+        for (key, value) in parsed.values where key.hasPrefix("quick_commands.") {
+            let parts = key.split(separator: ".", maxSplits: 2, omittingEmptySubsequences: false)
+            guard parts.count == 3 else { continue }
+            let name = String(parts[1])
+            let field = String(parts[2])
+            var existing = byName[name] ?? (type: "exec", command: "")
+            let stripped = HermesYAML.stripYAMLQuotes(value)
+            if field == "type" { existing.type = stripped }
+            if field == "command" { existing.command = stripped }
+            byName[name] = existing
+        }
+        return byName.compactMap { (name, entry) in
+            guard entry.type == "exec", !entry.command.isEmpty else { return nil }
+            return (name: name, command: entry.command)
+        }
+        .sorted { $0.name < $1.name }
     }
 
     private func appendMessageChunk(text: String) {

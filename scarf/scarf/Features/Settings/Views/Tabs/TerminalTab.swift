@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// Terminal tab — backend plus docker/container options.
 /// Heavy docker/container settings are hidden unless a container backend is selected.

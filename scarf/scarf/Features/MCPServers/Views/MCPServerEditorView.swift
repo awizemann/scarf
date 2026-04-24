@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 struct MCPServerEditorView: View {
     @State var viewModel: MCPServerEditorViewModel

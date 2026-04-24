@@ -637,6 +637,11 @@ public struct SSHTransport: ServerTransport {
     /// SSH-specific code paths live on this type and we want all Process
     /// lifecycle in one place per transport.
     nonisolated private func runLocal(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+        #if os(iOS)
+        // iOS uses `CitadelServerTransport` instead of spawning ssh/scp
+        // binaries. Reaching here from iOS is a wiring bug.
+        throw TransportError.other(message: "SSHTransport.runLocal is unavailable on iOS")
+        #else
         ensureControlDir()
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: executable)
@@ -682,5 +687,6 @@ public struct SSHTransport: ServerTransport {
         try? stderrPipe.fileHandleForReading.close()
         try? stdinPipe.fileHandleForWriting.close()
         return ProcessResult(exitCode: proc.terminationStatus, stdout: out, stderr: err)
+        #endif
     }
 }

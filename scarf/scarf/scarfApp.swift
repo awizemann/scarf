@@ -95,6 +95,19 @@ struct ScarfApp: App {
             registry.defaultServerID
         }
         .defaultSize(width: 1100, height: 700)
+        // Without an explicit resizability, `WindowGroup` defaults to
+        // `.automatic` which on macOS evaluates to `.contentSize` —
+        // meaning the window is BOUND to its content's ideal size
+        // rather than bounded-below by it. Any section whose content's
+        // intrinsic height changes (Chat's message list, the v2.3
+        // per-project Sessions tab, Insights charts) would resize the
+        // window on every section switch, snap back against user
+        // resize, and sometimes push the whole window past the
+        // screen. `.contentMinSize` turns the content's ideal height
+        // into a minimum floor: user resize works freely, the window
+        // stays put across section switches, and it still can't shrink
+        // smaller than a section's minimum render.
+        .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") { updater.checkForUpdates() }
@@ -374,7 +387,7 @@ struct MenuBarMenu: View {
                 systemImage: status.hermesRunning ? "circle.fill" : "circle"
             )
             Label(
-                status.gatewayRunning ? "Gateway Running" : "Gateway Stopped",
+                status.gatewayRunning ? "Messaging Gateway Running" : "Messaging Gateway Stopped",
                 systemImage: status.gatewayRunning ? "circle.fill" : "circle"
             )
             Button("Start Hermes") { status.startHermes() }

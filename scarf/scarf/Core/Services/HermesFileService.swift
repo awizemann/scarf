@@ -212,6 +212,16 @@ struct HermesFileService: Sendable {
             replyPrefix: str("whatsapp.reply_prefix")
         )
 
+        // `platform_toolsets.<platform>` is a dict of lists in config.yaml —
+        // parseNestedYAML flattens nested lists into dotted-path keys. Pull
+        // every key under the prefix and strip it.
+        var platformToolsets: [String: [String]] = [:]
+        for (key, items) in lists where key.hasPrefix("platform_toolsets.") {
+            let platform = String(key.dropFirst("platform_toolsets.".count))
+            guard !platform.isEmpty else { continue }
+            platformToolsets[platform] = items
+        }
+
         // Home Assistant lives under `platforms.homeassistant.extra.*`.
         let homeAssistant = HomeAssistantSettings(
             watchDomains: lists["platforms.homeassistant.extra.watch_domains"] ?? [],
@@ -259,6 +269,7 @@ struct HermesFileService: Sendable {
             cronWrapResponse: bool("cron.wrap_response", default: true),
             prefillMessagesFile: str("prefill_messages_file"),
             skillsExternalDirs: lists["skills.external_dirs"] ?? [],
+            platformToolsets: platformToolsets,
             display: display,
             terminal: terminal,
             browser: browser,

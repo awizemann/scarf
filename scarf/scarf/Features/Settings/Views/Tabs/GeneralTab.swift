@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// General tab — model picker (provider auto-follows), personality, locale.
 /// Credential management lives in the Credential Pools sidebar item; a hint

@@ -50,7 +50,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .profiles: return "Profiles"
         case .tools: return "Tools"
         case .mcpServers: return "MCP Servers"
-        case .gateway: return "Gateway"
+        case .gateway: return "Messaging Gateway"
         case .cron: return "Cron"
         case .health: return "Health"
         case .logs: return "Logs"
@@ -91,4 +91,15 @@ final class AppCoordinator {
     var selectedSection: SidebarSection = .dashboard
     var selectedSessionId: String?
     var selectedProjectName: String?
+
+    /// When non-nil, ChatView should start a fresh ACP session with
+    /// this absolute project path as cwd and then clear the value.
+    /// Wired from the per-project Sessions tab's "New Chat" button
+    /// (v2.3): the tab sets this, switches `selectedSection` to
+    /// `.chat`, and ChatView reacts on its next render.
+    ///
+    /// Separate from `selectedSessionId` (which resumes an existing
+    /// session) — a new session needs a cwd override Scarf doesn't
+    /// yet have an id for.
+    var pendingProjectChat: String?
 }
