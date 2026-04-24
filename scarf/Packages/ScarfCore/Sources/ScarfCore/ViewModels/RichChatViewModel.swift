@@ -44,10 +44,40 @@ public final class RichChatViewModel {
     public var messages: [HermesMessage] = []
     public var currentSession: HermesSession?
     public var messageGroups: [MessageGroup] = []
+    /// True from the moment the user sends a prompt until the ACP
+    /// `promptComplete` event arrives. Covers the whole round-trip
+    /// including auxiliary post-processing (title generation, usage
+    /// accounting, etc.). UIs should prefer the `isGenerating` /
+    /// `isPostProcessing` pair below — they distinguish "agent is
+    /// thinking about your message" from "agent is closing out" and
+    /// avoid the misleading "spinner after the reply has landed" UX
+    /// we saw in pass-1 (M7 #4).
     public var isAgentWorking = false
     public var pendingPermission: PendingPermission?
     /// Mutated to trigger a scroll-to-bottom in the message list.
     public var scrollTrigger = UUID()
+
+    /// True while the assistant hasn't yet emitted a complete reply
+    /// for the latest user prompt. Renders the prominent "Agent is
+    /// thinking…" indicator in the chat. Flips false as soon as we've
+    /// finalized an assistant message with content — even if the ACP
+    /// `promptComplete` event hasn't arrived yet (Hermes auxiliary
+    /// work like title generation delays that event).
+    public var isGenerating: Bool {
+        isAgentWorking && !isPostProcessing
+    }
+
+    /// True while ACP hasn't closed out the prompt but the assistant
+    /// has already finalized a reply the user can see. Renders a
+    /// subtle "Finishing up…" pill instead of the prominent spinner.
+    /// Avoids the pass-1 M7 #4 UX where users stared at "Agent is
+    /// working…" forever because `promptComplete` was held up by
+    /// auxiliary server-side work.
+    public var isPostProcessing: Bool {
+        guard isAgentWorking else { return false }
+        guard let last = messages.last else { return false }
+        return last.isAssistant && !last.content.isEmpty
+    }
 
     // Cumulative ACP token tracking (ACP returns tokens per prompt but DB has none)
     public private(set) var acpInputTokens = 0

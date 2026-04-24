@@ -94,12 +94,23 @@ struct ChatView: View {
                         MessageBubble(message: msg)
                             .id(msg.id)
                     }
-                    if controller.vm.isAgentWorking {
+                    if controller.vm.isGenerating {
                         HStack {
                             ProgressView()
-                            Text("Agent is working…")
+                            Text("Agent is thinking…")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                    } else if controller.vm.isPostProcessing {
+                        HStack(spacing: 6) {
+                            Image(systemName: "ellipsis")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Text("Finishing up…")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal)

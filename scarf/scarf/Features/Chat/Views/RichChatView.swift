@@ -15,7 +15,13 @@ struct RichChatView: View {
         VStack(spacing: 0) {
             SessionInfoBar(
                 session: richChat.currentSession,
-                isWorking: richChat.isAgentWorking,
+                // Prefer `isGenerating` over the raw `isAgentWorking`
+                // so the info bar drops the spinner as soon as the
+                // assistant's reply is visible, even while ACP
+                // auxiliary work (title gen, usage accounting) is
+                // still in flight. See RichChatViewModel docs — same
+                // fix as ScarfGo for pass-1 M7 #4.
+                isWorking: richChat.isGenerating,
                 acpInputTokens: richChat.acpInputTokens,
                 acpOutputTokens: richChat.acpOutputTokens,
                 acpThoughtTokens: richChat.acpThoughtTokens,
@@ -34,7 +40,7 @@ struct RichChatView: View {
             // which manifests as a white flash.
             RichChatMessageList(
                 groups: richChat.messageGroups,
-                isWorking: richChat.isAgentWorking,
+                isWorking: richChat.isGenerating,
                 isLoadingSession: chatViewModel.isPreparingSession,
                 scrollTrigger: richChat.scrollTrigger
             )
