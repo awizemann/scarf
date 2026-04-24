@@ -93,9 +93,22 @@ struct ChatView: View {
             coordinator?.pendingResumeSessionID = nil
             Task { await controller.startResuming(sessionID: sessionID) }
         }
-        .onDisappear {
-            Task { await controller.stop() }
-        }
+        // Deliberately NOT tearing down the ACP session on .onDisappear.
+        // `TabView` unmounts tab content when the user switches tabs
+        // (disappear fires), but `@State var controller` keeps the
+        // ChatController alive across those switches, so dropping the
+        // SSH exec channel + re-opening on next appear would cost the
+        // user a ~1-2s reconnect every time they hop to Dashboard
+        // and back. The ACPClient stays open; the controller cleans up
+        // properly when:
+        //   - the user Disconnects / Forgets the server (RootModel
+        //     flips out of .connected, whole tab root unmounts, and
+        //     ChatController.deinit + transport teardown runs),
+        //   - or the app goes to background (iOS will terminate the
+        //     socket eventually if memory pressure hits anyway).
+        // If a future iPad / multi-window variant wants to explicitly
+        // pause idle connections, add a coordinator-driven stop() on
+        // app-lifecycle phase changes instead.
         .overlay {
             if case .failed(let msg) = controller.state {
                 errorOverlay(msg)
