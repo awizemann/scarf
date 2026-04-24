@@ -51,6 +51,17 @@ struct ScarfIOSApp: App {
         WindowGroup {
             RootView(model: root)
                 .task { await root.load() }
+                .task {
+                    // Best-effort notification setup. Harmless if the
+                    // user denies — we just don't get push. The Push
+                    // Notifications capability is NOT enabled in the
+                    // Xcode target yet (M9 #4.4 skeleton only), so
+                    // APNs device-token registration is commented out
+                    // inside setUpOnLaunch — the delegate + category
+                    // plumbing is otherwise ready to light up when
+                    // Hermes gains a push sender.
+                    await MainActor.run { NotificationRouter.shared.setUpOnLaunch() }
+                }
                 // Clamp Dynamic Type at the scene root. ScarfGo is a
                 // developer tool that needs more density than Apple's
                 // .xxxLarge default, but we still scale from .xSmall

@@ -91,6 +91,13 @@ struct ScarfGoTabRoot: View {
         .tabViewStyle(.sidebarAdaptable)
         .environment(\.serverContext, ctx)
         .environment(\.scarfGoCoordinator, coordinator)
+        .onAppear {
+            // Give the notification router a handle to this session's
+            // coordinator so notification-taps can route across tabs.
+            // Weak ref — coordinator owns its own lifetime, router
+            // just observes.
+            NotificationRouter.shared.coordinator = coordinator
+        }
     }
 }
 
