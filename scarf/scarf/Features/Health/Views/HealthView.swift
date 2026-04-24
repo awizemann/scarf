@@ -53,7 +53,11 @@ struct HealthView: View {
             label: "Running health checks…",
             isEmpty: viewModel.statusSections.isEmpty && viewModel.doctorSections.isEmpty
         )
-        .onAppear { viewModel.load() }
+        .onAppear {
+            viewModel.load()
+            viewModel.startDashboardMonitoring()
+        }
+        .onDisappear { viewModel.stopDashboardMonitoring() }
         .confirmationDialog("Upload debug report?", isPresented: $showShareConfirm) {
             Button("Upload", role: .destructive) {
                 viewModel.runDebugShare()
@@ -161,7 +165,54 @@ struct HealthView: View {
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
+
+            if !viewModel.context.isRemote {
+                Divider()
+                webDashboardRow
+            }
         }
+    }
+
+    /// Status + controls for `hermes dashboard` (the web UI introduced in
+    /// v0.10.x). Hidden for remote contexts — the dashboard binds 127.0.0.1
+    /// and remote tunneling is deferred.
+    private var webDashboardRow: some View {
+        HStack(spacing: 16) {
+            HStack(spacing: 6) {
+                Image(systemName: "safari")
+                    .foregroundStyle(viewModel.dashboardStatus.running ? .green : .secondary)
+                    .font(.caption)
+                if viewModel.dashboardStatus.running {
+                    Text("Web Dashboard on :\(viewModel.dashboardStatus.port)")
+                        .font(.caption.bold())
+                } else {
+                    Text("Web Dashboard")
+                        .font(.caption.bold())
+                    Text("not running")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                if viewModel.dashboardStatus.running {
+                    Button("Open in Browser") { viewModel.openDashboardInBrowser() }
+                    Button("Stop") { viewModel.stopDashboard() }
+                        .disabled(viewModel.dashboardStatus.busy)
+                } else {
+                    Button("Launch Dashboard") { viewModel.launchDashboard() }
+                        .disabled(viewModel.dashboardStatus.busy)
+                }
+                if viewModel.dashboardStatus.busy {
+                    ProgressView().controlSize(.small)
+                }
+            }
+            .controlSize(.small)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Grid
