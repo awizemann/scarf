@@ -644,6 +644,16 @@ final class ChatController {
                 resolvedID = try await client.loadSession(cwd: home, sessionId: sessionID)
             }
             vm.setSessionId(resolvedID)
+            // Pull the transcript out of state.db so the user sees
+            // everything said up to now. Mirrors the Mac resume flow
+            // (scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift:376).
+            // `loadSessionHistory` refreshes the SQLite snapshot first
+            // so we pick up messages Hermes wrote between the
+            // Dashboard's last load and now.
+            await vm.loadSessionHistory(
+                sessionId: sessionID,
+                acpSessionId: resolvedID == sessionID ? nil : resolvedID
+            )
             state = .ready
         } catch {
             state = .failed(error.localizedDescription)
