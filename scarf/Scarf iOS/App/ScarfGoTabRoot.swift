@@ -19,19 +19,20 @@ import ScarfIOS
 /// push navigation (Cron editor, Memory detail, etc.) stays scoped
 /// to the tab instead of bleeding across.
 struct ScarfGoTabRoot: View {
+    let serverID: ServerID
     let config: IOSServerConfig
     let key: SSHKeyBundle
-    let onDisconnect: @MainActor () async -> Void
-
-    /// Stable context UUID shared with DashboardView + ChatView.
-    /// Matches the prior convention so the CitadelServerTransport
-    /// connection pool reuses the same SSH client across tabs.
-    private static let sharedContextID: ServerID = ServerID(
-        uuidString: "00000000-0000-0000-0000-0000000000A1"
-    )!
+    let onSoftDisconnect: @MainActor () async -> Void
+    let onForget: @MainActor () async -> Void
 
     var body: some View {
-        let ctx = config.toServerContext(id: Self.sharedContextID)
+        // The transport factory is keyed by ServerID, so the correct
+        // Keychain slot + config is picked automatically. Reuses the
+        // server's own id as the context id so the CitadelServerTransport
+        // pool caches per-server (instead of the singleton we had
+        // pre-M9). Two active servers → two connection holders, no
+        // SSH channel contention.
+        let ctx = config.toServerContext(id: serverID)
         TabView {
             // 1 — Chat: the reason the app is on your phone. Primary
             // tab; opens straight into the chat surface.
@@ -66,7 +67,11 @@ struct ScarfGoTabRoot: View {
             // label automatically; choosing the same word keeps our
             // More tab visually consistent with the system default.
             NavigationStack {
-                MoreTab(config: config, onDisconnect: onDisconnect)
+                MoreTab(
+                    config: config,
+                    onSoftDisconnect: onSoftDisconnect,
+                    onForget: onForget
+                )
             }
             .tabItem {
                 Label("More", systemImage: "ellipsis.circle")
@@ -88,10 +93,12 @@ struct ScarfGoTabRoot: View {
 /// deliberate design decision.
 private struct MoreTab: View {
     let config: IOSServerConfig
-    let onDisconnect: @MainActor () async -> Void
+    let onSoftDisconnect: @MainActor () async -> Void
+    let onForget: @MainActor () async -> Void
 
     @State private var showForgetConfirmation = false
     @State private var isForgetting = false
+    @State private var isDisconnecting = false
 
     var body: some View {
         List {
@@ -127,6 +134,29 @@ private struct MoreTab: View {
             }
 
             Section {
+                Button {
+                    Task {
+                        isDisconnecting = true
+                        await onSoftDisconnect()
+                    }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if isDisconnecting {
+                            ProgressView()
+                        } else {
+                            Text("Disconnect")
+                        }
+                        Spacer()
+                    }
+                }
+                .disabled(isDisconnecting || isForgetting)
+            } footer: {
+                Text("Closes the live connection. Your key and host details stay on this device; tapping the server from the list reconnects with no re-onboarding.")
+                    .font(.caption)
+            }
+
+            Section {
                 Button(role: .destructive) {
                     showForgetConfirmation = true
                 } label: {
@@ -140,7 +170,7 @@ private struct MoreTab: View {
                         Spacer()
                     }
                 }
-                .disabled(isForgetting)
+                .disabled(isForgetting || isDisconnecting)
             } footer: {
                 Text("Removes this server's SSH key and host info from the device. You'll need to add the public key back to `~/.ssh/authorized_keys` to reconnect.")
                     .font(.caption)
@@ -157,12 +187,12 @@ private struct MoreTab: View {
             Button("Forget \(config.displayName)", role: .destructive) {
                 Task {
                     isForgetting = true
-                    await onDisconnect()
+                    await onForget()
                 }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Your SSH key and host settings will be removed from this device. This cannot be undone.")
+            Text("Your SSH key and host settings for \(config.displayName) will be removed. Other servers stay configured. This cannot be undone.")
         }
     }
 }

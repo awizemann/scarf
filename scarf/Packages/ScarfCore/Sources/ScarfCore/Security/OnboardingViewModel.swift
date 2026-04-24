@@ -53,17 +53,25 @@ public final class OnboardingViewModel {
     private let configStore: any IOSServerConfigStore
     private let tester: any SSHConnectionTester
     private let keyGenerator: KeyGenerator
+    /// ServerID under which to save the key + config on completion.
+    /// Single-server v1 left this nil and the stores fell back to the
+    /// singleton APIs. M9 multi-server passes in a fresh ID from the
+    /// caller (or an existing ID when re-onboarding an existing row),
+    /// so the save lands in the right slot.
+    public let targetServerID: ServerID?
 
     public init(
         keyStore: any SSHKeyStore,
         configStore: any IOSServerConfigStore,
         tester: any SSHConnectionTester,
-        keyGenerator: @escaping KeyGenerator
+        keyGenerator: @escaping KeyGenerator,
+        targetServerID: ServerID? = nil
     ) {
         self.keyStore = keyStore
         self.configStore = configStore
         self.tester = tester
         self.keyGenerator = keyGenerator
+        self.targetServerID = targetServerID
     }
 
     // MARK: - Derived
@@ -142,7 +150,11 @@ public final class OnboardingViewModel {
         defer { isWorking = false }
 
         do {
-            try await keyStore.save(bundle)
+            if let id = targetServerID {
+                try await keyStore.save(bundle, for: id)
+            } else {
+                try await keyStore.save(bundle)
+            }
         } catch {
             lastTestError = .other("Couldn't save key to Keychain: \(error.localizedDescription)")
             step = .testFailed(reason: lastTestError?.errorDescription ?? "Keychain save failed")
@@ -190,7 +202,11 @@ public final class OnboardingViewModel {
 
         do {
             try await tester.testConnection(config: config, key: bundle)
-            try await configStore.save(config)
+            if let id = targetServerID {
+                try await configStore.save(config, id: id)
+            } else {
+                try await configStore.save(config)
+            }
             step = .connected
         } catch let err as SSHConnectionTestError {
             lastTestError = err

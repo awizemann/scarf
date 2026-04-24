@@ -6,18 +6,37 @@ import ScarfIOS
 /// Each step gets its own small view; the view switch is driven by
 /// `vm.step`.
 struct OnboardingRootView: View {
+    /// ServerID under which this onboarding run writes the key +
+    /// config. M9: the ServerListView reserves a fresh ID when the
+    /// user taps "+"; the RootModel passes it through to us; we pass
+    /// it into OnboardingViewModel which uses the ID-keyed store APIs.
+    let targetServerID: ServerID
     let onFinished: @MainActor () async -> Void
+    /// Invoked when the user cancels before completing. M9: pops us
+    /// back to the server list instead of leaving the user stuck on
+    /// step 1 with nowhere to go. Optional for callers that don't
+    /// need cancel (shouldn't be any, but keeps the API forgiving).
+    let onCancel: @MainActor () -> Void
 
-    @State private var vm: OnboardingViewModel = {
-        let tester = CitadelSSHService()
-        let service = tester // reuse the same instance for key generation
-        return OnboardingViewModel(
+    @State private var vm: OnboardingViewModel
+
+    init(
+        targetServerID: ServerID,
+        onFinished: @escaping @MainActor () async -> Void,
+        onCancel: @escaping @MainActor () -> Void = {}
+    ) {
+        self.targetServerID = targetServerID
+        self.onFinished = onFinished
+        self.onCancel = onCancel
+        let service = CitadelSSHService()
+        _vm = State(initialValue: OnboardingViewModel(
             keyStore: KeychainSSHKeyStore(),
             configStore: UserDefaultsIOSServerConfigStore(),
-            tester: tester,
-            keyGenerator: { try service.generateEd25519Key() }
-        )
-    }()
+            tester: service,
+            keyGenerator: { try service.generateEd25519Key() },
+            targetServerID: targetServerID
+        ))
+    }
 
     var body: some View {
         NavigationStack {
@@ -35,6 +54,23 @@ struct OnboardingRootView: View {
             }
             .navigationTitle("Connect to Hermes")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    // Cancel only makes sense while we haven't yet
+                    // completed — once the connection-test passes we
+                    // auto-forward to onFinished so there's nothing
+                    // to cancel. Hiding the button then also keeps
+                    // users from accidentally wiping a just-saved
+                    // server mid-race.
+                    if case .connected = vm.step {
+                        EmptyView()
+                    } else {
+                        Button("Cancel") {
+                            onCancel()
+                        }
+                    }
+                }
+            }
         }
         .onChange(of: vm.step) { _, new in
             if case .connected = new {
