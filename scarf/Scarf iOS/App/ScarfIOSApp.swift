@@ -51,6 +51,17 @@ struct ScarfIOSApp: App {
         WindowGroup {
             RootView(model: root)
                 .task { await root.load() }
+                // Clamp Dynamic Type at the scene root. ScarfGo is a
+                // developer tool that needs more density than Apple's
+                // .xxxLarge default, but we still scale from .xSmall
+                // to .accessibility2 so users who need larger text can
+                // get it without breaking the layout. Going past
+                // .accessibility2 (~XL accessibility) collapses
+                // multi-column rows and forces text truncation — not
+                // a win for anyone. Cross-checked against
+                // Use-Your-Loaf's "Restricting Dynamic Type Sizes"
+                // guidance (M8 density research).
+                .dynamicTypeSize(.xSmall ... .accessibility2)
         }
     }
 }
