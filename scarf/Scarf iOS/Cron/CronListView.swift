@@ -87,11 +87,18 @@ struct CronListView: View {
             CronEditorView(initial: job, title: "Edit cron job") { edited in
                 Task { await vm.upsert(edited) }
             }
+            // Cron editor is a Form with ~6 fields; .large gives room
+            // without cramping. No peek detent — editing cron jobs is
+            // a focused task, not something users want to half-see.
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingNewJob) {
             CronEditorView(initial: nil, title: "New cron job") { created in
                 Task { await vm.upsert(created) }
             }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
     }
 }

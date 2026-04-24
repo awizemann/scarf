@@ -78,6 +78,12 @@ struct ChatView: View {
                     optionId: optionId
                 )
             }
+            // Custom detents — `.medium` is either too tall (empty
+            // space above) or too short (options clipped). A 220pt
+            // peek shows the prompt + first ~3 options; users can
+            // drag to large for long option lists.
+            .presentationDetents([.height(220), .large])
+            .presentationDragIndicator(.visible)
         }
     }
 
