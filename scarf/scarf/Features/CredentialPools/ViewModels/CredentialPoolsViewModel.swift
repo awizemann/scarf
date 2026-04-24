@@ -14,6 +14,33 @@ struct HermesCredential: Identifiable, Sendable, Equatable {
     let tokenTail: String       // Last 4 chars of the token — NEVER store full token in UI state
     let lastStatus: String      // "ok" | "cooldown" | "exhausted" | ""
     let requestCount: Int
+    /// OAuth access-token expiry. Populated from `expires_at_ms` (epoch ms,
+    /// preferred) or `expires_at` (ISO8601). Nil for API-key entries and
+    /// for OAuth providers that haven't yet recorded an expiry.
+    let expiresAt: Date?
+    /// When the current Nous agent key was minted — surfaced so users can
+    /// tell whether a recent rotation has gone through. Nil for non-Nous
+    /// providers and for older Nous entries without the field.
+    let agentKeyObtainedAt: Date?
+
+    /// Display-time badge for expiry. Recomputed against `Date()` on each
+    /// render so the label stays current without needing a timer.
+    enum ExpiryBadge: Equatable {
+        case expired
+        case expiringSoon(days: Int)
+    }
+
+    /// Returns a badge when expiry is within 7 days or already past. Nil
+    /// means "not worth flagging" — either expiry is unknown or still far
+    /// enough out that a warning would be noise.
+    func expiryBadge(now: Date = Date()) -> ExpiryBadge? {
+        guard let expiresAt else { return nil }
+        if expiresAt <= now { return .expired }
+        let seconds = expiresAt.timeIntervalSince(now)
+        let days = Int(seconds / 86_400)
+        if days <= 7 { return .expiringSoon(days: max(1, days)) }
+        return nil
+    }
 }
 
 /// Summary of one provider's pool with its rotation strategy.
@@ -101,7 +128,9 @@ final class CredentialPoolsViewModel {
                     source: entry.source ?? "",
                     tokenTail: Self.tail(of: entry.access_token ?? ""),
                     lastStatus: entry.last_status ?? "",
-                    requestCount: entry.request_count ?? 0
+                    requestCount: entry.request_count ?? 0,
+                    expiresAt: Self.resolveExpiry(msField: entry.expires_at_ms, isoField: entry.expires_at),
+                    agentKeyObtainedAt: Self.parseISO8601(entry.agent_key_obtained_at)
                 )
             }
             return HermesCredentialPool(
@@ -110,6 +139,30 @@ final class CredentialPoolsViewModel {
                 credentials: creds
             )
         }
+    }
+
+    /// Prefer `expires_at_ms` (integer epoch ms — unambiguous) over
+    /// `expires_at` (ISO8601 string). Hermes writes whichever format the
+    /// upstream provider returned; new entries almost always carry the ms
+    /// form, older Nous entries may only have the ISO form.
+    nonisolated private static func resolveExpiry(msField: Double?, isoField: String?) -> Date? {
+        if let ms = msField, ms > 0 {
+            return Date(timeIntervalSince1970: ms / 1000.0)
+        }
+        return parseISO8601(isoField)
+    }
+
+    nonisolated private static func parseISO8601(_ str: String?) -> Date? {
+        guard let s = str, !s.isEmpty else { return nil }
+        // Fractional seconds are present on Nous tokens; plain seconds on
+        // most OAuth providers. Try the fractional parser first, fall back
+        // to the strict one.
+        let withFractional = ISO8601DateFormatter()
+        withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = withFractional.date(from: s) { return d }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: s)
     }
 
     /// Return last 4 chars prefixed with "…", or "" if the token is too short.
@@ -250,9 +303,20 @@ private struct AuthEntry: Decodable, Sendable {
     nonisolated let access_token: String?
     nonisolated let last_status: String?
     nonisolated let request_count: Int?
+    /// Epoch milliseconds. Double (not Int64) because some Nous entries
+    /// round-trip through JS and end up as `1780339200000.0`. Decoding as
+    /// Int would throw on the fractional zero.
+    nonisolated let expires_at_ms: Double?
+    /// ISO8601 — fallback when `expires_at_ms` isn't present.
+    nonisolated let expires_at: String?
+    /// Nous-specific — when the current agent key was issued. Surfaced as
+    /// "Agent key rotated Nh ago" so the user can tell if a recent manual
+    /// rotation has taken effect.
+    nonisolated let agent_key_obtained_at: String?
 
     enum CodingKeys: String, CodingKey {
         case id, label, auth_type, source, access_token, last_status, request_count
+        case expires_at_ms, expires_at, agent_key_obtained_at
     }
 
     nonisolated init(from decoder: any Decoder) throws {
@@ -264,5 +328,8 @@ private struct AuthEntry: Decodable, Sendable {
         self.access_token  = try c.decodeIfPresent(String.self, forKey: .access_token)
         self.last_status   = try c.decodeIfPresent(String.self, forKey: .last_status)
         self.request_count = try c.decodeIfPresent(Int.self, forKey: .request_count)
+        self.expires_at_ms = try c.decodeIfPresent(Double.self, forKey: .expires_at_ms)
+        self.expires_at    = try c.decodeIfPresent(String.self, forKey: .expires_at)
+        self.agent_key_obtained_at = try c.decodeIfPresent(String.self, forKey: .agent_key_obtained_at)
     }
 }

@@ -135,6 +135,7 @@ struct CredentialPoolsView: View {
                                     .font(.caption2)
                                     .foregroundStyle(statusColor(cred.lastStatus))
                             }
+                            expiryBadge(cred)
                         }
                         HStack(spacing: 8) {
                             Text(cred.tokenTail.isEmpty ? "—" : cred.tokenTail)
@@ -147,6 +148,11 @@ struct CredentialPoolsView: View {
                             }
                             if cred.requestCount > 0 {
                                 Text("\(cred.requestCount) req")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            if let rotated = cred.agentKeyObtainedAt {
+                                Text("agent key · \(Self.relativeAge(rotated))")
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
                             }
@@ -178,6 +184,45 @@ struct CredentialPoolsView: View {
         case "exhausted": return .red
         default: return .secondary
         }
+    }
+
+    /// Red "expired" / orange "expires in Nd" pill shown inline with the
+    /// credential's auth-type chip. Hidden when the credential has no
+    /// expiry or is more than 7 days out — no point pulling attention to a
+    /// token the user doesn't need to think about yet.
+    @ViewBuilder
+    private func expiryBadge(_ cred: HermesCredential) -> some View {
+        if let badge = cred.expiryBadge() {
+            switch badge {
+            case .expired:
+                Text("expired")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(.red)
+                    .clipShape(Capsule())
+            case .expiringSoon(let days):
+                Text("expires in \(days)d")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(.orange)
+                    .clipShape(Capsule())
+            }
+        }
+    }
+
+    /// "2h ago" / "3d ago" / "just now". Kept terse for the one-line
+    /// credential row. `RelativeDateTimeFormatter` isn't used because its
+    /// output ("2 hours ago") is too long for the slot.
+    private static func relativeAge(_ date: Date, now: Date = Date()) -> String {
+        let seconds = Int(now.timeIntervalSince(date))
+        if seconds < 60 { return "just now" }
+        if seconds < 3600 { return "\(seconds / 60)m ago" }
+        if seconds < 86_400 { return "\(seconds / 3600)h ago" }
+        return "\(seconds / 86_400)d ago"
     }
 }
 
