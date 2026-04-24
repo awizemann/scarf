@@ -85,50 +85,46 @@ struct ChatView: View {
 
     @ViewBuilder
     private var messageList: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    if controller.vm.messages.isEmpty, controller.state == .ready {
-                        emptyState
-                    }
-                    ForEach(controller.vm.messages) { msg in
-                        MessageBubble(message: msg)
-                            .id(msg.id)
-                    }
-                    if controller.vm.isGenerating {
-                        HStack {
-                            ProgressView()
-                            Text("Agent is thinking…")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal)
-                    } else if controller.vm.isPostProcessing {
-                        HStack(spacing: 6) {
-                            Image(systemName: "ellipsis")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                            Text("Finishing up…")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal)
-                    }
-                    Color.clear
-                        .frame(height: 1)
-                        .id("bottom")
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                if controller.vm.messages.isEmpty, controller.state == .ready {
+                    emptyState
                 }
-                .padding(.vertical)
+                ForEach(controller.vm.messages) { msg in
+                    MessageBubble(message: msg)
+                        .id(msg.id)
+                }
+                if controller.vm.isGenerating {
+                    HStack {
+                        ProgressView()
+                        Text("Agent is thinking…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+                } else if controller.vm.isPostProcessing {
+                    HStack(spacing: 6) {
+                        Image(systemName: "ellipsis")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Text("Finishing up…")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+                }
             }
-            .onChange(of: controller.vm.scrollTrigger) { _, _ in
-                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
-            }
-            .onChange(of: controller.vm.messages.count) { _, _ in
-                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
-            }
+            .padding(.vertical)
         }
+        // iOS 17+ keeps the scroll pinned to the newest content at
+        // the bottom; iOS 18's `.sizeChanges` variant also tracks
+        // when a message grows (streaming chunks, Expand-all on a
+        // code block). Replaces the old manual proxy.scrollTo dance
+        // which fought with the user's own scroll gestures.
+        .defaultScrollAnchor(.bottom)
+        .defaultScrollAnchor(.bottom, for: .sizeChanges)
     }
 
     @ViewBuilder
@@ -478,36 +474,132 @@ private struct MessageBubble: View {
 
     @ViewBuilder
     private var bubbleContent: some View {
-        // Render markdown on the assistant side so bold/code/links
-        // look right. User messages stay plain — no reason to parse
-        // what the user just typed. AttributedString(markdown:) is
-        // conservative — unknown constructs fall through as literal
-        // text, so the worst case is just "no formatting".
-        let text: Text = {
-            if message.isUser {
-                return Text(message.content)
+        // User bubbles are plain text — no reason to parse what the
+        // user just typed. Assistant bubbles route through the
+        // ChatContentFormatter so fenced code blocks get horizontal
+        // scrolling instead of soft-wrapping into ugly 4-line
+        // vertical columns on an iPhone.
+        if message.isUser {
+            Text(message.content)
+                .font(.body)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .foregroundStyle(.white)
+                .background(Color.accentColor)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .textSelection(.enabled)
+                .contextMenu { messageContextMenu }
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(ChatContentFormatter.segments(for: message.content).enumerated()), id: \.offset) { _, segment in
+                    switch segment {
+                    case .text(let body):
+                        Self.markdownText(body)
+                            .font(.body)
+                            .textSelection(.enabled)
+                    case .code(let lang, let body):
+                        CodeBlockView(language: lang, body: body)
+                    }
+                }
             }
-            if let attributed = try? AttributedString(
-                markdown: message.content,
-                options: AttributedString.MarkdownParsingOptions(
-                    interpretedSyntax: .inlineOnlyPreservingWhitespace
-                )
-            ) {
-                return Text(attributed)
-            }
-            return Text(message.content)
-        }()
-
-        text
-            .font(.body)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .foregroundStyle(message.isUser ? Color.white : Color.primary)
-            .background(
-                message.isUser ? Color.accentColor : Color(.secondarySystemBackground)
-            )
+            .foregroundStyle(Color.primary)
+            .background(Color(.secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 14))
-            .textSelection(.enabled)
+            .contextMenu { messageContextMenu }
+        }
+    }
+
+    /// Shared context-menu actions for user + assistant bubbles.
+    /// Copy is the most-used action; Share hands off to the system
+    /// share sheet via ShareLink. Regenerate is intentionally absent —
+    /// ACP doesn't support it natively and the pattern would require
+    /// non-trivial session-state surgery.
+    @ViewBuilder
+    private var messageContextMenu: some View {
+        Button {
+            UIPasteboard.general.string = message.content
+        } label: {
+            Label("Copy", systemImage: "doc.on.doc")
+        }
+        ShareLink(item: message.content) {
+            Label("Share", systemImage: "square.and.arrow.up")
+        }
+    }
+
+    /// Parses message text as markdown for the assistant side. Text-
+    /// only segments coming from ChatContentFormatter can contain
+    /// inline backticks / bold / links; `.inlineOnlyPreservingWhitespace`
+    /// preserves newlines + spacing and won't mangle the output if
+    /// the input isn't valid markdown.
+    private static func markdownText(_ body: String) -> Text {
+        if let attributed = try? AttributedString(
+            markdown: body,
+            options: AttributedString.MarkdownParsingOptions(
+                interpretedSyntax: .inlineOnlyPreservingWhitespace
+            )
+        ) {
+            return Text(attributed)
+        }
+        return Text(body)
+    }
+}
+
+/// Horizontally-scrollable fenced code block. ~240pt max height
+/// collapsed (Expand button reveals full height). Monospaced
+/// .footnote font keeps the bubble narrow enough to still show
+/// adjacent text on the same screen. Language label is a tiny
+/// header when present.
+private struct CodeBlockView: View {
+    let language: String?
+    let code: String
+    @State private var expanded = false
+
+    private let collapsedMaxHeight: CGFloat = 240
+
+    init(language: String?, body: String) {
+        self.language = language
+        self.code = body
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                if let lang = language, !lang.isEmpty {
+                    Text(lang.uppercased())
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(expanded ? "Collapse" : "Expand") {
+                    withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+                }
+                .font(.caption2)
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
+                Button {
+                    UIPasteboard.general.string = code
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.caption2)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
+
+            ScrollView(.horizontal, showsIndicators: true) {
+                Text(code)
+                    .font(.footnote.monospaced())
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .frame(maxHeight: expanded ? nil : collapsedMaxHeight)
+            .background(Color(.tertiarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
     }
 }
 
