@@ -127,7 +127,7 @@ struct RootView: View {
                 await model.onboardingFinished()
             })
         case .connected(let config, let key):
-            DashboardView(
+            ScarfGoTabRoot(
                 config: config,
                 key: key,
                 onDisconnect: {

@@ -9,11 +9,8 @@ import ScarfIOS
 struct DashboardView: View {
     let config: IOSServerConfig
     let key: SSHKeyBundle
-    let onDisconnect: @MainActor () async -> Void
 
     @State private var vm: IOSDashboardViewModel
-    @State private var isDisconnecting = false
-    @State private var showForgetConfirmation = false
 
     /// Stable ID used when building the `ServerContext` — tied to the
     /// config's host+user tuple so re-launching the app without reset
@@ -24,20 +21,19 @@ struct DashboardView: View {
 
     init(
         config: IOSServerConfig,
-        key: SSHKeyBundle,
-        onDisconnect: @escaping @MainActor () async -> Void
+        key: SSHKeyBundle
     ) {
         self.config = config
         self.key = key
-        self.onDisconnect = onDisconnect
         let ctx = config.toServerContext(id: Self.contextID)
         _vm = State(initialValue: IOSDashboardViewModel(context: ctx))
     }
 
     var body: some View {
-        NavigationStack {
-            List {
-                if let err = vm.lastError {
+        // TabView root already wraps this in a NavigationStack; don't
+        // nest (causes duplicate nav bars + broken back swipes).
+        List {
+            if let err = vm.lastError {
                     Section {
                         VStack(alignment: .leading, spacing: 8) {
                             Label("Connection issue", systemImage: "exclamationmark.triangle.fill")
@@ -90,95 +86,21 @@ struct DashboardView: View {
                     }
                 }
 
-                Section("Surfaces") {
-                    NavigationLink {
-                        ChatView(config: config, key: key)
-                    } label: {
-                        Label("Chat", systemImage: "bubble.left.and.bubble.right.fill")
-                    }
-                    NavigationLink {
-                        MemoryListView(config: config)
-                    } label: {
-                        Label("Memory", systemImage: "brain.head.profile")
-                    }
-                    NavigationLink {
-                        CronListView(config: config)
-                    } label: {
-                        Label("Cron", systemImage: "clock.arrow.circlepath")
-                    }
-                    NavigationLink {
-                        SkillsListView(config: config)
-                    } label: {
-                        Label("Skills", systemImage: "sparkles")
-                    }
-                    NavigationLink {
-                        SettingsView(config: config)
-                    } label: {
-                        Label("Settings", systemImage: "gearshape.fill")
-                    }
-                }
-
-                Section("Connected to") {
-                    LabeledContent("Host", value: config.host)
-                    if let user = config.user {
-                        LabeledContent("User", value: user)
-                    }
-                    if let port = config.port {
-                        LabeledContent("Port", value: String(port))
-                    }
-                    LabeledContent("Device key", value: key.displayFingerprint)
-                }
-
-                Section {
-                    Button(role: .destructive) {
-                        showForgetConfirmation = true
-                    } label: {
-                        HStack {
-                            Spacer()
-                            if isDisconnecting {
-                                ProgressView()
-                            } else {
-                                Text("Forget this server")
-                            }
-                            Spacer()
-                        }
-                    }
-                    .disabled(isDisconnecting)
-                } footer: {
-                    Text("Removes this server's SSH key and host info from the device. You'll need to add the public key back to `~/.ssh/authorized_keys` to reconnect.")
-                        .font(.caption)
-                }
-            }
-            .confirmationDialog(
-                "Forget this server?",
-                isPresented: $showForgetConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Forget \(config.displayName)", role: .destructive) {
-                    Task {
-                        isDisconnecting = true
-                        await onDisconnect()
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Your SSH key and host settings will be removed from this device. This cannot be undone.")
-            }
-            .navigationTitle(config.displayName)
-            .navigationBarTitleDisplayMode(.large)
-            .refreshable {
-                await vm.refresh()
-            }
-            .overlay {
-                if vm.isLoading, vm.recentSessions.isEmpty {
-                    ProgressView("Loading dashboard…")
-                        .padding()
-                        .background(.regularMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-            }
-            .task { await vm.load() }
         }
+        .navigationTitle(config.displayName)
+        .navigationBarTitleDisplayMode(.large)
+        .refreshable {
+            await vm.refresh()
+        }
+        .overlay {
+            if vm.isLoading, vm.recentSessions.isEmpty {
+                ProgressView("Loading dashboard…")
+                    .padding()
+                    .background(.regularMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+        }
+        .task { await vm.load() }
     }
 
     @ViewBuilder
