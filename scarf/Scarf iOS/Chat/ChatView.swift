@@ -56,7 +56,7 @@ struct ChatView: View {
                 VStack(spacing: 1) {
                     Text("Chat")
                         .font(.headline)
-                    if let projectName = controller.currentProjectName {
+                    if let projectName = controller.currentProjectName, !projectName.isEmpty {
                         Label(projectName, systemImage: "folder.fill")
                             .font(.caption2)
                             .foregroundStyle(.tint)
@@ -157,7 +157,18 @@ struct ChatView: View {
         ScrollView {
             LazyVStack(spacing: 12) {
                 if controller.vm.messages.isEmpty, controller.state == .ready {
-                    emptyState
+                    if controller.vm.sessionId != nil {
+                        // Resumed-session path: session ID is set but
+                        // no messages loaded. ACP-native sessions don't
+                        // persist their transcript to state.db (only
+                        // CLI/terminal sessions do), so resuming one
+                        // reconnects to the agent but can't surface
+                        // the history client-side. Explain to the user
+                        // rather than showing a blank canvas.
+                        resumedEmptyState
+                    } else {
+                        emptyState
+                    }
                 }
                 ForEach(controller.vm.messages) { msg in
                     MessageBubble(message: msg)
@@ -208,6 +219,32 @@ struct ChatView: View {
             Text("Connected to \(config.displayName)")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 60)
+    }
+
+    /// Friendlier-than-blank state for a session resumed from the
+    /// Dashboard that had no transcript persisted to `state.db`.
+    /// Hermes doesn't write ACP-native session messages to the
+    /// client DB — only CLI/terminal sessions leave a history there —
+    /// so resuming a "recent session" started via Chat means the
+    /// agent has the context but the client can't replay it. The
+    /// user can keep chatting and the agent will have full memory.
+    @ViewBuilder
+    private var resumedEmptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "arrow.clockwise.circle")
+                .font(.system(size: 40))
+                .foregroundStyle(.tertiary)
+            Text("Session resumed")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            Text("Hermes has the context for this session, but the transcript isn't cached locally. Send a message to continue.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
@@ -619,18 +656,30 @@ final class ChatController {
     func startResuming(sessionID: String) async {
         await stop()
         vm.reset()
+        // Clear eagerly so a lingering project name from a prior
+        // session doesn't flash onto the new header while the
+        // attribution lookup runs.
+        currentProjectName = nil
         // Resolve the project name for this session (if any) via the
         // attribution sidecar + project registry. Set BEFORE the ACP
         // handshake so the nav-bar subtitle is visible the moment the
         // "Connecting…" overlay disappears. Run off-thread so we
-        // don't block while the SFTP reads happen.
+        // don't block while the SFTP reads happen. Empty-string names
+        // are treated as nil — registry entries should never have
+        // empty names in practice, but guard against a surprise
+        // JSON-decode edge case that would render just a folder icon
+        // with no text (pass-2 bug: user saw exactly that).
         let ctx = context
-        currentProjectName = await Task.detached {
+        let resolved: String? = await Task.detached {
             let attribution = SessionAttributionService(context: ctx)
             guard let path = attribution.projectPath(for: sessionID) else { return nil }
             let registry = ProjectDashboardService(context: ctx).loadRegistry()
-            return registry.projects.first(where: { $0.path == path })?.name
+            guard let name = registry.projects.first(where: { $0.path == path })?.name,
+                  !name.isEmpty
+            else { return nil }
+            return name
         }.value
+        currentProjectName = resolved
 
         state = .connecting
         let client = ACPClient.forIOSApp(
