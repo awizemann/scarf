@@ -40,6 +40,12 @@ struct ModelPickerSheet: View {
     /// "Sign in to Nous Portal" button in the subscription summary.
     @State private var showNousSignIn: Bool = false
 
+    /// Validation failure surfaced on Select when the typed / selected
+    /// model isn't in the chosen provider's catalog. Pass-1 M7 #5
+    /// cross-platform fix — previously Scarf let you save any string
+    /// and the failure only appeared hours later at runtime.
+    @State private var validationIssue: ModelValidationIssue?
+
     @Environment(\.serverContext) private var serverContext
     private var catalog: ModelCatalogService { ModelCatalogService(context: serverContext) }
     private var subscriptionService: NousSubscriptionService { NousSubscriptionService(context: serverContext) }
@@ -76,6 +82,27 @@ struct ModelPickerSheet: View {
                 subscription = subscriptionService.loadState()
             }
         }
+        .alert(item: $validationIssue) { issue in
+            Alert(
+                title: Text("Model not available"),
+                message: Text(validationMessage(for: issue)),
+                primaryButton: .default(Text("Pick from catalog")) {
+                    validationIssue = nil
+                    customMode = false
+                },
+                secondaryButton: .cancel(Text("Edit"))
+            )
+        }
+    }
+
+    private func validationMessage(for issue: ModelValidationIssue) -> String {
+        var msg = "\(issue.modelID) isn't in \(issue.providerName)'s catalog."
+        if !issue.suggestions.isEmpty {
+            msg += " Did you mean one of:\n• " + issue.suggestions.joined(separator: "\n• ")
+        } else {
+            msg += " Pick one from the catalog or double-check the spelling."
+        }
+        return msg
     }
 
     private var header: some View {
@@ -423,15 +450,30 @@ struct ModelPickerSheet: View {
     }
 
     private func submitSelection() {
+        let (model, provider): (String, String)
         if customMode {
-            let model = customModelID.trimmingCharacters(in: .whitespaces)
-            let provider = resolvedCustomProvider()
-            onSelect(model, provider)
+            model = customModelID.trimmingCharacters(in: .whitespaces)
+            provider = resolvedCustomProvider()
         } else if isSelectedProviderOverlay {
-            let model = overlayModelID.trimmingCharacters(in: .whitespaces)
-            onSelect(model, selectedProviderID)
+            model = overlayModelID.trimmingCharacters(in: .whitespaces)
+            provider = selectedProviderID
         } else {
-            onSelect(selectedModelID, selectedProviderID)
+            model = selectedModelID
+            provider = selectedProviderID
+        }
+
+        // Block unknown models before they land in config.yaml.
+        // Overlay-only providers short-circuit to .valid inside the
+        // validator because their catalogs aren't in models.dev.
+        switch catalog.validateModel(model, for: provider) {
+        case .valid, .unknownProvider:
+            onSelect(model, provider)
+        case .invalid(let providerName, let suggestions):
+            validationIssue = ModelValidationIssue(
+                modelID: model,
+                providerName: providerName,
+                suggestions: suggestions
+            )
         }
     }
 
@@ -444,4 +486,13 @@ struct ModelPickerSheet: View {
             .background(tint == .secondary ? AnyShapeStyle(.quaternary) : AnyShapeStyle(tint.opacity(0.15)))
             .clipShape(Capsule())
     }
+}
+
+/// Carrier for the catalog-validation alert. Identifiable so SwiftUI's
+/// `.alert(item:)` can key off each unique issue.
+private struct ModelValidationIssue: Identifiable {
+    let id = UUID()
+    let modelID: String
+    let providerName: String
+    let suggestions: [String]
 }

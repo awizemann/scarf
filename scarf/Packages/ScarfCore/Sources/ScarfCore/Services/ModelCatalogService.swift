@@ -285,6 +285,75 @@ public struct ModelCatalogService: Sendable {
         )
     }
 
+    /// Result of validating a user-entered model ID against the
+    /// selected provider. See `validateModel(_:for:)`.
+    public enum ModelValidation: Equatable, Sendable {
+        /// Accept the save — the model is in the provider's catalog
+        /// (or the provider is overlay-only, where a free-form model
+        /// name is the normal path).
+        case valid
+        /// Accept with a warning — we don't have a catalog entry for
+        /// the provider at all, so can't check. Usually means the
+        /// user is offline or the local cache is missing. Save but
+        /// surface an advisory.
+        case unknownProvider(providerID: String)
+        /// Block the save — the provider exists but doesn't serve
+        /// that model. Includes a handful of close-by suggestions
+        /// for the UI to render as "did you mean…".
+        case invalid(providerName: String, suggestions: [String])
+    }
+
+    /// Validate `modelID` against `providerID` before persisting it as
+    /// `model.default` in `config.yaml`. Centralises the logic so both
+    /// Mac's ModelPickerSheet and ScarfGo's scoped settings editor
+    /// (Phase 4.3) use the same check. Pass-1 found that you could
+    /// save `claude-haiku-4-5-20251001` under provider `nous` —
+    /// Nous's catalog has no such model and Hermes later failed with
+    /// HTTP 404 at runtime. Catch that at save time, not 6 hours later.
+    public func validateModel(_ modelID: String, for providerID: String) -> ModelValidation {
+        let trimmed = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return .invalid(providerName: providerID, suggestions: [])
+        }
+
+        // Overlay-only providers (Nous Portal, OpenAI Codex, Qwen
+        // OAuth, …) serve their own catalogs that aren't mirrored to
+        // models.dev, so we don't have a reliable way to check model
+        // IDs locally. Treat any non-empty value as provisionally
+        // valid — the worst case is the runtime 404 we hit in pass-1,
+        // but the UI has the error banner now (M7 #2) to surface that
+        // cleanly.
+        //
+        // Exception: if an overlay-only provider DOES appear in the
+        // models.dev cache (unlikely but possible as catalogs evolve),
+        // we fall through to the real check below.
+        let models = loadModels(for: providerID)
+        if models.isEmpty {
+            if Self.overlayOnlyProviders[providerID] != nil {
+                return .valid
+            }
+            return .unknownProvider(providerID: providerID)
+        }
+
+        if models.contains(where: { $0.modelID == trimmed }) {
+            return .valid
+        }
+
+        // No exact match — offer the closest names (by prefix) as
+        // suggestions. Up to 5, ordered by release date (newest
+        // first — already the sort order of loadModels).
+        let lowerTrimmed = trimmed.lowercased()
+        let byPrefix = models
+            .filter { $0.modelID.lowercased().hasPrefix(String(lowerTrimmed.prefix(3))) }
+            .prefix(5)
+            .map(\.modelID)
+        let suggestions = byPrefix.isEmpty
+            ? Array(models.prefix(5).map(\.modelID))
+            : Array(byPrefix)
+        let providerName = providerByID(providerID)?.providerName ?? providerID
+        return .invalid(providerName: providerName, suggestions: suggestions)
+    }
+
     // MARK: - Decoding
 
     private func loadCatalog() -> [String: ProviderEntry]? {

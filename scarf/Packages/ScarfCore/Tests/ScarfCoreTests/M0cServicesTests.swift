@@ -207,6 +207,94 @@ import Foundation
         #expect(bad.loadProviders().isEmpty)
     }
 
+    @Test func validateModelAcceptsCatalogHit() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("scarf-catalog-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let json = #"""
+        {
+          "deepseek": {
+            "id": "deepseek",
+            "name": "DeepSeek",
+            "models": {
+              "deepseek-v4-flash": {"name": "DeepSeek v4 Flash"},
+              "deepseek-v4-pro": {"name": "DeepSeek v4 Pro"}
+            }
+          }
+        }
+        """#
+        try json.write(to: tmp, atomically: true, encoding: .utf8)
+        let svc = ModelCatalogService(path: tmp.path)
+        #expect(svc.validateModel("deepseek-v4-flash", for: "deepseek") == .valid)
+    }
+
+    @Test func validateModelRejectsMissingModelWithSuggestions() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("scarf-catalog-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let json = #"""
+        {
+          "deepseek": {
+            "id": "deepseek",
+            "name": "DeepSeek",
+            "models": {
+              "deepseek-v4-flash": {"name": "DeepSeek v4 Flash"},
+              "deepseek-v4-pro": {"name": "DeepSeek v4 Pro"}
+            }
+          }
+        }
+        """#
+        try json.write(to: tmp, atomically: true, encoding: .utf8)
+        let svc = ModelCatalogService(path: tmp.path)
+        // The exact bug from pass-1: Anthropic-style model ID under
+        // deepseek provider.
+        let result = svc.validateModel("claude-haiku-4-5-20251001", for: "deepseek")
+        guard case let .invalid(providerName, suggestions) = result else {
+            Issue.record("Expected .invalid, got \(result)")
+            return
+        }
+        #expect(providerName == "DeepSeek")
+        // No prefix match on "cla" so we fall through to the first-5
+        // suggestion fallback; both entries are present.
+        #expect(suggestions.count == 2)
+    }
+
+    @Test func validateModelReportsUnknownProviderWhenNoCatalogEntry() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("scarf-catalog-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        // Empty catalog — provider "openai" won't be found + isn't
+        // overlay-only, so should return .unknownProvider.
+        try "{}".write(to: tmp, atomically: true, encoding: .utf8)
+        let svc = ModelCatalogService(path: tmp.path)
+        let result = svc.validateModel("gpt-5", for: "openai")
+        if case .unknownProvider(let pid) = result {
+            #expect(pid == "openai")
+        } else {
+            Issue.record("Expected .unknownProvider, got \(result)")
+        }
+    }
+
+    @Test func validateModelAcceptsOverlayProvidersWithoutCatalog() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("scarf-catalog-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try "{}".write(to: tmp, atomically: true, encoding: .utf8)
+        let svc = ModelCatalogService(path: tmp.path)
+        // Nous is an overlay-only provider — any non-empty string is
+        // accepted because the overlay has no local catalog mirror.
+        #expect(svc.validateModel("deepseek/deepseek-v4-flash", for: "nous") == .valid)
+    }
+
+    @Test func validateModelRejectsEmptyInput() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("scarf-catalog-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try "{}".write(to: tmp, atomically: true, encoding: .utf8)
+        let svc = ModelCatalogService(path: tmp.path)
+        let result = svc.validateModel("", for: "nous")
+        if case .invalid = result {
+            // expected
+        } else {
+            Issue.record("Expected .invalid for empty input, got \(result)")
+        }
+    }
+
     // MARK: - ProjectDashboardService
 
     @Test func projectDashboardServiceRegistryRoundTrip() throws {
