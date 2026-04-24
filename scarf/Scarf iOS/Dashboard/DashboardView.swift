@@ -10,6 +10,7 @@ struct DashboardView: View {
     let config: IOSServerConfig
     let key: SSHKeyBundle
 
+    @Environment(\.scarfGoCoordinator) private var coordinator
     @State private var vm: IOSDashboardViewModel
 
     /// Stable ID used when building the `ServerContext` — tied to the
@@ -66,22 +67,34 @@ struct DashboardView: View {
                 if !vm.recentSessions.isEmpty {
                     Section("Recent sessions") {
                         ForEach(vm.recentSessions) { session in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(session.displayTitle)
-                                    .font(.body)
-                                    .lineLimit(2)
-                                HStack(spacing: 12) {
-                                    Label(session.source, systemImage: session.sourceIcon)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    if let started = session.startedAt {
-                                        Text(started, format: .relative(presentation: .numeric))
+                            Button {
+                                // Route to Chat tab with a resume
+                                // request for this session id. Chat
+                                // will pick it up from the coordinator
+                                // on next appear (M9 #4.1).
+                                coordinator?.resumeSession(session.id)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(session.displayTitle)
+                                        .font(.body)
+                                        .lineLimit(2)
+                                        .foregroundStyle(.primary)
+                                    HStack(spacing: 12) {
+                                        Label(session.source, systemImage: session.sourceIcon)
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
+                                        if let started = session.startedAt {
+                                            Text(started, format: .relative(presentation: .numeric))
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
                                 }
+                                .padding(.vertical, 2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
                             }
-                            .padding(.vertical, 2)
+                            .buttonStyle(.plain)
                         }
                     }
                 }

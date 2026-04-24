@@ -20,6 +20,8 @@ struct ChatView: View {
     let config: IOSServerConfig
     let key: SSHKeyBundle
 
+    @Environment(\.scarfGoCoordinator) private var coordinator
+    @Environment(\.serverContext) private var envContext
     @State private var controller: ChatController
 
     init(config: IOSServerConfig, key: SSHKeyBundle) {
@@ -56,7 +58,28 @@ struct ChatView: View {
             }
         }
         .task {
-            await controller.start()
+            // Dashboard row taps set `pendingResumeSessionID` on the
+            // coordinator before switching to the Chat tab. Honor
+            // that if present, else open a fresh session. Clearing
+            // the coordinator value is the consumer's responsibility
+            // (us) — otherwise a later plain tap on the Chat tab
+            // would accidentally re-resume the old session.
+            if let sessionID = coordinator?.pendingResumeSessionID {
+                coordinator?.pendingResumeSessionID = nil
+                await controller.startResuming(sessionID: sessionID)
+            } else {
+                await controller.start()
+            }
+        }
+        // Also react to a coordinator change that happens while Chat
+        // is already mounted (e.g., user is in Chat, switches to
+        // Dashboard, taps a session row — coordinator flips the tab
+        // AND sets pendingResumeSessionID. The `.task` above only
+        // fires on first appear; this is the mid-session hook.)
+        .onChange(of: coordinator?.pendingResumeSessionID) { _, new in
+            guard let sessionID = new else { return }
+            coordinator?.pendingResumeSessionID = nil
+            Task { await controller.startResuming(sessionID: sessionID) }
         }
         .onDisappear {
             Task { await controller.stop() }
@@ -428,6 +451,72 @@ final class ChatController {
         await stop()
         vm.reset()
         await start()
+    }
+
+    /// Resume an existing ACP session. Called from ChatView when the
+    /// coordinator carries a `pendingResumeSessionID` (Dashboard row
+    /// tap). If we're currently on a different session, stop first
+    /// so there's no phantom ACP process hanging around. Falls back
+    /// to `session/load` if the remote doesn't support `session/resume`
+    /// (Hermes < 0.9.x).
+    func startResuming(sessionID: String) async {
+        await stop()
+        vm.reset()
+        state = .connecting
+        let client = ACPClient.forIOSApp(
+            context: context,
+            keyProvider: {
+                let store = KeychainSSHKeyStore()
+                guard let key = try await store.load() else {
+                    throw SSHKeyStoreError.backendFailure(
+                        message: "No SSH key in Keychain — re-run onboarding.",
+                        osStatus: nil
+                    )
+                }
+                return key
+            }
+        )
+        self.client = client
+        vm.acpStderrProvider = { [weak client] in
+            await client?.recentStderr ?? ""
+        }
+
+        do {
+            try await client.start()
+        } catch {
+            state = .failed(error.localizedDescription)
+            await vm.recordACPFailure(error, client: client)
+            return
+        }
+
+        let stream = await client.events
+        eventTask = Task { [weak self] in
+            for await event in stream {
+                guard let self else { break }
+                await MainActor.run {
+                    self.vm.handleACPEvent(event)
+                }
+            }
+        }
+
+        do {
+            let home = await context.resolvedUserHome()
+            // Prefer `session/resume` for true resume semantics
+            // (same session id preserved in state.db); fall back to
+            // `session/load` if the remote doesn't know resume.
+            let resolvedID: String
+            do {
+                resolvedID = try await client.resumeSession(cwd: home, sessionId: sessionID)
+            } catch {
+                resolvedID = try await client.loadSession(cwd: home, sessionId: sessionID)
+            }
+            vm.setSessionId(resolvedID)
+            state = .ready
+        } catch {
+            state = .failed(error.localizedDescription)
+            await vm.recordACPFailure(error, client: client)
+            await stop()
+        }
     }
 
     /// Dispatch the user's answer to a pending permission request.

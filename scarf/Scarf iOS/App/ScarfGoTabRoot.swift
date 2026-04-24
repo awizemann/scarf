@@ -25,6 +25,11 @@ struct ScarfGoTabRoot: View {
     let onSoftDisconnect: @MainActor () async -> Void
     let onForget: @MainActor () async -> Void
 
+    /// One coordinator per server-connected session. Cross-tab
+    /// signalling (Dashboard row → Chat tab resume, eventually
+    /// notification deep-link → Chat) flows through here.
+    @State private var coordinator = ScarfGoCoordinator()
+
     var body: some View {
         // The transport factory is keyed by ServerID, so the correct
         // Keychain slot + config is picked automatically. Reuses the
@@ -33,7 +38,7 @@ struct ScarfGoTabRoot: View {
         // pre-M9). Two active servers → two connection holders, no
         // SSH channel contention.
         let ctx = config.toServerContext(id: serverID)
-        TabView {
+        TabView(selection: $coordinator.selectedTab) {
             // 1 — Chat: the reason the app is on your phone. Primary
             // tab; opens straight into the chat surface.
             NavigationStack {
@@ -42,6 +47,7 @@ struct ScarfGoTabRoot: View {
             .tabItem {
                 Label("Chat", systemImage: "bubble.left.and.bubble.right.fill")
             }
+            .tag(ScarfGoCoordinator.Tab.chat)
 
             // 2 — Dashboard: stats + recent sessions (no surfaces list
             // anymore — those live in More).
@@ -51,6 +57,7 @@ struct ScarfGoTabRoot: View {
             .tabItem {
                 Label("Dashboard", systemImage: "gauge.with.needle")
             }
+            .tag(ScarfGoCoordinator.Tab.dashboard)
 
             // 3 — Memory: MEMORY.md + USER.md + SOUL.md.
             NavigationStack {
@@ -59,6 +66,7 @@ struct ScarfGoTabRoot: View {
             .tabItem {
                 Label("Memory", systemImage: "brain.head.profile")
             }
+            .tag(ScarfGoCoordinator.Tab.memory)
 
             // 4 — More: Cron, Skills, Settings, plus the destructive
             // "Forget this server" action. Named "More" because on
@@ -76,11 +84,13 @@ struct ScarfGoTabRoot: View {
             .tabItem {
                 Label("More", systemImage: "ellipsis.circle")
             }
+            .tag(ScarfGoCoordinator.Tab.more)
         }
         // Pulls the sidebar-on-iPad affordance into the same code path
         // as the bottom-bar-on-iPhone one. No-op on iPhone today.
         .tabViewStyle(.sidebarAdaptable)
         .environment(\.serverContext, ctx)
+        .environment(\.scarfGoCoordinator, coordinator)
     }
 }
 
