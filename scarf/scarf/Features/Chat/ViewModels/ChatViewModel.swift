@@ -82,13 +82,21 @@ final class ChatViewModel {
             return acpStatus.hasPrefix("Reconnecting")
         }
     }
-    var acpError: String?
-    /// Human-readable hint derived from error + stderr (e.g. "set ANTHROPIC_API_KEY").
-    /// Shown above the raw error in the UI when present.
-    var acpErrorHint: String?
-    /// Tail of stderr captured from `hermes acp` at the time of the last
-    /// failure — shown in a collapsible details section so users can copy/paste.
-    var acpErrorDetails: String?
+    /// Error triplet moved to RichChatViewModel in M7 #2 so ScarfGo can
+    /// share the same banner. These are forwarding accessors to keep
+    /// the many existing call sites in this file unchanged.
+    var acpError: String? {
+        get { richChatViewModel.acpError }
+        set { richChatViewModel.acpError = newValue }
+    }
+    var acpErrorHint: String? {
+        get { richChatViewModel.acpErrorHint }
+        set { richChatViewModel.acpErrorHint = newValue }
+    }
+    var acpErrorDetails: String? {
+        get { richChatViewModel.acpErrorDetails }
+        set { richChatViewModel.acpErrorDetails = newValue }
+    }
     /// True when `hasAnyAICredential()` returned false at last preflight.
     var missingCredentials: Bool = false
 
@@ -109,26 +117,17 @@ final class ChatViewModel {
         missingCredentials = !fileService.hasAnyAICredential()
     }
 
-    /// Clears the error/hint/details triplet so future failures overwrite
-    /// cleanly instead of stacking on top of stale state.
+    /// Forwarders to the ScarfCore implementation so the error-banner
+    /// state lives in one place (M7 #2). The per-site logging label
+    /// stays here — only the storage is shared.
     private func clearACPErrorState() {
-        acpError = nil
-        acpErrorHint = nil
-        acpErrorDetails = nil
+        richChatViewModel.clearACPErrorState()
     }
 
-    /// Populates acpError, acpErrorHint, acpErrorDetails from an error + the
-    /// stderr tail the ACP client captured, and logs the failure with a
-    /// site-specific context label. Call on any failure path.
     @MainActor
     private func recordACPFailure(_ error: Error, client: ACPClient?, context: String) async {
-        let msg = error.localizedDescription
-        logger.error("\(context): \(msg)")
-        let stderrTail = await client?.recentStderr ?? ""
-        let hint = ACPErrorHint.classify(errorMessage: msg, stderrTail: stderrTail)
-        acpError = msg
-        acpErrorHint = hint
-        acpErrorDetails = stderrTail.isEmpty ? nil : stderrTail
+        logger.error("\(context): \(error.localizedDescription)")
+        await richChatViewModel.recordACPFailure(error, client: client)
     }
 
     // MARK: - Session Lifecycle

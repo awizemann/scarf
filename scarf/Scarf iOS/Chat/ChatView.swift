@@ -38,6 +38,7 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            errorBanner
             messageList
             Divider()
             composer
@@ -176,6 +177,75 @@ struct ChatView: View {
         .background(.regularMaterial)
     }
 
+    @State private var showErrorDetails: Bool = false
+
+    /// Inline error banner rendered above the message list when the
+    /// ACP layer signals a non-retryable failure (provider HTTP 4xx,
+    /// malformed model, missing credentials…). Mirrors the Mac pattern
+    /// in scarf/scarf/Features/Chat/Views/ChatView.swift:errorBanner;
+    /// both now pull from RichChatViewModel's shared error triplet.
+    /// Pass-1 M7 #2 — previously errors vanished into stderr and the
+    /// user saw a perpetual spinner.
+    @ViewBuilder
+    private var errorBanner: some View {
+        if let err = controller.vm.acpError {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let hint = controller.vm.acpErrorHint {
+                            Text(hint)
+                                .font(.callout)
+                                .textSelection(.enabled)
+                        }
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .lineLimit(showErrorDetails ? nil : 2)
+                    }
+                    Spacer(minLength: 4)
+                    if controller.vm.acpErrorDetails != nil {
+                        Button(showErrorDetails ? "Hide" : "Details") {
+                            showErrorDetails.toggle()
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                    }
+                    Button {
+                        let payload = [
+                            controller.vm.acpErrorHint,
+                            err,
+                            controller.vm.acpErrorDetails
+                        ]
+                            .compactMap { $0 }
+                            .joined(separator: "\n\n")
+                        UIPasteboard.general.string = payload
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                }
+                if showErrorDetails, let details = controller.vm.acpErrorDetails {
+                    ScrollView(.vertical) {
+                        Text(details)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 140)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.orange.opacity(0.12))
+        }
+    }
+
     /// Shown while we're opening the SSH exec channel + spawning
     /// `hermes acp` + creating the ACP session. Typically ~0.5–1.5 s
     /// on a warm network — silent before this overlay existed, which
@@ -269,10 +339,19 @@ final class ChatController {
         )
         self.client = client
 
+        // Hand the VM a closure that can fetch the ACPClient's recent
+        // stderr when it needs to enrich the error banner on a non-
+        // retryable `promptComplete` (pass-1 M7 #2). The VM caches
+        // this; we only need to set it once per client.
+        vm.acpStderrProvider = { [weak client] in
+            await client?.recentStderr ?? ""
+        }
+
         do {
             try await client.start()
         } catch {
             state = .failed(error.localizedDescription)
+            await vm.recordACPFailure(error, client: client)
             return
         }
 
@@ -299,6 +378,7 @@ final class ChatController {
             state = .ready
         } catch {
             state = .failed(error.localizedDescription)
+            await vm.recordACPFailure(error, client: client)
             await stop()
         }
     }
@@ -319,7 +399,10 @@ final class ChatController {
         } catch {
             // The event task may already have surfaced a
             // .connectionLost; show the send-time error only if the
-            // state didn't already fail.
+            // state didn't already fail. Always populate the error
+            // banner so the user sees actionable detail regardless
+            // of which path raised first (M7 #2).
+            await vm.recordACPFailure(error, client: client)
             if case .ready = state {
                 state = .failed("Prompt failed: \(error.localizedDescription)")
             }

@@ -79,6 +79,94 @@ public final class RichChatViewModel {
         return last.isAssistant && !last.content.isEmpty
     }
 
+    // MARK: - Error banner state (shared macOS + iOS)
+
+    /// Human-readable error message shown in the chat's error banner.
+    /// Nil = no active error. Populated from `recordACPFailure(...)`
+    /// (throws from ACP ops) and from `handlePromptComplete` when the
+    /// response's `stopReason` is `"error"` (non-retryable provider
+    /// failures like Nous Portal HTTP 404 for an unknown model —
+    /// pass-1 M7 #2).
+    public var acpError: String?
+
+    /// Short hint derived from the error + stderr tail (e.g.
+    /// "set ANTHROPIC_API_KEY" or "pick a different model — this
+    /// one isn't in the provider's catalog"). Shown above the raw
+    /// error in the banner when present. Classified by
+    /// `ACPErrorHint.classify(errorMessage:stderrTail:)`.
+    public var acpErrorHint: String?
+
+    /// Tail of stderr captured from `hermes acp` at the time of the
+    /// failure. Shown in a collapsible "Show details" section so
+    /// users can copy-paste the raw output into a bug report.
+    public var acpErrorDetails: String?
+
+    /// Optional stderr-tail provider the controller can hook up when it
+    /// creates the ACPClient. Used by `handlePromptComplete` to enrich
+    /// the error banner on non-retryable stopReasons. The closure is
+    /// called async so callers can await `ACPClient.recentStderr`
+    /// without blocking the MainActor. Defaults to nil (no stderr in
+    /// banner, just the hint fallback).
+    public var acpStderrProvider: (@Sendable () async -> String)?
+
+    /// Clear the error triplet. Call on session reset / new chat /
+    /// successful new prompt so stale errors don't linger.
+    public func clearACPErrorState() {
+        acpError = nil
+        acpErrorHint = nil
+        acpErrorDetails = nil
+    }
+
+    /// Populate the error triplet from a thrown Error + the ACPClient
+    /// we can query for recent stderr. Safe to call from anywhere
+    /// that catches an ACP op failure.
+    public func recordACPFailure(_ error: Error, client: ACPClient?) async {
+        let msg = error.localizedDescription
+        let stderrTail = await client?.recentStderr ?? ""
+        let hint = ACPErrorHint.classify(errorMessage: msg, stderrTail: stderrTail)
+        acpError = msg
+        acpErrorHint = hint
+        acpErrorDetails = stderrTail.isEmpty ? nil : stderrTail
+    }
+
+    /// Populate the error triplet when `handlePromptComplete` sees a
+    /// non-`end_turn` stopReason (i.e. the provider rejected the
+    /// prompt and Hermes correctly surfaced it via ACP). The hint
+    /// classifier reads the stderr tail; for stopReason="error" cases
+    /// the tail typically contains the provider's HTTP status + reason.
+    public func recordPromptStopFailure(stopReason: String, client: ACPClient?) async {
+        let msg = "Prompt ended without a response (stopReason: \(stopReason))."
+        let stderrTail = await client?.recentStderr ?? ""
+        let hint = ACPErrorHint.classify(errorMessage: msg, stderrTail: stderrTail)
+            ?? Self.fallbackHint(for: stopReason)
+        acpError = msg
+        acpErrorHint = hint
+        acpErrorDetails = stderrTail.isEmpty ? nil : stderrTail
+    }
+
+    /// Same as `recordPromptStopFailure` but pulls stderr from the
+    /// `acpStderrProvider` closure the controller registered. Used by
+    /// `handlePromptComplete` where we don't have direct ACPClient
+    /// access.
+    private func recordPromptStopFailureUsingProvider(stopReason: String) async {
+        let msg = "Prompt ended without a response (stopReason: \(stopReason))."
+        let stderrTail = await acpStderrProvider?() ?? ""
+        let hint = ACPErrorHint.classify(errorMessage: msg, stderrTail: stderrTail)
+            ?? Self.fallbackHint(for: stopReason)
+        acpError = msg
+        acpErrorHint = hint
+        acpErrorDetails = stderrTail.isEmpty ? nil : stderrTail
+    }
+
+    private static func fallbackHint(for stopReason: String) -> String? {
+        switch stopReason {
+        case "error":    return "The provider returned an error. Check the details below — often the configured model isn't in the provider's catalog."
+        case "refusal":  return "The session may have been cleared on the server. Start a new chat to continue."
+        case "max_tokens": return "The response was cut off before any content was produced. Try a shorter prompt or raise the max-tokens limit in Settings."
+        default: return nil
+        }
+    }
+
     // Cumulative ACP token tracking (ACP returns tokens per prompt but DB has none)
     public private(set) var acpInputTokens = 0
     public private(set) var acpOutputTokens = 0
@@ -165,6 +253,9 @@ public final class RichChatViewModel {
         acpInputTokens = 0
         acpOutputTokens = 0
         acpThoughtTokens = 0
+        acpError = nil
+        acpErrorHint = nil
+        acpErrorDetails = nil
         acpCachedReadTokens = 0
         acpCommands = []
         pendingPermission = nil
@@ -197,6 +288,10 @@ public final class RichChatViewModel {
 
     /// Add a user message immediately (before DB write) for instant UI feedback.
     public func addUserMessage(text: String) {
+        // Fresh prompt → clear any stale error banner from a prior
+        // failed attempt so we don't show "old error" + "still thinking…"
+        // simultaneously. Matches the Mac ChatViewModel pattern.
+        clearACPErrorState()
         let id = nextLocalId
         nextLocalId -= 1
         let message = HermesMessage(
@@ -408,6 +503,13 @@ public final class RichChatViewModel {
                 finishReason: response.stopReason,
                 reasoning: nil
             ))
+            // Pass-1 M7 #2: surface the same failure as a top-of-chat
+            // error banner with the stderr tail, so users don't have
+            // to rely solely on the system-message to understand why
+            // nothing happened. The controller registers
+            // `acpStderrProvider`; if absent, the banner still shows
+            // with the hint fallback.
+            Task { await self.recordPromptStopFailureUsingProvider(stopReason: response.stopReason) }
         }
 
         // Accumulate token usage from this prompt
