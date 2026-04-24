@@ -672,7 +672,18 @@ private struct MessageBubble: View {
                     if message.hasReasoning, let r = message.reasoning, !r.isEmpty {
                         ReasoningDisclosure(reasoning: r)
                     }
-                    bubbleContent
+                    // Only render the bubble when there's actual text
+                    // to show. Assistant messages can exist in a
+                    // "reasoning-only" or "tool-calls-only" state
+                    // while the agent is thinking / invoking tools —
+                    // rendering an empty gray bubble next to every
+                    // "Thinking…" disclosure looked like a ghost
+                    // message. User bubbles we always render (the
+                    // user explicitly submitted content, even if
+                    // it's just whitespace, they saw it land).
+                    if message.isUser || !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        bubbleContent
+                    }
                     if !message.toolCalls.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
                             ForEach(message.toolCalls) { call in
