@@ -15,7 +15,7 @@ import Observation
 @Observable
 @MainActor
 public final class IOSMemoryViewModel {
-    public enum Kind: Sendable, Equatable {
+    public enum Kind: Sendable, Equatable, CaseIterable {
         /// `~/.hermes/memories/MEMORY.md` — the agent's persistent
         /// memory. Visible (and editable) to the agent at every
         /// session start.
@@ -23,12 +23,18 @@ public final class IOSMemoryViewModel {
         /// `~/.hermes/memories/USER.md` — user-profile notes the
         /// agent reads but (by default) does not write.
         case user
+        /// `~/.hermes/SOUL.md` — the agent's persona / character
+        /// (voice, tone, style). Lives in the Personalities feature
+        /// on macOS; on iOS we fold it into Memory so the whole
+        /// "edit the agent's prompt inputs" surface is in one place.
+        case soul
 
         /// Heading shown in the UI.
         public var displayName: String {
             switch self {
             case .memory: return "MEMORY.md"
             case .user:   return "USER.md"
+            case .soul:   return "SOUL.md"
             }
         }
 
@@ -37,6 +43,7 @@ public final class IOSMemoryViewModel {
             switch self {
             case .memory: return "brain.head.profile"
             case .user:   return "person.crop.square"
+            case .soul:   return "sparkles"
             }
         }
 
@@ -47,16 +54,19 @@ public final class IOSMemoryViewModel {
                 return "Agent's persistent memory. Appears in every session prompt."
             case .user:
                 return "Notes about you. Read by the agent but not modified automatically."
+            case .soul:
+                return "Agent persona — voice, tone, personality."
             }
         }
 
         /// Resolve the remote path for this memory file on the
-        /// given context. `ServerContext.paths` exposes both
-        /// `memoryMD` and `userMD` directly.
+        /// given context. `ServerContext.paths` exposes
+        /// `memoryMD`, `userMD`, and `soulMD` directly.
         public func path(on context: ServerContext) -> String {
             switch self {
             case .memory: return context.paths.memoryMD
             case .user:   return context.paths.userMD
+            case .soul:   return context.paths.soulMD
             }
         }
     }

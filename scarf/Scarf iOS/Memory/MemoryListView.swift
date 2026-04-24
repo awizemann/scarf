@@ -1,10 +1,12 @@
 import SwiftUI
 import ScarfCore
 
-/// Entry screen for the Memory feature. Two rows: MEMORY.md and
-/// USER.md. Each taps into `MemoryEditorView`. Pure SwiftUI — the
-/// actual load/save happens in `IOSMemoryViewModel` which lives in
-/// ScarfCore and is tested on Linux.
+/// Entry screen for the Memory feature. Three rows: MEMORY.md,
+/// USER.md, and SOUL.md (persona). SOUL lives in the Personalities
+/// feature on macOS; we fold it in here on iOS so the whole
+/// "agent prompt inputs" surface is one tap away. Each row taps into
+/// `MemoryEditorView`. Pure SwiftUI — the actual load/save happens in
+/// `IOSMemoryViewModel` which lives in ScarfCore.
 struct MemoryListView: View {
     let config: IOSServerConfig
 
@@ -18,8 +20,9 @@ struct MemoryListView: View {
             Section {
                 memoryRow(.memory, context: ctx)
                 memoryRow(.user, context: ctx)
+                memoryRow(.soul, context: ctx)
             } footer: {
-                Text("These files live under `~/.hermes/memories/` on the remote host.")
+                Text("MEMORY.md and USER.md live under `~/.hermes/memories/`. SOUL.md lives at `~/.hermes/SOUL.md`.")
                     .font(.caption)
             }
         }

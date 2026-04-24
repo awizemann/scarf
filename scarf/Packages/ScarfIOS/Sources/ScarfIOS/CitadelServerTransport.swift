@@ -216,9 +216,23 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
 
     // MARK: - Async primitives (package-private, testable through subclassing)
 
+    /// Rewrite a leading `~/` or bare `~` to the probed absolute
+    /// `$HOME`. SFTP (per RFC 4254 / SFTP protocol) does NOT expand
+    /// tildes — a path like `~/.hermes/memories/MEMORY.md` is treated
+    /// as a relative path with a literal `~` directory name, so every
+    /// SFTP op silently fails to locate the file. Normalize here before
+    /// handing paths to Citadel's SFTP client.
+    private func resolveSFTPPath(_ path: String) async throws -> String {
+        guard path == "~" || path.hasPrefix("~/") else { return path }
+        let home = try await connectionHolder.resolveHome()
+        if path == "~" { return home }
+        return home + "/" + path.dropFirst(2)
+    }
+
     private func asyncReadFile(_ path: String) async throws -> Data {
         let sftp = try await connectionHolder.sftp()
-        return try await sftp.withFile(filePath: path, flags: [.read]) { file in
+        let resolved = try await resolveSFTPPath(path)
+        return try await sftp.withFile(filePath: resolved, flags: [.read]) { file in
             let buf = try await file.readAll()
             return Data(buffer: buf)
         }
@@ -226,9 +240,10 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
 
     private func asyncWriteFile(_ path: String, data: Data) async throws {
         let sftp = try await connectionHolder.sftp()
+        let resolved = try await resolveSFTPPath(path)
         let byteBuffer = ByteBuffer(bytes: data)
         try await sftp.withFile(
-            filePath: path,
+            filePath: resolved,
             flags: [.write, .create, .truncate]
         ) { file in
             try await file.write(byteBuffer, at: 0)
@@ -237,8 +252,9 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
 
     private func asyncFileExists(_ path: String) async throws -> Bool {
         let sftp = try await connectionHolder.sftp()
+        let resolved = try await resolveSFTPPath(path)
         do {
-            _ = try await sftp.getAttributes(at: path)
+            _ = try await sftp.getAttributes(at: resolved)
             return true
         } catch {
             return false
@@ -247,8 +263,9 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
 
     private func asyncStat(_ path: String) async throws -> FileStat? {
         let sftp = try await connectionHolder.sftp()
+        let resolved = try await resolveSFTPPath(path)
         do {
-            let attrs = try await sftp.getAttributes(at: path)
+            let attrs = try await sftp.getAttributes(at: resolved)
             let size = attrs.size.map { Int64($0) } ?? 0
             let mtime = attrs.accessModificationTime?.modificationTime ?? Date(timeIntervalSince1970: 0)
             // SFTPFileAttributes doesn't expose a "type" field directly;
@@ -265,7 +282,8 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
 
     private func asyncListDirectory(_ path: String) async throws -> [String] {
         let sftp = try await connectionHolder.sftp()
-        let listing = try await sftp.listDirectory(atPath: path)
+        let resolved = try await resolveSFTPPath(path)
+        let listing = try await sftp.listDirectory(atPath: resolved)
         // Flatten all components across the response batches, strip the
         // conventional "." / ".." entries to match
         // `FileManager.contentsOfDirectory` behaviour.
@@ -275,12 +293,13 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
 
     private func asyncCreateDirectory(_ path: String) async throws {
         let sftp = try await connectionHolder.sftp()
+        let resolved = try await resolveSFTPPath(path)
         // `createDirectory` at Citadel layer fails if the dir exists;
         // we want mkdir -p semantics so we walk the path and create
         // each component. Absolute paths only — the iOS app never
         // passes a relative path.
-        let components = path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
-        var cursor = path.hasPrefix("/") ? "" : ""
+        let components = resolved.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        var cursor = resolved.hasPrefix("/") ? "" : ""
         for component in components {
             cursor += "/" + component
             do {
@@ -299,10 +318,11 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
 
     private func asyncRemoveFile(_ path: String) async throws {
         let sftp = try await connectionHolder.sftp()
+        let resolved = try await resolveSFTPPath(path)
         // Parallel to LocalTransport: no-op if the file doesn't exist.
-        let exists = try await asyncFileExists(path)
+        let exists = try await asyncFileExists(resolved)
         if !exists { return }
-        try await sftp.remove(at: path)
+        try await sftp.remove(at: resolved)
     }
 
     private func asyncRunProcess(
@@ -449,6 +469,12 @@ private actor ConnectionHolder {
 
     private var sshClient: SSHClient?
     private var sftpClient: SFTPClient?
+    /// Resolved absolute `$HOME` on the remote host. Probed once per
+    /// connection via `echo $HOME` over SSH exec, then memoized. Used
+    /// to rewrite `~/…` SFTP paths (SFTP does NOT expand tildes — it
+    /// treats them as literal characters, so `~/.hermes/…` reads fail
+    /// unless we rewrite to the absolute path client-side).
+    private var resolvedHome: String?
 
     init(
         contextID: ServerID,
@@ -458,6 +484,22 @@ private actor ConnectionHolder {
         self.contextID = contextID
         self.config = config
         self.keyProvider = keyProvider
+    }
+
+    /// Probe + cache the remote user's home directory. Returns the
+    /// absolute path (e.g. `/Users/alan`). Falls back to the original
+    /// tilde-form on probe failure so callers get a best-effort path
+    /// rather than a hard error; those callers will surface the real
+    /// failure via the subsequent SFTP op.
+    func resolveHome() async throws -> String {
+        if let cached = resolvedHome { return cached }
+        let client = try await ssh()
+        let buffer = try await client.executeCommand("echo $HOME")
+        let raw = buffer.getString(at: 0, length: buffer.readableBytes) ?? ""
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let home = trimmed.isEmpty ? "~" : trimmed
+        resolvedHome = home
+        return home
     }
 
     func ssh() async throws -> SSHClient {

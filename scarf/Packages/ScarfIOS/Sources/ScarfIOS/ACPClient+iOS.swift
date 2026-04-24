@@ -54,12 +54,22 @@ public extension ACPClient {
         let key = try await keyProvider()
         let client = try await openSSHClient(config: sshConfig, key: key)
 
-        // Command to spawn. `hermes acp` is the ACP entry point; if
-        // the user configured a non-default hermes binary path we
-        // honour that via `paths.hermesBinary`. The `exec` command
-        // is invoked via SSH RFC 4254 exec (no TTY) — binary-clean
-        // stdin/stdout for JSON-RPC bytes.
-        let command = context.paths.hermesBinary + " acp"
+        // Command to spawn. `hermes acp` is the ACP entry point.
+        //
+        // SSH `exec` (RFC 4254) runs a non-interactive, non-login shell
+        // whose PATH is the sshd default (`/usr/bin:/bin:/usr/sbin:/sbin`).
+        // Common Hermes install locations like `~/.local/bin` (pipx),
+        // `/opt/homebrew/bin`, and `/usr/local/bin` aren't on that PATH,
+        // and `-l` alone doesn't help because most users add PATH exports
+        // to `.zshrc` which is only sourced for interactive shells.
+        //
+        // We mirror `HermesPathSet.hermesBinaryCandidates` (the Mac-side
+        // local probe list) by prepending all four common locations to
+        // PATH before `exec`-ing hermes. Binary-clean stdio (JSON-RPC on
+        // stdin/stdout) is preserved because `exec` replaces the shell
+        // process — no intermediate layer buffers the bytes.
+        let hermesCmd = context.paths.hermesBinary + " acp"
+        let command = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" exec \(hermesCmd)"
 
         return try await SSHExecACPChannel(
             client: client,
