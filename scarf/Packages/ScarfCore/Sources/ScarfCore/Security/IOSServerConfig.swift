@@ -68,29 +68,89 @@ public struct IOSServerConfig: Sendable, Hashable, Codable {
     }
 }
 
-/// Async-safe single-record storage contract. iOS implements this
-/// with `UserDefaults`; tests use `InMemoryIOSServerConfigStore`.
+/// Async-safe multi-record storage contract.
+///
+/// Single-server callers (v1 onboarding flow, RootModel before M9)
+/// use the no-arg `load()` / `save(_:)` / `delete()` methods, which
+/// operate on the "primary" server (first entry in the list, or
+/// the only entry on a fresh install). Multi-server callers use the
+/// ID-keyed variants added in M9.
+///
+/// A migration helper is embedded: any implementation that discovers
+/// a v1 singleton payload on `load()` must insert it under a fresh
+/// `ServerID` and leave the list consistent. Callers shouldn't need
+/// to know about the migration; they just see a populated list.
 public protocol IOSServerConfigStore: Sendable {
-    /// Returns the stored config, or `nil` if nothing has been saved
-    /// yet (fresh install, or the user reset onboarding).
+
+    // MARK: - Singleton API (compat, still the default in v1)
+
+    /// Returns the primary stored config, or `nil` if nothing has
+    /// been saved yet. In a multi-server world this returns the
+    /// first entry in the list (sorted by display name). Kept for
+    /// back-compat with RootModel's single-server code path; new
+    /// callers should prefer `load(id:)` / `listAll()`.
     func load() async throws -> IOSServerConfig?
 
-    /// Overwrites any existing config. Idempotent.
+    /// Overwrites any existing primary config. In a multi-server
+    /// world, saves under the implementation's "primary" slot —
+    /// preserving existing non-primary entries. Idempotent.
     func save(_ config: IOSServerConfig) async throws
 
-    /// Deletes the stored config. No-op if empty.
+    /// Deletes ALL stored configs. Matches the v1 "forget" semantics.
     func delete() async throws
+
+    // MARK: - Multi-server API (M9)
+
+    /// Return every configured server, mapped by its `ServerID`.
+    /// Empty dictionary on a fresh install.
+    func listAll() async throws -> [ServerID: IOSServerConfig]
+
+    /// Load a specific server by id. Returns nil if not present.
+    func load(id: ServerID) async throws -> IOSServerConfig?
+
+    /// Save or replace the config for the given id. Does not affect
+    /// other servers in the list.
+    func save(_ config: IOSServerConfig, id: ServerID) async throws
+
+    /// Remove a specific server by id. No-op if absent.
+    func delete(id: ServerID) async throws
 }
 
 /// Process-lifetime in-memory config store. For tests and previews.
 public actor InMemoryIOSServerConfigStore: IOSServerConfigStore {
-    private var config: IOSServerConfig?
+    private var storage: [ServerID: IOSServerConfig] = [:]
 
     public init(initial: IOSServerConfig? = nil) {
-        self.config = initial
+        if let initial {
+            self.storage[ServerID()] = initial
+        }
     }
 
-    public func load() async throws -> IOSServerConfig? { config }
-    public func save(_ config: IOSServerConfig) async throws { self.config = config }
-    public func delete() async throws { config = nil }
+    public func load() async throws -> IOSServerConfig? {
+        storage.values.sorted(by: { $0.displayName < $1.displayName }).first
+    }
+
+    public func save(_ config: IOSServerConfig) async throws {
+        // Singleton save: replace the primary entry (or create one
+        // if the list is empty). Never grows the list unexpectedly.
+        if let primaryID = storage.keys.sorted(by: { ($0.uuidString) < ($1.uuidString) }).first {
+            storage[primaryID] = config
+        } else {
+            storage[ServerID()] = config
+        }
+    }
+
+    public func delete() async throws { storage.removeAll() }
+
+    public func listAll() async throws -> [ServerID: IOSServerConfig] { storage }
+
+    public func load(id: ServerID) async throws -> IOSServerConfig? { storage[id] }
+
+    public func save(_ config: IOSServerConfig, id: ServerID) async throws {
+        storage[id] = config
+    }
+
+    public func delete(id: ServerID) async throws {
+        storage.removeValue(forKey: id)
+    }
 }

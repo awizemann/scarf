@@ -49,21 +49,45 @@ public struct SSHKeyBundle: Sendable, Hashable, Codable {
     }
 }
 
-/// Async-safe key storage contract. iOS implements this with the
-/// Keychain; tests use `InMemorySSHKeyStore`.
+/// Async-safe key storage contract.
 ///
-/// Single-key storage is intentional: v1 of the iOS app binds one SSH
-/// key to one Hermes server. Multi-key / multi-server comes later.
+/// Singleton API (`load()` / `save(_:)` / `delete()`) persists here
+/// for the v1 single-server callers. M9 added the `ServerID`-keyed
+/// variants so we can hold a key per configured server; singleton
+/// semantics remain for the "primary" slot (first key when the list
+/// is populated).
 public protocol SSHKeyStore: Sendable {
-    /// Returns the stored key bundle, or `nil` if the store is empty.
-    /// Callers should prompt the onboarding flow when this is `nil`.
+    // MARK: - Singleton API (compat)
+
+    /// Returns the primary stored key, or `nil` if the store is empty.
+    /// In a multi-server world this picks the first key by stable
+    /// ordering; callers with specific server context should prefer
+    /// `load(for:)`.
     func load() async throws -> SSHKeyBundle?
 
-    /// Overwrites any existing key with `bundle`. Idempotent.
+    /// Overwrites the primary key. Does not affect other stored keys
+    /// (M9 multi-server). Idempotent.
     func save(_ bundle: SSHKeyBundle) async throws
 
-    /// Deletes the stored key. No-op if the store is empty.
+    /// Deletes ALL stored keys across every ServerID slot. Matches
+    /// the v1 "forget" semantics.
     func delete() async throws
+
+    // MARK: - Multi-server API (M9)
+
+    /// Return the ids for every server with a stored key. Empty on
+    /// fresh install.
+    func listAll() async throws -> [ServerID]
+
+    /// Load the key stored for the given server id, or nil if absent.
+    func load(for id: ServerID) async throws -> SSHKeyBundle?
+
+    /// Save or replace the key for the given server id. Leaves other
+    /// servers' keys untouched.
+    func save(_ bundle: SSHKeyBundle, for id: ServerID) async throws
+
+    /// Remove the key for a specific server id. No-op if absent.
+    func delete(for id: ServerID) async throws
 }
 
 /// Errors raised by `SSHKeyStore` implementations when the backing
@@ -91,13 +115,44 @@ public enum SSHKeyStoreError: Error, LocalizedError {
 /// Process-lifetime in-memory key store. Intended for tests and
 /// previews — never for production. Thread-safe via an internal actor.
 public actor InMemorySSHKeyStore: SSHKeyStore {
-    private var bundle: SSHKeyBundle?
+    private var bundles: [ServerID: SSHKeyBundle] = [:]
 
     public init(initial: SSHKeyBundle? = nil) {
-        self.bundle = initial
+        if let initial {
+            self.bundles[ServerID()] = initial
+        }
     }
 
-    public func load() async throws -> SSHKeyBundle? { bundle }
-    public func save(_ bundle: SSHKeyBundle) async throws { self.bundle = bundle }
-    public func delete() async throws { bundle = nil }
+    public func load() async throws -> SSHKeyBundle? {
+        guard let id = bundles.keys.sorted(by: { $0.uuidString < $1.uuidString }).first else {
+            return nil
+        }
+        return bundles[id]
+    }
+
+    public func save(_ bundle: SSHKeyBundle) async throws {
+        if let primaryID = bundles.keys.sorted(by: { $0.uuidString < $1.uuidString }).first {
+            bundles[primaryID] = bundle
+        } else {
+            bundles[ServerID()] = bundle
+        }
+    }
+
+    public func delete() async throws { bundles.removeAll() }
+
+    public func listAll() async throws -> [ServerID] {
+        Array(bundles.keys)
+    }
+
+    public func load(for id: ServerID) async throws -> SSHKeyBundle? {
+        bundles[id]
+    }
+
+    public func save(_ bundle: SSHKeyBundle, for id: ServerID) async throws {
+        bundles[id] = bundle
+    }
+
+    public func delete(for id: ServerID) async throws {
+        bundles.removeValue(forKey: id)
+    }
 }
