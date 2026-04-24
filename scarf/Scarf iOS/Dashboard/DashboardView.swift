@@ -13,6 +13,7 @@ struct DashboardView: View {
 
     @State private var vm: IOSDashboardViewModel
     @State private var isDisconnecting = false
+    @State private var showForgetConfirmation = false
 
     /// Stable ID used when building the `ServerContext` — tied to the
     /// config's host+user tuple so re-launching the app without reset
@@ -130,23 +131,38 @@ struct DashboardView: View {
 
                 Section {
                     Button(role: .destructive) {
-                        Task {
-                            isDisconnecting = true
-                            await onDisconnect()
-                        }
+                        showForgetConfirmation = true
                     } label: {
                         HStack {
                             Spacer()
                             if isDisconnecting {
                                 ProgressView()
                             } else {
-                                Text("Disconnect")
+                                Text("Forget this server")
                             }
                             Spacer()
                         }
                     }
                     .disabled(isDisconnecting)
+                } footer: {
+                    Text("Removes this server's SSH key and host info from the device. You'll need to add the public key back to `~/.ssh/authorized_keys` to reconnect.")
+                        .font(.caption)
                 }
+            }
+            .confirmationDialog(
+                "Forget this server?",
+                isPresented: $showForgetConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Forget \(config.displayName)", role: .destructive) {
+                    Task {
+                        isDisconnecting = true
+                        await onDisconnect()
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Your SSH key and host settings will be removed from this device. This cannot be undone.")
             }
             .navigationTitle(config.displayName)
             .navigationBarTitleDisplayMode(.large)
