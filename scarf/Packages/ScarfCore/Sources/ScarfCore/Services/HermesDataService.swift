@@ -47,6 +47,11 @@ public actor HermesDataService {
 
     private var db: OpaquePointer?
     private var hasV07Schema = false
+    /// True when the connected DB carries the Hermes v2026.4.23+
+    /// columns (`sessions.api_call_count`, `messages.reasoning_content`).
+    /// Detected via PRAGMA table_info in `detectSchema`. Drives
+    /// optional-column SELECT shape so older DBs keep working.
+    private var hasV011Schema = false
     /// Local filesystem path we last opened. For remote contexts this is
     /// the cached snapshot under `~/Library/Caches/scarf/snapshots/<id>/`.
     private var openedAtPath: String?
@@ -170,13 +175,42 @@ public actor HermesDataService {
 
     private func detectSchema() {
         guard let db else { return }
+        // Sessions schema
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "PRAGMA table_info(sessions)", -1, &stmt, nil) == SQLITE_OK else { return }
-        defer { sqlite3_finalize(stmt) }
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            if let name = sqlite3_column_text(stmt, 1), String(cString: name) == "reasoning_tokens" {
-                hasV07Schema = true
-                return
+        if sqlite3_prepare_v2(db, "PRAGMA table_info(sessions)", -1, &stmt, nil) == SQLITE_OK {
+            defer { sqlite3_finalize(stmt) }
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let name = sqlite3_column_text(stmt, 1) {
+                    let column = String(cString: name)
+                    if column == "reasoning_tokens" {
+                        hasV07Schema = true
+                    }
+                    if column == "api_call_count" {
+                        hasV011Schema = true
+                    }
+                }
+            }
+        }
+        // Messages schema — confirm `reasoning_content` exists. We
+        // upgrade to v0.11 only if BOTH new columns are present so
+        // partial-migration DBs (sessions migrated, messages not yet)
+        // don't trigger a "no such column" runtime error on message
+        // reads. Belt-and-braces.
+        if hasV011Schema {
+            var msgStmt: OpaquePointer?
+            var sawReasoningContent = false
+            if sqlite3_prepare_v2(db, "PRAGMA table_info(messages)", -1, &msgStmt, nil) == SQLITE_OK {
+                defer { sqlite3_finalize(msgStmt) }
+                while sqlite3_step(msgStmt) == SQLITE_ROW {
+                    if let name = sqlite3_column_text(msgStmt, 1),
+                       String(cString: name) == "reasoning_content" {
+                        sawReasoningContent = true
+                        break
+                    }
+                }
+            }
+            if !sawReasoningContent {
+                hasV011Schema = false
             }
         }
     }
@@ -192,6 +226,9 @@ public actor HermesDataService {
             """
         if hasV07Schema {
             cols += ", reasoning_tokens, actual_cost_usd, cost_status, billing_provider"
+        }
+        if hasV011Schema {
+            cols += ", api_call_count"
         }
         return cols
     }
@@ -251,6 +288,9 @@ public actor HermesDataService {
         if hasV07Schema {
             cols += ", reasoning"
         }
+        if hasV011Schema {
+            cols += ", reasoning_content"
+        }
         return cols
     }
 
@@ -273,9 +313,9 @@ public actor HermesDataService {
         guard let db else { return [] }
         let sanitized = sanitizeFTSQuery(query)
         guard !sanitized.isEmpty else { return [] }
-        let msgCols = hasV07Schema
-            ? "m.id, m.session_id, m.role, m.content, m.tool_call_id, m.tool_calls, m.tool_name, m.timestamp, m.token_count, m.finish_reason, m.reasoning"
-            : "m.id, m.session_id, m.role, m.content, m.tool_call_id, m.tool_calls, m.tool_name, m.timestamp, m.token_count, m.finish_reason"
+        var msgCols = "m.id, m.session_id, m.role, m.content, m.tool_call_id, m.tool_calls, m.tool_name, m.timestamp, m.token_count, m.finish_reason"
+        if hasV07Schema { msgCols += ", m.reasoning" }
+        if hasV011Schema { msgCols += ", m.reasoning_content" }
         let sql = """
             SELECT \(msgCols)
             FROM messages_fts fts
@@ -603,7 +643,15 @@ public actor HermesDataService {
     // MARK: - Row Parsing
 
     private func sessionFromRow(_ stmt: OpaquePointer) -> HermesSession {
-        HermesSession(
+        // v0.11 column lives at index 20 (after the 16 base + 4 v0.7
+        // columns). Read defensively — old DBs that lack the column
+        // never reach this code path because hasV011Schema gates the
+        // SELECT shape.
+        let apiCallCount: Int = {
+            guard hasV011Schema else { return 0 }
+            return Int(sqlite3_column_int(stmt, 20))
+        }()
+        return HermesSession(
             id: columnText(stmt, 0),
             source: columnText(stmt, 1),
             userId: columnOptionalText(stmt, 2),
@@ -623,13 +671,18 @@ public actor HermesDataService {
             reasoningTokens: hasV07Schema ? Int(sqlite3_column_int(stmt, 16)) : 0,
             actualCostUSD: hasV07Schema && sqlite3_column_type(stmt, 17) != SQLITE_NULL ? sqlite3_column_double(stmt, 17) : nil,
             costStatus: hasV07Schema ? columnOptionalText(stmt, 18) : nil,
-            billingProvider: hasV07Schema ? columnOptionalText(stmt, 19) : nil
+            billingProvider: hasV07Schema ? columnOptionalText(stmt, 19) : nil,
+            apiCallCount: apiCallCount
         )
     }
 
     private func messageFromRow(_ stmt: OpaquePointer) -> HermesMessage {
         let toolCallsJSON = columnOptionalText(stmt, 5)
         let toolCalls = parseToolCalls(toolCallsJSON)
+        // reasoning lives at index 10 (v0.7+); reasoning_content at 11
+        // when v0.11 schema is present. Both columns can carry text
+        // simultaneously — UI prefers `reasoningContent`.
+        let reasoningContent: String? = hasV011Schema ? columnOptionalText(stmt, 11) : nil
         return HermesMessage(
             id: Int(sqlite3_column_int(stmt, 0)),
             sessionId: columnText(stmt, 1),
@@ -641,7 +694,8 @@ public actor HermesDataService {
             timestamp: columnDate(stmt, 7),
             tokenCount: sqlite3_column_type(stmt, 8) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 8)) : nil,
             finishReason: columnOptionalText(stmt, 9),
-            reasoning: hasV07Schema ? columnOptionalText(stmt, 10) : nil
+            reasoning: hasV07Schema ? columnOptionalText(stmt, 10) : nil,
+            reasoningContent: reasoningContent
         )
     }
 

@@ -233,6 +233,10 @@ struct SessionRow: View {
             HStack(spacing: 12) {
                 Label("\(session.messageCount)", systemImage: "bubble.left")
                 Label("\(session.toolCallCount)", systemImage: "wrench")
+                if session.apiCallCount > 0 {
+                    Label("\(session.apiCallCount)", systemImage: "network")
+                        .help("API calls (Hermes v2026.4.23+)")
+                }
                 if let cost = session.displayCostUSD, cost > 0 {
                     Label(cost.formatted(.currency(code: "USD").precision(.fractionLength(4))), systemImage: "dollarsign.circle")
                 }

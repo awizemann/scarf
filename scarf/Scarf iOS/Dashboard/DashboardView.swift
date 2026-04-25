@@ -220,6 +220,11 @@ struct DashboardView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    if session.apiCallCount > 0 {
+                        Label("\(session.apiCallCount)", systemImage: "network")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 if let projectName = vm.projectName(for: session) {
                     Label(projectName, systemImage: "folder.fill")

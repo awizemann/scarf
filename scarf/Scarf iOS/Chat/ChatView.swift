@@ -990,7 +990,9 @@ private struct MessageBubble: View {
             HStack(alignment: .bottom) {
                 if message.isUser { Spacer(minLength: 40) }
                 VStack(alignment: message.isUser ? .trailing : .leading, spacing: 4) {
-                    if message.hasReasoning, let r = message.reasoning, !r.isEmpty {
+                    // v2.5: prefer reasoning_content (Hermes v0.11+);
+                    // fall back to legacy reasoning when only it's set.
+                    if message.hasReasoning, let r = message.preferredReasoning, !r.isEmpty {
                         ReasoningDisclosure(reasoning: r)
                     }
                     // Only render the bubble when there's actual text

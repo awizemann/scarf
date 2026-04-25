@@ -12,6 +12,12 @@ public struct HermesMessage: Identifiable, Sendable {
     public let tokenCount: Int?
     public let finishReason: String?
     public let reasoning: String?
+    /// Hermes v2026.4.23+ richer reasoning column. Some providers
+    /// emit a structured "thinking" payload separate from the
+    /// classic `reasoning` blob; both can be present on the same
+    /// message during the v0.10 → v0.11 transition. UI prefers
+    /// `reasoningContent` when set, falls back to `reasoning`.
+    public let reasoningContent: String?
 
 
     public init(
@@ -25,7 +31,8 @@ public struct HermesMessage: Identifiable, Sendable {
         timestamp: Date?,
         tokenCount: Int?,
         finishReason: String?,
-        reasoning: String?
+        reasoning: String?,
+        reasoningContent: String? = nil
     ) {
         self.id = id
         self.sessionId = sessionId
@@ -38,11 +45,25 @@ public struct HermesMessage: Identifiable, Sendable {
         self.tokenCount = tokenCount
         self.finishReason = finishReason
         self.reasoning = reasoning
+        self.reasoningContent = reasoningContent
     }
     public var isUser: Bool { role == "user" }
     public var isAssistant: Bool { role == "assistant" }
     public var isToolResult: Bool { role == "tool" }
-    public var hasReasoning: Bool { reasoning != nil && !(reasoning?.isEmpty ?? true) }
+    /// True when ANY reasoning channel has content. UI uses this to
+    /// decide whether to render the "Thinking…" disclosure.
+    public var hasReasoning: Bool {
+        let r = reasoning ?? ""
+        let rc = reasoningContent ?? ""
+        return !r.isEmpty || !rc.isEmpty
+    }
+    /// Preferred reasoning text for rendering — `reasoningContent`
+    /// (newer, richer) wins over the legacy `reasoning` blob when
+    /// both are present.
+    public var preferredReasoning: String? {
+        if let rc = reasoningContent, !rc.isEmpty { return rc }
+        return reasoning
+    }
 }
 
 public struct HermesToolCall: Identifiable, Sendable, Codable {

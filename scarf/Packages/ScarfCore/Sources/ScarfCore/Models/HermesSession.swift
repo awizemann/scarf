@@ -21,6 +21,12 @@ public struct HermesSession: Identifiable, Sendable {
     public let actualCostUSD: Double?
     public let costStatus: String?
     public let billingProvider: String?
+    /// Number of API calls Hermes made for this session (Hermes
+    /// v2026.4.23+; populated from `sessions.api_call_count`). Distinct
+    /// from `toolCallCount` — every tool round-trip is a tool call,
+    /// but each agent reasoning step also costs an API call. `0` on
+    /// older Hermes hosts that don't have the column.
+    public let apiCallCount: Int
 
 
     public init(
@@ -43,7 +49,8 @@ public struct HermesSession: Identifiable, Sendable {
         reasoningTokens: Int,
         actualCostUSD: Double?,
         costStatus: String?,
-        billingProvider: String?
+        billingProvider: String?,
+        apiCallCount: Int = 0
     ) {
         self.id = id
         self.source = source
@@ -65,6 +72,7 @@ public struct HermesSession: Identifiable, Sendable {
         self.actualCostUSD = actualCostUSD
         self.costStatus = costStatus
         self.billingProvider = billingProvider
+        self.apiCallCount = apiCallCount
     }
     public var isSubagent: Bool { parentSessionId != nil }
 

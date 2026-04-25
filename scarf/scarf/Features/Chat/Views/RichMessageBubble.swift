@@ -95,7 +95,10 @@ struct RichMessageBubble: View {
 
     private var reasoningSection: some View {
         DisclosureGroup {
-            Text(message.reasoning ?? "")
+            // v2.5: prefer the v0.11 `reasoning_content` column (newer,
+            // typically richer); fall back to the legacy `reasoning`
+            // blob when only it's populated.
+            Text(message.preferredReasoning ?? "")
                 .font(.caption.monospaced())
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)

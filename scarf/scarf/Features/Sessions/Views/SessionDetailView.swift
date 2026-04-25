@@ -57,6 +57,11 @@ struct SessionDetailView: View {
                 Label(session.model ?? "unknown", systemImage: "cpu")
                 Label("\(session.messageCount) msgs", systemImage: "bubble.left")
                 Label("\(session.toolCallCount) tools", systemImage: "wrench")
+                if session.apiCallCount > 0 {
+                    // Hermes v2026.4.23+ — distinct from tool calls;
+                    // every reasoning step costs an API call too.
+                    Label("\(session.apiCallCount) API", systemImage: "network")
+                }
                 if session.reasoningTokens > 0 {
                     Label("\(session.reasoningTokens) reasoning", systemImage: "brain")
                 }
