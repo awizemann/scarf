@@ -315,7 +315,23 @@ final class ChatViewModel {
         // and Hermes-version-independent. v2.5.
         let wireText = expandIfProjectScoped(text)
 
-        acpStatus = "Agent working..."
+        // /steer is non-interruptive — the agent is still on its
+        // current turn; the guidance applies after the next tool
+        // call. Don't change the "Agent working..." status (it's
+        // already on); show a transient toast so the user knows the
+        // guidance was accepted. v2.5 / Hermes v2026.4.23+.
+        let isSteer = richChatViewModel.isNonInterruptiveSlash(text)
+        if isSteer {
+            richChatViewModel.transientHint = "Guidance queued — applies after the next tool call."
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                if self?.richChatViewModel.transientHint == "Guidance queued — applies after the next tool call." {
+                    self?.richChatViewModel.transientHint = nil
+                }
+            }
+        } else {
+            acpStatus = "Agent working..."
+        }
         acpPromptTask = Task { @MainActor in
             do {
                 let result = try await client.sendPrompt(sessionId: sessionId, text: wireText)

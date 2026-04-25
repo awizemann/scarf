@@ -46,6 +46,9 @@ struct RichChatView: View {
             )
 
             Divider()
+            if let hint = richChat.transientHint {
+                steeringToast(hint)
+            }
             RichChatInputBar(
                 onSend: { text in
                     onSend(text)
@@ -74,5 +77,25 @@ struct RichChatView: View {
                 richChat.scheduleRefresh()
             }
         }
+    }
+
+    /// Soft pill above the composer that confirms a non-interruptive
+    /// command (e.g. `/steer`) was received. Auto-clears after a short
+    /// delay (managed by `ChatViewModel`); presence in the model is
+    /// what drives this view.
+    private func steeringToast(_ hint: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrowshape.turn.up.right.fill")
+                .foregroundStyle(.tint)
+                .font(.caption)
+            Text(hint)
+                .font(.caption)
+                .foregroundStyle(.primary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.tint.opacity(0.12))
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }

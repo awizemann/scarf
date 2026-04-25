@@ -47,6 +47,9 @@ struct ChatView: View {
             projectContextBar
             messageList
             Divider()
+            if let hint = controller.vm.transientHint {
+                steeringToast(hint)
+            }
             composer
         }
         .navigationTitle("Chat")
@@ -242,6 +245,26 @@ struct ChatView: View {
     }
 
     @ViewBuilder
+    /// Soft pill above the composer confirming a non-interruptive
+    /// command was received (e.g. `/steer`). Auto-clears via the
+    /// 4-second Task in `ChatController.send()`.
+    private func steeringToast(_ hint: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrowshape.turn.up.right.fill")
+                .foregroundStyle(.tint)
+                .font(.caption)
+            Text(hint)
+                .font(.caption)
+                .foregroundStyle(.primary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.tint.opacity(0.12))
+        .transition(.opacity)
+    }
+
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
             TextField(
@@ -557,6 +580,19 @@ final class ChatController {
         guard !sessionId.isEmpty else { return }
         draft = ""
         vm.addUserMessage(text: text)
+        // /steer is non-interruptive — the agent is still on its
+        // current turn; the guidance applies after the next tool call.
+        // Surface a transient toast confirming the guidance was
+        // received. v2.5 / Hermes v2026.4.23+.
+        if vm.isNonInterruptiveSlash(text) {
+            vm.transientHint = "Guidance queued — applies after the next tool call."
+            Task { @MainActor [weak vm] in
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                if vm?.transientHint == "Guidance queued — applies after the next tool call." {
+                    vm?.transientHint = nil
+                }
+            }
+        }
         // Project-scoped slash commands expand client-side: the user
         // bubble shows the literal `/<name> args` they typed (above);
         // Hermes receives the expanded prompt template body. Other

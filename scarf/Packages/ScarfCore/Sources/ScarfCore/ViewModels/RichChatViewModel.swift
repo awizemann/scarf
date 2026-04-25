@@ -197,8 +197,31 @@ public final class RichChatViewModel {
     /// `ChatViewModel.sendPrompt` and needs the body + model override.
     public private(set) var projectScopedCommands: [ProjectSlashCommand] = []
 
+    /// Hardcoded ACP-native commands that don't interrupt the current
+    /// turn. v2.5 ships `/steer` as the flagship — applies user
+    /// guidance after the next tool call without aborting. Fronted by
+    /// Hermes v2026.4.23+ but listed here unconditionally so older
+    /// hosts that don't advertise it still surface the trigger; the
+    /// agent will respond appropriately or no-op gracefully.
+    public static let nonInterruptiveCommands: [HermesSlashCommand] = [
+        HermesSlashCommand(
+            name: "steer",
+            description: "Nudge the agent mid-run (applies after the next tool call)",
+            argumentHint: "<guidance>",
+            source: .acpNonInterruptive
+        )
+    ]
+
+    /// Transient hint shown above the composer, e.g. "Guidance queued —
+    /// applies after the next tool call." for `/steer`. The chat view
+    /// auto-clears it after a short delay (handled in the view); the
+    /// model just owns the value.
+    public var transientHint: String?
+
     /// Merged slash-menu list. Precedence: **ACP > project-scoped >
     /// quick_commands** (most specific source wins). De-duplicated by name.
+    /// Non-interruptive ACP commands (`/steer`) are always appended at
+    /// the end so they don't crowd the more frequently-used options.
     public var availableCommands: [HermesSlashCommand] {
         let acpNames = Set(acpCommands.map(\.name))
         let projectAsHermes: [HermesSlashCommand] = projectScopedCommands
@@ -215,7 +238,28 @@ public final class RichChatViewModel {
         let quicks = quickCommands.filter {
             !acpNames.contains($0.name) && !projectNames.contains($0.name)
         }
-        return acpCommands + projectAsHermes + quicks
+        let occupied = acpNames.union(projectNames).union(Set(quicks.map(\.name)))
+        let nonInterruptive = Self.nonInterruptiveCommands.filter {
+            !occupied.contains($0.name)
+        }
+        return acpCommands + projectAsHermes + quicks + nonInterruptive
+    }
+
+    /// True when `text` is a non-interruptive command that should NOT
+    /// flip `isAgentWorking` to true on send. Used by the Mac/iOS chat
+    /// view models to skip the "agent working" overlay change for
+    /// `/steer` (the agent's still on its current turn).
+    public func isNonInterruptiveSlash(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/") else { return false }
+        let withoutSlash = trimmed.dropFirst()
+        let name: String
+        if let space = withoutSlash.firstIndex(of: " ") {
+            name = String(withoutSlash[..<space])
+        } else {
+            name = String(withoutSlash)
+        }
+        return Self.nonInterruptiveCommands.contains { $0.name == name }
     }
 
     /// Look up the full project-scoped command payload by slash trigger.
