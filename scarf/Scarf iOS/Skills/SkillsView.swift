@@ -18,6 +18,10 @@ struct SkillsView: View {
 
     @State private var vm: SkillsViewModel
     @State private var currentTab: Tab = .installed
+    /// v2.5 SkillSnapshotService diff against the per-server last-seen
+    /// snapshot. Drives the "What's New" pill at the top of the tab.
+    /// Nil before first compute or when there's nothing changed.
+    @State private var snapshotDiff: SkillSnapshotDiff?
 
     private static let sharedContextID: ServerID = ServerID(
         uuidString: "00000000-0000-0000-0000-0000000000A1"
@@ -39,6 +43,15 @@ struct SkillsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // v2.5 "What's New" pill — surfaced above the sub-tab
+            // picker when the per-server snapshot diff has changes.
+            // First-load with no prior snapshot silently primes (no
+            // pill, the snapshot just records what's there).
+            if let diff = snapshotDiff,
+               diff.hasChanges,
+               !diff.previousSnapshotEmpty {
+                whatsNewPill(diff: diff)
+            }
             tabPicker
                 .padding(.horizontal)
                 .padding(.top, 8)
@@ -49,8 +62,54 @@ struct SkillsView: View {
         }
         .navigationTitle(titleString)
         .navigationBarTitleDisplayMode(.inline)
-        .task { await vm.load() }
-        .refreshable { await vm.load() }
+        .task {
+            await vm.load()
+            recomputeSnapshotDiff()
+        }
+        .refreshable {
+            await vm.load()
+            recomputeSnapshotDiff()
+        }
+    }
+
+    /// Compute the snapshot diff against the per-server last-seen
+    /// state. First load with no prior snapshot silently primes —
+    /// the pill never renders for users on day one.
+    private func recomputeSnapshotDiff() {
+        let allSkills = vm.categories.flatMap(\.skills)
+        let svc = SkillSnapshotService(serverID: Self.sharedContextID)
+        let diff = svc.diff(against: allSkills)
+        if diff.previousSnapshotEmpty {
+            svc.markSeen(allSkills)
+            snapshotDiff = nil
+        } else {
+            snapshotDiff = diff
+        }
+    }
+
+    /// "2 new, 4 updated since you last looked" pill at the top of
+    /// the tab. Tapping "Seen" persists the current set as the new
+    /// baseline + dismisses the pill.
+    @ViewBuilder
+    private func whatsNewPill(diff: SkillSnapshotDiff) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(.tint)
+            Text(diff.label)
+                .font(.callout)
+                .foregroundStyle(.primary)
+            Spacer()
+            Button("Seen") {
+                SkillSnapshotService(serverID: Self.sharedContextID)
+                    .markSeen(vm.categories.flatMap(\.skills))
+                snapshotDiff = nil
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.tint.opacity(0.1))
     }
 
     private var titleString: String {
