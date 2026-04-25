@@ -533,8 +533,14 @@ final class ChatController {
         guard !sessionId.isEmpty else { return }
         draft = ""
         vm.addUserMessage(text: text)
+        // Project-scoped slash commands expand client-side: the user
+        // bubble shows the literal `/<name> args` they typed (above);
+        // Hermes receives the expanded prompt template body. Other
+        // command sources (ACP, quick_commands) keep going to Hermes
+        // literally. v2.5.
+        let wireText = expandIfProjectScoped(text)
         do {
-            _ = try await client.sendPrompt(sessionId: sessionId, text: text)
+            _ = try await client.sendPrompt(sessionId: sessionId, text: wireText)
         } catch {
             // The event task may already have surfaced a
             // .connectionLost; show the send-time error only if the
@@ -546,6 +552,28 @@ final class ChatController {
                 state = .failed("Prompt failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    /// Mirror of `ChatViewModel.expandIfProjectScoped(_:)` on Mac.
+    /// `/<name> args` matching a loaded project-scoped command is
+    /// expanded; everything else is sent literally.
+    private func expandIfProjectScoped(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/") else { return text }
+        let withoutSlash = String(trimmed.dropFirst())
+        let name: String
+        let argument: String
+        if let space = withoutSlash.firstIndex(of: " ") {
+            name = String(withoutSlash[..<space])
+            argument = String(withoutSlash[withoutSlash.index(after: space)...])
+        } else {
+            name = withoutSlash
+            argument = ""
+        }
+        guard !name.isEmpty,
+              let cmd = vm.projectScopedCommand(named: name)
+        else { return text }
+        return ProjectSlashCommandService(context: context).expand(cmd, withArgument: argument)
     }
 
     /// Stop the current session + tear down the SSH exec channel.
@@ -565,6 +593,9 @@ final class ChatController {
         await stop()
         vm.reset()
         currentProjectName = nil
+        // Quick-chat sessions don't have a project; clear any leftover
+        // project-scoped slash commands from a prior session.
+        vm.loadProjectScopedCommands(at: nil)
         await start()
     }
 
@@ -577,6 +608,10 @@ final class ChatController {
         await stop()
         vm.reset()
         currentProjectName = project.name
+        // Pull any project-authored slash commands at
+        // <project.path>/.scarf/slash-commands/ into the chat menu.
+        // Async + non-fatal — degrades cleanly on SFTP failures (logged).
+        vm.loadProjectScopedCommands(at: project.path)
         // Write the context block first. Non-fatal on failure — chat
         // still starts, just without the managed block. We capture the
         // failure (rather than swallowing via `try?`) so the user gets
@@ -722,16 +757,20 @@ final class ChatController {
         // JSON-decode edge case that would render just a folder icon
         // with no text (pass-2 bug: user saw exactly that).
         let ctx = context
-        let resolved: String? = await Task.detached {
+        // Resolve both the path AND the name so we can (a) render the
+        // header chip with the name and (b) load any project-scoped
+        // slash commands at the project's `.scarf/slash-commands/` dir.
+        let resolved: (path: String, name: String)? = await Task.detached {
             let attribution = SessionAttributionService(context: ctx)
             guard let path = attribution.projectPath(for: sessionID) else { return nil }
             let registry = ProjectDashboardService(context: ctx).loadRegistry()
             guard let name = registry.projects.first(where: { $0.path == path })?.name,
                   !name.isEmpty
             else { return nil }
-            return name
+            return (path: path, name: name)
         }.value
-        currentProjectName = resolved
+        currentProjectName = resolved?.name
+        vm.loadProjectScopedCommands(at: resolved?.path)
 
         state = .connecting
         let client = ACPClient.forIOSApp(

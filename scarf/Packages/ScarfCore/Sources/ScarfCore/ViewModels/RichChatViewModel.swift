@@ -189,11 +189,41 @@ public final class RichChatViewModel {
     public private(set) var acpCommands: [HermesSlashCommand] = []
     /// User-defined commands parsed from `config.yaml` `quick_commands`.
     public private(set) var quickCommands: [HermesSlashCommand] = []
+    /// Project-scoped, Scarf-managed commands at
+    /// `<project>/.scarf/slash-commands/<name>.md`. Loaded by
+    /// `loadProjectScopedCommands(at:)` when a project chat starts; cleared
+    /// on `reset()`. The full `ProjectSlashCommand` payload is kept here
+    /// (not just the surface metadata) because expansion happens in
+    /// `ChatViewModel.sendPrompt` and needs the body + model override.
+    public private(set) var projectScopedCommands: [ProjectSlashCommand] = []
 
-    /// Merged list, ACP-first, de-duplicated by name.
+    /// Merged slash-menu list. Precedence: **ACP > project-scoped >
+    /// quick_commands** (most specific source wins). De-duplicated by name.
     public var availableCommands: [HermesSlashCommand] {
         let acpNames = Set(acpCommands.map(\.name))
-        return acpCommands + quickCommands.filter { !acpNames.contains($0.name) }
+        let projectAsHermes: [HermesSlashCommand] = projectScopedCommands
+            .filter { !acpNames.contains($0.name) }
+            .map { cmd in
+                HermesSlashCommand(
+                    name: cmd.name,
+                    description: cmd.description,
+                    argumentHint: cmd.argumentHint,
+                    source: .projectScoped
+                )
+            }
+        let projectNames = Set(projectAsHermes.map(\.name))
+        let quicks = quickCommands.filter {
+            !acpNames.contains($0.name) && !projectNames.contains($0.name)
+        }
+        return acpCommands + projectAsHermes + quicks
+    }
+
+    /// Look up the full project-scoped command payload by slash trigger.
+    /// `ChatViewModel.sendPrompt` calls this when the input matches a
+    /// `.projectScoped` source and needs the body for client-side
+    /// expansion.
+    public func projectScopedCommand(named name: String) -> ProjectSlashCommand? {
+        projectScopedCommands.first { $0.name == name }
     }
 
     public var supportsCompress: Bool { availableCommands.contains { $0.name == "compress" } }
@@ -270,6 +300,7 @@ public final class RichChatViewModel {
         acpErrorDetails = nil
         acpCachedReadTokens = 0
         acpCommands = []
+        projectScopedCommands = []
         pendingPermission = nil
         loadQuickCommands()
     }
@@ -404,6 +435,27 @@ public final class RichChatViewModel {
             }
             await MainActor.run { [weak self] in
                 self?.quickCommands = mapped
+            }
+        }
+    }
+
+    /// Load project-scoped slash commands from
+    /// `<projectPath>/.scarf/slash-commands/` off the main actor and
+    /// publish them. Safe to call repeatedly — replaces the existing
+    /// list (e.g., when the user adds / edits / deletes commands).
+    /// Pass `nil` to clear (e.g., on session de-attribution from a
+    /// project, or quick-chat sessions).
+    public func loadProjectScopedCommands(at projectPath: String?) {
+        guard let projectPath else {
+            projectScopedCommands = []
+            return
+        }
+        let ctx = context
+        Task.detached { [weak self] in
+            let svc = ProjectSlashCommandService(context: ctx)
+            let loaded = svc.loadCommands(at: projectPath)
+            await MainActor.run { [weak self] in
+                self?.projectScopedCommands = loaded
             }
         }
     }

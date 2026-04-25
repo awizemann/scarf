@@ -267,6 +267,33 @@ final class ChatViewModel {
         }
     }
 
+    /// If `text` is a `/<name> [args]` invocation matching a project-
+    /// scoped slash command currently loaded into the view model, return
+    /// the expanded prompt body (with `{{argument}}` substituted). Otherwise
+    /// return the input unchanged.
+    ///
+    /// ACP commands and `quick_commands:` keep going to Hermes literally —
+    /// only project-scoped commands get the client-side expansion treatment
+    /// because Hermes has no concept of them.
+    private func expandIfProjectScoped(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/") else { return text }
+        let withoutSlash = String(trimmed.dropFirst())
+        let name: String
+        let argument: String
+        if let space = withoutSlash.firstIndex(of: " ") {
+            name = String(withoutSlash[..<space])
+            argument = String(withoutSlash[withoutSlash.index(after: space)...])
+        } else {
+            name = withoutSlash
+            argument = ""
+        }
+        guard !name.isEmpty,
+              let cmd = richChatViewModel.projectScopedCommand(named: name)
+        else { return text }
+        return ProjectSlashCommandService(context: context).expand(cmd, withArgument: argument)
+    }
+
     private func sendViaACP(client: ACPClient, text: String) {
         guard let sessionId = richChatViewModel.sessionId else {
             clearACPErrorState()
@@ -280,10 +307,18 @@ final class ChatViewModel {
             richChatViewModel.addUserMessage(text: text)
         }
 
+        // Project-scoped slash commands expand client-side: the user
+        // sees the literal `/<name> args` they typed (already in the
+        // transcript as their bubble), but Hermes receives the expanded
+        // prompt template. The literal slash is meaningless to Hermes
+        // for project-scoped commands; this is what makes them portable
+        // and Hermes-version-independent. v2.5.
+        let wireText = expandIfProjectScoped(text)
+
         acpStatus = "Agent working..."
         acpPromptTask = Task { @MainActor in
             do {
-                let result = try await client.sendPrompt(sessionId: sessionId, text: text)
+                let result = try await client.sendPrompt(sessionId: sessionId, text: wireText)
                 acpStatus = "Ready"
                 richChatViewModel.handleACPEvent(
                     .promptComplete(sessionId: sessionId, response: result)
@@ -420,11 +455,18 @@ final class ChatViewModel {
                     let name = registry.projects.first(where: { $0.path == path })?.name
                     self.currentProjectPath = path
                     self.currentProjectName = name ?? path
+                    // Pull any project-scoped slash commands the user has
+                    // authored at <path>/.scarf/slash-commands/ so the
+                    // chat slash menu surfaces them. Async + non-fatal —
+                    // the menu degrades to ACP + quick commands only on
+                    // any failure (logged inside the service).
+                    self.richChatViewModel.loadProjectScopedCommands(at: path)
                 } else {
                     // Explicit clear on non-project sessions so the
                     // indicator doesn't leak from a previous chat.
                     self.currentProjectPath = nil
                     self.currentProjectName = nil
+                    self.richChatViewModel.loadProjectScopedCommands(at: nil)
                 }
 
                 // Refresh session list so the new ACP session appears in the Resume menu
