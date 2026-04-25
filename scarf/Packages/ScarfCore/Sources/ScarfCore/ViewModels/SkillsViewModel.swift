@@ -149,7 +149,12 @@ public final class SkillsViewModel {
             if source != "all" { args += ["--source", source] }
             let result = Self.runHermes(executable: bin, args: args, transport: xport, timeout: 30)
             let parsed = HermesSkillsHubParser.parseHubList(result.output)
-            await self?.finishBrowse(results: parsed, exitCode: result.exitCode, isSearch: false)
+            await self?.finishBrowse(
+                results: parsed,
+                exitCode: result.exitCode,
+                rawOutput: result.output,
+                isSearch: false
+            )
         }
     }
 
@@ -168,7 +173,12 @@ public final class SkillsViewModel {
             if source != "all" { args += ["--source", source] }
             let result = Self.runHermes(executable: bin, args: args, transport: xport, timeout: 30)
             let parsed = HermesSkillsHubParser.parseHubList(result.output)
-            await self?.finishBrowse(results: parsed, exitCode: result.exitCode, isSearch: true)
+            await self?.finishBrowse(
+                results: parsed,
+                exitCode: result.exitCode,
+                rawOutput: result.output,
+                isSearch: true
+            )
         }
     }
 
@@ -244,16 +254,52 @@ public final class SkillsViewModel {
     // about than the prior interleaved `MainActor.run` chains.
 
     @MainActor
-    private func finishBrowse(results: [HermesHubSkill], exitCode: Int32, isSearch: Bool) async {
+    private func finishBrowse(
+        results: [HermesHubSkill],
+        exitCode: Int32,
+        rawOutput: String,
+        isSearch: Bool
+    ) async {
         isHubLoading = false
         hubResults = results
         if results.isEmpty {
-            hubMessage = isSearch
-                ? "No matches"
-                : (exitCode == 0 ? "No results" : "Browse failed")
+            if exitCode == 0 {
+                hubMessage = isSearch ? "No matches" : "No results"
+            } else {
+                let label = isSearch ? "Search failed" : "Browse failed"
+                let detail = Self.firstSignificantLine(rawOutput)
+                hubMessage = detail.isEmpty
+                    ? "\(label) (exit \(exitCode))"
+                    : "\(label): \(detail)"
+            }
         } else {
             hubMessage = nil
         }
+    }
+
+    /// Extract the first non-empty, non-decorative line from CLI output —
+    /// used to surface the actual error reason in `hubMessage` instead of a
+    /// canned "Browse failed". Skips Rich box-drawing chrome and ANSI noise
+    /// so the message stays readable in a one-line banner.
+    nonisolated private static func firstSignificantLine(_ output: String) -> String {
+        let stripped = output
+            .replacingOccurrences(
+                of: #"\u{001B}\[[0-9;]*m"#,
+                with: "",
+                options: .regularExpression
+            )
+        for raw in stripped.components(separatedBy: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty else { continue }
+            if line.unicodeScalars.allSatisfy({ scalar in
+                let v = scalar.value
+                // Skip pure box-drawing rows (U+2500..U+257F) so the
+                // diagnostic surfaces the actual error text below them.
+                return (v >= 0x2500 && v <= 0x257F) || scalar == " "
+            }) { continue }
+            return String(line.prefix(160))
+        }
+        return ""
     }
 
     @MainActor

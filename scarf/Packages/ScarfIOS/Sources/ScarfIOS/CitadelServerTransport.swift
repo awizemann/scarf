@@ -331,29 +331,61 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         timeout: TimeInterval?
     ) async throws -> ProcessResult {
         let client = try await connectionHolder.ssh()
-        let cmd = Self.shellJoin([executable] + args)
-        // Citadel's executeCommand accumulates stdout into a ByteBuffer.
-        // stderr isn't separately exposed — we fold it into the output
-        // via `2>&1` so error paths still give callers something to
-        // show. Exit code is similarly not directly exposed; on non-
-        // zero exit Citadel throws, so we map that to a commandFailed
-        // error with the captured output as stderr.
+        // Citadel's raw exec channel doesn't source the user's shell rc
+        // files, so non-interactive SSH sessions land with a stripped
+        // PATH (typically just `/usr/bin:/bin`). pipx installs `hermes`
+        // at `~/.local/bin/hermes`, and many of hermes's sub-tools
+        // (git/curl/python) live in homebrew prefixes that the remote
+        // sshd would otherwise add via login-shell init. Mac's OpenSSH
+        // sshd handles this transparently; Citadel does not. We extend
+        // PATH inline so bare `hermes` resolves AND any subprocess it
+        // spawns can still find its tools.
+        let cmd = "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" "
+            + Self.shellJoin([executable] + args)
+        // Citadel's `executeCommand` discards captured output when the
+        // remote exits non-zero (it throws `CommandFailed` and the
+        // accumulated ByteBuffer is lost). That breaks legitimate cases
+        // like `hermes skills browse` printing a full table and *then*
+        // exiting non-zero — callers see nothing and report "Browse
+        // failed". Drive `executeCommandStream` directly so we can
+        // collect stdout + stderr regardless of exit code, and surface
+        // the real exit status.
+        let stream: AsyncThrowingStream<ExecCommandOutput, Error>
         do {
-            let buffer = try await client.executeCommand(cmd + " 2>&1")
-            var buf = buffer
-            let str = buf.readString(length: buf.readableBytes) ?? ""
-            return ProcessResult(
-                exitCode: 0,
-                stdout: Data(str.utf8),
-                stderr: Data()
-            )
+            stream = try await client.executeCommandStream(cmd)
         } catch {
             return ProcessResult(
-                exitCode: 1,
+                exitCode: -1,
                 stdout: Data(),
                 stderr: Data(error.localizedDescription.utf8)
             )
         }
+        var stdout = Data()
+        var stderr = Data()
+        var exitCode: Int32 = 0
+        do {
+            for try await chunk in stream {
+                switch chunk {
+                case .stdout(var buf):
+                    if let s = buf.readString(length: buf.readableBytes) {
+                        stdout.append(Data(s.utf8))
+                    }
+                case .stderr(var buf):
+                    if let s = buf.readString(length: buf.readableBytes) {
+                        stderr.append(Data(s.utf8))
+                    }
+                }
+            }
+        } catch let failed as SSHClient.CommandFailed {
+            exitCode = Int32(failed.exitCode)
+        } catch {
+            // Network / channel-level failure mid-stream — preserve any
+            // partial output and report -1 so callers can distinguish
+            // from a clean non-zero remote exit.
+            stderr.append(Data(error.localizedDescription.utf8))
+            exitCode = -1
+        }
+        return ProcessResult(exitCode: exitCode, stdout: stdout, stderr: stderr)
     }
 
     private func asyncSnapshotSQLite(remotePath: String) async throws -> URL {
@@ -506,16 +538,27 @@ private actor ConnectionHolder {
         if let existing = sshClient, existing.isConnected {
             return existing
         }
+        // Replacing the SSHClient invalidates any cached SFTPClient that
+        // was bound to the previous (now-dead) connection. Drop it here
+        // so the next sftp() call re-opens against the new client; without
+        // this, every SFTP-backed call after a reconnect throws "channel
+        // closed" until the app is restarted.
+        if let oldSftp = sftpClient {
+            try? await oldSftp.close()
+            sftpClient = nil
+        }
         let client = try await openSSH()
         sshClient = client
         return client
     }
 
     func sftp() async throws -> SFTPClient {
+        // Pulling SSH first ensures a stale-after-reconnect cached
+        // sftpClient is cleared in `ssh()` before we read it here.
+        let client = try await ssh()
         if let existing = sftpClient {
             return existing
         }
-        let client = try await ssh()
         let sftp = try await client.openSFTP()
         sftpClient = sftp
         return sftp
