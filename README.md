@@ -19,7 +19,17 @@
   <a href="https://www.buymeacoffee.com/awizemann"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="28"></a>
 </p>
 
-## What's New in 2.3
+## What's New in 2.5
+
+- **ScarfGo, the iPhone companion, ships in public TestFlight.** Same Hermes server you've been running on your Mac — now reachable from your phone over SSH. Multi-server, project-scoped chat, session resume, memory editor, cron list, skills tree, settings (read), all native iOS. Pure-Swift SSH (Citadel under the hood — no `ssh` binary needed on iOS). Per-project chat writes the same Scarf-managed `AGENTS.md` block the Mac app does, so the agent boots with the same project context regardless of which client opened the session. **TestFlight invite + onboarding walkthrough:** [ScarfGo wiki page](https://github.com/awizemann/scarf/wiki/ScarfGo).
+- **Mac global Sessions: project filter + project badges** — parity with ScarfGo's Sessions tab. The list grows a filter Menu (All projects / Unattributed / each registered project) and each row carries a tinted folder chip with the project name when attributed. Same `SessionAttributionService` + `ProjectDashboardService` ScarfGo consumes, both now in ScarfCore.
+- **Human-readable cron schedules everywhere.** New `CronScheduleFormatter` in ScarfCore translates the common cron shapes (every-N-minutes, every-N-hours, daily-at-H, weekdays-at-H, the `@hourly` / `@daily` / `@weekly` / `@monthly` macros) into English phrases and falls back to the raw expression on anything custom. Mac and iOS render the same. Sibling `formatNextRun(_:)` renders ISO-8601 next-run timestamps as relative phrases.
+- **Under the hood** — `SessionAttributionService`, `ProjectContextBlock`, `CronScheduleFormatter`, and the ACP error triplet (`acpError` / `acpErrorHint` / `acpErrorDetails`) consolidated into ScarfCore so Mac and iOS consume one source of truth. The cross-suite test races we hit during pre-release verification got fixed by collapsing every factory-touching test into a single `.serialized` suite. 163 tests, three consecutive green runs. Several `try?` swallows in iOS lifecycle code now surface real failures (Keychain unlock errors no longer drop people into onboarding; partial Forget operations report what failed).
+- **iOS push notifications skeleton** — `NotificationRouter` ships with foreground presentation + a lock-screen "Approve / Deny" action category gated by `apnsEnabled = false`. Lights up when Hermes ships a server-side push sender + an APNs cert.
+
+See the full [v2.5.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.5.0), the [ScarfGo wiki page](https://github.com/awizemann/scarf/wiki/ScarfGo), and [Platform Differences](https://github.com/awizemann/scarf/wiki/Platform-Differences) for what is and isn't shared between Mac and iOS.
+
+### Previously, in 2.3
 
 - **Projects sidebar grows up** — group projects into folders, rename / archive / unarchive in place, filter the list with ⌘F, jump to the first nine with ⌘1–⌘9. Archived projects hide by default; a toggle in the bottom bar surfaces them. Non-destructive on the v2.2 registry file — downgrade stays clean.
 - **Per-project Sessions tab** — alongside Dashboard and Site. Shows chats attributed to the project, with a **New Chat** button that spawns `hermes acp` with the project's directory as the session cwd and attributes the result via a Scarf-owned sidecar (`~/.hermes/scarf/session_project_map.json`). Click any listed session to resume it with project context automatically restored.
@@ -28,44 +38,7 @@
 - **Tool Gateway — Nous Portal support** — Hermes v0.10.0 introduced subscription-routed tools (web search, image gen, TTS, browser automation). Scarf 2.3 merges Hermes's provider-overlay table into the model picker so **Nous Portal + 5 other previously-invisible providers** now appear, and ships a dedicated **Sign in to Nous Portal** sheet that runs the device-code flow end-to-end in-app — no terminal. Each of the 8 auxiliary sub-model tasks gets a per-task Nous toggle, a Tool Gateway card lands in Health, and Credential Pools' silent-fail dead-end for device-code providers is closed. Scarf's existing messaging-gateway section is renamed **Messaging Gateway** to disambiguate from the new Tool Gateway.
 - **Window-layout cleanup** — switching to Chat or a Sessions tab no longer grows the window past the screen. `.windowResizability(.contentMinSize)` + targeted `idealHeight` caps keep the window's floor at a sensible content minimum while letting users freely drag larger or smaller.
 
-See the full [v2.3.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.3.0), the [Project Templates wiki page](https://github.com/awizemann/scarf/wiki/Project-Templates), and the [Hermes Version Compatibility page](https://github.com/awizemann/scarf/wiki/Hermes-Version-Compatibility) for the Tool Gateway's Hermes v0.10.0 requirement.
-
-### Previously, in 2.2
-
-- **Project Templates** — Scarf projects can now travel. Package a project's dashboard, agent instructions, skills, cron jobs, and a typed configuration schema into a `.scarftemplate` bundle, hand it to anyone, and they install it in one click. Every bundle ships with a cross-agent `AGENTS.md` ([agents.md](https://agents.md/) standard) so the instructions work in Claude Code, Cursor, Codex, Aider, and the 20+ other agents that read it natively. Browser-based one-click install via `scarf://install?url=…` deep links. Export / Install from File / Install from URL live under the **Templates** menu in the Projects toolbar.
-- **Typed configuration with Keychain-backed secrets** — templates declare a schema with seven field types (`string`, `text`, `number`, `bool`, `enum`, `list`, `secret`). A **Configure** step in the install flow renders the form, routes secrets to the macOS Keychain, and drops non-secret values into `<project>/.scarf/config.json`.
-- **Public template catalog** — [awizemann.github.io/scarf/templates/](https://awizemann.github.io/scarf/templates/) with live dashboard previews + schema rendering. CI-enforced Python validator mirrors the Swift-side invariants on every PR.
-- **Safe-by-design** — skills namespaced, cron jobs tagged and paused-on-install, lock-file-driven uninstall, exports carry schema but never values.
-
-See the [v2.2.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.2.0) for the full 2.2 series.
-
-### Previously, in 2.1
-
-- **Seven languages** — Full UI translations for Simplified Chinese, German, French, Spanish, Japanese, and Brazilian Portuguese on top of English. Scarf respects the system language by default; override per-app via **System Settings → Language & Region → Apps → Scarf**. Contributor workflow for adding more locales is documented in [CONTRIBUTING.md → Adding a Language](CONTRIBUTING.md#adding-a-language).
-- **Locale-aware number formatting** — Currency, byte sizes, compact token counts (`15K`, `1.5M`), and day-of-week charts now follow the user's locale instead of POSIX / English defaults.
-- **Chat slash-command menu** — Type `/` in Rich Chat to browse every command the agent has advertised plus any user-defined `quick_commands:` from config.yaml. ↑/↓ to navigate, Tab/Enter to complete, Esc to dismiss.
-- **Chat polish** — Auto-scroll on send and on prompt completion, a non-blocking loading spinner during session reconnects, properly centered empty state, and the long-standing "session loads with whitespace" bug fixed (LazyVStack → VStack in the message list).
-
-See the full [v2.1.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.1.0).
-
-### Previously, in 2.0
-
-- **Multi-server** — Manage multiple Hermes installations (local + any number of remotes) from one app. Each window binds to one server; open them side-by-side.
-- **Remote Hermes over SSH** — Every feature that worked against your local `~/.hermes/` now works against a remote host. File I/O routes through `scp`/`sftp`; chat ACP runs over `ssh -T`; SQLite is served from atomic `.backup` snapshots pulled on file-watcher ticks.
-- **Chat UX overhaul** — No more white-screen flash on first message, no more scroll jumping into whitespace during streaming, failed prompts explain themselves instead of silently spinning forever.
-- **Correctness pass** — Fixed remote WAL error spam, stale-snapshot session resume, auto-resume of dead cron sessions, 230+ Swift 6 concurrency warnings.
-
-See the [v2.0.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.0.0) for the full 2.0 series.
-
-### Previously, in 1.6
-
-- **Platforms** — Native GUI setup for all 13 messaging platforms, no more hand-editing `.env`
-- **Credential Pools** — Fixed OAuth flow and API-key handling; pick providers from a catalog
-- **Model Picker** — Hierarchical browser backed by the 111-provider models.dev cache
-- **Settings tabs** — 10 organized tabs covering ~60 previously hidden config fields
-- **Configure sidebar** — Personalities, Quick Commands, Plugins, Webhooks, Profiles
-
-See the [v1.6.0 release notes](https://github.com/awizemann/scarf/releases/tag/v1.6.0) for the full 1.6 series.
+See the full [v2.3.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.3.0). Earlier release summaries (1.6 / 2.0 / 2.1 / 2.2) live at [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index) on the wiki.
 
 ## Multi-server, one window per server
 
@@ -136,10 +109,11 @@ Custom, agent-generated dashboards for any project. Define stat boxes, charts, t
 
 ## Requirements
 
-- macOS 14.6+ (Sonoma)
-- Xcode 16.0+
-- [Hermes agent](https://github.com/hermes-ai/hermes-agent) v0.6.0+ installed at `~/.hermes/` on each target host (v0.9.0+ recommended for full feature support)
-- For remote servers: SSH access (key-based), `sqlite3` on the remote (for atomic DB snapshots), and the `hermes` CLI resolvable from the remote user's `PATH` or at a path you specify per server.
+- macOS 14.6+ (Sonoma) for Scarf
+- iOS 18.0+ for [ScarfGo](https://github.com/awizemann/scarf/wiki/ScarfGo) (the iPhone companion, public TestFlight from v2.5)
+- Xcode 16.0+ to build from source
+- [Hermes agent](https://github.com/hermes-ai/hermes-agent) v0.6.0+ installed at `~/.hermes/` on each target host (v0.10.0+ recommended for full feature support)
+- For remote servers: SSH access (key-based), `sqlite3` on the remote (for atomic DB snapshots), and the `hermes` CLI resolvable from the remote user's `PATH` or at a path you specify per server. ScarfGo requires the same on every Hermes host it connects to.
 
 ### Compatibility
 
