@@ -29,7 +29,7 @@ struct SettingsView: View {
             if let err = vm.lastError {
                 Section {
                     Label(err, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(ScarfColor.warning)
                 }
             }
 
@@ -49,6 +49,8 @@ struct SettingsView: View {
             }
         }
         .scarfGoListDensity()
+        .scrollContentBackground(.hidden)
+        .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await vm.load() }

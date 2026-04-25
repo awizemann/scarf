@@ -24,7 +24,7 @@ struct ServerListView: View {
                     Section {
                         VStack(alignment: .leading, spacing: 8) {
                             Label("Something went wrong", systemImage: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(ScarfColor.warning)
                                 .font(.headline)
                             Text(err)
                                 .font(.callout)
@@ -60,6 +60,8 @@ struct ServerListView: View {
                 }
             }
             .scarfGoListDensity()
+            .scrollContentBackground(.hidden)
+            .background(ScarfColor.backgroundPrimary)
             .navigationTitle("Servers")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

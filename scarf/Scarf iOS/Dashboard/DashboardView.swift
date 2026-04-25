@@ -3,10 +3,10 @@ import ScarfCore
 import ScarfIOS
 import ScarfDesign
 
-/// iOS Dashboard — shows session count, token usage, cost, and the
-/// last 5 sessions pulled from the remote Hermes SQLite snapshot.
-/// Every data source routes through `ServerContext → CitadelServerTransport`
-/// so the same services that drive the Mac Dashboard power this one.
+/// iOS Dashboard — adopts the Mac-style card layout (status row +
+/// stats grid + recent-sessions card) instead of a native iOS list.
+/// Sessions sub-tab keeps a List view for scrolling density but
+/// renders against the rust page background.
 struct DashboardView: View {
     let config: IOSServerConfig
     let key: SSHKeyBundle
@@ -16,17 +16,8 @@ struct DashboardView: View {
     @State private var selectedSection: Section = .overview
     @State private var sessionProjectFilter: String? = nil
 
-    /// Two top-level surfaces in the Dashboard. Overview = stats +
-    /// 5 most-recent sessions for glance. Sessions = the 25-session
-    /// deeper list with a project filter. Split added in pass-2 per
-    /// user feedback — the old single-List layout grew too busy
-    /// once we started adding project badges, and users wanted a
-    /// way to slice by project.
     enum Section: Hashable { case overview, sessions }
 
-    /// Stable ID used when building the `ServerContext` — tied to the
-    /// config's host+user tuple so re-launching the app without reset
-    /// yields the same ID (important for the snapshot cache dir).
     private static let contextID: ServerID = ServerID(
         uuidString: "00000000-0000-0000-0000-0000000000A1"
     )!
@@ -48,18 +39,18 @@ struct DashboardView: View {
                 Text("Sessions").tag(Section.sessions)
             }
             .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
+            .padding(.horizontal, ScarfSpace.s4)
+            .padding(.top, ScarfSpace.s2)
+            .padding(.bottom, ScarfSpace.s1)
 
             Group {
                 switch selectedSection {
-                case .overview: overviewList
+                case .overview: overviewContent
                 case .sessions: sessionsList
                 }
             }
         }
-        .scarfGoListDensity()
+        .background(ScarfColor.backgroundPrimary.ignoresSafeArea())
         .navigationTitle(config.displayName)
         .navigationBarTitleDisplayMode(.large)
         .refreshable { await vm.refresh() }
@@ -68,62 +59,159 @@ struct DashboardView: View {
                 ProgressView("Loading dashboard…")
                     .padding()
                     .background(.regularMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.lg))
             }
         }
         .task { await vm.load() }
     }
 
-    // MARK: - Overview
+    // MARK: - Overview (Mac-style cards)
 
     @ViewBuilder
-    private var overviewList: some View {
-        List {
-            if let err = vm.lastError {
-                SwiftUI.Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Connection issue", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(ScarfColor.warning)
-                            .font(.headline)
-                        Text(err)
-                            .font(.callout)
-                            .foregroundStyle(ScarfColor.foregroundMuted)
-                        Button("Retry") {
-                            Task { await vm.refresh() }
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    .padding(.vertical, 4)
+    private var overviewContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: ScarfSpace.s5) {
+                if let err = vm.lastError {
+                    errorBanner(err)
+                }
+
+                statsSection
+
+                if !vm.recentSessions.isEmpty {
+                    recentSessionsSection
                 }
             }
+            .padding(.horizontal, ScarfSpace.s4)
+            .padding(.vertical, ScarfSpace.s4)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .background(ScarfColor.backgroundPrimary)
+    }
 
-            SwiftUI.Section("Activity") {
-                statRow("Total sessions", value: "\(vm.stats.totalSessions)")
-                statRow("Total messages", value: "\(vm.stats.totalMessages)")
-                statRow("Tool calls", value: "\(vm.stats.totalToolCalls)")
+    private func errorBanner(_ err: String) -> some View {
+        HStack(alignment: .top, spacing: ScarfSpace.s2) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(ScarfColor.warning)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Connection issue")
+                    .font(.headline)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
+                Text(err)
+                    .font(.callout)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Retry") {
+                    Task { await vm.refresh() }
+                }
+                .buttonStyle(.bordered)
+                .padding(.top, 4)
             }
+            Spacer(minLength: 0)
+        }
+        .padding(ScarfSpace.s3)
+        .background(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .fill(ScarfColor.warning.opacity(0.10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                        .strokeBorder(ScarfColor.warning.opacity(0.30), lineWidth: 1)
+                )
+        )
+    }
 
-            SwiftUI.Section("Tokens") {
-                statRow("Input", value: formatTokens(vm.stats.totalInputTokens))
-                statRow("Output", value: formatTokens(vm.stats.totalOutputTokens))
-                statRow("Reasoning", value: formatTokens(vm.stats.totalReasoningTokens))
+    private var statsSection: some View {
+        VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+            Text("Activity")
+                .font(.headline)
+                .foregroundStyle(ScarfColor.foregroundPrimary)
+
+            LazyVGrid(
+                columns: [GridItem(.flexible(), spacing: ScarfSpace.s3),
+                          GridItem(.flexible(), spacing: ScarfSpace.s3)],
+                spacing: ScarfSpace.s3
+            ) {
+                statCard(label: "Sessions", value: "\(vm.stats.totalSessions)")
+                statCard(label: "Messages", value: "\(vm.stats.totalMessages)")
+                statCard(label: "Tool Calls", value: "\(vm.stats.totalToolCalls)")
+                statCard(
+                    label: "Tokens",
+                    value: formatTokens(vm.stats.totalInputTokens + vm.stats.totalOutputTokens),
+                    sub: tokenSub
+                )
             }
+        }
+    }
 
-            if !vm.recentSessions.isEmpty {
-                SwiftUI.Section {
-                    ForEach(vm.recentSessions) { session in
-                        sessionRow(session)
-                    }
-                } header: {
-                    HStack {
-                        Text("Recent sessions")
-                        Spacer()
-                        Button("See all") { selectedSection = .sessions }
-                            .font(.caption)
-                            .textCase(nil)
+    private var tokenSub: String? {
+        let inT = vm.stats.totalInputTokens
+        let outT = vm.stats.totalOutputTokens
+        guard inT + outT > 0 else { return nil }
+        return "\(formatTokens(inT)) in · \(formatTokens(outT)) out"
+    }
+
+    private func statCard(label: String, value: String, sub: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .textCase(.uppercase)
+                .tracking(0.5)
+                .foregroundStyle(ScarfColor.foregroundMuted)
+            Text(value)
+                .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                .foregroundStyle(ScarfColor.foregroundPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            if let sub {
+                Text(sub)
+                    .font(.caption2)
+                    .foregroundStyle(ScarfColor.foregroundFaint)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(ScarfSpace.s3)
+        .background(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .fill(ScarfColor.backgroundSecondary)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .strokeBorder(ScarfColor.border, lineWidth: 1)
+        )
+    }
+
+    private var recentSessionsSection: some View {
+        VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+            HStack {
+                Text("Recent sessions")
+                    .font(.headline)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
+                Spacer()
+                Button("See all") { selectedSection = .sessions }
+                    .font(.caption)
+                    .foregroundStyle(ScarfColor.accent)
+                    .buttonStyle(.plain)
+            }
+            VStack(spacing: 0) {
+                ForEach(Array(vm.recentSessions.enumerated()), id: \.element.id) { idx, session in
+                    sessionRow(session)
+                        .padding(.horizontal, ScarfSpace.s3)
+                        .padding(.vertical, ScarfSpace.s2 + 2)
+                    if idx < vm.recentSessions.count - 1 {
+                        Rectangle()
+                            .fill(ScarfColor.border)
+                            .frame(height: 1)
                     }
                 }
             }
+            .background(
+                RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                    .fill(ScarfColor.backgroundSecondary)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                    .strokeBorder(ScarfColor.border, lineWidth: 1)
+            )
         }
     }
 
@@ -134,8 +222,8 @@ struct DashboardView: View {
         VStack(spacing: 0) {
             if !vm.allProjects.isEmpty {
                 filterBar
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 8)
+                    .padding(.horizontal, ScarfSpace.s3)
+                    .padding(.vertical, ScarfSpace.s2)
             }
 
             List {
@@ -149,20 +237,20 @@ struct DashboardView: View {
                             : "No sessions for that project yet. Try another filter or start a chat in that project.")
                     )
                     .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                 } else {
                     ForEach(filtered) { session in
                         sessionRow(session)
+                            .listRowBackground(ScarfColor.backgroundSecondary)
                     }
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(ScarfColor.backgroundPrimary)
         }
     }
 
-    /// Project filter control rendered above the Sessions list. Uses
-    /// a Menu instead of a segmented Picker because there can be many
-    /// projects — segments don't scale past 3–4 options on a phone.
-    /// Shows the active filter as the button label (tappable to
-    /// change); an explicit "All projects" entry clears the filter.
     @ViewBuilder
     private var filterBar: some View {
         HStack {
@@ -191,16 +279,16 @@ struct DashboardView: View {
                         .font(.caption2)
                 }
                 .font(.caption)
-                .foregroundStyle(.tint)
+                .foregroundStyle(ScarfColor.accent)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(.tint.opacity(0.1), in: Capsule())
+                .background(ScarfColor.accentTint, in: Capsule())
             }
             Spacer()
         }
     }
 
-    // MARK: - Row helpers
+    // MARK: - Row helper
 
     @ViewBuilder
     private func sessionRow(_ session: HermesSession) -> some View {
@@ -211,7 +299,7 @@ struct DashboardView: View {
                 Text(session.displayTitle)
                     .font(.body)
                     .lineLimit(2)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
                 HStack(spacing: 12) {
                     Label(session.source, systemImage: session.sourceIcon)
                         .font(.caption)
@@ -230,11 +318,11 @@ struct DashboardView: View {
                 if let projectName = vm.projectName(for: session) {
                     Label(projectName, systemImage: "folder.fill")
                         .font(.caption2)
-                        .foregroundStyle(.tint)
+                        .foregroundStyle(ScarfColor.accent)
                         .labelStyle(.titleAndIcon)
                         .padding(.vertical, 2)
                         .padding(.horizontal, 6)
-                        .background(.tint.opacity(0.12), in: Capsule())
+                        .background(ScarfColor.accentTint, in: Capsule())
                 }
             }
             .padding(.vertical, 2)
@@ -244,18 +332,6 @@ struct DashboardView: View {
         .buttonStyle(.plain)
     }
 
-    @ViewBuilder
-    private func statRow(_ label: String, value: String) -> some View {
-        LabeledContent(label) {
-            Text(value)
-                .monospacedDigit()
-                .foregroundStyle(ScarfColor.foregroundMuted)
-        }
-    }
-
-    /// Mirror of `ScarfCore.formatTokens` — inlined here rather than
-    /// exported from ScarfCore because it's currently wrapped in
-    /// `#if canImport(SQLite3)` (from the M0d InsightsViewModel move).
     private func formatTokens(_ count: Int) -> String {
         if count >= 1_000_000 {
             return String(format: "%.1fM", Double(count) / 1_000_000)

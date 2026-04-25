@@ -67,6 +67,7 @@ struct ProjectsListView: View {
                 Section {
                     ForEach(topLevel) { project in
                         projectRow(project)
+                            .listRowBackground(ScarfColor.backgroundSecondary)
                     }
                 }
             }
@@ -74,11 +75,14 @@ struct ProjectsListView: View {
                 Section(folder) {
                     ForEach(visibleProjects.filter { $0.folder == folder }) { project in
                         projectRow(project)
+                            .listRowBackground(ScarfColor.backgroundSecondary)
                     }
                 }
             }
         }
         .scarfGoListDensity()
+        .scrollContentBackground(.hidden)
+        .background(ScarfColor.backgroundPrimary)
     }
 
     private func projectRow(_ project: ProjectEntry) -> some View {

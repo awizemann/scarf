@@ -26,7 +26,7 @@ struct CronListView: View {
             if let err = vm.lastError {
                 Section {
                     Label(err, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(ScarfColor.warning)
                 }
             }
 
@@ -62,6 +62,8 @@ struct CronListView: View {
             }
         }
         .scarfGoListDensity()
+        .scrollContentBackground(.hidden)
+        .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Cron jobs")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

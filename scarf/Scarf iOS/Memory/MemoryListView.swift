@@ -24,16 +24,22 @@ struct MemoryListView: View {
             Section {
                 memoryRow(.memory, context: ctx)
                     .scarfGoCompactListRow()
+                    .listRowBackground(ScarfColor.backgroundSecondary)
                 memoryRow(.user, context: ctx)
                     .scarfGoCompactListRow()
+                    .listRowBackground(ScarfColor.backgroundSecondary)
                 memoryRow(.soul, context: ctx)
                     .scarfGoCompactListRow()
+                    .listRowBackground(ScarfColor.backgroundSecondary)
             } footer: {
                 Text("MEMORY.md and USER.md live under `~/.hermes/memories/`. SOUL.md lives at `~/.hermes/SOUL.md`.")
                     .font(.caption)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
             }
         }
         .scarfGoListDensity()
+        .scrollContentBackground(.hidden)
+        .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Memory")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

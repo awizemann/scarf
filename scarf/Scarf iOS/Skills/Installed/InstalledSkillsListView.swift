@@ -45,11 +45,14 @@ struct InstalledSkillsListView: View {
                             }
                         }
                         .scarfGoCompactListRow()
+                        .listRowBackground(ScarfColor.backgroundSecondary)
                     }
                 }
             }
         }
         .scarfGoListDensity()
+        .scrollContentBackground(.hidden)
+        .background(ScarfColor.backgroundPrimary)
         .searchable(text: $vm.searchText, placement: .navigationBarDrawer(displayMode: .always))
     }
 }
