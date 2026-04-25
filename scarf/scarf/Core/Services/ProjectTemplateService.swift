@@ -134,6 +134,24 @@ struct ProjectTemplateService: Sendable {
             )
         }
 
+        // Project-scoped slash commands (manifest schemaVersion 3+). Each
+        // claimed name `<n>` must correspond to a `slash-commands/<n>.md`
+        // file at the bundle root; copied into
+        // `<projectDir>/.scarf/slash-commands/<n>.md`. The chat layer
+        // picks them up automatically when the project chat starts.
+        for slashName in (manifest.contents.slashCommands ?? []) {
+            let source = "slash-commands/" + slashName + ".md"
+            guard inspection.files.contains(source) else {
+                throw ProjectTemplateError.requiredFileMissing(source)
+            }
+            projectFiles.append(
+                TemplateFileCopy(
+                    sourceRelativePath: source,
+                    destinationPath: projectDir + "/.scarf/slash-commands/" + slashName + ".md"
+                )
+            )
+        }
+
         // Namespaced skills: copied wholesale from skills/<name>/** into
         // ~/.hermes/skills/templates/<slug>/<name>/**.
         var skillsFiles: [TemplateFileCopy] = []
@@ -453,6 +471,38 @@ struct ProjectTemplateService: Sendable {
         } else if fileSet.contains(where: { $0.hasPrefix("skills/") }) {
             throw ProjectTemplateError.contentClaimMismatch(
                 "bundle contains skills/ but manifest.contents.skills is missing"
+            )
+        }
+
+        // Slash commands (manifest schemaVersion 3+). Each claimed name
+        // must correspond to exactly one `slash-commands/<name>.md` file
+        // at the bundle root; extra files (not claimed) are rejected.
+        // Also reject malformed names so the on-disk shape stays
+        // round-trippable through `ProjectSlashCommandService.parse`.
+        if let claimed = manifest.contents.slashCommands {
+            for name in claimed {
+                if let reason = ProjectSlashCommand.validateName(name) {
+                    throw ProjectTemplateError.contentClaimMismatch(
+                        "manifest.contents.slashCommands lists \"\(name)\": \(reason)"
+                    )
+                }
+                let path = "slash-commands/" + name + ".md"
+                if !fileSet.contains(path) {
+                    throw ProjectTemplateError.contentClaimMismatch(
+                        "manifest lists slash command \(name) but \(path) is missing from the bundle"
+                    )
+                }
+            }
+            let presentSlash = fileSet.filter { $0.hasPrefix("slash-commands/") }
+            let claimedFull = Set(claimed.map { "slash-commands/" + $0 + ".md" })
+            if let extra = presentSlash.first(where: { !claimedFull.contains($0) }) {
+                throw ProjectTemplateError.contentClaimMismatch(
+                    "bundle contains \(extra) but it's not listed in manifest.contents.slashCommands"
+                )
+            }
+        } else if fileSet.contains(where: { $0.hasPrefix("slash-commands/") }) {
+            throw ProjectTemplateError.contentClaimMismatch(
+                "bundle contains slash-commands/ but manifest.contents.slashCommands is missing"
             )
         }
 

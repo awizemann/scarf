@@ -513,6 +513,113 @@ class ConfigSchemaValidationTests(unittest.TestCase):
         errors = self._collect_errors()
         self.assertEqual(errors, [])
 
+    # MARK: - Slash commands (schemaVersion 3, v2.5)
+
+    def test_accepts_template_with_slash_commands(self):
+        manifest = {
+            "schemaVersion": 3,
+            "id": "tester/slashes",
+            "name": "Slashes",
+            "version": "1.0.0",
+            "description": "ships slash commands",
+            "contents": {
+                "dashboard": True, "agentsMd": True,
+                "slashCommands": ["review", "deploy-staging"],
+            },
+        }
+        review_md = b"---\nname: review\ndescription: Code review\n---\nReview {{argument}}.\n"
+        deploy_md = b"---\nname: deploy-staging\ndescription: Deploy\n---\nDeploy now.\n"
+        make_template_dir(
+            self.repo, "tester", "slashes",
+            manifest=manifest,
+            bundle_files={
+                "template.json": json.dumps(manifest).encode("utf-8"),
+                "README.md": b"# r", "AGENTS.md": b"# a",
+                "dashboard.json": json.dumps(MINIMAL_DASHBOARD).encode("utf-8"),
+                "slash-commands/review.md": review_md,
+                "slash-commands/deploy-staging.md": deploy_md,
+            },
+        )
+        errors = self._collect_errors()
+        self.assertEqual(errors, [])
+
+    def test_rejects_unclaimed_slash_command_file(self):
+        manifest = {
+            "schemaVersion": 3,
+            "id": "tester/orphan",
+            "name": "Orphan",
+            "version": "1.0.0",
+            "description": "extra file",
+            "contents": {
+                "dashboard": True, "agentsMd": True,
+                "slashCommands": ["review"],
+            },
+        }
+        review_md = b"---\nname: review\ndescription: Code review\n---\nReview.\n"
+        rogue_md = b"---\nname: rogue\ndescription: Sneaky\n---\nrun.\n"
+        make_template_dir(
+            self.repo, "tester", "orphan",
+            manifest=manifest,
+            bundle_files={
+                "template.json": json.dumps(manifest).encode("utf-8"),
+                "README.md": b"# r", "AGENTS.md": b"# a",
+                "dashboard.json": json.dumps(MINIMAL_DASHBOARD).encode("utf-8"),
+                "slash-commands/review.md": review_md,
+                "slash-commands/rogue.md": rogue_md,
+            },
+        )
+        errors = self._collect_errors()
+        self.assertTrue(any("slash-commands/rogue.md" in str(e) for e in errors), errors)
+
+    def test_rejects_missing_slash_command_file(self):
+        manifest = {
+            "schemaVersion": 3,
+            "id": "tester/missing",
+            "name": "Missing",
+            "version": "1.0.0",
+            "description": "claim without file",
+            "contents": {
+                "dashboard": True, "agentsMd": True,
+                "slashCommands": ["review"],
+            },
+        }
+        make_template_dir(
+            self.repo, "tester", "missing",
+            manifest=manifest,
+            bundle_files={
+                "template.json": json.dumps(manifest).encode("utf-8"),
+                "README.md": b"# r", "AGENTS.md": b"# a",
+                "dashboard.json": json.dumps(MINIMAL_DASHBOARD).encode("utf-8"),
+            },
+        )
+        errors = self._collect_errors()
+        self.assertTrue(any("slash-commands/review.md" in str(e) for e in errors), errors)
+
+    def test_rejects_invalid_slash_command_name(self):
+        manifest = {
+            "schemaVersion": 3,
+            "id": "tester/bad-name",
+            "name": "BadName",
+            "version": "1.0.0",
+            "description": "bad slash name",
+            "contents": {
+                "dashboard": True, "agentsMd": True,
+                "slashCommands": ["BadName"],  # uppercase rejected
+            },
+        }
+        make_template_dir(
+            self.repo, "tester", "bad-name",
+            manifest=manifest,
+            bundle_files={
+                "template.json": json.dumps(manifest).encode("utf-8"),
+                "README.md": b"# r", "AGENTS.md": b"# a",
+                "dashboard.json": json.dumps(MINIMAL_DASHBOARD).encode("utf-8"),
+                "slash-commands/BadName.md": b"---\nname: BadName\ndescription: x\n---\n",
+            },
+        )
+        errors = self._collect_errors()
+        self.assertTrue(any("BadName" in str(e) for e in errors), errors)
+
     def _collect_errors(self):
         errors = []
         for tdir in build_catalog._iter_templates(self.repo):

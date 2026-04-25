@@ -63,6 +63,13 @@ struct TemplateContents: Codable, Sendable, Equatable {
     /// validator so a bundle can't hide a schema from the preview.
     /// `nil` or `0` means schema-less (v1-compatible behaviour).
     let config: Int?
+    /// Names of project-scoped slash commands the template ships (added
+    /// in manifest schemaVersion 3). Each name `<n>` must correspond to
+    /// a `slash-commands/<n>.md` file at the bundle root with valid YAML
+    /// frontmatter (parsed by `ProjectSlashCommandService`). The
+    /// installer copies them to `<project>/.scarf/slash-commands/<n>.md`
+    /// on install. `nil` or `[]` means the template ships no commands.
+    let slashCommands: [String]?
 }
 
 struct TemplateMemoryClaim: Codable, Sendable, Equatable {
@@ -213,6 +220,13 @@ struct TemplateLock: Codable, Sendable {
     /// Informational — the actual removal of config.json rides on
     /// `projectFiles`. Optional for back-compat.
     let configFields: [String]?
+    /// Project-scoped slash command files the installer wrote, as paths
+    /// relative to the project root (e.g.
+    /// `.scarf/slash-commands/review.md`). The uninstaller removes
+    /// exactly these — preserving any user-authored slash commands the
+    /// user added to `<project>/.scarf/slash-commands/` after install.
+    /// Optional for back-compat with pre-v2.5 lock files.
+    let slashCommandFiles: [String]?
 
     enum CodingKeys: String, CodingKey {
         case templateId = "template_id"
@@ -226,6 +240,7 @@ struct TemplateLock: Codable, Sendable {
         case memoryBlockId = "memory_block_id"
         case configKeychainItems = "config_keychain_items"
         case configFields = "config_fields"
+        case slashCommandFiles = "slash_command_files"
     }
 }
 

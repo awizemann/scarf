@@ -40,6 +40,11 @@ struct ProjectTemplateExporter: Sendable {
         let skillIds: [String]
         let cronJobs: [HermesCronJob]
         let memoryAppendix: String?
+        /// Names of slash commands that will be carried into the bundle
+        /// (read from `<project>/.scarf/slash-commands/<n>.md`). The
+        /// export sheet shows these in the preview so authors can see
+        /// what will travel with the bundle.
+        let slashCommandNames: [String]
     }
 
     /// Inputs collected by the export sheet.
@@ -78,6 +83,15 @@ struct ProjectTemplateExporter: Sendable {
         }
         let allJobs = HermesFileService(context: context).loadCronJobs()
         let picked = allJobs.filter { inputs.includeCronJobIds.contains($0.id) }
+        // Pick up every project-scoped slash command at
+        // <project>/.scarf/slash-commands/. The exporter ships them
+        // unconditionally — they're tied to the project, not to user
+        // identity, and the names go into the manifest's contents claim
+        // so installers see them in the preview sheet.
+        let slashCommandNames = ProjectSlashCommandService(context: context)
+            .loadCommands(at: dir)
+            .map(\.name)
+            .sorted()
         return ExportPlan(
             templateId: inputs.templateId,
             templateName: inputs.templateName,
@@ -89,7 +103,8 @@ struct ProjectTemplateExporter: Sendable {
             instructionFiles: instructions,
             skillIds: inputs.includeSkillIds,
             cronJobs: picked,
-            memoryAppendix: inputs.memoryAppendix
+            memoryAppendix: inputs.memoryAppendix,
+            slashCommandNames: slashCommandNames
         )
     }
 
@@ -183,6 +198,20 @@ struct ProjectTemplateExporter: Sendable {
             try data.write(to: URL(fileURLWithPath: memDir + "/append.md"))
         }
 
+        // Slash commands (manifest schemaVersion 3). Copy each from the
+        // project's `.scarf/slash-commands/<name>.md` into the bundle
+        // root's `slash-commands/<name>.md`. Read goes through the
+        // transport so remote projects work too.
+        if !plan.slashCommandNames.isEmpty {
+            let slashDir = stagingDir + "/slash-commands"
+            try FileManager.default.createDirectory(atPath: slashDir, withIntermediateDirectories: true)
+            for name in plan.slashCommandNames {
+                let source = plan.projectDir + "/.scarf/slash-commands/" + name + ".md"
+                let destination = slashDir + "/" + name + ".md"
+                try copyFromHermes(source, to: destination, transport: transport)
+            }
+        }
+
         // If the source project was itself installed from a schemaful
         // template, its `.scarf/manifest.json` carries the schema we
         // want to forward to the exported bundle. We carry only the
@@ -194,10 +223,16 @@ struct ProjectTemplateExporter: Sendable {
             from: plan.projectDir
         )
 
-        // Bump schemaVersion to 2 when a schema is carried through;
-        // remain on 1 otherwise so schema-less exports stay
-        // byte-compatible with existing v2.2 catalog validators.
-        let schemaVersion = forwardedSchema == nil ? 1 : 2
+        // Bump schemaVersion based on the most-recent feature carried
+        // through:
+        //   v3 — bundle ships slashCommands (added v2.5).
+        //   v2 — bundle ships a config schema (added v2.3).
+        //   v1 — schema-less, byte-compatible with v2.2 catalog validators.
+        let schemaVersion: Int = {
+            if !plan.slashCommandNames.isEmpty { return 3 }
+            if forwardedSchema != nil { return 2 }
+            return 1
+        }()
 
         // Manifest — claims exactly what we just wrote
         let manifest = ProjectTemplateManifest(
@@ -222,7 +257,8 @@ struct ProjectTemplateExporter: Sendable {
                 skills: plan.skillIds.isEmpty ? nil : plan.skillIds.compactMap { $0.split(separator: "/").last.map(String.init) },
                 cron: plan.cronJobs.isEmpty ? nil : plan.cronJobs.count,
                 memory: (inputs.memoryAppendix?.isEmpty == false) ? TemplateMemoryClaim(append: true) : nil,
-                config: forwardedSchema?.fields.count
+                config: forwardedSchema?.fields.count,
+                slashCommands: plan.slashCommandNames.isEmpty ? nil : plan.slashCommandNames
             ),
             config: forwardedSchema
         )

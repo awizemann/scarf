@@ -47,7 +47,13 @@ from typing import Iterable
 
 SCHEMA_VERSION_V1 = 1   # original v2.2 bundle
 SCHEMA_VERSION_V2 = 2   # v2.3 — adds optional manifest.config block
-SUPPORTED_SCHEMA_VERSIONS = {SCHEMA_VERSION_V1, SCHEMA_VERSION_V2}
+SCHEMA_VERSION_V3 = 3   # v2.5 — adds optional contents.slashCommands block
+SUPPORTED_SCHEMA_VERSIONS = {SCHEMA_VERSION_V1, SCHEMA_VERSION_V2, SCHEMA_VERSION_V3}
+
+# Slash command names: lowercase letters, digits, hyphens; must start
+# with a letter. Mirrors `ProjectSlashCommand.validNamePattern` on the
+# Swift side so catalog ↔ installer round-trip is byte-clean.
+SLASH_COMMAND_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 MAX_BUNDLE_BYTES = 5 * 1024 * 1024  # 5 MB cap on submissions; installer is 50 MB
 REQUIRED_BUNDLE_FILES = ("template.json", "README.md", "AGENTS.md", "dashboard.json")
 SUPPORTED_WIDGET_TYPES = {"stat", "progress", "text", "table", "chart", "list", "webview"}
@@ -256,6 +262,45 @@ def _validate_contents_claim(
         errors.append(ValidationError(
             template_dir,
             f"contents.config={claimed_config} but config.schema has {schema_field_count} field(s)"
+        ))
+
+    # Slash commands (schemaVersion 3+) — each claimed name must match
+    # SLASH_COMMAND_NAME_RE and have a corresponding `slash-commands/<n>.md`
+    # file at the bundle root. Extra slash-commands/ files not in the
+    # claim list are rejected. Mirrors Swift's verifyClaims slash-command
+    # check.
+    claimed_slash = contents.get("slashCommands")
+    if claimed_slash is not None:
+        if not isinstance(claimed_slash, list):
+            errors.append(ValidationError(
+                template_dir,
+                "contents.slashCommands must be a list of names"
+            ))
+            claimed_slash = []
+        claimed_full = set()
+        for name in claimed_slash:
+            if not isinstance(name, str) or not SLASH_COMMAND_NAME_RE.match(name):
+                errors.append(ValidationError(
+                    template_dir,
+                    f"contents.slashCommands name {name!r} must match {SLASH_COMMAND_NAME_RE.pattern}"
+                ))
+                continue
+            path = f"slash-commands/{name}.md"
+            claimed_full.add(path)
+            if path not in bundle_files:
+                errors.append(ValidationError(
+                    template_dir,
+                    f"contents.slashCommands claims {name!r} but {path} is missing from the bundle"
+                ))
+        for present in {f for f in bundle_files if f.startswith("slash-commands/")} - claimed_full:
+            errors.append(ValidationError(
+                template_dir,
+                f"bundle has {present} but it's not listed in contents.slashCommands"
+            ))
+    elif any(f.startswith("slash-commands/") for f in bundle_files):
+        errors.append(ValidationError(
+            template_dir,
+            "bundle contains slash-commands/ files but contents.slashCommands is missing"
         ))
 
 

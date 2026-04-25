@@ -281,6 +281,16 @@ struct ProjectTemplateInstaller: Sendable {
             guard let schema = plan.configSchema, !schema.isEmpty else { return nil }
             return schema.fields.map(\.key)
         }()
+        // Slash command file paths, RELATIVE to the project root, so the
+        // uninstaller can remove only what the template installed (not
+        // user-authored slash commands the user added later in the
+        // same dir). Source-relative-path identifies bundle slash commands
+        // because they live under `slash-commands/` in the unpacked tree.
+        let slashCommandFiles: [String]? = {
+            let names = plan.manifest.contents.slashCommands ?? []
+            guard !names.isEmpty else { return nil }
+            return names.sorted().map { ".scarf/slash-commands/\($0).md" }
+        }()
 
         let lock = TemplateLock(
             templateId: plan.manifest.id,
@@ -293,7 +303,8 @@ struct ProjectTemplateInstaller: Sendable {
             cronJobNames: cronJobNames,
             memoryBlockId: plan.memoryAppendix == nil ? nil : plan.manifest.id,
             configKeychainItems: keychainItems,
-            configFields: configFields
+            configFields: configFields,
+            slashCommandFiles: slashCommandFiles
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

@@ -170,7 +170,8 @@ final class TestRegistryLock: @unchecked Sendable {
                 skills: skills,
                 cron: cron,
                 memory: nil,
-                config: configFieldCount ?? configSchema?.fields.count
+                config: configFieldCount ?? configSchema?.fields.count,
+                slashCommands: nil
             ),
             config: configSchema
         )
