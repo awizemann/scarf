@@ -496,42 +496,13 @@ struct HermesFileService: Sendable {
 
     // MARK: - Skills
 
+    /// Walks `~/.hermes/skills/<category>/<name>/`. v2.5 delegates to
+    /// the shared ScarfCore `SkillsScanner` so iOS and Mac use byte-
+    /// identical scan logic — including the v0.11 frontmatter parsing
+    /// that populates `HermesSkill.allowedTools` / `relatedSkills` /
+    /// `dependencies`.
     nonisolated func loadSkills() -> [HermesSkillCategory] {
-        let dir = context.paths.skillsDir
-        guard let categories = try? transport.listDirectory(dir) else { return [] }
-
-        return categories.sorted().compactMap { categoryName in
-            let categoryPath = dir + "/" + categoryName
-            guard transport.stat(categoryPath)?.isDirectory == true else { return nil }
-            guard let skillNames = try? transport.listDirectory(categoryPath) else { return nil }
-
-            let skills = skillNames.sorted().compactMap { skillName -> HermesSkill? in
-                let skillPath = categoryPath + "/" + skillName
-                guard transport.stat(skillPath)?.isDirectory == true else { return nil }
-                let files = (try? transport.listDirectory(skillPath)) ?? []
-                let requiredConfig = parseSkillRequiredConfig(skillPath + "/skill.yaml")
-                // v2.5: Hermes v2026.4.23 ships richer SKILL.md
-                // frontmatter (allowed_tools, related_skills,
-                // dependencies). Parse opportunistically — old skills
-                // without a SKILL.md file or without these fields stay
-                // nil and the detail view skips the chip rows.
-                let frontmatter = parseSkillFrontmatter(skillPath + "/SKILL.md")
-                return HermesSkill(
-                    id: categoryName + "/" + skillName,
-                    name: skillName,
-                    category: categoryName,
-                    path: skillPath,
-                    files: files.sorted(),
-                    requiredConfig: requiredConfig,
-                    allowedTools: frontmatter.allowedTools,
-                    relatedSkills: frontmatter.relatedSkills,
-                    dependencies: frontmatter.dependencies
-                )
-            }
-
-            guard !skills.isEmpty else { return nil }
-            return HermesSkillCategory(id: categoryName, name: categoryName, skills: skills)
-        }
+        SkillsScanner.scan(context: context, transport: transport)
     }
 
     nonisolated func loadSkillContent(path: String) -> String {
@@ -550,56 +521,6 @@ struct HermesFileService: Sendable {
             return false
         }
         return true
-    }
-
-    /// Parse `allowed_tools`, `related_skills`, `dependencies` from a
-    /// SKILL.md YAML frontmatter block (Hermes v2026.4.23+). Returns
-    /// nil-filled tuple when the file is absent or has no frontmatter
-    /// — pre-v0.11 skills behave as before.
-    nonisolated private func parseSkillFrontmatter(
-        _ path: String
-    ) -> (allowedTools: [String]?, relatedSkills: [String]?, dependencies: [String]?) {
-        guard let content = readFile(path) else { return (nil, nil, nil) }
-        let lines = content.components(separatedBy: "\n")
-        // Frontmatter must be the first line `---` followed by another
-        // `---` somewhere below. Anything else and we bail.
-        guard lines.first == "---",
-              let endIdx = lines.dropFirst().firstIndex(of: "---")
-        else { return (nil, nil, nil) }
-        let frontmatter = lines[1..<endIdx].joined(separator: "\n")
-        let parsed = HermesYAML.parseNestedYAML(frontmatter)
-        let allowedTools = parsed.lists["allowed_tools"]
-        let relatedSkills = parsed.lists["related_skills"]
-        let dependencies = parsed.lists["dependencies"]
-        return (
-            allowedTools: (allowedTools?.isEmpty ?? true) ? nil : allowedTools,
-            relatedSkills: (relatedSkills?.isEmpty ?? true) ? nil : relatedSkills,
-            dependencies: (dependencies?.isEmpty ?? true) ? nil : dependencies
-        )
-    }
-
-    nonisolated private func parseSkillRequiredConfig(_ path: String) -> [String] {
-        guard let content = readFile(path) else { return [] }
-        var result: [String] = []
-        var inRequiredConfig = false
-        for line in content.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
-            let indent = line.prefix(while: { $0 == " " }).count
-            if trimmed == "required_config:" || trimmed.hasPrefix("required_config:") {
-                inRequiredConfig = true
-                continue
-            }
-            if inRequiredConfig {
-                if indent < 2 && !trimmed.isEmpty {
-                    break
-                }
-                if trimmed.hasPrefix("- ") {
-                    result.append(String(trimmed.dropFirst(2)))
-                }
-            }
-        }
-        return result
     }
 
     // MARK: - MCP Servers
