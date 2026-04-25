@@ -21,27 +21,47 @@
 
 ## What's New in 2.5
 
-- **ScarfGo, the iPhone companion, ships in public TestFlight.** Same Hermes server you've been running on your Mac — now reachable from your phone over SSH. Multi-server, project-scoped chat, session resume, memory editor, cron list, skills tree, settings (read), all native iOS. Pure-Swift SSH (Citadel under the hood — no `ssh` binary needed on iOS). Per-project chat writes the same Scarf-managed `AGENTS.md` block the Mac app does, so the agent boots with the same project context regardless of which client opened the session. **TestFlight invite + onboarding walkthrough:** [ScarfGo wiki page](https://github.com/awizemann/scarf/wiki/ScarfGo).
-- **Portable project-scoped slash commands.** Author reusable prompt templates as Markdown files at `<project>/.scarf/slash-commands/<name>.md` with YAML frontmatter (name, description, argumentHint, optional model override). Invoke as `/<name> [args]` from chat — Scarf substitutes `{{argument}}` (with optional `default:` fallback) in the body and sends the expanded prompt to Hermes. Mac authoring tab + iOS read-only browser. Templates carry them via the new `slash-commands/` block in `.scarftemplate` bundles (schemaVersion 3).
+### ScarfGo — the iPhone companion ships in public TestFlight
+
+Same Hermes server you've been running on your Mac — now reachable from your phone over SSH. Multi-server, project-scoped chat, session resume, memory editor, cron list, skills tree, settings (read), all native iOS. Pure-Swift SSH (Citadel under the hood — no `ssh` binary needed on iOS). Per-project chat writes the same Scarf-managed `AGENTS.md` block the Mac app does, so the agent boots with the same project context regardless of which client opened the session.
+
+**[Join the public TestFlight](https://testflight.apple.com/join/qCrRpcTz)** — the link is live now but only accepts new beta testers once Apple's Beta Review approves the first build. If you hit a "not accepting testers" splash, bookmark it and try again in 24–48h.
+
+See the [ScarfGo wiki page](https://github.com/awizemann/scarf/wiki/ScarfGo) for the full feature tour, [ScarfGo Onboarding](https://github.com/awizemann/scarf/wiki/ScarfGo-Onboarding) for the SSH-key setup walkthrough, and [Platform Differences](https://github.com/awizemann/scarf/wiki/Platform-Differences) for what is and isn't shared between Mac and iOS.
+
+### Everything else in 2.5
+
+- **Portable project-scoped slash commands.** Author reusable prompt templates as Markdown files at `<project>/.scarf/slash-commands/<name>.md` with YAML frontmatter (name, description, argumentHint, optional model override). Invoke as `/<name> [args]` from chat — Scarf substitutes `{{argument}}` (with optional `default:` fallback) in the body and sends the expanded prompt to Hermes. Mac authoring tab + iOS read-only browser. Templates carry them via the new `slash-commands/` block in `.scarftemplate` bundles (schemaVersion 3). See [Slash Commands](https://github.com/awizemann/scarf/wiki/Slash-Commands) for the full schema.
 - **Hermes v2026.4.23 chat parity.** `/steer` non-interruptive guidance command, per-turn stopwatch on assistant bubbles, numbered keyboard shortcuts (1–9) on the permission sheet, git branch chip in the chat header. The new `messages.reasoning_content` and `sessions.api_call_count` columns surface as a richer reasoning disclosure + an "API" chip on session rows.
 - **Spotify + design-md skills.** Mac ships an in-app Spotify OAuth sheet (mirrors the v2.3 Nous Portal pattern); design-md gets a host-side `npx` prereq check on both platforms. SKILL.md frontmatter (`allowed_tools`, `related_skills`, `dependencies`) renders as chip rows. A "What's New" pill on the Skills tab tells you when remote skills changed since you last looked.
 - **Mac global Sessions: project filter + project badges** — parity with ScarfGo's Sessions tab. The list grows a filter Menu (All projects / Unattributed / each registered project) and each row carries a tinted folder chip with the project name when attributed.
 - **Human-readable cron schedules everywhere.** New `CronScheduleFormatter` in ScarfCore translates the common cron shapes into English phrases and falls back to the raw expression on anything custom. Mac and iOS render the same.
+- **Mac design-system overhaul.** Rust palette, typed token bundle (`ScarfColor`, `ScarfFont`, `ScarfSpace`, `ScarfRadius`), reusable components (`ScarfPageHeader`, `ScarfCard`, `ScarfBadge`, `ScarfTextField`, four button styles), redesigned 3-pane chat. iOS adopts the same tokens with a hybrid Dynamic Type policy so accessibility scaling on body text is preserved. See [Design System](https://github.com/awizemann/scarf/wiki/Design-System) for the full reference.
 - **Under the hood** — `SessionAttributionService`, `ProjectContextBlock`, `CronScheduleFormatter`, `GitBranchService`, `SkillPrereqService`, `SkillSnapshotService`, `ProjectSlashCommandService`, and the ACP error triplet (`acpError` / `acpErrorHint` / `acpErrorDetails`) consolidated into ScarfCore so Mac and iOS consume one source of truth. 179 tests across 13 suites, three consecutive green runs. Several `try?` swallows in iOS lifecycle code now surface real failures (Keychain unlock errors no longer drop people into onboarding; partial Forget operations report what failed).
 - **iOS push notifications skeleton** — `NotificationRouter` ships with foreground presentation + a lock-screen "Approve / Deny" action category gated by `apnsEnabled = false`. Lights up when Hermes ships a server-side push sender + an APNs cert.
 
-See the full [v2.5.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.5.0), the [ScarfGo wiki page](https://github.com/awizemann/scarf/wiki/ScarfGo), and [Platform Differences](https://github.com/awizemann/scarf/wiki/Platform-Differences) for what is and isn't shared between Mac and iOS.
+See the full [v2.5.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.5.0).
 
-### Previously, in 2.3
+**Previous releases:** see the [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index) on the wiki for v2.3, v2.2, v2.0, v1.6, and earlier.
 
-- **Projects sidebar grows up** — group projects into folders, rename / archive / unarchive in place, filter the list with ⌘F, jump to the first nine with ⌘1–⌘9. Archived projects hide by default; a toggle in the bottom bar surfaces them. Non-destructive on the v2.2 registry file — downgrade stays clean.
-- **Per-project Sessions tab** — alongside Dashboard and Site. Shows chats attributed to the project, with a **New Chat** button that spawns `hermes acp` with the project's directory as the session cwd and attributes the result via a Scarf-owned sidecar (`~/.hermes/scarf/session_project_map.json`). Click any listed session to resume it with project context automatically restored.
-- **Agent actually knows what project it's in** — the architectural headline. Every project-scoped chat gets a Scarf-managed block auto-injected into the project's `AGENTS.md` before the session starts. Hermes reads AGENTS.md from the session's cwd at startup and picks up the block as part of its system prompt. Ask the agent *"what project am I in?"* and it answers with the project name, directory, template id + version, configuration field names, and registered cron jobs — pulled from the injected block. Secret-safe (field names only, never values), idempotent, bounded to `<!-- scarf-project:begin/end -->` markers so template-author content outside the block is preserved across refreshes.
-- **Project indicator in Chat** — folder chip in `SessionInfoBar` and `Chat · <ProjectName>` in the nav title when you're in a project-scoped chat. Resumed sessions keep the indicator by looking up the attribution sidecar at resume time.
-- **Tool Gateway — Nous Portal support** — Hermes v0.10.0 introduced subscription-routed tools (web search, image gen, TTS, browser automation). Scarf 2.3 merges Hermes's provider-overlay table into the model picker so **Nous Portal + 5 other previously-invisible providers** now appear, and ships a dedicated **Sign in to Nous Portal** sheet that runs the device-code flow end-to-end in-app — no terminal. Each of the 8 auxiliary sub-model tasks gets a per-task Nous toggle, a Tool Gateway card lands in Health, and Credential Pools' silent-fail dead-end for device-code providers is closed. Scarf's existing messaging-gateway section is renamed **Messaging Gateway** to disambiguate from the new Tool Gateway.
-- **Window-layout cleanup** — switching to Chat or a Sessions tab no longer grows the window past the screen. `.windowResizability(.contentMinSize)` + targeted `idealHeight` caps keep the window's floor at a sensible content minimum while letting users freely drag larger or smaller.
+## Connect ScarfGo to your Hermes server
 
-See the full [v2.3.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.3.0). Earlier release summaries (1.6 / 2.0 / 2.1 / 2.2) live at [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index) on the wiki.
+ScarfGo speaks SSH directly — no companion service, no developer-controlled server in between. Onboarding takes about a minute:
+
+1. **Install via TestFlight.** Open the [public TestFlight link](https://testflight.apple.com/join/qCrRpcTz) on your phone, accept the invite, install ScarfGo from TestFlight (just like any other beta).
+2. **Tap Add Server.** Enter the host (IP or DNS), SSH user, port (default 22), and an optional nickname. Same details you'd type into `ssh user@host`.
+3. **Generate Key.** ScarfGo creates a fresh Ed25519 keypair on the device. The private half lives in the iOS Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) and is excluded from iCloud sync — it never leaves the phone.
+4. **Add the public key to your Hermes host.** Tap **Copy public key**, then on the host run:
+   ```bash
+   cat >> ~/.ssh/authorized_keys <<'EOF'
+   <paste the line ScarfGo showed you>
+   EOF
+   chmod 600 ~/.ssh/authorized_keys
+   ```
+   This is its own line per device — the convention any second SSH client uses. Mac (Scarf) keeps using your existing ssh-agent / `~/.ssh/config` and is unaffected.
+5. **Tap Test connection.** ScarfGo opens an SSH session, probes for the `hermes` binary, and saves the server on success. If it can't find `hermes`, see the [troubleshooting section](https://github.com/awizemann/scarf/wiki/ScarfGo-Onboarding#troubleshooting) — it's almost always a `PATH` quirk on non-interactive SSH.
+
+Done. Open the Dashboard tab and tap any session to resume it; tap the **+** in Chat to start a new project-scoped session.
 
 ## Multi-server, one window per server
 
