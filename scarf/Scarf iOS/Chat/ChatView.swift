@@ -1,6 +1,7 @@
 import SwiftUI
 import ScarfCore
 import ScarfIOS
+import os
 
 // The Chat feature on iOS is gated on `canImport(SQLite3)` because
 // `RichChatViewModel` reads session history from `HermesDataService`
@@ -445,6 +446,11 @@ final class ChatController {
     private var client: ACPClient?
     private var eventTask: Task<Void, Never>?
 
+    private static let logger = Logger(
+        subsystem: "com.scarf.ios",
+        category: "ChatController"
+    )
+
     init(context: ServerContext) {
         self.context = context
         self.vm = RichChatViewModel(context: context)
@@ -572,20 +578,36 @@ final class ChatController {
         vm.reset()
         currentProjectName = project.name
         // Write the context block first. Non-fatal on failure — chat
-        // still starts, just without the managed block; the user sees
-        // the error via controller.state if it escalates.
+        // still starts, just without the managed block. We capture the
+        // failure (rather than swallowing via `try?`) so the user gets
+        // a yellow banner explaining the agent won't see project context
+        // for this session, with the underlying error in "Show details".
         let block = ProjectContextBlock.renderMinimalBlock(
             projectName: project.name,
             projectPath: project.path
         )
         let ctx = context
-        await Task.detached {
-            try? ProjectContextBlock.writeBlock(
-                block,
-                forProjectAt: project.path,
-                context: ctx
-            )
+        let projectPath = project.path
+        let writeResult: Result<Void, Error> = await Task.detached {
+            do {
+                try ProjectContextBlock.writeBlock(
+                    block,
+                    forProjectAt: projectPath,
+                    context: ctx
+                )
+                return .success(())
+            } catch {
+                return .failure(error)
+            }
         }.value
+        if case .failure(let error) = writeResult {
+            Self.logger.error(
+                "ProjectContextBlock.writeBlock failed for \(projectPath, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            vm.acpError = "Project context not written — agent will proceed without it."
+            vm.acpErrorHint = "Check that the SSH user can write to \(projectPath)/AGENTS.md."
+            vm.acpErrorDetails = error.localizedDescription
+        }
         await start(projectPath: project.path, projectName: project.name)
     }
 
@@ -648,9 +670,15 @@ final class ChatController {
             state = .ready
 
             // If this was a project-scoped session, record the
-            // attribution so the Mac's per-project Sessions tab picks
-            // it up. Best-effort — ACP session creation already won,
-            // a failed attribution write is cosmetic.
+            // attribution so Dashboard's Sessions tab can render the
+            // project badge for it. Best-effort and intentionally fire-
+            // and-forget — `SessionAttributionService.persist` already
+            // logs SFTP failures via `os.Logger` (see the
+            // `Self.logger.error` in `persist`), and a failed write
+            // here is purely cosmetic: the chat works, only the badge
+            // is missing until the next reconcile. We deliberately
+            // don't surface this to the chat banner because it would
+            // alarm users about a non-issue.
             if let projectPath {
                 let ctx = context
                 Task.detached {
