@@ -25,6 +25,7 @@ struct ChatView: View {
     @Environment(\.serverContext) private var envContext
     @State private var controller: ChatController
     @State private var showProjectPicker = false
+    @State private var showSlashCommandsSheet = false
 
     init(config: IOSServerConfig, key: SSHKeyBundle) {
         self.config = config
@@ -365,11 +366,34 @@ struct ChatView: View {
                         .truncationMode(.tail)
                 }
                 Spacer()
+                if !controller.vm.projectScopedCommands.isEmpty {
+                    Button {
+                        showSlashCommandsSheet = true
+                    } label: {
+                        Label(
+                            "\(controller.vm.projectScopedCommands.count) slash",
+                            systemImage: "slash.circle.fill"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.tint)
+                        .labelStyle(.titleAndIcon)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(.tint.opacity(0.18), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.tint.opacity(0.1))
+            .sheet(isPresented: $showSlashCommandsSheet) {
+                ProjectSlashCommandsBrowser(
+                    projectName: projectName,
+                    commands: controller.vm.projectScopedCommands
+                )
+            }
         }
     }
 
