@@ -58,4 +58,76 @@ struct SkillFrontmatterParserTests {
     @Test func handlesEmptyInput() {
         #expect(SkillFrontmatterParser.parseRequiredConfig("").isEmpty)
     }
+
+    // MARK: - parseV011Fields (Hermes v2026.4.23 SKILL.md frontmatter)
+
+    @Test func v011_extractsAllThreeLists() {
+        let md = """
+        ---
+        allowed_tools:
+          - read_file
+          - write_file
+        related_skills:
+          - timer
+          - deploy
+        dependencies:
+          - npx
+          - node
+        ---
+
+        # Skill body — body content is ignored by the parser.
+        """
+        let r = SkillFrontmatterParser.parseV011Fields(md)
+        #expect(r.allowedTools == ["read_file", "write_file"])
+        #expect(r.relatedSkills == ["timer", "deploy"])
+        #expect(r.dependencies == ["npx", "node"])
+    }
+
+    @Test func v011_handlesAbsentFields() {
+        // Frontmatter present but only one v0.11 field declared.
+        let md = """
+        ---
+        allowed_tools:
+          - run_shell
+        ---
+
+        Body.
+        """
+        let r = SkillFrontmatterParser.parseV011Fields(md)
+        #expect(r.allowedTools == ["run_shell"])
+        #expect(r.relatedSkills == nil)
+        #expect(r.dependencies == nil)
+    }
+
+    @Test func v011_returnsNilOnMissingFrontmatter() {
+        // SKILL.md without --- markers — pre-v0.11 file shape.
+        let md = "# Skill\n\nBody only, no frontmatter."
+        let r = SkillFrontmatterParser.parseV011Fields(md)
+        #expect(r.allowedTools == nil)
+        #expect(r.relatedSkills == nil)
+        #expect(r.dependencies == nil)
+    }
+
+    @Test func v011_returnsNilWhenFieldEmpty() {
+        // Field declared but with an empty list — treated same as absent
+        // (no chip row, no ghost section).
+        let md = """
+        ---
+        allowed_tools:
+        related_skills:
+          - foo
+        ---
+        """
+        let r = SkillFrontmatterParser.parseV011Fields(md)
+        #expect(r.allowedTools == nil)
+        #expect(r.relatedSkills == ["foo"])
+        #expect(r.dependencies == nil)
+    }
+
+    @Test func v011_returnsNilOnEmptyInput() {
+        let r = SkillFrontmatterParser.parseV011Fields("")
+        #expect(r.allowedTools == nil)
+        #expect(r.relatedSkills == nil)
+        #expect(r.dependencies == nil)
+    }
 }

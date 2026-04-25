@@ -41,13 +41,25 @@ public enum SkillsScanner: Sendable {
                             yamlPath: skillPath + "/skill.yaml",
                             transport: transport
                         )
+                        // v2.5 Hermes v0.11 SKILL.md frontmatter
+                        // (allowed_tools, related_skills, dependencies).
+                        // Opportunistic read — old skills without the
+                        // file or without those fields keep nil, and
+                        // the chip rows hide themselves.
+                        let v011 = readV011Fields(
+                            mdPath: skillPath + "/SKILL.md",
+                            transport: transport
+                        )
                         return HermesSkill(
                             id: categoryName + "/" + skillName,
                             name: skillName,
                             category: categoryName,
                             path: skillPath,
                             files: files,
-                            requiredConfig: requiredConfig
+                            requiredConfig: requiredConfig,
+                            allowedTools: v011.allowedTools,
+                            relatedSkills: v011.relatedSkills,
+                            dependencies: v011.dependencies
                         )
                     }
 
@@ -61,5 +73,19 @@ public enum SkillsScanner: Sendable {
               let content = String(data: data, encoding: .utf8)
         else { return [] }
         return SkillFrontmatterParser.parseRequiredConfig(content)
+    }
+
+    /// Read SKILL.md (Hermes v2026.4.23+) and parse its YAML frontmatter
+    /// for the v0.11 fields. Nil-everything when the file is absent or
+    /// has no frontmatter — fully back-compatible with older skills.
+    private static func readV011Fields(
+        mdPath: String,
+        transport: any ServerTransport
+    ) -> (allowedTools: [String]?, relatedSkills: [String]?, dependencies: [String]?) {
+        guard transport.fileExists(mdPath),
+              let data = try? transport.readFile(mdPath),
+              let content = String(data: data, encoding: .utf8)
+        else { return (nil, nil, nil) }
+        return SkillFrontmatterParser.parseV011Fields(content)
     }
 }
