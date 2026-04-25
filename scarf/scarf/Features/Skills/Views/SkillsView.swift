@@ -36,7 +36,13 @@ struct SkillsView: View {
             }
         }
         .navigationTitle("Skills (\(viewModel.totalSkillCount))")
-        .onAppear { viewModel.load() }
+        // SkillsViewModel.load() is async after the v2.5 ScarfCore
+        // promotion. Wrap in a Task here so the existing onAppear
+        // contract (fire-and-forget) keeps working without making
+        // the Mac UI care about the new isolation.
+        .onAppear {
+            Task { await viewModel.load() }
+        }
     }
 
     private var modePicker: some View {

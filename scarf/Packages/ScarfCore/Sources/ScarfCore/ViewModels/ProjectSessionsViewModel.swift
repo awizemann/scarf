@@ -1,23 +1,26 @@
 import Foundation
 import os
-import ScarfCore
 
-/// Drives the per-project Sessions tab introduced in v2.3. Pulls the
-/// global session list from `HermesDataService`, filters by the
-/// attribution sidecar, and exposes a minimal surface for the view:
-/// the filtered sessions array, loading state, and a refresh entry
-/// point that the view can call on appearance + on file-watcher
-/// change.
+/// Drives the per-project Sessions tab introduced in v2.3 and reused
+/// by the iOS Project Detail view in v2.5. Pulls the global session
+/// list from `HermesDataService`, filters by the attribution sidecar,
+/// and exposes a minimal surface for the view: the filtered sessions
+/// array, loading state, and a refresh entry point that the view can
+/// call on appearance + on file-watcher change.
+///
+/// Promoted from the Mac target into ScarfCore in v2.5 so iOS and Mac
+/// share the exact same filtering + attribution semantics — there's
+/// nothing AppKit-specific here, just transport-backed I/O.
 @Observable
 @MainActor
-final class ProjectSessionsViewModel {
+public final class ProjectSessionsViewModel {
     private static let logger = Logger(subsystem: "com.scarf", category: "ProjectSessionsViewModel")
 
     private let dataService: HermesDataService
     private let attribution: SessionAttributionService
     private let project: ProjectEntry
 
-    init(context: ServerContext, project: ProjectEntry) {
+    public init(context: ServerContext, project: ProjectEntry) {
         self.dataService = HermesDataService(context: context)
         self.attribution = SessionAttributionService(context: context)
         self.project = project
@@ -25,23 +28,23 @@ final class ProjectSessionsViewModel {
 
     /// Sessions attributed to the owning project, in the order
     /// `HermesDataService.fetchSessions` returns them (newest first).
-    var sessions: [HermesSession] = []
+    public var sessions: [HermesSession] = []
 
     /// True from `load()` start to its completion. The view renders
     /// a ProgressView during the first fetch; afterwards, re-fetches
     /// triggered by file-watcher changes happen silently.
-    var isLoading: Bool = false
+    public var isLoading: Bool = false
 
     /// Short diagnostic string for an empty list — nil when sessions
     /// are loaded and populated, otherwise explains the empty state
     /// (no sessions ever created in this project, vs. no sessions
     /// matched the project's attribution map).
-    var emptyStateHint: String?
+    public var emptyStateHint: String?
 
     /// Refresh the session list. Safe to call repeatedly; the data
     /// service reconnects to state.db on demand and the attribution
     /// service reads the sidecar afresh each call.
-    func load() async {
+    public func load() async {
         isLoading = true
         defer { isLoading = false }
 
@@ -87,11 +90,10 @@ final class ProjectSessionsViewModel {
     }
 
     /// Release the underlying DB handle. Safe to call repeatedly; the
-    /// service re-opens on the next `load()`. Mirrors the pattern in
-    /// ActivityViewModel.swift:80 — view calls this on `.onDisappear`
-    /// so file descriptors and the SQLite cache don't dangle once
-    /// the tab isn't visible.
-    func close() async {
+    /// service re-opens on the next `load()`. View calls this on
+    /// `.onDisappear` so file descriptors and the SQLite cache don't
+    /// dangle once the tab isn't visible.
+    public func close() async {
         await dataService.close()
     }
 }

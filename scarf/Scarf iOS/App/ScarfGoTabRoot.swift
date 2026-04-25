@@ -2,22 +2,26 @@ import SwiftUI
 import ScarfCore
 import ScarfIOS
 
-/// ScarfGo's primary navigation surface. Replaces the pre-M8
-/// "Dashboard is the hub" pattern where Chat/Memory/Cron/Skills/
-/// Settings lived as NavigationLink rows three-quarters of the way
-/// down a scrolling List — pass-1 user-visible complaint:
+/// ScarfGo's primary navigation surface. v2.5 expands the original
+/// 4-tab layout (Chat | Dashboard | Memory | More) to 5 primary tabs
+/// with Chat in the mathematical center:
 ///
-/// > "We should have the actions for the user in a permanent footer?
-/// >  I don't see any navigation."
+///     Dashboard | Projects | Chat | Skills | System
 ///
-/// 4 primary tabs + a "More" bucket for the read-heavy / seldom-used
-/// features. Uses iOS 18's `.sidebarAdaptable` tab style so the same
-/// tree degrades to a bottom tab bar on iPhone and gets a native
-/// sidebar on iPadOS / macCatalyst if we ever add those targets.
+/// "Chat in the middle" is the v2.5 product ask — chat is the action
+/// users come back for, so it's the most thumb-reachable slot on a
+/// phone-sized device. We stay on Apple's native `TabView` instead of
+/// drawing a custom raised center button: 5 tabs is exactly the iPhone
+/// system maximum (no auto-collapse to "More"), and `.sidebarAdaptable`
+/// continues to give us a real sidebar on iPad / macCatalyst for free.
+/// Memory drops out of primary slots and lives inside the renamed
+/// "System" tab (was "More"). Skills graduates from a System sub-row
+/// into its own primary tab to match v2.5's full Mac parity for skills
+/// (Installed / Browse Hub / Updates).
 ///
-/// Each tab wraps its feature view in its own `NavigationStack` so
-/// push navigation (Cron editor, Memory detail, etc.) stays scoped
-/// to the tab instead of bleeding across.
+/// Each tab wraps its feature view in its own `NavigationStack` so push
+/// navigation (Cron editor, Memory detail, Project detail, etc.) stays
+/// scoped to the tab instead of bleeding across.
 struct ScarfGoTabRoot: View {
     let serverID: ServerID
     let config: IOSServerConfig
@@ -26,8 +30,9 @@ struct ScarfGoTabRoot: View {
     let onForget: @MainActor () async -> Void
 
     /// One coordinator per server-connected session. Cross-tab
-    /// signalling (Dashboard row → Chat tab resume, eventually
-    /// notification deep-link → Chat) flows through here.
+    /// signalling (Dashboard row → Chat tab resume, Project Detail
+    /// → in-project chat handoff, notification deep-link → Chat) flows
+    /// through here.
     @State private var coordinator = ScarfGoCoordinator()
 
     var body: some View {
@@ -39,18 +44,7 @@ struct ScarfGoTabRoot: View {
         // SSH channel contention.
         let ctx = config.toServerContext(id: serverID)
         TabView(selection: $coordinator.selectedTab) {
-            // 1 — Chat: the reason the app is on your phone. Primary
-            // tab; opens straight into the chat surface.
-            NavigationStack {
-                ChatView(config: config, key: key)
-            }
-            .tabItem {
-                Label("Chat", systemImage: "bubble.left.and.bubble.right.fill")
-            }
-            .tag(ScarfGoCoordinator.Tab.chat)
-
-            // 2 — Dashboard: stats + recent sessions (no surfaces list
-            // anymore — those live in More).
+            // 1 — Dashboard: stats + recent sessions.
             NavigationStack {
                 DashboardView(config: config, key: key)
             }
@@ -58,33 +52,59 @@ struct ScarfGoTabRoot: View {
                 Label("Dashboard", systemImage: "gauge.with.needle")
             }
             .tag(ScarfGoCoordinator.Tab.dashboard)
+            .accessibilityLabel("Dashboard tab")
 
-            // 3 — Memory: MEMORY.md + USER.md + SOUL.md.
+            // 2 — Projects: registered projects → per-project dashboard,
+            // site, and sessions. Read-only registry on iOS — add /
+            // rename / archive happens in the Mac app.
             NavigationStack {
-                MemoryListView(config: config)
+                ProjectsListView(config: config)
             }
             .tabItem {
-                Label("Memory", systemImage: "brain.head.profile")
+                Label("Projects", systemImage: "square.grid.2x2")
             }
-            .tag(ScarfGoCoordinator.Tab.memory)
+            .tag(ScarfGoCoordinator.Tab.projects)
+            .accessibilityLabel("Projects tab")
 
-            // 4 — More: Cron, Skills, Settings, plus the destructive
-            // "Forget this server" action. Named "More" because on
-            // iOS 18 with .sidebarAdaptable the system collapses
-            // leftover tabs into a disclosure group with that exact
-            // label automatically; choosing the same word keeps our
-            // More tab visually consistent with the system default.
+            // 3 — Chat: the reason the app is on your phone. Centered
+            // among the 5 tabs for thumb reach + visual prominence.
             NavigationStack {
-                MoreTab(
+                ChatView(config: config, key: key)
+            }
+            .tabItem {
+                Label("Chat", systemImage: "bubble.left.and.bubble.right.fill")
+            }
+            .tag(ScarfGoCoordinator.Tab.chat)
+            .accessibilityLabel("Chat tab")
+
+            // 4 — Skills: Installed | Browse Hub | Updates, mirroring
+            // the Mac app's 3-tab skills surface.
+            NavigationStack {
+                SkillsView(config: config)
+            }
+            .tabItem {
+                Label("Skills", systemImage: "lightbulb")
+            }
+            .tag(ScarfGoCoordinator.Tab.skills)
+            .accessibilityLabel("Skills tab")
+
+            // 5 — System: server identity, Memory, Cron, Settings, plus
+            // the destructive disconnect / forget actions. Renamed from
+            // "More" to match the user-facing v2.5 vocabulary; the
+            // .sidebarAdaptable system fallback label happens not to
+            // matter here because we never overflow.
+            NavigationStack {
+                SystemTab(
                     config: config,
                     onSoftDisconnect: onSoftDisconnect,
                     onForget: onForget
                 )
             }
             .tabItem {
-                Label("More", systemImage: "ellipsis.circle")
+                Label("System", systemImage: "gearshape.fill")
             }
-            .tag(ScarfGoCoordinator.Tab.more)
+            .tag(ScarfGoCoordinator.Tab.system)
+            .accessibilityLabel("System tab")
         }
         // Pulls the sidebar-on-iPad affordance into the same code path
         // as the bottom-bar-on-iPhone one. No-op on iPhone today.
@@ -101,14 +121,15 @@ struct ScarfGoTabRoot: View {
     }
 }
 
-/// Groups the features that don't deserve a primary tab on a phone:
-/// Cron (infrequent edits), Skills (read-only), Settings (read-only
-/// until M9 scoped editor), plus the destructive server-forget action.
+/// Server identity + Memory + Cron + Settings + destructive actions.
+/// "System" reads as configuration / server-meta; the reorganization
+/// in v2.5 promotes Skills out of here into its own primary tab and
+/// pulls Memory in from a primary tab into a NavigationLink row.
 ///
 /// Kept private to this file because we don't expect it to be reused
 /// elsewhere — if a feature graduates to a primary tab, that's a
 /// deliberate design decision.
-private struct MoreTab: View {
+private struct SystemTab: View {
     let config: IOSServerConfig
     let onSoftDisconnect: @MainActor () async -> Void
     let onForget: @MainActor () async -> Void
@@ -131,15 +152,15 @@ private struct MoreTab: View {
 
             Section("Features") {
                 NavigationLink {
-                    CronListView(config: config)
+                    MemoryListView(config: config)
                 } label: {
-                    Label("Cron jobs", systemImage: "clock.arrow.circlepath")
+                    Label("Memory", systemImage: "brain.head.profile")
                 }
                 .scarfGoCompactListRow()
                 NavigationLink {
-                    SkillsListView(config: config)
+                    CronListView(config: config)
                 } label: {
-                    Label("Skills", systemImage: "sparkles")
+                    Label("Cron jobs", systemImage: "clock.arrow.circlepath")
                 }
                 .scarfGoCompactListRow()
                 NavigationLink {
@@ -194,7 +215,7 @@ private struct MoreTab: View {
             }
         }
         .scarfGoListDensity()
-        .navigationTitle("More")
+        .navigationTitle("System")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(
             "Forget this server?",
