@@ -27,6 +27,16 @@ Same Hermes server you've been running on your Mac — now reachable from your p
 
 **[Join the public TestFlight](https://testflight.apple.com/join/qCrRpcTz)** — the link is live now but only accepts new beta testers once Apple's Beta Review approves the first build. If you hit a "not accepting testers" splash, bookmark it and try again in 24–48h.
 
+<p align="center">
+  <a href="assets/screenshots/scarfgo-servers.png"><img src="assets/screenshots/scarfgo-servers.png" alt="ScarfGo — Servers list" width="180"></a>
+  <a href="assets/screenshots/scarfgo-chat.png"><img src="assets/screenshots/scarfgo-chat.png" alt="ScarfGo — Chat with Hermes" width="180"></a>
+  <a href="assets/screenshots/scarfgo-project-dashboard.png"><img src="assets/screenshots/scarfgo-project-dashboard.png" alt="ScarfGo — Project dashboard" width="180"></a>
+  <a href="assets/screenshots/scarfgo-skills.png"><img src="assets/screenshots/scarfgo-skills.png" alt="ScarfGo — Skills browser" width="180"></a>
+  <a href="assets/screenshots/scarfgo-system.png"><img src="assets/screenshots/scarfgo-system.png" alt="ScarfGo — System tab" width="180"></a>
+</p>
+
+<p align="center"><sub><em>Tap any thumbnail to view full size. Servers list · Chat · Project dashboard (Site Status Checker template) · Skills browser · System tab.</em></sub></p>
+
 See the [ScarfGo wiki page](https://github.com/awizemann/scarf/wiki/ScarfGo) for the full feature tour, [ScarfGo Onboarding](https://github.com/awizemann/scarf/wiki/ScarfGo-Onboarding) for the SSH-key setup walkthrough, and [Platform Differences](https://github.com/awizemann/scarf/wiki/Platform-Differences) for what is and isn't shared between Mac and iOS.
 
 ### Everything else in 2.5
