@@ -444,21 +444,33 @@ struct PermissionApprovalView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
+            // Numbered keyboard shortcuts (1–9) on the option buttons.
+            // Mirrors the new TUI pattern Hermes v2026.4.23 ships —
+            // power users approve / deny without reaching for the
+            // mouse. Visible "1." prefixes act as discoverability
+            // hints; the actual key binding goes through
+            // `.keyboardShortcut`. Capped at 9 — extra options stay
+            // tappable but unbound (they'd need modifiers to
+            // disambiguate beyond 9, which isn't worth it).
             HStack(spacing: 12) {
-                ForEach(options, id: \.optionId) { option in
-                    if option.optionId == "deny" {
-                        Button(option.name) {
-                            onRespond(option.optionId)
-                            dismiss()
+                ForEach(Array(options.enumerated()), id: \.element.optionId) { idx, option in
+                    let label = idx < 9 ? "\(idx + 1). \(option.name)" : option.name
+                    Group {
+                        if option.optionId == "deny" {
+                            Button(label) {
+                                onRespond(option.optionId)
+                                dismiss()
+                            }
+                            .buttonStyle(.bordered)
+                        } else {
+                            Button(label) {
+                                onRespond(option.optionId)
+                                dismiss()
+                            }
+                            .buttonStyle(.borderedProminent)
                         }
-                        .buttonStyle(.bordered)
-                    } else {
-                        Button(option.name) {
-                            onRespond(option.optionId)
-                            dismiss()
-                        }
-                        .buttonStyle(.borderedProminent)
                     }
+                    .applyingNumberShortcut(index: idx)
                 }
             }
         }
@@ -481,6 +493,20 @@ struct PermissionApprovalView: View {
         case "edit": return .blue
         case "delete": return .red
         default: return .secondary
+        }
+    }
+}
+
+private extension View {
+    /// Bind the digit `idx + 1` (1-9) to this view as a no-modifier
+    /// keyboard shortcut. Indices ≥ 9 silently skip — there are only
+    /// nine numeric shortcut keys without modifier conflicts.
+    @ViewBuilder
+    func applyingNumberShortcut(index idx: Int) -> some View {
+        if idx < 9, let scalar = Unicode.Scalar(48 + idx + 1) {
+            self.keyboardShortcut(KeyEquivalent(Character(scalar)), modifiers: [])
+        } else {
+            self
         }
     }
 }

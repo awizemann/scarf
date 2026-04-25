@@ -1270,7 +1270,12 @@ private struct PermissionSheet: View {
                 }
 
                 Section("Your response") {
-                    ForEach(permission.options, id: \.optionId) { opt in
+                    // Visual numbering 1-9 matches the Mac sheet's
+                    // keyboard shortcuts; on iPhone the numbers serve
+                    // as a hierarchy hint rather than an accelerator
+                    // (no hardware keyboard binding). Mirrors the new
+                    // Hermes v2026.4.23 TUI pattern.
+                    ForEach(Array(permission.options.enumerated()), id: \.element.optionId) { idx, opt in
                         Button {
                             Task {
                                 await onRespond(opt.optionId)
@@ -1278,6 +1283,11 @@ private struct PermissionSheet: View {
                             }
                         } label: {
                             HStack {
+                                if idx < 9 {
+                                    Text("\(idx + 1).")
+                                        .font(.body.monospaced())
+                                        .foregroundStyle(.secondary)
+                                }
                                 Text(opt.name)
                                 Spacer()
                                 Image(systemName: "chevron.right")
