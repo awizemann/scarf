@@ -84,7 +84,16 @@ Public documentation lives in the GitHub wiki at https://github.com/awizemann/sc
 
 ## Hermes Version
 
-Targets Hermes v0.10.0 (v2026.4.16). Log lines may carry an optional `[session_id]` tag between the level and logger name — `HermesLogService.parseLine` treats the session tag as an optional capture group, so older untagged lines still parse.
+Targets Hermes v2026.4.23 (v0.11.0). Log lines may carry an optional `[session_id]` tag between the level and logger name — `HermesLogService.parseLine` treats the session tag as an optional capture group, so older untagged lines still parse.
+
+**v2026.4.23 (v0.11.0)** added (Scarf-relevant subset):
+
+- `/steer <prompt>` — non-interruptive mid-run guidance slash command. Surfaced in Scarf chat menus via `RichChatViewModel.nonInterruptiveCommands`; `ChatViewModel.sendViaACP` (Mac) and `ChatController.send` (iOS) skip the "Agent working…" status flip and show a transient toast instead.
+- New CLI subcommands: `hermes plugins` / `profile` / `webhook` / `insights` / `logs` / `memory reset` / `completion` / `dashboard`. Scarf v2.5 adopts **`hermes memory reset`** (toolbar button on MemoryView with destructive confirmation). The other CLIs are documented here for v2.6 — Scarf still reads `~/.hermes/plugins/`, `~/.hermes/profiles/` etc directly today; switching those paths to the canonical CLI is a forward-compatible change to make when bandwidth permits.
+- New state.db columns: `messages.reasoning_content` + `sessions.api_call_count`. `HermesDataService.detectSchema` flips `hasV011Schema` only when both are present (partial migrations stay on v0.7 path). Surfaced as the "API" chip on session rows + a network-icon counter in DashboardView. `HermesMessage.preferredReasoning` picks the newer column when both reasoning channels are populated.
+- New skills: `design-md` (Google's DESIGN.md authoring; needs `npx`/Node 18+ on host — checked via `SkillPrereqService` and surfaced as a yellow banner) and `spotify` (OAuth via `hermes auth spotify` — driven by `SpotifyAuthFlow` + `SpotifySignInSheet`, mirroring v2.3 Nous Portal pattern).
+- Updated skills: `research-paper-writing` 1.1.0 (+SciencePlots dep), `segment-anything-model` (expanded docs), `google-workspace` (gws CLI prefer + granular OAuth scopes), `hermes-agent` (in-tree).
+- SKILL.md frontmatter gains `allowed_tools` / `related_skills` / `dependencies` lists. `HermesSkill` carries them as optional fields; `SkillsView` (Mac) + `SkillDetailView` (iOS) render them as chip rows when populated.
 
 v0.10.0 introduced the **Tool Gateway** — paid Nous Portal subscribers route web search, image generation, TTS, and browser automation through their subscription without separate API keys. In Scarf:
 

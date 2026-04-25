@@ -3,6 +3,8 @@ import ScarfCore
 
 struct MemoryView: View {
     @State private var viewModel: MemoryViewModel
+    @State private var showResetConfirm: Bool = false
+    @State private var resetError: String?
     @Environment(HermesFileWatcher.self) private var fileWatcher
 
     init(context: ServerContext) {
@@ -60,6 +62,56 @@ struct MemoryView: View {
         }
         .sheet(isPresented: $viewModel.isEditing) {
             editorSheet
+        }
+        .toolbar {
+            // v2.5: `hermes memory reset` (Hermes v2026.4.23+) wipes
+            // both MEMORY.md and USER.md atomically — useful when a
+            // session went off the rails. Destructive, confirmation-
+            // gated, surfaced as a small toolbar button rather than
+            // a prominent button to avoid accidental clicks.
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showResetConfirm = true
+                } label: {
+                    Label("Reset memory…", systemImage: "arrow.counterclockwise")
+                }
+                .help("Reset MEMORY.md and USER.md to empty (Hermes v2026.4.23+)")
+            }
+        }
+        .confirmationDialog(
+            "Reset memory?",
+            isPresented: $showResetConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Reset", role: .destructive) {
+                resetMemoryRemotely()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Wipes MEMORY.md and USER.md to empty via `hermes memory reset --yes`. The agent's accumulated knowledge for this server is gone immediately. Use this when a session went off the rails — there's no undo.")
+        }
+        .alert("Couldn't reset memory", isPresented: Binding(
+            get: { resetError != nil },
+            set: { if !$0 { resetError = nil } }
+        )) {
+            Button("OK") { resetError = nil }
+        } message: {
+            Text(resetError ?? "")
+        }
+    }
+
+    /// Run `hermes memory reset --yes` over the active context's
+    /// transport. Refreshes the on-screen content on success; surfaces
+    /// stderr in an alert on failure.
+    private func resetMemoryRemotely() {
+        let result = viewModel.context.runHermes(["memory", "reset", "--yes"])
+        if result.exitCode == 0 {
+            viewModel.load()
+        } else {
+            let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            resetError = trimmed.isEmpty
+                ? "hermes memory reset exited with status \(result.exitCode)."
+                : trimmed
         }
     }
 
