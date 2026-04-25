@@ -1,4 +1,5 @@
 import ScarfCore
+import ScarfDesign
 import SwiftUI
 
 /// Preview-and-confirm sheet for uninstalling a template-installed
@@ -41,7 +42,7 @@ struct TemplateUninstallSheet: View {
     private var idleView: some View {
         VStack(spacing: 16) {
             Text("No template loaded.")
-                .font(.headline)
+                .scarfStyle(.headline)
             Button("Close") { dismiss() }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -87,7 +88,7 @@ struct TemplateUninstallSheet: View {
                     .foregroundStyle(.secondary)
                 Button("Remove") { viewModel.confirmUninstall() }
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
                     .tint(.red)
             }
             .padding(.top, 8)
@@ -244,7 +245,7 @@ struct TemplateUninstallSheet: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.headline)
+            Text(title).scarfStyle(.headline)
             if let subtitle {
                 Text(subtitle)
                     .font(.caption.monospaced())
@@ -296,7 +297,7 @@ struct TemplateUninstallSheet: View {
                 dismiss()
             }
             .keyboardShortcut(.defaultAction)
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ScarfPrimaryButton())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
@@ -316,7 +317,7 @@ struct TemplateUninstallSheet: View {
                 Image(systemName: "folder.badge.questionmark")
                     .foregroundStyle(.orange)
                 Text("Project folder kept")
-                    .font(.headline)
+                    .scarfStyle(.headline)
             }
             Text("These files weren't installed by the template (the agent or you created them after install), so Scarf left them in place along with the folder itself.")
                 .font(.caption)

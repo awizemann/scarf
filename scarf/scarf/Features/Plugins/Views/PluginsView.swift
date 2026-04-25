@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct PluginsView: View {
     @State private var viewModel: PluginsViewModel
@@ -15,7 +16,6 @@ struct PluginsView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
             if viewModel.isLoading && viewModel.plugins.isEmpty {
                 ProgressView().padding()
             } else if viewModel.plugins.isEmpty {
@@ -24,6 +24,7 @@ struct PluginsView: View {
                 list
             }
         }
+        .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Plugins")
         .loadingOverlay(
             viewModel.isLoading,
@@ -45,25 +46,28 @@ struct PluginsView: View {
     }
 
     private var header: some View {
-        HStack {
-            if let msg = viewModel.message {
-                Label(msg, systemImage: "info.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
+        ScarfPageHeader(
+            "Plugins",
+            subtitle: "Hermes plugins discovered from `~/.hermes/plugins/`."
+        ) {
+            HStack(spacing: ScarfSpace.s2) {
+                if let msg = viewModel.message {
+                    Label(msg, systemImage: "info.circle.fill")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.success)
+                }
+                Button("Reload") { viewModel.load() }
+                    .buttonStyle(ScarfGhostButton())
+                Button {
+                    installIdentifier = ""
+                    showInstall = true
+                } label: {
+                    Label("Install", systemImage: "plus")
+                }
+                .buttonStyle(ScarfPrimaryButton())
             }
-            Spacer()
-            Button {
-                installIdentifier = ""
-                showInstall = true
-            } label: {
-                Label("Install", systemImage: "plus")
-            }
-            .controlSize(.small)
-            Button("Reload") { viewModel.load() }
-                .controlSize(.small)
+            .fixedSize(horizontal: true, vertical: false)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
     }
 
     private var emptyState: some View {

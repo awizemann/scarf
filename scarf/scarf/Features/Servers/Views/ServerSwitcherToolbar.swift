@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Toolbar control that shows the current window's server and exposes a
 /// menu for opening *other* servers in additional windows. Multi-window is
@@ -36,13 +37,15 @@ struct ServerSwitcherToolbar: View {
         } label: {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(current.isRemote ? Color.blue : Color.green)
+                    .fill(current.isRemote ? ScarfColor.info : ScarfColor.success)
                     .frame(width: 8, height: 8)
                 Text(verbatim: current.displayName)
-                    .font(.callout)
+                    .scarfStyle(.callout)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
-                    .font(.caption2)
+                    .font(.system(size: 10))
+                    .foregroundStyle(ScarfColor.foregroundMuted)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)

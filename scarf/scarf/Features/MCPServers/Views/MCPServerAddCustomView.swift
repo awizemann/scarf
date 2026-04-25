@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct MCPServerAddCustomView: View {
     let viewModel: MCPServersViewModel
@@ -16,13 +17,13 @@ struct MCPServerAddCustomView: View {
         VStack(spacing: 0) {
             HStack {
                 Text("Add Custom MCP Server")
-                    .font(.headline)
+                    .scarfStyle(.headline)
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Add") {
                     submit()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .disabled(!canSubmit)
             }
             .padding()

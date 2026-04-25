@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct FeishuSetupView: View {
     @State private var viewModel: FeishuSetupViewModel
@@ -52,7 +53,7 @@ struct FeishuSetupView: View {
             }
             Spacer()
             Button("Reload") { viewModel.load() }.controlSize(.small)
-            Button("Save") { viewModel.save() }.buttonStyle(.borderedProminent).controlSize(.small)
+            Button("Save") { viewModel.save() }.buttonStyle(ScarfPrimaryButton()).controlSize(.small)
         }
     }
 }

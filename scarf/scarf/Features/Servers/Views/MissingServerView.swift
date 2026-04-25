@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Shown when a window is restored after the user removed the server it
 /// was bound to. Lets them open Local or any remaining registered server
@@ -33,7 +34,7 @@ struct MissingServerView: View {
                     openWindow(value: ServerContext.local.id)
                     dismissWindow()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
 
                 if !registry.entries.isEmpty {
                     Menu {

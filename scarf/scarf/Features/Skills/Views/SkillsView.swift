@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct SkillsView: View {
     @State private var viewModel: SkillsViewModel
@@ -38,6 +39,10 @@ struct SkillsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            ScarfPageHeader(
+                "Skills",
+                subtitle: "Pre-packaged prompt collections the agent can call into. \(viewModel.totalSkillCount) installed."
+            )
             modePicker
             // v2.5 "What's New" pill — only renders when the diff has
             // changes against a non-empty prior snapshot (first launch
@@ -55,7 +60,8 @@ struct SkillsView: View {
             case .updates:   updatesContent
             }
         }
-        .navigationTitle("Skills (\(viewModel.totalSkillCount))")
+        .background(ScarfColor.backgroundPrimary)
+        .navigationTitle("Skills")
         // SkillsViewModel.load() is async after the v2.5 ScarfCore
         // promotion. Wrap in a Task here so the existing onAppear
         // contract (fire-and-forget) keeps working without making

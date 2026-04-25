@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct TelegramSetupView: View {
     @State private var viewModel: TelegramSetupViewModel
@@ -57,7 +58,7 @@ struct TelegramSetupView: View {
             Button("Reload") { viewModel.load() }
                 .controlSize(.small)
             Button("Save") { viewModel.save() }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .controlSize(.small)
         }
     }

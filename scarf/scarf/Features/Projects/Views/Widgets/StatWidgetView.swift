@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct StatWidgetView: View {
     let widget: DashboardWidget
@@ -14,10 +15,10 @@ struct StatWidgetView: View {
                 if let icon = widget.icon {
                     Image(systemName: icon)
                         .foregroundStyle(widgetColor)
-                        .font(.caption)
+                        .scarfStyle(.caption)
                 }
                 Text(widget.title)
-                    .font(.caption)
+                    .scarfStyle(.caption)
                     .foregroundStyle(.secondary)
             }
             if let value = widget.value {
@@ -32,7 +33,7 @@ struct StatWidgetView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(.quaternary.opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(ScarfColor.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.lg))
     }
 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Sidebar view for the Projects feature. Renders the registry as:
 /// - A search field at the top (⌘F focus).
@@ -68,18 +69,18 @@ struct ProjectsSidebar: View {
         HStack {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-                .font(.caption)
+                .scarfStyle(.caption)
             TextField("Filter projects", text: $filterText)
                 .textFieldStyle(.plain)
                 .focused($searchFocused)
-                .font(.caption)
+                .scarfStyle(.caption)
             if !filterText.isEmpty {
                 Button {
                     filterText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.tertiary)
-                        .font(.caption)
+                        .scarfStyle(.caption)
                 }
                 .buttonStyle(.borderless)
             }
@@ -122,7 +123,7 @@ struct ProjectsSidebar: View {
                         }
                     } label: {
                         Label(folder, systemImage: "folder")
-                            .font(.caption)
+                            .scarfStyle(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -137,7 +138,7 @@ struct ProjectsSidebar: View {
                     }
                 } label: {
                     Label("Archived (\(archivedVisible.count))", systemImage: "archivebox")
-                        .font(.caption)
+                        .scarfStyle(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -208,7 +209,7 @@ struct ProjectsSidebar: View {
 
             Toggle(isOn: $showArchived) {
                 Image(systemName: showArchived ? "archivebox.fill" : "archivebox")
-                    .font(.caption)
+                    .scarfStyle(.caption)
             }
             .toggleStyle(.button)
             .buttonStyle(.borderless)

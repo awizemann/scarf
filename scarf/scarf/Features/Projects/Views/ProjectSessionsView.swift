@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Per-project Sessions tab (v2.3). Lives beside the Dashboard and
 /// Site tabs in the project view; populated from the session
@@ -59,9 +60,9 @@ struct ProjectSessionsView: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Sessions in this project")
-                    .font(.headline)
+                    .scarfStyle(.headline)
                 Text("Chats you start here get attributed automatically. Older CLI-started sessions live in the global Sessions sidebar.")
-                    .font(.caption)
+                    .scarfStyle(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -75,7 +76,7 @@ struct ProjectSessionsView: View {
             } label: {
                 Label("New Chat", systemImage: "message.badge.filled.fill")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ScarfPrimaryButton())
         }
         .padding()
     }

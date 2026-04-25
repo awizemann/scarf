@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// List of registered remote servers with add/remove actions. Rendered as a
 /// popover from the toolbar switcher.
@@ -59,7 +60,7 @@ struct ManageServersView: View {
 
     private var header: some View {
         HStack {
-            Text("Servers").font(.headline)
+            Text("Servers").scarfStyle(.headline)
             Spacer()
             Button {
                 showAddSheet = true
@@ -76,7 +77,7 @@ struct ManageServersView: View {
             Image(systemName: "server.rack")
                 .font(.system(size: 28))
                 .foregroundStyle(.secondary)
-            Text("No remote servers").font(.headline)
+            Text("No remote servers").scarfStyle(.headline)
             Text("Click Add to connect to a remote Hermes installation over SSH.")
                 .font(.caption)
                 .foregroundStyle(.secondary)

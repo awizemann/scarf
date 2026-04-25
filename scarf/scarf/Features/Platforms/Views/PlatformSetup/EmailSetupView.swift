@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct EmailSetupView: View {
     @State private var viewModel: EmailSetupViewModel
@@ -75,7 +76,7 @@ struct EmailSetupView: View {
             }
             Spacer()
             Button("Reload") { viewModel.load() }.controlSize(.small)
-            Button("Save") { viewModel.save() }.buttonStyle(.borderedProminent).controlSize(.small)
+            Button("Save") { viewModel.save() }.buttonStyle(ScarfPrimaryButton()).controlSize(.small)
         }
     }
 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct PersonalitiesView: View {
     @State private var viewModel: PersonalitiesViewModel
@@ -12,35 +13,39 @@ struct PersonalitiesView: View {
 
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                header
-                activeSection
-                listSection
-                soulSection
+        VStack(spacing: 0) {
+            ScarfPageHeader(
+                "Personalities",
+                subtitle: "Per-personality model + prompt overrides defined in config.yaml."
+            ) {
+                HStack(spacing: ScarfSpace.s2) {
+                    if let msg = viewModel.message {
+                        Label(msg, systemImage: "checkmark.circle.fill")
+                            .scarfStyle(.caption)
+                            .foregroundStyle(ScarfColor.success)
+                    }
+                    Button("Edit config.yaml") { viewModel.openConfigInEditor() }
+                        .buttonStyle(ScarfGhostButton())
+                    Button("Reload") { viewModel.load(); soulDraft = viewModel.soulMarkdown }
+                        .buttonStyle(ScarfSecondaryButton())
+                }
+                .fixedSize(horizontal: true, vertical: false)
             }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    activeSection
+                    listSection
+                    soulSection
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
         }
+        .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Personalities")
         .onAppear {
             viewModel.load()
             soulDraft = viewModel.soulMarkdown
-        }
-    }
-
-    private var header: some View {
-        HStack {
-            if let msg = viewModel.message {
-                Label(msg, systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
-            }
-            Spacer()
-            Button("Edit config.yaml") { viewModel.openConfigInEditor() }
-                .controlSize(.small)
-            Button("Reload") { viewModel.load(); soulDraft = viewModel.soulMarkdown }
-                .controlSize(.small)
         }
     }
 

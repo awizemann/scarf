@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 import ScarfCore
+import ScarfDesign
 
 /// Author-facing sheet for exporting an existing project as a
 /// `.scarftemplate`. Mirrors the profile-export flow: fill in a few fields,
@@ -89,7 +90,7 @@ struct TemplateExportSheet: View {
             Spacer()
             Button("Export…") { runExport() }
                 .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .disabled(!canExport)
         }
         .padding(.top, 8)
@@ -97,7 +98,7 @@ struct TemplateExportSheet: View {
 
     private var metadataGroup: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Metadata").font(.headline)
+            Text("Metadata").scarfStyle(.headline)
             LabeledContent("Template ID") {
                 TextField("owner/name", text: $viewModel.templateId)
                     .textFieldStyle(.roundedBorder)
@@ -137,7 +138,7 @@ struct TemplateExportSheet: View {
     private var requiredFilesGroup: some View {
         let plan = viewModel.previewPlan()
         return VStack(alignment: .leading, spacing: 6) {
-            Text("Required Files").font(.headline)
+            Text("Required Files").scarfStyle(.headline)
             check(label: "dashboard.json (\(plan.projectDir)/.scarf/dashboard.json)", ok: plan.dashboardPresent)
             check(label: "README.md (\(plan.projectDir)/README.md)", ok: plan.readmePresent)
             check(label: "AGENTS.md (\(plan.projectDir)/AGENTS.md)", ok: plan.agentsMdPresent)
@@ -147,7 +148,7 @@ struct TemplateExportSheet: View {
     private var instructionsGroup: some View {
         let plan = viewModel.previewPlan()
         return VStack(alignment: .leading, spacing: 4) {
-            Text("Agent-specific instructions (optional)").font(.headline)
+            Text("Agent-specific instructions (optional)").scarfStyle(.headline)
             if plan.instructionFiles.isEmpty {
                 Text("No per-agent instruction files found in the project root.")
                     .font(.caption)
@@ -163,7 +164,7 @@ struct TemplateExportSheet: View {
 
     private var skillsGroup: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Include Skills").font(.headline)
+            Text("Include Skills").scarfStyle(.headline)
             if viewModel.availableSkills.isEmpty {
                 Text("No skills found.")
                     .font(.caption)
@@ -186,7 +187,7 @@ struct TemplateExportSheet: View {
 
     private var cronGroup: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Include Cron Jobs").font(.headline)
+            Text("Include Cron Jobs").scarfStyle(.headline)
             if viewModel.availableCronJobs.isEmpty {
                 Text("No cron jobs found.")
                     .font(.caption)
@@ -214,7 +215,7 @@ struct TemplateExportSheet: View {
 
     private var memoryGroup: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Memory Appendix (optional)").font(.headline)
+            Text("Memory Appendix (optional)").scarfStyle(.headline)
             Text("Markdown that will be appended to the installer's MEMORY.md, wrapped in template-specific markers so it can be removed cleanly later.")
                 .font(.caption)
                 .foregroundStyle(.secondary)

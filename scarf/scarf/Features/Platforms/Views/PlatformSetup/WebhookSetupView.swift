@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct WebhookSetupView: View {
     @State private var viewModel: WebhookSetupViewModel
@@ -53,7 +54,7 @@ struct WebhookSetupView: View {
             }
             Spacer()
             Button("Reload") { viewModel.load() }.controlSize(.small)
-            Button("Save") { viewModel.save() }.buttonStyle(.borderedProminent).controlSize(.small)
+            Button("Save") { viewModel.save() }.buttonStyle(ScarfPrimaryButton()).controlSize(.small)
         }
     }
 }

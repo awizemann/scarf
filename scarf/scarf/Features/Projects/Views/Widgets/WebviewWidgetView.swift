@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 import WebKit
 
 struct WebviewWidgetView: View {
@@ -29,7 +30,7 @@ struct WebviewWidgetView: View {
         VStack(spacing: 0) {
             if let url = webURL {
                 WebViewRepresentable(url: url)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.lg))
             } else {
                 ContentUnavailableView {
                     Label("Invalid URL", systemImage: "globe")
@@ -49,10 +50,10 @@ struct WebviewWidgetView: View {
                 if let icon = widget.icon {
                     Image(systemName: icon)
                         .foregroundStyle(.secondary)
-                        .font(.caption)
+                        .scarfStyle(.caption)
                 }
                 Text(widget.title)
-                    .font(.caption)
+                    .scarfStyle(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
                 if let urlString = widget.url {
@@ -76,8 +77,8 @@ struct WebviewWidgetView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(.quaternary.opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(ScarfColor.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.lg))
     }
 }
 

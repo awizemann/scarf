@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 import AppKit
 
 struct WebhooksView: View {
@@ -25,7 +26,6 @@ struct WebhooksView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
             if viewModel.isLoading && viewModel.webhooks.isEmpty {
                 ProgressView().padding()
             } else if viewModel.webhookPlatformNotEnabled {
@@ -36,6 +36,7 @@ struct WebhooksView: View {
                 list
             }
         }
+        .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Webhooks")
         .onAppear { viewModel.load() }
         .sheet(isPresented: $showAddSheet) { addSheet }
@@ -52,25 +53,28 @@ struct WebhooksView: View {
     }
 
     private var header: some View {
-        HStack {
-            if let msg = viewModel.message {
-                Label(msg, systemImage: "info.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
+        ScarfPageHeader(
+            "Webhooks",
+            subtitle: "HTTP receivers that trigger sessions on incoming events."
+        ) {
+            HStack(spacing: ScarfSpace.s2) {
+                if let msg = viewModel.message {
+                    Label(msg, systemImage: "info.circle.fill")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.success)
+                }
+                Button("Reload") { viewModel.load() }
+                    .buttonStyle(ScarfGhostButton())
+                Button {
+                    resetAddForm()
+                    showAddSheet = true
+                } label: {
+                    Label("Subscribe", systemImage: "plus")
+                }
+                .buttonStyle(ScarfPrimaryButton())
             }
-            Spacer()
-            Button {
-                resetAddForm()
-                showAddSheet = true
-            } label: {
-                Label("Subscribe", systemImage: "plus")
-            }
-            .controlSize(.small)
-            Button("Reload") { viewModel.load() }
-                .controlSize(.small)
+            .fixedSize(horizontal: true, vertical: false)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
     }
 
     /// Shown when hermes reports the webhook platform isn't enabled. Direct users

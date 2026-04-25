@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct MatrixSetupView: View {
     @State private var viewModel: MatrixSetupViewModel
@@ -69,7 +70,7 @@ struct MatrixSetupView: View {
             }
             Spacer()
             Button("Reload") { viewModel.load() }.controlSize(.small)
-            Button("Save") { viewModel.save() }.buttonStyle(.borderedProminent).controlSize(.small)
+            Button("Save") { viewModel.save() }.buttonStyle(ScarfPrimaryButton()).controlSize(.small)
         }
     }
 }

@@ -1,4 +1,5 @@
 import ScarfCore
+import ScarfDesign
 import SwiftUI
 
 /// Post-install configuration editor. Thin wrapper around the same
@@ -73,7 +74,7 @@ struct ConfigEditorSheet: View {
                     Text("Configuration saved").font(.title2.bold())
                     Button("Done") { dismiss() }
                         .keyboardShortcut(.defaultAction)
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(ScarfPrimaryButton())
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .frame(minWidth: 560, minHeight: 280)

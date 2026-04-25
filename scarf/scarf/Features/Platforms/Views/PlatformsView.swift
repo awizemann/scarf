@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct PlatformsView: View {
     @State private var viewModel: PlatformsViewModel
@@ -13,12 +14,19 @@ struct PlatformsView: View {
     // HSplitView (not nested NavigationSplitView) because ContentView already
     // hosts the outer NavigationSplitView — nesting them breaks layout on macOS.
     var body: some View {
-        HSplitView {
-            platformList
-                .frame(minWidth: 220, idealWidth: 240, maxWidth: 300)
-            detail
-                .frame(minWidth: 480)
+        VStack(spacing: 0) {
+            ScarfPageHeader(
+                "Platforms",
+                subtitle: "Inbound channels the agent listens on. Set up tokens per platform."
+            )
+            HSplitView {
+                platformList
+                    .frame(minWidth: 220, idealWidth: 240, maxWidth: 300)
+                detail
+                    .frame(minWidth: 480)
+            }
         }
+        .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Platforms")
         .onAppear { viewModel.load() }
         // Re-read config.yaml / .env / gateway_state.json when any of them

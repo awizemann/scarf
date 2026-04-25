@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct ProgressWidgetView: View {
     let widget: DashboardWidget
@@ -14,7 +15,7 @@ struct ProgressWidgetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(widget.title)
-                .font(.caption)
+                .scarfStyle(.caption)
                 .foregroundStyle(.secondary)
             ProgressView(value: progressValue) {
                 if let label = widget.label {
@@ -27,7 +28,7 @@ struct ProgressWidgetView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(.quaternary.opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(ScarfColor.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.lg))
     }
 }

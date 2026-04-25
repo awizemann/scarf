@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Sheet for renaming a project in the registry. Preserves the
 /// project's `path`, `folder`, and `archived` fields — the rename
@@ -45,15 +46,16 @@ struct RenameProjectSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Rename project").font(.headline)
+        VStack(alignment: .leading, spacing: ScarfSpace.s3) {
+            Text("Rename project")
+                .scarfStyle(.headline)
+                .foregroundStyle(ScarfColor.foregroundPrimary)
             Text("The project directory on disk isn't changed — only the label Scarf shows in the sidebar.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .scarfStyle(.caption)
+                .foregroundStyle(ScarfColor.foregroundMuted)
                 .fixedSize(horizontal: false, vertical: true)
 
-            TextField("Project name", text: $newName)
-                .textFieldStyle(.roundedBorder)
+            ScarfTextField("Project name", text: $newName)
                 .onSubmit {
                     if validation.isValid {
                         save()
@@ -62,21 +64,22 @@ struct RenameProjectSheet: View {
 
             if let message = validation.message {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.danger)
             }
 
             HStack {
                 Button("Cancel") { dismiss() }
+                    .buttonStyle(ScarfGhostButton())
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save") { save() }
+                    .buttonStyle(ScarfPrimaryButton())
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
                     .disabled(!validation.isValid)
             }
         }
-        .padding()
+        .padding(ScarfSpace.s5)
         .frame(minWidth: 420)
     }
 

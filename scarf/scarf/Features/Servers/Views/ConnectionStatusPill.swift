@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Small colored pill shown in the toolbar reflecting the server's reach-
 /// ability. Green = connected, yellow = probing, red = unreachable.
@@ -33,8 +34,8 @@ struct ConnectionStatusPill: View {
                     .foregroundStyle(color)
                     .symbolRenderingMode(.hierarchical)
                 labelText
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
                     .lineLimit(1)
             }
             .padding(.horizontal, 4)
@@ -51,10 +52,10 @@ struct ConnectionStatusPill: View {
 
     private var color: Color {
         switch status.status {
-        case .connected: return .green
-        case .degraded: return .orange
-        case .idle: return .yellow
-        case .error: return .red
+        case .connected: return ScarfColor.success
+        case .degraded: return ScarfColor.warning
+        case .idle: return ScarfColor.warning.opacity(0.7)
+        case .error: return ScarfColor.danger
         }
     }
 
@@ -101,13 +102,14 @@ struct ConnectionStatusPill: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Label(message, systemImage: "xmark.octagon.fill")
-                        .foregroundStyle(.red)
-                        .font(.headline)
+                        .foregroundStyle(ScarfColor.danger)
+                        .scarfStyle(.headline)
                     Spacer()
                     Button("Retry") {
                         status.retry()
                         showDetails = false
                     }
+                    .buttonStyle(ScarfPrimaryButton())
                 }
                 Divider()
 

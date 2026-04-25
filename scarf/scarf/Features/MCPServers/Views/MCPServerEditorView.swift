@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct MCPServerEditorView: View {
     @State var viewModel: MCPServerEditorViewModel
@@ -11,7 +12,7 @@ struct MCPServerEditorView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Edit \(viewModel.server.name)")
-                        .font(.headline)
+                        .scarfStyle(.headline)
                     Text(viewModel.server.transport.displayName)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -30,7 +31,7 @@ struct MCPServerEditorView: View {
                         Text("Save")
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .keyboardShortcut(.defaultAction)
                 .disabled(viewModel.isSaving)
             }

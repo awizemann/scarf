@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Sheet for assigning a project to a folder in the sidebar. Folders
 /// are implicit — they exist because at least one project references
@@ -55,11 +56,13 @@ struct MoveToFolderSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Move \"\(project.name)\" to folder").font(.headline)
+        VStack(alignment: .leading, spacing: ScarfSpace.s3) {
+            Text("Move \"\(project.name)\" to folder")
+                .scarfStyle(.headline)
+                .foregroundStyle(ScarfColor.foregroundPrimary)
             Text("Folders only affect how projects are grouped in Scarf's sidebar. Nothing on disk changes.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .scarfStyle(.caption)
+                .foregroundStyle(ScarfColor.foregroundMuted)
                 .fixedSize(horizontal: false, vertical: true)
 
             Picker("Destination", selection: $mode) {
@@ -77,8 +80,7 @@ struct MoveToFolderSheet: View {
             .pickerStyle(.inline)
 
             if case .new = mode {
-                TextField("New folder name", text: $newFolderName)
-                    .textFieldStyle(.roundedBorder)
+                ScarfTextField("New folder name", text: $newFolderName)
                     .onSubmit {
                         if canMove { commit() }
                     }
@@ -86,15 +88,16 @@ struct MoveToFolderSheet: View {
 
             HStack {
                 Button("Cancel") { dismiss() }
+                    .buttonStyle(ScarfGhostButton())
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Move") { commit() }
+                    .buttonStyle(ScarfPrimaryButton())
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
                     .disabled(!canMove)
             }
         }
-        .padding()
+        .padding(ScarfSpace.s5)
         .frame(minWidth: 420, minHeight: 320)
     }
 

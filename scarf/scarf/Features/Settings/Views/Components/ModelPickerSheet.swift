@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Two-column model browser sheet. Left column lists providers, right column
 /// lists models for the selected provider. Supports filtering and a "Custom…"
@@ -109,7 +110,7 @@ struct ModelPickerSheet: View {
         HStack(spacing: 8) {
             Image(systemName: "cpu")
             Text("Select Model")
-                .font(.headline)
+                .scarfStyle(.headline)
             Spacer()
             if !customMode {
                 TextField("Search…", text: $searchText)
@@ -294,7 +295,7 @@ struct ModelPickerSheet: View {
                 } label: {
                     Label("Sign in to Nous Portal", systemImage: "person.badge.key.fill")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .controlSize(.regular)
             }
         }
@@ -361,7 +362,7 @@ struct ModelPickerSheet: View {
             Spacer()
             Button("Cancel") { onCancel() }
             Button("Select") { submitSelection() }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .disabled(!canSubmit)
         }
         .padding()

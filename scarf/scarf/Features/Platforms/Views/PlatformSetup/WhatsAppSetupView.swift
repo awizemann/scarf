@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct WhatsAppSetupView: View {
     @State private var viewModel: WhatsAppSetupViewModel
@@ -56,7 +57,7 @@ struct WhatsAppSetupView: View {
             }
             Spacer()
             Button("Reload") { viewModel.load() }.controlSize(.small)
-            Button("Save") { viewModel.save() }.buttonStyle(.borderedProminent).controlSize(.small)
+            Button("Save") { viewModel.save() }.buttonStyle(ScarfPrimaryButton()).controlSize(.small)
         }
     }
 
@@ -71,7 +72,7 @@ struct WhatsAppSetupView: View {
                         .controlSize(.small)
                 } else {
                     Button("Start Pairing") { viewModel.startPairing() }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(ScarfPrimaryButton())
                         .controlSize(.small)
                 }
             }

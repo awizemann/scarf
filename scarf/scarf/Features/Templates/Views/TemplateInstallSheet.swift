@@ -1,5 +1,6 @@
 import AppKit
 import ScarfCore
+import ScarfDesign
 import SwiftUI
 
 /// Preview-and-confirm sheet for installing a `.scarftemplate`. Honest
@@ -47,7 +48,7 @@ struct TemplateInstallSheet: View {
     private var idleView: some View {
         VStack(spacing: 16) {
             Text("No template loaded.")
-                .font(.headline)
+                .scarfStyle(.headline)
             Button("Close") { dismiss() }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -70,7 +71,7 @@ struct TemplateInstallSheet: View {
                 Divider()
             }
             Text("Where should this project live?")
-                .font(.headline)
+                .scarfStyle(.headline)
             Text("Scarf will create a new folder inside the directory you pick, named after the template id.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -169,7 +170,7 @@ struct TemplateInstallSheet: View {
                     .foregroundStyle(.secondary)
                 Button("Install") { viewModel.confirmInstall() }
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
             }
             .padding(.top, 8)
         }
@@ -353,7 +354,7 @@ struct TemplateInstallSheet: View {
     @ViewBuilder
     private func section<Content: View>(title: String, subtitle: String?, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.headline)
+            Text(title).scarfStyle(.headline)
             if let subtitle {
                 Text(subtitle)
                     .font(.caption.monospaced())
@@ -391,7 +392,7 @@ struct TemplateInstallSheet: View {
                 dismiss()
             }
             .keyboardShortcut(.defaultAction)
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ScarfPrimaryButton())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

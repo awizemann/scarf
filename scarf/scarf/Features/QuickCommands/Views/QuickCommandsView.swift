@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct QuickCommandsView: View {
     @State private var viewModel: QuickCommandsViewModel
@@ -12,19 +13,22 @@ struct QuickCommandsView: View {
 
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                header
-                intro
-                if viewModel.commands.isEmpty {
-                    emptyState
-                } else {
-                    list
+        VStack(spacing: 0) {
+            header
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    intro
+                    if viewModel.commands.isEmpty {
+                        emptyState
+                    } else {
+                        list
+                    }
                 }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Quick Commands")
         .onAppear { viewModel.load() }
         .sheet(isPresented: $showAddSheet) {
@@ -46,28 +50,33 @@ struct QuickCommandsView: View {
     }
 
     private var header: some View {
-        HStack {
-            if let msg = viewModel.message {
-                Label(msg, systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
+        ScarfPageHeader(
+            "Quick Commands",
+            subtitle: "Shell shortcuts hermes exposes in chat as `/command_name`."
+        ) {
+            HStack(spacing: ScarfSpace.s2) {
+                if let msg = viewModel.message {
+                    Label(msg, systemImage: "checkmark.circle.fill")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.success)
+                }
+                Button("Reload") { viewModel.load() }
+                    .buttonStyle(ScarfGhostButton())
+                Button {
+                    showAddSheet = true
+                } label: {
+                    Label("Add Command", systemImage: "plus")
+                }
+                .buttonStyle(ScarfPrimaryButton())
             }
-            Spacer()
-            Button {
-                showAddSheet = true
-            } label: {
-                Label("Add Command", systemImage: "plus")
-            }
-            .controlSize(.small)
-            Button("Reload") { viewModel.load() }
-                .controlSize(.small)
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
 
     private var intro: some View {
-        Text("Quick commands are shell shortcuts hermes exposes in chat as `/command_name`. They live under `quick_commands:` in config.yaml.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+        Text("Stored under `quick_commands:` in config.yaml.")
+            .scarfStyle(.caption)
+            .foregroundStyle(ScarfColor.foregroundMuted)
     }
 
     private var emptyState: some View {

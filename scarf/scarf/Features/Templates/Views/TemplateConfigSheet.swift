@@ -1,4 +1,5 @@
 import ScarfCore
+import ScarfDesign
 import SwiftUI
 
 /// The configure form rendered for template install + post-install
@@ -106,7 +107,7 @@ struct TemplateConfigSheet: View {
                 // handles dismissal via the success view's Done button.
             }
             .keyboardShortcut(.defaultAction)
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ScarfPrimaryButton())
         }
         .padding(16)
     }
@@ -117,10 +118,10 @@ struct TemplateConfigSheet: View {
     private func fieldRow(_ field: TemplateConfigField) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(field.label).font(.headline)
+                Text(field.label).scarfStyle(.headline)
                 if field.required {
                     Text("*")
-                        .font(.headline)
+                        .scarfStyle(.headline)
                         .foregroundStyle(.red)
                 }
                 Spacer()

@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct SignalSetupView: View {
     @State private var viewModel: SignalSetupViewModel
@@ -73,7 +74,7 @@ struct SignalSetupView: View {
             }
             Spacer()
             Button("Reload") { viewModel.load() }.controlSize(.small)
-            Button("Save") { viewModel.save() }.buttonStyle(.borderedProminent).controlSize(.small)
+            Button("Save") { viewModel.save() }.buttonStyle(ScarfPrimaryButton()).controlSize(.small)
         }
     }
 
@@ -87,7 +88,7 @@ struct SignalSetupView: View {
                 case .none:
                     Button("Link Device") { viewModel.startLink() }.controlSize(.small)
                         .disabled(!viewModel.signalCLIInstalled)
-                    Button("Start Daemon") { viewModel.startDaemon() }.buttonStyle(.borderedProminent).controlSize(.small)
+                    Button("Start Daemon") { viewModel.startDaemon() }.buttonStyle(ScarfPrimaryButton()).controlSize(.small)
                         .disabled(!viewModel.signalCLIInstalled || viewModel.account.isEmpty)
                 case .link:
                     Text("Linking…").font(.caption).foregroundStyle(.secondary)

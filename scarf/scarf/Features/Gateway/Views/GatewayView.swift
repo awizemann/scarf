@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct GatewayView: View {
     @State private var viewModel: GatewayViewModel
@@ -11,15 +12,22 @@ struct GatewayView: View {
 
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                serviceSection
-                platformsSection
-                pairingSection
+        VStack(spacing: 0) {
+            ScarfPageHeader(
+                "Messaging Gateway",
+                subtitle: "Outbound channel bridge — Discord, Telegram, Slack, etc."
+            )
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    serviceSection
+                    platformsSection
+                    pairingSection
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Messaging Gateway")
         .onAppear { viewModel.load() }
         .onChange(of: fileWatcher.lastChangeDate) { viewModel.load() }

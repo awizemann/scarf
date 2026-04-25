@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct TableWidgetView: View {
     let widget: DashboardWidget
@@ -7,7 +8,7 @@ struct TableWidgetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(widget.title)
-                .font(.caption)
+                .scarfStyle(.caption)
                 .foregroundStyle(.secondary)
             if let columns = widget.columns, let rows = widget.rows {
                 Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
@@ -32,7 +33,7 @@ struct TableWidgetView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(.quaternary.opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(ScarfColor.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.lg))
     }
 }

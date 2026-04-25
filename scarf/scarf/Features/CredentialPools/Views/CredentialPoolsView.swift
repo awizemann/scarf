@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct CredentialPoolsView: View {
     @State private var viewModel: CredentialPoolsViewModel
@@ -12,23 +13,26 @@ struct CredentialPoolsView: View {
 
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                header
-                safetyNotice
-                if viewModel.isLoading {
-                    ProgressView().padding()
-                } else if viewModel.pools.isEmpty {
-                    emptyState
-                } else {
-                    ForEach(viewModel.pools) { pool in
-                        poolSection(pool)
+        VStack(spacing: 0) {
+            header
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    safetyNotice
+                    if viewModel.isLoading {
+                        ProgressView().padding()
+                    } else if viewModel.pools.isEmpty {
+                        emptyState
+                    } else {
+                        ForEach(viewModel.pools) { pool in
+                            poolSection(pool)
+                        }
                     }
                 }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Credential Pools")
         .loadingOverlay(
             viewModel.isLoading,
@@ -58,21 +62,26 @@ struct CredentialPoolsView: View {
     }
 
     private var header: some View {
-        HStack {
-            if let msg = viewModel.message {
-                Label(msg, systemImage: "info.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        ScarfPageHeader(
+            "Credential Pools",
+            subtitle: "Shared OAuth + token pools rotated across runs."
+        ) {
+            HStack(spacing: ScarfSpace.s2) {
+                if let msg = viewModel.message {
+                    Label(msg, systemImage: "info.circle.fill")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                }
+                Button("Reload") { viewModel.load() }
+                    .buttonStyle(ScarfGhostButton())
+                Button {
+                    showAddSheet = true
+                } label: {
+                    Label("Add Credential", systemImage: "plus")
+                }
+                .buttonStyle(ScarfPrimaryButton())
             }
-            Spacer()
-            Button {
-                showAddSheet = true
-            } label: {
-                Label("Add Credential", systemImage: "plus")
-            }
-            .controlSize(.small)
-            Button("Reload") { viewModel.load() }
-                .controlSize(.small)
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
 

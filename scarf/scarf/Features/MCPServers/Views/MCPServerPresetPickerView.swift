@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct MCPServerPresetPickerView: View {
     let viewModel: MCPServersViewModel
@@ -35,7 +36,7 @@ struct MCPServerPresetPickerView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 (selectedPreset.map { Text(verbatim: $0.displayName) } ?? Text("Add from Preset"))
-                    .font(.headline)
+                    .scarfStyle(.headline)
                 (selectedPreset.map { Text(verbatim: $0.description) } ?? Text("Pick an MCP server to add."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -132,7 +133,7 @@ struct MCPServerPresetPickerView: View {
                     Button("Add Server") {
                         submit(preset: preset)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
                     .disabled(!canSubmit(preset: preset))
                 }
             }

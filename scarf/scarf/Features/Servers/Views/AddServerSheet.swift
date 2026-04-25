@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Sheet for adding a new remote server. Collects SSH connection details,
 /// runs a "Test Connection" probe, and — on save — hands the persisted
@@ -36,7 +37,7 @@ struct AddServerSheet: View {
             Image(systemName: "server.rack")
                 .font(.title2)
             Text("Add Remote Server")
-                .font(.headline)
+                .scarfStyle(.headline)
             Spacer()
         }
         .padding(.horizontal, 20)

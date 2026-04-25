@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 import AppKit
 import UniformTypeIdentifiers
 
@@ -21,12 +22,19 @@ struct ProfilesView: View {
     @State private var pendingDelete: HermesProfile?
 
     var body: some View {
-        HSplitView {
-            listSection
-                .frame(minWidth: 260, idealWidth: 300)
-            detailSection
-                .frame(minWidth: 400)
+        VStack(spacing: 0) {
+            ScarfPageHeader(
+                "Profiles",
+                subtitle: "Named config bundles you can swap between."
+            )
+            HSplitView {
+                listSection
+                    .frame(minWidth: 260, idealWidth: 300)
+                detailSection
+                    .frame(minWidth: 400)
+            }
         }
+        .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Profiles")
         .onAppear { viewModel.load() }
         .sheet(isPresented: $showCreate) { createSheet }

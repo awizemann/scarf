@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 import Charts
 
 // Flattened data point for Charts to avoid complex nested generic inference
@@ -27,15 +28,15 @@ struct ChartWidgetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(widget.title)
-                .font(.caption)
+                .scarfStyle(.caption)
                 .foregroundStyle(.secondary)
             chartContent
                 .frame(height: 150)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(.quaternary.opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(ScarfColor.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.lg))
     }
 
     @ViewBuilder

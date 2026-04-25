@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfDesign
 
 /// Translucent loading overlay used by feature views while their VM's
 /// `load()` runs in the background. Shows a centered ProgressView with
@@ -27,15 +28,15 @@ struct LoadingOverlay: ViewModifier {
                     if isEmpty {
                         // Full cover: empty state. User has no data to look at,
                         // so own the whole pane with the spinner.
-                        VStack(spacing: 12) {
+                        VStack(spacing: ScarfSpace.s3) {
                             ProgressView()
                                 .controlSize(.large)
                             Text(label)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
+                                .scarfStyle(.callout)
+                                .foregroundStyle(ScarfColor.foregroundMuted)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color(NSColor.windowBackgroundColor))
+                        .background(ScarfColor.backgroundPrimary)
                     } else {
                         // Stale-content refresh: top-trailing pill so the
                         // user sees data is being refreshed without losing
@@ -47,13 +48,13 @@ struct LoadingOverlay: ViewModifier {
                                     ProgressView()
                                         .controlSize(.small)
                                     Text(label)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .scarfStyle(.caption)
+                                        .foregroundStyle(ScarfColor.foregroundMuted)
                                 }
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 5)
                                 .background(.thinMaterial, in: Capsule())
-                                .padding(8)
+                                .padding(ScarfSpace.s2)
                             }
                             Spacer()
                         }

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ScarfDesign
 
 /// In-app sign-in sheet for Nous Portal — hosts a ``NousAuthFlow`` and
 /// renders one of four sub-views keyed on `flow.state`. Reached from the
@@ -69,7 +70,7 @@ struct NousSignInSheet: View {
             Image(systemName: "person.badge.key.fill")
                 .foregroundStyle(.tint)
             Text("Sign in to Nous Portal")
-                .font(.headline)
+                .scarfStyle(.headline)
             Spacer()
             if case .waitingForApproval = flowState {
                 Button("Cancel") { dismiss() }
@@ -123,7 +124,7 @@ struct NousSignInSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Approve in your browser")
-                    .font(.headline)
+                    .scarfStyle(.headline)
                 Text("We opened the Nous Portal approval page. Confirm this code matches what it shows, then approve.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -176,7 +177,7 @@ struct NousSignInSheet: View {
                 .foregroundStyle(.green)
                 .font(.system(size: 48))
             Text("Signed in to Nous Portal")
-                .font(.headline)
+                .scarfStyle(.headline)
             Text("Your tools will now route through your subscription.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -193,7 +194,7 @@ struct NousSignInSheet: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                 Text(billingURL == nil ? "Sign-in didn't complete" : "Subscription required")
-                    .font(.headline)
+                    .scarfStyle(.headline)
             }
 
             Text(reason)
@@ -209,7 +210,7 @@ struct NousSignInSheet: View {
                     Label("Subscribe", systemImage: "creditcard")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .controlSize(.large)
             }
 

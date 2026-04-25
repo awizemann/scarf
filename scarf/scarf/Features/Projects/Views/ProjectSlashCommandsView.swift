@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// The "Slash Commands" tab on the per-project surface. Lists the
 /// project-scoped commands stored at `<project>/.scarf/slash-commands/`
@@ -52,9 +53,9 @@ struct ProjectSlashCommandsView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Slash Commands")
-                    .font(.headline)
+                    .scarfStyle(.headline)
                 Text("`/<name>` shortcuts that expand into prompt templates. Stored at `<project>/.scarf/slash-commands/` so they ship with `.scarftemplate` bundles.")
-                    .font(.caption)
+                    .scarfStyle(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
@@ -83,7 +84,7 @@ struct ProjectSlashCommandsView: View {
                 Text("Add reusable prompt templates here. Each command shows up in the chat slash menu when you're chatting in this project.")
             } actions: {
                 Button("Add Command") { viewModel.beginNew() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -117,7 +118,7 @@ struct ProjectSlashCommandsView: View {
                 Text("Couldn't update slash commands")
                     .font(.subheadline.weight(.semibold))
                 Text(message)
-                    .font(.caption)
+                    .scarfStyle(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -165,7 +166,7 @@ private struct CommandRow: View {
                     }
                 }
                 Text(command.description)
-                    .font(.caption)
+                    .scarfStyle(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                 if let tags = command.tags, !tags.isEmpty {
@@ -208,7 +209,7 @@ struct SlashCommandEditorSheet: View {
                 Button("Save") {
                     Task { await viewModel.saveDraft() }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .keyboardShortcut(.defaultAction)
                 .disabled(saveDisabled)
             }
@@ -244,7 +245,7 @@ struct SlashCommandEditorSheet: View {
                     .help("Lowercase letters, digits, and hyphens. Must start with a letter.")
                     if let nameError = nameValidationMessage {
                         Text(nameError)
-                            .font(.caption)
+                            .scarfStyle(.caption)
                             .foregroundStyle(.orange)
                     }
                     TextField("Description", text: Binding(
@@ -277,7 +278,7 @@ struct SlashCommandEditorSheet: View {
 
                 Section("Prompt template") {
                     Text("Use `{{argument}}` to substitute the user's input. `{{argument | default: \"…\"}}` provides a fallback when the user invokes the command without arguments.")
-                        .font(.caption)
+                        .scarfStyle(.caption)
                         .foregroundStyle(.secondary)
                     TextEditor(text: Binding(
                         get: { viewModel.draft?.body ?? "" },
@@ -305,12 +306,12 @@ struct SlashCommandEditorSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Preview")
-                    .font(.headline)
+                    .scarfStyle(.headline)
                 Spacer()
             }
             HStack {
                 Text("Sample argument")
-                    .font(.caption)
+                    .scarfStyle(.caption)
                     .foregroundStyle(.secondary)
                 TextField("(empty)", text: $sampleArgument)
                     .textFieldStyle(.roundedBorder)
@@ -324,7 +325,7 @@ struct SlashCommandEditorSheet: View {
                     .textSelection(.enabled)
             }
             Text("This is the prompt Hermes will receive. The user sees the literal `/\(viewModel.draft?.name ?? "name")` they typed in their own bubble; the expanded body goes to the agent with a `<!-- scarf-slash:<name> -->` marker.")
-                .font(.caption)
+                .scarfStyle(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
