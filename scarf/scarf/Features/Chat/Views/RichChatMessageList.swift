@@ -10,6 +10,11 @@ struct RichChatMessageList: View {
     var isLoadingSession: Bool = false
     /// External trigger to force a scroll-to-bottom (e.g., from "Return to Active Session").
     var scrollTrigger: UUID = UUID()
+    /// Wall-clock turn durations indexed by assistant-message id.
+    /// Threaded through to `MessageGroupView` → `RichMessageBubble` so the
+    /// bubble's metadata footer can render the v2.5 stopwatch pill.
+    /// Defaults empty so callers that don't care can omit it.
+    var turnDurations: [Int: TimeInterval] = [:]
 
     /// Scrolling strategy: plain `VStack` (not `LazyVStack`) plus
     /// `.defaultScrollAnchor(.bottom)`.
@@ -53,7 +58,7 @@ struct RichChatMessageList: View {
                     }
 
                     ForEach(groups) { group in
-                        MessageGroupView(group: group)
+                        MessageGroupView(group: group, turnDurations: turnDurations)
                             .id("group-\(group.id)")
                     }
 
@@ -133,6 +138,11 @@ struct RichChatMessageList: View {
 
 struct MessageGroupView: View {
     let group: MessageGroup
+    /// Wall-clock turn durations keyed by assistant-message id (v2.5).
+    /// Forwarded into `RichMessageBubble` so the metadata footer can
+    /// render the stopwatch pill. Defaults empty so existing callers
+    /// that haven't been updated yet still compile.
+    var turnDurations: [Int: TimeInterval] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -151,7 +161,11 @@ struct MessageGroupView: View {
             // group's lifetime.
             let assistantMessages = group.assistantMessages.filter(\.isAssistant)
             ForEach(Array(assistantMessages.enumerated()), id: \.offset) { _, message in
-                RichMessageBubble(message: message, toolResults: group.toolResults)
+                RichMessageBubble(
+                    message: message,
+                    toolResults: group.toolResults,
+                    turnDuration: turnDurations[message.id]
+                )
             }
 
             if group.toolCallCount > 1 {

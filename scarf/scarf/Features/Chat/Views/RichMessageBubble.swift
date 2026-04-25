@@ -4,6 +4,12 @@ import ScarfCore
 struct RichMessageBubble: View {
     let message: HermesMessage
     let toolResults: [String: HermesMessage]
+    /// Wall-clock duration of the agent turn this assistant message
+    /// belongs to (v2.5). Rendered as a compact stopwatch pill in the
+    /// metadata footer when present. Nil for user bubbles, for the
+    /// streaming-in-progress placeholder, and for resumed sessions
+    /// loaded from `state.db` (no live timing available).
+    var turnDuration: TimeInterval? = nil
 
     var body: some View {
         if message.isUser {
@@ -132,6 +138,10 @@ struct RichMessageBubble: View {
             }
             if let time = message.timestamp {
                 Text(time, style: .time)
+            }
+            if let seconds = turnDuration {
+                Text(RichChatViewModel.formatTurnDuration(seconds))
+                    .help("Wall-clock duration of this turn")
             }
         }
         .font(.caption2)

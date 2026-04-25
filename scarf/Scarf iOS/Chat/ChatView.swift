@@ -165,8 +165,11 @@ struct ChatView: View {
                     }
                 }
                 ForEach(controller.vm.messages) { msg in
-                    MessageBubble(message: msg)
-                        .id(msg.id)
+                    MessageBubble(
+                        message: msg,
+                        turnDuration: controller.vm.turnDuration(forMessageId: msg.id)
+                    )
+                    .id(msg.id)
                 }
                 if controller.vm.isGenerating {
                     HStack {
@@ -933,6 +936,11 @@ private struct PermissionWrapper: Identifiable {
 
 private struct MessageBubble: View {
     let message: HermesMessage
+    /// Wall-clock duration of the agent turn this assistant message
+    /// belongs to (v2.5). Renders as a small `4.2s` pill below the
+    /// bubble when present. Nil for user / streaming / pre-v2.5
+    /// resumed messages.
+    var turnDuration: TimeInterval? = nil
 
     var body: some View {
         if message.isToolResult {
@@ -962,6 +970,13 @@ private struct MessageBubble: View {
                                 ToolCallCard(call: call)
                             }
                         }
+                    }
+                    // Per-turn stopwatch — assistant only, when the
+                    // turn duration was captured (live ACP turns).
+                    if !message.isUser, let seconds = turnDuration {
+                        Text(RichChatViewModel.formatTurnDuration(seconds))
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                     }
                 }
                 if !message.isUser { Spacer(minLength: 40) }

@@ -218,6 +218,40 @@ public final class RichChatViewModel {
     /// model just owns the value.
     public var transientHint: String?
 
+    /// Wall-clock start time of the current agent turn. Set when a fresh
+    /// user prompt enters an idle session (not for `/steer` which sends
+    /// during an active turn); cleared on `finalizeStreamingMessage`
+    /// after the duration is captured. Used to compute the per-turn
+    /// stopwatch displayed below assistant bubbles. v2.5.
+    private var currentTurnStart: Date?
+
+    /// Wall-clock duration of completed assistant turns, keyed by the
+    /// finalised assistant message's local id. Render the value in the
+    /// chat UI as a small "4.2s" pill below the bubble. Map grows
+    /// alongside the message list; cleared on `reset()`.
+    public private(set) var turnDurations: [Int: TimeInterval] = [:]
+
+    /// Look up a completed turn's duration. Nil for the streaming
+    /// placeholder (still in flight) and for any assistant message
+    /// that pre-dates the v2.5 stopwatch (e.g., loaded from state.db
+    /// for a resumed session).
+    public func turnDuration(forMessageId id: Int) -> TimeInterval? {
+        turnDurations[id]
+    }
+
+    /// Format a duration as a compact stopwatch label used by the chat
+    /// UI: `0.8s`, `4.2s`, `1m 12s`. Sub-second values render with one
+    /// decimal place; ≥60s switches to `<m>m <s>s`.
+    public static func formatTurnDuration(_ seconds: TimeInterval) -> String {
+        if seconds < 60 {
+            return String(format: "%.1fs", seconds)
+        }
+        let totalSeconds = Int(seconds.rounded())
+        let minutes = totalSeconds / 60
+        let remainder = totalSeconds % 60
+        return "\(minutes)m \(remainder)s"
+    }
+
     /// Merged slash-menu list. Precedence: **ACP > project-scoped >
     /// quick_commands** (most specific source wins). De-duplicated by name.
     /// Non-interruptive ACP commands (`/steer`) are always appended at
@@ -345,6 +379,9 @@ public final class RichChatViewModel {
         acpCachedReadTokens = 0
         acpCommands = []
         projectScopedCommands = []
+        currentTurnStart = nil
+        turnDurations = [:]
+        transientHint = nil
         pendingPermission = nil
         loadQuickCommands()
     }
@@ -395,6 +432,15 @@ public final class RichChatViewModel {
             reasoning: nil
         )
         messages.append(message)
+        // Per-turn stopwatch (v2.5): record the start time only when
+        // we're entering a fresh agent turn. /steer-style mid-run sends
+        // arrive while isAgentWorking is already true; preserve the
+        // existing start so the captured duration reflects the FULL
+        // turn (initial prompt → final reply), not just the time since
+        // the user nudged.
+        if !isAgentWorking {
+            currentTurnStart = Date()
+        }
         isAgentWorking = true
         streamingAssistantText = ""
         streamingThinkingText = ""
@@ -708,6 +754,15 @@ public final class RichChatViewModel {
                 finishReason: streamingToolCalls.isEmpty ? "stop" : nil,
                 reasoning: streamingThinkingText.isEmpty ? nil : streamingThinkingText
             )
+            // Capture per-turn duration so the chat UI can render the
+            // stopwatch pill (v2.5). Skips assistants we don't have a
+            // start time for — e.g., the .promptComplete fired but the
+            // turn began before this VM was constructed (shouldn't
+            // happen in practice but guards an edge case).
+            if let start = currentTurnStart {
+                turnDurations[id] = Date().timeIntervalSince(start)
+                currentTurnStart = nil
+            }
         } else {
             // Remove empty streaming placeholder
             messages.remove(at: idx)

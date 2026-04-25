@@ -42,7 +42,8 @@ struct RichChatView: View {
                 groups: richChat.messageGroups,
                 isWorking: richChat.isGenerating,
                 isLoadingSession: chatViewModel.isPreparingSession,
-                scrollTrigger: richChat.scrollTrigger
+                scrollTrigger: richChat.scrollTrigger,
+                turnDurations: richChat.turnDurations
             )
 
             Divider()
