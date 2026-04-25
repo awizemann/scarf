@@ -170,6 +170,18 @@ struct SkillsView: View {
                        case .missing(let hint) = designMdNpxStatus {
                         designMdNpxBanner(hint: hint)
                     }
+                    // v2.5 SKILL.md frontmatter chips. Render only the
+                    // sections that are populated — old skills without
+                    // this metadata show no extra rows.
+                    if let tools = skill.allowedTools, !tools.isEmpty {
+                        skillChipSection(title: "Allowed tools", items: tools)
+                    }
+                    if let related = skill.relatedSkills, !related.isEmpty {
+                        skillChipSection(title: "Related skills", items: related)
+                    }
+                    if let deps = skill.dependencies, !deps.isEmpty {
+                        skillChipSection(title: "Dependencies", items: deps)
+                    }
                     Divider()
                     if !skill.files.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
@@ -228,6 +240,28 @@ struct SkillsView: View {
         } else {
             ContentUnavailableView("Select a Skill", systemImage: "lightbulb", description: Text("Choose a skill from the list"))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// Render a labelled chip row for v2.5 SKILL.md frontmatter
+    /// sections (allowed_tools, related_skills, dependencies). Items
+    /// flow horizontally with wrapping; the row hides itself when
+    /// there's nothing to show (caller already gates on `!isEmpty`).
+    private func skillChipSection(title: String, items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                ForEach(items, id: \.self) { item in
+                    Text(item)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.secondary.opacity(0.12), in: Capsule())
+                }
+            }
         }
     }
 

@@ -510,13 +510,22 @@ struct HermesFileService: Sendable {
                 guard transport.stat(skillPath)?.isDirectory == true else { return nil }
                 let files = (try? transport.listDirectory(skillPath)) ?? []
                 let requiredConfig = parseSkillRequiredConfig(skillPath + "/skill.yaml")
+                // v2.5: Hermes v2026.4.23 ships richer SKILL.md
+                // frontmatter (allowed_tools, related_skills,
+                // dependencies). Parse opportunistically — old skills
+                // without a SKILL.md file or without these fields stay
+                // nil and the detail view skips the chip rows.
+                let frontmatter = parseSkillFrontmatter(skillPath + "/SKILL.md")
                 return HermesSkill(
                     id: categoryName + "/" + skillName,
                     name: skillName,
                     category: categoryName,
                     path: skillPath,
                     files: files.sorted(),
-                    requiredConfig: requiredConfig
+                    requiredConfig: requiredConfig,
+                    allowedTools: frontmatter.allowedTools,
+                    relatedSkills: frontmatter.relatedSkills,
+                    dependencies: frontmatter.dependencies
                 )
             }
 
@@ -541,6 +550,32 @@ struct HermesFileService: Sendable {
             return false
         }
         return true
+    }
+
+    /// Parse `allowed_tools`, `related_skills`, `dependencies` from a
+    /// SKILL.md YAML frontmatter block (Hermes v2026.4.23+). Returns
+    /// nil-filled tuple when the file is absent or has no frontmatter
+    /// — pre-v0.11 skills behave as before.
+    nonisolated private func parseSkillFrontmatter(
+        _ path: String
+    ) -> (allowedTools: [String]?, relatedSkills: [String]?, dependencies: [String]?) {
+        guard let content = readFile(path) else { return (nil, nil, nil) }
+        let lines = content.components(separatedBy: "\n")
+        // Frontmatter must be the first line `---` followed by another
+        // `---` somewhere below. Anything else and we bail.
+        guard lines.first == "---",
+              let endIdx = lines.dropFirst().firstIndex(of: "---")
+        else { return (nil, nil, nil) }
+        let frontmatter = lines[1..<endIdx].joined(separator: "\n")
+        let parsed = HermesYAML.parseNestedYAML(frontmatter)
+        let allowedTools = parsed.lists["allowed_tools"]
+        let relatedSkills = parsed.lists["related_skills"]
+        let dependencies = parsed.lists["dependencies"]
+        return (
+            allowedTools: (allowedTools?.isEmpty ?? true) ? nil : allowedTools,
+            relatedSkills: (relatedSkills?.isEmpty ?? true) ? nil : relatedSkills,
+            dependencies: (dependencies?.isEmpty ?? true) ? nil : dependencies
+        )
     }
 
     nonisolated private func parseSkillRequiredConfig(_ path: String) -> [String] {
