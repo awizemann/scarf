@@ -107,7 +107,17 @@ public enum ProjectContextBlock {
     /// yet. The marker + identity headers match the Mac output byte-
     /// for-byte where the content overlaps, so a project scaffolded
     /// on iOS round-trips cleanly through the Mac.
-    public static func renderMinimalBlock(projectName: String, projectPath: String) -> String {
+    ///
+    /// `slashCommandNames` populates the v2.5 "Project slash commands"
+    /// line — pass nil/empty to omit that line entirely. The names
+    /// flow into the agent's context so it can answer "what commands
+    /// do I have available?" and recognise the `<!-- scarf-slash:<name> -->`
+    /// marker the chat layer prepends to expanded prompts.
+    public static func renderMinimalBlock(
+        projectName: String,
+        projectPath: String,
+        slashCommandNames: [String]? = nil
+    ) -> String {
         var lines: [String] = []
         lines.append(beginMarker)
         lines.append("## Scarf project context")
@@ -118,6 +128,10 @@ public enum ProjectContextBlock {
         lines.append("")
         lines.append("- **Project directory:** `\(projectPath)`")
         lines.append("- **Dashboard:** `\(projectPath)/.scarf/dashboard.json`")
+        if let names = slashCommandNames, !names.isEmpty {
+            let formatted = names.sorted().map { "`/\($0)`" }.joined(separator: ", ")
+            lines.append("- **Project slash commands:** \(formatted). The user invokes these via the chat slash menu; you'll see the expanded prompt as a normal user message preceded by `<!-- scarf-slash:<name> -->`.")
+        }
         lines.append("")
         lines.append("Any content below this block is template- or user-authored; preserve and defer to it for project-specific behavior. Do NOT modify content inside these markers — Scarf rewrites this block on every project-scoped chat start.")
         lines.append(endMarker)

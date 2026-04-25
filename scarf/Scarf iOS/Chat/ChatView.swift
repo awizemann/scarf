@@ -612,6 +612,19 @@ final class ChatController {
         // <project.path>/.scarf/slash-commands/ into the chat menu.
         // Async + non-fatal — degrades cleanly on SFTP failures (logged).
         vm.loadProjectScopedCommands(at: project.path)
+        // Synchronously load the slash command NAMES so we can list them
+        // in the AGENTS.md block (the agent needs to know what commands
+        // are available). This is a separate read from the async one
+        // above because the block has to land on disk BEFORE `hermes acp`
+        // boots — async loads might lose the race. Blocking load on a
+        // detached task to keep the MainActor responsive.
+        let ctx = context
+        let projectPath = project.path
+        let slashNames: [String] = await Task.detached {
+            ProjectSlashCommandService(context: ctx)
+                .loadCommands(at: projectPath)
+                .map(\.name)
+        }.value
         // Write the context block first. Non-fatal on failure — chat
         // still starts, just without the managed block. We capture the
         // failure (rather than swallowing via `try?`) so the user gets
@@ -619,10 +632,9 @@ final class ChatController {
         // for this session, with the underlying error in "Show details".
         let block = ProjectContextBlock.renderMinimalBlock(
             projectName: project.name,
-            projectPath: project.path
+            projectPath: project.path,
+            slashCommandNames: slashNames
         )
-        let ctx = context
-        let projectPath = project.path
         let writeResult: Result<Void, Error> = await Task.detached {
             do {
                 try ProjectContextBlock.writeBlock(

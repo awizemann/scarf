@@ -129,6 +129,7 @@ struct ProjectAgentContextService: Sendable {
         let templateInfo = readTemplateInfo(for: project)
         let configFieldsLine = renderConfigFieldsLine(for: project)
         let cronLines = renderCronLines(for: project, templateId: templateInfo?.id)
+        let slashCommandNames = readSlashCommandNames(for: project)
         let lockFilePresent = context.makeTransport().fileExists(
             project.path + "/.scarf/template.lock.json"
         )
@@ -158,6 +159,11 @@ struct ProjectAgentContextService: Sendable {
             }
         }
 
+        if !slashCommandNames.isEmpty {
+            let formatted = slashCommandNames.sorted().map { "`/\($0)`" }.joined(separator: ", ")
+            lines.append("- **Project slash commands:** \(formatted). The user invokes these via the chat slash menu; you'll see the expanded prompt as a normal user message preceded by `<!-- scarf-slash:<name> -->`.")
+        }
+
         if lockFilePresent {
             lines.append("- **Uninstall manifest:** `\(project.path)/.scarf/template.lock.json` (tracks files written by template install)")
         }
@@ -167,6 +173,17 @@ struct ProjectAgentContextService: Sendable {
         lines.append(Self.endMarker)
 
         return lines.joined(separator: "\n")
+    }
+
+    /// Read the names of every project-scoped slash command at
+    /// `<project>/.scarf/slash-commands/`. Empty array when the dir
+    /// is absent or no `.md` files parse cleanly. Used by `renderBlock`
+    /// to surface the available commands to the agent so it knows what
+    /// `<!-- scarf-slash:<name> -->` markers to expect on user prompts.
+    nonisolated private func readSlashCommandNames(for project: ProjectEntry) -> [String] {
+        ProjectSlashCommandService(context: context)
+            .loadCommands(at: project.path)
+            .map(\.name)
     }
 
     // MARK: - Helpers
