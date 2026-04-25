@@ -85,6 +85,7 @@ struct ProjectSlashCommandsView: View {
                 Button("Add Command") { viewModel.beginNew() }
                     .buttonStyle(.borderedProminent)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 0) {
                 if let err = viewModel.lastError {

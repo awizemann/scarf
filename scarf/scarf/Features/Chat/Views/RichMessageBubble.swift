@@ -12,6 +12,8 @@ struct RichMessageBubble: View {
     /// loaded from `state.db` (no live timing available).
     var turnDuration: TimeInterval? = nil
 
+    @Environment(ChatViewModel.self) private var chatViewModel
+
     var body: some View {
         if message.isUser {
             userBubble
@@ -163,7 +165,9 @@ struct RichMessageBubble: View {
             ForEach(message.toolCalls) { call in
                 ToolCallCard(
                     call: call,
-                    result: toolResults[call.callId]
+                    result: toolResults[call.callId],
+                    isFocused: chatViewModel.focusedToolCallId == call.callId,
+                    onFocus: { chatViewModel.focusedToolCallId = call.callId }
                 )
             }
         }

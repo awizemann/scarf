@@ -72,6 +72,20 @@ public struct HermesToolCall: Identifiable, Sendable, Codable {
     public let functionName: String
     public let arguments: String
 
+    /// Wall-clock duration of the tool call. Set on ACP `toolCallComplete`
+    /// (or equivalent) by `RichChatViewModel`. Nil for sessions loaded
+    /// from `state.db` (no live timing) and for in-flight calls.
+    public var duration: TimeInterval?
+
+    /// Process exit code, when the tool kind is `.execute` and the
+    /// tool-result message exposes one. Best-effort parse of the result
+    /// content; nil when not applicable / not parseable.
+    public var exitCode: Int?
+
+    /// Wall-clock timestamp the call was emitted by Hermes. Set on ACP
+    /// `toolCallStart`. Nil for sessions loaded from `state.db`.
+    public var startedAt: Date?
+
     public enum CodingKeys: String, CodingKey {
         case callId = "id"
         case type
@@ -83,10 +97,20 @@ public struct HermesToolCall: Identifiable, Sendable, Codable {
         case arguments
     }
 
-    public init(callId: String, functionName: String, arguments: String) {
+    public init(
+        callId: String,
+        functionName: String,
+        arguments: String,
+        duration: TimeInterval? = nil,
+        exitCode: Int? = nil,
+        startedAt: Date? = nil
+    ) {
         self.callId = callId
         self.functionName = functionName
         self.arguments = arguments
+        self.duration = duration
+        self.exitCode = exitCode
+        self.startedAt = startedAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -95,6 +119,11 @@ public struct HermesToolCall: Identifiable, Sendable, Codable {
         let funcContainer = try container.nestedContainer(keyedBy: FunctionKeys.self, forKey: .function)
         functionName = try funcContainer.decode(String.self, forKey: .name)
         arguments = try funcContainer.decode(String.self, forKey: .arguments)
+        // Telemetry fields are populated locally from ACP events, never
+        // persisted via Codable, so they decode as nil.
+        duration = nil
+        exitCode = nil
+        startedAt = nil
     }
 
     public func encode(to encoder: Encoder) throws {

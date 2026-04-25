@@ -5,12 +5,22 @@ import ScarfDesign
 struct ToolCallCard: View {
     let call: HermesToolCall
     let result: HermesMessage?
+    /// True when this card matches `chatViewModel.focusedToolCallId`.
+    /// Bumps the card's tint + border so users can see at a glance
+    /// which tool the inspector pane is currently showing.
+    var isFocused: Bool = false
+    /// Called when the user clicks the card. Wired to set
+    /// `chatViewModel.focusedToolCallId = call.callId` from
+    /// `RichMessageBubble` (Mac). Inline expansion still toggles on the
+    /// same click — power users get both paths from one gesture.
+    var onFocus: (() -> Void)? = nil
 
     @State private var expanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
+                onFocus?()
                 withAnimation(ScarfAnimation.fast) { expanded.toggle() }
             } label: {
                 HStack(spacing: 9) {
@@ -49,10 +59,13 @@ struct ToolCallCard: View {
                 .padding(.vertical, 6)
                 .background(
                     RoundedRectangle(cornerRadius: 7)
-                        .fill(toolColor.opacity(0.10))
+                        .fill(toolColor.opacity(isFocused ? 0.16 : 0.10))
                         .overlay(
                             RoundedRectangle(cornerRadius: 7)
-                                .strokeBorder(toolColor.opacity(0.30), lineWidth: 1)
+                                .strokeBorder(
+                                    toolColor.opacity(isFocused ? 0.55 : 0.30),
+                                    lineWidth: isFocused ? 1.4 : 1
+                                )
                         )
                 )
             }

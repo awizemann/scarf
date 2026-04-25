@@ -37,7 +37,11 @@ public final class RichChatViewModel {
     public init(context: ServerContext = .local) {
         self.context = context
         self.dataService = HermesDataService(context: context)
-        loadQuickCommands()
+        // Quick-commands load happens in `reset()`, which every chat-start
+        // path calls before the user can interact (iOS: ChatController.start;
+        // Mac: ChatViewModel.startNewSession/resumeSession/continueLastSession).
+        // Calling it here too caused two parallel SFTP reads of config.yaml
+        // on iOS chat startup.
     }
 
 
@@ -591,13 +595,29 @@ public final class RichChatViewModel {
         let toolCall = HermesToolCall(
             callId: call.toolCallId,
             functionName: call.functionName,
-            arguments: call.argumentsJSON
+            arguments: call.argumentsJSON,
+            startedAt: Date()
         )
         streamingToolCalls.append(toolCall)
         upsertStreamingMessage()
     }
 
     private func handleToolCallComplete(_ update: ACPToolCallUpdateEvent) {
+        // Populate live telemetry on the matching streaming call BEFORE
+        // finalizing — once finalize runs, streamingToolCalls is cleared
+        // and the call is locked into the parent HermesMessage's `let
+        // toolCalls`. Mutating here lets `finalizeStreamingMessage()`
+        // promote a HermesToolCall that already carries duration +
+        // exitCode for the inspector to render. No-op for sessions
+        // loaded from `state.db` (no live event ever fires).
+        if let idx = streamingToolCalls.firstIndex(where: { $0.callId == update.toolCallId }) {
+            let started = streamingToolCalls[idx].startedAt
+            if let started {
+                streamingToolCalls[idx].duration = Date().timeIntervalSince(started)
+            }
+            streamingToolCalls[idx].exitCode = Self.exitCode(forStatus: update.status)
+        }
+
         // Finalize the streaming assistant message (with its tool calls) as a permanent message
         finalizeStreamingMessage()
 
@@ -618,6 +638,19 @@ public final class RichChatViewModel {
             reasoning: nil
         ))
         buildMessageGroups()
+    }
+
+    /// Derive a synthetic exit code from the ACP update event's status
+    /// string. Hermes reports `completed`/`error`/`failed`/`canceled`;
+    /// we collapse to 0 for success, 1 for known-failure variants, nil
+    /// for anything else (so the inspector renders "—" rather than
+    /// fabricating a value).
+    private static func exitCode(forStatus status: String) -> Int? {
+        switch status.lowercased() {
+        case "completed", "success", "ok": return 0
+        case "error", "failed", "canceled", "cancelled": return 1
+        default: return nil
+        }
     }
 
     private func handlePromptComplete(response: ACPPromptResult) {

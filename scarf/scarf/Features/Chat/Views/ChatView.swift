@@ -242,41 +242,21 @@ struct ChatView: View {
                     .foregroundStyle(.red)
             }
 
+            // The session list pane on the left is the canonical home
+            // for browsing + resuming sessions and starting new ones.
+            // We keep a slim toolbar Menu for the actions that aren't
+            // expressed by clicking a row: "Return to Active Session"
+            // (scroll back to the live session) and "Continue Last
+            // Session" (continue the most-recent without explicit pick).
             Menu {
                 if viewModel.hasActiveProcess, let activeId = viewModel.richChatViewModel.sessionId {
-                    Button("Return to Active Session (\(activeId.prefix(8))...)") {
+                    Button("Return to Active Session (\(activeId.prefix(8))…)") {
                         viewModel.richChatViewModel.requestScrollToBottom()
                     }
                     Divider()
                 }
-                Button("New Session") {
-                    viewModel.startNewSession()
-                }
                 Button("Continue Last Session") {
                     viewModel.continueLastSession()
-                }
-                if !viewModel.recentSessions.isEmpty {
-                    Divider()
-                    Text("Resume Session")
-                    let activeSessionId = viewModel.richChatViewModel.sessionId
-                    let originSessionId = viewModel.richChatViewModel.originSessionId
-                    ForEach(viewModel.recentSessions) { session in
-                        Button {
-                            viewModel.resumeSession(session.id)
-                        } label: {
-                            HStack {
-                                Text(viewModel.previewFor(session))
-                                    .lineLimit(1)
-                                if let date = session.startedAt {
-                                    Text("·")
-                                        .foregroundStyle(.secondary)
-                                    Text(date, style: .relative)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .disabled(session.id == activeSessionId || session.id == originSessionId)
-                    }
                 }
             } label: {
                 Label("Session", systemImage: "play.circle")

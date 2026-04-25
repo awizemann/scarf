@@ -33,6 +33,16 @@ final class ChatViewModel {
 
     var recentSessions: [HermesSession] = []
     var sessionPreviews: [String: String] = [:]
+
+    /// Per-recent-session project attribution. Keyed by `HermesSession.id`,
+    /// value is the project's display name. Populated alongside
+    /// `recentSessions` via a single batched read in `loadRecentSessions()`.
+    /// Sessions with no entry are unattributed (global / quick chats).
+    private(set) var sessionProjectNames: [String: String] = [:]
+
+    /// All registered projects, used to build the project filter menu in
+    /// the chat session list pane. Loaded alongside `sessionProjectNames`.
+    private(set) var allProjects: [ProjectEntry] = []
     var terminalView: LocalProcessTerminalView?
     var hasActiveProcess = false
     var voiceEnabled = false
@@ -41,6 +51,31 @@ final class ChatViewModel {
     var displayMode: ChatDisplayMode = .richChat
     let richChatViewModel: RichChatViewModel
     private var coordinator: Coordinator?
+
+    /// `callId` of the tool call currently surfaced in the chat
+    /// inspector pane, or nil when nothing is focused. Set by
+    /// `ToolCallCard` taps in the transcript; cleared by the inspector's
+    /// xmark close. Mac-only state — the inspector is a Mac-target view,
+    /// so this lives on the Mac `ChatViewModel` rather than the
+    /// cross-platform `RichChatViewModel`.
+    var focusedToolCallId: String?
+
+    /// Resolved focus target for the inspector. Walks
+    /// `richChatViewModel.messageGroups` to find the matching
+    /// `HermesToolCall` and its tool-result message (when present).
+    /// Returns nil when nothing is focused or the focused id no longer
+    /// resolves (e.g., session reload swept it).
+    var focusedToolCall: (call: HermesToolCall, result: HermesMessage?)? {
+        guard let id = focusedToolCallId else { return nil }
+        for group in richChatViewModel.messageGroups {
+            for msg in group.assistantMessages {
+                if let call = msg.toolCalls.first(where: { $0.callId == id }) {
+                    return (call, group.toolResults[id])
+                }
+            }
+        }
+        return nil
+    }
 
     /// Absolute project path for the current session, when the chat is
     /// project-scoped (either started via a project's "New Chat" button
@@ -383,18 +418,28 @@ final class ChatViewModel {
         // projects (creates AGENTS.md with just the block); safe on
         // template-installed projects (splices the block into
         // existing AGENTS.md without touching template content).
-        if let projectPath {
-            let registry = ProjectDashboardService(context: context).loadRegistry()
-            if let project = registry.projects.first(where: { $0.path == projectPath }) {
-                do {
-                    try ProjectAgentContextService(context: context).refresh(for: project)
-                } catch {
-                    logger.warning("couldn't refresh project context block for \(project.name): \(error.localizedDescription)")
-                }
-            }
-        }
-
+        let contextForPrep = context
+        let prepLogger = logger
         Task { @MainActor in
+            if let projectPath {
+                // Synchronous file I/O (ProjectDashboardService.loadRegistry +
+                // ProjectAgentContextService.refresh, which itself walks the
+                // slash-commands directory) must run off the MainActor — the
+                // detached task runs the work on the cooperative pool and we
+                // await it here so the AGENTS.md block lands before client.start().
+                await Task.detached {
+                    let registry = ProjectDashboardService(context: contextForPrep).loadRegistry()
+                    guard let project = registry.projects.first(where: { $0.path == projectPath }) else {
+                        return
+                    }
+                    do {
+                        try ProjectAgentContextService(context: contextForPrep).refresh(for: project)
+                    } catch {
+                        prepLogger.warning("couldn't refresh project context block for \(project.name): \(error.localizedDescription)")
+                    }
+                }.value
+            }
+
             do {
                 // Start ACP process and event loop FIRST
                 try await client.start()
@@ -686,9 +731,78 @@ final class ChatViewModel {
     func loadRecentSessions() async {
         let opened = await dataService.open()
         guard opened else { return }
-        recentSessions = await dataService.fetchSessions(limit: 10)
-        sessionPreviews = await dataService.fetchSessionPreviews(limit: 10)
+        // Bumped from 10 → 50 so the project filter has enough data to
+        // surface attributed sessions (older attributed sessions were
+        // getting truncated out of the original limit). Sessions feature
+        // loads 500; the chat sidebar doesn't need that, but 50 keeps
+        // the project filter useful without measurable cost.
+        let fetchedSessions = await dataService.fetchSessions(limit: 50)
+        let fetchedPreviews = await dataService.fetchSessionPreviews(limit: 50)
         await dataService.close()
+
+        // Project attribution + registry — single batched off-main read.
+        let ctx = context
+        let bundle: (names: [String: String], projects: [ProjectEntry]) = await Task.detached {
+            let attribution = SessionAttributionService(context: ctx)
+            let registry = ProjectDashboardService(context: ctx).loadRegistry()
+            let pathToName = Dictionary(
+                uniqueKeysWithValues: registry.projects.map { ($0.path, $0.name) }
+            )
+            let map = attribution.load().mappings
+            var names: [String: String] = [:]
+            for (sessionID, path) in map {
+                if let name = pathToName[path] {
+                    names[sessionID] = name
+                }
+            }
+            return (names: names, projects: registry.projects)
+        }.value
+
+        // Single batched commit — assigning all four observables at once
+        // means SwiftUI sees one update rather than four staggered ones.
+        // Eliminates the brief "list flashes / project chips appear
+        // late" reload artifact during session switches.
+        recentSessions = fetchedSessions
+        sessionPreviews = fetchedPreviews
+        sessionProjectNames = bundle.names
+        allProjects = bundle.projects
+    }
+
+    /// Resolved project display name for a recent session, or nil for
+    /// unattributed (global / quick) sessions.
+    func projectName(for session: HermesSession) -> String? {
+        sessionProjectNames[session.id]
+    }
+
+    /// Rename a session via `hermes sessions rename`. Updates local
+    /// caches in-place on success so the chat sidebar reflects the new
+    /// title without a full reload. Same shell command path the
+    /// SessionsView feature uses.
+    func renameSession(_ sessionId: String, to newTitle: String) {
+        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let result = context.runHermes(["sessions", "rename", sessionId, trimmed])
+        guard result.exitCode == 0 else { return }
+        if let idx = recentSessions.firstIndex(where: { $0.id == sessionId }) {
+            recentSessions[idx] = recentSessions[idx].withTitle(trimmed)
+        }
+        sessionPreviews[sessionId] = trimmed
+    }
+
+    /// Delete a session via `hermes sessions delete --yes`. Removes the
+    /// row from local caches on success and resets the live chat
+    /// transcript when the deleted session was the active one (so the
+    /// user isn't left looking at orphaned content).
+    func deleteSession(_ sessionId: String) {
+        let result = context.runHermes(["sessions", "delete", "--yes", sessionId])
+        guard result.exitCode == 0 else { return }
+        recentSessions.removeAll { $0.id == sessionId }
+        sessionPreviews.removeValue(forKey: sessionId)
+        sessionProjectNames.removeValue(forKey: sessionId)
+        if richChatViewModel.sessionId == sessionId {
+            richChatViewModel.reset()
+            focusedToolCallId = nil
+        }
     }
 
     func previewFor(_ session: HermesSession) -> String {
