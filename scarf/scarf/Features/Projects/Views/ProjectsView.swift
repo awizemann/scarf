@@ -6,12 +6,14 @@ private enum DashboardTab: String, CaseIterable {
     case dashboard = "Dashboard"
     case site = "Site"
     case sessions = "Sessions"
+    case slashCommands = "Slash"
 
     var displayName: LocalizedStringResource {
         switch self {
         case .dashboard: return "Dashboard"
         case .site: return "Site"
         case .sessions: return "Sessions"
+        case .slashCommands: return "Slash Commands"
         }
     }
 
@@ -20,6 +22,7 @@ private enum DashboardTab: String, CaseIterable {
         case .dashboard: return "square.grid.2x2"
         case .site: return "globe"
         case .sessions: return "bubble.left.and.bubble.right"
+        case .slashCommands: return "slash.circle"
         }
     }
 }
@@ -365,6 +368,12 @@ struct ProjectsView: View {
                         ProjectSessionsView(project: project)
                     } else {
                         ContentUnavailableView("No project selected", systemImage: "bubble.left.and.bubble.right")
+                    }
+                case .slashCommands:
+                    if let project = viewModel.selectedProject {
+                        ProjectSlashCommandsView(project: project)
+                    } else {
+                        ContentUnavailableView("No project selected", systemImage: "slash.circle")
                     }
                 }
             }
