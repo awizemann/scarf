@@ -37,6 +37,40 @@ final class SessionsViewModel {
     var showDeleteConfirmation = false
     var deleteSessionId: String?
 
+    // MARK: - Project attribution (v2.5)
+    //
+    // Session-to-project lookup populated from `~/.hermes/scarf/session_project_map.json`
+    // + the project registry. Drives the "Project" filter Menu above the
+    // list and the badge chip in each session row. Mirrors the same
+    // services iOS uses on the Dashboard's Sessions tab — both platforms
+    // read the same sidecar.
+
+    /// session ID → project display name. Empty when no sessions on screen
+    /// are project-attributed.
+    private(set) var sessionProjectNames: [String: String] = [:]
+    /// Every project in the registry, used to populate the filter Menu.
+    private(set) var allProjects: [ProjectEntry] = []
+    /// Currently selected project filter.
+    /// - `nil` (default): show all sessions.
+    /// - `""` sentinel: show only unattributed sessions.
+    /// - any other string: project name to match against `sessionProjectNames`.
+    var projectFilter: String?
+
+    /// Sessions to actually render — applies `projectFilter` over `sessions`.
+    /// Inset is O(n) which is fine at the 500-session window we load.
+    var filteredSessions: [HermesSession] {
+        guard let filter = projectFilter else { return sessions }
+        if filter.isEmpty {
+            return sessions.filter { sessionProjectNames[$0.id] == nil }
+        }
+        return sessions.filter { sessionProjectNames[$0.id] == filter }
+    }
+
+    /// Project display name for a session, or nil for unattributed.
+    func projectName(for session: HermesSession) -> String? {
+        sessionProjectNames[session.id]
+    }
+
     func load() async {
         // refresh() forces a fresh snapshot on remote contexts. The DB stays
         // open after load() so selectSession()/search() can query without
@@ -45,6 +79,30 @@ final class SessionsViewModel {
         guard opened else { return }
         sessions = await dataService.fetchSessions(limit: 500)
         sessionPreviews = await dataService.fetchSessionPreviews(limit: 500)
+
+        // Load attribution + registry off the main actor in one batch so
+        // 500 rows don't trigger 500 SFTP reads. Failure is silent — the
+        // absence of project labels is a cosmetic degradation, not a
+        // data-loss problem (matches the iOS Dashboard pattern).
+        let ctx = context
+        let bundle: (names: [String: String], projects: [ProjectEntry]) = await Task.detached {
+            let attribution = SessionAttributionService(context: ctx)
+            let registry = ProjectDashboardService(context: ctx).loadRegistry()
+            let pathToName = Dictionary(
+                uniqueKeysWithValues: registry.projects.map { ($0.path, $0.name) }
+            )
+            let map = attribution.load().mappings
+            var names: [String: String] = [:]
+            for (sessionID, path) in map {
+                if let name = pathToName[path] {
+                    names[sessionID] = name
+                }
+            }
+            return (names: names, projects: registry.projects)
+        }.value
+        sessionProjectNames = bundle.names
+        allProjects = bundle.projects
+
         computeStats()
     }
 

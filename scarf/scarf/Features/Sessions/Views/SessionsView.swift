@@ -17,6 +17,10 @@ struct SessionsView: View {
                 statsBar(stats)
                 Divider()
             }
+            if !viewModel.allProjects.isEmpty {
+                filterBar
+                Divider()
+            }
             HSplitView {
                 sessionList
                     .frame(minWidth: 280, idealWidth: 320)
@@ -104,19 +108,100 @@ struct SessionsView: View {
                     }
                 }
             } else {
-                ForEach(viewModel.sessions) { session in
-                    SessionRow(session: session, preview: viewModel.previewFor(session))
-                        .tag(session.id)
-                        .contextMenu {
-                            Button("Rename...") { viewModel.beginRename(session) }
-                            Button("Export...") { viewModel.exportSession(session) }
-                            Divider()
-                            Button("Delete...", role: .destructive) { viewModel.beginDelete(session) }
-                        }
+                ForEach(viewModel.filteredSessions) { session in
+                    SessionRow(
+                        session: session,
+                        preview: viewModel.previewFor(session),
+                        projectName: viewModel.projectName(for: session)
+                    )
+                    .tag(session.id)
+                    .contextMenu {
+                        Button("Rename...") { viewModel.beginRename(session) }
+                        Button("Export...") { viewModel.exportSession(session) }
+                        Divider()
+                        Button("Delete...", role: .destructive) { viewModel.beginDelete(session) }
+                    }
                 }
             }
         }
         .listStyle(.inset)
+    }
+
+    /// Project filter Menu shown above the list when at least one
+    /// project is registered. Mirrors the Dashboard's Sessions tab on
+    /// iOS, with an "Unattributed" entry for quick-chat / pre-v2.3
+    /// sessions that have no project mapping.
+    private var filterBar: some View {
+        HStack(spacing: 8) {
+            Menu {
+                Button {
+                    viewModel.projectFilter = nil
+                } label: {
+                    Label("All projects", systemImage: "tray.full")
+                }
+                Button {
+                    viewModel.projectFilter = ""
+                } label: {
+                    Label("Unattributed", systemImage: "questionmark.folder")
+                }
+                Divider()
+                ForEach(viewModel.allProjects.sorted { $0.name < $1.name }) { project in
+                    Button {
+                        viewModel.projectFilter = project.name
+                    } label: {
+                        Label(project.name, systemImage: "folder.fill")
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: filterIconName)
+                    Text(filterLabel)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.caption2)
+                }
+                .font(.caption)
+                .foregroundStyle(.tint)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(.tint.opacity(0.1), in: Capsule())
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
+            if viewModel.projectFilter != nil {
+                Button {
+                    viewModel.projectFilter = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear filter")
+            }
+
+            Spacer()
+
+            Text("\(viewModel.filteredSessions.count) of \(viewModel.sessions.count) shown")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    private var filterIconName: String {
+        viewModel.projectFilter == nil
+            ? "line.3.horizontal.decrease.circle"
+            : "line.3.horizontal.decrease.circle.fill"
+    }
+
+    private var filterLabel: String {
+        switch viewModel.projectFilter {
+        case .none:                 return "All projects"
+        case .some(let s) where s.isEmpty: return "Unattributed"
+        case .some(let s):          return s
+        }
     }
 
     @ViewBuilder

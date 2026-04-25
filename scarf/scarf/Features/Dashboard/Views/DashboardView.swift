@@ -198,6 +198,11 @@ struct StatCard: View {
 struct SessionRow: View {
     let session: HermesSession
     var preview: String?
+    /// Optional project display name to render as a chip below the title.
+    /// Nil for unattributed / quick-chat sessions. Surfaced on the
+    /// Sessions list (v2.5) and reusable from any other site that wants
+    /// the same visual.
+    var projectName: String? = nil
 
     var body: some View {
         HStack {
@@ -207,10 +212,21 @@ struct SessionRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(preview ?? session.displayTitle)
                     .lineLimit(1)
-                if let date = session.startedAt {
-                    Text(date, style: .relative)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    if let date = session.startedAt {
+                        Text(date, style: .relative)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let projectName, !projectName.isEmpty {
+                        Label(projectName, systemImage: "folder.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.tint)
+                            .labelStyle(.titleAndIcon)
+                            .padding(.vertical, 1)
+                            .padding(.horizontal, 5)
+                            .background(.tint.opacity(0.12), in: Capsule())
+                    }
                 }
             }
             Spacer()
