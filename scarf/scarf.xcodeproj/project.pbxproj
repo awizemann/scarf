@@ -10,6 +10,8 @@
 		53495AB62F7B992C00BD31AD /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 53SWIFTTERM0001 /* SwiftTerm */; };
 		53SCARFCORE0010 /* ScarfCore in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFCORE0001 /* ScarfCore */; };
 		53SCARFCORE0011 /* ScarfCore in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFCORE0002 /* ScarfCore */; };
+		53SCARFDESIGN0010 /* ScarfDesign in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFDESIGN0001 /* ScarfDesign */; };
+		53SCARFDESIGN0011 /* ScarfDesign in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFDESIGN0002 /* ScarfDesign */; };
 		53SCARFIOS0010 /* ScarfIOS in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFIOS0001 /* ScarfIOS */; };
 		53SPARKLE00010 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 53SPARKLE00011 /* Sparkle */; };
 /* End PBXBuildFile section */
@@ -116,6 +118,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				53SCARFCORE0011 /* ScarfCore in Frameworks */,
+				53SCARFDESIGN0011 /* ScarfDesign in Frameworks */,
 				53SCARFIOS0010 /* ScarfIOS in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -140,6 +143,7 @@
 			files = (
 				53495AB62F7B992C00BD31AD /* SwiftTerm in Frameworks */,
 				53SCARFCORE0010 /* ScarfCore in Frameworks */,
+				53SCARFDESIGN0010 /* ScarfDesign in Frameworks */,
 				53SPARKLE00010 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -208,6 +212,7 @@
 			name = "scarf mobile";
 			packageProductDependencies = (
 				53SCARFCORE0002 /* ScarfCore */,
+				53SCARFDESIGN0002 /* ScarfDesign */,
 				53SCARFIOS0001 /* ScarfIOS */,
 			);
 			productName = "Scarf iOS";
@@ -279,6 +284,7 @@
 			packageProductDependencies = (
 				53SWIFTTERM0001 /* SwiftTerm */,
 				53SCARFCORE0001 /* ScarfCore */,
+				53SCARFDESIGN0001 /* ScarfDesign */,
 				53SPARKLE00011 /* Sparkle */,
 			);
 			productName = scarf;
@@ -383,6 +389,7 @@
 			packageReferences = (
 				53SWIFTTERM0002 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
 				53SCARFCORE0020 /* XCLocalSwiftPackageReference "Packages/ScarfCore" */,
+				53SCARFDESIGN0020 /* XCLocalSwiftPackageReference "Packages/ScarfDesign" */,
 				53SCARFIOS0020 /* XCLocalSwiftPackageReference "Packages/ScarfIOS" */,
 				53SPARKLE00012 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
@@ -1039,6 +1046,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ScarfCore;
 		};
+		53SCARFDESIGN0020 /* XCLocalSwiftPackageReference "Packages/ScarfDesign" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ScarfDesign;
+		};
 		53SCARFIOS0020 /* XCLocalSwiftPackageReference "Packages/ScarfIOS" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ScarfIOS;
@@ -1072,6 +1083,14 @@
 		53SCARFCORE0002 /* ScarfCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ScarfCore;
+		};
+		53SCARFDESIGN0001 /* ScarfDesign */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ScarfDesign;
+		};
+		53SCARFDESIGN0002 /* ScarfDesign */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ScarfDesign;
 		};
 		53SCARFIOS0001 /* ScarfIOS */ = {
 			isa = XCSwiftPackageProductDependency;

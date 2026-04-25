@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Scarf — UI Kit</title>
+  <link rel="stylesheet" href="../colors_and_type.css">
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
+      background: linear-gradient(135deg, #EFC59E 0%, #C25A2A 60%, #5C220F 100%); }
+    @keyframes scarfSpin { to { transform: rotate(360deg); } }
+    #root { height: 100%; }
+    .scarf-app {
+      display: flex; height: 100vh;
+      background: var(--bg);
+      overflow: hidden;
+    }
+    .scarf-traffic {
+      position: absolute; top: 14px; left: 18px;
+      display: flex; gap: 8px; z-index: 100;
+    }
+    .scarf-traffic .dot { width: 12px; height: 12px; border-radius: 50%; }
+    .scarf-traffic .dot.r { background: #FE5F57; }
+    .scarf-traffic .dot.y { background: #FEBB2E; }
+    .scarf-traffic .dot.g { background: #28C840; }
+    .scarf-content {
+      flex: 1; display: flex; flex-direction: column;
+      min-width: 0; padding-top: 38px;
+      background: var(--bg);
+    }
+    @keyframes pulseScarf { 0%,100% { opacity:1 } 50% { opacity: 0.3 } }
+    /* placeholder for contentEditable */
+    [contenteditable][data-placeholder]:empty:before {
+      content: attr(data-placeholder); color: var(--fg-faint); pointer-events: none;
+    }
+    /* scrollbar tweak */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb { background: rgba(28,26,32,0.15); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(28,26,32,0.25); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <template id="__bundler_thumbnail">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+      <rect width="100" height="100" fill="#C25A2A"/>
+      <text x="50" y="62" text-anchor="middle" font-family="Georgia, serif"
+            font-size="48" font-style="italic" fill="#FAF7F2" font-weight="600">S</text>
+    </svg>
+  </template>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+
+  <script type="text/babel" src="Common.jsx"></script>
+  <script type="text/babel" src="Sidebar.jsx"></script>
+  <script type="text/babel" src="Dashboard.jsx"></script>
+  <script type="text/babel" src="Sessions.jsx"></script>
+  <script type="text/babel" src="Insights.jsx"></script>
+  <script type="text/babel" src="Projects.jsx"></script>
+  <script type="text/babel" src="Chat.jsx"></script>
+  <script type="text/babel" src="Settings.jsx"></script>
+  <script type="text/babel" src="Tools.jsx"></script>
+  <script type="text/babel" src="MCPServers.jsx"></script>
+  <script type="text/babel" src="Cron.jsx"></script>
+  <script type="text/babel" src="Logs.jsx"></script>
+  <script type="text/babel" src="Memory.jsx"></script>
+  <script type="text/babel" src="Activity.jsx"></script>
+  <script type="text/babel" src="Health.jsx"></script>
+  <script type="text/babel" src="MoreViews.jsx"></script>
+
+  <script type="text/babel">
+    function App() {
+      const [active, setActive] = React.useState('dashboard');
+      React.useEffect(() => {
+        // re-render lucide icons after each route change
+        requestAnimationFrame(() => window.lucide && window.lucide.createIcons());
+      }, [active]);
+      const Views = {
+        dashboard: Dashboard,
+        sessions: Sessions,
+        insights: Insights,
+        projects: Projects,
+        chat: Chat,
+        settings: Settings,
+        tools: Tools,
+        mcpServers: MCPServers,
+        cron: Cron,
+        logs: Logs,
+        memory: Memory,
+        activity: Activity,
+        health: Health,
+        personalities: Personalities,
+        quickCommands: QuickCommands,
+        platforms: Platforms,
+        credentialPools: Credentials,
+        plugins: Plugins,
+        webhooks: Webhooks,
+        profiles: Profiles,
+        gateway: Gateway,
+      };
+      const Active = Views[active] || PlaceholderView(active);
+      return (
+        <div className="scarf-app" data-screen-label={`Scarf · ${active}`}>
+          <div className="scarf-traffic">
+            <span className="dot r"></span><span className="dot y"></span><span className="dot g"></span>
+          </div>
+          <ScarfSidebar active={active} onSelect={setActive} />
+          <div className="scarf-content">
+            <Active />
+          </div>
+        </div>
+      );
+    }
+
+    function PlaceholderView(name) {
+      const SIDEBAR_FLAT = SIDEBAR_SECTIONS.flatMap(s => s.items);
+      const item = SIDEBAR_FLAT.find(i => i.id === name) || { label: name, icon: 'inbox' };
+      return function Inner() {
+        return (
+          <>
+            <ContentHeader title={item.label} subtitle={`This view isn't fleshed out in the UI kit yet.`} />
+            <EmptyState icon={item.icon}
+              title={`${item.label}`}
+              body={`The Scarf app exposes a dedicated ${item.label} pane here. The kit ships a faithful Dashboard, Sessions, Insights, Projects, and Chat — wire ${item.label} the same way against your data.`}
+              action={<Btn kind="primary" icon="external-link">Open Scarf docs</Btn>}
+            />
+          </>
+        );
+      };
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    // Lucide ran once on DOMContentLoaded before React mounted — re-run now that the DOM has icons.
+    setTimeout(() => window.lucide && window.lucide.createIcons(), 0);
+    setTimeout(() => window.lucide && window.lucide.createIcons(), 200);
+  </script>
+</body>
+</html>

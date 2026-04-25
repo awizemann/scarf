@@ -1,0 +1,19 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Status cards</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+.scard { background:var(--bg-quaternary); border-radius:8px; padding:12px; flex:1; min-width:130px; }
+.scard .head { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--fg-muted); margin-bottom:4px; }
+.scard .dot { width:8px; height:8px; border-radius:50%; }
+.scard .val { font-family:var(--font-mono); font-size:14px; font-weight:500; }
+</style></head>
+<body>
+<div class="card-root">
+  <div class="row" style="gap:12px">
+    <div class="scard"><div class="head"><span class="dot" style="background:var(--green-500)"></span>Hermes</div><div class="val">Running</div></div>
+    <div class="scard"><div class="head" style="color:var(--blue-500)">⌬ Model</div><div class="val">claude-sonnet-4.5</div></div>
+    <div class="scard"><div class="head" style="color:var(--accent)">☁ Provider</div><div class="val">Anthropic</div></div>
+    <div class="scard"><div class="head"><span class="dot" style="background:var(--green-500)"></span>Gateway</div><div class="val">Connected · 3</div></div>
+  </div>
+  <div class="mono">Status cards · 4 across at standard width</div>
+</div>
+</body></html>

@@ -1,0 +1,25 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Sidebar</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+.sb { width:220px; background:var(--bg-quaternary); border-radius:10px; padding:10px 8px; font-size:13px; }
+.sb-title { font-size:10px; color:var(--fg-muted); font-weight:600; text-transform:uppercase; letter-spacing:.06em; padding:6px 8px 4px }
+.sb-item { display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:6px; color:var(--fg); cursor:pointer }
+.sb-item:hover { background:var(--bg-tertiary) }
+.sb-item.active { background:var(--accent-tint); color:var(--accent-active) }
+.sb-icon { width:14px; opacity:.7 }
+.sb-item.active .sb-icon { opacity:1 }
+</style></head>
+<body>
+<div class="card-root" style="padding:14px">
+  <div class="sb">
+    <div class="sb-title">Monitor</div>
+    <div class="sb-item"><span class="sb-icon">▦</span>Dashboard</div>
+    <div class="sb-item active"><span class="sb-icon">📊</span>Insights</div>
+    <div class="sb-item"><span class="sb-icon">💬</span>Sessions</div>
+    <div class="sb-title">Interact</div>
+    <div class="sb-item"><span class="sb-icon">✦</span>Chat</div>
+    <div class="sb-item"><span class="sb-icon">◈</span>Memory</div>
+    <div class="sb-item"><span class="sb-icon">⚒</span>Skills</div>
+  </div>
+</div>
+</body></html>

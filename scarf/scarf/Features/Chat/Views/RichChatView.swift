@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct RichChatView: View {
     @Bindable var richChat: RichChatViewModel
@@ -89,16 +90,16 @@ struct RichChatView: View {
     private func steeringToast(_ hint: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "arrowshape.turn.up.right.fill")
-                .foregroundStyle(.tint)
-                .font(.caption)
+                .foregroundStyle(ScarfColor.accent)
+                .scarfStyle(.caption)
             Text(hint)
-                .font(.caption)
-                .foregroundStyle(.primary)
+                .scarfStyle(.caption)
+                .foregroundStyle(ScarfColor.foregroundPrimary)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, ScarfSpace.s3)
         .padding(.vertical, 6)
-        .background(.tint.opacity(0.12))
+        .background(ScarfColor.accentTint)
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }

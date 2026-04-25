@@ -1,0 +1,193 @@
+/* Scarf Design System — colors + type tokens. v2 (amber→rust)
+ *
+ * Light/dark via [data-theme="dark"] override on a parent. Default light.
+ *
+ * v2 changes: brand shifted from purple to a tri-stop amber→rust gradient.
+ * Neutrals warmed (yellow undertone). Semantic green/blue/red/orange preserved
+ * — those still mean success/info/danger and remain the tool-kind colors in chat.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* ───── Brand — amber → rust ───── */
+  --brand-50:  #FBF1E8;
+  --brand-100: #F6E0CB;
+  --brand-200: #EFC59E;   /* highlight stop in tri-gradient */
+  --brand-300: #E89360;   /* gradient start */
+  --brand-400: #D87844;
+  --brand-500: #C25A2A;   /* primary accent — Scarf Rust */
+  --brand-600: #A6481E;
+  --brand-700: #7A2E14;   /* gradient end */
+  --brand-800: #5C220F;
+  --brand-900: #3B1608;
+
+  /* ───── Neutrals (warm, slight amber tint) ───── */
+  --gray-0:   #FFFFFF;
+  --gray-50:  #FBF9F6;
+  --gray-100: #F4F1EC;
+  --gray-200: #EAE5DD;
+  --gray-300: #D8D1C5;
+  --gray-400: #B5ABA0;
+  --gray-500: #8C857B;
+  --gray-600: #6A645B;
+  --gray-700: #4A463F;
+  --gray-800: #2D2A25;
+  --gray-900: #1A1814;
+  --gray-950: #100E0B;
+
+  /* ───── Semantic palette ───── */
+  --green-500:  #2AA876;
+  --green-600:  #1F7F5A;
+  --green-100:  #D8F0E5;
+  --red-500:    #D9534F;
+  --red-600:    #B83C38;
+  --red-100:    #F8DAD8;
+  --orange-500: #F0AD4E;   /* reasoning / warning — distinct from brand rust */
+  --orange-100: #FCEAD0;
+  --blue-500:   #3498DB;
+  --blue-100:   #D8ECF8;
+  --indigo-500: #5B6CD9;
+  --purple-tool-500: #8E5BC9;
+
+  /* ───── Surfaces (light) ───── */
+  --fg:        var(--gray-900);
+  --fg-muted:  var(--gray-600);
+  --fg-faint:  var(--gray-500);
+  --bg:        var(--gray-50);
+  --bg-card:   var(--gray-0);
+  --bg-quaternary: rgba(45, 42, 37, 0.04);
+  --bg-tertiary:   rgba(45, 42, 37, 0.07);
+  --border:    rgba(45, 42, 37, 0.08);
+  --border-strong: rgba(45, 42, 37, 0.14);
+
+  /* ───── Brand tokens (semantic) ───── */
+  --accent:        var(--brand-500);
+  --accent-hover:  var(--brand-600);
+  --accent-active: var(--brand-700);
+  --accent-tint:   rgba(194, 90, 42, 0.10);
+  --accent-tint-strong: rgba(194, 90, 42, 0.18);
+  --on-accent:     #FFFFFF;
+
+  /* ───── Type stacks ───── */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  /* ───── Type scale ───── */
+  --text-caption2: 10px;
+  --text-caption:  12px;
+  --text-footnote: 13px;
+  --text-body:     14px;
+  --text-callout:  15px;
+  --text-subhead:  16px;
+  --text-headline: 17px;
+  --text-title3:   20px;
+  --text-title2:   22px;
+  --text-title1:   28px;
+  --text-largeTitle: 34px;
+
+  --leading-tight:   1.2;
+  --leading-snug:    1.35;
+  --leading-normal:  1.5;
+  --leading-relaxed: 1.6;
+
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* ───── Radii / spacing / shadow ───── */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+  --r-xl: 12px;
+  --r-2xl: 14px;
+  --r-pill: 999px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  --shadow-sm: 0 1px 2px rgba(45, 42, 37, 0.05);
+  --shadow-md: 0 1px 2px rgba(45, 42, 37, 0.04), 0 4px 12px rgba(45, 42, 37, 0.04);
+  --shadow-lg: 0 2px 4px rgba(45, 42, 37, 0.06), 0 8px 24px rgba(45, 42, 37, 0.07);
+  --shadow-xl: 0 4px 8px rgba(45, 42, 37, 0.08), 0 16px 40px rgba(45, 42, 37, 0.10);
+  --shadow-focus: 0 0 0 3px rgba(194, 90, 42, 0.28);
+
+  --gradient-brand: linear-gradient(135deg, #E89360 0%, #C25A2A 50%, #7A2E14 100%);
+  --gradient-brand-soft: linear-gradient(135deg, #F6E0CB 0%, #EFC59E 100%);
+
+  --ease-smooth: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 300ms;
+}
+
+[data-theme="dark"] {
+  --fg:        #EDE8E0;
+  --fg-muted:  #A39C92;
+  --fg-faint:  #756F66;
+  --bg:        #15130F;
+  --bg-card:   #1F1C18;
+  --bg-quaternary: rgba(255, 248, 235, 0.05);
+  --bg-tertiary:   rgba(255, 248, 235, 0.08);
+  --border:    rgba(255, 248, 235, 0.08);
+  --border-strong: rgba(255, 248, 235, 0.14);
+
+  --accent:        #E89360;
+  --accent-hover:  #F0A879;
+  --accent-active: #D87844;
+  --accent-tint:   rgba(232, 147, 96, 0.14);
+  --accent-tint-strong: rgba(232, 147, 96, 0.24);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.35), 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.45), 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --fg:        #EDE8E0;
+    --fg-muted:  #A39C92;
+    --fg-faint:  #756F66;
+    --bg:        #15130F;
+    --bg-card:   #1F1C18;
+    --bg-quaternary: rgba(255, 248, 235, 0.05);
+    --bg-tertiary:   rgba(255, 248, 235, 0.08);
+    --border:    rgba(255, 248, 235, 0.08);
+    --border-strong: rgba(255, 248, 235, 0.14);
+
+    --accent:        #E89360;
+    --accent-hover:  #F0A879;
+    --accent-active: #D87844;
+    --accent-tint:   rgba(232, 147, 96, 0.14);
+    --accent-tint-strong: rgba(232, 147, 96, 0.24);
+  }
+}
+
+/* ───── Semantic type rules ───── */
+body, .scarf-body {
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--leading-normal);
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+.scarf-h1 { font-family: var(--font-display); font-size: var(--text-largeTitle); font-weight: 600; line-height: 1.2; letter-spacing: -0.02em; }
+.scarf-h2 { font-family: var(--font-display); font-size: var(--text-title1); font-weight: 600; line-height: 1.2; letter-spacing: -0.015em; }
+.scarf-h3 { font-family: var(--font-display); font-size: var(--text-title2); font-weight: 600; line-height: 1.35; letter-spacing: -0.01em; }
+.scarf-headline { font-family: var(--font-sans); font-size: var(--text-headline); font-weight: 600; line-height: 1.35; }
+.scarf-subhead { font-family: var(--font-sans); font-size: var(--text-subhead); font-weight: 500; line-height: 1.35; }
+.scarf-body-text { font-family: var(--font-sans); font-size: var(--text-body); line-height: 1.5; }
+.scarf-caption { font-family: var(--font-sans); font-size: var(--text-caption); line-height: 1.5; color: var(--fg-muted); }
+.scarf-caption-strong { font-family: var(--font-sans); font-size: var(--text-caption); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-muted); }
+.scarf-mono { font-family: var(--font-mono); font-size: 0.92em; }
+.scarf-code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-quaternary); padding: 1px 5px; border-radius: var(--r-sm); color: var(--fg); }

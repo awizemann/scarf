@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct SessionInfoBar: View {
     let session: HermesSession?
@@ -29,14 +30,14 @@ struct SessionInfoBar: View {
                 // identical to v2.2.1 behavior.
                 if let projectName {
                     Label(projectName, systemImage: "folder.fill")
-                        .font(.caption)
-                        .foregroundStyle(.tint)
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.accent)
                         .lineLimit(1)
                         .help("Chat is scoped to Scarf project \"\(projectName)\"")
                     if let gitBranch {
                         Label(gitBranch, systemImage: "arrow.triangle.branch")
-                            .font(.caption)
-                            .foregroundStyle(.tint)
+                            .scarfStyle(.caption)
+                            .foregroundStyle(ScarfColor.accent)
                             .lineLimit(1)
                             .help("Project's current git branch")
                     }
@@ -44,19 +45,20 @@ struct SessionInfoBar: View {
 
                 HStack(spacing: 4) {
                     Circle()
-                        .fill(isWorking ? .green : .secondary)
+                        .fill(isWorking ? ScarfColor.success : ScarfColor.foregroundFaint)
                         .frame(width: 6, height: 6)
                         .opacity(isWorking ? 1 : 0.6)
                     if isWorking {
                         Text("Working")
-                            .font(.caption)
-                            .foregroundStyle(.green)
+                            .scarfStyle(.caption)
+                            .foregroundStyle(ScarfColor.success)
                     }
                 }
 
                 if let title = session.title, !title.isEmpty {
                     Text(title)
-                        .font(.caption.bold())
+                        .scarfStyle(.captionStrong)
+                        .foregroundStyle(ScarfColor.foregroundPrimary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -95,15 +97,19 @@ struct SessionInfoBar: View {
                 Label(session.source, systemImage: session.sourceIcon)
             } else {
                 Text("No active session")
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(ScarfColor.foregroundFaint)
                 Spacer()
             }
         }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal)
+        .scarfStyle(.caption)
+        .foregroundStyle(ScarfColor.foregroundMuted)
+        .padding(.horizontal, ScarfSpace.s4)
         .padding(.vertical, 6)
-        .background(.bar)
+        .background(ScarfColor.backgroundSecondary)
+        .overlay(
+            Rectangle().fill(ScarfColor.border).frame(height: 1),
+            alignment: .bottom
+        )
     }
 
     private func formatTokens(_ count: Int) -> String {

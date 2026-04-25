@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct MCPServersView: View {
     @State private var viewModel: MCPServersViewModel
@@ -10,13 +11,17 @@ struct MCPServersView: View {
 
 
     var body: some View {
-        HSplitView {
-            serversList
-                .frame(minWidth: 260, idealWidth: 300)
-            serverDetail
-                .frame(minWidth: 500)
+        VStack(spacing: 0) {
+            pageHeader
+            HSplitView {
+                serversList
+                    .frame(minWidth: 260, idealWidth: 320)
+                serverDetail
+                    .frame(minWidth: 500)
+            }
         }
-        .navigationTitle("MCP Servers (\(viewModel.servers.count))")
+        .background(ScarfColor.backgroundPrimary)
+        .navigationTitle("MCP Servers")
         .loadingOverlay(
             viewModel.isLoading,
             label: "Loading MCP servers…",
@@ -24,23 +29,7 @@ struct MCPServersView: View {
         )
         .searchable(text: $viewModel.searchText, prompt: "Filter servers...")
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    viewModel.showPresetPicker = true
-                } label: {
-                    Label("Add from Preset", systemImage: "square.grid.2x2")
-                }
-                Button {
-                    viewModel.showAddCustom = true
-                } label: {
-                    Label("Add Custom", systemImage: "plus")
-                }
-                Button {
-                    viewModel.testAll()
-                } label: {
-                    Label("Test All", systemImage: "bolt.horizontal")
-                }
-                .disabled(viewModel.servers.isEmpty)
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     viewModel.load()
                 } label: {
@@ -75,6 +64,51 @@ struct MCPServersView: View {
         } message: {
             Text(viewModel.activeError ?? "")
         }
+    }
+
+    private var pageHeader: some View {
+        HStack(alignment: .top, spacing: ScarfSpace.s3) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("MCP Servers")
+                    .scarfStyle(.title2)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
+                Text("Model Context Protocol endpoints — \(viewModel.servers.count) configured.")
+                    .scarfStyle(.footnote)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+            }
+            Spacer()
+            HStack(spacing: ScarfSpace.s2) {
+                Button {
+                    viewModel.testAll()
+                } label: {
+                    Label("Test all", systemImage: "bolt.horizontal")
+                }
+                .buttonStyle(ScarfGhostButton())
+                .disabled(viewModel.servers.isEmpty)
+
+                Button {
+                    viewModel.showPresetPicker = true
+                } label: {
+                    Label("From preset", systemImage: "square.grid.2x2")
+                }
+                .buttonStyle(ScarfSecondaryButton())
+
+                Button {
+                    viewModel.showAddCustom = true
+                } label: {
+                    Label("Add server", systemImage: "plus")
+                }
+                .buttonStyle(ScarfPrimaryButton())
+            }
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .padding(.horizontal, ScarfSpace.s6)
+        .padding(.top, ScarfSpace.s5)
+        .padding(.bottom, ScarfSpace.s4)
+        .overlay(
+            Rectangle().fill(ScarfColor.border).frame(height: 1),
+            alignment: .bottom
+        )
     }
 
     private var serversList: some View {
@@ -113,14 +147,15 @@ struct MCPServersView: View {
     private func serverRow(_ server: HermesMCPServer) -> some View {
         HStack(spacing: 8) {
             Image(systemName: server.transport == .http ? "network" : "terminal")
-                .foregroundStyle(server.enabled ? Color.accentColor : .secondary)
+                .foregroundStyle(server.enabled ? ScarfColor.accent : ScarfColor.foregroundMuted)
             VStack(alignment: .leading, spacing: 2) {
                 Text(server.name)
-                    .font(.body)
+                    .scarfStyle(.body)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
                 if !server.enabled {
                     Text("Disabled")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .font(ScarfFont.caption2)
+                        .foregroundStyle(ScarfColor.foregroundFaint)
                 }
             }
             Spacer()
@@ -128,7 +163,7 @@ struct MCPServersView: View {
                 ProgressView().controlSize(.small)
             } else if let result = viewModel.testResults[server.name] {
                 Image(systemName: result.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundStyle(result.succeeded ? .green : .red)
+                    .foregroundStyle(result.succeeded ? ScarfColor.success : ScarfColor.danger)
                     .help(result.succeeded ? Text("\(result.tools.count) tools") : Text("Test failed"))
             }
         }
@@ -145,11 +180,12 @@ struct MCPServersView: View {
             }
             if let status = viewModel.statusMessage {
                 Text(status)
-                    .font(.caption)
-                    .padding(.horizontal, 12)
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.accentActive)
+                    .padding(.horizontal, ScarfSpace.s3)
                     .padding(.vertical, 6)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.accentColor.opacity(0.12))
+                    .background(ScarfColor.accentTint)
             }
             if let server = viewModel.selectedServer {
                 MCPServerDetailView(

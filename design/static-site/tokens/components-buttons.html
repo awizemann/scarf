@@ -1,0 +1,31 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Buttons</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+.btn { font-family:var(--font-sans); font-size:14px; font-weight:500; padding:7px 14px; border-radius:8px; border:1px solid transparent; cursor:pointer; transition:all 120ms var(--ease-smooth); }
+.btn-primary { background:var(--accent); color:#fff; }
+.btn-primary:hover { background:var(--accent-hover); }
+.btn-secondary { background:var(--bg-card); color:var(--fg); border-color:var(--border-strong); }
+.btn-secondary:hover { border-color:var(--accent); color:var(--accent-hover); }
+.btn-ghost { background:transparent; color:var(--fg); }
+.btn-ghost:hover { background:var(--bg-quaternary); }
+.btn-danger { background:#fff; color:var(--red-600); border-color:var(--red-500); }
+.btn-link { background:transparent; color:var(--accent); padding:6px 0; border:none; }
+.btn-sm { font-size:12px; padding:4px 10px; }
+</style></head>
+<body>
+<div class="card-root">
+  <div class="label">Buttons</div>
+  <div class="row">
+    <button class="btn btn-primary">Install Template</button>
+    <button class="btn btn-secondary">Run Diagnostics…</button>
+    <button class="btn btn-ghost">Cancel</button>
+    <button class="btn btn-danger">Delete</button>
+    <button class="btn btn-link">View All →</button>
+  </div>
+  <div class="row" style="margin-top:4px">
+    <button class="btn btn-primary btn-sm">Add</button>
+    <button class="btn btn-secondary btn-sm">Export</button>
+    <button class="btn btn-secondary btn-sm" disabled style="opacity:.4">Configure</button>
+  </div>
+</div>
+</body></html>

@@ -1,0 +1,31 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Tool call card</title>
+<link rel="stylesheet" href="_preview.css"></head>
+<body>
+<div class="card-root">
+  <div style="background:var(--bg-quaternary);border-radius:6px;padding:6px 8px;display:flex;align-items:center;gap:6px;font-size:12px">
+    <div style="width:3px;height:16px;background:var(--green-500);border-radius:1px"></div>
+    <span style="color:var(--green-500)">📖</span>
+    <span style="font-family:var(--font-mono);font-weight:600">read_file</span>
+    <span style="font-family:var(--font-mono);color:var(--fg-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">~/.hermes/config.yaml</span>
+    <span style="color:var(--green-500)">✓</span>
+    <span style="color:var(--fg-faint)">▸</span>
+  </div>
+  <div style="background:var(--bg-quaternary);border-radius:6px;padding:6px 8px;display:flex;align-items:center;gap:6px;font-size:12px">
+    <div style="width:3px;height:16px;background:var(--orange-500);border-radius:1px"></div>
+    <span style="color:var(--orange-500)">⌘</span>
+    <span style="font-family:var(--font-mono);font-weight:600">execute</span>
+    <span style="font-family:var(--font-mono);color:var(--fg-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">{ "cmd": "hermes status" }</span>
+    <span style="color:var(--green-500)">✓</span>
+    <span style="color:var(--fg-faint)">▾</span>
+  </div>
+  <div style="background:var(--bg-quaternary);border-radius:6px;padding:6px 8px;display:flex;align-items:center;gap:6px;font-size:12px">
+    <div style="width:3px;height:16px;background:var(--blue-500);border-radius:1px"></div>
+    <span style="color:var(--blue-500)">✎</span>
+    <span style="font-family:var(--font-mono);font-weight:600">write_file</span>
+    <span style="font-family:var(--font-mono);color:var(--fg-faint);flex:1">cron/jobs.json</span>
+    <div style="width:10px;height:10px;border:1.5px solid var(--fg-faint);border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite"></div>
+    <span style="color:var(--fg-faint)">▸</span>
+  </div>
+  <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+</div>
+</body></html>

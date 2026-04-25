@@ -1,0 +1,26 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Form inputs</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+.field { display:flex; flex-direction:column; gap:4px; flex:1; }
+.field label { font-size:11px; color:var(--fg-muted); font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+.field input, .field select { font-family:var(--font-sans); font-size:14px; padding:6px 10px; border:1px solid var(--border-strong); border-radius:6px; background:var(--bg-card); color:var(--fg); outline:none; transition:all 120ms; }
+.field input:focus { border-color:var(--accent); box-shadow:var(--shadow-focus); }
+.toggle { width:36px; height:20px; background:var(--accent); border-radius:999px; position:relative; cursor:pointer; }
+.toggle::after { content:''; position:absolute; right:2px; top:2px; width:16px; height:16px; background:#fff; border-radius:50%; box-shadow:0 1px 2px rgba(0,0,0,.2); }
+.toggle.off { background:var(--gray-300); }
+.toggle.off::after { right:auto; left:2px; }
+</style></head>
+<body>
+<div class="card-root">
+  <div class="row" style="gap:14px;align-items:flex-end">
+    <div class="field"><label>Project Name</label><input value="hermes-blog"/></div>
+    <div class="field"><label>Strategy</label><select><option>round_robin</option></select></div>
+  </div>
+  <div class="row" style="gap:18px">
+    <div class="row" style="gap:8px"><div class="toggle"></div><span style="font-size:13px">Auto-update</span></div>
+    <div class="row" style="gap:8px"><div class="toggle off"></div><span style="font-size:13px">Pause cron</span></div>
+    <div class="row" style="gap:8px;font-size:13px"><input type="checkbox" checked style="accent-color:var(--accent)"/>Verified</div>
+    <div class="row" style="gap:8px;font-size:13px"><input type="radio" checked style="accent-color:var(--accent)"/>Local</div>
+  </div>
+</div>
+</body></html>

@@ -1,6 +1,14 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
+/// Insights — usage charts and breakdowns. Visual layer follows
+/// `design/static-site/ui-kit/Insights.jsx`: page header (title +
+/// subtitle + period picker + Export action), stat-card row, model /
+/// tool / activity breakdown cards. The current Scarf data surface is
+/// richer than the mockup (we report cache + reasoning tokens, active
+/// time, day-of-week / hour-of-day breakdowns); we keep all of it and
+/// only adopt the visual chrome.
 struct InsightsView: View {
     @State private var viewModel: InsightsViewModel
     @Environment(AppCoordinator.self) private var coordinator
@@ -10,21 +18,24 @@ struct InsightsView: View {
         _viewModel = State(initialValue: InsightsViewModel(context: context))
     }
 
-
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                periodPicker
-                overviewSection
-                modelSection
-                platformSection
-                toolsSection
-                activitySection
-                notableSection
+        VStack(spacing: 0) {
+            pageHeader
+            ScrollView {
+                VStack(alignment: .leading, spacing: ScarfSpace.s5) {
+                    overviewSection
+                    modelSection
+                    platformSection
+                    toolsSection
+                    activitySection
+                    notableSection
+                }
+                .padding(.horizontal, ScarfSpace.s6)
+                .padding(.vertical, ScarfSpace.s5)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Insights")
         .task { await viewModel.load() }
         .onChange(of: viewModel.period) {
@@ -35,23 +46,41 @@ struct InsightsView: View {
         }
     }
 
-    private var periodPicker: some View {
-        Picker("Period", selection: $viewModel.period) {
-            ForEach(InsightsPeriod.allCases) { period in
-                Text(period.displayName).tag(period)
+    // MARK: - Page header
+
+    private var pageHeader: some View {
+        HStack(alignment: .top, spacing: ScarfSpace.s3) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Insights")
+                    .scarfStyle(.title2)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
+                Text("Patterns across sessions, models, and tools.")
+                    .scarfStyle(.footnote)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
             }
+            Spacer()
+            Picker("Period", selection: $viewModel.period) {
+                ForEach(InsightsPeriod.allCases) { period in
+                    Text(period.displayName).tag(period)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: 220)
         }
-        .pickerStyle(.segmented)
-        .frame(maxWidth: 400)
+        .padding(.horizontal, ScarfSpace.s6)
+        .padding(.top, ScarfSpace.s5)
+        .padding(.bottom, ScarfSpace.s4)
+        .overlay(
+            Rectangle().fill(ScarfColor.border).frame(height: 1),
+            alignment: .bottom
+        )
     }
 
     // MARK: - Overview
 
     private var overviewSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Overview")
-                .font(.headline)
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 12) {
+        sectionHeader("Overview", spacing: ScarfSpace.s3) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: ScarfSpace.s3), count: 4), spacing: ScarfSpace.s3) {
                 InsightCard(label: "Sessions", value: "\(viewModel.sessions.count)")
                 InsightCard(label: "Messages", value: "\(viewModel.totalMessages)")
                 InsightCard(label: "User Messages", value: "\(viewModel.userMessageCount)")
@@ -62,10 +91,20 @@ struct InsightsView: View {
                 InsightCard(label: "Cache Write", value: formatTokens(viewModel.totalCacheWriteTokens))
                 InsightCard(label: "Reasoning Tokens", value: formatTokens(viewModel.totalReasoningTokens))
                 InsightCard(label: "Total Tokens", value: formatTokens(viewModel.totalTokens))
-                InsightCard(label: "Total Cost", value: viewModel.totalCost.formatted(.currency(code: "USD").precision(.fractionLength(2))))
+                InsightCard(
+                    label: "Total Cost",
+                    value: viewModel.totalCost.formatted(.currency(code: "USD").precision(.fractionLength(2))),
+                    accent: true
+                )
                 InsightCard(label: "Active Time", value: formatDuration(viewModel.activeTime))
                 InsightCard(label: "Avg Session", value: formatDuration(viewModel.avgSessionDuration))
-                InsightCard(label: "Avg Msgs/Session", value: viewModel.sessions.isEmpty ? "0" : (Double(viewModel.totalMessages) / Double(viewModel.sessions.count)).formatted(.number.precision(.fractionLength(1))))
+                InsightCard(
+                    label: "Avg Msgs/Session",
+                    value: viewModel.sessions.isEmpty
+                        ? "0"
+                        : (Double(viewModel.totalMessages) / Double(viewModel.sessions.count))
+                            .formatted(.number.precision(.fractionLength(1)))
+                )
             }
         }
     }
@@ -73,32 +112,38 @@ struct InsightsView: View {
     // MARK: - Models
 
     private var modelSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Models")
-                .font(.headline)
-            if viewModel.modelUsage.isEmpty {
-                Text("No data")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(viewModel.modelUsage) { model in
-                    HStack {
-                        Image(systemName: "cpu")
-                            .foregroundStyle(.blue)
-                            .frame(width: 20)
-                        Text(model.model)
-                            .font(.system(.body, design: .monospaced))
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("\(model.sessions) sessions")
-                                .font(.caption)
-                            Text("\(formatTokens(model.totalTokens)) tokens")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+        sectionHeader("By Model") {
+            cardWrapper {
+                if viewModel.modelUsage.isEmpty {
+                    emptyRow("No model data yet")
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(viewModel.modelUsage.enumerated()), id: \.element.id) { idx, model in
+                            HStack(spacing: ScarfSpace.s2) {
+                                Image(systemName: "cpu")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(ScarfColor.accent)
+                                    .frame(width: 18)
+                                Text(model.model)
+                                    .font(ScarfFont.monoSmall)
+                                    .foregroundStyle(ScarfColor.foregroundPrimary)
+                                Spacer()
+                                Text("\(model.sessions) sessions")
+                                    .scarfStyle(.caption)
+                                    .foregroundStyle(ScarfColor.foregroundMuted)
+                                Text("·")
+                                    .foregroundStyle(ScarfColor.foregroundFaint)
+                                Text("\(formatTokens(model.totalTokens)) tokens")
+                                    .font(ScarfFont.monoSmall)
+                                    .foregroundStyle(ScarfColor.foregroundMuted)
+                            }
+                            .padding(.horizontal, ScarfSpace.s3)
+                            .padding(.vertical, 10)
+                            if idx < viewModel.modelUsage.count - 1 {
+                                Rectangle().fill(ScarfColor.border).frame(height: 1)
+                            }
                         }
                     }
-                    .padding(10)
-                    .background(.quaternary.opacity(0.5))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
             }
         }
@@ -107,32 +152,36 @@ struct InsightsView: View {
     // MARK: - Platforms
 
     private var platformSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Platforms")
-                .font(.headline)
+        sectionHeader("By Platform") {
             if viewModel.platformUsage.isEmpty {
-                Text("No data")
-                    .foregroundStyle(.secondary)
+                cardWrapper { emptyRow("No platform data yet") }
             } else {
-                HStack(spacing: 12) {
+                HStack(spacing: ScarfSpace.s3) {
                     ForEach(viewModel.platformUsage) { platform in
                         VStack(spacing: 6) {
                             Image(systemName: platformIcon(platform.platform))
-                                .font(.title2)
-                                .foregroundStyle(Color.accentColor)
+                                .font(.system(size: 18))
+                                .foregroundStyle(ScarfColor.accent)
                             Text(platform.platform)
-                                .font(.caption.bold())
+                                .scarfStyle(.captionStrong)
+                                .foregroundStyle(ScarfColor.foregroundPrimary)
                             Text("\(platform.sessions) sessions")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .scarfStyle(.caption)
+                                .foregroundStyle(ScarfColor.foregroundMuted)
                             Text("\(platform.messages) msgs")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .scarfStyle(.caption)
+                                .foregroundStyle(ScarfColor.foregroundMuted)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(12)
-                        .background(.quaternary.opacity(0.5))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .padding(ScarfSpace.s3)
+                        .background(
+                            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                                .fill(ScarfColor.backgroundSecondary)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                                .strokeBorder(ScarfColor.border, lineWidth: 1)
+                        )
                     }
                 }
             }
@@ -142,99 +191,115 @@ struct InsightsView: View {
     // MARK: - Tools
 
     private var toolsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Top Tools")
-                .font(.headline)
-            if viewModel.toolUsage.isEmpty {
-                Text("No data")
-                    .foregroundStyle(.secondary)
-            } else {
-                let maxCount = viewModel.toolUsage.first?.count ?? 1
-                ForEach(viewModel.toolUsage.prefix(15)) { tool in
-                    HStack(spacing: 10) {
-                        Text(tool.name)
-                            .font(.system(.caption, design: .monospaced))
-                            .frame(width: 140, alignment: .trailing)
-                        GeometryReader { geo in
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(barColor(for: tool.name))
-                                .frame(width: max(4, geo.size.width * Double(tool.count) / Double(maxCount)))
+        sectionHeader("Top Tools") {
+            cardWrapper {
+                if viewModel.toolUsage.isEmpty {
+                    emptyRow("No tool calls yet")
+                } else {
+                    let maxCount = viewModel.toolUsage.first?.count ?? 1
+                    VStack(spacing: 0) {
+                        ForEach(Array(viewModel.toolUsage.prefix(15).enumerated()), id: \.element.id) { idx, tool in
+                            toolBarRow(tool, maxCount: maxCount)
+                            if idx < min(viewModel.toolUsage.count, 15) - 1 {
+                                Rectangle().fill(ScarfColor.border).frame(height: 1)
+                            }
                         }
-                        .frame(height: 16)
-                        Text("\(tool.count)")
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 40, alignment: .trailing)
-                        Text((tool.percentage / 100).formatted(.percent.precision(.fractionLength(1))))
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 50, alignment: .trailing)
                     }
-                    .frame(height: 20)
                 }
             }
         }
     }
 
+    private func toolBarRow(_ tool: ToolUsage, maxCount: Int) -> some View {
+        HStack(spacing: ScarfSpace.s2) {
+            Text(tool.name)
+                .font(ScarfFont.monoSmall)
+                .foregroundStyle(ScarfColor.foregroundPrimary)
+                .frame(width: 140, alignment: .trailing)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(ScarfColor.backgroundTertiary)
+                        .frame(height: 6)
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(barColor(for: tool.name))
+                        .frame(width: max(4, geo.size.width * Double(tool.count) / Double(maxCount)), height: 6)
+                }
+            }
+            .frame(height: 6)
+            Text("\(tool.count)")
+                .font(ScarfFont.monoSmall)
+                .foregroundStyle(ScarfColor.foregroundMuted)
+                .frame(width: 50, alignment: .trailing)
+            Text((tool.percentage / 100).formatted(.percent.precision(.fractionLength(1))))
+                .scarfStyle(.caption)
+                .foregroundStyle(ScarfColor.foregroundFaint)
+                .frame(width: 50, alignment: .trailing)
+        }
+        .padding(.horizontal, ScarfSpace.s3)
+        .padding(.vertical, 8)
+    }
+
     // MARK: - Activity Patterns
 
     private var activitySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Activity Patterns")
-                .font(.headline)
-            HStack(alignment: .top, spacing: 24) {
-                dayOfWeekChart
-                hourlyChart
+        sectionHeader("Activity Patterns") {
+            HStack(alignment: .top, spacing: ScarfSpace.s5) {
+                cardWrapper { dayOfWeekChart.padding(ScarfSpace.s3) }
+                cardWrapper { hourlyChart.padding(ScarfSpace.s3) }
             }
         }
     }
 
     private var dayOfWeekChart: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: ScarfSpace.s2) {
             Text("By Day")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
+                .scarfStyle(.captionUppercase)
+                .foregroundStyle(ScarfColor.foregroundMuted)
             let dayNames = Calendar.current.shortWeekdaySymbols
             let maxVal = max(1, viewModel.dailyActivity.values.max() ?? 1)
             ForEach(0..<7, id: \.self) { day in
                 let count = viewModel.dailyActivity[day] ?? 0
                 HStack(spacing: 6) {
                     Text(verbatim: dayNames[(day + 1) % 7])
-                        .font(.caption.monospaced())
+                        .font(ScarfFont.monoSmall)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                         .frame(width: 30, alignment: .trailing)
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.accentColor.opacity(0.7))
+                        .fill(ScarfColor.accent.opacity(0.85))
                         .frame(width: max(0, CGFloat(count) / CGFloat(maxVal) * 120), height: 14)
                     if count > 0 {
                         Text("\(count)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .font(ScarfFont.caption2)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
                     }
+                    Spacer(minLength: 0)
                 }
             }
         }
     }
 
     private var hourlyChart: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: ScarfSpace.s2) {
             Text("By Hour")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
+                .scarfStyle(.captionUppercase)
+                .foregroundStyle(ScarfColor.foregroundMuted)
             let maxVal = max(1, viewModel.hourlyActivity.values.max() ?? 1)
             HStack(alignment: .bottom, spacing: 2) {
                 ForEach(0..<24, id: \.self) { hour in
                     let count = viewModel.hourlyActivity[hour] ?? 0
                     VStack(spacing: 2) {
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(count > 0 ? Color.accentColor.opacity(0.7) : Color.secondary.opacity(0.15))
+                            .fill(count > 0 ? ScarfColor.accent.opacity(0.85) : ScarfColor.backgroundTertiary)
                             .frame(width: 12, height: max(4, CGFloat(count) / CGFloat(maxVal) * 80))
                         if hour % 6 == 0 {
                             Text("\(hour)")
                                 .font(.system(size: 8))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(ScarfColor.foregroundFaint)
                         } else {
-                            Text("")
-                                .font(.system(size: 8))
+                            Text(" ").font(.system(size: 8))
                         }
                     }
                 }
@@ -245,41 +310,86 @@ struct InsightsView: View {
     // MARK: - Notable Sessions
 
     private var notableSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Notable Sessions")
-                .font(.headline)
-            if viewModel.notableSessions.isEmpty {
-                Text("No data")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(viewModel.notableSessions) { notable in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(notable.label)
-                                .font(.caption.bold())
-                                .foregroundStyle(.secondary)
-                            Text(notable.preview)
-                                .lineLimit(1)
+        sectionHeader("Notable Sessions") {
+            cardWrapper {
+                if viewModel.notableSessions.isEmpty {
+                    emptyRow("No notable sessions yet")
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(viewModel.notableSessions.enumerated()), id: \.element.id) { idx, notable in
+                            HStack(spacing: ScarfSpace.s3) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(notable.label)
+                                        .scarfStyle(.captionUppercase)
+                                        .foregroundStyle(ScarfColor.foregroundMuted)
+                                    Text(notable.preview)
+                                        .scarfStyle(.body)
+                                        .foregroundStyle(ScarfColor.foregroundPrimary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                Text(notable.value)
+                                    .font(ScarfFont.body.monospacedDigit())
+                                    .foregroundStyle(ScarfColor.foregroundPrimary)
+                                Button {
+                                    coordinator.selectedSessionId = notable.session.id
+                                    coordinator.selectedSection = .sessions
+                                } label: {
+                                    Image(systemName: "arrow.right.circle")
+                                        .font(.system(size: 16))
+                                        .foregroundStyle(ScarfColor.accent)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Open session")
+                            }
+                            .padding(.horizontal, ScarfSpace.s3)
+                            .padding(.vertical, 10)
+                            if idx < viewModel.notableSessions.count - 1 {
+                                Rectangle().fill(ScarfColor.border).frame(height: 1)
+                            }
                         }
-                        Spacer()
-                        Text(notable.value)
-                            .font(.system(.body, design: .monospaced, weight: .semibold))
-                        Button {
-                            coordinator.selectedSessionId = notable.session.id
-                            coordinator.selectedSection = .sessions
-                        } label: {
-                            Image(systemName: "arrow.right.circle")
-                                .foregroundStyle(Color.accentColor)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Open session")
                     }
-                    .padding(10)
-                    .background(.quaternary.opacity(0.5))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
             }
         }
+    }
+
+    // MARK: - Section primitives
+
+    @ViewBuilder
+    private func sectionHeader<Content: View>(
+        _ title: String,
+        spacing: CGFloat = ScarfSpace.s2,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: spacing) {
+            Text(title)
+                .scarfStyle(.bodyEmph)
+                .foregroundStyle(ScarfColor.foregroundPrimary)
+            content()
+        }
+    }
+
+    @ViewBuilder
+    private func cardWrapper<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(
+                RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                    .fill(ScarfColor.backgroundSecondary)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                    .strokeBorder(ScarfColor.border, lineWidth: 1)
+            )
+    }
+
+    private func emptyRow(_ text: String) -> some View {
+        Text(text)
+            .scarfStyle(.body)
+            .foregroundStyle(ScarfColor.foregroundMuted)
+            .frame(maxWidth: .infinity)
+            .padding(ScarfSpace.s5)
     }
 
     // MARK: - Helpers
@@ -290,14 +400,13 @@ struct InsightsView: View {
 
     private func barColor(for toolName: String) -> Color {
         switch toolName {
-        case "terminal", "execute_code": return .orange
-        case "read_file", "search_files": return .green
-        case "write_file", "patch": return .blue
-        case "web_search", "web_extract": return .purple
-        case _ where toolName.hasPrefix("browser"): return .indigo
-        case "memory": return .pink
-        case "vision", "image_gen": return .mint
-        default: return Color.accentColor
+        case "terminal", "execute_code": return ScarfColor.warning
+        case "read_file", "search_files": return ScarfColor.success
+        case "write_file", "patch": return ScarfColor.info
+        case "web_search", "web_extract": return ScarfColor.Tool.web
+        case _ where toolName.hasPrefix("browser"): return ScarfColor.Tool.search
+        case "memory": return ScarfColor.Tool.think
+        default: return ScarfColor.accent
         }
     }
 }
@@ -305,18 +414,34 @@ struct InsightsView: View {
 struct InsightCard: View {
     let label: String
     let value: String
+    let accent: Bool
+
+    init(label: String, value: String, accent: Bool = false) {
+        self.label = label
+        self.value = value
+        self.accent = accent
+    }
 
     var body: some View {
-        VStack(spacing: 4) {
-            Text(value)
-                .font(.system(.title3, design: .monospaced, weight: .semibold))
+        VStack(alignment: .leading, spacing: 4) {
             Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .scarfStyle(.captionUppercase)
+                .foregroundStyle(ScarfColor.foregroundMuted)
+            Text(value)
+                .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                .foregroundStyle(accent ? ScarfColor.accent : ScarfColor.foregroundPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
-        .frame(maxWidth: .infinity)
-        .padding(10)
-        .background(.quaternary.opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(ScarfSpace.s3)
+        .background(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .fill(ScarfColor.backgroundSecondary)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .strokeBorder(ScarfColor.border, lineWidth: 1)
+        )
     }
 }

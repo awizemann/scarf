@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct RichChatInputBar: View {
     let onSend: (String) -> Void
@@ -35,15 +36,16 @@ struct RichChatInputBar: View {
                 .padding(.top, 8)
             }
 
-            HStack(alignment: .bottom, spacing: 8) {
+            HStack(alignment: .bottom, spacing: ScarfSpace.s2) {
                 if showCompressButton {
                     Button {
                         compressFocus = ""
                         showCompressSheet = true
                     } label: {
                         Image(systemName: "rectangle.compress.vertical")
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 16))
+                            .foregroundStyle(ScarfColor.foregroundMuted)
+                            .padding(6)
                     }
                     .buttonStyle(.plain)
                     .disabled(!isEnabled)
@@ -51,21 +53,28 @@ struct RichChatInputBar: View {
                 }
 
                 TextEditor(text: $text)
-                    .font(.body)
+                    .font(ScarfFont.body)
                     .scrollContentBackground(.hidden)
                     .focused($isFocused)
                     .frame(minHeight: 28, maxHeight: 120)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.quaternary.opacity(0.5))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: ScarfRadius.xl, style: .continuous)
+                            .fill(ScarfColor.backgroundSecondary)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: ScarfRadius.xl, style: .continuous)
+                                    .strokeBorder(showMenu ? ScarfColor.accent : ScarfColor.borderStrong, lineWidth: 1)
+                            )
+                    )
                     .overlay(alignment: .topLeading) {
                         if text.isEmpty {
-                            Text("Message Hermes...")
-                                .foregroundStyle(.tertiary)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
+                            Text("Message Hermes…  /  for commands")
+                                .scarfStyle(.body)
+                                .foregroundStyle(ScarfColor.foregroundFaint)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
                                 .allowsHitTesting(false)
                         }
                     }
@@ -107,18 +116,27 @@ struct RichChatInputBar: View {
                 Button {
                     send()
                 } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(canSend ? Color.accentColor : .secondary)
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(canSend ? ScarfColor.onAccent : ScarfColor.foregroundFaint)
+                        .frame(width: 30, height: 30)
+                        .background(
+                            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                                .fill(canSend ? ScarfColor.accent : ScarfColor.backgroundSecondary)
+                        )
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSend)
                 .help("Send message (Enter)")
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, ScarfSpace.s3)
+            .padding(.vertical, ScarfSpace.s2)
         }
-        .background(.bar)
+        .background(ScarfColor.backgroundSecondary)
+        .overlay(
+            Rectangle().fill(ScarfColor.border).frame(height: 1),
+            alignment: .top
+        )
         .onChange(of: text) { _, _ in
             updateMenuState()
         }
@@ -131,28 +149,30 @@ struct RichChatInputBar: View {
     }
 
     private var compressSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: ScarfSpace.s3) {
             Text("Compress Conversation")
-                .font(.headline)
+                .scarfStyle(.headline)
+                .foregroundStyle(ScarfColor.foregroundPrimary)
             Text("Optionally focus the summary on a specific topic. Leave blank to compress evenly.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            TextField("Focus topic (optional)", text: $compressFocus)
-                .textFieldStyle(.roundedBorder)
+                .scarfStyle(.caption)
+                .foregroundStyle(ScarfColor.foregroundMuted)
+            ScarfTextField("Focus topic (optional)", text: $compressFocus)
             HStack {
                 Spacer()
                 Button("Cancel") { showCompressSheet = false }
+                    .buttonStyle(ScarfGhostButton())
                 Button("Compress") {
                     let focus = compressFocus.trimmingCharacters(in: .whitespacesAndNewlines)
                     let command = focus.isEmpty ? "/compress" : "/compress \(focus)"
                     onSend(command)
                     showCompressSheet = false
                 }
+                .buttonStyle(ScarfPrimaryButton())
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(20)
-        .frame(width: 360)
+        .padding(ScarfSpace.s5)
+        .frame(width: 380)
     }
 
     private var canSend: Bool {

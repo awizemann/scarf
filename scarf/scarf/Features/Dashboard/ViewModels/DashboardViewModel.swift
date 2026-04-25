@@ -17,6 +17,10 @@ final class DashboardViewModel {
     var stats = HermesDataService.SessionStats.empty
     var recentSessions: [HermesSession] = []
     var sessionPreviews: [String: String] = [:]
+    /// Last few tool calls across all sessions, flattened to
+    /// `ActivityEntry` rows for the Dashboard's "Recent activity" card.
+    /// Same data source as ActivityView, just a smaller slice.
+    var recentActivity: [ActivityEntry] = []
     var config = HermesConfig.empty
     var gatewayState: GatewayState?
     var hermesRunning = false
@@ -39,6 +43,23 @@ final class DashboardViewModel {
             stats = await dataService.fetchStats()
             recentSessions = await dataService.fetchSessions(limit: 5)
             sessionPreviews = await dataService.fetchSessionPreviews(limit: 5)
+            let activityMessages = await dataService.fetchRecentToolCalls(limit: 8)
+            recentActivity = activityMessages.flatMap { msg in
+                msg.toolCalls.map { call in
+                    ActivityEntry(
+                        id: call.callId,
+                        sessionId: msg.sessionId,
+                        toolName: call.functionName,
+                        kind: call.toolKind,
+                        summary: call.argumentsSummary,
+                        arguments: call.arguments,
+                        messageContent: msg.content,
+                        timestamp: msg.timestamp
+                    )
+                }
+            }
+            .prefix(6)
+            .map { $0 }
             await dataService.close()
         } else if let msg = await dataService.lastOpenError {
             collectedErrors.append(msg)

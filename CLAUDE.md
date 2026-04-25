@@ -22,6 +22,18 @@ scarf/scarf/           Xcode project root (PBXFileSystemSynchronizedRootGroup �
 - **Sandbox disabled**: App reads `~/.hermes/` directly.
 - **Swift 6 concurrency**: `@MainActor` default. Services use `nonisolated` + async/await.
 
+## Design System (ScarfDesign)
+
+All app UI uses the typed token bundle in [scarf/Packages/ScarfDesign/](scarf/Packages/ScarfDesign/) — both the `scarf` and `scarf mobile` targets `import ScarfDesign`. Reach for these tokens before inventing new colors, fonts, or spacings.
+
+- **Colors**: `ScarfColor.accent`, `.foregroundPrimary/Muted/Faint`, `.backgroundPrimary/Secondary/Tertiary`, `.border/.borderStrong`, `.success/.danger/.warning/.info`, `.Tool.bash/edit/search/web/think`. All resolve from `ScarfBrand.xcassets` and adapt light/dark automatically.
+- **Typography**: `.scarfStyle(.title2)`, `.scarfStyle(.body)`, `.scarfStyle(.captionUppercase)`, etc. Use these instead of `.font(.system(...))`. Eleven preset styles cover the type scale.
+- **Spacing / radius / shadow**: `ScarfSpace.s1...s10` (4/8/12/16/20/24/32/40), `ScarfRadius.sm/md/lg/xl/xxl/pill`, `.scarfShadow(.sm/.md/.lg/.xl)`. Hardcoded `.padding(12)` or `cornerRadius: 8` is a code smell — convert.
+- **Components**: `ScarfPageHeader("Title", subtitle: "...") { trailing }`, `ScarfCard { ... }`, `ScarfBadge("text", kind: .success)`, `ScarfTextField`, `ScarfSectionHeader`, `ScarfDivider`, `ScarfPrimaryButton/SecondaryButton/GhostButton/DestructiveButton` (apply with `.buttonStyle(...)`).
+- **App icon + accent**: `Assets.xcassets/AppIcon.appiconset/` is the rust set; `Assets.xcassets/AccentColor.colorset` resolves `Color.accentColor` to rust so any unmigrated SwiftUI control still tints correctly.
+- **Reference**: full screen mockups live at `design/static-site/ui-kit/*.jsx` (open `design/static-site/index.html` in a browser). The `ScarfChatView.ChatRootView` reference component in the package is a 3-pane chat redesign target — usable for previews but not yet swapped into the live chat (the existing `RichChatView` machinery still owns the real ACP pipeline).
+- **Don't**: introduce purple/violet tones (we shifted to rust); use yellow `#F0AD4E` for success (that's `.warning` — `.success` is green); bypass the type scale with `.font(.system(size: 13.5))`; ship terminal/syntax-highlight palettes through ScarfColor (those are content semantics, keep them inline).
+
 ## Key Paths
 
 - Hermes home: `~/.hermes/`

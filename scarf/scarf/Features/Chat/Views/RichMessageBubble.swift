@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct RichMessageBubble: View {
     let message: HermesMessage
@@ -23,21 +24,37 @@ struct RichMessageBubble: View {
     // MARK: - User Bubble
 
     private var userBubble: some View {
-        VStack(alignment: .trailing, spacing: 2) {
+        VStack(alignment: .trailing, spacing: 4) {
             HStack {
                 Spacer(minLength: 80)
                 Text(message.content)
+                    .scarfStyle(.body)
+                    .foregroundStyle(ScarfColor.onAccent)
                     .textSelection(.enabled)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.accentColor.opacity(0.15))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        UnevenRoundedRectangle(
+                            cornerRadii: .init(
+                                topLeading: 14,
+                                bottomLeading: 14,
+                                bottomTrailing: 4,
+                                topTrailing: 14
+                            )
+                        )
+                        .fill(ScarfColor.accent)
+                    )
             }
             if let time = message.timestamp {
-                Text(time, style: .time)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .padding(.trailing, 4)
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(ScarfColor.success)
+                    Text(time, style: .time)
+                        .font(ScarfFont.caption2)
+                        .foregroundStyle(ScarfColor.foregroundFaint)
+                }
+                .padding(.trailing, 4)
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -46,30 +63,43 @@ struct RichMessageBubble: View {
     // MARK: - Assistant Bubble
 
     private var assistantBubble: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .top, spacing: 10) {
+            // Avatar — rust gradient sparkles, matches ScarfChatView's pattern.
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(ScarfGradient.brand)
+                .frame(width: 26, height: 26)
+                .overlay(
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(.white)
+                        .font(.system(size: 12, weight: .semibold))
+                )
+                .scarfShadow(.sm)
+
+            VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: ScarfSpace.s2) {
                     if message.hasReasoning {
                         reasoningSection
                     }
-
                     if !message.content.isEmpty {
                         contentView
                     }
-
                     if !message.toolCalls.isEmpty {
                         toolCallsSection
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.secondary.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                Spacer(minLength: 40)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: ScarfRadius.xl, style: .continuous)
+                        .fill(ScarfColor.backgroundSecondary)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: ScarfRadius.xl, style: .continuous)
+                        .strokeBorder(ScarfColor.border, lineWidth: 1)
+                )
+                metadataFooter
             }
-
-            metadataFooter
+            Spacer(minLength: 40)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -95,25 +125,35 @@ struct RichMessageBubble: View {
 
     private var reasoningSection: some View {
         DisclosureGroup {
-            // v2.5: prefer the v0.11 `reasoning_content` column (newer,
-            // typically richer); fall back to the legacy `reasoning`
-            // blob when only it's populated.
             Text(message.preferredReasoning ?? "")
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
+                .font(ScarfFont.monoSmall)
+                .foregroundStyle(ScarfColor.foregroundMuted)
+                .italic()
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 6)
         } label: {
-            HStack(spacing: 4) {
-                Text("Reasoning")
+            HStack(spacing: 5) {
+                Image(systemName: "brain")
+                    .font(.system(size: 11))
+                Text("REASONING")
+                    .scarfStyle(.captionStrong)
+                    .tracking(0.5)
                 if let tokens = message.tokenCount, tokens > 0 {
-                    Text("(\(tokens) tokens)")
-                        .foregroundStyle(.tertiary)
+                    Text("· \(tokens) tok")
+                        .font(ScarfFont.monoSmall)
+                        .foregroundStyle(ScarfColor.foregroundFaint)
                 }
             }
         }
-        .font(.caption.bold())
-        .foregroundStyle(.orange)
+        .foregroundStyle(ScarfColor.warning)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 7).fill(ScarfColor.warning.opacity(0.10))
+                .overlay(RoundedRectangle(cornerRadius: 7)
+                    .strokeBorder(ScarfColor.warning.opacity(0.30), lineWidth: 1))
+        )
     }
 
     // MARK: - Tool Calls
@@ -134,21 +174,27 @@ struct RichMessageBubble: View {
     private var metadataFooter: some View {
         HStack(spacing: 8) {
             if let tokens = message.tokenCount, tokens > 0 {
-                Text("\(tokens) tokens")
+                Text("\(tokens) tok")
+                    .font(ScarfFont.monoSmall)
             }
             if let reason = message.finishReason, !reason.isEmpty {
+                Text("·")
                 Text(reason)
+                    .scarfStyle(.caption)
             }
             if let time = message.timestamp {
+                Text("·")
                 Text(time, style: .time)
+                    .scarfStyle(.caption)
             }
             if let seconds = turnDuration {
+                Text("·")
                 Text(RichChatViewModel.formatTurnDuration(seconds))
+                    .font(ScarfFont.monoSmall)
                     .help("Wall-clock duration of this turn")
             }
         }
-        .font(.caption2)
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(ScarfColor.foregroundFaint)
         .padding(.leading, 4)
     }
 }

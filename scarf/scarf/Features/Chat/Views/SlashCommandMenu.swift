@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Floating menu of available slash commands shown above the chat input when
 /// the user types `/` as the first character. Purely presentational — the
@@ -25,24 +26,24 @@ struct SlashCommandMenu: View {
         if !agentHasCommands {
             VStack(alignment: .leading, spacing: 4) {
                 Text("No commands available")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .scarfStyle(.callout)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
                 Text("The agent hasn't advertised any slash commands yet. Keep typing to send as a message, or press Esc.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.foregroundFaint)
             }
-            .padding(12)
+            .padding(ScarfSpace.s3)
             .frame(minWidth: 360, alignment: .leading)
         } else if commands.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 Text("No matching commands")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .scarfStyle(.callout)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
                 Text("Keep typing to send as a message, or press Esc.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.foregroundFaint)
             }
-            .padding(12)
+            .padding(ScarfSpace.s3)
             .frame(minWidth: 360, alignment: .leading)
         } else {
             ScrollViewReader { proxy in
@@ -82,34 +83,35 @@ private struct SlashCommandRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text("/\(command.name)")
-                        .font(.system(.body, design: .monospaced))
+                        .font(ScarfFont.mono)
                         .fontWeight(.semibold)
+                        .foregroundStyle(isSelected ? ScarfColor.accentActive : ScarfColor.foregroundPrimary)
                     if let hint = command.argumentHint {
                         Text("<\(hint)>")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.tertiary)
+                            .font(ScarfFont.monoSmall)
+                            .foregroundStyle(ScarfColor.foregroundFaint)
                     }
                     if command.source == .quickCommand {
                         Text("user")
-                            .font(.caption2)
+                            .font(ScarfFont.caption2)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 1)
-                            .background(.quaternary.opacity(0.8))
+                            .background(ScarfColor.backgroundTertiary)
                             .clipShape(Capsule())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
                     }
                 }
                 if !command.description.isEmpty {
                     Text(command.description)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                         .lineLimit(2)
                 }
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
+        .padding(.horizontal, ScarfSpace.s3)
+        .padding(.vertical, ScarfSpace.s2)
+        .background(isSelected ? ScarfColor.accentTint : Color.clear)
     }
 }

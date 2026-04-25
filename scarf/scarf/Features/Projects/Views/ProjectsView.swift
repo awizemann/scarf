@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 import UniformTypeIdentifiers
 
 private enum DashboardTab: String, CaseIterable {
@@ -433,9 +434,9 @@ struct ProjectsView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(selectedTab == tab ? Color.accentColor.opacity(0.15) : Color.clear)
-                    .foregroundStyle(selectedTab == tab ? .primary : .secondary)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .background(selectedTab == tab ? ScarfColor.accentTint : Color.clear)
+                    .foregroundStyle(selectedTab == tab ? ScarfColor.accentActive : ScarfColor.foregroundMuted)
+                    .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md))
                 }
                 .buttonStyle(.plain)
             }

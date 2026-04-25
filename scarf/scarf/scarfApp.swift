@@ -60,6 +60,7 @@ struct ScarfApp: App {
             if let ctx = registry.context(for: serverID) {
                 ContextBoundRoot(context: ctx)
                     .environment(registry)
+                    .environment(liveRegistry)
                     .environment(\.serverContext, ctx)
                     .environment(updater)
                     // Sync the live-status set whenever a window appears —

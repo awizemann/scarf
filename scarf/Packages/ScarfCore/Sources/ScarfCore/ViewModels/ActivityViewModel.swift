@@ -96,6 +96,26 @@ public struct ActivityEntry: Identifiable, Sendable {
     public let messageContent: String
     public let timestamp: Date?
 
+    public init(
+        id: String,
+        sessionId: String,
+        toolName: String,
+        kind: ToolKind,
+        summary: String,
+        arguments: String,
+        messageContent: String,
+        timestamp: Date?
+    ) {
+        self.id = id
+        self.sessionId = sessionId
+        self.toolName = toolName
+        self.kind = kind
+        self.summary = summary
+        self.arguments = arguments
+        self.messageContent = messageContent
+        self.timestamp = timestamp
+    }
+
     public var prettyArguments: String {
         guard let data = arguments.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data, options: []),

@@ -1,0 +1,44 @@
+/* Shared styling for design-system preview cards.
+   Each card is sized for ~700px wide and renders one focused concept. */
+@import url('../colors_and_type.css');
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+}
+
+.card-root {
+  padding: 20px 24px;
+  min-height: 110px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.col { display: flex; flex-direction: column; gap: 8px; }
+.label { font-size: 11px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+.mono { font-family: var(--font-mono); font-size: 11px; color: var(--fg-muted); }
+
+/* swatches */
+.swatch {
+  width: 92px;
+  height: 64px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 6px 8px;
+  position: relative;
+  overflow: hidden;
+}
+.swatch .name { font-size: 10px; font-weight: 600; }
+.swatch .hex  { font-family: var(--font-mono); font-size: 10px; opacity: 0.85; }
+.swatch.dark-text { color: var(--gray-900); }
+.swatch.light-text { color: #fff; }

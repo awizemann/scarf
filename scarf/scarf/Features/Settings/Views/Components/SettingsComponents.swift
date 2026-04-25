@@ -1,9 +1,10 @@
 import SwiftUI
 import AppKit
+import ScarfDesign
 
-/// Shared form-row components used across the Settings tabs. Extracting these keeps
-/// individual tab views small and avoids triggering SwiftUI's type-checker timeout
-/// on large view bodies (per project guidance in CLAUDE.md).
+/// Shared form-row components used across the Settings tabs. Tokens come
+/// from ScarfDesign so light/dark resolves automatically and the rust
+/// accent flows through any controls that reach for `Color.accentColor`.
 
 struct SettingsSection<Content: View>: View {
     let title: LocalizedStringKey
@@ -11,14 +12,52 @@ struct SettingsSection<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: icon)
-                .font(.headline)
+        VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 13))
+                    .foregroundStyle(ScarfColor.accent)
+                Text(title)
+                    .scarfStyle(.bodyEmph)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
+            }
             VStack(spacing: 1) {
                 content
             }
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .background(
+                RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                    .fill(ScarfColor.backgroundSecondary)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                    .strokeBorder(ScarfColor.border, lineWidth: 1)
+            )
         }
+    }
+}
+
+private let settingsRowLabelWidth: CGFloat = 160
+
+private struct SettingsRowChrome: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, ScarfSpace.s3)
+            .padding(.vertical, 6)
+            .background(ScarfColor.backgroundTertiary.opacity(0.5))
+    }
+}
+
+private extension View {
+    func settingsRowChrome() -> some View { modifier(SettingsRowChrome()) }
+}
+
+private struct SettingsRowLabel: View {
+    let label: String
+    var body: some View {
+        Text(label)
+            .scarfStyle(.caption)
+            .foregroundStyle(ScarfColor.foregroundMuted)
+            .frame(width: settingsRowLabelWidth, alignment: .trailing)
     }
 }
 
@@ -31,23 +70,20 @@ struct EditableTextField: View {
 
     var body: some View {
         HStack {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 160, alignment: .trailing)
+            SettingsRowLabel(label: label)
             if isEditing {
                 TextField(label, text: $text, onCommit: {
                     if text != value { onCommit(text) }
                     isEditing = false
                 })
                 .textFieldStyle(.roundedBorder)
-                .font(.system(.caption, design: .monospaced))
+                .font(ScarfFont.monoSmall)
                 Button("Cancel") { isEditing = false }
                     .controlSize(.mini)
             } else {
                 Text(value.isEmpty ? "—" : value)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(value.isEmpty ? .secondary : .primary)
+                    .font(ScarfFont.monoSmall)
+                    .foregroundStyle(value.isEmpty ? ScarfColor.foregroundFaint : ScarfColor.foregroundPrimary)
                 Spacer()
                 Button("Edit") {
                     text = value
@@ -56,9 +92,7 @@ struct EditableTextField: View {
                 .controlSize(.mini)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.3))
+        .settingsRowChrome()
     }
 }
 
@@ -73,10 +107,7 @@ struct SecretTextField: View {
 
     var body: some View {
         HStack {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 160, alignment: .trailing)
+            SettingsRowLabel(label: label)
             if isEditing {
                 TextField(label, text: $text, onCommit: {
                     if text != value { onCommit(text) }
@@ -84,7 +115,7 @@ struct SecretTextField: View {
                     isRevealed = false
                 })
                 .textFieldStyle(.roundedBorder)
-                .font(.system(.caption, design: .monospaced))
+                .font(ScarfFont.monoSmall)
                 Button("Cancel") {
                     isEditing = false
                     isRevealed = false
@@ -92,8 +123,8 @@ struct SecretTextField: View {
                 .controlSize(.mini)
             } else {
                 Text(displayValue)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(value.isEmpty ? .secondary : .primary)
+                    .font(ScarfFont.monoSmall)
+                    .foregroundStyle(value.isEmpty ? ScarfColor.foregroundFaint : ScarfColor.foregroundPrimary)
                 Spacer()
                 if !value.isEmpty {
                     Button(isRevealed ? "Hide" : "Reveal") { isRevealed.toggle() }
@@ -106,9 +137,7 @@ struct SecretTextField: View {
                 .controlSize(.mini)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.3))
+        .settingsRowChrome()
     }
 
     private var displayValue: String {
@@ -127,10 +156,7 @@ struct PickerRow: View {
 
     var body: some View {
         HStack {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 160, alignment: .trailing)
+            SettingsRowLabel(label: label)
             Picker("", selection: Binding(
                 get: { selection },
                 set: { onChange($0) }
@@ -142,9 +168,7 @@ struct PickerRow: View {
             .frame(maxWidth: 250)
             Spacer()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.3))
+        .settingsRowChrome()
     }
 }
 
@@ -155,21 +179,17 @@ struct ToggleRow: View {
 
     var body: some View {
         HStack {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 160, alignment: .trailing)
+            SettingsRowLabel(label: label)
             Toggle("", isOn: Binding(
                 get: { isOn },
                 set: { onChange($0) }
             ))
             .toggleStyle(.switch)
             .labelsHidden()
+            .tint(ScarfColor.accent)
             Spacer()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.3))
+        .settingsRowChrome()
     }
 }
 
@@ -190,12 +210,9 @@ struct StepperRow: View {
 
     var body: some View {
         HStack {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 160, alignment: .trailing)
+            SettingsRowLabel(label: label)
             Text("\(value)")
-                .font(.system(.caption, design: .monospaced))
+                .font(ScarfFont.monoSmall)
                 .frame(width: 70, alignment: .leading)
             Stepper("", value: Binding(
                 get: { value },
@@ -204,9 +221,7 @@ struct StepperRow: View {
             .labelsHidden()
             Spacer()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.3))
+        .settingsRowChrome()
     }
 }
 
@@ -220,12 +235,9 @@ struct DoubleStepperRow: View {
 
     var body: some View {
         HStack {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 160, alignment: .trailing)
+            SettingsRowLabel(label: label)
             Text(value.formatted(.number.precision(.fractionLength(2))))
-                .font(.system(.caption, design: .monospaced))
+                .font(ScarfFont.monoSmall)
                 .frame(width: 70, alignment: .leading)
             Stepper("", value: Binding(
                 get: { value },
@@ -234,9 +246,7 @@ struct DoubleStepperRow: View {
             .labelsHidden()
             Spacer()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.3))
+        .settingsRowChrome()
     }
 }
 
@@ -246,19 +256,14 @@ struct ReadOnlyRow: View {
 
     var body: some View {
         HStack {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 160, alignment: .trailing)
+            SettingsRowLabel(label: label)
             Text(value.isEmpty ? "—" : value)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(value.isEmpty ? .secondary : .primary)
+                .font(ScarfFont.monoSmall)
+                .foregroundStyle(value.isEmpty ? ScarfColor.foregroundFaint : ScarfColor.foregroundPrimary)
                 .textSelection(.enabled)
             Spacer()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.3))
+        .settingsRowChrome()
     }
 }
 
@@ -268,24 +273,21 @@ struct PathRow: View {
 
     var body: some View {
         HStack {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 160, alignment: .trailing)
+            SettingsRowLabel(label: label)
             Text(path)
-                .font(.system(.caption, design: .monospaced))
+                .font(ScarfFont.monoSmall)
+                .foregroundStyle(ScarfColor.foregroundPrimary)
                 .textSelection(.enabled)
             Spacer()
             Button {
                 NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
             } label: {
                 Image(systemName: "folder")
-                    .font(.caption)
+                    .font(.system(size: 12))
+                    .foregroundStyle(ScarfColor.foregroundMuted)
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.3))
+        .settingsRowChrome()
     }
 }

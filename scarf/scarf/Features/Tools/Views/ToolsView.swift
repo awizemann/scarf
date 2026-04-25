@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct ToolsView: View {
     @State private var viewModel: ToolsViewModel
@@ -11,16 +12,38 @@ struct ToolsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            pageHeader
             platformPicker
-            Divider()
             toolsList
             if !viewModel.mcpStatus.isEmpty {
                 Divider()
                 mcpSection
             }
         }
+        .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Tools")
         .task { await viewModel.load() }
+    }
+
+    private var pageHeader: some View {
+        HStack(alignment: .top, spacing: ScarfSpace.s3) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Tools")
+                    .scarfStyle(.title2)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
+                Text("Tool kits the agent can call. Toggle per platform; MCP servers extend this list.")
+                    .scarfStyle(.footnote)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, ScarfSpace.s6)
+        .padding(.top, ScarfSpace.s5)
+        .padding(.bottom, ScarfSpace.s4)
+        .overlay(
+            Rectangle().fill(ScarfColor.border).frame(height: 1),
+            alignment: .bottom
+        )
     }
 
     private var platformPicker: some View {
@@ -104,10 +127,10 @@ struct ToolsView: View {
 
     private func statusColor(_ status: PlatformConnectivity) -> Color {
         switch status {
-        case .connected: return .green
-        case .configured: return .orange
-        case .notConfigured: return .secondary.opacity(0.4)
-        case .error: return .red
+        case .connected: return ScarfColor.success
+        case .configured: return ScarfColor.warning
+        case .notConfigured: return ScarfColor.foregroundFaint
+        case .error: return ScarfColor.danger
         }
     }
 
@@ -160,16 +183,18 @@ struct ToolRow: View {
     let onToggle: () async -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: ScarfSpace.s3) {
             Text(tool.icon)
-                .font(.title3)
+                .font(.system(size: 18))
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(tool.name)
-                    .font(.system(.body, design: .monospaced, weight: .medium))
+                    .font(ScarfFont.body.monospaced())
+                    .fontWeight(.medium)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
                 Text(tool.description)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
             }
             Spacer()
             Toggle("", isOn: Binding(
@@ -178,10 +203,17 @@ struct ToolRow: View {
             ))
             .toggleStyle(.switch)
             .labelsHidden()
+            .tint(ScarfColor.accent)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.quaternary.opacity(0.3))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, ScarfSpace.s3)
+        .padding(.vertical, ScarfSpace.s2)
+        .background(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .fill(ScarfColor.backgroundSecondary)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .strokeBorder(ScarfColor.border, lineWidth: 1)
+        )
     }
 }

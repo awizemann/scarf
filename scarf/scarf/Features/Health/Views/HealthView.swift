@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct HealthView: View {
     @State private var viewModel: HealthViewModel
@@ -15,8 +16,8 @@ struct HealthView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            pageHeader
             headerBar
-            Divider()
             HStack {
                 Picker("", selection: $selectedTab) {
                     Text("Status").tag(0)
@@ -29,15 +30,15 @@ struct HealthView: View {
                     viewModel.runDump()
                     showDiagnostics = true
                 }
-                .controlSize(.small)
+                .buttonStyle(ScarfGhostButton())
                 Button("Share Debug Report…") {
                     showShareConfirm = true
                 }
-                .controlSize(.small)
+                .buttonStyle(ScarfSecondaryButton())
                 .disabled(viewModel.isSharingDebug)
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal)
+            .padding(.horizontal, ScarfSpace.s6)
+            .padding(.vertical, ScarfSpace.s2)
             if showDiagnostics && !viewModel.diagnosticsOutput.isEmpty {
                 Divider()
                 diagnosticsPanel
@@ -45,9 +46,11 @@ struct HealthView: View {
             Divider()
             ScrollView {
                 sectionGrid(selectedTab == 0 ? viewModel.statusSections : viewModel.doctorSections)
-                    .padding()
+                    .padding(.horizontal, ScarfSpace.s6)
+                    .padding(.vertical, ScarfSpace.s5)
             }
         }
+        .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Health")
         .loadingOverlay(
             viewModel.isLoading,
@@ -97,76 +100,81 @@ struct HealthView: View {
 
     // MARK: - Header
 
+    private var pageHeader: some View {
+        HStack(alignment: .top, spacing: ScarfSpace.s3) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Health")
+                    .scarfStyle(.title2)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
+                Text("Hermes process status, diagnostics, and the local web dashboard.")
+                    .scarfStyle(.footnote)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+            }
+            Spacer()
+            HStack(spacing: 12) {
+                MiniCount(count: viewModel.okCount, color: ScarfColor.success, icon: "checkmark.circle.fill")
+                MiniCount(count: viewModel.warningCount, color: ScarfColor.warning, icon: "exclamationmark.triangle.fill")
+                MiniCount(count: viewModel.issueCount, color: ScarfColor.danger, icon: "xmark.circle.fill")
+            }
+            Button("Refresh") { viewModel.load() }
+                .buttonStyle(ScarfSecondaryButton())
+        }
+        .padding(.horizontal, ScarfSpace.s6)
+        .padding(.top, ScarfSpace.s5)
+        .padding(.bottom, ScarfSpace.s4)
+        .overlay(
+            Rectangle().fill(ScarfColor.border).frame(height: 1),
+            alignment: .bottom
+        )
+    }
+
     private var headerBar: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 16) {
-                if !viewModel.version.isEmpty {
-                    Text(viewModel.version)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-
-                if viewModel.hasUpdate {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.caption2)
-                        Text(viewModel.updateInfo)
-                            .font(.caption)
-                    }
-                    .foregroundStyle(.orange)
-                }
-
-                Spacer()
-
-                HStack(spacing: 12) {
-                    MiniCount(count: viewModel.okCount, color: .green, icon: "checkmark.circle.fill")
-                    MiniCount(count: viewModel.warningCount, color: .orange, icon: "exclamationmark.triangle.fill")
-                    MiniCount(count: viewModel.issueCount, color: .red, icon: "xmark.circle.fill")
-                }
-
-                Button("Refresh") { viewModel.load() }
-                    .controlSize(.small)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-
-            Divider()
-
-            HStack(spacing: 16) {
+            HStack(spacing: ScarfSpace.s4) {
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(viewModel.hermesRunning ? .green : .red)
+                        .fill(viewModel.hermesRunning ? ScarfColor.success : ScarfColor.danger)
                         .frame(width: 8, height: 8)
                     (viewModel.hermesRunning ? Text("Hermes Running") : Text("Hermes Stopped"))
-                        .font(.caption.bold())
+                        .scarfStyle(.captionStrong)
+                        .foregroundStyle(ScarfColor.foregroundPrimary)
                     if let pid = viewModel.hermesPID {
                         Text("PID \(pid)")
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
+                            .font(ScarfFont.monoSmall)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
                     }
                 }
-
+                if !viewModel.version.isEmpty {
+                    Text(viewModel.version)
+                        .font(ScarfFont.monoSmall)
+                        .foregroundStyle(ScarfColor.foregroundFaint)
+                }
+                if viewModel.hasUpdate {
+                    Label(viewModel.updateInfo, systemImage: "arrow.triangle.2.circlepath")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.warning)
+                }
                 if let msg = viewModel.actionMessage {
                     Label(msg, systemImage: "arrow.triangle.2.circlepath")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.warning)
                 }
-
                 Spacer()
-
-                HStack(spacing: 8) {
+                HStack(spacing: ScarfSpace.s2) {
                     Button("Start") { viewModel.startHermes() }
+                        .buttonStyle(ScarfPrimaryButton())
                         .disabled(viewModel.hermesRunning)
                     Button("Stop") { viewModel.stopHermes() }
+                        .buttonStyle(ScarfSecondaryButton())
                         .disabled(!viewModel.hermesRunning)
                     Button("Restart") { viewModel.restartHermes() }
+                        .buttonStyle(ScarfGhostButton())
                         .disabled(!viewModel.hermesRunning)
                 }
-                .controlSize(.small)
+                .fixedSize(horizontal: true, vertical: false)
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-
+            .padding(.horizontal, ScarfSpace.s6)
+            .padding(.vertical, ScarfSpace.s3)
             if !viewModel.context.isRemote {
                 Divider()
                 webDashboardRow
@@ -178,42 +186,44 @@ struct HealthView: View {
     /// v0.10.x). Hidden for remote contexts — the dashboard binds 127.0.0.1
     /// and remote tunneling is deferred.
     private var webDashboardRow: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: ScarfSpace.s4) {
             HStack(spacing: 6) {
                 Image(systemName: "safari")
-                    .foregroundStyle(viewModel.dashboardStatus.running ? .green : .secondary)
-                    .font(.caption)
+                    .foregroundStyle(viewModel.dashboardStatus.running ? ScarfColor.success : ScarfColor.foregroundMuted)
+                    .font(.system(size: 12))
                 if viewModel.dashboardStatus.running {
                     Text("Web Dashboard on :\(viewModel.dashboardStatus.port)")
-                        .font(.caption.bold())
+                        .scarfStyle(.captionStrong)
+                        .foregroundStyle(ScarfColor.foregroundPrimary)
                 } else {
                     Text("Web Dashboard")
-                        .font(.caption.bold())
+                        .scarfStyle(.captionStrong)
+                        .foregroundStyle(ScarfColor.foregroundPrimary)
                     Text("not running")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                 }
             }
-
             Spacer()
-
-            HStack(spacing: 8) {
+            HStack(spacing: ScarfSpace.s2) {
                 if viewModel.dashboardStatus.running {
                     Button("Open in Browser") { viewModel.openDashboardInBrowser() }
+                        .buttonStyle(ScarfPrimaryButton())
                     Button("Stop") { viewModel.stopDashboard() }
+                        .buttonStyle(ScarfGhostButton())
                         .disabled(viewModel.dashboardStatus.busy)
                 } else {
                     Button("Launch Dashboard") { viewModel.launchDashboard() }
+                        .buttonStyle(ScarfPrimaryButton())
                         .disabled(viewModel.dashboardStatus.busy)
                 }
                 if viewModel.dashboardStatus.busy {
                     ProgressView().controlSize(.small)
                 }
             }
-            .controlSize(.small)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
+        .padding(.horizontal, ScarfSpace.s6)
+        .padding(.vertical, ScarfSpace.s3)
     }
 
     // MARK: - Grid
@@ -247,9 +257,9 @@ struct SectionCard: View {
     private var errorCount: Int { section.checks.filter { $0.status == .error }.count }
 
     private var accentColor: Color {
-        if errorCount > 0 { return .red }
-        if warnCount > 0 { return .orange }
-        return .green
+        if errorCount > 0 { return ScarfColor.danger }
+        if warnCount > 0 { return ScarfColor.warning }
+        return ScarfColor.success
     }
 
     var body: some View {
@@ -267,20 +277,20 @@ struct SectionCard: View {
                         HStack(spacing: 8) {
                             if okCount > 0 {
                                 HStack(spacing: 2) {
-                                    Circle().fill(.green).frame(width: 5, height: 5)
-                                    Text("\(okCount)").font(.caption2).foregroundStyle(.secondary)
+                                    Circle().fill(ScarfColor.success).frame(width: 5, height: 5)
+                                    Text("\(okCount)").font(ScarfFont.caption2).foregroundStyle(ScarfColor.foregroundMuted)
                                 }
                             }
                             if warnCount > 0 {
                                 HStack(spacing: 2) {
-                                    Circle().fill(.orange).frame(width: 5, height: 5)
-                                    Text("\(warnCount)").font(.caption2).foregroundStyle(.secondary)
+                                    Circle().fill(ScarfColor.warning).frame(width: 5, height: 5)
+                                    Text("\(warnCount)").font(ScarfFont.caption2).foregroundStyle(ScarfColor.foregroundMuted)
                                 }
                             }
                             if errorCount > 0 {
                                 HStack(spacing: 2) {
-                                    Circle().fill(.red).frame(width: 5, height: 5)
-                                    Text("\(errorCount)").font(.caption2).foregroundStyle(.secondary)
+                                    Circle().fill(ScarfColor.danger).frame(width: 5, height: 5)
+                                    Text("\(errorCount)").font(ScarfFont.caption2).foregroundStyle(ScarfColor.foregroundMuted)
                                 }
                             }
                         }
@@ -305,10 +315,12 @@ struct SectionCard: View {
                 .padding(12)
             }
         }
-        .background(.quaternary.opacity(0.3))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .fill(ScarfColor.backgroundSecondary)
+        )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
                 .strokeBorder(accentColor.opacity(0.3), lineWidth: 1)
         )
     }
@@ -348,9 +360,9 @@ struct CheckRow: View {
 
     private var statusColor: Color {
         switch check.status {
-        case .ok: return .green
-        case .warning: return .orange
-        case .error: return .red
+        case .ok: return ScarfColor.success
+        case .warning: return ScarfColor.warning
+        case .error: return ScarfColor.danger
         }
     }
 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct MCPServerDetailView: View {
     let server: HermesMCPServer
@@ -44,71 +45,77 @@ struct MCPServerDetailView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .top) {
+        HStack(alignment: .top, spacing: ScarfSpace.s3) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(ScarfColor.accentTint)
+                Image(systemName: server.transport == .http ? "network" : "terminal")
+                    .font(.system(size: 22))
+                    .foregroundStyle(ScarfColor.accent)
+            }
+            .frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Image(systemName: server.transport == .http ? "network" : "terminal")
-                        .foregroundStyle(.secondary)
                     Text(server.name)
-                        .font(.title2.bold())
-                    if !server.enabled {
-                        Text("Disabled")
-                            .font(.caption)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(Color.secondary.opacity(0.2))
-                            .clipShape(Capsule())
-                    }
+                        .scarfStyle(.title2)
+                        .foregroundStyle(ScarfColor.foregroundPrimary)
+                    ScarfBadge(server.enabled ? "active" : "disabled",
+                               kind: server.enabled ? .success : .neutral)
                     if server.hasOAuthToken {
-                        Label("OAuth", systemImage: "key.fill")
-                            .font(.caption)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(Color.green.opacity(0.15))
-                            .clipShape(Capsule())
+                        ScarfBadge("oauth", kind: .info)
                     }
                 }
                 Text(server.transport.displayName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .scarfStyle(.footnote)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
             }
             Spacer()
-            HStack(spacing: 8) {
+            HStack(spacing: ScarfSpace.s2) {
                 Button {
                     onTest()
                 } label: {
                     if isTesting {
                         ProgressView().controlSize(.small)
                     } else {
-                        Label("Test", systemImage: "bolt.horizontal")
+                        Image(systemName: "bolt.horizontal")
                     }
                 }
+                .buttonStyle(ScarfGhostButton())
                 .disabled(isTesting)
+                .help("Test")
+
                 Button {
                     onToggleEnabled()
                 } label: {
-                    Label(server.enabled ? "Disable" : "Enable", systemImage: server.enabled ? "pause.circle" : "play.circle")
+                    Image(systemName: server.enabled ? "pause.circle" : "play.circle")
                 }
+                .buttonStyle(ScarfSecondaryButton())
+                .help(server.enabled ? "Disable" : "Enable")
+
                 Button {
                     onEdit()
                 } label: {
                     Label("Edit", systemImage: "pencil")
                 }
-                .buttonStyle(.borderedProminent)
-                Button(role: .destructive) {
+                .buttonStyle(ScarfPrimaryButton())
+
+                Button {
                     showDeleteConfirm = true
                 } label: {
-                    Label("Remove", systemImage: "trash")
+                    Image(systemName: "trash")
                 }
+                .buttonStyle(ScarfDestructiveButton())
+                .help("Remove")
             }
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
 
     private var overview: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Connection")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
+                .scarfStyle(.captionUppercase)
+                .foregroundStyle(ScarfColor.foregroundMuted)
             switch server.transport {
             case .stdio:
                 summaryRow(label: "Command", value: server.command ?? "—")
@@ -122,10 +129,16 @@ struct MCPServerDetailView: View {
                 }
             }
         }
-        .padding(12)
+        .padding(ScarfSpace.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .fill(ScarfColor.backgroundSecondary)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .strokeBorder(ScarfColor.border, lineWidth: 1)
+        )
     }
 
     private func summaryRow(label: String, value: String) -> some View {
@@ -143,8 +156,8 @@ struct MCPServerDetailView: View {
     private var envSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Environment Variables")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
+                .scarfStyle(.captionUppercase)
+                .foregroundStyle(ScarfColor.foregroundMuted)
             if server.env.isEmpty {
                 Text("No env vars configured.")
                     .font(.caption)
@@ -162,17 +175,23 @@ struct MCPServerDetailView: View {
                 }
             }
         }
-        .padding(12)
+        .padding(ScarfSpace.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .fill(ScarfColor.backgroundSecondary)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .strokeBorder(ScarfColor.border, lineWidth: 1)
+        )
     }
 
     private var headersSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Headers")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
+                .scarfStyle(.captionUppercase)
+                .foregroundStyle(ScarfColor.foregroundMuted)
             if server.headers.isEmpty {
                 Text("No headers configured.")
                     .font(.caption)
@@ -190,39 +209,57 @@ struct MCPServerDetailView: View {
                 }
             }
         }
-        .padding(12)
+        .padding(ScarfSpace.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .fill(ScarfColor.backgroundSecondary)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .strokeBorder(ScarfColor.border, lineWidth: 1)
+        )
     }
 
     private var toolsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Tool Filters")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
+                .scarfStyle(.captionUppercase)
+                .foregroundStyle(ScarfColor.foregroundMuted)
             summaryRow(label: "Include", value: server.toolsInclude.isEmpty ? "(all)" : server.toolsInclude.joined(separator: ", "))
             summaryRow(label: "Exclude", value: server.toolsExclude.isEmpty ? "—" : server.toolsExclude.joined(separator: ", "))
             summaryRow(label: "Resources", value: server.resourcesEnabled ? "enabled" : "disabled")
             summaryRow(label: "Prompts", value: server.promptsEnabled ? "enabled" : "disabled")
         }
-        .padding(12)
+        .padding(ScarfSpace.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .fill(ScarfColor.backgroundSecondary)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .strokeBorder(ScarfColor.border, lineWidth: 1)
+        )
     }
 
     private var timeoutsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Timeouts")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
+                .scarfStyle(.captionUppercase)
+                .foregroundStyle(ScarfColor.foregroundMuted)
             summaryRow(label: "Connect", value: server.connectTimeout.map { "\($0)s" } ?? "default")
             summaryRow(label: "Call", value: server.timeout.map { "\($0)s" } ?? "default")
         }
-        .padding(12)
+        .padding(ScarfSpace.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .fill(ScarfColor.backgroundSecondary)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .strokeBorder(ScarfColor.border, lineWidth: 1)
+        )
     }
 }
