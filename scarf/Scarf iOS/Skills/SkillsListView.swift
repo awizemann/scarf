@@ -8,6 +8,7 @@ struct SkillsListView: View {
     let config: IOSServerConfig
 
     @State private var vm: IOSSkillsViewModel
+    @State private var snapshotDiff: SkillSnapshotDiff?
 
     private static let sharedContextID: ServerID = ServerID(
         uuidString: "00000000-0000-0000-0000-0000000000A1"
@@ -21,6 +22,28 @@ struct SkillsListView: View {
 
     var body: some View {
         List {
+            if let diff = snapshotDiff,
+               diff.hasChanges,
+               !diff.previousSnapshotEmpty {
+                Section {
+                    HStack(spacing: 8) {
+                        Image(systemName: "sparkles")
+                            .foregroundStyle(.tint)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(diff.label)
+                                .font(.callout)
+                        }
+                        Spacer()
+                        Button("Seen") {
+                            SkillSnapshotService(serverID: Self.sharedContextID)
+                                .markSeen(vm.categories.flatMap(\.skills))
+                            snapshotDiff = nil
+                        }
+                        .controlSize(.small)
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
             if let err = vm.lastError {
                 Section {
                     Label(err, systemImage: "exclamationmark.triangle.fill")
@@ -71,8 +94,29 @@ struct SkillsListView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }
         }
-        .refreshable { await vm.load() }
-        .task { await vm.load() }
+        .refreshable {
+            await vm.load()
+            recomputeSnapshotDiff()
+        }
+        .task {
+            await vm.load()
+            recomputeSnapshotDiff()
+        }
+    }
+
+    /// v2.5 "What's New" diff against the last-seen snapshot for this
+    /// server. First-time users get a silent prime — the pill only
+    /// renders on subsequent loads when something actually changed.
+    private func recomputeSnapshotDiff() {
+        let allSkills = vm.categories.flatMap(\.skills)
+        let svc = SkillSnapshotService(serverID: Self.sharedContextID)
+        let diff = svc.diff(against: allSkills)
+        if diff.previousSnapshotEmpty {
+            svc.markSeen(allSkills)
+            snapshotDiff = nil
+        } else {
+            snapshotDiff = diff
+        }
     }
 }
 

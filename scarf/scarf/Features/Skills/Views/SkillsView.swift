@@ -9,6 +9,10 @@ struct SkillsView: View {
     /// is in flight; populated with `.present` / `.missing(...)` /
     /// `.unknown(...)` on completion.
     @State private var designMdNpxStatus: SkillPrereqService.Status?
+    /// Diff between the current skill list and the last-seen snapshot
+    /// for the active server. Drives the v2.5 "What's New" pill at
+    /// the top of the Skills list. Nil before first compute.
+    @State private var snapshotDiff: SkillSnapshotDiff?
     @Environment(\.serverContext) private var serverContext
     @State private var currentTab: Tab = .installed
 
@@ -35,6 +39,15 @@ struct SkillsView: View {
     var body: some View {
         VStack(spacing: 0) {
             modePicker
+            // v2.5 "What's New" pill — only renders when the diff has
+            // changes against a non-empty prior snapshot (first launch
+            // is silent so users aren't drowned in "everything is
+            // new!" noise).
+            if let diff = snapshotDiff,
+               diff.hasChanges,
+               !diff.previousSnapshotEmpty {
+                whatsNewPill(diff: diff)
+            }
             Divider()
             switch currentTab {
             case .installed: installedContent
@@ -58,6 +71,53 @@ struct SkillsView: View {
                 designMdNpxStatus = await svc.probe(binary: "npx")
             }
         }
+        // Snapshot diff: recompute whenever the loaded skill list
+        // changes. First-load with no prior snapshot silently primes
+        // the snapshot — subsequent changes show the pill.
+        .onChange(of: viewModel.totalSkillCount) { _, _ in
+            recomputeSnapshotDiff()
+        }
+        .task {
+            recomputeSnapshotDiff()
+        }
+    }
+
+    /// Compute the snapshot diff against the active server's last-seen
+    /// state. On a first-ever load (empty snapshot) we silently mark
+    /// the current set as seen so the next load shows real deltas.
+    private func recomputeSnapshotDiff() {
+        let allSkills = viewModel.categories.flatMap(\.skills)
+        let svc = SkillSnapshotService(serverID: serverContext.id)
+        let diff = svc.diff(against: allSkills)
+        if diff.previousSnapshotEmpty {
+            // Silent prime — don't show the pill; just record what
+            // we've seen so future diffs are honest.
+            svc.markSeen(allSkills)
+            snapshotDiff = nil
+        } else {
+            snapshotDiff = diff
+        }
+    }
+
+    /// Tappable pill rendering "2 new, 4 updated since you last looked".
+    /// Tap → mark current set as seen + dismiss the pill.
+    private func whatsNewPill(diff: SkillSnapshotDiff) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(.tint)
+            Text(diff.label)
+                .font(.callout)
+            Spacer()
+            Button("Mark as seen") {
+                let svc = SkillSnapshotService(serverID: serverContext.id)
+                svc.markSeen(viewModel.categories.flatMap(\.skills))
+                snapshotDiff = nil
+            }
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.tint.opacity(0.1))
     }
 
     private var modePicker: some View {
