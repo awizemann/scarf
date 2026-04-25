@@ -3,6 +3,8 @@ import ScarfCore
 
 struct SkillsView: View {
     @State private var viewModel: SkillsViewModel
+    @State private var showSpotifySignIn: Bool = false
+    @Environment(\.serverContext) private var serverContext
     @State private var currentTab: Tab = .installed
 
     init(context: ServerContext) {
@@ -134,6 +136,14 @@ struct SkillsView: View {
                         .background(.orange.opacity(0.1))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
+                    // v2.5 Spotify auth affordance — only when this skill
+                    // is the spotify one. We don't probe auth.json here
+                    // (transport read is async); the button always shows
+                    // and the sheet itself handles the "already signed in?"
+                    // case (token present → succeeds immediately on retry).
+                    if skill.name.lowercased() == "spotify" {
+                        spotifyAuthRow
+                    }
                     Divider()
                     if !skill.files.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
@@ -182,10 +192,42 @@ struct SkillsView: View {
             .sheet(isPresented: $viewModel.isEditing) {
                 skillEditorSheet
             }
+            .sheet(isPresented: $showSpotifySignIn) {
+                SpotifySignInSheet(onSignedIn: {
+                    // No state to refresh in this view yet — chat picks
+                    // up the new token on next session start. Keep the
+                    // hook so a future "auth status" indicator can rebind.
+                })
+            }
         } else {
             ContentUnavailableView("Select a Skill", systemImage: "lightbulb", description: Text("Choose a skill from the list"))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// Renders the v2.5 Spotify auth row when the user has the
+    /// `spotify` skill selected. Tapping opens `SpotifySignInSheet`
+    /// which drives `hermes auth spotify` end-to-end in-app.
+    private var spotifyAuthRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "music.note")
+                .foregroundStyle(.green)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Sign in to Spotify")
+                    .font(.callout.weight(.medium))
+                Text("Authorise Hermes to control playback, search, and library actions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Sign In") { showSpotifySignIn = true }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.green.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private var skillEditorSheet: some View {

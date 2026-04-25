@@ -89,6 +89,25 @@ private struct SkillDetailView: View {
                     .textSelection(.enabled)
             }
 
+            if skill.name.lowercased() == "spotify" {
+                Section("Authentication") {
+                    Label {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Spotify needs OAuth")
+                                .font(.callout.weight(.medium))
+                            Text("Run `hermes auth spotify` from the Scarf macOS app or a shell — it opens your browser to complete the OAuth flow. Once authorised, this skill picks up the credentials from `~/.hermes/auth.json` automatically.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    } icon: {
+                        Image(systemName: "music.note")
+                            .foregroundStyle(.green)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+
             if !skill.files.isEmpty {
                 Section("Files") {
                     ForEach(skill.files, id: \.self) { file in
