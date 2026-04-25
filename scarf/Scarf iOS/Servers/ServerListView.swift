@@ -19,6 +19,26 @@ struct ServerListView: View {
     var body: some View {
         NavigationStack {
             List {
+                if let err = model.lastError {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Something went wrong", systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .font(.headline)
+                            Text(err)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            HStack(spacing: 12) {
+                                Button("Dismiss") { model.clearLastError() }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+
                 Section {
                     ForEach(sortedServers, id: \.id) { row in
                         ServerListRow(row: row) {
