@@ -49,6 +49,13 @@ final class ChatViewModel {
     /// indicator in SessionInfoBar + the `Chat · <Name>` nav title.
     private(set) var currentProjectPath: String?
 
+    /// Git branch the project's working directory is currently on, or
+    /// nil when the dir isn't a git repo / git isn't installed / the
+    /// resolution failed. Populated alongside `currentProjectPath`;
+    /// surfaced as a small chip after the project name in
+    /// `SessionInfoBar`. v2.5.
+    private(set) var currentGitBranch: String?
+
     /// Human-readable name of the active project, resolved from the
     /// projects registry at session-start time. Stored alongside the
     /// path so the view renders without hitting disk on every update.
@@ -477,11 +484,21 @@ final class ChatViewModel {
                     // the menu degrades to ACP + quick commands only on
                     // any failure (logged inside the service).
                     self.richChatViewModel.loadProjectScopedCommands(at: path)
+                    // Resolve the project's current git branch (v2.5)
+                    // for the chat header chip. Async + nil on failure
+                    // (not a git repo / git missing / SSH error) — the
+                    // chip just doesn't render.
+                    let svc = GitBranchService(context: context)
+                    Task { @MainActor [weak self] in
+                        let branch = await svc.branch(at: path)
+                        self?.currentGitBranch = branch
+                    }
                 } else {
                     // Explicit clear on non-project sessions so the
                     // indicator doesn't leak from a previous chat.
                     self.currentProjectPath = nil
                     self.currentProjectName = nil
+                    self.currentGitBranch = nil
                     self.richChatViewModel.loadProjectScopedCommands(at: nil)
                 }
 

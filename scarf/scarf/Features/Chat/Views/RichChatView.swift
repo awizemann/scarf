@@ -30,7 +30,9 @@ struct RichChatView: View {
                 // ChatViewModel.currentProjectName which is set in
                 // startACPSession on both new project chats and
                 // resumed project-attributed sessions.
-                projectName: chatViewModel.currentProjectName
+                projectName: chatViewModel.currentProjectName,
+                // v2.5: git branch indicator alongside the project chip.
+                gitBranch: chatViewModel.currentGitBranch
             )
             Divider()
 

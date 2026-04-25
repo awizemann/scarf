@@ -14,6 +14,11 @@ struct SessionInfoBar: View {
     /// `ChatViewModel.currentProjectName` — the view just passes it
     /// through.
     var projectName: String? = nil
+    /// Current git branch of the project's working directory, when
+    /// resolved (v2.5). Renders as a tinted chip after the project
+    /// name. Nil for non-project chats and for projects that aren't
+    /// git repos.
+    var gitBranch: String? = nil
 
     var body: some View {
         HStack(spacing: 16) {
@@ -28,6 +33,13 @@ struct SessionInfoBar: View {
                         .foregroundStyle(.tint)
                         .lineLimit(1)
                         .help("Chat is scoped to Scarf project \"\(projectName)\"")
+                    if let gitBranch {
+                        Label(gitBranch, systemImage: "arrow.triangle.branch")
+                            .font(.caption)
+                            .foregroundStyle(.tint)
+                            .lineLimit(1)
+                            .help("Project's current git branch")
+                    }
                 }
 
                 HStack(spacing: 4) {

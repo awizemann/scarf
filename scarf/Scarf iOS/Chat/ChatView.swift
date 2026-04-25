@@ -385,11 +385,23 @@ struct ChatView: View {
                     Text("Project chat")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    Text(projectName)
-                        .font(.callout.weight(.medium))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                    HStack(spacing: 6) {
+                        Text(projectName)
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        if let branch = controller.currentGitBranch, !branch.isEmpty {
+                            Label(branch, systemImage: "arrow.triangle.branch")
+                                .font(.caption2)
+                                .foregroundStyle(.tint)
+                                .labelStyle(.titleAndIcon)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(.tint.opacity(0.15), in: Capsule())
+                                .lineLimit(1)
+                        }
+                    }
                 }
                 Spacer()
                 if !controller.vm.projectScopedCommands.isEmpty {
@@ -491,6 +503,12 @@ final class ChatController {
     /// Set by `resetAndStartInProject` and by `startResuming` when
     /// the resumed session is attributed to a registered project.
     private(set) var currentProjectName: String?
+
+    /// Git branch of the project's working directory at session start
+    /// (v2.5). Nil for non-project sessions and projects that aren't
+    /// git repos / have git missing on the host. Surfaced as a small
+    /// chip on the right side of the project context bar.
+    private(set) var currentGitBranch: String?
 
     private let context: ServerContext
     private var client: ACPClient?
@@ -656,6 +674,7 @@ final class ChatController {
         await stop()
         vm.reset()
         currentProjectName = nil
+        currentGitBranch = nil
         // Quick-chat sessions don't have a project; clear any leftover
         // project-scoped slash commands from a prior session.
         vm.loadProjectScopedCommands(at: nil)
@@ -671,18 +690,27 @@ final class ChatController {
         await stop()
         vm.reset()
         currentProjectName = project.name
+        currentGitBranch = nil
         // Pull any project-authored slash commands at
         // <project.path>/.scarf/slash-commands/ into the chat menu.
         // Async + non-fatal — degrades cleanly on SFTP failures (logged).
         vm.loadProjectScopedCommands(at: project.path)
+        // v2.5 git branch indicator. Async + nil on failure — the chip
+        // simply doesn't render if the project isn't a git repo.
+        let ctx = context
+        let projectPath = project.path
+        Task { @MainActor [weak self] in
+            let branch = await GitBranchService(context: ctx).branch(at: projectPath)
+            if self?.currentProjectName == project.name {
+                self?.currentGitBranch = branch
+            }
+        }
         // Synchronously load the slash command NAMES so we can list them
         // in the AGENTS.md block (the agent needs to know what commands
         // are available). This is a separate read from the async one
         // above because the block has to land on disk BEFORE `hermes acp`
         // boots — async loads might lose the race. Blocking load on a
         // detached task to keep the MainActor responsive.
-        let ctx = context
-        let projectPath = project.path
         let slashNames: [String] = await Task.detached {
             ProjectSlashCommandService(context: ctx)
                 .loadCommands(at: projectPath)
@@ -845,7 +873,20 @@ final class ChatController {
             return (path: path, name: name)
         }.value
         currentProjectName = resolved?.name
+        currentGitBranch = nil
         vm.loadProjectScopedCommands(at: resolved?.path)
+        // v2.5 git branch indicator for the resumed-session header.
+        if let resumePath = resolved?.path {
+            let resolvedName = resolved?.name
+            Task { @MainActor [weak self] in
+                let branch = await GitBranchService(context: ctx).branch(at: resumePath)
+                // Guard against a project switch landing while we
+                // were resolving — only set if the chat hasn't moved.
+                if self?.currentProjectName == resolvedName {
+                    self?.currentGitBranch = branch
+                }
+            }
+        }
 
         state = .connecting
         let client = ACPClient.forIOSApp(
