@@ -38,9 +38,10 @@ public struct ProjectDashboardService: Sendable {
     /// choice is now theirs.
     public func saveRegistry(_ registry: ProjectRegistry) throws {
         let dir = context.paths.scarfDir
-        if !transport.fileExists(dir) {
-            try transport.createDirectory(dir)
-        }
+        // `createDirectory` is mkdir -p across every transport (Local
+        // uses withIntermediateDirectories, SSH/Citadel both ignore
+        // "already exists"), so we don't need to fileExists-guard it.
+        try transport.createDirectory(dir)
         let data = try JSONEncoder().encode(registry)
         // Pretty-print for readability (agents may read this file).
         let writeData: Data
@@ -62,7 +63,7 @@ public struct ProjectDashboardService: Sendable {
         do {
             return try JSONDecoder().decode(ProjectDashboard.self, from: data)
         } catch {
-            print("[Scarf] Failed to decode dashboard for \(project.name): \(error.localizedDescription)")
+            Self.logger.error("Failed to decode dashboard for \(project.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }

@@ -191,6 +191,8 @@ public actor ProcessACPChannel: ACPChannel {
         stdinPipe.fileHandleForReading.closeFile()
         stdoutPipe.fileHandleForReading.closeFile()
         stderrPipe.fileHandleForReading.closeFile()
+        stdoutPipe.fileHandleForWriting.closeFile()
+        stderrPipe.fileHandleForWriting.closeFile()
 
         readerTask?.cancel()
         stderrTask?.cancel()

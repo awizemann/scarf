@@ -127,6 +127,17 @@ public struct LocalTransport: ServerTransport {
         } catch {
             throw TransportError.other(message: "Failed to launch \(executable): \(error.localizedDescription)")
         }
+        // Parent has its own copy of every pipe end after fork. The child
+        // inherits and uses the writing ends of stdout/stderr and the
+        // reading end of stdin; the parent must close its own copies of
+        // those so EOF reaches the parent's reader once the child exits
+        // (otherwise the kernel keeps each fd open as long as any process
+        // holds a reference, and we leak fds).
+        try? stdoutPipe.fileHandleForWriting.close()
+        try? stderrPipe.fileHandleForWriting.close()
+        if stdin != nil {
+            try? stdinPipe.fileHandleForReading.close()
+        }
         if let stdin {
             try? stdinPipe.fileHandleForWriting.write(contentsOf: stdin)
             try? stdinPipe.fileHandleForWriting.close()
@@ -189,6 +200,10 @@ public struct LocalTransport: ServerTransport {
                     continuation.finish(throwing: error)
                     return
                 }
+                // Parent's copy of the writing ends — the child has its
+                // own; close ours so EOF reaches the reader after exit.
+                try? outPipe.fileHandleForWriting.close()
+                try? errPipe.fileHandleForWriting.close()
                 let handle = outPipe.fileHandleForReading
                 var buffer = Data()
                 while true {
@@ -204,11 +219,18 @@ public struct LocalTransport: ServerTransport {
                     }
                 }
                 proc.waitUntilExit()
+                let stderrTail: String
                 if proc.terminationStatus != 0 {
-                    let stderr = (try? errPipe.fileHandleForReading.readToEnd())
+                    stderrTail = (try? errPipe.fileHandleForReading.readToEnd())
                         .flatMap { String(data: $0 ?? Data(), encoding: .utf8) } ?? ""
+                } else {
+                    stderrTail = ""
+                }
+                try? outPipe.fileHandleForReading.close()
+                try? errPipe.fileHandleForReading.close()
+                if proc.terminationStatus != 0 {
                     continuation.finish(throwing: TransportError.commandFailed(
-                        exitCode: proc.terminationStatus, stderr: stderr
+                        exitCode: proc.terminationStatus, stderr: stderrTail
                     ))
                 } else {
                     continuation.finish()

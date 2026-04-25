@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(os)
+import os
+#endif
 
 public struct LogEntry: Identifiable, Sendable {
     public let id: Int
@@ -47,6 +50,10 @@ public struct LogEntry: Identifiable, Sendable {
 }
 
 public actor HermesLogService {
+    #if canImport(os)
+    nonisolated private static let logger = Logger(subsystem: "com.scarf", category: "HermesLogService")
+    #endif
+
     /// Local file handle for local contexts. `nil` when following a remote
     /// log or when no log is open.
     private var localHandle: FileHandle?
@@ -89,8 +96,8 @@ public actor HermesLogService {
                 } catch {
                     // Transient disconnects / command failures: surface once
                     // and stop. Callers typically re-open the log on retry.
-                    #if DEBUG
-                    print("[Scarf] remote tail ended: \(error.localizedDescription)")
+                    #if canImport(os)
+                    Self.logger.warning("remote tail ended: \(error.localizedDescription, privacy: .public)")
                     #endif
                 }
             }
@@ -103,7 +110,9 @@ public actor HermesLogService {
         do {
             try localHandle?.close()
         } catch {
-            print("[Scarf] Failed to close log handle: \(error.localizedDescription)")
+            #if canImport(os)
+            Self.logger.warning("Failed to close log handle: \(error.localizedDescription, privacy: .public)")
+            #endif
         }
         localHandle = nil
         currentPath = nil

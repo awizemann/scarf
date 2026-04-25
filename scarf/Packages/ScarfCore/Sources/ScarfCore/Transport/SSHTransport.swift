@@ -474,6 +474,10 @@ public struct SSHTransport: ServerTransport {
                     continuation.finish(throwing: error)
                     return
                 }
+                // Parent's copy of the writing ends — close ours so EOF
+                // reaches the reader after the child exits.
+                try? outPipe.fileHandleForWriting.close()
+                try? errPipe.fileHandleForWriting.close()
                 let handle = outPipe.fileHandleForReading
                 var buffer = Data()
                 while true {
@@ -489,11 +493,18 @@ public struct SSHTransport: ServerTransport {
                     }
                 }
                 proc.waitUntilExit()
+                let stderrTail: String
                 if proc.terminationStatus != 0 {
-                    let stderr = (try? errPipe.fileHandleForReading.readToEnd())
+                    stderrTail = (try? errPipe.fileHandleForReading.readToEnd())
                         .flatMap { String(data: $0 ?? Data(), encoding: .utf8) } ?? ""
+                } else {
+                    stderrTail = ""
+                }
+                try? outPipe.fileHandleForReading.close()
+                try? errPipe.fileHandleForReading.close()
+                if proc.terminationStatus != 0 {
                     continuation.finish(throwing: TransportError.classifySSHFailure(
-                        host: config.host, exitCode: proc.terminationStatus, stderr: stderr
+                        host: config.host, exitCode: proc.terminationStatus, stderr: stderrTail
                     ))
                 } else {
                     continuation.finish()
@@ -661,6 +672,13 @@ public struct SSHTransport: ServerTransport {
             try proc.run()
         } catch {
             throw TransportError.other(message: "Failed to launch \(executable): \(error.localizedDescription)")
+        }
+        // Parent's copy of the inherited ends — close so EOF lands when
+        // the child exits and we don't leak fds.
+        try? stdoutPipe.fileHandleForWriting.close()
+        try? stderrPipe.fileHandleForWriting.close()
+        if stdin != nil {
+            try? stdinPipe.fileHandleForReading.close()
         }
         if let stdin {
             try? stdinPipe.fileHandleForWriting.write(contentsOf: stdin)

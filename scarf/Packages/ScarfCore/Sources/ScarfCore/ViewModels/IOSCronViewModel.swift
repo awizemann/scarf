@@ -119,10 +119,11 @@ public final class IOSCronViewModel {
                 let transport = ctx.makeTransport()
                 // Ensure the cron/ directory exists — on a fresh
                 // Hermes install this file won't be present.
+                // `createDirectory` is mkdir -p across all transports;
+                // call unconditionally and let writeFile surface any
+                // real failure.
                 let parent = (path as NSString).deletingLastPathComponent
-                if !transport.fileExists(parent) {
-                    try? transport.createDirectory(parent)
-                }
+                try? transport.createDirectory(parent)
                 try transport.writeFile(path, data: data)
                 return true
             } catch {

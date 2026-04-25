@@ -705,7 +705,7 @@ public actor HermesDataService {
         do {
             return try JSONDecoder().decode([HermesToolCall].self, from: data)
         } catch {
-            print("[Scarf] Failed to decode tool calls: \(error.localizedDescription)")
+            Self.logger.error("Failed to decode tool calls: \(error.localizedDescription, privacy: .public)")
             return []
         }
     }

@@ -243,14 +243,27 @@ final class ServerLiveStatus: Identifiable {
 
     func startPolling() {
         stopPolling()
-        // First refresh inline so the icon doesn't flash "stopped" for the
-        // first 10s after launch.
-        refresh()
         pollTask = Task { [weak self] in
+            // Exponential backoff on consecutive failures. Healthy servers
+            // poll every 10s. When a registered remote goes unreachable,
+            // pgrep + gateway_state.json reads fail every tick — without
+            // backoff that's a log warning + a 5s pgrep timeout every 10s
+            // for as long as the remote stays down. Reset to 10s on the
+            // first probe that fully succeeds.
+            var consecutiveFailures = 0
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                let ok = await self?.pollOnce() ?? false
                 if Task.isCancelled { return }
-                self?.refresh()
+                consecutiveFailures = ok ? 0 : consecutiveFailures + 1
+                let delaySec: UInt64
+                switch consecutiveFailures {
+                case 0:  delaySec = 10
+                case 1:  delaySec = 30
+                case 2:  delaySec = 60
+                case 3:  delaySec = 120
+                default: delaySec = 300
+                }
+                try? await Task.sleep(nanoseconds: delaySec * 1_000_000_000)
             }
         }
     }
@@ -290,15 +303,44 @@ final class ServerLiveStatus: Identifiable {
     }
 
     private func refresh() {
+        Task { [weak self] in _ = await self?.pollOnce() }
+    }
+
+    /// Single probe used by both the polling loop (which needs the
+    /// success/failure signal for backoff) and the fire-and-forget
+    /// `refresh()` callers (start/stop/restart). Returns `true` only when
+    /// both the pgrep call AND the gateway_state.json read returned a
+    /// transport-level success — `.success(nil)` (file missing because
+    /// hermes is stopped) still counts as a successful probe.
+    private func pollOnce() async -> Bool {
         let svc = fileService
-        Task.detached { [weak self] in
-            let running = svc.isHermesRunning()
-            let gateway = svc.loadGatewayState()?.isRunning ?? false
-            await MainActor.run { [weak self] in
-                self?.hermesRunning = running
-                self?.gatewayRunning = gateway
-            }
+        struct ProbeResult: Sendable {
+            let running: Bool
+            let gatewayRunning: Bool
+            let ok: Bool
         }
+        let probe = await Task.detached { () -> ProbeResult in
+            let pgrep = svc.hermesPIDResult()
+            let gateway = svc.loadGatewayStateResult()
+            let running: Bool
+            switch pgrep {
+            case .success(let pid): running = (pid != nil)
+            case .failure: running = false
+            }
+            let gatewayRunning: Bool
+            switch gateway {
+            case .success(let state): gatewayRunning = state?.isRunning ?? false
+            case .failure: gatewayRunning = false
+            }
+            let pgrepOK: Bool
+            if case .failure = pgrep { pgrepOK = false } else { pgrepOK = true }
+            let gatewayOK: Bool
+            if case .failure = gateway { gatewayOK = false } else { gatewayOK = true }
+            return ProbeResult(running: running, gatewayRunning: gatewayRunning, ok: pgrepOK && gatewayOK)
+        }.value
+        hermesRunning = probe.running
+        gatewayRunning = probe.gatewayRunning
+        return probe.ok
     }
 }
 
