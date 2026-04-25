@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="icon.png" width="128" height="128" alt="Scarf app icon">
+  <img src="icon-v2.5.png" width="128" height="128" alt="Scarf app icon">
 </p>
 
 <h1 align="center">Scarf</h1>
