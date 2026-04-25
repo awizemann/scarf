@@ -141,6 +141,15 @@ public struct ServerContext: Sendable, Hashable, Identifiable {
     /// `nonisolated(unsafe)` annotation mirrors the same pattern
     /// `SSHTransport.environmentEnricher` uses — single-write at app
     /// startup, many-read afterwards.
+    ///
+    /// **Test usage.** Production sets this once at launch. Tests that need
+    /// to inject a fake transport must run inside `M5FeatureVMTests` (the
+    /// canonical `.serialized` suite that owns this static) — running
+    /// factory-touching tests across multiple parallel suites races on this
+    /// var. `@TaskLocal` would scope cleanly, but the production hot paths
+    /// dispatch DB/SFTP reads through `Task.detached` which severs
+    /// TaskLocal inheritance, so the static-write pattern is the only one
+    /// that survives the call stack.
     public typealias SSHTransportFactory = @Sendable (
         _ id: ServerID,
         _ config: SSHConfig,

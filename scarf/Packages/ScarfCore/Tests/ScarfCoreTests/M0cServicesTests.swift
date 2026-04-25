@@ -166,7 +166,11 @@ import Foundation
 
         let svc = ModelCatalogService(path: tmp.path)
 
-        let providers = svc.loadProviders()
+        // `loadProviders()` returns the merged result of the parsed catalog
+        // + the hardcoded overlay providers (Nous Portal, Codex, …). Filter
+        // to the catalog half here so the assertion is independent of the
+        // overlay table evolving.
+        let providers = svc.loadProviders().filter { !$0.isOverlay }
         #expect(providers.count == 2)
         // Alphabetical by display name → Anthropic, OpenAI.
         #expect(providers[0].providerID == "anthropic")
@@ -193,18 +197,29 @@ import Foundation
     }
 
     @Test func modelCatalogHandlesMissingAndMalformedFiles() {
-        // Missing file → empty arrays, no crash.
+        // Missing or malformed catalog → no crash, no models.dev entries,
+        // but the hardcoded overlay providers (Nous Portal, Codex, Qwen,
+        // Gemini CLI, Copilot ACP, Arcee) still surface so the picker
+        // doesn't go dark when the cache is missing. Assert on the overlay
+        // shape rather than `.isEmpty` (which was correct before v2.3
+        // baked the overlays into `loadProviders()`).
         let svc = ModelCatalogService(path: "/tmp/scarf-nonexistent-\(UUID().uuidString).json")
-        #expect(svc.loadProviders().isEmpty)
+        let missing = svc.loadProviders()
+        #expect(!missing.isEmpty)
+        #expect(missing.allSatisfy { $0.isOverlay })
+        #expect(missing.contains { $0.providerID == "nous" && $0.subscriptionGated })
         #expect(svc.loadModels(for: "anthropic").isEmpty)
         #expect(svc.provider(for: "anything") == nil)
 
-        // Malformed JSON → empty arrays, no crash, logger.error path exercised.
+        // Malformed JSON → same overlay-only result, no crash, logger.error
+        // path exercised.
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("scarf-bad-\(UUID().uuidString).json")
         try? "not json".write(to: tmp, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: tmp) }
         let bad = ModelCatalogService(path: tmp.path)
-        #expect(bad.loadProviders().isEmpty)
+        let badProviders = bad.loadProviders()
+        #expect(!badProviders.isEmpty)
+        #expect(badProviders.allSatisfy { $0.isOverlay })
     }
 
     @Test func validateModelAcceptsCatalogHit() throws {

@@ -45,8 +45,10 @@ import Foundation
 
     /// Wrap each test body in a factory override so `ctx.makeTransport()`
     /// returns a `LocalTransport` instead of trying to spawn a real SSH
-    /// subprocess. The `.serialized` suite trait guarantees no other
-    /// test races on the factory static.
+    /// subprocess. The `.serialized` suite trait guarantees no other test
+    /// in *this* suite races on the factory static. Cross-suite races used
+    /// to bite us when M3TransportTests ran in parallel — fixed by moving
+    /// every factory-touching test into this suite.
     @MainActor
     private func withLocalTransportFactory<T>(
         _ body: @MainActor () async throws -> T
@@ -349,6 +351,168 @@ import Foundation
         #expect(remote is SSHTransport)
         #expect(remote.isRemote == true)
         #expect(remote.contextID == remoteCtx.id)
+    }
+
+    // MARK: - M3 sshTransportFactory injection + HermesLogService remote tail
+    //
+    // Moved from M3TransportTests in v2.5. Both suites had `.serialized`
+    // internally but ran in parallel with each other, clobbering the
+    // `ServerContext.sshTransportFactory` static. Co-locating them in a
+    // single `.serialized` suite fixes the race; logic is unchanged.
+
+    @Test @MainActor func sshTransportFactoryOverridesDefault() {
+        // Set up a mock factory that returns a `LocalTransport` regardless
+        // of the ServerKind — easy way to prove the injection point
+        // routes to our override.
+        final class CountingBox: @unchecked Sendable {
+            var count = 0
+            func bump() { count += 1 }
+        }
+        let box = CountingBox()
+        let previous = ServerContext.sshTransportFactory
+        defer { ServerContext.sshTransportFactory = previous }
+
+        ServerContext.sshTransportFactory = { id, _, _ in
+            box.bump()
+            return LocalTransport(contextID: id)
+        }
+
+        let ctx = ServerContext(
+            id: UUID(),
+            displayName: "test",
+            kind: .ssh(SSHConfig(host: "h"))
+        )
+        let transport = ctx.makeTransport()
+        #expect(transport is LocalTransport)
+        #expect(box.count == 1)
+    }
+
+    @Test @MainActor func sshTransportFactoryNilFallsBackToSSHTransport() {
+        let previous = ServerContext.sshTransportFactory
+        defer { ServerContext.sshTransportFactory = previous }
+        ServerContext.sshTransportFactory = nil
+
+        let ctx = ServerContext(
+            id: UUID(),
+            displayName: "test",
+            kind: .ssh(SSHConfig(host: "h"))
+        )
+        let transport = ctx.makeTransport()
+        #expect(transport is SSHTransport)
+    }
+
+    @Test @MainActor func sshTransportFactoryIgnoredForLocalContext() {
+        let previous = ServerContext.sshTransportFactory
+        defer { ServerContext.sshTransportFactory = previous }
+        // Even if set, the factory is ONLY consulted for `.ssh` kinds —
+        // `.local` always gets a `LocalTransport` directly.
+        ServerContext.sshTransportFactory = { _, _, _ in
+            Issue.record("factory called for local context")
+            return LocalTransport()
+        }
+
+        let transport = ServerContext.local.makeTransport()
+        #expect(transport is LocalTransport)
+    }
+
+    /// Minimal `ServerTransport` test double: `isRemote == true`, all
+    /// file I/O throws, `streamLines` returns a scripted sequence of
+    /// lines. Exists to verify HermesLogService's remote-tail path
+    /// pumps scripted output into the ring buffer without a real SSH
+    /// subprocess.
+    final class ScriptedTransport: ServerTransport, @unchecked Sendable {
+        public let contextID: ServerID = UUID()
+        public let isRemote: Bool = true
+        private let lines: [String]
+
+        init(lines: [String]) { self.lines = lines }
+
+        func readFile(_ path: String) throws -> Data { throw TransportError.other(message: "N/A") }
+        func writeFile(_ path: String, data: Data) throws { throw TransportError.other(message: "N/A") }
+        func fileExists(_ path: String) -> Bool { true }
+        func stat(_ path: String) -> FileStat? { FileStat(size: 0, mtime: Date(), isDirectory: false) }
+        func listDirectory(_ path: String) throws -> [String] { [] }
+        func createDirectory(_ path: String) throws {}
+        func removeFile(_ path: String) throws {}
+        func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+            // For readLastLines' one-shot tail — return all scripted lines joined.
+            let content = lines.joined(separator: "\n") + "\n"
+            return ProcessResult(exitCode: 0, stdout: Data(content.utf8), stderr: Data())
+        }
+        #if !os(iOS)
+        func makeProcess(executable: String, args: [String]) -> Process {
+            // Required by protocol on non-iOS; not exercised in tests below.
+            Process()
+        }
+        #endif
+        func streamLines(executable: String, args: [String]) -> AsyncThrowingStream<String, Error> {
+            AsyncThrowingStream { continuation in
+                Task {
+                    for line in lines {
+                        continuation.yield(line)
+                    }
+                    continuation.finish()
+                }
+            }
+        }
+        func snapshotSQLite(remotePath: String) throws -> URL { URL(fileURLWithPath: remotePath) }
+        func watchPaths(_ paths: [String]) -> AsyncStream<WatchEvent> {
+            AsyncStream { $0.finish() }
+        }
+    }
+
+    @Test @MainActor func hermesLogServiceRemoteTailPumpsThroughStreamLines() async throws {
+        let scripted = ScriptedTransport(lines: [
+            "2026-04-22 12:00:00,001 INFO hermes.agent: starting",
+            "2026-04-22 12:00:01,002 WARNING hermes.gateway: low disk",
+            "2026-04-22 12:00:02,003 ERROR hermes.agent: boom",
+        ])
+
+        let previous = ServerContext.sshTransportFactory
+        defer { ServerContext.sshTransportFactory = previous }
+        ServerContext.sshTransportFactory = { _, _, _ in scripted }
+
+        let ctx = ServerContext(
+            id: UUID(),
+            displayName: "t",
+            kind: .ssh(SSHConfig(host: "h"))
+        )
+        let service = HermesLogService(context: ctx)
+        await service.openLog(path: "/fake/agent.log")
+        defer { Task { await service.closeLog() } }
+
+        // Give the pump task a moment to drain the scripted stream.
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let entries = await service.readNewLines()
+        #expect(entries.count == 3)
+        #expect(entries[0].level == .info)
+        #expect(entries[1].level == .warning)
+        #expect(entries[2].level == .error)
+        #expect(entries[2].message == "boom")
+    }
+
+    @Test @MainActor func hermesLogServiceReadLastLinesUsesOneShotTail() async {
+        let scripted = ScriptedTransport(lines: ["x", "y", "z"])
+        let previous = ServerContext.sshTransportFactory
+        defer { ServerContext.sshTransportFactory = previous }
+        ServerContext.sshTransportFactory = { _, _, _ in scripted }
+
+        let ctx = ServerContext(
+            id: UUID(),
+            displayName: "t",
+            kind: .ssh(SSHConfig(host: "h"))
+        )
+        let service = HermesLogService(context: ctx)
+        // Doesn't need openLog first for the one-shot, but currentPath
+        // has to be set — openLog does both.
+        await service.openLog(path: "/fake/agent.log")
+        defer { Task { await service.closeLog() } }
+
+        let entries = await service.readLastLines(count: 100)
+        #expect(entries.count == 3)
+        #expect(entries[0].message == "x")
+        #expect(entries[2].message == "z")
     }
 
     // MARK: - M6 Cron editing (write paths)
