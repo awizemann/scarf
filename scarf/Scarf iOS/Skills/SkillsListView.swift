@@ -79,6 +79,9 @@ struct SkillsListView: View {
 private struct SkillDetailView: View {
     let skill: HermesSkill
 
+    @Environment(\.serverContext) private var serverContext
+    @State private var npxStatus: SkillPrereqService.Status?
+
     var body: some View {
         List {
             Section("Location") {
@@ -87,6 +90,30 @@ private struct SkillDetailView: View {
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
+            }
+
+            // v2.5 design-md prereq surface — the skill needs `npx`
+            // (Node.js 18+) on the host. iOS read-only banner: same
+            // wording as the Mac one, no install button (the user is
+            // already going to need a shell to fix this).
+            if skill.name.lowercased() == "design-md",
+               case .missing(let hint) = npxStatus {
+                Section("Prerequisite missing") {
+                    Label {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("`npx` not found on the Hermes host.")
+                                .font(.callout.weight(.medium))
+                            Text(hint)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                    .padding(.vertical, 4)
+                }
             }
 
             if skill.name.lowercased() == "spotify" {
@@ -119,5 +146,17 @@ private struct SkillDetailView: View {
         }
         .navigationTitle(skill.name)
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: skill.id) {
+            // Only probe when this skill needs it. design-md is the
+            // only skill in v2.5 with a host-side prereq surface; the
+            // probe runs once per appear and isn't cached across
+            // navigation events (cheap — single SSH `which` call).
+            guard skill.name.lowercased() == "design-md" else {
+                npxStatus = nil
+                return
+            }
+            let svc = SkillPrereqService(context: serverContext)
+            npxStatus = await svc.probe(binary: "npx")
+        }
     }
 }

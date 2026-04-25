@@ -4,6 +4,11 @@ import ScarfCore
 struct SkillsView: View {
     @State private var viewModel: SkillsViewModel
     @State private var showSpotifySignIn: Bool = false
+    /// Result of the npx prereq probe for the design-md skill, when
+    /// selected. Re-fetched on each skill change. Nil while the probe
+    /// is in flight; populated with `.present` / `.missing(...)` /
+    /// `.unknown(...)` on completion.
+    @State private var designMdNpxStatus: SkillPrereqService.Status?
     @Environment(\.serverContext) private var serverContext
     @State private var currentTab: Tab = .installed
 
@@ -39,6 +44,20 @@ struct SkillsView: View {
         }
         .navigationTitle("Skills (\(viewModel.totalSkillCount))")
         .onAppear { viewModel.load() }
+        // v2.5: re-probe `npx` whenever the selected skill changes;
+        // only the design-md skill cares about the result, but binding
+        // to the selection makes the probe automatic across switches.
+        .onChange(of: viewModel.selectedSkill?.name) { _, newName in
+            guard newName?.lowercased() == "design-md" else {
+                designMdNpxStatus = nil
+                return
+            }
+            designMdNpxStatus = nil
+            let svc = SkillPrereqService(context: serverContext)
+            Task { @MainActor in
+                designMdNpxStatus = await svc.probe(binary: "npx")
+            }
+        }
     }
 
     private var modePicker: some View {
@@ -144,6 +163,13 @@ struct SkillsView: View {
                     if skill.name.lowercased() == "spotify" {
                         spotifyAuthRow
                     }
+                    // v2.5 design-md prereq surface. The skill needs
+                    // `npx` (Node.js 18+) on the host; show a yellow
+                    // banner with an install hint when it's missing.
+                    if skill.name.lowercased() == "design-md",
+                       case .missing(let hint) = designMdNpxStatus {
+                        designMdNpxBanner(hint: hint)
+                    }
                     Divider()
                     if !skill.files.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
@@ -203,6 +229,27 @@ struct SkillsView: View {
             ContentUnavailableView("Select a Skill", systemImage: "lightbulb", description: Text("Choose a skill from the list"))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// Yellow banner surfaced on the design-md skill detail when the
+    /// host's `npx` probe came back missing. Reuses the same color
+    /// language as the missing-config banner.
+    private func designMdNpxBanner(hint: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+            VStack(alignment: .leading, spacing: 2) {
+                Text("`npx` not found on the Hermes host.")
+                    .font(.caption.bold())
+                Text(hint)
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .foregroundStyle(.orange)
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.orange.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     /// Renders the v2.5 Spotify auth row when the user has the
