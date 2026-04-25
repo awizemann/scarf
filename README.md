@@ -22,9 +22,12 @@
 ## What's New in 2.5
 
 - **ScarfGo, the iPhone companion, ships in public TestFlight.** Same Hermes server you've been running on your Mac — now reachable from your phone over SSH. Multi-server, project-scoped chat, session resume, memory editor, cron list, skills tree, settings (read), all native iOS. Pure-Swift SSH (Citadel under the hood — no `ssh` binary needed on iOS). Per-project chat writes the same Scarf-managed `AGENTS.md` block the Mac app does, so the agent boots with the same project context regardless of which client opened the session. **TestFlight invite + onboarding walkthrough:** [ScarfGo wiki page](https://github.com/awizemann/scarf/wiki/ScarfGo).
-- **Mac global Sessions: project filter + project badges** — parity with ScarfGo's Sessions tab. The list grows a filter Menu (All projects / Unattributed / each registered project) and each row carries a tinted folder chip with the project name when attributed. Same `SessionAttributionService` + `ProjectDashboardService` ScarfGo consumes, both now in ScarfCore.
-- **Human-readable cron schedules everywhere.** New `CronScheduleFormatter` in ScarfCore translates the common cron shapes (every-N-minutes, every-N-hours, daily-at-H, weekdays-at-H, the `@hourly` / `@daily` / `@weekly` / `@monthly` macros) into English phrases and falls back to the raw expression on anything custom. Mac and iOS render the same. Sibling `formatNextRun(_:)` renders ISO-8601 next-run timestamps as relative phrases.
-- **Under the hood** — `SessionAttributionService`, `ProjectContextBlock`, `CronScheduleFormatter`, and the ACP error triplet (`acpError` / `acpErrorHint` / `acpErrorDetails`) consolidated into ScarfCore so Mac and iOS consume one source of truth. The cross-suite test races we hit during pre-release verification got fixed by collapsing every factory-touching test into a single `.serialized` suite. 163 tests, three consecutive green runs. Several `try?` swallows in iOS lifecycle code now surface real failures (Keychain unlock errors no longer drop people into onboarding; partial Forget operations report what failed).
+- **Portable project-scoped slash commands.** Author reusable prompt templates as Markdown files at `<project>/.scarf/slash-commands/<name>.md` with YAML frontmatter (name, description, argumentHint, optional model override). Invoke as `/<name> [args]` from chat — Scarf substitutes `{{argument}}` (with optional `default:` fallback) in the body and sends the expanded prompt to Hermes. Mac authoring tab + iOS read-only browser. Templates carry them via the new `slash-commands/` block in `.scarftemplate` bundles (schemaVersion 3).
+- **Hermes v2026.4.23 chat parity.** `/steer` non-interruptive guidance command, per-turn stopwatch on assistant bubbles, numbered keyboard shortcuts (1–9) on the permission sheet, git branch chip in the chat header. The new `messages.reasoning_content` and `sessions.api_call_count` columns surface as a richer reasoning disclosure + an "API" chip on session rows.
+- **Spotify + design-md skills.** Mac ships an in-app Spotify OAuth sheet (mirrors the v2.3 Nous Portal pattern); design-md gets a host-side `npx` prereq check on both platforms. SKILL.md frontmatter (`allowed_tools`, `related_skills`, `dependencies`) renders as chip rows. A "What's New" pill on the Skills tab tells you when remote skills changed since you last looked.
+- **Mac global Sessions: project filter + project badges** — parity with ScarfGo's Sessions tab. The list grows a filter Menu (All projects / Unattributed / each registered project) and each row carries a tinted folder chip with the project name when attributed.
+- **Human-readable cron schedules everywhere.** New `CronScheduleFormatter` in ScarfCore translates the common cron shapes into English phrases and falls back to the raw expression on anything custom. Mac and iOS render the same.
+- **Under the hood** — `SessionAttributionService`, `ProjectContextBlock`, `CronScheduleFormatter`, `GitBranchService`, `SkillPrereqService`, `SkillSnapshotService`, `ProjectSlashCommandService`, and the ACP error triplet (`acpError` / `acpErrorHint` / `acpErrorDetails`) consolidated into ScarfCore so Mac and iOS consume one source of truth. 179 tests across 13 suites, three consecutive green runs. Several `try?` swallows in iOS lifecycle code now surface real failures (Keychain unlock errors no longer drop people into onboarding; partial Forget operations report what failed).
 - **iOS push notifications skeleton** — `NotificationRouter` ships with foreground presentation + a lock-screen "Approve / Deny" action category gated by `apnsEnabled = false`. Lights up when Hermes ships a server-side push sender + an APNs cert.
 
 See the full [v2.5.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.5.0), the [ScarfGo wiki page](https://github.com/awizemann/scarf/wiki/ScarfGo), and [Platform Differences](https://github.com/awizemann/scarf/wiki/Platform-Differences) for what is and isn't shared between Mac and iOS.
@@ -112,7 +115,7 @@ Custom, agent-generated dashboards for any project. Define stat boxes, charts, t
 - macOS 14.6+ (Sonoma) for Scarf
 - iOS 18.0+ for [ScarfGo](https://github.com/awizemann/scarf/wiki/ScarfGo) (the iPhone companion, public TestFlight from v2.5)
 - Xcode 16.0+ to build from source
-- [Hermes agent](https://github.com/hermes-ai/hermes-agent) v0.6.0+ installed at `~/.hermes/` on each target host (v0.10.0+ recommended for full feature support)
+- [Hermes agent](https://github.com/hermes-ai/hermes-agent) v0.6.0+ installed at `~/.hermes/` on each target host (v0.11.0+ recommended for full v2.5 feature support — `/steer`, new state.db columns, design-md/spotify skills, SKILL.md frontmatter chips)
 - For remote servers: SSH access (key-based), `sqlite3` on the remote (for atomic DB snapshots), and the `hermes` CLI resolvable from the remote user's `PATH` or at a path you specify per server. ScarfGo requires the same on every Hermes host it connects to.
 
 ### Compatibility
@@ -125,9 +128,10 @@ Scarf reads Hermes's SQLite database and parses CLI output from `hermes status`,
 | v0.7.0 (2026-04-03) | Verified |
 | v0.8.0 (2026-04-08) | Verified |
 | v0.9.0 (2026-04-13) | Verified |
-| v0.10.0 (2026-04-18) | Verified (recommended for full 2.0 feature support) |
+| v0.10.0 (2026-04-16) | Verified (Tool Gateway introduced) |
+| v0.11.0 (2026-04-23) | **Verified — current target (recommended for full v2.5 feature support)** |
 
-Scarf 2.0 targets Hermes v0.10.0 for the ACP session/fork/list/resume capabilities used by remote chat. Earlier Hermes versions remain supported for monitoring, sessions, and file-based features; ACP-specific behavior may gracefully degrade on older agents.
+Scarf 2.5 targets Hermes v0.11.0 for `/steer`, the new state.db columns (`messages.reasoning_content`, `sessions.api_call_count`), the new skills (design-md, spotify), the SKILL.md frontmatter chip surfaces, and the `hermes memory reset` toolbar action. Earlier Hermes versions remain supported for monitoring, sessions, file-based features, and ACP chat; v0.11-specific behavior degrades gracefully on older agents (`/steer` is harmless, new columns silently nil out).
 
 If a Hermes update changes the database schema or CLI output format, Scarf may need to be updated. Check the [Health](#features) view for compatibility warnings.
 

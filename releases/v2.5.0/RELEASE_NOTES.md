@@ -1,6 +1,6 @@
 ## What's New in 2.5.0
 
-The big one for 2.5: **ScarfGo, the iPhone companion**, ships in public TestFlight. Same Hermes server you've been running on your Mac — now reachable from your phone over SSH. Dashboard, chat, memory, cron, skills, settings (read), all of it. On the Mac side, the global Sessions list grows up alongside the iOS work — project filter, project badges on each row.
+The big one for 2.5: **ScarfGo, the iPhone companion**, ships in public TestFlight. Same Hermes server you've been running on your Mac — now reachable from your phone over SSH. Dashboard, chat, memory, cron, skills, settings (read), all of it. On the Mac side, the global Sessions list grows up alongside the iOS work — project filter, project badges on each row. **Plus**: full Hermes v2026.4.23 chat parity (`/steer`, per-turn stopwatch, numbered approvals, git branch chip), portable project-scoped slash commands that ship with `.scarftemplate` bundles, in-app Spotify OAuth, and design-md prereq checks.
 
 ### ScarfGo iOS companion (public TestFlight)
 
@@ -19,6 +19,51 @@ What's in the first public TestFlight build:
 - **iOS 18+.** Dynamic Type clamp at the scene root, sidebar-adaptable TabView, scoped sheet detents, scroll anchoring, content-aware empty states throughout.
 
 **TestFlight invite:** see the [ScarfGo wiki page](https://github.com/awizemann/scarf/wiki/ScarfGo) for the public link + onboarding walkthrough.
+
+### Portable project-scoped slash commands
+
+A net-new Scarf primitive (Hermes has no project-scoped slash command concept — Scarf invents the format and intercepts the chat menu client-side). Author reusable prompt templates as Markdown files at `<project>/.scarf/slash-commands/<name>.md` with YAML frontmatter (name, description, argumentHint, optional model override, tags). Invoke as `/<name> [args]` from chat — Scarf substitutes `{{argument}}` (and `{{argument | default: "..."}}`) in the body and sends the expanded prompt to Hermes; the agent never sees the slash. Works uniformly on Mac + iOS, local + remote SSH, against any Hermes version.
+
+- **Mac authoring tab.** Per-project view gains a Slash Commands tab alongside Dashboard / Site / Sessions. List, add, edit, duplicate, delete; live preview pane shows the expanded prompt with a sample-argument field so authors see exactly what Hermes will receive.
+- **iOS read-only browser.** ScarfGo's chat project context bar grows a `<N> slash` chip when the project has slash commands; tap to browse them in a sheet. Multi-line markdown editing is a phone keyboard's nightmare, so v2.5 keeps Mac as the canonical editor; iOS catches up in v2.6+.
+- **AGENTS.md block extension.** The Scarf-managed project context block now lists available commands so the agent can answer "what slash commands does this project have?" and recognise the `<!-- scarf-slash:<name> -->` marker prepended to expanded prompts.
+- **`.scarftemplate` format extension** (schemaVersion 3). Templates ship slash commands by including `slash-commands/<name>.md` files at the bundle root and listing them in `manifest.contents.slashCommands`. The installer copies them to the project's `.scarf/slash-commands/` dir; the lock file tracks them for clean uninstall (user-authored commands in the same dir survive uninstall).
+- **Catalog validator** (`tools/build-catalog.py`) mirrors the Swift verifier. Schema version bumps to 3 only when the bundle ships slash commands; v1/v2 templates stay byte-compatible.
+
+### Hermes v2026.4.23 chat parity
+
+Scarf 2.5 mirrors the chat-surface features Hermes's TUI rewrite shipped this week:
+
+- **`/steer <prompt>`** — non-interruptive mid-run guidance. Surfaces in the slash menu as a special command; sending it doesn't flip the "Agent working…" indicator (the agent's still on its current turn) and shows a transient toast above the composer: "Guidance queued — applies after the next tool call."
+- **Per-turn stopwatch** — wall-clock duration of each completed assistant turn renders as a compact pill (`4.2s` / `1m 12s`) on the bubble's metadata footer (Mac) or below the bubble (iOS). Resumed sessions loaded from `state.db` show no pill (timing is captured live only).
+- **Numbered keyboard shortcuts on permission sheet** — Mac approval sheet binds 1–9 to the option buttons (visible "1. " / "2. " prefixes). Power users approve / deny without reaching for the mouse. iOS shows the same numbered hints as a hierarchy cue without the keyboard binding.
+- **Git branch indicator** — the chat header shows the project's current git branch as a tinted chip alongside the project name (e.g. `📂 myproject · main`). One SSH `git rev-parse --abbrev-ref HEAD` call per session start; nil-out gracefully on non-git dirs / missing git / SSH errors.
+
+### Spotify + design-md skill onboarding
+
+Hermes v2026.4.23 added two new skills. Scarf surfaces them properly:
+
+- **Spotify (`spotify`)** — needs OAuth via `hermes auth spotify`. Mac ships a dedicated Sign-in sheet (mirroring the v2.3 Nous Portal pattern): runs the subprocess, regex-detects the `accounts.spotify.com/authorize?...` URL, auto-opens it in your browser, polls `~/.hermes/auth.json` after subprocess exit to confirm the token landed. Five-state machine (starting → waiting → verifying → success / failure) with retry. iOS surfaces a documentation row noting OAuth needs to happen from Mac or a shell — phone OAuth flows are their own UX problem.
+- **design-md (`design-md`)** — requires `npx` (Node.js 18+) on the host. New `SkillPrereqService.probe(binary:)` runs `which npx` over the transport on skill detail appear; on miss, both Mac and iOS render a yellow banner with an install hint (per-OS).
+
+### SKILL.md frontmatter chips
+
+Hermes v2026.4.23 SKILL.md files carry richer YAML frontmatter (`allowed_tools`, `related_skills`, `dependencies`). Scarf parses it on both platforms (Mac via `HermesFileService.parseSkillFrontmatter`, iOS via `IOSSkillsViewModel.parseFrontmatter`) and renders chip rows in the skill detail view. Old skills without these fields stay nil and the rows hide themselves.
+
+### "What's New" pill on Skills tab
+
+Per-server snapshot of `[skillId: signature]` (file count + sorted file names). When the snapshot changes between visits, both Skills views render a tinted pill at the top: "2 new, 4 updated since you last looked." Tap "Mark as seen" to update the snapshot. First-time loads silently prime so users don't see "everything is new!" noise on a fresh install. Persisted to `~/Library/Application Support/com.scarf/skill-snapshots/<serverID>.json` (Mac) / `UserDefaults` (iOS).
+
+### state.db deltas (Hermes v0.11)
+
+- `messages.reasoning_content` — newer richer reasoning channel some providers emit alongside the legacy `reasoning` blob. UI prefers the new column when both are populated (`HermesMessage.preferredReasoning`).
+- `sessions.api_call_count` — distinct from `tool_call_count`; counts per-turn API round-trips. Surfaced as the "API" label on Mac SessionDetailView and as a network-icon chip on Mac/iOS Dashboard session rows.
+
+`HermesDataService.hasV011Schema` only flips true when both columns are present (partial migrations stay on the v0.7 path to avoid runtime errors). Older Hermes hosts keep working unchanged.
+
+### `hermes memory reset` toolbar action
+
+New toolbar button on Mac MemoryView — "Reset memory…" with destructive confirmation dialog. Routes through `hermes memory reset --yes`; refreshes the on-screen content on success, surfaces stderr in an alert on failure. Other v0.11 CLIs (`plugins`, `profile`, `webhook`, `insights`, `logs`) are documented in `CLAUDE.md` for future v2.6 adoption — Scarf still reads the underlying files directly today, which keeps working.
 
 ### Mac global Sessions: project filter + badges
 
