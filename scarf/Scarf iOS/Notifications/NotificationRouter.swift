@@ -27,6 +27,23 @@ import ScarfIOS
 final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationRouter()
 
+    /// Master gate for the APNs / push pipeline. While `false`:
+    ///
+    /// - The `SCARF_PENDING_PERMISSION` category (Approve / Deny actions)
+    ///   is NOT registered, so even if a notification with that
+    ///   `categoryIdentifier` slipped through somehow, iOS would render
+    ///   it without action buttons rather than route the tap to the
+    ///   stub-only `APPROVE_PERMISSION` / `DENY_PERMISSION` handlers.
+    /// - `registerForRemoteNotifications()` stays uncalled.
+    ///
+    /// Flip to `true` only when (a) the Push Notifications capability is
+    /// enabled in the Xcode target, (b) Hermes ships a push sender, and
+    /// (c) `APPROVE_PERMISSION` / `DENY_PERMISSION` cases below have real
+    /// implementations (not just `logger.info` stubs). This gate is the
+    /// single switch — flipping it in isolation should not cause the
+    /// stub handlers to silently swallow real user intent.
+    static let apnsEnabled = false
+
     private let logger = Logger(subsystem: "com.scarf", category: "NotificationRouter")
 
     /// Coordinator reference set by ScarfGoTabRoot on appear so the
@@ -95,7 +112,19 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
     /// Install the notification category that exposes Approve / Deny
     /// action buttons on the lock screen. Safe to call multiple times
     /// — registerCategories replaces.
+    ///
+    /// **Gated on `apnsEnabled`.** Until Hermes ships a real push sender
+    /// and the `APPROVE_PERMISSION` / `DENY_PERMISSION` handlers have
+    /// real implementations, register the empty set so iOS has no
+    /// category by which to route action-tapped notifications to the
+    /// stub handlers. When `apnsEnabled` flips to `true`, the category
+    /// is installed and the handlers are simultaneously expected to be
+    /// real.
     func registerCategories() {
+        guard Self.apnsEnabled else {
+            UNUserNotificationCenter.current().setNotificationCategories([])
+            return
+        }
         let approve = UNNotificationAction(
             identifier: "APPROVE_PERMISSION",
             title: "Approve",
