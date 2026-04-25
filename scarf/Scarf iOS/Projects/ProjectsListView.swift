@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Top-level Projects tab. Lists registered Scarf projects from
 /// `~/.hermes/scarf/projects.json`. Folder groupings + archive flags
@@ -94,7 +95,7 @@ struct ProjectsListView: View {
                         .foregroundStyle(.primary)
                     Text(project.path)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }

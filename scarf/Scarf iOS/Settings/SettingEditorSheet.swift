@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Sheet for editing a single Hermes config value. Renders the
 /// appropriate control for each supported key:

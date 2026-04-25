@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// iOS dashboard layout. ScrollView of sections; each section is a
 /// `LazyVGrid` whose column count is clamped to the device's
@@ -23,7 +24,7 @@ struct DashboardWidgetsView: View {
                 if let description = dashboard.description, !description.isEmpty {
                     Text(description)
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                         .padding(.horizontal)
                 }
                 ForEach(dashboard.sections) { section in
@@ -104,7 +105,7 @@ struct WidgetView: View {
         VStack(alignment: .leading, spacing: 4) {
             Label(widget.title, systemImage: "questionmark.app.dashed")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
             Text("Widget type \"\(widget.type)\" isn't supported in this version of Scarf yet.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)

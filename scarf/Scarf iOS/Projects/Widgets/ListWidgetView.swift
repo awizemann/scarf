@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct ListWidgetView: View {
     let widget: DashboardWidget
@@ -9,12 +10,12 @@ struct ListWidgetView: View {
             HStack(spacing: 4) {
                 if let icon = widget.icon {
                     Image(systemName: icon)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                         .font(.caption)
                 }
                 Text(widget.title)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
             }
             if let items = widget.items {
                 ForEach(items) { item in

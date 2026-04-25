@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 import WebKit
 
 /// iOS twin of Mac's `WebviewWidgetView`. Same two modes (inline card
@@ -52,12 +53,12 @@ struct WebviewWidgetView: View {
             HStack {
                 if let icon = widget.icon {
                     Image(systemName: icon)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                         .font(.caption)
                 }
                 Text(widget.title)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
                 Spacer()
                 if let urlString = widget.url {
                     Text(urlString)

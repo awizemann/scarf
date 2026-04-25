@@ -1,6 +1,7 @@
 import SwiftUI
 import ScarfCore
 import ScarfIOS
+import ScarfDesign
 
 /// Owns the `OnboardingViewModel` and renders the current step.
 /// Each step gets its own small view; the view switch is driven by
@@ -129,7 +130,7 @@ private struct KeySourceStep: View {
                 .bold()
             Text("Scarf authenticates to your Hermes host with an SSH key. You can generate a new one on this device, or import one you already use.")
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
                 .padding(.horizontal)
 
             VStack(spacing: 12) {
@@ -140,7 +141,7 @@ private struct KeySourceStep: View {
                         .frame(maxWidth: .infinity)
                         .padding()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
 
                 Button {
                     vm.pickKeyChoice(.importExisting)
@@ -167,7 +168,7 @@ private struct GenerateKeyStep: View {
             ProgressView()
                 .scaleEffect(1.2)
             Text("Generating Ed25519 keypair…")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
         }
         .task {
             await vm.generateKey()
@@ -221,7 +222,7 @@ private struct ShowPublicKeyStep: View {
                     .bold()
                 Text("Append the line below to `~/.ssh/authorized_keys` on the Hermes host. Once added, tap **I've added this key** to test the connection.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
 
                 if let bundle = vm.keyBundle {
                     Text(OnboardingLogic.authorizedKeysLine(for: bundle))
@@ -229,7 +230,7 @@ private struct ShowPublicKeyStep: View {
                         .textSelection(.enabled)
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(.secondarySystemBackground))
+                        .background(ScarfColor.backgroundSecondary)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
 
                     Button(copied ? "Copied" : "Copy") {
@@ -257,7 +258,7 @@ private struct ShowPublicKeyStep: View {
                     }
                     .padding(.vertical, 8)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .disabled(vm.isWorking)
             }
             .padding()
@@ -273,7 +274,7 @@ private struct TestConnectionStep: View {
             ProgressView()
                 .scaleEffect(1.2)
             Text("Testing connection to \(vm.host)…")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
         }
     }
 }
@@ -286,7 +287,7 @@ private struct TestFailedStep: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Label("Connection failed", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(ScarfColor.warning)
                     .font(.title3)
                     .bold()
                 Text(reason)
@@ -301,7 +302,7 @@ private struct TestFailedStep: View {
                     Button("Retry") {
                         Task { await vm.runConnectionTest() }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
                 }
             }
             .padding()
@@ -314,12 +315,12 @@ private struct ConnectedStep: View {
         VStack(spacing: 16) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 64))
-                .foregroundStyle(.green)
+                .foregroundStyle(ScarfColor.success)
             Text("Connected")
                 .font(.title2)
                 .bold()
             Text("Loading dashboard…")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
         }
     }
 }

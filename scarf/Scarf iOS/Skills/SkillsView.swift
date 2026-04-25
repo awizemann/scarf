@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// iOS Skills tab — 3-tab segmented surface mirroring the Mac
 /// `SkillsView`. Owns one `SkillsViewModel` (ScarfCore-side, unified
@@ -136,7 +137,7 @@ struct SkillsView: View {
                 }
                 Text(msg)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
                 Spacer()
             }
             .padding(.horizontal, 16)
@@ -148,7 +149,7 @@ struct SkillsView: View {
                     .controlSize(.small)
                 Text("Working…")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
                 Spacer()
             }
             .padding(.horizontal, 16)

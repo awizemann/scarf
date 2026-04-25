@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct ProgressWidgetView: View {
     let widget: DashboardWidget
@@ -15,12 +16,12 @@ struct ProgressWidgetView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(widget.title)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
             ProgressView(value: progressValue) {
                 if let label = widget.label {
                     Text(label)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                 }
             }
             .tint(parseColor(widget.color))

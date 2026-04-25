@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Editor for a single memory file (MEMORY.md / USER.md / SOUL.md).
 /// Owns an `IOSMemoryViewModel` instance, renders its `text` in a
@@ -67,7 +68,7 @@ struct MemoryEditorView: View {
                             .foregroundStyle(.orange)
                         Text(err)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
                         Spacer()
                     }
                     .padding(.horizontal, 12)

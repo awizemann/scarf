@@ -1,6 +1,7 @@
 import SwiftUI
 import ScarfCore
 import ScarfIOS
+import ScarfDesign
 
 /// iOS Dashboard — shows session count, token usage, cost, and the
 /// last 5 sessions pulled from the remote Hermes SQLite snapshot.
@@ -82,11 +83,11 @@ struct DashboardView: View {
                 SwiftUI.Section {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Connection issue", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(ScarfColor.warning)
                             .font(.headline)
                         Text(err)
                             .font(.callout)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
                         Button("Retry") {
                             Task { await vm.refresh() }
                         }
@@ -214,16 +215,16 @@ struct DashboardView: View {
                 HStack(spacing: 12) {
                     Label(session.source, systemImage: session.sourceIcon)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                     if let started = session.startedAt {
                         Text(started, format: .relative(presentation: .numeric))
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
                     }
                     if session.apiCallCount > 0 {
                         Label("\(session.apiCallCount)", systemImage: "network")
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
                     }
                 }
                 if let projectName = vm.projectName(for: session) {
@@ -248,7 +249,7 @@ struct DashboardView: View {
         LabeledContent(label) {
             Text(value)
                 .monospacedDigit()
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
         }
     }
 

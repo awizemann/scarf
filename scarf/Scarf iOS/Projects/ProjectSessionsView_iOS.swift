@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// iOS twin of the Mac per-project Sessions tab. Reuses the
 /// ScarfCore-side `ProjectSessionsViewModel` (promoted from the Mac
@@ -50,7 +51,7 @@ struct ProjectSessionsView_iOS: View {
                     .fontWeight(.semibold)
                 Text("Chats you start here are attributed automatically.")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
@@ -60,7 +61,7 @@ struct ProjectSessionsView_iOS: View {
                 Label("New Chat", systemImage: "message.badge.filled.fill")
                     .labelStyle(.iconOnly)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ScarfPrimaryButton())
             .controlSize(.small)
             .accessibilityLabel("Start new chat in \(project.name)")
         }
@@ -96,7 +97,7 @@ struct ProjectSessionsView_iOS: View {
                 .foregroundStyle(.tertiary)
             Text(hint ?? "No sessions yet.")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 32)
@@ -129,7 +130,7 @@ private struct ProjectSessionRow_iOS: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: iconForSource(session.source))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
                 Text(displayTitle)
@@ -144,7 +145,7 @@ private struct ProjectSessionRow_iOS: View {
                             .foregroundStyle(.tertiary)
                         Text(started)
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
                     }
                 }
             }
@@ -154,7 +155,7 @@ private struct ProjectSessionRow_iOS: View {
                     .font(.caption.monospaced())
                 Text("msgs")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
             }
         }
         .padding(.vertical, 4)

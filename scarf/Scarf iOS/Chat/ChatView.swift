@@ -1,6 +1,7 @@
 import SwiftUI
 import ScarfCore
 import ScarfIOS
+import ScarfDesign
 import os
 
 // The Chat feature on iOS is gated on `canImport(SQLite3)` because
@@ -205,7 +206,7 @@ struct ChatView: View {
                         ProgressView()
                         Text("Agent is thinking…")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal)
@@ -241,7 +242,7 @@ struct ChatView: View {
                 .foregroundStyle(.tertiary)
             Text("Ask Hermes something")
                 .font(.headline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
             Text("Connected to \(config.displayName)")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
@@ -265,7 +266,7 @@ struct ChatView: View {
                 .foregroundStyle(.tertiary)
             Text("Session resumed")
                 .font(.headline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
             Text("Hermes has the context for this session, but the transcript isn't cached locally. Send a message to continue.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
@@ -349,7 +350,7 @@ struct ChatView: View {
                         }
                         Text(err)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
                             .textSelection(.enabled)
                             .lineLimit(showErrorDetails ? nil : 2)
                     }
@@ -380,7 +381,7 @@ struct ChatView: View {
                     ScrollView(.vertical) {
                         Text(details)
                             .font(.caption2.monospaced())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -413,7 +414,7 @@ struct ChatView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Project chat")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                     HStack(spacing: 6) {
                         Text(projectName)
                             .font(.callout.weight(.medium))
@@ -475,7 +476,7 @@ struct ChatView: View {
                 .controlSize(.large)
             Text("Connecting to \(config.displayName)…")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
         }
         .padding(24)
         .background(.regularMaterial)
@@ -493,12 +494,12 @@ struct ChatView: View {
             Text(message)
                 .font(.callout)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
                 .padding(.horizontal)
             Button("Retry") {
                 Task { await controller.start() }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ScarfPrimaryButton())
         }
         .padding()
         .background(.regularMaterial)
@@ -1090,7 +1091,7 @@ private struct MessageBubble: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .foregroundStyle(Color.primary)
-            .background(Color(.secondarySystemBackground))
+            .background(ScarfColor.backgroundSecondary)
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .contextMenu { messageContextMenu }
         }
@@ -1154,7 +1155,7 @@ private struct CodeBlockView: View {
                 if let lang = language, !lang.isEmpty {
                     Text(lang.uppercased())
                         .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                 }
                 Spacer()
                 Button(expanded ? "Collapse" : "Expand") {
@@ -1170,7 +1171,7 @@ private struct CodeBlockView: View {
                         .font(.caption2)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
             }
 
             ScrollView(.horizontal, showsIndicators: true) {
@@ -1200,14 +1201,14 @@ private struct ReasoningDisclosure: View {
         DisclosureGroup(isExpanded: $isExpanded) {
             Text(reasoning)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
                 .italic()
                 .textSelection(.enabled)
                 .padding(.top, 4)
         } label: {
             Label("Thinking…", systemImage: "brain")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
         }
         .padding(.horizontal, 6)
     }
@@ -1232,7 +1233,7 @@ private struct ToolCallCard: View {
                         .foregroundStyle(.primary)
                     Text(call.argumentsSummary.prefix(60))
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                         .lineLimit(1)
                     Spacer()
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
@@ -1245,7 +1246,7 @@ private struct ToolCallCard: View {
             if isExpanded {
                 Text(call.arguments)
                     .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
                     .textSelection(.enabled)
                     .padding(.top, 2)
             }
@@ -1281,10 +1282,10 @@ private struct ToolResultRow: View {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.turn.down.right")
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
                         Text("Tool output")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
                         Text(message.content.prefix(80))
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
@@ -1299,7 +1300,7 @@ private struct ToolResultRow: View {
                 if isExpanded {
                     Text(message.content)
                         .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                         .textSelection(.enabled)
                         .padding(.top, 2)
                 }
@@ -1336,7 +1337,7 @@ private struct PermissionSheet: View {
                             .textSelection(.enabled)
                         Text("Kind: \(permission.kind)")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
                     }
                     .padding(.vertical, 4)
                 }
@@ -1358,7 +1359,7 @@ private struct PermissionSheet: View {
                                 if idx < 9 {
                                     Text("\(idx + 1).")
                                         .font(.body.monospaced())
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(ScarfColor.foregroundMuted)
                                 }
                                 Text(opt.name)
                                 Spacer()

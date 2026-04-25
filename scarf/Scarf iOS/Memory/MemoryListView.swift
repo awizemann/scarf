@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Entry screen for the Memory feature. Three rows: MEMORY.md,
 /// USER.md, and SOUL.md (persona). SOUL lives in the Personalities
@@ -124,7 +125,7 @@ struct MemoryListView: View {
                         .fontWeight(.medium)
                     Text(kind.subtitle)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                 }
             }
             .padding(.vertical, 4)

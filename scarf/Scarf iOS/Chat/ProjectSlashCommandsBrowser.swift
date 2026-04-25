@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Read-only sheet that lists every project-scoped slash command
 /// available in the current project chat. Surfaced from the chat
@@ -62,16 +63,16 @@ private struct CommandRow: View {
                 if let hint = command.argumentHint, !hint.isEmpty {
                     Text(hint)
                         .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
             }
             Text(command.description)
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
                 .lineLimit(2)
             if let model = command.model, !model.isEmpty {
                 Label(model, systemImage: "cpu")
@@ -130,7 +131,7 @@ private struct CommandDetailSheet: View {
                         .textSelection(.enabled)
                     Text("`{{argument}}` is replaced with whatever you type after `/\(command.name)`. The agent receives the expanded body — never the literal slash.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding()
@@ -149,7 +150,7 @@ private struct CommandDetailSheet: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
             Text(value)
                 .font(mono ? .system(.body, design: .monospaced) : .body)
         }

@@ -1,6 +1,7 @@
 import SwiftUI
 import ScarfCore
 import ScarfIOS
+import ScarfDesign
 
 /// ScarfGo's root surface when the user has at least one server
 /// configured. Replaces the pre-M9 "boot straight into Dashboard"
@@ -27,7 +28,7 @@ struct ServerListView: View {
                                 .font(.headline)
                             Text(err)
                                 .font(.callout)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(ScarfColor.foregroundMuted)
                                 .fixedSize(horizontal: false, vertical: true)
                             HStack(spacing: 12) {
                                 Button("Dismiss") { model.clearLastError() }
@@ -151,7 +152,7 @@ private struct ServerListRow: View {
                         .foregroundStyle(.primary)
                     Text(hostLine)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")

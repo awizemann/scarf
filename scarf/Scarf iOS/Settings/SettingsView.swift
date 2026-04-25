@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// iOS Settings screen. Read-only browser of `~/.hermes/config.yaml`
 /// as it currently stands on the remote, grouped into sections that
@@ -84,7 +85,7 @@ struct SettingsView: View {
                                 .foregroundStyle(.primary)
                             Text(currentValue(for: spec.key))
                                 .font(.caption.monospaced())
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(ScarfColor.foregroundMuted)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         }
@@ -213,7 +214,7 @@ struct SettingsView: View {
                 ForEach(vm.config.security.blocklistDomains.prefix(5), id: \.self) { domain in
                     Text(domain)
                         .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                 }
                 if vm.config.security.blocklistDomains.count > 5 {
                     Text("+ \(vm.config.security.blocklistDomains.count - 5) more")
@@ -265,7 +266,7 @@ struct SettingsView: View {
                 } else {
                     Text(vm.rawYAML)
                         .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }

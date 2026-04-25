@@ -34,6 +34,23 @@ All app UI uses the typed token bundle in [scarf/Packages/ScarfDesign/](scarf/Pa
 - **Reference**: full screen mockups live at `design/static-site/ui-kit/*.jsx` (open `design/static-site/index.html` in a browser). The `ScarfChatView.ChatRootView` reference component in the package is a 3-pane chat redesign target — usable for previews but not yet swapped into the live chat (the existing `RichChatView` machinery still owns the real ACP pipeline).
 - **Don't**: introduce purple/violet tones (we shifted to rust); use yellow `#F0AD4E` for success (that's `.warning` — `.success` is green); bypass the type scale with `.font(.system(size: 13.5))`; ship terminal/syntax-highlight palettes through ScarfColor (those are content semantics, keep them inline).
 
+### iOS Dynamic Type policy
+
+iOS users can scale text via Settings → Accessibility → Display & Text Size. ScarfFont uses fixed point sizes; adopting it blanket on iOS would regress accessibility on `.accessibility2` / `.xSmall` users. iOS-specific rule:
+
+- **Use `ScarfFont` only for**: status badges, chip labels, intentional-display elements (e.g., onboarding step titles, header chrome that's meant to be a fixed visual size).
+- **Keep `.font(.headline)` / `.body` / `.caption` semantic tokens for**: list-row primary + secondary text, body copy, error messages, chat content — anything the user reads.
+
+Decision tree per text element: "is this read for content?" → semantic token. "Is this chrome / a label / a badge?" → ScarfFont.
+
+Mac doesn't have this constraint and adopts ScarfFont everywhere. The iOS app already clamps Dynamic Type at the scene root (`ScarfIOSApp.swift`: `.dynamicTypeSize(.xSmall ... .accessibility2)`) — keep that.
+
+### iOS page chrome
+
+Don't retrofit `ScarfPageHeader` over iOS tab roots. iOS uses `.navigationTitle(...)` + `.navigationBarTitleDisplayMode(.large)` as its native page-header pattern; stacking ScarfPageHeader on top creates double titles. Use ScarfPageHeader only on iOS sub-views without a native large-title bar (rare).
+
+iOS button styling: only swap `.borderedProminent` → `ScarfPrimaryButton`. **Leave `.bordered` native** — it's the iOS convention and inherits rust through `AccentColor.colorset` automatically. Same for `.plain` (used as compact tap targets in lists).
+
 ## Key Paths
 
 - Hermes home: `~/.hermes/`

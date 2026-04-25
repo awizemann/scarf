@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct StatWidgetView: View {
     let widget: DashboardWidget
@@ -18,7 +19,7 @@ struct StatWidgetView: View {
                 }
                 Text(widget.title)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
             }
             if let value = widget.value {
                 Text(value.displayString)

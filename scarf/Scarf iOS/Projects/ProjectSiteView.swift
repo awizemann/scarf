@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Full-canvas webview wrapper for the Site sub-tab. Reuses the
 /// `WebviewWidgetView` representable in its `fullCanvas: true` mode so

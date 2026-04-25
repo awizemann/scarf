@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Updates sub-tab. Mirrors Mac: Check button populates `vm.updates`;
 /// Update All button is enabled only when there's at least one
@@ -24,7 +25,7 @@ struct UpdatesView: View {
             } label: {
                 Label("Check for Updates", systemImage: "arrow.triangle.2.circlepath")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ScarfPrimaryButton())
             .controlSize(.small)
             .disabled(vm.isHubLoading)
 
@@ -66,7 +67,7 @@ struct UpdatesView: View {
                             HStack(spacing: 6) {
                                 Text(update.currentVersion)
                                     .font(.caption.monospaced())
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(ScarfColor.foregroundMuted)
                                 Image(systemName: "arrow.right")
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)

@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// iOS Cron screen. M6 gained: toggle-enabled, swipe-to-delete,
 /// "+" toolbar → editor sheet, and row-tap → edit existing job.
@@ -36,7 +37,7 @@ struct CronListView: View {
                             .font(.headline)
                         Text("Tap \(Image(systemName: "plus.circle.fill")) to create one, or manage them from the Mac app.")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
                     }
                     .padding(.vertical, 4)
                 }
@@ -130,7 +131,7 @@ private struct CronRow: View {
                             Text("DISABLED")
                                 .font(.caption2)
                                 .fontWeight(.bold)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(ScarfColor.foregroundMuted)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 1)
                                 .background(Color(.secondarySystemFill))
@@ -139,7 +140,7 @@ private struct CronRow: View {
                     }
                     Text(CronScheduleFormatter.humanReadable(from: job.schedule))
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                     Text("Next: \(CronScheduleFormatter.formatNextRun(iso: job.nextRunAt))")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)

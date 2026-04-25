@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Per-project detail view, presented when a row in `ProjectsListView`
 /// is tapped. Mirrors the Mac three-tab layout (Dashboard | Site |

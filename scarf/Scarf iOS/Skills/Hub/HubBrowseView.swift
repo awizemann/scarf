@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Browse / search the Hermes skills hub. Source picker is a `Menu`
 /// (more compact than Mac's segmented Picker on a phone-width screen).
@@ -21,7 +22,7 @@ struct HubBrowseView: View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
                 TextField("Search skills…", text: $vm.hubQuery)
                     .textFieldStyle(.roundedBorder)
                     .submitLabel(.search)
@@ -51,7 +52,7 @@ struct HubBrowseView: View {
                 } label: {
                     Label("Search", systemImage: "magnifyingglass")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .controlSize(.small)
                 .disabled(vm.isHubLoading)
                 Button {
@@ -83,7 +84,7 @@ struct HubBrowseView: View {
                 } label: {
                     Label("Browse top skills", systemImage: "books.vertical")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .disabled(vm.isHubLoading)
             }
         } else {
@@ -128,7 +129,7 @@ private struct HubSkillRow: View {
                 if !skill.description.isEmpty {
                     Text(skill.description)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                         .lineLimit(3)
                 }
             }

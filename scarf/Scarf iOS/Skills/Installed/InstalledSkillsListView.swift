@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Installed skills sub-tab. Category-grouped list; tapping a row
 /// pushes `SkillDetailView` for that skill. Filtering uses the VM's
@@ -40,7 +41,7 @@ struct InstalledSkillsListView: View {
                                     .font(.body)
                                 Text("\(skill.files.count) file\(skill.files.count == 1 ? "" : "s")")
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(ScarfColor.foregroundMuted)
                             }
                         }
                         .scarfGoCompactListRow()

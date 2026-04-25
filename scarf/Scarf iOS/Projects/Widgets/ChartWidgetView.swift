@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 import Charts
 
 // Flattened data point for Charts to avoid complex nested generic inference
@@ -28,7 +29,7 @@ struct ChartWidgetView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(widget.title)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
             chartContent
                 .frame(height: 150)
         }

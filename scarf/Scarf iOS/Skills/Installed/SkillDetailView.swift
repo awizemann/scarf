@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Installed skill detail. Shows location + required-config warning
 /// banner + file picker + content viewer. Edit and Uninstall buttons
@@ -28,7 +29,7 @@ struct SkillDetailView: View {
                 LabeledContent("Category", value: skill.category)
                 Text(skill.path)
                     .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
                     .textSelection(.enabled)
             }
 
@@ -43,7 +44,7 @@ struct SkillDetailView: View {
                                 .font(.callout.weight(.medium))
                             Text(hint)
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(ScarfColor.foregroundMuted)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     } icon: {
@@ -66,7 +67,7 @@ struct SkillDetailView: View {
                                 .font(.callout.weight(.medium))
                             Text("Run `hermes auth spotify` from the Scarf macOS app or a shell — it opens your browser to complete the OAuth flow. Once authorised, this skill picks up the credentials from `~/.hermes/auth.json` automatically.")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(ScarfColor.foregroundMuted)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     } icon: {
@@ -108,7 +109,7 @@ struct SkillDetailView: View {
                                 .fontWeight(.semibold)
                             Text("Add these keys to ~/.hermes/config.yaml:")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(ScarfColor.foregroundMuted)
                             ForEach(vm.missingConfig, id: \.self) { key in
                                 Text("• \(key)")
                                     .font(.caption.monospaced())
@@ -224,7 +225,7 @@ struct SkillDetailView: View {
             ForEach(items, id: \.self) { item in
                 Text(item)
                     .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
                     .background(.secondary.opacity(0.12), in: Capsule())

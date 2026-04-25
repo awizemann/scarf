@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct TextWidgetView: View {
     let widget: DashboardWidget
@@ -8,7 +9,7 @@ struct TextWidgetView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(widget.title)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ScarfColor.foregroundMuted)
             if let content = widget.content {
                 if widget.format == "markdown" {
                     // SwiftUI's built-in inline markdown via AttributedString.

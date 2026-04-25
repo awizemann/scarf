@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// Sheet presented from ChatView's "+" toolbar button. Offers two
 /// modes:
@@ -45,7 +46,7 @@ struct ProjectPickerSheet: View {
                                     .foregroundStyle(.primary)
                                 Text("No project — agent runs in your home directory.")
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(ScarfColor.foregroundMuted)
                             }
                         }
                     }
@@ -64,7 +65,7 @@ struct ProjectPickerSheet: View {
                     } else if projects.isEmpty {
                         Text("No Scarf projects registered yet. Create one in the Mac app's Projects sidebar.")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
                     } else {
                         ForEach(sortedVisibleProjects) { project in
                             Button {
@@ -82,7 +83,7 @@ struct ProjectPickerSheet: View {
                                             .foregroundStyle(.primary)
                                         Text(project.path)
                                             .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(ScarfColor.foregroundMuted)
                                             .lineLimit(1)
                                             .truncationMode(.middle)
                                     }
