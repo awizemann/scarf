@@ -546,7 +546,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.3.0;
+				MARKETING_VERSION = 2.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.scarfgo.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -584,7 +584,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.3.0;
+				MARKETING_VERSION = 2.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.scarfgo.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -826,7 +826,7 @@
 				CODE_SIGN_ENTITLEMENTS = scarf/scarf.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 25;
+				CURRENT_PROJECT_VERSION = 100;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 3Q6X2L86C4;
 				ENABLE_APP_SANDBOX = NO;
@@ -840,7 +840,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
-				MARKETING_VERSION = 2.3.0;
+				MARKETING_VERSION = 2.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.scarf.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -862,7 +862,7 @@
 				CODE_SIGN_ENTITLEMENTS = scarf/scarf.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 25;
+				CURRENT_PROJECT_VERSION = 100;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 3Q6X2L86C4;
 				ENABLE_APP_SANDBOX = NO;
@@ -876,7 +876,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
-				MARKETING_VERSION = 2.3.0;
+				MARKETING_VERSION = 2.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.scarf.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
