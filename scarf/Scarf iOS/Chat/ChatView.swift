@@ -53,6 +53,7 @@ struct ChatView: View {
             }
             composer
         }
+        .background(ScarfColor.backgroundPrimary.ignoresSafeArea())
         .navigationTitle("Chat")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

@@ -67,6 +67,7 @@ struct ProjectDetailView: View {
             Divider()
             tabContent
         }
+        .background(ScarfColor.backgroundPrimary)
         .navigationTitle(project.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

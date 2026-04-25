@@ -1,6 +1,7 @@
 import SwiftUI
 import ScarfCore
 import ScarfIOS
+import ScarfDesign
 
 /// ScarfGo's primary navigation surface. v2.5 expands the original
 /// 4-tab layout (Chat | Dashboard | Memory | More) to 5 primary tabs
@@ -46,7 +47,7 @@ struct ScarfGoTabRoot: View {
         TabView(selection: $coordinator.selectedTab) {
             // 1 — Dashboard: stats + recent sessions.
             NavigationStack {
-                DashboardView(config: config, key: key)
+                DashboardView(config: config, key: key, onSoftDisconnect: onSoftDisconnect)
             }
             .tabItem {
                 Label("Dashboard", systemImage: "gauge.with.needle")
@@ -142,11 +143,14 @@ private struct SystemTab: View {
         List {
             Section("Server") {
                 LabeledContent("Host", value: config.host)
+                    .listRowBackground(ScarfColor.backgroundSecondary)
                 if let user = config.user {
                     LabeledContent("User", value: user)
+                        .listRowBackground(ScarfColor.backgroundSecondary)
                 }
                 if let port = config.port {
                     LabeledContent("Port", value: String(port))
+                        .listRowBackground(ScarfColor.backgroundSecondary)
                 }
             }
 
@@ -157,18 +161,21 @@ private struct SystemTab: View {
                     Label("Memory", systemImage: "brain.head.profile")
                 }
                 .scarfGoCompactListRow()
+                .listRowBackground(ScarfColor.backgroundSecondary)
                 NavigationLink {
                     CronListView(config: config)
                 } label: {
                     Label("Cron jobs", systemImage: "clock.arrow.circlepath")
                 }
                 .scarfGoCompactListRow()
+                .listRowBackground(ScarfColor.backgroundSecondary)
                 NavigationLink {
                     SettingsView(config: config)
                 } label: {
                     Label("Settings", systemImage: "gearshape.fill")
                 }
                 .scarfGoCompactListRow()
+                .listRowBackground(ScarfColor.backgroundSecondary)
             }
 
             Section {
@@ -189,6 +196,7 @@ private struct SystemTab: View {
                     }
                 }
                 .disabled(isDisconnecting || isForgetting)
+                .listRowBackground(ScarfColor.backgroundSecondary)
             } footer: {
                 Text("Closes the live connection. Your key and host details stay on this device; tapping the server from the list reconnects with no re-onboarding.")
                     .font(.caption)
@@ -209,12 +217,15 @@ private struct SystemTab: View {
                     }
                 }
                 .disabled(isForgetting || isDisconnecting)
+                .listRowBackground(ScarfColor.backgroundSecondary)
             } footer: {
                 Text("Removes this server's SSH key and host info from the device. You'll need to add the public key back to `~/.ssh/authorized_keys` to reconnect.")
                     .font(.caption)
             }
         }
         .scarfGoListDensity()
+        .scrollContentBackground(.hidden)
+        .background(ScarfColor.backgroundPrimary)
         .navigationTitle("System")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(

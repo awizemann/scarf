@@ -15,6 +15,7 @@ struct HubBrowseView: View {
             Divider()
             content
         }
+        .background(ScarfColor.backgroundPrimary)
     }
 
     @ViewBuilder
@@ -94,9 +95,12 @@ struct HubBrowseView: View {
                         vm.installHubSkill(hubSkill)
                     }
                     .scarfGoCompactListRow()
+                    .listRowBackground(ScarfColor.backgroundSecondary)
                 }
             }
             .scarfGoListDensity()
+            .scrollContentBackground(.hidden)
+            .background(ScarfColor.backgroundPrimary)
         }
     }
 }

@@ -32,6 +32,7 @@ struct SkillDetailView: View {
                     .foregroundStyle(ScarfColor.foregroundMuted)
                     .textSelection(.enabled)
             }
+            .listRowBackground(ScarfColor.backgroundSecondary)
 
             // v2.5 design-md prereq banner. Only when this is the
             // design-md skill AND `which npx` came back missing.
@@ -53,6 +54,7 @@ struct SkillDetailView: View {
                     }
                     .padding(.vertical, 4)
                 }
+                .listRowBackground(ScarfColor.backgroundSecondary)
             }
 
             // v2.5 Spotify auth note. iOS doesn't run the OAuth flow
@@ -76,6 +78,7 @@ struct SkillDetailView: View {
                     }
                     .padding(.vertical, 4)
                 }
+                .listRowBackground(ScarfColor.backgroundSecondary)
             }
 
             // v2.5 SKILL.md frontmatter chip rows. Each section
@@ -86,16 +89,19 @@ struct SkillDetailView: View {
                 Section("Allowed tools") {
                     chipRow(tools)
                 }
+                .listRowBackground(ScarfColor.backgroundSecondary)
             }
             if let related = skill.relatedSkills, !related.isEmpty {
                 Section("Related skills") {
                     chipRow(related)
                 }
+                .listRowBackground(ScarfColor.backgroundSecondary)
             }
             if let deps = skill.dependencies, !deps.isEmpty {
                 Section("Dependencies") {
                     chipRow(deps)
                 }
+                .listRowBackground(ScarfColor.backgroundSecondary)
             }
 
             if !vm.missingConfig.isEmpty {
@@ -118,6 +124,7 @@ struct SkillDetailView: View {
                     }
                     .padding(.vertical, 6)
                 }
+                .listRowBackground(ScarfColor.backgroundSecondary)
             }
 
             if !skill.files.isEmpty {
@@ -139,6 +146,7 @@ struct SkillDetailView: View {
                         }
                         .buttonStyle(.plain)
                         .scarfGoCompactListRow()
+                        .listRowBackground(ScarfColor.backgroundSecondary)
                     }
                 }
             }
@@ -159,9 +167,12 @@ struct SkillDetailView: View {
                             .textSelection(.enabled)
                     }
                 }
+                .listRowBackground(ScarfColor.backgroundSecondary)
             }
         }
         .scarfGoListDensity()
+        .scrollContentBackground(.hidden)
+        .background(ScarfColor.backgroundPrimary)
         .navigationTitle(skill.name)
         .navigationBarTitleDisplayMode(.inline)
         .task {

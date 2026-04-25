@@ -10,11 +10,17 @@ import ScarfDesign
 struct DashboardView: View {
     let config: IOSServerConfig
     let key: SSHKeyBundle
+    /// Soft-disconnect closure threaded down from the connected-server
+    /// host. Surfaced in the nav bar as a "Switch server" button so
+    /// users can hop back to the server list without first navigating
+    /// to the System tab.
+    let onSoftDisconnect: (@MainActor () async -> Void)?
 
     @Environment(\.scarfGoCoordinator) private var coordinator
     @State private var vm: IOSDashboardViewModel
     @State private var selectedSection: Section = .overview
     @State private var sessionProjectFilter: String? = nil
+    @State private var isDisconnecting = false
 
     enum Section: Hashable { case overview, sessions }
 
@@ -24,10 +30,12 @@ struct DashboardView: View {
 
     init(
         config: IOSServerConfig,
-        key: SSHKeyBundle
+        key: SSHKeyBundle,
+        onSoftDisconnect: (@MainActor () async -> Void)? = nil
     ) {
         self.config = config
         self.key = key
+        self.onSoftDisconnect = onSoftDisconnect
         let ctx = config.toServerContext(id: Self.contextID)
         _vm = State(initialValue: IOSDashboardViewModel(context: ctx))
     }
@@ -53,6 +61,27 @@ struct DashboardView: View {
         .background(ScarfColor.backgroundPrimary.ignoresSafeArea())
         .navigationTitle(config.displayName)
         .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            if let onSoftDisconnect {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Task {
+                            isDisconnecting = true
+                            await onSoftDisconnect()
+                        }
+                    } label: {
+                        if isDisconnecting {
+                            ProgressView()
+                        } else {
+                            Label("Switch server", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+                    }
+                    .disabled(isDisconnecting)
+                    .accessibilityLabel("Switch server")
+                    .accessibilityHint("Disconnects from this server and returns to the server list")
+                }
+            }
+        }
         .refreshable { await vm.refresh() }
         .overlay {
             if vm.isLoading, vm.recentSessions.isEmpty {

@@ -13,5 +13,7 @@ struct ProjectSiteView: View {
         WebviewWidgetView(widget: widget, fullCanvas: true)
             .padding(.horizontal, 8)
             .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(ScarfColor.backgroundPrimary)
     }
 }

@@ -23,6 +23,7 @@ struct ProjectSessionsView_iOS: View {
             Divider()
             content
         }
+        .background(ScarfColor.backgroundPrimary)
         .task(id: project.id) {
             // Rebuild the VM when the project changes so stale state
             // from a previously-selected project doesn't bleed
@@ -116,9 +117,12 @@ struct ProjectSessionsView_iOS: View {
                 }
                 .buttonStyle(.plain)
                 .scarfGoCompactListRow()
+                .listRowBackground(ScarfColor.backgroundSecondary)
             }
         }
         .scarfGoListDensity()
+        .scrollContentBackground(.hidden)
+        .background(ScarfColor.backgroundPrimary)
     }
 }
 

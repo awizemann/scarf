@@ -15,6 +15,7 @@ struct UpdatesView: View {
             Divider()
             content
         }
+        .background(ScarfColor.backgroundPrimary)
     }
 
     @ViewBuilder
@@ -80,9 +81,12 @@ struct UpdatesView: View {
                     }
                     .padding(.vertical, 4)
                     .scarfGoCompactListRow()
+                    .listRowBackground(ScarfColor.backgroundSecondary)
                 }
             }
             .scarfGoListDensity()
+            .scrollContentBackground(.hidden)
+            .background(ScarfColor.backgroundPrimary)
         }
     }
 }
