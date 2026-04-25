@@ -79,28 +79,36 @@ struct ChatView: View {
             )
         }
         .task {
-            // Dashboard row taps set `pendingResumeSessionID` on the
-            // coordinator before switching to the Chat tab. Honor
-            // that if present, else open a fresh session. Clearing
-            // the coordinator value is the consumer's responsibility
-            // (us) — otherwise a later plain tap on the Chat tab
-            // would accidentally re-resume the old session.
+            // Dashboard row taps set `pendingResumeSessionID`, Project
+            // Detail's "New Chat" sets `pendingProjectChat`. Both fire
+            // a tab switch to .chat alongside the value set; we
+            // consume + clear here on first appear. Resume wins over
+            // project-chat if both somehow get set in a single hop —
+            // but in practice the coordinator never sets both at once.
             if let sessionID = coordinator?.pendingResumeSessionID {
                 coordinator?.pendingResumeSessionID = nil
                 await controller.startResuming(sessionID: sessionID)
+            } else if let projectPath = coordinator?.pendingProjectChat {
+                coordinator?.pendingProjectChat = nil
+                await consumePendingProjectChat(projectPath)
             } else {
                 await controller.start()
             }
         }
-        // Also react to a coordinator change that happens while Chat
-        // is already mounted (e.g., user is in Chat, switches to
-        // Dashboard, taps a session row — coordinator flips the tab
-        // AND sets pendingResumeSessionID. The `.task` above only
-        // fires on first appear; this is the mid-session hook.)
+        // React to coordinator changes that happen while Chat is
+        // already mounted (e.g., user is in Chat, taps Projects, opens
+        // a project detail, taps "New Chat" — coordinator flips the
+        // tab AND sets pendingProjectChat. The `.task` above only
+        // fires on first appear; these are the mid-session hooks.)
         .onChange(of: coordinator?.pendingResumeSessionID) { _, new in
             guard let sessionID = new else { return }
             coordinator?.pendingResumeSessionID = nil
             Task { await controller.startResuming(sessionID: sessionID) }
+        }
+        .onChange(of: coordinator?.pendingProjectChat) { _, new in
+            guard let projectPath = new else { return }
+            coordinator?.pendingProjectChat = nil
+            Task { await consumePendingProjectChat(projectPath) }
         }
         // Deliberately NOT tearing down the ACP session on .onDisappear.
         // `TabView` unmounts tab content when the user switches tabs
@@ -142,6 +150,27 @@ struct ChatView: View {
             .presentationDetents([.height(220), .large])
             .presentationDragIndicator(.visible)
         }
+    }
+
+    /// Resolve a project absolute path to a `ProjectEntry` via the
+    /// transport-backed registry, then dispatch `resetAndStartInProject`.
+    /// If the path isn't registered (race with a Mac-app removal, or
+    /// SFTP read failure), fall back to a synthesized entry whose name
+    /// is the path's last component — chat still starts and the user
+    /// sees a usable project chip.
+    private func consumePendingProjectChat(_ path: String) async {
+        let ctx = config.toServerContext(id: Self.sharedContextID)
+        let entry: ProjectEntry = await Task.detached {
+            let registry = ProjectDashboardService(context: ctx).loadRegistry()
+            if let match = registry.projects.first(where: { $0.path == path }) {
+                return match
+            }
+            return ProjectEntry(
+                name: (path as NSString).lastPathComponent.isEmpty ? path : (path as NSString).lastPathComponent,
+                path: path
+            )
+        }.value
+        await controller.resetAndStartInProject(entry)
     }
 
     // MARK: - Subviews

@@ -257,7 +257,7 @@ import Foundation
             try FileManager.default.removeItem(
                 at: home.appendingPathComponent("skills")
             )
-            let vm = IOSSkillsViewModel(context: ctx)
+            let vm = SkillsViewModel(context: ctx)
             await vm.load()
             #expect(vm.categories.isEmpty)
             #expect(vm.lastError == nil)
@@ -284,7 +284,7 @@ import Foundation
             // Dotfile should be filtered
             try "".write(to: pJournal.appendingPathComponent(".DS_Store"), atomically: true, encoding: .utf8)
 
-            let vm = IOSSkillsViewModel(context: ctx)
+            let vm = SkillsViewModel(context: ctx)
             await vm.load()
             #expect(vm.categories.count == 2)
             #expect(vm.categories[0].name == "dev")
@@ -305,7 +305,7 @@ import Foundation
                 at: home.appendingPathComponent("skills/empty-cat"),
                 withIntermediateDirectories: true
             )
-            let vm = IOSSkillsViewModel(context: ctx)
+            let vm = SkillsViewModel(context: ctx)
             await vm.load()
             #expect(vm.categories.isEmpty)
         }
