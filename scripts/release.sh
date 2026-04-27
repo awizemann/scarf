@@ -188,6 +188,21 @@ build_variant() {
 
   log "[$label] Package $(basename "$out_zip")"
   ditto -c -k --keepParent "$app_path" "$out_zip"
+
+  # Post-package verification: extract the actual distribution zip and confirm
+  # codesign + Gatekeeper still accept it. Catches any regression introduced by
+  # ditto / staple / future pipeline tweaks before users see "damaged" errors.
+  # See issue #49 — without this, a broken seal in Sparkle.framework or the
+  # outer bundle would only surface in user reports.
+  log "[$label] Post-package signature + Gatekeeper verification"
+  local verify_dir
+  verify_dir="$(mktemp -d)"
+  ditto -xk "$out_zip" "$verify_dir"
+  codesign --verify --strict --deep --verbose=4 "$verify_dir/Scarf.app" \
+    || die "[$label] codesign --verify failed on packaged zip"
+  spctl --assess --type execute --verbose "$verify_dir/Scarf.app" \
+    || die "[$label] spctl --assess failed on packaged zip"
+  rm -rf "$verify_dir"
 }
 
 UNIVERSAL_ZIP="$RELEASE_DIR/Scarf-v${VERSION}-Universal.zip"

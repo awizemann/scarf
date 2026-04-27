@@ -179,6 +179,20 @@ Download the latest build from [Releases](https://github.com/awizemann/scarf/rel
 
 Scarf checks for updates automatically on launch via [Sparkle](https://sparkle-project.org) and daily thereafter. You can disable automatic checks or trigger a manual check from **Settings → General → Updates** or the menu bar icon.
 
+#### "Scarf.app is damaged" on first launch
+
+If Gatekeeper rejects the app on first launch (occasionally happens on macOS 14+ for zip-distributed apps depending on extraction tool + quarantine state), the bundle itself is fine — every release is verified to pass `codesign --verify --strict --deep` and `spctl --assess --type execute` before it ships. The fix is to **only remove the quarantine attribute**, never strip all xattrs or re-sign:
+
+```bash
+# Recommended — non-destructive
+xattr -d com.apple.quarantine /Applications/Scarf.app
+
+# Or extract with ditto instead of double-clicking the zip:
+ditto -xk ~/Downloads/Scarf-vX.X.X-Universal.zip ~/Downloads/
+```
+
+**Do not run `xattr -rc /Applications/Scarf.app`** — it strips codesign-related extended attributes and can break the bundle's seal. **Do not run `codesign --force --deep --sign - /Applications/Scarf.app`** — `--deep` ad-hoc re-signing is incompatible with Sparkle.framework's nested XPC services and `Updater.app` sub-bundle, and will corrupt the framework signature even if the outer app appears intact afterward. If a clean re-download + `xattr -d com.apple.quarantine` doesn't resolve the issue, please open an issue with `codesign --verify --verbose=4 --strict /Applications/Scarf.app` output captured **before** any mitigation attempts.
+
 ### Build from Source
 
 ```bash
