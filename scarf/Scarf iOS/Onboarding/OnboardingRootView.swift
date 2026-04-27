@@ -18,15 +18,24 @@ struct OnboardingRootView: View {
     /// step 1 with nowhere to go. Optional for callers that don't
     /// need cancel (shouldn't be any, but keeps the API forgiving).
     let onCancel: @MainActor () -> Void
+    /// Whether the Cancel button should appear in the nav bar
+    /// (issue #55). False on the first-run onboarding where there
+    /// is no `.serverList` to fall back to — showing Cancel there
+    /// fired the action but the state machine routed straight back
+    /// into onboarding, so the button looked broken to TestFlight
+    /// users.
+    let canCancel: Bool
 
     @State private var vm: OnboardingViewModel
 
     init(
         targetServerID: ServerID,
+        canCancel: Bool = true,
         onFinished: @escaping @MainActor () async -> Void,
         onCancel: @escaping @MainActor () -> Void = {}
     ) {
         self.targetServerID = targetServerID
+        self.canCancel = canCancel
         self.onFinished = onFinished
         self.onCancel = onCancel
         let service = CitadelSSHService()
@@ -63,9 +72,16 @@ struct OnboardingRootView: View {
                     // to cancel. Hiding the button then also keeps
                     // users from accidentally wiping a just-saved
                     // server mid-race.
+                    //
+                    // Also hidden on first-run onboarding (issue #55):
+                    // there is no server list to return to, so Cancel
+                    // would either be inert (state machine looping
+                    // back into onboarding) or confusing (an empty
+                    // server list with no path forward). Better to
+                    // not show the affordance at all.
                     if case .connected = vm.step {
                         EmptyView()
-                    } else {
+                    } else if canCancel {
                         Button("Cancel") {
                             onCancel()
                         }

@@ -185,8 +185,20 @@ final class RootModel {
 
     /// Cancel an in-progress onboarding and return to the list.
     /// Called by the sheet's Cancel affordance.
+    ///
+    /// Issue #55: prior versions had a defensive `servers.isEmpty`
+    /// fallback that re-presented onboarding when there was nothing
+    /// to fall back to. That made Cancel look broken on first-run.
+    /// `OnboardingRootView` now hides the Cancel button when
+    /// `canCancel == false`, so this path is only ever reached when
+    /// at least one server already exists. In debug we assert that
+    /// invariant; in release we still route to `.serverList` (which
+    /// renders an empty-state with the "+ Add server" button) rather
+    /// than re-presenting onboarding, so the worst case is "user
+    /// sees the empty server list" rather than "Cancel does nothing."
     func cancelOnboarding() {
-        state = servers.isEmpty ? .onboarding(forNewServer: ServerID()) : .serverList
+        assert(!servers.isEmpty, "cancelOnboarding called with no servers — Cancel button should be hidden via OnboardingRootView.canCancel")
+        state = .serverList
     }
 
     /// Called from OnboardingView when the flow finishes. Reload the
@@ -320,7 +332,14 @@ struct RootView: View {
         case .serverList:
             ServerListView(model: model)
         case .onboarding(let forNewServer):
-            OnboardingRootView(targetServerID: forNewServer) {
+            // canCancel is gated on whether there's a server list to
+            // return to (issue #55). On first-run the user MUST add
+            // their first server to use the app — the toolbar omits
+            // the Cancel button in that case.
+            OnboardingRootView(
+                targetServerID: forNewServer,
+                canCancel: !model.servers.isEmpty
+            ) {
                 await model.onboardingFinished(serverID: forNewServer)
             } onCancel: {
                 model.cancelOnboarding()
