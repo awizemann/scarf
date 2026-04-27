@@ -27,6 +27,21 @@ public struct MessageGroup: Identifiable {
     public var toolCallCount: Int {
         assistantMessages.reduce(0) { $0 + $1.toolCalls.count }
     }
+
+    /// Aggregated `ToolKind → count` over all assistant tool calls in
+    /// this group. Lives on the model so SwiftUI's Equatable
+    /// short-circuit (issue #46) covers it — previously this was a
+    /// `MessageGroupView` computed property that re-walked O(m × k)
+    /// per group on every body re-evaluation.
+    public var toolKindCounts: [ToolKind: Int] {
+        var counts: [ToolKind: Int] = [:]
+        for msg in assistantMessages where msg.isAssistant {
+            for call in msg.toolCalls {
+                counts[call.toolKind, default: 0] += 1
+            }
+        }
+        return counts
+    }
 }
 
 @Observable
@@ -759,7 +774,42 @@ public final class RichChatViewModel {
         } else {
             messages.append(msg)
         }
-        buildMessageGroups()
+        patchTrailingGroupForStreaming(streamingMsg: msg)
+    }
+
+    /// Per-chunk fast path for `messageGroups` (issue #46). Mutates
+    /// only the trailing group's assistant entry instead of rebuilding
+    /// the entire `messageGroups` array via `buildMessageGroups()` on
+    /// every streamed token.
+    ///
+    /// Falls back to a full rebuild whenever it can't safely patch:
+    ///  - no trailing group exists yet (e.g. first chunk after `reset`)
+    ///  - the trailing group is a user-only group (the very first chunk
+    ///    of a brand-new turn — we need a full rebuild so the assistant
+    ///    is grouped under the right user message)
+    ///
+    /// Other call sites of `buildMessageGroups()` are intentionally
+    /// untouched: they handle structural events (user message, tool
+    /// call complete, finalize, session resume) where group boundaries
+    /// can change, and a full rebuild is the right move there.
+    private func patchTrailingGroupForStreaming(streamingMsg: HermesMessage) {
+        guard let lastIdx = messageGroups.indices.last else {
+            buildMessageGroups()
+            return
+        }
+        let trailing = messageGroups[lastIdx]
+        var assistants = trailing.assistantMessages
+        if let i = assistants.firstIndex(where: { $0.id == Self.streamingId }) {
+            assistants[i] = streamingMsg
+        } else {
+            assistants.append(streamingMsg)
+        }
+        messageGroups[lastIdx] = MessageGroup(
+            id: trailing.id,
+            userMessage: trailing.userMessage,
+            assistantMessages: assistants,
+            toolResults: trailing.toolResults
+        )
     }
 
     /// Convert the streaming message (id=0) into a permanent message and reset streaming state.

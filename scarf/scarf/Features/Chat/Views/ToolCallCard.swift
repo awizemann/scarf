@@ -16,6 +16,12 @@ struct ToolCallCard: View {
     var onFocus: (() -> Void)? = nil
 
     @State private var expanded = false
+    /// Pretty-printed `call.arguments`. Computed once per `call.callId`
+    /// via `.task(id:)` instead of on every card re-render (issue #46).
+    /// Seeded with the raw arguments so the first frame after expand
+    /// shows readable text instead of a flicker of empty space while
+    /// the task runs.
+    @State private var formattedArgs: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -77,7 +83,7 @@ struct ToolCallCard: View {
                         Text("ARGUMENTS")
                             .scarfStyle(.captionUppercase)
                             .foregroundStyle(ScarfColor.foregroundMuted)
-                        Text(formatJSON(call.arguments))
+                        Text(formattedArgs.isEmpty ? call.arguments : formattedArgs)
                             .font(ScarfFont.monoSmall)
                             .foregroundStyle(ScarfColor.foregroundPrimary)
                             .textSelection(.enabled)
@@ -101,6 +107,9 @@ struct ToolCallCard: View {
                 }
                 .padding(.leading, 4)
             }
+        }
+        .task(id: call.callId) {
+            formattedArgs = formatJSON(call.arguments)
         }
     }
 
@@ -141,13 +150,18 @@ struct ToolResultContent: View {
     let content: String
 
     @State private var showAll = false
-
-    private var lines: [String] { content.components(separatedBy: "\n") }
-    private var isLong: Bool { lines.count > 8 }
+    /// Cached line split. The previous computed-property pair
+    /// (`lines` + `isLong`) split `content` twice on every render —
+    /// once for the count check, once for the prefix join. With long
+    /// tool outputs (file contents, command output) this was O(n)
+    /// per render, repeated for every settled card on every chunk
+    /// (issue #46). Now split once per content change via `.task(id:)`.
+    @State private var lines: [String] = []
+    @State private var preview: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(showAll ? content : lines.prefix(8).joined(separator: "\n"))
+            Text(showAll ? content : preview)
                 .font(ScarfFont.monoSmall)
                 .foregroundStyle(ScarfColor.foregroundPrimary)
                 .textSelection(.enabled)
@@ -162,7 +176,7 @@ struct ToolResultContent: View {
                         )
                 )
 
-            if isLong {
+            if lines.count > 8 {
                 Button(showAll ? "Show less" : "Show all \(lines.count) lines") {
                     withAnimation { showAll.toggle() }
                 }
@@ -170,6 +184,11 @@ struct ToolResultContent: View {
                 .foregroundStyle(ScarfColor.accent)
                 .buttonStyle(.plain)
             }
+        }
+        .task(id: content) {
+            let split = content.components(separatedBy: "\n")
+            lines = split
+            preview = split.prefix(8).joined(separator: "\n")
         }
     }
 }

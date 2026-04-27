@@ -59,6 +59,7 @@ struct RichChatMessageList: View {
 
                     ForEach(groups) { group in
                         MessageGroupView(group: group, turnDurations: turnDurations)
+                            .equatable()
                             .id("group-\(group.id)")
                     }
 
@@ -136,7 +137,7 @@ struct RichChatMessageList: View {
     }
 }
 
-struct MessageGroupView: View {
+struct MessageGroupView: View, Equatable {
     let group: MessageGroup
     /// Wall-clock turn durations keyed by assistant-message id (v2.5).
     /// Forwarded into `RichMessageBubble` so the metadata footer can
@@ -144,10 +145,47 @@ struct MessageGroupView: View {
     /// that haven't been updated yet still compile.
     var turnDurations: [Int: TimeInterval] = [:]
 
+    /// Equatable short-circuit for SwiftUI: when the trailing group's
+    /// streaming bubble grows, only that group's `==` returns false.
+    /// All earlier groups skip body re-evaluation, dropping per-chunk
+    /// render work from O(n) to O(1) for settled groups (issue #46).
+    ///
+    /// What participates:
+    ///  - `group.id` (primary key — stable sequential index).
+    ///  - assistant-message id list (additions / finalize-id-flip).
+    ///  - For the streaming message (id == 0): content, reasoning,
+    ///    reasoningContent, toolCalls.count — the only fields that
+    ///    mutate while streaming.
+    ///  - `turnDurations[msg.id]` for assistants in this group only —
+    ///    the dict is large and shared across groups, but each group
+    ///    only renders its own entries.
+    ///  - `group.toolResults.count` — append-only within a group.
+    static func == (lhs: MessageGroupView, rhs: MessageGroupView) -> Bool {
+        guard lhs.group.id == rhs.group.id else { return false }
+        guard lhs.group.userMessage?.id == rhs.group.userMessage?.id else { return false }
+        guard lhs.group.userMessage?.content == rhs.group.userMessage?.content else { return false }
+        guard lhs.group.assistantMessages.count == rhs.group.assistantMessages.count else { return false }
+        for (l, r) in zip(lhs.group.assistantMessages, rhs.group.assistantMessages) {
+            if l.id != r.id { return false }
+            if l.id == 0 {
+                if l.content != r.content { return false }
+                if l.reasoning != r.reasoning { return false }
+                if l.reasoningContent != r.reasoningContent { return false }
+                if l.toolCalls.count != r.toolCalls.count { return false }
+            }
+        }
+        if lhs.group.toolResults.count != rhs.group.toolResults.count { return false }
+        for msg in lhs.group.assistantMessages where msg.isAssistant && msg.id != 0 {
+            if lhs.turnDurations[msg.id] != rhs.turnDurations[msg.id] { return false }
+        }
+        return true
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let user = group.userMessage {
                 RichMessageBubble(message: user, toolResults: [:])
+                    .equatable()
             }
 
             // Identify by array offset rather than `message.id`. The
@@ -166,6 +204,7 @@ struct MessageGroupView: View {
                     toolResults: group.toolResults,
                     turnDuration: turnDurations[message.id]
                 )
+                .equatable()
             }
 
             if group.toolCallCount > 1 {
@@ -176,7 +215,7 @@ struct MessageGroupView: View {
 
     @ViewBuilder
     private var toolSummary: some View {
-        let kinds = toolKindCounts
+        let kinds = group.toolKindCounts
         if !kinds.isEmpty {
             HStack(spacing: 4) {
                 Image(systemName: "wrench")
@@ -188,16 +227,6 @@ struct MessageGroupView: View {
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.vertical, 2)
         }
-    }
-
-    private var toolKindCounts: [ToolKind: Int] {
-        var counts: [ToolKind: Int] = [:]
-        for msg in group.assistantMessages where msg.isAssistant {
-            for call in msg.toolCalls {
-                counts[call.toolKind, default: 0] += 1
-            }
-        }
-        return counts
     }
 
     private func summaryText(_ kinds: [ToolKind: Int]) -> String {

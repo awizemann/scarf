@@ -2,7 +2,7 @@ import SwiftUI
 import ScarfCore
 import ScarfDesign
 
-struct RichMessageBubble: View {
+struct RichMessageBubble: View, Equatable {
     let message: HermesMessage
     let toolResults: [String: HermesMessage]
     /// Wall-clock duration of the agent turn this assistant message
@@ -13,6 +13,29 @@ struct RichMessageBubble: View {
     var turnDuration: TimeInterval? = nil
 
     @Environment(ChatViewModel.self) private var chatViewModel
+
+    /// SwiftUI body short-circuit (issue #46). Settled bubbles
+    /// (`message.id != 0`) are immutable — id equality plus a couple
+    /// of cheap stored-field comparisons is sufficient. The streaming
+    /// bubble (id == 0) gets a content + reasoning + toolCalls.count
+    /// comparison so it correctly redraws on every chunk.
+    /// `toolResults` is compared by count: results are append-only
+    /// within a group, so a count change implies a new tool result.
+    static func == (lhs: RichMessageBubble, rhs: RichMessageBubble) -> Bool {
+        guard lhs.message.id == rhs.message.id else { return false }
+        if lhs.message.id == 0 {
+            return lhs.message.content == rhs.message.content
+                && lhs.message.reasoning == rhs.message.reasoning
+                && lhs.message.reasoningContent == rhs.message.reasoningContent
+                && lhs.message.toolCalls.count == rhs.message.toolCalls.count
+                && lhs.turnDuration == rhs.turnDuration
+                && lhs.toolResults.count == rhs.toolResults.count
+        }
+        return lhs.turnDuration == rhs.turnDuration
+            && lhs.toolResults.count == rhs.toolResults.count
+            && lhs.message.tokenCount == rhs.message.tokenCount
+            && lhs.message.finishReason == rhs.message.finishReason
+    }
 
     var body: some View {
         if message.isUser {
