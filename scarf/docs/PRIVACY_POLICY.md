@@ -54,7 +54,8 @@ If you join the ScarfGo beta via TestFlight, Apple shares anonymized crash repor
 
 - iOS Keychain storage uses `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` so credentials are unreachable while the device is locked and never synced to iCloud.
 - SSH connections use the same protocol stack as `ssh(1)` — strict host-key verification on first connect, key-based auth (no passwords are sent over the wire), and Citadel's pure-Swift implementation on iOS.
-- The macOS app is sandboxed where possible and notarized via Apple's standard Developer ID flow.
+- The macOS app is notarized via Apple's standard Developer ID flow (signed + stapled by `xcrun notarytool` on every release). It is not App-Sandboxed — Scarf needs direct read access to `~/.hermes/` and the ability to spawn the `hermes` CLI, both of which the App Sandbox forbids. That's why Scarf is distributed via GitHub Releases + Sparkle rather than the Mac App Store.
+- ScarfGo on iOS runs inside the standard iOS app sandbox — no special entitlements beyond Keychain access for the SSH key.
 
 ## Children's privacy
 
@@ -65,7 +66,7 @@ Neither app is directed at children under 13 and we do not knowingly collect any
 Because we don't collect any data on developer-controlled servers, there is nothing for you to opt out of, request deletion of, or export. To remove all app-stored data from your device:
 
 - **ScarfGo**: delete the app. iOS purges the Keychain group + app container.
-- **Scarf**: delete the app and the `~/Library/Containers/com.scarf` directory (the app is sandboxed; this is the only on-disk data).
+- **Scarf**: delete `Scarf.app` from `/Applications`, then optionally remove `~/Library/Caches/scarf/` (remote SQLite snapshots), `~/Library/Preferences/com.scarf.app.plist` (server registry + preferences), and `~/Library/Application Support/com.scarf/` (skill snapshots).
 
 Your Hermes host's data (`~/.hermes/`) stays untouched — that's yours to manage.
 
