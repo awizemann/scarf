@@ -17,9 +17,18 @@ import ScarfCore
 ///   go here; v1 item is migrated into v2 on first `listAll()` after
 ///   the upgrade, then removed.
 ///
-/// All items use `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`
-/// so they're reachable after a single device unlock (background
-/// tasks, notification actions) but never sync to iCloud Keychain.
+/// **Accessibility / sync attributes.** Default behavior pins items
+/// to this device with `kSecAttrAccessibleAfterFirstUnlockThisDevice
+/// Only` + `kSecAttrSynchronizable=false`. Users can opt into iCloud
+/// Keychain sync via `SSHKeyICloudPreference` (issue #52); when
+/// enabled, writes use `kSecAttrAccessibleAfterFirstUnlock` (no
+/// `ThisDeviceOnly` suffix) + `kSecAttrSynchronizable=true` so the
+/// key is picked up by iCloud Keychain on every signed-in device.
+///
+/// All read / list / delete queries pass `kSecAttrSynchronizable =
+/// kSecAttrSynchronizableAny` so they match items regardless of
+/// sync state — load-bearing during the migration window when
+/// device-only and synced items can briefly coexist.
 public struct KeychainSSHKeyStore: SSHKeyStore {
     public static let defaultService = "com.scarf.ssh-key"
     public static let legacyV1Account = "primary"
@@ -56,10 +65,12 @@ public struct KeychainSSHKeyStore: SSHKeyStore {
 
     public func delete() async throws {
         // Wipe every v2 entry + the legacy v1 entry. Single-query delete
-        // that matches any account under our service.
+        // that matches any account under our service. Pass `Any` so the
+        // wipe catches synced + device-only items uniformly (issue #52).
         let query: [String: Any] = [
-            kSecClass as String:        kSecClassGenericPassword,
-            kSecAttrService as String:  service,
+            kSecClass as String:                   kSecClassGenericPassword,
+            kSecAttrService as String:             service,
+            kSecAttrSynchronizable as String:      kSecAttrSynchronizableAny,
         ]
         let status = SecItemDelete(query as CFDictionary)
         if status != errSecSuccess && status != errSecItemNotFound {
@@ -74,10 +85,13 @@ public struct KeychainSSHKeyStore: SSHKeyStore {
     public func listAll() async throws -> [ServerID] {
         migrateLegacyIfNeeded()
         let query: [String: Any] = [
-            kSecClass as String:             kSecClassGenericPassword,
-            kSecAttrService as String:       service,
-            kSecReturnAttributes as String:  true,
-            kSecMatchLimit as String:        kSecMatchLimitAll,
+            kSecClass as String:                   kSecClassGenericPassword,
+            kSecAttrService as String:             service,
+            kSecReturnAttributes as String:        true,
+            kSecMatchLimit as String:              kSecMatchLimitAll,
+            // Match items regardless of sync state (issue #52). Without
+            // this the listing silently misses synced items.
+            kSecAttrSynchronizable as String:      kSecAttrSynchronizableAny,
         ]
         var items: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &items)
@@ -115,15 +129,60 @@ public struct KeychainSSHKeyStore: SSHKeyStore {
         try deleteBundle(account: Self.multiAccountPrefix + id.uuidString)
     }
 
+    // MARK: - iCloud sync migration (issue #52)
+
+    /// Migrate every stored key bundle to the requested sync state and
+    /// persist the user's preference for future writes.
+    ///
+    /// Idempotent: if the user enables sync twice in a row the second
+    /// call simply re-saves with the same attributes. Safe to call
+    /// from a UI toggle handler. Errors thrown by individual key
+    /// re-writes propagate; partial migrations are tolerable because
+    /// the read paths use `kSecAttrSynchronizableAny` and pick up
+    /// either copy on the next read.
+    ///
+    /// Side effects:
+    /// - Each stored key is read with `Any`, deleted with `Any`, then
+    ///   re-saved with the target sync attributes via `writeBundle(_:account:syncToICloud:)`.
+    /// - The legacy v1 entry (if present) is migrated to the v2 layout
+    ///   with the new attributes in passing.
+    /// - `SSHKeyICloudPreference.isEnabled` is set BEFORE the rewrite
+    ///   loop so any concurrent `save(_:)` call from another path
+    ///   already uses the right attributes.
+    public func migrateAllItems(toICloudSync enabled: Bool) async throws {
+        SSHKeyICloudPreference.isEnabled = enabled
+
+        // Pull every v2 + v1 bundle into memory first. We can't iterate
+        // and rewrite simultaneously: deleting an item we're about to
+        // re-add would race with the listing query.
+        var bundles: [(account: String, bundle: SSHKeyBundle)] = []
+        for id in try await listAll() {
+            if let bundle = try await load(for: id) {
+                bundles.append((Self.multiAccountPrefix + id.uuidString, bundle))
+            }
+        }
+        if let legacy = try? readLegacy() {
+            bundles.append((Self.legacyV1Account, legacy))
+        }
+
+        for (account, bundle) in bundles {
+            try writeBundle(bundle, account: account, syncToICloud: enabled)
+        }
+    }
+
     // MARK: - Private — Keychain plumbing per-account
 
     private func readBundle(account: String) throws -> SSHKeyBundle? {
         let query: [String: Any] = [
-            kSecClass as String:            kSecClassGenericPassword,
-            kSecAttrService as String:      service,
-            kSecAttrAccount as String:      account,
-            kSecReturnData as String:       true,
-            kSecMatchLimit as String:       kSecMatchLimitOne,
+            kSecClass as String:                   kSecClassGenericPassword,
+            kSecAttrService as String:             service,
+            kSecAttrAccount as String:             account,
+            kSecReturnData as String:              true,
+            kSecMatchLimit as String:              kSecMatchLimitOne,
+            // Match items regardless of sync state (issue #52). Without
+            // this the query implicitly defaults to false and orphans
+            // any items that have been migrated to iCloud sync.
+            kSecAttrSynchronizable as String:      kSecAttrSynchronizableAny,
         ]
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
@@ -149,6 +208,13 @@ public struct KeychainSSHKeyStore: SSHKeyStore {
     }
 
     private func writeBundle(_ bundle: SSHKeyBundle, account: String) throws {
+        try writeBundle(bundle, account: account, syncToICloud: SSHKeyICloudPreference.isEnabled)
+    }
+
+    /// Write path with explicit sync control. Used by the public
+    /// migration helper to force a target sync state regardless of
+    /// the current preference.
+    private func writeBundle(_ bundle: SSHKeyBundle, account: String, syncToICloud: Bool) throws {
         let data: Data
         do {
             data = try JSONEncoder().encode(bundle)
@@ -157,17 +223,34 @@ public struct KeychainSSHKeyStore: SSHKeyStore {
                 message: "Encode failed: \(error.localizedDescription)", osStatus: nil
             )
         }
-        let baseQuery: [String: Any] = [
+        // Delete with kSecAttrSynchronizableAny to clear out any prior
+        // copy regardless of its sync state — without this a flip from
+        // synced → device-only could leave the synced copy behind and
+        // create two competing items at the same (service, account).
+        let deleteQuery: [String: Any] = [
+            kSecClass as String:                   kSecClassGenericPassword,
+            kSecAttrService as String:             service,
+            kSecAttrAccount as String:             account,
+            kSecAttrSynchronizable as String:      kSecAttrSynchronizableAny,
+        ]
+        SecItemDelete(deleteQuery as CFDictionary)
+
+        var attributes: [String: Any] = [
             kSecClass as String:        kSecClassGenericPassword,
             kSecAttrService as String:  service,
             kSecAttrAccount as String:  account,
         ]
-        SecItemDelete(baseQuery as CFDictionary)
-
-        var attributes = baseQuery
         attributes[kSecValueData as String] = data
-        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        attributes[kSecAttrSynchronizable as String] = kCFBooleanFalse
+        if syncToICloud {
+            // iCloud Keychain requires the non-`ThisDeviceOnly` accessible
+            // class — items with the `ThisDeviceOnly` suffix are silently
+            // skipped by the sync engine.
+            attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+            attributes[kSecAttrSynchronizable as String] = kCFBooleanTrue
+        } else {
+            attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            attributes[kSecAttrSynchronizable as String] = kCFBooleanFalse
+        }
 
         let addStatus = SecItemAdd(attributes as CFDictionary, nil)
         guard addStatus == errSecSuccess else {
@@ -179,9 +262,10 @@ public struct KeychainSSHKeyStore: SSHKeyStore {
 
     private func deleteBundle(account: String) throws {
         let query: [String: Any] = [
-            kSecClass as String:        kSecClassGenericPassword,
-            kSecAttrService as String:  service,
-            kSecAttrAccount as String:  account,
+            kSecClass as String:                   kSecClassGenericPassword,
+            kSecAttrService as String:             service,
+            kSecAttrAccount as String:             account,
+            kSecAttrSynchronizable as String:      kSecAttrSynchronizableAny,
         ]
         let status = SecItemDelete(query as CFDictionary)
         if status != errSecSuccess && status != errSecItemNotFound {
@@ -217,10 +301,13 @@ public struct KeychainSSHKeyStore: SSHKeyStore {
     /// triggering a recursive migration.
     private func listAllInternal(skipMigration: Bool) throws -> [ServerID] {
         let query: [String: Any] = [
-            kSecClass as String:             kSecClassGenericPassword,
-            kSecAttrService as String:       service,
-            kSecReturnAttributes as String:  true,
-            kSecMatchLimit as String:        kSecMatchLimitAll,
+            kSecClass as String:                   kSecClassGenericPassword,
+            kSecAttrService as String:             service,
+            kSecReturnAttributes as String:        true,
+            kSecMatchLimit as String:              kSecMatchLimitAll,
+            // Match items regardless of sync state (issue #52). Without
+            // this the listing silently misses synced items.
+            kSecAttrSynchronizable as String:      kSecAttrSynchronizableAny,
         ]
         var items: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &items)

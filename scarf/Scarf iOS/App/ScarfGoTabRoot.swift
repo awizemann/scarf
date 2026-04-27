@@ -138,6 +138,13 @@ private struct SystemTab: View {
     @State private var showForgetConfirmation = false
     @State private var isForgetting = false
     @State private var isDisconnecting = false
+    /// Mirror of `SSHKeyICloudPreference.isEnabled` — drives the iCloud
+    /// Keychain sync toggle (issue #52). Initial value is read on view
+    /// init so the toggle reflects today's preference before the user
+    /// taps anything; flipping triggers `migrateAllItems(toICloudSync:)`.
+    @State private var iCloudSyncEnabled: Bool = SSHKeyICloudPreference.isEnabled
+    @State private var iCloudMigrationInFlight = false
+    @State private var iCloudMigrationError: String?
 
     var body: some View {
         List {
@@ -177,6 +184,67 @@ private struct SystemTab: View {
                 .scarfGoCompactListRow()
                 .listRowBackground(ScarfColor.backgroundSecondary)
             }
+
+            Section {
+                Toggle(isOn: $iCloudSyncEnabled) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "key.icloud.fill")
+                            .foregroundStyle(.tint)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Sync SSH key with iCloud Keychain")
+                            Text(iCloudSyncEnabled
+                                 ? "Synced — your other Apple devices with iCloud Keychain will see this key."
+                                 : "This device only — generate a separate key on each device.")
+                                .font(.caption)
+                                .foregroundStyle(ScarfColor.foregroundMuted)
+                        }
+                    }
+                }
+                .tint(ScarfColor.accent)
+                .disabled(iCloudMigrationInFlight)
+                .onChange(of: iCloudSyncEnabled) { _, newValue in
+                    Task {
+                        iCloudMigrationInFlight = true
+                        iCloudMigrationError = nil
+                        defer { iCloudMigrationInFlight = false }
+                        do {
+                            try await KeychainSSHKeyStore().migrateAllItems(toICloudSync: newValue)
+                        } catch {
+                            // Revert the toggle on failure so the UI
+                            // reflects what's actually in the Keychain;
+                            // surface the error inline so the user can
+                            // retry / report. Keychain failures here are
+                            // rare (typically `errSecDuplicateItem` if a
+                            // prior migration was interrupted — the
+                            // delete-with-Any in writeBundle prevents
+                            // that, but we still belt-and-brace).
+                            iCloudMigrationError = error.localizedDescription
+                            iCloudSyncEnabled = !newValue
+                            SSHKeyICloudPreference.isEnabled = !newValue
+                        }
+                    }
+                }
+                if iCloudMigrationInFlight {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Updating Keychain…")
+                            .font(.caption)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
+                    }
+                }
+                if let err = iCloudMigrationError {
+                    Label(err, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(ScarfColor.warning)
+                }
+            } header: {
+                Text("Security")
+            } footer: {
+                Text("End-to-end encrypted via iCloud Keychain. With Advanced Data Protection on, the encryption keys never leave your devices. Toggle off to keep the key device-only — each new device must onboard separately.")
+                    .font(.caption)
+            }
+            .listRowBackground(ScarfColor.backgroundSecondary)
 
             Section {
                 Button {
