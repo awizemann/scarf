@@ -19,15 +19,43 @@ public final class ConnectionStatusViewModel {
         /// Healthy: SSH connected AND we can read `~/.hermes/config.yaml`.
         case connected
         /// SSH connects but the follow-up read-access probe failed. Data
-        /// views will be empty until this is resolved. `reason` is shown
-        /// in the pill tooltip; users click the pill to open diagnostics.
-        case degraded(reason: String)
+        /// views will be empty until this is resolved.
+        ///
+        /// `reason` is the short pill copy (e.g. `"can't read ~/.hermes/
+        /// config.yaml"`); `hint` is a longer actionable string surfaced
+        /// in the pill's quick popover so users see *why* and *what to do*
+        /// without diving into the diagnostics sheet (issue #53). `cause`
+        /// classifies the failure for UI branching.
+        case degraded(reason: String, hint: String, cause: DegradedCause)
         /// No probe yet or the previous probe timed out but we haven't
         /// confirmed failure. Shown as yellow to tell the user "checking…".
         case idle
         /// Last probe failed. `message` is a terse human summary; `stderr`
         /// is the raw diagnostic text for a disclosure panel.
         case error(message: String, stderr: String)
+    }
+
+    /// Specific tier-2 failure mode emitted by the probe script. Used to
+    /// drive both the pill copy and the popover hint (issue #53).
+    public enum DegradedCause: Equatable {
+        /// `config.yaml` is missing entirely. Most common cause: Hermes
+        /// hasn't run `setup` yet on this remote.
+        case configMissing
+        /// `~/.hermes` itself doesn't exist. Hermes isn't installed for
+        /// the SSH user on this host.
+        case homeMissing
+        /// File exists but the SSH user can't read it. Permission /
+        /// ownership mismatch.
+        case configUnreadable
+        /// `~/.hermes/active_profile` points at a non-default Hermes
+        /// profile and the configured Hermes home doesn't carry the
+        /// real config — the user is reading the wrong directory.
+        /// Carries the active profile name so the hint can name it.
+        case profileActive(name: String)
+        /// Probe couldn't classify the failure precisely (e.g. older
+        /// remote returned a binary `TIER2:1` without a tag). Falls
+        /// back to a generic hint.
+        case unknown
     }
 
     public private(set) var status: Status = .idle
@@ -97,15 +125,40 @@ public final class ConnectionStatusViewModel {
         } else {
             homeArg = "\"\(hermesHome.replacingOccurrences(of: "\"", with: "\\\""))\""
         }
+        // Probe emits a granular `TIER2:1:<cause>` code so the pill can
+        // surface a specific hint (issue #53) instead of the prior
+        // collapsed-to-binary "can't read config.yaml". Causes:
+        //   no-home — $H itself doesn't exist
+        //   missing — config.yaml absent
+        //   perm    — exists but unreadable by SSH user
+        //   profile:<name> — config missing AND ~/.hermes/active_profile
+        //                    points at a Hermes profile, suggesting Scarf
+        //                    is reading the wrong dir
         let script = """
         echo TIER1:0
         H=\(homeArg)
-        if [ -r "$H/config.yaml" ]; then echo TIER2:0; else echo TIER2:1; fi
+        if [ -r "$H/config.yaml" ]; then
+          echo TIER2:0
+        elif [ ! -d "$H" ]; then
+          echo TIER2:1:no-home
+        elif [ ! -e "$H/config.yaml" ]; then
+          ACTIVE=""
+          if [ -r "$HOME/.hermes/active_profile" ]; then
+            ACTIVE=$(head -n1 "$HOME/.hermes/active_profile" 2>/dev/null | tr -d ' \\t\\r\\n')
+          fi
+          if [ -n "$ACTIVE" ] && [ "$ACTIVE" != "default" ]; then
+            echo TIER2:1:profile:$ACTIVE
+          else
+            echo TIER2:1:missing
+          fi
+        else
+          echo TIER2:1:perm
+        fi
         """
 
         enum ProbeOutcome {
             case connected
-            case degraded(reason: String)
+            case degraded(reason: String, hint: String, cause: DegradedCause)
             case failure(TransportError)
         }
 
@@ -130,10 +183,12 @@ public final class ConnectionStatusViewModel {
                 if tier2 {
                     return .connected
                 }
-                // Connected but can't read config.yaml — the core issue #19
-                // symptom. Give the pill a short reason; the full story goes
-                // into Remote Diagnostics.
-                return .degraded(reason: "can't read ~/.hermes/config.yaml")
+                // Connected but tier 2 failed. Parse the granular cause
+                // code; older remotes that don't emit a tag fall through
+                // to `.unknown` with a generic hint (issue #53).
+                let cause = Self.parseDegradedCause(stdout: out)
+                let (reason, hint) = Self.describe(cause: cause, hermesHome: hermesHome)
+                return .degraded(reason: reason, hint: hint, cause: cause)
             } catch let e as TransportError {
                 return .failure(e)
             } catch {
@@ -146,8 +201,8 @@ public final class ConnectionStatusViewModel {
             status = .connected
             lastSuccess = Date()
             consecutiveFailures = 0
-        case .degraded(let reason):
-            status = .degraded(reason: reason)
+        case .degraded(let reason, let hint, let cause):
+            status = .degraded(reason: reason, hint: hint, cause: cause)
             lastSuccess = Date()   // SSH itself is fine, reset failure count
             consecutiveFailures = 0
         case .failure(let err):
@@ -174,6 +229,61 @@ public final class ConnectionStatusViewModel {
                     stderr: err.diagnosticStderr
                 )
             }
+        }
+    }
+
+    /// Pull a `DegradedCause` out of the probe stdout. Looks for the
+    /// `TIER2:1:<code>[:detail]` line; falls back to `.unknown` when
+    /// only the legacy binary `TIER2:1` is present (older remotes,
+    /// future-proofs against accidental tag drops).
+    nonisolated static func parseDegradedCause(stdout: String) -> DegradedCause {
+        for raw in stdout.split(separator: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix("TIER2:1:") else { continue }
+            let body = String(line.dropFirst("TIER2:1:".count))
+            if body == "no-home" { return .homeMissing }
+            if body == "missing" { return .configMissing }
+            if body == "perm"    { return .configUnreadable }
+            if body.hasPrefix("profile:") {
+                let name = String(body.dropFirst("profile:".count))
+                if !name.isEmpty {
+                    return .profileActive(name: name)
+                }
+            }
+        }
+        return .unknown
+    }
+
+    /// Map a `DegradedCause` into the pill's short `reason` (single line,
+    /// fits in a tooltip) and longer `hint` (popover body, can carry
+    /// commands the user can copy).
+    nonisolated static func describe(cause: DegradedCause, hermesHome: String) -> (reason: String, hint: String) {
+        switch cause {
+        case .homeMissing:
+            return (
+                "Hermes not installed on remote",
+                "`\(hermesHome)` doesn't exist on the remote. Install Hermes for the SSH user, or — if Hermes is already installed under a different path — set this server's Hermes home in Manage Servers."
+            )
+        case .configMissing:
+            return (
+                "Hermes hasn't been set up yet",
+                "`\(hermesHome)/config.yaml` is missing. Run `hermes setup` (or your first `hermes chat`) on the remote to create it. Scarf will go green automatically once it appears."
+            )
+        case .configUnreadable:
+            return (
+                "Permission denied on config.yaml",
+                "`\(hermesHome)/config.yaml` exists but the SSH user can't read it. Check ownership: `ls -l \(hermesHome)/config.yaml`. Either run Hermes as the SSH user, `chmod a+r` the file, or SSH as the Hermes user."
+            )
+        case .profileActive(let name):
+            return (
+                "Hermes profile \"\(name)\" is active",
+                "The remote is using Hermes profile `\(name)` — its config lives at `~/.hermes/profiles/\(name)/config.yaml`, not `\(hermesHome)/config.yaml`. Either set this server's Hermes home to `~/.hermes/profiles/\(name)` in Manage Servers → Edit, or run `hermes profile use default` on the remote to revert."
+            )
+        case .unknown:
+            return (
+                "Can't read Hermes state",
+                "SSH is fine but Scarf can't reach `\(hermesHome)/config.yaml`. Run diagnostics for a full breakdown."
+            )
         }
     }
 }

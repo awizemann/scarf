@@ -10,6 +10,7 @@ import ScarfDesign
 struct ConnectionStatusPill: View {
     let status: ConnectionStatusViewModel
     @State private var showDetails = false
+    @State private var showDegraded = false
     @State private var showDiagnostics = false
 
     var body: some View {
@@ -18,9 +19,10 @@ struct ConnectionStatusPill: View {
             case .error:
                 showDetails = true
             case .degraded:
-                // Yellow "can't read" state — open the diagnostics sheet
-                // so the user can see exactly which files fail and why.
-                showDiagnostics = true
+                // Show the granular reason + hint inline first (issue
+                // #53). The user can drill into the full diagnostics
+                // sheet from the popover if the hint isn't enough.
+                showDegraded = true
             case .connected, .idle:
                 status.retry()
             }
@@ -44,6 +46,9 @@ struct ConnectionStatusPill: View {
         .help(tooltipText)
         .popover(isPresented: $showDetails, arrowEdge: .bottom) {
             errorDetails.frame(width: 400)
+        }
+        .popover(isPresented: $showDegraded, arrowEdge: .bottom) {
+            degradedDetails.frame(width: 440)
         }
         .sheet(isPresented: $showDiagnostics) {
             RemoteDiagnosticsView(context: status.context)
@@ -75,7 +80,7 @@ struct ConnectionStatusPill: View {
     private var labelText: Text {
         switch status.status {
         case .connected: return Text("Connected")
-        case .degraded: return Text("Connected — can't read Hermes state")
+        case .degraded(let reason, _, _): return Text("Connected — \(reason)")
         case .idle: return Text("Checking…")
         case .error(let message, _): return Text(verbatim: message)
         }
@@ -89,10 +94,72 @@ struct ConnectionStatusPill: View {
                 return Text("Last probe: \(fmt.localizedString(for: ts, relativeTo: Date()))")
             }
             return Text("Connected")
-        case .degraded(let reason):
-            return Text("SSH works but \(reason). Click for diagnostics.")
+        case .degraded(let reason, _, _):
+            return Text("SSH works but \(reason). Click for details.")
         case .idle: return Text("Waiting for first probe")
         case .error: return Text("Click for details")
+        }
+    }
+
+    @ViewBuilder
+    private var degradedDetails: some View {
+        if case .degraded(let reason, let hint, let cause) = status.status {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top) {
+                    Label(reason, systemImage: "stethoscope")
+                        .foregroundStyle(ScarfColor.warning)
+                        .scarfStyle(.headline)
+                    Spacer()
+                }
+                Divider()
+                Text(hint)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if case .profileActive(let name) = cause {
+                    // Specific copy-paste affordance for the profile case
+                    // — the most actionable hint, surfaced inline.
+                    profileFixCommand(name: name)
+                }
+                HStack {
+                    Button("Run diagnostics") {
+                        showDegraded = false
+                        showDiagnostics = true
+                    }
+                    .buttonStyle(ScarfSecondaryButton())
+                    Spacer()
+                    Button("Retry") {
+                        status.retry()
+                        showDegraded = false
+                    }
+                    .buttonStyle(ScarfPrimaryButton())
+                }
+            }
+            .padding(14)
+            .frame(width: 440)
+        }
+    }
+
+    @ViewBuilder
+    private func profileFixCommand(name _: String) -> some View {
+        let command = "hermes profile use default"
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Or run this on the remote to switch back to the default profile:")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Text(command)
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(6)
+                    .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+                Spacer()
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(command, forType: .string)
+                }
+                .buttonStyle(.borderless)
+            }
         }
     }
 
