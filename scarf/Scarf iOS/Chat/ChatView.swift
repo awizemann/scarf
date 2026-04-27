@@ -200,6 +200,7 @@ struct ChatView: View {
                         message: msg,
                         turnDuration: controller.vm.turnDuration(forMessageId: msg.id)
                     )
+                    .equatable()
                     .id(msg.id)
                 }
                 if controller.vm.isGenerating {
@@ -1006,13 +1007,40 @@ private struct PermissionWrapper: Identifiable {
 
 // MARK: - Message bubble
 
-private struct MessageBubble: View {
+private struct MessageBubble: View, Equatable {
     let message: HermesMessage
     /// Wall-clock duration of the agent turn this assistant message
     /// belongs to (v2.5). Renders as a small `4.2s` pill below the
     /// bubble when present. Nil for user / streaming / pre-v2.5
     /// resumed messages.
     var turnDuration: TimeInterval? = nil
+
+    /// SwiftUI body short-circuit (issue #46 — iOS path). On iOS the
+    /// chat list is `LazyVStack` over `controller.vm.messages` directly
+    /// (no message-group layer), so every visible bubble re-evaluates
+    /// its body on each streamed chunk because `messages` mutates and
+    /// the `@Observable` VM invalidates anyone reading it. Without
+    /// equatable short-circuiting, every visible bubble re-runs
+    /// `ChatContentFormatter.segments` + `AttributedString(markdown:)`
+    /// per chunk — CPU-expensive on phones, especially with long
+    /// content already on screen.
+    ///
+    /// Streaming message has `id == 0` (shared with Mac via
+    /// `RichChatViewModel.streamingId`); it correctly redraws on
+    /// every chunk via the content/reasoning/toolCalls.count compare.
+    static func == (lhs: MessageBubble, rhs: MessageBubble) -> Bool {
+        guard lhs.message.id == rhs.message.id else { return false }
+        if lhs.message.id == 0 {
+            return lhs.message.content == rhs.message.content
+                && lhs.message.reasoning == rhs.message.reasoning
+                && lhs.message.reasoningContent == rhs.message.reasoningContent
+                && lhs.message.toolCalls.count == rhs.message.toolCalls.count
+                && lhs.turnDuration == rhs.turnDuration
+        }
+        return lhs.turnDuration == rhs.turnDuration
+            && lhs.message.tokenCount == rhs.message.tokenCount
+            && lhs.message.finishReason == rhs.message.finishReason
+    }
 
     var body: some View {
         if message.isToolResult {
