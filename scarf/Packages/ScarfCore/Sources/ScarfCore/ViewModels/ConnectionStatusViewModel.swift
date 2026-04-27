@@ -70,12 +70,10 @@ public final class ConnectionStatusViewModel {
     private let consecutiveFailureThreshold = 2
 
     public let context: ServerContext
-    private let transport: any ServerTransport
     private var probeTask: Task<Void, Never>?
 
     public init(context: ServerContext) {
         self.context = context
-        self.transport = context.makeTransport()
         if !context.isRemote {
             // Local contexts are always considered connected — no network
             // or auth can fail.
@@ -108,7 +106,7 @@ public final class ConnectionStatusViewModel {
     }
 
     private func probeOnce() async {
-        let snapshot = transport
+        let snapshot = context
         let hermesHome = context.paths.home
         // Two-tier probe in one SSH round-trip:
         //   tier 1: `true` — raw connectivity / auth / ControlMaster path
@@ -162,39 +160,38 @@ public final class ConnectionStatusViewModel {
             case failure(TransportError)
         }
 
-        let outcome: ProbeOutcome = await Task.detached {
-            do {
-                let probe = try snapshot.runProcess(
-                    executable: "/bin/sh",
-                    args: ["-c", script],
-                    stdin: nil,
-                    timeout: 10
-                )
-                guard probe.exitCode == 0 else {
-                    return .failure(.commandFailed(exitCode: probe.exitCode, stderr: probe.stderrString))
+        // Issue #44: previously this used `transport.runProcess(executable:
+        // "/bin/sh", args: ["-c", script])`, which goes through
+        // SSHTransport's `remotePathArg` quoting. That mangles multi-line
+        // shell scripts containing `"$VAR"` references and nested
+        // quotes — the remote received a scrambled string and the if-test
+        // for config.yaml readability silently failed even when the file
+        // was readable. Result: 14/14 diagnostics passing AND a stuck
+        // "Connected — can't read Hermes state" pill, simultaneously,
+        // because diagnostics had its own runOverSSH workaround. Now
+        // both paths use SSHScriptRunner so they always agree.
+        let outcome: ProbeOutcome = await {
+            let result = await SSHScriptRunner.run(script: script, context: snapshot, timeout: 10)
+            switch result {
+            case .connectFailure(let msg):
+                return .failure(.other(message: msg))
+            case .completed(let out, let stderr, let exitCode):
+                guard exitCode == 0 else {
+                    return .failure(.commandFailed(exitCode: exitCode, stderr: stderr))
                 }
-                let out = probe.stdoutString
                 let tier1 = out.contains("TIER1:0")
                 let tier2 = out.contains("TIER2:0")
                 if !tier1 {
-                    // The script itself didn't reach tier 1 — treat as connection failure.
                     return .failure(.commandFailed(exitCode: 1, stderr: out))
                 }
                 if tier2 {
                     return .connected
                 }
-                // Connected but tier 2 failed. Parse the granular cause
-                // code; older remotes that don't emit a tag fall through
-                // to `.unknown` with a generic hint (issue #53).
                 let cause = Self.parseDegradedCause(stdout: out)
                 let (reason, hint) = Self.describe(cause: cause, hermesHome: hermesHome)
                 return .degraded(reason: reason, hint: hint, cause: cause)
-            } catch let e as TransportError {
-                return .failure(e)
-            } catch {
-                return .failure(.other(message: error.localizedDescription))
             }
-        }.value
+        }()
 
         switch outcome {
         case .connected:

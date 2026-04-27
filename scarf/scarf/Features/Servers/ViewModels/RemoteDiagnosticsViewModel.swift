@@ -123,7 +123,11 @@ final class RemoteDiagnosticsViewModel {
         finishedAt = nil
 
         let script = Self.buildScript(hermesHome: context.paths.home)
-        let captured = await Self.execute(script: script, context: context)
+        // Use the shared SSHScriptRunner so this view model and the
+        // ConnectionStatusViewModel pill always agree on what the
+        // remote sees (issue #44 — the prior local copies of the
+        // workaround drifted from each other).
+        let captured = await SSHScriptRunner.run(script: script, context: context, timeout: 30)
 
         switch captured {
         case .connectFailure(let msg):
@@ -280,164 +284,6 @@ final class RemoteDiagnosticsViewModel {
 
         printf '__END__\n'
         """#
-    }
-
-    enum Captured {
-        case connectFailure(String)
-        case completed(stdout: String, stderr: String, exitCode: Int32)
-    }
-
-    private static func execute(script: String, context: ServerContext) async -> Captured {
-        // Can't use `transport.runProcess(executable: "/bin/sh", args: ["-c", script])`
-        // here: SSHTransport.runProcess pipes every argument through
-        // `remotePathArg` (which double-quotes to rewrite `~/` → `$HOME/`),
-        // which mangles a multi-line shell script containing `"$1"`,
-        // nested quotes, and `printf` escape sequences. The result on the
-        // remote is a scrambled string and every probe fails to emit.
-        //
-        // Mirror TestConnectionProbe's approach: build the ssh argv
-        // directly so the script travels as a single opaque argv entry
-        // that ssh forwards to the remote shell unchanged.
-        switch context.kind {
-        case .local:
-            return await runLocally(script: script)
-        case .ssh(let config):
-            return await runOverSSH(script: script, config: config)
-        }
-    }
-
-    /// Direct ssh invocation. Pipes the script into `sh` on stdin rather
-    /// than passing it as `sh -c <script>` argv — because ssh concatenates
-    /// argv with spaces and sends that as a single command string to the
-    /// remote's LOGIN shell, which then parses newlines as command
-    /// separators. A multi-line `sh -c <script>` would run only the first
-    /// line inside the `sh` subprocess (any variables set there die when
-    /// `sh` exits), and the rest would run in the login shell with no
-    /// access to those variables. Symptom: `$H=""` everywhere downstream.
-    ///
-    /// Feeding the script via stdin avoids the split entirely — `sh -s`
-    /// consumes the whole stream in one process, so variable scope is
-    /// preserved and the script runs exactly the same way it would from
-    /// a local `cat script.sh | sh`.
-    private static func runOverSSH(script: String, config: SSHConfig) async -> Captured {
-        var sshArgv: [String] = [
-            "-o", "ControlMaster=auto",
-            "-o", "ControlPath=\(controlDirPath())/%C",
-            "-o", "ControlPersist=600",
-            "-o", "ServerAliveInterval=30",
-            "-o", "ConnectTimeout=10",
-            "-o", "StrictHostKeyChecking=accept-new",
-            "-o", "LogLevel=QUIET",
-            "-o", "BatchMode=yes",
-            "-T"  // no pty — keep stdin/stdout a clean byte stream
-        ]
-        if let port = config.port { sshArgv += ["-p", String(port)] }
-        if let id = config.identityFile, !id.isEmpty {
-            sshArgv += ["-i", id]
-        }
-        let hostSpec: String
-        if let user = config.user, !user.isEmpty { hostSpec = "\(user)@\(config.host)" }
-        else { hostSpec = config.host }
-        sshArgv.append(hostSpec)
-        sshArgv.append("--")
-        sshArgv.append("/bin/sh")
-        sshArgv.append("-s")   // read script from stdin
-
-        return await Task.detached { () -> Captured in
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-            proc.arguments = sshArgv
-
-            // Inherit the shell's SSH_AUTH_SOCK so ssh can reach the
-            // agent — same pattern as SSHTransport + TestConnectionProbe.
-            var env = ProcessInfo.processInfo.environment
-            let shellEnv = HermesFileService.enrichedEnvironment()
-            for key in ["SSH_AUTH_SOCK", "SSH_AGENT_PID"] {
-                if env[key] == nil, let v = shellEnv[key], !v.isEmpty {
-                    env[key] = v
-                }
-            }
-            proc.environment = env
-
-            let stdinPipe = Pipe()
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
-            proc.standardInput = stdinPipe
-            proc.standardOutput = stdoutPipe
-            proc.standardError = stderrPipe
-
-            do {
-                try proc.run()
-            } catch {
-                return .connectFailure("Failed to launch ssh: \(error.localizedDescription)")
-            }
-
-            // Write the script to ssh's stdin, then close the write end so
-            // remote sh sees EOF and exits after executing the whole script.
-            if let data = script.data(using: .utf8) {
-                try? stdinPipe.fileHandleForWriting.write(contentsOf: data)
-            }
-            try? stdinPipe.fileHandleForWriting.close()
-
-            let deadline = Date().addingTimeInterval(30)
-            while proc.isRunning && Date() < deadline {
-                try? await Task.sleep(nanoseconds: 100_000_000)
-            }
-            if proc.isRunning {
-                proc.terminate()
-                return .connectFailure("Diagnostics timed out after 30s")
-            }
-            let out = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
-            let err = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
-            return .completed(
-                stdout: String(data: out, encoding: .utf8) ?? "",
-                stderr: String(data: err, encoding: .utf8) ?? "",
-                exitCode: proc.terminationStatus
-            )
-        }.value
-    }
-
-    /// Local Shell invocation — runs the diagnostic script against the
-    /// user's own Mac. Less useful than the remote form (most checks will
-    /// trivially pass), but lets the same UI work for both contexts.
-    private static func runLocally(script: String) async -> Captured {
-        return await Task.detached { () -> Captured in
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/bin/sh")
-            proc.arguments = ["-c", script]
-
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
-            proc.standardOutput = stdoutPipe
-            proc.standardError = stderrPipe
-            do {
-                try proc.run()
-            } catch {
-                return .connectFailure("Failed to launch /bin/sh: \(error.localizedDescription)")
-            }
-            let deadline = Date().addingTimeInterval(10)
-            while proc.isRunning && Date() < deadline {
-                try? await Task.sleep(nanoseconds: 100_000_000)
-            }
-            if proc.isRunning {
-                proc.terminate()
-                return .connectFailure("Local diagnostics timed out (should be <1s)")
-            }
-            let out = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
-            let err = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
-            return .completed(
-                stdout: String(data: out, encoding: .utf8) ?? "",
-                stderr: String(data: err, encoding: .utf8) ?? "",
-                exitCode: proc.terminationStatus
-            )
-        }.value
-    }
-
-    /// Same cache directory used by SSHTransport — shared so the diagnostic
-    /// probe reuses the connection's ControlMaster socket when it already
-    /// exists (no second TCP handshake, no second auth).
-    private static func controlDirPath() -> String {
-        SSHTransport.controlDirPath()
     }
 
     private static func parse(stdout: String, stderr: String, exitCode: Int32) -> [Probe] {
