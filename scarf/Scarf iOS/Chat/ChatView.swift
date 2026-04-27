@@ -27,6 +27,12 @@ struct ChatView: View {
     @State private var controller: ChatController
     @State private var showProjectPicker = false
     @State private var showSlashCommandsSheet = false
+    /// Drives the composer's keyboard. Bound to the TextField via
+    /// `.focused(...)`; cleared by the scroll-to-dismiss gesture on
+    /// the message list AND by an explicit keyboard-toolbar button.
+    /// (issue #51 — pre-fix the keyboard could never be dismissed,
+    /// blocking access to the toolbar nav button on small phones.)
+    @FocusState private var composerFocused: Bool
 
     init(config: IOSServerConfig, key: SSHKeyBundle) {
         self.config = config
@@ -234,6 +240,11 @@ struct ChatView: View {
         // which fought with the user's own scroll gestures.
         .defaultScrollAnchor(.bottom)
         .defaultScrollAnchor(.bottom, for: .sizeChanges)
+        // Drag the messages downward to interactively collapse the
+        // keyboard — the standard iOS chat gesture. Without this the
+        // keyboard could never be dismissed once it rose, hiding the
+        // top-trailing nav button on small phones (issue #51).
+        .scrollDismissesKeyboard(.interactively)
     }
 
     @ViewBuilder
@@ -311,8 +322,26 @@ struct ChatView: View {
             .lineLimit(1...5)
             .disabled(controller.state != .ready)
             .submitLabel(.send)
+            .focused($composerFocused)
             .onSubmit {
                 Task { await controller.send() }
+            }
+            // Explicit dismiss-keyboard affordance, complementing the
+            // interactive scroll-to-dismiss on the message list. iOS
+            // shows a keyboard accessory toolbar above the system
+            // keyboard whenever a focused TextField is on screen;
+            // putting a "Done" chevron there is the most-discoverable
+            // dismissal pattern (issue #51).
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button {
+                        composerFocused = false
+                    } label: {
+                        Image(systemName: "keyboard.chevron.compact.down")
+                    }
+                    .accessibilityLabel("Hide keyboard")
+                }
             }
 
             Button {
