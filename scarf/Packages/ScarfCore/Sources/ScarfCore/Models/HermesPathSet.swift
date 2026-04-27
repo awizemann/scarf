@@ -35,10 +35,22 @@ public struct HermesPathSet: Sendable, Hashable {
         self.isRemote = isRemote
         self.binaryHint = binaryHint
     }
-    public nonisolated static let defaultLocalHome: String = {
-        let user = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
-        return user + "/.hermes"
-    }()
+    /// Resolved path to the active local Hermes profile (issue #50).
+    ///
+    /// Hermes v0.11+ supports multiple profiles via `hermes profile use`;
+    /// each profile is a fully independent `HERMES_HOME` directory. We
+    /// delegate to `HermesProfileResolver` (which reads
+    /// `~/.hermes/active_profile`) so every derived path — `state.db`,
+    /// `sessions/`, `config.yaml`, `memories/`, etc. — automatically
+    /// follows the active profile. Returns the pre-profile default
+    /// `~/.hermes` whenever no named profile is active, so existing
+    /// (non-profile) installations are unaffected.
+    ///
+    /// Backed by a 5-second cache inside the resolver, so frequent
+    /// `HermesPathSet` constructions don't hammer the filesystem.
+    public nonisolated static var defaultLocalHome: String {
+        HermesProfileResolver.resolveLocalHome()
+    }
 
     /// Default remote home when the user doesn't override it in `SSHConfig`.
     /// We leave `~` unexpanded on purpose — the remote shell resolves it.

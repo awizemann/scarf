@@ -21,9 +21,28 @@ struct SessionInfoBar: View {
     /// git repos.
     var gitBranch: String? = nil
 
+    /// Active Hermes profile name (issue #50). Resolved on each body
+    /// re-evaluation; the resolver caches for 5s so this is cheap.
+    /// Chip renders only when not "default" so existing (non-profile)
+    /// installations see no change in the bar.
+    private var activeProfile: String {
+        HermesProfileResolver.activeProfileName()
+    }
+
     var body: some View {
         HStack(spacing: 16) {
             if let session {
+                // Profile chip leftmost — surfaces which Hermes profile
+                // Scarf is reading (issue #50). Without this users couldn't
+                // tell whether the visible session list came from the
+                // profile they thought they switched to.
+                if activeProfile != "default" {
+                    Label(activeProfile, systemImage: "person.crop.square")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.warning)
+                        .lineLimit(1)
+                        .help("Scarf is reading from Hermes profile \"\(activeProfile)\". Switch profiles with `hermes profile use <name>` and relaunch Scarf.")
+                }
                 // Project indicator first — visually anchors the session
                 // as "scoped to project X" before the working dot and
                 // title. Hidden for non-project chats so the bar looks
