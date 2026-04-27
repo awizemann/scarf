@@ -14,6 +14,21 @@ struct RichMessageBubble: View, Equatable {
 
     @Environment(ChatViewModel.self) private var chatViewModel
 
+    /// Scarf-local chat density preferences (issues #47 / #48). All
+    /// three default to today's UI. Read here so the reasoning + tool-
+    /// call switches don't have to thread the values through every
+    /// layer; the AppStorage seam is one line per dependency.
+    @AppStorage(ChatDensityKeys.toolCardStyle)
+    private var toolCardStyleRaw: String = ToolCardStyle.full.rawValue
+    @AppStorage(ChatDensityKeys.reasoningStyle)
+    private var reasoningStyleRaw: String = ReasoningStyle.disclosure.rawValue
+    private var toolCardStyle: ToolCardStyle {
+        ToolCardStyle(rawValue: toolCardStyleRaw) ?? .full
+    }
+    private var reasoningStyle: ReasoningStyle {
+        ReasoningStyle(rawValue: reasoningStyleRaw) ?? .disclosure
+    }
+
     /// SwiftUI body short-circuit (issue #46). Settled bubbles
     /// (`message.id != 0`) are immutable — id equality plus a couple
     /// of cheap stored-field comparisons is sufficient. The streaming
@@ -102,13 +117,13 @@ struct RichMessageBubble: View, Equatable {
 
             VStack(alignment: .leading, spacing: 4) {
                 VStack(alignment: .leading, spacing: ScarfSpace.s2) {
-                    if message.hasReasoning {
+                    if message.hasReasoning, reasoningStyle != .hidden {
                         reasoningSection
                     }
                     if !message.content.isEmpty {
                         contentView
                     }
-                    if !message.toolCalls.isEmpty {
+                    if !message.toolCalls.isEmpty, toolCardStyle != .hidden {
                         toolCallsSection
                     }
                 }
@@ -148,7 +163,24 @@ struct RichMessageBubble: View, Equatable {
 
     // MARK: - Reasoning
 
+    /// Reasoning is rendered in one of three styles, controlled by
+    /// `Settings → Display → Chat density → Reasoning` (issue #48).
+    /// Token count for the reasoning-bearing message is kept in the
+    /// metadataFooter (always-visible), so collapsing or hiding the
+    /// box doesn't drop telemetry.
+    @ViewBuilder
     private var reasoningSection: some View {
+        switch reasoningStyle {
+        case .disclosure:
+            reasoningDisclosure
+        case .inline:
+            reasoningInline
+        case .hidden:
+            EmptyView()
+        }
+    }
+
+    private var reasoningDisclosure: some View {
         DisclosureGroup {
             Text(message.preferredReasoning ?? "")
                 .font(ScarfFont.monoSmall)
@@ -181,9 +213,44 @@ struct RichMessageBubble: View, Equatable {
         )
     }
 
+    /// Inline reasoning: italic foregroundFaint caption with a 9pt
+    /// brain prefix, no box / border / disclosure. Same data, far less
+    /// vertical space — addresses the #48 complaint.
+    private var reasoningInline: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Image(systemName: "brain")
+                .font(.system(size: 9))
+                .foregroundStyle(ScarfColor.warning)
+            Text(message.preferredReasoning ?? "")
+                .font(ScarfFont.caption)
+                .italic()
+                .foregroundStyle(ScarfColor.foregroundFaint)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     // MARK: - Tool Calls
 
+    /// Tool calls render in one of three styles, controlled by
+    /// `Settings → Display → Chat density → Tool calls` (issue #47).
+    /// `.hidden` is handled by the caller (skips this view entirely)
+    /// AND by the parent `MessageGroupView`, which makes its
+    /// always-visible toolSummary pill tappable so the inspector pane
+    /// remains reachable in both compact and hidden modes.
+    @ViewBuilder
     private var toolCallsSection: some View {
+        switch toolCardStyle {
+        case .full:
+            toolCallsFull
+        case .compact:
+            toolCallsCompact
+        case .hidden:
+            EmptyView()
+        }
+    }
+
+    private var toolCallsFull: some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(message.toolCalls) { call in
                 ToolCallCard(
@@ -193,6 +260,78 @@ struct RichMessageBubble: View, Equatable {
                     onFocus: { chatViewModel.focusedToolCallId = call.callId }
                 )
             }
+        }
+    }
+
+    /// One-line tappable chip per call. Click sets focus so the right-
+    /// pane inspector opens with the same data the inline expand
+    /// shows. Status dot mirrors the full-card status icon: in-flight
+    /// progress / success check / non-zero exit code → danger.
+    private var toolCallsCompact: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(message.toolCalls) { call in
+                let result = toolResults[call.callId]
+                let isFocused = chatViewModel.focusedToolCallId == call.callId
+                let color = compactToolColor(for: call.toolKind)
+                Button {
+                    chatViewModel.focusedToolCallId = call.callId
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: call.toolKind.icon)
+                            .font(.system(size: 10))
+                            .foregroundStyle(color)
+                        Text(call.functionName)
+                            .font(ScarfFont.monoSmall)
+                            .fontWeight(.medium)
+                            .foregroundStyle(ScarfColor.foregroundPrimary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Spacer(minLength: 6)
+                        compactStatusIcon(call: call, result: result)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(color.opacity(isFocused ? 0.16 : 0.08))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 5)
+                                    .strokeBorder(
+                                        color.opacity(isFocused ? 0.45 : 0.20),
+                                        lineWidth: isFocused ? 1.2 : 1
+                                    )
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("Click to inspect this tool call")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func compactStatusIcon(call: HermesToolCall, result: HermesMessage?) -> some View {
+        if let exit = call.exitCode {
+            Image(systemName: exit == 0 ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(exit == 0 ? ScarfColor.success : ScarfColor.danger)
+        } else if result != nil {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(ScarfColor.success)
+        } else {
+            ProgressView().controlSize(.mini)
+        }
+    }
+
+    private func compactToolColor(for kind: ToolKind) -> Color {
+        switch kind {
+        case .read:    return ScarfColor.success
+        case .edit:    return ScarfColor.info
+        case .execute: return ScarfColor.warning
+        case .fetch:   return ScarfColor.Tool.web
+        case .browser: return ScarfColor.Tool.search
+        case .other:   return ScarfColor.foregroundMuted
         }
     }
 

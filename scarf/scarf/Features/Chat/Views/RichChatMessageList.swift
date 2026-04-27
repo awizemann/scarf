@@ -145,6 +145,16 @@ struct MessageGroupView: View, Equatable {
     /// that haven't been updated yet still compile.
     var turnDurations: [Int: TimeInterval] = [:]
 
+    @Environment(ChatViewModel.self) private var chatViewModel
+    /// Read here so the toolSummary pill knows whether to render as
+    /// always-visible (today's behavior) or as a tappable inspector
+    /// shortcut when per-call tool cards are hidden (issue #47).
+    @AppStorage(ChatDensityKeys.toolCardStyle)
+    private var toolCardStyleRaw: String = ToolCardStyle.full.rawValue
+    private var toolCardStyle: ToolCardStyle {
+        ToolCardStyle(rawValue: toolCardStyleRaw) ?? .full
+    }
+
     /// Equatable short-circuit for SwiftUI: when the trailing group's
     /// streaming bubble grows, only that group's `==` returns false.
     /// All earlier groups skip body re-evaluation, dropping per-chunk
@@ -207,7 +217,16 @@ struct MessageGroupView: View, Equatable {
                 .equatable()
             }
 
-            if group.toolCallCount > 1 {
+            // When per-call tool cards are visible, the summary pill
+            // is informational only. When tool cards are hidden
+            // (issue #47), this pill becomes the only chrome surfacing
+            // tool activity AND the only path back into the inspector
+            // pane — render it on every group with calls (not just >1)
+            // and make it tappable to focus the first call.
+            let showSummary = (toolCardStyle == .hidden)
+                ? group.toolCallCount > 0
+                : group.toolCallCount > 1
+            if showSummary {
                 toolSummary
             }
         }
@@ -217,16 +236,42 @@ struct MessageGroupView: View, Equatable {
     private var toolSummary: some View {
         let kinds = group.toolKindCounts
         if !kinds.isEmpty {
-            HStack(spacing: 4) {
-                Image(systemName: "wrench")
-                    .font(.caption2)
-                Text(summaryText(kinds))
-                    .font(.caption2)
+            let firstCallId = group.assistantMessages
+                .flatMap(\.toolCalls)
+                .first?.callId
+            let isInteractive = (toolCardStyle == .hidden) && firstCallId != nil
+            Group {
+                if isInteractive, let firstCallId {
+                    Button {
+                        chatViewModel.focusedToolCallId = firstCallId
+                    } label: {
+                        toolSummaryPill(kinds, interactive: true)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Click to inspect tool calls")
+                } else {
+                    toolSummaryPill(kinds, interactive: false)
+                }
             }
-            .foregroundStyle(.tertiary)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.vertical, 2)
         }
+    }
+
+    @ViewBuilder
+    private func toolSummaryPill(_ kinds: [ToolKind: Int], interactive: Bool) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "wrench")
+                .font(.caption2)
+            Text(summaryText(kinds))
+                .font(.caption2)
+            if interactive {
+                Image(systemName: "arrow.up.right.square")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .foregroundStyle(.tertiary)
     }
 
     private func summaryText(_ kinds: [ToolKind: Int]) -> String {

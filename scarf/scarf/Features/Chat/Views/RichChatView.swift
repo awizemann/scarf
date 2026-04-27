@@ -22,6 +22,13 @@ struct RichChatView: View {
     @Environment(HermesFileWatcher.self) private var fileWatcher
     @Environment(ChatViewModel.self) private var chatViewModel
 
+    /// User-controlled font scale for the chat surface (issue #48).
+    /// Applied via `.environment(\.dynamicTypeSize, ...)` so message
+    /// list, input bar, session info bar, and the inspector pane all
+    /// scale together. Default 1.0 = today's UI.
+    @AppStorage(ChatDensityKeys.fontScale)
+    private var fontScale: Double = ChatFontScale.default
+
     /// In ACP mode, events drive updates directly — no DB polling needed.
     private var isACPMode: Bool { chatViewModel.isACPConnected }
 
@@ -42,6 +49,7 @@ struct RichChatView: View {
                 .frame(width: 320)
         }
         .frame(minHeight: 0, idealHeight: 500, maxHeight: .infinity)
+        .environment(\.dynamicTypeSize, ChatFontScale.dynamicTypeSize(for: fontScale))
         // DB polling fallback for terminal mode only — never overwrite ACP messages
         .onChange(of: fileWatcher.lastChangeDate) {
             if !isACPMode, !richChat.hasMessages, richChat.sessionId != nil {
