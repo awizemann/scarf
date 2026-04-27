@@ -306,7 +306,7 @@ struct ProjectsView: View {
             onAddProject: { showingAddSheet = true }
         )
         .sheet(isPresented: $showingAddSheet) {
-            AddProjectSheet { name, path in
+            AddProjectSheet(context: serverContext) { name, path in
                 viewModel.addProject(name: name, path: path)
                 fileWatcher.updateProjectWatches(viewModel.dashboardPaths)
             }
@@ -593,7 +593,24 @@ struct AddProjectSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var projectName = ""
     @State private var projectPath = ""
+    /// Inline verification result for remote contexts (issue #54).
+    /// Renders alongside the path field as a green check / red x so
+    /// users learn whether a remote path is valid BEFORE they hit Add
+    /// and the agent's tool calls fail at runtime.
+    @State private var remoteVerification: RemoteVerification = .idle
+    /// Active server context. On remote contexts the local Browse
+    /// button is hidden (NSOpenPanel browses the Mac filesystem,
+    /// useless when the project lives on a remote host) and replaced
+    /// with a Verify button driven by the SSH transport's `stat`.
+    let context: ServerContext
     let onAdd: (String, String) -> Void
+
+    private enum RemoteVerification: Equatable {
+        case idle
+        case verifying
+        case ok(String)        // green: "Directory exists (1.2k items)" etc.
+        case warn(String)      // red: missing / not a dir / unreadable
+    }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -601,20 +618,13 @@ struct AddProjectSheet: View {
                 .font(.headline)
             TextField("Project Name", text: $projectName)
                 .textFieldStyle(.roundedBorder)
-            HStack {
-                TextField("Project Path", text: $projectPath)
-                    .textFieldStyle(.roundedBorder)
-                Button("Browse...") {
-                    let panel = NSOpenPanel()
-                    panel.canChooseDirectories = true
-                    panel.canChooseFiles = false
-                    panel.allowsMultipleSelection = false
-                    if panel.runModal() == .OK, let url = panel.url {
-                        projectPath = url.path
-                        if projectName.isEmpty {
-                            projectName = url.lastPathComponent
-                        }
-                    }
+            VStack(alignment: .leading, spacing: 6) {
+                pathInputRow
+                if context.isRemote {
+                    Text("Path on \(context.displayName) — must already exist on the server. Tool calls run with this directory as their working directory.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    verificationBadge
                 }
             }
             HStack {
@@ -631,6 +641,102 @@ struct AddProjectSheet: View {
             }
         }
         .padding()
-        .frame(width: 400)
+        .frame(width: 440)
+    }
+
+    @ViewBuilder
+    private var pathInputRow: some View {
+        HStack {
+            TextField("Project Path", text: $projectPath)
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: projectPath) { _, _ in
+                    // Stale verification once the path edits — reset to
+                    // idle so users don't see a green check for a path
+                    // they've since changed.
+                    if remoteVerification != .idle {
+                        remoteVerification = .idle
+                    }
+                }
+            if context.isRemote {
+                Button("Verify") {
+                    Task { await verifyRemotePath() }
+                }
+                .disabled(projectPath.isEmpty || remoteVerification == .verifying)
+            } else {
+                Button("Browse...") {
+                    let panel = NSOpenPanel()
+                    panel.canChooseDirectories = true
+                    panel.canChooseFiles = false
+                    panel.allowsMultipleSelection = false
+                    if panel.runModal() == .OK, let url = panel.url {
+                        projectPath = url.path
+                        if projectName.isEmpty {
+                            projectName = url.lastPathComponent
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var verificationBadge: some View {
+        switch remoteVerification {
+        case .idle:
+            EmptyView()
+        case .verifying:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Checking on \(context.displayName)…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        case .ok(let detail):
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(ScarfColor.success)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+            }
+        case .warn(let detail):
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(ScarfColor.warning)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+            }
+        }
+    }
+
+    /// Verify the entered path on the remote via the existing SSH
+    /// transport. Uses `stat` (not just `fileExists`) so we can reject
+    /// files-that-aren't-dirs without a separate round trip.
+    private func verifyRemotePath() async {
+        let path = projectPath.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty, context.isRemote else { return }
+        remoteVerification = .verifying
+
+        let snapshot = context
+        let result: RemoteVerification = await Task.detached {
+            let transport = snapshot.makeTransport()
+            guard transport.fileExists(path) else {
+                return .warn("Path doesn't exist on \(snapshot.displayName).")
+            }
+            guard let stat = transport.stat(path) else {
+                // Stat failed even though `test -e` passed — typically
+                // a permission issue on the parent dir. Surface as a
+                // warning so the user knows the path is reachable but
+                // not introspectable.
+                return .warn("Found, but couldn't stat — check parent directory permissions.")
+            }
+            if stat.isDirectory {
+                return .ok("Directory exists on \(snapshot.displayName).")
+            } else {
+                return .warn("Path is a file, not a directory. Project paths must be directories.")
+            }
+        }.value
+        remoteVerification = result
     }
 }
