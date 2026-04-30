@@ -11,16 +11,50 @@
     } else {
       root.removeAttribute('data-theme');
     }
+    applyImageTheme();
   }
 
-  // Hydrate stored preference (if any) — runs after DOMContentLoaded since the
-  // <script> is deferred. There's a brief moment of media-query default before
-  // hydrate; that's acceptable here (no FOUC because the media query already
-  // gets the right colors).
+  // Resolve the *effective* theme — explicit data-theme wins, otherwise
+  // fall back to the OS preference.
+  function resolveTheme() {
+    const explicit = root.getAttribute('data-theme');
+    if (explicit === 'light' || explicit === 'dark') return explicit;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+
+  // Swap every <img data-dark-src="..."> between its light and dark variants.
+  // Also rewrites the parent <picture>'s <source srcset> so the picture
+  // algorithm doesn't override us on resize/layout passes.
+  function applyImageTheme() {
+    const theme = resolveTheme();
+    document.querySelectorAll('img[data-dark-src]').forEach((img) => {
+      if (!img.dataset.lightSrc) {
+        img.dataset.lightSrc = img.getAttribute('src');
+      }
+      const target = theme === 'dark' ? img.dataset.darkSrc : img.dataset.lightSrc;
+      if (img.getAttribute('src') !== target) img.setAttribute('src', target);
+      const picture = img.parentElement;
+      if (picture && picture.tagName === 'PICTURE') {
+        picture.querySelectorAll('source').forEach((s) => {
+          if (s.getAttribute('srcset') !== target) s.setAttribute('srcset', target);
+        });
+      }
+    });
+  }
+
+  // Hydrate stored preference (if any) — runs after DOMContentLoaded since
+  // the <script> is deferred. There's a brief moment of media-query default
+  // before hydrate; that's acceptable here (no FOUC because the media query
+  // already gets the right colors and the first images render at light by
+  // default — JS swaps within a frame on dark-mode systems).
+  let stored = null;
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    stored = localStorage.getItem(STORAGE_KEY);
     if (stored === 'light' || stored === 'dark') applyTheme(stored);
-  } catch (_) { /* localStorage unavailable — fall back to media query */ }
+    else applyImageTheme(); // initial pass even if no stored preference
+  } catch (_) {
+    applyImageTheme();
+  }
 
   const toggle = document.querySelector('[data-theme-toggle]');
   if (toggle) {
@@ -40,8 +74,18 @@
     });
   }
 
+  // Re-apply on system preference change so users who haven't set an
+  // explicit override still get matching screenshots.
+  if (window.matchMedia) {
+    const mql = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => {
+      if (!root.hasAttribute('data-theme')) applyImageTheme();
+    };
+    if (mql.addEventListener) mql.addEventListener('change', onChange);
+    else if (mql.addListener) mql.addListener(onChange);
+  }
+
   // Auto-collapse sticky header on scroll-down, restore on scroll-up.
-  // Pure progressive enhancement — no header in the DOM = nothing happens.
   const header = document.querySelector('.site-header');
   if (header) {
     let lastY = window.scrollY;
