@@ -1,0 +1,24 @@
+{
+  "name": "Scarf",
+  "short_name": "Scarf",
+  "description": "Native macOS and iOS GUI for the Hermes AI agent.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "browser",
+  "background_color": "#FAF7F2",
+  "theme_color": "#C2563D",
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+# Scarf
+
+> Scarf is a native macOS and iOS GUI for the Hermes AI agent. It surfaces every part of a running Hermes installation — chat sessions, project workspaces, memory files, installed skills, MCP servers, cron jobs, messaging gateways, logs, and configuration — through a sidebar-driven Mac app and a tab-based iPhone companion called ScarfGo.
+
+Both apps are free, MIT licensed, and built from a single open repository. Scarf reads from `~/.hermes/state.db` directly (read-only) and streams agent replies in real time over the Agent Client Protocol. It connects to remote Hermes installations using the host's existing SSH config — no companion service, no telemetry, no account.
+
+## Quick facts
+
+- **Platforms:** macOS 14.6+ Sonoma (Apple Silicon and Intel), iOS 18+
+- **License:** MIT
+- **Repository:** https://github.com/awizemann/scarf
+- **Author:** Alan Wizemann
+- **Hermes prerequisite:** https://github.com/hermes-ai/hermes-agent installed at `~/.hermes/`
+- **Mac download:** https://github.com/awizemann/scarf/releases/latest
+- **iOS download:** https://testflight.apple.com/join/qCrRpcTz (public TestFlight)
+- **Auto-updates (Mac):** Sparkle, with EdDSA signature verification
+- **Telemetry:** none
+
+## Documentation
+
+- [README](https://github.com/awizemann/scarf/blob/main/README.md): project overview, full feature list, build instructions
+- [Wiki](https://github.com/awizemann/scarf/wiki): user guide, architecture, design system reference
+- [Wiki — ScarfGo](https://github.com/awizemann/scarf/wiki/ScarfGo): iOS companion details
+- [Wiki — ScarfGo Onboarding](https://github.com/awizemann/scarf/wiki/ScarfGo-Onboarding): SSH key setup walkthrough
+- [Wiki — Platform Differences](https://github.com/awizemann/scarf/wiki/Platform-Differences): what is and isn't shared between Mac and iOS
+- [Releases](https://github.com/awizemann/scarf/releases): release notes for every version
+- [License](https://github.com/awizemann/scarf/blob/main/LICENSE): MIT
+
+## Feature surfaces
+
+Mac (sidebar sections):
+
+- **Monitor:** Dashboard, Insights, Sessions Browser, Activity Feed
+- **Interact:** Live Chat (ACP streaming + Terminal mode), Memory Viewer/Editor, Skills Browser
+- **Configure:** Platforms, Personalities, Quick Commands, Credential Pools, Plugins, Webhooks, Profiles
+- **Manage:** Tools, MCP Servers, Gateway Control, Cron Manager, Health, Log Viewer, Settings
+- **Project Dashboards:** custom JSON-defined dashboards rendered by Scarf, populated by the agent
+- **System:** Hermes process control, menu bar status
+
+iOS (ScarfGo, tabs):
+
+- Servers (multi-host management with pure-Swift SSH)
+- Dashboard (stats + recent sessions per server)
+- Chat (full ACP, project-scoped)
+- Sessions (resume, attribute to projects)
+- Memory editor (read/write `MEMORY.md`, `USER.md`)
+- Cron (list view, human-readable schedules)
+- Skills browser (categories + prereq banners)
+- Settings (read-only `config.yaml`)
+
+## Differentiators
+
+- Native SwiftUI, not Electron — single Mach-O binary, kilobytes of memory, full system integration
+- Read-only access to `state.db` — Scarf cannot corrupt Hermes data because it never writes
+- Multi-server: one window per Hermes host on Mac, multi-server on iOS, all over standard SSH
+- Project-scoped chat with Scarf-managed `AGENTS.md` block injected before session boot
+- Portable `.scarftemplate` bundles for sharing project setups (dashboards, skills, cron jobs, slash commands)
+- Live ACP streaming with rich tool-call rendering, permission dialogs, voice control
+- 13 messaging platforms managed in one native UI (Telegram, Discord, Slack, WhatsApp, Signal, iMessage, Email, Matrix, Mattermost, Feishu, Home Assistant, Webhook, CLI)
+- Open and inspectable — pure Swift, MIT, no external runtime dependencies
+
+## Optional
+
+- [Templates Catalog](https://awizemann.github.io/scarf/templates/): community-contributed `.scarftemplate` bundles, one-click install
+- [Sparkle Appcast](https://awizemann.github.io/scarf/appcast.xml): the auto-update feed (RSS/XML)

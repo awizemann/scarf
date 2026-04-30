@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://awizemann.github.io/scarf/sitemap.xml

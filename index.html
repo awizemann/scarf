@@ -2,23 +2,683 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Scarf</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body { font-family: -apple-system, system-ui, sans-serif; max-width: 40rem; margin: 4rem auto; padding: 0 1rem; color: #222; }
-    a { color: #0969da; }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+
+  <title>Scarf — Native Mac &amp; iOS app for your Hermes AI agent</title>
+  <meta name="description" content="Scarf is the native macOS and iOS GUI for the Hermes AI agent — sessions, projects, memory, skills, cron, multi-server SSH. Free and open source.">
+  <link rel="canonical" href="https://awizemann.github.io/scarf/">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Scarf">
+  <meta property="og:title" content="Scarf — Native Mac &amp; iOS app for your Hermes AI agent">
+  <meta property="og:description" content="Native macOS and iOS GUI for the Hermes AI agent. Sessions, projects, memory, skills, cron, multi-server SSH. Free and open source.">
+  <meta property="og:url" content="https://awizemann.github.io/scarf/">
+  <meta property="og:image" content="https://awizemann.github.io/scarf/assets/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Scarf — native Mac & iOS app for the Hermes AI agent">
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Scarf — Native Mac &amp; iOS app for your Hermes AI agent">
+  <meta name="twitter:description" content="Native macOS and iOS GUI for the Hermes AI agent. Sessions, projects, memory, skills, cron, multi-server SSH.">
+  <meta name="twitter:image" content="https://awizemann.github.io/scarf/assets/twitter-card.png">
+
+  <!-- Theme + favicons -->
+  <meta name="theme-color" content="#C2563D" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1A1818" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="icon" href="assets/icon-192.png" type="image/png" sizes="192x192">
+  <link rel="icon" href="assets/icon-512.png" type="image/png" sizes="512x512">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+
+  <!-- AI crawler hint -->
+  <link rel="alternate" type="text/plain" title="LLM-friendly summary" href="llms.txt">
+
+  <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
-  <h1>Scarf</h1>
-  <p>A native macOS companion app for the Hermes AI agent.</p>
-  <p>
-    Downloads and release notes live on the
-    <a href="https://github.com/awizemann/scarf/releases">GitHub releases page</a>.
-  </p>
-  <p>
-    The Sparkle auto-update feed is at
-    <a href="appcast.xml">appcast.xml</a>.
-  </p>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header" role="banner">
+    <a class="brand" href="./" aria-label="Scarf home">
+      <img src="assets/scarf-icon-512.png" width="32" height="32" alt="" decoding="async">
+      <span class="brand-name">Scarf</span>
+    </a>
+    <nav class="site-nav" aria-label="Primary">
+      <a href="#features">Features</a>
+      <a href="#ios">iPhone</a>
+      <a href="templates/">Templates</a>
+      <a href="#download">Download</a>
+      <a href="https://github.com/awizemann/scarf" rel="noopener">GitHub</a>
+    </nav>
+    <button type="button" class="theme-toggle" aria-label="Toggle dark mode" data-theme-toggle>
+      <svg class="theme-icon icon-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path></svg>
+      <svg class="theme-icon icon-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+    </button>
+  </header>
+
+  <main id="main">
+
+    <!-- Hero -->
+    <section class="hero" id="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title">Native Mac &amp; iOS app<br>for your Hermes AI agent.</h1>
+        <p class="hero-lede">
+          Scarf is a native macOS and iOS GUI for the
+          <a href="https://github.com/hermes-ai/hermes-agent" rel="noopener">Hermes AI agent</a>.
+          See every session, project, skill, memory file, and cron job — locally on your Mac
+          and remotely from your iPhone over SSH.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://github.com/awizemann/scarf/releases/latest" rel="noopener">
+            <span>Download for Mac</span>
+            <span class="btn-meta">macOS 14.6+ · Apple Silicon &amp; Intel</span>
+          </a>
+          <a class="btn btn-secondary" href="https://testflight.apple.com/join/qCrRpcTz" rel="noopener">
+            <span>Get on iPhone</span>
+            <span class="btn-meta">TestFlight · iOS 18+</span>
+          </a>
+        </div>
+        <p class="hero-prereq">
+          Requires <a href="https://github.com/hermes-ai/hermes-agent" rel="noopener">Hermes</a> installed at <code>~/.hermes/</code>.
+        </p>
+      </div>
+
+      <div class="hero-visual" aria-hidden="false">
+        <picture class="hero-mac">
+          <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/mac-hero-dark.png">
+          <img src="assets/screenshots/mac-hero.png"
+               alt="Scarf on macOS — chat view streaming a response with a tool-call card"
+               width="1600" height="1000"
+               fetchpriority="high" decoding="async">
+        </picture>
+        <picture class="hero-iphone">
+          <img src="assets/screenshots/ios-chat.png"
+               alt="ScarfGo on iPhone — chat with the Hermes agent over SSH"
+               width="430" height="932"
+               decoding="async">
+        </picture>
+      </div>
+    </section>
+
+    <!-- Trust strip -->
+    <aside class="trust-strip" aria-label="At a glance">
+      <ul>
+        <li>Native Swift 6</li>
+        <li>No Electron</li>
+        <li>MIT licensed</li>
+        <li>Sparkle auto-updates</li>
+        <li>macOS 14.6+ &nbsp;·&nbsp; iOS 18+</li>
+      </ul>
+    </aside>
+
+    <!-- What Scarf does (AEO load-bearing paragraph) -->
+    <section class="what" id="what" aria-labelledby="what-title">
+      <h2 id="what-title">What Scarf does</h2>
+      <p>
+        Scarf is a native macOS and iOS GUI for the Hermes AI agent. It surfaces every part of a
+        running Hermes installation — chat sessions, project workspaces, memory files, installed
+        skills, MCP servers, cron jobs, messaging gateways, logs, and configuration — through a
+        sidebar-driven app on Mac and a tab-based companion on iPhone. Scarf reads from
+        <code>~/.hermes/state.db</code> directly (read-only), streams agent replies in real time
+        over the Agent Client Protocol, and connects to remote Hermes installations through your
+        existing SSH config. There is no telemetry, no login, and no separate cloud service.
+      </p>
+    </section>
+
+    <!-- Mac feature blocks -->
+    <section class="features" id="features" aria-labelledby="features-title">
+      <h2 id="features-title" class="section-heading">Built for the way Hermes actually works</h2>
+
+      <article class="feature feature-flip">
+        <div class="feature-text">
+          <h3>Live agent sessions</h3>
+          <p>
+            Real-time streaming chat over the Agent Client Protocol. Tool calls render inline with
+            collapsible argument and output panes. Tool-permission requests surface as interactive
+            dialogs you can approve, deny, or stage. Reasoning and thinking blocks display when the
+            model emits them. Resume any prior session from the sidebar, or jump back into a
+            conversation that disconnected — Scarf reconnects to the same session id.
+          </p>
+        </div>
+        <div class="feature-visual">
+          <picture>
+            <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/mac-chat-dark.png">
+            <img src="assets/screenshots/mac-chat.png"
+                 alt="Mac app — chat view with a tool-call card and a streaming response"
+                 width="1600" height="1000" loading="lazy" decoding="async">
+          </picture>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-text">
+          <h3>Project workspaces</h3>
+          <p>
+            Per-project chat with the agent's working directory pinned, custom dashboards rendered
+            from a JSON spec the agent itself can author, project-scoped slash commands defined as
+            Markdown files, and a Scarf-managed <code>AGENTS.md</code> block that gives Hermes
+            project context before every session boots. Templates package these into a single
+            <code>.scarftemplate</code> bundle you can share or install with one click.
+          </p>
+        </div>
+        <div class="feature-visual">
+          <picture>
+            <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/mac-projects-dark.png">
+            <img src="assets/screenshots/mac-projects.png"
+                 alt="Mac app — project dashboard with stat boxes and a chart widget"
+                 width="1600" height="1000" loading="lazy" decoding="async">
+          </picture>
+        </div>
+      </article>
+
+      <article class="feature feature-flip">
+        <div class="feature-text">
+          <h3>Multi-server over SSH</h3>
+          <p>
+            One window per Hermes server. Local <code>~/.hermes/</code> is synthesized
+            automatically; remote servers connect through your existing
+            <code>~/.ssh/config</code>, ssh-agent, ProxyJump, and ControlMaster. File I/O routes
+            through scp/sftp; the SQLite database is served from atomic snapshots; chat tunnels as
+            <code>ssh -T host hermes acp</code> with JSON-RPC end-to-end. There is no companion
+            service in the middle.
+          </p>
+        </div>
+        <div class="feature-visual">
+          <picture>
+            <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/mac-sessions-dark.png">
+            <img src="assets/screenshots/mac-sessions.png"
+                 alt="Mac app — sessions browser filtered to a remote server"
+                 width="1600" height="1000" loading="lazy" decoding="async">
+          </picture>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-text">
+          <h3>Memory, skills, MCP</h3>
+          <p>
+            Edit <code>MEMORY.md</code> and <code>USER.md</code> with live file-watcher refresh and
+            external-provider awareness. Browse the Skills Hub across six registries, install,
+            update, and inspect <code>SKILL.md</code> frontmatter. Configure MCP servers from a
+            curated preset list (GitHub, Linear, Notion, Sentry, Stripe) or fully custom; test the
+            connection in-app and watch the discovered tool list populate.
+          </p>
+        </div>
+        <div class="feature-visual">
+          <picture>
+            <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/mac-mcp-dark.png">
+            <img src="assets/screenshots/mac-mcp.png"
+                 alt="Mac app — MCP servers configuration view"
+                 width="1600" height="1000" loading="lazy" decoding="async">
+          </picture>
+        </div>
+      </article>
+
+      <article class="feature feature-flip">
+        <div class="feature-text">
+          <h3>Cron &amp; messaging gateways</h3>
+          <p>
+            Create, edit, pause, resume, run-now, and delete cron jobs without touching the CLI —
+            with human-readable schedules ("Every weekday at 9:00 AM") and the underlying
+            expression a tap away. Native GUI for thirteen messaging platforms (Telegram, Discord,
+            Slack, WhatsApp, Signal, iMessage, Email, Matrix, Mattermost, Feishu, Home Assistant,
+            Webhook, CLI) with per-platform credential forms and connectivity dots.
+          </p>
+        </div>
+        <div class="feature-visual">
+          <picture>
+            <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/mac-cron-dark.png">
+            <img src="assets/screenshots/mac-cron.png"
+                 alt="Mac app — cron manager with paused and active jobs"
+                 width="1600" height="1000" loading="lazy" decoding="async">
+          </picture>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-text">
+          <h3>Insights &amp; health</h3>
+          <p>
+            Token usage and cost broken down by day, model, and platform; reasoning tokens
+            tracked separately. Activity heatmaps and notable sessions across 7, 30, 90 days, or
+            all time. Component-level health checks, on-demand diagnostics, and a one-click debug
+            report uploader for Hermes support — with a confirmation dialog before anything
+            leaves the machine.
+          </p>
+        </div>
+        <div class="feature-visual">
+          <picture>
+            <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/mac-dashboard-dark.png">
+            <img src="assets/screenshots/mac-dashboard.png"
+                 alt="Mac app — dashboard with token usage, recent sessions, and health"
+                 width="1600" height="1000" loading="lazy" decoding="async">
+          </picture>
+        </div>
+      </article>
+    </section>
+
+    <!-- iOS / ScarfGo -->
+    <section class="ios" id="ios" aria-labelledby="ios-title">
+      <div class="ios-copy">
+        <p class="eyebrow">ScarfGo for iPhone</p>
+        <h2 id="ios-title">Your Hermes agent, on your phone.</h2>
+        <p>
+          ScarfGo is the native iOS companion to Scarf. It speaks SSH directly to your Hermes
+          host using <a href="https://github.com/orlandos-nl/Citadel" rel="noopener">Citadel</a> — a
+          pure-Swift SSH stack, no companion service, no developer-controlled relay. Generate an
+          Ed25519 keypair on the device, paste the public half into <code>authorized_keys</code>,
+          and you have full project-aware chat, session resume, memory editing, cron browsing,
+          and skill management on iOS 18+.
+        </p>
+        <ul class="ios-points">
+          <li>Pure-Swift SSH — keys live in the iOS Keychain and never leave the device.</li>
+          <li>Multi-server: connect to as many Hermes hosts as you have SSH access to.</li>
+          <li>Project-scoped chat writes the same Scarf-managed <code>AGENTS.md</code> block as Mac.</li>
+          <li>Same session attribution, so "which project does this conversation belong to?" matches across devices.</li>
+        </ul>
+        <a class="btn btn-primary" href="https://testflight.apple.com/join/qCrRpcTz" rel="noopener">
+          <span>Join the public TestFlight</span>
+          <span class="btn-meta">iOS 18+</span>
+        </a>
+      </div>
+
+      <div class="ios-gallery" role="list" aria-label="ScarfGo screenshots">
+        <div class="phone-frame" role="listitem">
+          <img src="assets/screenshots/ios-servers.png" alt="ScarfGo — server picker with two configured Hermes hosts" loading="lazy" decoding="async" width="430" height="932">
+        </div>
+        <div class="phone-frame" role="listitem">
+          <img src="assets/screenshots/ios-chat.png" alt="ScarfGo — chat with the Hermes agent" loading="lazy" decoding="async" width="430" height="932">
+        </div>
+        <div class="phone-frame" role="listitem">
+          <img src="assets/screenshots/ios-project-dashboard.png" alt="ScarfGo — project dashboard" loading="lazy" decoding="async" width="430" height="932">
+        </div>
+        <div class="phone-frame" role="listitem">
+          <img src="assets/screenshots/ios-skills.png" alt="ScarfGo — skills browser" loading="lazy" decoding="async" width="430" height="932">
+        </div>
+        <div class="phone-frame" role="listitem">
+          <img src="assets/screenshots/ios-system.png" alt="ScarfGo — system tab" loading="lazy" decoding="async" width="430" height="932">
+        </div>
+      </div>
+    </section>
+
+    <!-- Why native -->
+    <section class="why" id="why" aria-labelledby="why-title">
+      <h2 id="why-title" class="section-heading">Why a native app</h2>
+      <div class="why-grid">
+        <article class="why-card">
+          <h3>Native, not Electron</h3>
+          <p>
+            One Mach-O binary. SwiftUI on macOS 14.6+ and iOS 18+. Kilobytes of memory and
+            negligible energy use compared to a bundled Chromium. Drag-and-drop, sharing, the
+            menu bar, Spotlight, and accessibility all behave the way a Mac or iPhone user
+            expects.
+          </p>
+        </article>
+        <article class="why-card">
+          <h3>Read-only safe</h3>
+          <p>
+            Scarf opens <code>~/.hermes/state.db</code> in read-only WAL mode. The app cannot
+            corrupt your Hermes data even if it crashes mid-write — because it never writes.
+            Memory files and cron jobs are the only mutable surfaces, both with explicit
+            confirmations.
+          </p>
+        </article>
+        <article class="why-card">
+          <h3>Open and inspectable</h3>
+          <p>
+            <a href="https://github.com/awizemann/scarf" rel="noopener">MIT licensed</a>, pure
+            Swift, zero external runtime dependencies. Build it yourself with
+            <code>xcodebuild</code> in two minutes. Sparkle auto-updates ship signed,
+            notarized, EdDSA-verified zips — never silent over-the-wire mutations.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <!-- Templates teaser -->
+    <section class="templates" id="templates" aria-labelledby="templates-title">
+      <h2 id="templates-title">Project templates</h2>
+      <p>
+        A <code>.scarftemplate</code> bundle packages a project's dashboard, skills, cron jobs,
+        memory blocks, slash commands, and configuration schema into one shareable file.
+        Browse the public catalog and install with a single click.
+      </p>
+      <a class="btn btn-secondary" href="templates/">Browse the template catalog →</a>
+    </section>
+
+    <!-- Download -->
+    <section class="download" id="download" aria-labelledby="download-title">
+      <h2 id="download-title" class="section-heading">Download</h2>
+      <div class="download-grid">
+        <article class="download-card">
+          <h3>Scarf for Mac</h3>
+          <p class="download-meta">macOS 14.6 (Sonoma) or later · Apple Silicon &amp; Intel · Universal binary</p>
+          <ul class="download-points">
+            <li>Notarized, code-signed Developer ID build</li>
+            <li>Sparkle auto-updates with EdDSA signature verification</li>
+            <li>Free and open source under the MIT license</li>
+          </ul>
+          <a class="btn btn-primary" href="https://github.com/awizemann/scarf/releases/latest" rel="noopener">
+            <span>Get the latest release</span>
+            <span class="btn-meta">GitHub Releases · .zip</span>
+          </a>
+        </article>
+
+        <article class="download-card">
+          <h3>ScarfGo for iPhone</h3>
+          <p class="download-meta">iOS 18.0 or later · iPhone · public TestFlight</p>
+          <ul class="download-points">
+            <li>Pure-Swift SSH — no companion service required</li>
+            <li>Multi-server support, identical to Mac</li>
+            <li>Free and open source under the MIT license</li>
+          </ul>
+          <a class="btn btn-primary" href="https://testflight.apple.com/join/qCrRpcTz" rel="noopener">
+            <span>Join the TestFlight</span>
+            <span class="btn-meta">Apple TestFlight</span>
+          </a>
+        </article>
+      </div>
+
+      <p class="download-prereq">
+        Both apps require <a href="https://github.com/hermes-ai/hermes-agent" rel="noopener">Hermes</a>
+        installed at <code>~/.hermes/</code> on each host you want to manage. Scarf does not include
+        Hermes itself — see the
+        <a href="https://github.com/hermes-ai/hermes-agent#installation" rel="noopener">Hermes installation
+        guide</a> first.
+      </p>
+    </section>
+
+    <!-- FAQ -->
+    <section class="faq" id="faq" aria-labelledby="faq-title">
+      <h2 id="faq-title" class="section-heading">Frequently asked questions</h2>
+      <div class="faq-list">
+
+        <details>
+          <summary>What is Scarf?</summary>
+          <div>
+            <p>Scarf is a native macOS and iOS GUI for the <a href="https://github.com/hermes-ai/hermes-agent" rel="noopener">Hermes AI agent</a>. It surfaces Hermes's sessions, projects, memory, skills, MCP servers, cron jobs, messaging gateways, logs, and configuration through a sidebar-driven Mac app and a tab-based iPhone companion called ScarfGo.</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>Do I need Hermes installed first?</summary>
+          <div>
+            <p>Yes. Scarf is a client for an existing Hermes installation. It expects to find Hermes's data directory at <code>~/.hermes/</code> on each host you connect to (local or remote). Install Hermes first by following the <a href="https://github.com/hermes-ai/hermes-agent#installation" rel="noopener">Hermes installation guide</a>.</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>Does Scarf work without internet?</summary>
+          <div>
+            <p>Yes for the local Hermes case — Scarf reads files and the SQLite database directly from <code>~/.hermes/</code> with no network involvement. Internet is only required when Hermes itself reaches out to model providers or MCP servers, when you connect to a remote Hermes host over SSH, or when checking for Sparkle updates.</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>Is Scarf open source?</summary>
+          <div>
+            <p>Yes. Both Scarf and ScarfGo are <a href="https://github.com/awizemann/scarf/blob/main/LICENSE" rel="noopener">MIT licensed</a> and built from the same open repository at <a href="https://github.com/awizemann/scarf" rel="noopener">github.com/awizemann/scarf</a>. There are no closed-source components and no telemetry.</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>What macOS and iOS versions are supported?</summary>
+          <div>
+            <p>Scarf for Mac requires macOS 14.6 Sonoma or later, on Apple Silicon or Intel. ScarfGo for iPhone requires iOS 18.0 or later. Both are universal builds; there is no separate Apple Silicon download.</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>How does ScarfGo connect to my Mac?</summary>
+          <div>
+            <p>ScarfGo speaks SSH directly to your Hermes host using a pure-Swift SSH stack (Citadel). On first launch it generates an Ed25519 keypair on the device — the private key lives in the iOS Keychain (with <code>kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly</code>) and is excluded from iCloud sync. Paste the public key into the host's <code>~/.ssh/authorized_keys</code>, and ScarfGo can run <code>hermes acp</code> over the SSH session for chat and read the SQLite database for everything else. There is no companion service or developer-controlled relay.</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>What data does Scarf collect?</summary>
+          <div>
+            <p>None. Scarf has no telemetry, no analytics, no crash reporter, and no account system. The only outbound network connections are to GitHub Releases (when you check for updates via Sparkle), to remote Hermes hosts you explicitly add, and to Hermes's own model providers and MCP servers — all initiated by Hermes, not Scarf.</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>Where are my conversations stored?</summary>
+          <div>
+            <p>In Hermes's own data directory — <code>~/.hermes/state.db</code> for session history and <code>~/.hermes/sessions/session_*.json</code> for full transcripts. Scarf reads these files but never writes to <code>state.db</code>. ScarfGo reads them through SSH-initiated SQLite snapshots and never caches them locally on the device.</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>How do updates work?</summary>
+          <div>
+            <p>Scarf for Mac uses <a href="https://sparkle-project.org/" rel="noopener">Sparkle</a> for in-app updates — signed and notarized zips with EdDSA signature verification. The appcast lives at <a href="appcast.xml">awizemann.github.io/scarf/appcast.xml</a>. ScarfGo updates through TestFlight in the usual way until it ships on the App Store.</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>Can I use Scarf with a remote or headless Hermes server?</summary>
+          <div>
+            <p>Yes — that is one of the main use cases. Add the host through <strong>File → Open Server… → Add Server</strong> on Mac, or tap <strong>Add Server</strong> on the ScarfGo Servers tab. Scarf uses the system SSH config (Mac) or a device-generated key (iOS), so anything reachable through your normal terminal SSH workflow works without extra setup. The remote host needs <code>sqlite3</code> and <code>pgrep</code> on its <code>$PATH</code> and the SSH user needs read access to <code>~/.hermes/</code>.</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>What's the difference between Scarf and using Hermes from the terminal?</summary>
+          <div>
+            <p>Scarf is strictly additive — it visualizes data Hermes already produces. The terminal CLI (<code>hermes chat</code>, <code>hermes cron</code>, <code>hermes mcp</code>, etc.) remains the source of truth for everything. Scarf gives you live streaming chat with rich tool-call rendering, multi-server windows, project workspaces with custom dashboards, and a one-pane view of skills, MCP servers, cron jobs, and gateways without memorizing CLI subcommands.</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>Is there a Windows or Linux version?</summary>
+          <div>
+            <p>No. Scarf is built on SwiftUI and AppKit and ships only for Apple platforms. There are no current plans for Windows or Linux ports — the
+            <a href="https://github.com/hermes-ai/hermes-agent" rel="noopener">Hermes CLI</a> itself works on those platforms, and Scarf can connect to a remote Linux Hermes host from a Mac.</p>
+          </div>
+        </details>
+
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer" role="contentinfo">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <img src="assets/scarf-icon-512.png" width="40" height="40" alt="" decoding="async">
+        <p>Scarf is made by <a href="https://github.com/awizemann" rel="noopener">Alan Wizemann</a>. MIT licensed.</p>
+      </div>
+      <nav class="footer-nav" aria-label="Footer">
+        <div>
+          <h4>Project</h4>
+          <ul>
+            <li><a href="https://github.com/awizemann/scarf" rel="noopener">GitHub</a></li>
+            <li><a href="https://github.com/awizemann/scarf/wiki" rel="noopener">Wiki</a></li>
+            <li><a href="https://github.com/awizemann/scarf/releases" rel="noopener">Releases</a></li>
+            <li><a href="https://github.com/awizemann/scarf/blob/main/LICENSE" rel="noopener">License (MIT)</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Community</h4>
+          <ul>
+            <li><a href="templates/">Template catalog</a></li>
+            <li><a href="https://github.com/awizemann/scarf/discussions" rel="noopener">Discussions</a></li>
+            <li><a href="https://github.com/awizemann/scarf/issues" rel="noopener">Report a bug</a></li>
+            <li><a href="https://www.buymeacoffee.com/awizemann" rel="noopener">Buy me a coffee</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Technical</h4>
+          <ul>
+            <li><a href="appcast.xml">Sparkle appcast</a></li>
+            <li><a href="llms.txt">llms.txt</a></li>
+            <li><a href="https://github.com/hermes-ai/hermes-agent" rel="noopener">Hermes agent</a></li>
+            <li><a href="https://testflight.apple.com/join/qCrRpcTz" rel="noopener">TestFlight (iOS)</a></li>
+          </ul>
+        </div>
+      </nav>
+    </div>
+  </footer>
+
+  <!-- Structured data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "Scarf",
+        "alternateName": "Scarf for Mac",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS 14.6 or later",
+        "description": "Native macOS GUI for the Hermes AI agent. Sessions, projects, memory, skills, MCP servers, cron jobs, messaging gateways, multi-server SSH.",
+        "url": "https://awizemann.github.io/scarf/",
+        "downloadUrl": "https://github.com/awizemann/scarf/releases/latest",
+        "softwareVersion": "2.5.2",
+        "license": "https://opensource.org/licenses/MIT",
+        "image": "https://awizemann.github.io/scarf/assets/og-image.png",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "author": {
+          "@type": "Person",
+          "name": "Alan Wizemann",
+          "url": "https://github.com/awizemann"
+        }
+      },
+      {
+        "@type": "MobileApplication",
+        "name": "ScarfGo",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "iOS 18.0 or later",
+        "description": "Native iPhone companion to Scarf. Multi-server Hermes management over SSH, project-aware chat, memory editor, cron browser, skills browser.",
+        "url": "https://awizemann.github.io/scarf/#ios",
+        "downloadUrl": "https://testflight.apple.com/join/qCrRpcTz",
+        "license": "https://opensource.org/licenses/MIT",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "author": {
+          "@type": "Person",
+          "name": "Alan Wizemann",
+          "url": "https://github.com/awizemann"
+        }
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What is Scarf?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Scarf is a native macOS and iOS GUI for the Hermes AI agent. It surfaces Hermes's sessions, projects, memory, skills, MCP servers, cron jobs, messaging gateways, logs, and configuration through a sidebar-driven Mac app and a tab-based iPhone companion called ScarfGo."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need Hermes installed first?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Scarf is a client for an existing Hermes installation. It expects to find Hermes's data directory at ~/.hermes/ on each host you connect to. Install Hermes first by following the Hermes installation guide."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does Scarf work without internet?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes for the local Hermes case — Scarf reads files and the SQLite database directly from ~/.hermes/ with no network involvement. Internet is only required when Hermes itself reaches out to model providers or MCP servers, when connecting to a remote Hermes host over SSH, or when checking for Sparkle updates."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is Scarf open source?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Both Scarf and ScarfGo are MIT licensed and built from the same open repository at github.com/awizemann/scarf. There are no closed-source components and no telemetry."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What macOS and iOS versions are supported?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Scarf for Mac requires macOS 14.6 Sonoma or later, on Apple Silicon or Intel. ScarfGo for iPhone requires iOS 18.0 or later. Both are universal builds."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How does ScarfGo connect to my Mac?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "ScarfGo speaks SSH directly to your Hermes host using Citadel, a pure-Swift SSH stack. On first launch it generates an Ed25519 keypair on the device — the private key lives in the iOS Keychain and never leaves the phone. Paste the public key into the host's authorized_keys and ScarfGo can run hermes acp over the SSH session for chat and read the SQLite database for everything else. There is no companion service or relay."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What data does Scarf collect?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "None. Scarf has no telemetry, no analytics, no crash reporter, and no account system. The only outbound network connections are to GitHub Releases (Sparkle update checks), remote Hermes hosts you explicitly add, and Hermes's own model providers and MCP servers — all initiated by Hermes, not Scarf."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Where are my conversations stored?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "In Hermes's own data directory — ~/.hermes/state.db for session history and ~/.hermes/sessions/session_*.json for full transcripts. Scarf reads these files but never writes to state.db. ScarfGo reads them through SSH-initiated SQLite snapshots and never caches them locally on the device."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How do updates work?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Scarf for Mac uses Sparkle for in-app updates — signed and notarized zips with EdDSA signature verification. The appcast lives at awizemann.github.io/scarf/appcast.xml. ScarfGo updates through TestFlight in the usual way until it ships on the App Store."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I use Scarf with a remote or headless Hermes server?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Add the host through File → Open Server… → Add Server on Mac, or Add Server on ScarfGo. Scarf uses the system SSH config (Mac) or a device-generated key (iOS), so anything reachable through normal terminal SSH works without extra setup. The remote host needs sqlite3 and pgrep on its PATH and the SSH user needs read access to ~/.hermes/."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What's the difference between Scarf and using Hermes from the terminal?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Scarf is strictly additive — it visualizes data Hermes already produces. The terminal CLI remains the source of truth. Scarf gives you live streaming chat with rich tool-call rendering, multi-server windows, project workspaces with custom dashboards, and a one-pane view of skills, MCP servers, cron jobs, and gateways without memorizing CLI subcommands."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is there a Windows or Linux version?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. Scarf is built on SwiftUI and AppKit and ships only for Apple platforms. The Hermes CLI itself works on those platforms, and Scarf can connect to a remote Linux Hermes host from a Mac."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <script src="app.js" defer></script>
 </body>
 </html>
