@@ -114,7 +114,7 @@ struct RichChatInputBar: View {
                         // bare `if text.isEmpty` overlay renders the
                         // translucent placeholder text on top of the
                         // just-typed character — visible as a "behind
-                        // or around" ghost. Two mitigations:
+                        // or around" ghost. Three mitigations:
                         //
                         //   1. Pin an opaque rectangle behind the
                         //      placeholder text. During any single-
@@ -125,15 +125,29 @@ struct RichChatInputBar: View {
                         //      keystroke (removes the per-keystroke
                         //      view-mutation churn the composer was
                         //      already paying for).
+                        //   3. Constrain to a single line with
+                        //      `frame(maxWidth: .infinity)` and
+                        //      `truncationMode(.tail)` so the long-form
+                        //      hint can't escape the rounded
+                        //      TextEditor bounds when the sidebar /
+                        //      detail-pane geometry compresses the
+                        //      composer (was visibly overflowing).
                         Text(supportsImagePrompts
                              ? "Message Hermes…  /  for commands · drag images to attach"
                              : "Message Hermes…  /  for commands")
                             .scarfStyle(.body)
                             .foregroundStyle(ScarfColor.foregroundFaint)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
                             .background(ScarfColor.backgroundSecondary)
-                            .opacity(text.isEmpty ? 1 : 0)
+                            // Hide once the field has any content OR
+                            // the user is actively focused — matches
+                            // standard NSTextField / UITextField
+                            // placeholder semantics.
+                            .opacity((text.isEmpty && !isFocused) ? 1 : 0)
                             .allowsHitTesting(false)
                     }
                     // Drag-drop image attachments. Receives both file URLs
