@@ -103,6 +103,34 @@ struct InstalledTemplatesIndexTests {
         )
     }
 
+    /// Pre-release versions outrank by being *older*: a `1.0.0-beta`
+    /// catalog entry must NOT surface as "Update available" against a
+    /// stable `1.0.0` installation, otherwise the upgrade flow would
+    /// silently downgrade the user. See semver §11.
+    @Test func prereleaseDoesNotShadowStable() {
+        // Catalog ships pre-release; user already on the matching stable.
+        // Should classify as installed (not update-available).
+        #expect(
+            InstalledTemplatesIndex.classify(catalogVersion: "1.0.0-beta", installedVersion: "1.0.0")
+                == .installed(version: "1.0.0")
+        )
+        // The reverse: user on pre-release, catalog ships stable. Stable
+        // is genuinely newer.
+        #expect(
+            InstalledTemplatesIndex.classify(catalogVersion: "1.0.0", installedVersion: "1.0.0-beta")
+                == .updateAvailable(installedVersion: "1.0.0-beta", catalogVersion: "1.0.0")
+        )
+        // Two pre-releases on the same numeric core: lexicographic
+        // tiebreak on the suffix. `beta.2` > `beta.1`.
+        #expect(
+            InstalledTemplatesIndex.classify(catalogVersion: "1.0.0-beta.2", installedVersion: "1.0.0-beta.1")
+                == .updateAvailable(installedVersion: "1.0.0-beta.1", catalogVersion: "1.0.0-beta.2")
+        )
+        // Direct probe of the comparator for the historical bug case.
+        #expect(InstalledTemplatesIndex.isVersionNewer("1.0.0-beta", than: "1.0.0") == false)
+        #expect(InstalledTemplatesIndex.isVersionNewer("1.0.0", than: "1.0.0-beta") == true)
+    }
+
     // MARK: - Helpers
 
     /// Helper bundle returned by `makeTmpHome()` so each `@Test`

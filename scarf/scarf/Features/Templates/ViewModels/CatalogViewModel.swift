@@ -108,10 +108,16 @@ final class CatalogViewModel {
     /// short-circuit and always tries the network. Always rebuilds
     /// the installed index, since the user may have installed/uninstalled
     /// since the last load.
+    ///
+    /// `indexService.build()` walks the projects registry + every
+    /// project's lock file synchronously, so we run it on a detached
+    /// task — sync file I/O on `@MainActor` would jank the catalog
+    /// sheet during refresh on hosts with many projects.
     func refresh(forceRefresh: Bool = false) async {
         loadState = .loading
         let result = await catalogService.loadCatalog(forceRefresh: forceRefresh)
-        let index = indexService.build()
+        let indexService = self.indexService
+        let index = await Task.detached { indexService.build() }.value
         await applyLoad(result: result, index: index)
     }
 

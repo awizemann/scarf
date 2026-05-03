@@ -1,5 +1,6 @@
 import Foundation
 import ScarfCore
+import os
 
 /// One template entry as exposed by `awizemann.github.io/scarf/templates/catalog.json`.
 /// Mirrors the per-template shape `tools/build-catalog.py` emits — the
@@ -99,6 +100,12 @@ struct CatalogEntry: Codable, Sendable, Identifiable, Hashable {
 /// "human reminder; a timestamp would churn the diff every run"
 /// comment. The catalog UI uses the cache file's `fetchedAt` for the
 /// "last refreshed" string, not anything from `catalog.json`.
+///
+/// **Per-element fault tolerance.** `templates` is decoded entry by
+/// entry through an unkeyed container — a single malformed entry
+/// (missing `tags`, `author`, etc.) is dropped with a logged warning
+/// rather than failing the whole catalog decode. Honors the contract
+/// the per-entry doc-comment promises.
 struct Catalog: Codable, Sendable {
     let schemaVersion: Int?
     let templates: [CatalogEntry]
@@ -114,5 +121,39 @@ struct Catalog: Codable, Sendable {
     enum CodingKeys: String, CodingKey {
         case schemaVersion
         case templates
+    }
+
+    private static let decodeLogger = Logger(subsystem: "com.scarf", category: "CatalogDecoder")
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
+
+        var entries: [CatalogEntry] = []
+        if container.contains(.templates) {
+            var unkeyed = try container.nestedUnkeyedContainer(forKey: .templates)
+            entries.reserveCapacity(unkeyed.count ?? 0)
+            while !unkeyed.isAtEnd {
+                do {
+                    entries.append(try unkeyed.decode(CatalogEntry.self))
+                } catch {
+                    Self.decodeLogger.warning("dropping malformed catalog entry at index \(unkeyed.currentIndex - 1): \(error.localizedDescription, privacy: .public)")
+                    // Advance past the bad element so the loop terminates.
+                    // Decoding into a permissive `JSONValue` placeholder
+                    // would also work, but Foundation's Decoder API has
+                    // no built-in skip — `_Skip` consumes one element.
+                    _ = try? unkeyed.decode(_Skip.self)
+                }
+            }
+        }
+        self.templates = entries
+    }
+
+    /// Placeholder type used to consume a malformed array element after
+    /// the real decode threw. Decodes anything by ignoring it.
+    private struct _Skip: Decodable {
+        init(from decoder: Decoder) throws {
+            _ = try decoder.singleValueContainer()
+        }
     }
 }

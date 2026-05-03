@@ -113,6 +113,49 @@ struct CatalogServiceTests {
 
     // MARK: - Fallback
 
+    /// One malformed catalog entry must NOT fail the whole list — the
+    /// per-entry doc-comment promises this so a single typo on the live
+    /// catalog doesn't leave every Scarf user with an empty picker.
+    /// Decoder drops the bad entry with a logged warning and keeps the
+    /// rest.
+    @Test func malformedEntryIsDroppedRestSurvive() throws {
+        // First entry has every required field; second is missing
+        // `tags` (required by `CatalogEntry`); third is well-formed.
+        let json = """
+        {
+          "schemaVersion": 1,
+          "templates": [
+            {
+              "id": "good/one",
+              "name": "Good One",
+              "version": "1.0.0",
+              "tags": ["a"],
+              "author": {"name": "T"},
+              "installUrl": "https://example.invalid/one.scarftemplate"
+            },
+            {
+              "id": "bad/missing-tags",
+              "name": "Missing Tags",
+              "version": "1.0.0",
+              "author": {"name": "T"},
+              "installUrl": "https://example.invalid/bad.scarftemplate"
+            },
+            {
+              "id": "good/three",
+              "name": "Good Three",
+              "version": "1.0.0",
+              "tags": ["b"],
+              "author": {"name": "T"},
+              "installUrl": "https://example.invalid/three.scarftemplate"
+            }
+          ]
+        }
+        """
+        let catalog = try JSONDecoder().decode(Catalog.self, from: Data(json.utf8))
+        let ids = catalog.templates.map(\.id)
+        #expect(ids == ["good/one", "good/three"])
+    }
+
     @Test func bundledFallbackIsNonEmpty() {
         // The fallback ships with the catalog as a hardcoded list so
         // a fresh-install / offline user still sees something on first

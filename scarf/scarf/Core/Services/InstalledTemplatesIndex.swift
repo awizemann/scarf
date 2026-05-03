@@ -32,8 +32,13 @@ struct InstalledTemplatesIndex: Sendable {
     func build() -> [String: String] {
         let transport = context.makeTransport()
         let registryPath = context.paths.projectsRegistry
-        guard transport.fileExists(registryPath),
-              let data = try? transport.readFile(registryPath) else {
+        guard transport.fileExists(registryPath) else { return [:] }
+
+        let data: Data
+        do {
+            data = try transport.readFile(registryPath)
+        } catch {
+            Self.logger.warning("couldn't read projects registry at \(registryPath, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return [:]
         }
 
@@ -91,18 +96,37 @@ struct InstalledTemplatesIndex: Sendable {
         let path = project.path + "/.scarf/template.lock.json"
         let transport = context.makeTransport()
         guard transport.fileExists(path) else { return nil }
-        guard let data = try? transport.readFile(path) else { return nil }
-        return try? JSONDecoder().decode(TemplateLock.self, from: data)
+
+        let data: Data
+        do {
+            data = try transport.readFile(path)
+        } catch {
+            Self.logger.warning("couldn't read template lock at \(path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+
+        do {
+            return try JSONDecoder().decode(TemplateLock.self, from: data)
+        } catch {
+            Self.logger.warning("couldn't decode template lock at \(path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
     }
 
     /// Plain semver-ish comparison: split on `.`, compare numerically
-    /// from major down. Non-numeric segments fall back to string
-    /// comparison (so `1.0.0-beta` vs `1.0.0` does the sane thing).
-    /// Good enough for "is the catalog ahead?" — this isn't a package
-    /// manager.
-    private static func isVersionNewer(_ candidate: String, than other: String) -> Bool {
-        let a = candidate.split(separator: ".").map(String.init)
-        let b = other.split(separator: ".").map(String.init)
+    /// from major down. Pre-release suffixes (anything after `-` in a
+    /// segment) make that release *older* than the same numeric prefix
+    /// without a suffix — matches semver §11 ("a pre-release version has
+    /// lower precedence than the associated normal version"), so
+    /// `1.0.0-beta` is *not* newer than `1.0.0`. Two pre-releases on the
+    /// same numeric prefix fall back to lexicographic compare on the
+    /// suffix. Good enough for "is the catalog ahead?" — this isn't a
+    /// package manager.
+    static func isVersionNewer(_ candidate: String, than other: String) -> Bool {
+        let (aCore, aPre) = splitPrerelease(candidate)
+        let (bCore, bPre) = splitPrerelease(other)
+        let a = aCore.split(separator: ".").map(String.init)
+        let b = bCore.split(separator: ".").map(String.init)
         for i in 0..<max(a.count, b.count) {
             let ai = i < a.count ? a[i] : "0"
             let bi = i < b.count ? b[i] : "0"
@@ -112,6 +136,23 @@ struct InstalledTemplatesIndex: Sendable {
                 return ai > bi
             }
         }
-        return false
+        // Numeric cores match. Pre-release tiebreak: an absent pre-release
+        // outranks any present pre-release.
+        switch (aPre, bPre) {
+        case (nil, nil):           return false
+        case (nil, _):             return true   // candidate has no pre-release; older has one → newer
+        case (_, nil):             return false  // candidate has pre-release; other is the release → older
+        case (let ap?, let bp?):   return ap > bp
+        }
+    }
+
+    /// Split a version string into its numeric core and pre-release
+    /// suffix on the first `-`. `"1.0.0-beta.2"` → `("1.0.0", "beta.2")`.
+    /// `"1.0.0"` → `("1.0.0", nil)`.
+    private static func splitPrerelease(_ version: String) -> (core: String, pre: String?) {
+        if let dash = version.firstIndex(of: "-") {
+            return (String(version[..<dash]), String(version[version.index(after: dash)...]))
+        }
+        return (version, nil)
     }
 }
