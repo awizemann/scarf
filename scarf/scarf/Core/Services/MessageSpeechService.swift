@@ -95,7 +95,7 @@ final class MessageSpeechService: NSObject {
     }
 }
 
-extension MessageSpeechService: @preconcurrency AVSpeechSynthesizerDelegate {
+extension MessageSpeechService: AVSpeechSynthesizerDelegate {
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         Task { @MainActor in
             self.playingMessageId = nil

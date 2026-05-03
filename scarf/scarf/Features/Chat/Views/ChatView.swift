@@ -466,7 +466,11 @@ struct ChatView: View {
 
 // MARK: - Permission Approval View
 
-extension RichChatViewModel.PendingPermission: Identifiable {
+// `@retroactive` acknowledges that we're declaring conformance for a
+// type (`PendingPermission`) and protocol (`Identifiable`) we don't own
+// — the Swift 6 compiler flags this otherwise so that downstream
+// breakage is loud if `ScarfCore` ever adds the conformance upstream.
+extension RichChatViewModel.PendingPermission: @retroactive Identifiable {
     public var id: Int { requestId }
 }
 

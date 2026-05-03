@@ -198,7 +198,12 @@ struct CredentialPoolsView: View {
                         showAddSheet = true
                     }
                     .controlSize(.small)
-                    .help("Run `hermes auth add \(provider.provider) --type oauth` again to refresh this provider's tokens.")
+                    // `Text(verbatim:)` skips the LocalizedStringKey
+                    // overload that would interpret the backticks as
+                    // markdown inline-code styling — `.help(_:)` rejects
+                    // styled Text. Plain string preserves the backticks
+                    // literally.
+                    .help(Text(verbatim: "Run `hermes auth add \(provider.provider) --type oauth` again to refresh this provider's tokens."))
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
