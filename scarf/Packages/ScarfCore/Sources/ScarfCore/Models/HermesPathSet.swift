@@ -98,6 +98,12 @@ public struct HermesPathSet: Sendable, Hashable {
     /// on user request from the model picker. Survives offline runs so
     /// the picker still has something to render.
     public nonisolated var nousModelsCache: String { scarfDir + "/nous_models_cache.json" }
+    /// Cached `templates/catalog.json` from awizemann.github.io. Populated
+    /// by `CatalogService` on first sheet-open and refreshed on a 24h TTL
+    /// or on explicit user click. Mirrors `nousModelsCache` exactly:
+    /// JSON, scarf-owned, survives offline runs so the catalog browser
+    /// still has something to render. Wiped by a Hermes home reset.
+    public nonisolated var catalogCache: String { scarfDir + "/catalog_cache.json" }
     public nonisolated var mcpTokensDir: String { home + "/mcp-tokens" }
 
     // MARK: - Binary resolution

@@ -40,6 +40,7 @@ struct ProjectsView: View {
     @State private var exportSheetProject: ProjectEntry?
     @State private var showingInstallURLPrompt = false
     @State private var installURLInput = ""
+    @State private var showingCatalogSheet = false
     @State private var showingUninstallSheet = false
     @State private var configEditorProject: ProjectEntry?
     /// Project queued for the "remove from list" confirmation dialog.
@@ -132,6 +133,17 @@ struct ProjectsView: View {
         .sheet(isPresented: $showingInstallURLPrompt) {
             installURLSheet
         }
+        .sheet(isPresented: $showingCatalogSheet) {
+            CatalogView { url in
+                // Hand the catalog's HTTPS URL to the existing install
+                // flow — no new entry-point logic, just a different
+                // way to surface the URL. The install sheet's
+                // `awaitingParentDirectory` stage takes over from here.
+                installerViewModel.openRemoteURL(url)
+                showingCatalogSheet = false
+                showingInstallSheet = true
+            }
+        }
         .sheet(isPresented: $showingUninstallSheet) {
             TemplateUninstallSheet(viewModel: uninstallerViewModel) { removed in
                 // Refresh the registry and clear selection if we just
@@ -198,6 +210,11 @@ struct ProjectsView: View {
     private var templatesToolbar: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             Menu {
+                Button("Browse Catalog…", systemImage: "books.vertical") {
+                    showingCatalogSheet = true
+                }
+                .accessibilityIdentifier("templates.browseCatalog")
+                Divider()
                 Button("Install from File…", systemImage: "tray.and.arrow.down") {
                     openInstallFilePicker()
                 }

@@ -152,11 +152,21 @@ struct ScarfHermesHomeOverrideE2ETests {
 
     private static let envKey = "SCARF_HERMES_HOME"
 
-    @Test func overrideSteersServerContextPaths() {
+    @Test func overrideSteersServerContextPaths() throws {
+        let snapshot = TestRegistryLock.acquireAndSnapshot()
         let saved = ProcessInfo.processInfo.environment[Self.envKey]
-        defer { restore(saved) }
+        defer {
+            restore(saved)
+            TestRegistryLock.restore(snapshot)
+        }
 
         let tmp = NSTemporaryDirectory().appending("scarf-e2e-home-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(atPath: tmp, withIntermediateDirectories: true)
+        // Sentinel marker so the override is honored. Without this,
+        // `HermesProfileResolver.scarfHermesHomeOverride()` ignores the
+        // env var to protect the user's real `~/.hermes`.
+        try Data().write(to: URL(fileURLWithPath: tmp + "/" + HermesProfileResolver.testHomeMarkerFilename))
+        defer { try? FileManager.default.removeItem(atPath: tmp) }
         setenv(Self.envKey, tmp, 1)
 
         // Every derived path in HermesPathSet is computed off `home`, so
@@ -173,8 +183,12 @@ struct ScarfHermesHomeOverrideE2ETests {
     }
 
     @Test func overrideUnsetReturnsToProductionHome() {
+        let snapshot = TestRegistryLock.acquireAndSnapshot()
         let saved = ProcessInfo.processInfo.environment[Self.envKey]
-        defer { restore(saved) }
+        defer {
+            restore(saved)
+            TestRegistryLock.restore(snapshot)
+        }
 
         unsetenv(Self.envKey)
         HermesProfileResolver.invalidateCache()
