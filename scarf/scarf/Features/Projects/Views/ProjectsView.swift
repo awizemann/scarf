@@ -201,10 +201,12 @@ struct ProjectsView: View {
                 Button("Install from File…", systemImage: "tray.and.arrow.down") {
                     openInstallFilePicker()
                 }
+                .accessibilityIdentifier("templates.installFromFile")
                 Button("Install from URL…", systemImage: "link") {
                     installURLInput = ""
                     showingInstallURLPrompt = true
                 }
+                .accessibilityIdentifier("templates.installFromURL")
                 Divider()
                 if let selected = viewModel.selectedProject {
                     Button("Export \"\(selected.name)\" as Template…", systemImage: "tray.and.arrow.up") {
@@ -217,6 +219,7 @@ struct ProjectsView: View {
             } label: {
                 Label("Templates", systemImage: "shippingbox")
             }
+            .accessibilityIdentifier("templates.toolbar.menu")
         }
     }
 
@@ -229,6 +232,7 @@ struct ProjectsView: View {
                 .foregroundStyle(.secondary)
             TextField("https://example.com/my.scarftemplate", text: $installURLInput)
                 .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("templates.installURL.field")
             HStack {
                 Button("Cancel") { showingInstallURLPrompt = false }
                     .keyboardShortcut(.cancelAction)
@@ -243,6 +247,7 @@ struct ProjectsView: View {
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
                 .disabled(URL(string: installURLInput)?.scheme?.lowercased() != "https")
+                .accessibilityIdentifier("templates.installURL.confirm")
             }
         }
         .padding()

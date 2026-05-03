@@ -179,6 +179,7 @@ struct TemplateInstallSheet: View {
                 Button("Install") { viewModel.confirmInstall() }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(ScarfPrimaryButton())
+                    .accessibilityIdentifier("templateInstall.confirmInstall")
             }
             .padding(.top, 8)
         }
@@ -507,6 +508,7 @@ private struct ParentDirectoryStep: View {
             TextField("Parent directory", text: $parentPath)
                 .textFieldStyle(.roundedBorder)
                 .autocorrectionDisabled()
+                .accessibilityIdentifier("templateInstall.parentDir.field")
                 .onChange(of: parentPath) { _, _ in
                     if remoteVerification != .idle {
                         remoteVerification = .idle
@@ -565,6 +567,7 @@ private struct ParentDirectoryStep: View {
             }
             .keyboardShortcut(.defaultAction)
             .disabled(parentPath.trimmingCharacters(in: .whitespaces).isEmpty)
+            .accessibilityIdentifier("templateInstall.parentDir.continue")
         }
     }
 

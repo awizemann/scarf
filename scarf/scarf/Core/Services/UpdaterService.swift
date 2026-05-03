@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import Sparkle
 
 /// Thin wrapper around Sparkle's `SPUStandardUpdaterController`.
@@ -24,9 +25,15 @@ final class UpdaterService: NSObject {
 
     override init() {
         // startingUpdater: true → Sparkle scans for updates on launch per Info.plist schedule.
-        // Default delegates are sufficient for a non-sandboxed app.
+        // Under `--scarf-test-mode` we keep Sparkle inert so XCUITest runs
+        // never see a "an update is available" sheet pop on top of the
+        // window the test is trying to drive. The controller still
+        // initializes — `automaticallyChecksForUpdates` reads/writes
+        // continue to work — it just doesn't fire the on-launch check
+        // or surface UI.
+        let startUpdater = !TestModeFlags.shared.isTestMode
         self.controller = SPUStandardUpdaterController(
-            startingUpdater: true,
+            startingUpdater: startUpdater,
             updaterDelegate: nil,
             userDriverDelegate: nil
         )
