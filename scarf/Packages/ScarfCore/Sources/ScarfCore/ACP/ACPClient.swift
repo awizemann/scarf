@@ -593,7 +593,30 @@ public enum ACPClientError: Error, LocalizedError {
 /// human-readable hint for the chat UI. Pattern-matches the most common
 /// fresh-install failure modes. Returns nil when no known pattern matches.
 public enum ACPErrorHint {
-    public static func classify(errorMessage: String, stderrTail: String) -> String? {
+    /// Result of a classifier hit. `hint` is the user-facing copy; when
+    /// the failure is an OAuth refresh-revocation, `oauthProvider` names
+    /// the affected provider (lowercase, matching `auth.json` keys) so
+    /// the UI can offer a one-click re-authenticate affordance. `nil`
+    /// `oauthProvider` means "we matched a non-OAuth failure mode, or
+    /// we matched OAuth but couldn't identify which provider."
+    public struct Classification: Sendable, Equatable {
+        public let hint: String
+        public let oauthProvider: String?
+
+        public init(hint: String, oauthProvider: String? = nil) {
+            self.hint = hint
+            self.oauthProvider = oauthProvider
+        }
+    }
+
+    /// Known OAuth-authed providers Hermes ships. Listed lowercase to
+    /// match `auth.json.providers.<key>` and the values
+    /// `OAuthFlowController.start(provider:)` accepts.
+    private static let oauthProviders = [
+        "nous", "claude", "anthropic", "qwen", "gemini", "google", "copilot", "github",
+    ]
+
+    public static func classify(errorMessage: String, stderrTail: String) -> Classification? {
         let haystack = errorMessage + "\n" + stderrTail
 
         // SSH-level failures come first — they apply only to remote
@@ -603,30 +626,55 @@ public enum ACPErrorHint {
         // all surface as opaque "ACP process terminated" / "request
         // timed out", and the user has no idea where to look.
         if haystack.contains("Connection refused") {
-            return "Couldn't reach the remote host — the SSH port is closed or the droplet is down. Check the host is running and reachable."
+            return Classification(hint: "Couldn't reach the remote host — the SSH port is closed or the droplet is down. Check the host is running and reachable.")
         }
         if haystack.localizedCaseInsensitiveContains("Operation timed out")
             || haystack.localizedCaseInsensitiveContains("Connection timed out")
             || haystack.contains("Network is unreachable")
             || haystack.contains("No route to host") {
-            return "Couldn't reach the remote host — the network connection timed out. Check the host is running and your network is up."
+            return Classification(hint: "Couldn't reach the remote host — the network connection timed out. Check the host is running and your network is up.")
         }
         if haystack.contains("Permission denied (publickey")
             || haystack.contains("Permission denied, please try again") {
-            return "SSH rejected the key. Make sure the right identity file is selected and that ssh-agent has the key loaded — open Terminal and run `ssh-add -l`."
+            return Classification(hint: "SSH rejected the key. Make sure the right identity file is selected and that ssh-agent has the key loaded — open Terminal and run `ssh-add -l`.")
         }
         if haystack.contains("Host key verification failed")
             || haystack.contains("REMOTE HOST IDENTIFICATION HAS CHANGED") {
-            return "The remote host's SSH key changed. If you just rebuilt the droplet, remove the old entry with `ssh-keygen -R <host>`, then try again."
+            return Classification(hint: "The remote host's SSH key changed. If you just rebuilt the droplet, remove the old entry with `ssh-keygen -R <host>`, then try again.")
         }
         if haystack.contains("Could not resolve hostname")
             || haystack.contains("Name or service not known") {
-            return "Couldn't resolve the host name. Check the host in this server's settings."
+            return Classification(hint: "Couldn't resolve the host name. Check the host in this server's settings.")
         }
         if haystack.localizedCaseInsensitiveContains("command not found")
             || haystack.contains("hermes: not found")
             || haystack.contains("exit 127") {
-            return "The remote shell couldn't find `hermes`. Either install Hermes on the remote (`pipx install hermes-agent`) or set an absolute binary path in this server's settings."
+            return Classification(hint: "The remote shell couldn't find `hermes`. Either install Hermes on the remote (`pipx install hermes-agent`) or set an absolute binary path in this server's settings.")
+        }
+
+        // OAuth refresh-token revocation. Hermes prints
+        // "Refresh session has been revoked. Run `hermes model` to
+        // re-authenticate." to stderr/stdout when an OAuth-authed
+        // provider's refresh token can no longer mint access tokens
+        // (user revoked, server rotated keys, etc.). We can't drive
+        // `hermes model` interactively, but `hermes auth add <provider>
+        // --type oauth` is the same code path Scarf already drives via
+        // `OAuthFlowController` for first-time setup, so we surface a
+        // re-authenticate affordance instead. Checked BEFORE the
+        // generic "no credentials found" path because the message
+        // contains the word "credentials" via the surrounding context.
+        if haystack.localizedCaseInsensitiveContains("refresh session has been revoked")
+            || haystack.range(of: #"refresh.*revoked"#, options: [.regularExpression, .caseInsensitive]) != nil
+            || haystack.localizedCaseInsensitiveContains("re-authenticate")
+            || haystack.localizedCaseInsensitiveContains("reauthenticate")
+            || (haystack.contains("401") && oauthProvider(in: haystack) != nil)
+            || (haystack.localizedCaseInsensitiveContains("unauthorized") && oauthProvider(in: haystack) != nil) {
+            let provider = oauthProvider(in: haystack)
+            let suffix = provider.map { " (affected provider: \($0))." } ?? "."
+            return Classification(
+                hint: "Your OAuth session has expired or been revoked\(suffix) Click Re-authenticate below to sign in again.",
+                oauthProvider: provider
+            )
         }
 
         if haystack.range(of: #"No\s+(Anthropic|OpenAI|OpenRouter|Gemini|Google|Groq|Mistral|XAI)?\s*credentials\s+found"#,
@@ -635,7 +683,7 @@ public enum ACPErrorHint {
             || haystack.contains("ANTHROPIC_TOKEN")
             || haystack.contains("claude setup-token")
             || haystack.contains("claude /login") {
-            return "Hermes can't find your AI provider credentials. Set `ANTHROPIC_API_KEY` (or similar) in `~/.hermes/.env` or your shell profile, then restart Scarf."
+            return Classification(hint: "Hermes can't find your AI provider credentials. Set `ANTHROPIC_API_KEY` (or similar) in `~/.hermes/.env` or your shell profile, then restart Scarf.")
         }
         if let match = haystack.range(of: #"No such file or directory:\s*'([^']+)'"#,
                                       options: .regularExpression) {
@@ -643,13 +691,31 @@ public enum ACPErrorHint {
             if let nameStart = matched.range(of: "'"),
                let nameEnd = matched.range(of: "'", range: nameStart.upperBound..<matched.endIndex) {
                 let name = String(matched[nameStart.upperBound..<nameEnd.lowerBound])
-                return "Hermes couldn't find `\(name)` on PATH. If you use nvm/asdf/mise, make sure it's exported in `~/.zprofile` (not only `~/.zshrc`), then restart Scarf."
+                return Classification(hint: "Hermes couldn't find `\(name)` on PATH. If you use nvm/asdf/mise, make sure it's exported in `~/.zprofile` (not only `~/.zshrc`), then restart Scarf.")
             }
-            return "Hermes couldn't find a required binary on PATH. Check that your shell's PATH is exported in `~/.zprofile`, then restart Scarf."
+            return Classification(hint: "Hermes couldn't find a required binary on PATH. Check that your shell's PATH is exported in `~/.zprofile`, then restart Scarf.")
         }
         if haystack.localizedCaseInsensitiveContains("rate limit")
             || haystack.localizedCaseInsensitiveContains("429") {
-            return "Your AI provider returned a rate-limit error. Try again in a moment."
+            return Classification(hint: "Your AI provider returned a rate-limit error. Try again in a moment.")
+        }
+        return nil
+    }
+
+    /// Best-effort extraction of an OAuth provider name from raw error
+    /// text. Returns the lowercase provider key (`"nous"`, `"claude"`,
+    /// etc.) when one of the known OAuth providers appears as a whole
+    /// word. The first match wins — Hermes typically logs the active
+    /// provider name once, near the failure.
+    private static func oauthProvider(in haystack: String) -> String? {
+        let lowered = haystack.lowercased()
+        for provider in oauthProviders {
+            // Whole-word match so substrings like "anthropicapi" don't
+            // false-trigger on "anthropic".
+            let pattern = "\\b" + NSRegularExpression.escapedPattern(for: provider) + "\\b"
+            if lowered.range(of: pattern, options: .regularExpression) != nil {
+                return provider
+            }
         }
         return nil
     }

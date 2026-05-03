@@ -139,6 +139,10 @@ final class ChatViewModel {
         get { richChatViewModel.acpErrorDetails }
         set { richChatViewModel.acpErrorDetails = newValue }
     }
+    var acpErrorOAuthProvider: String? {
+        get { richChatViewModel.acpErrorOAuthProvider }
+        set { richChatViewModel.acpErrorOAuthProvider = newValue }
+    }
     /// True when `hasAnyAICredential()` returned false at last preflight.
     var missingCredentials: Bool = false
 

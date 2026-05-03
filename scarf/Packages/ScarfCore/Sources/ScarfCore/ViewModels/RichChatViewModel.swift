@@ -120,6 +120,12 @@ public final class RichChatViewModel {
     /// users can copy-paste the raw output into a bug report.
     public var acpErrorDetails: String?
 
+    /// Lowercase OAuth provider name (`"nous"`, `"claude"`, …) when the
+    /// most recent failure was an OAuth refresh-revocation Hermes asked
+    /// the user to fix via re-authentication. Drives the chat banner's
+    /// "Re-authenticate" button. Nil for any other failure mode.
+    public var acpErrorOAuthProvider: String?
+
     /// Optional stderr-tail provider the controller can hook up when it
     /// creates the ACPClient. Used by `handlePromptComplete` to enrich
     /// the error banner on non-retryable stopReasons. The closure is
@@ -134,6 +140,7 @@ public final class RichChatViewModel {
         acpError = nil
         acpErrorHint = nil
         acpErrorDetails = nil
+        acpErrorOAuthProvider = nil
     }
 
     /// Populate the error triplet from a thrown Error + the ACPClient
@@ -154,10 +161,11 @@ public final class RichChatViewModel {
         }
         let msg = error.localizedDescription
         let stderrTail = await client?.recentStderr ?? ""
-        let hint = ACPErrorHint.classify(errorMessage: msg, stderrTail: stderrTail)
+        let cls = ACPErrorHint.classify(errorMessage: msg, stderrTail: stderrTail)
         acpError = msg
-        acpErrorHint = hint
+        acpErrorHint = cls?.hint
         acpErrorDetails = stderrTail.isEmpty ? nil : stderrTail
+        acpErrorOAuthProvider = cls?.oauthProvider
     }
 
     /// Populate the error triplet when `handlePromptComplete` sees a
@@ -168,11 +176,11 @@ public final class RichChatViewModel {
     public func recordPromptStopFailure(stopReason: String, client: ACPClient?) async {
         let msg = "Prompt ended without a response (stopReason: \(stopReason))."
         let stderrTail = await client?.recentStderr ?? ""
-        let hint = ACPErrorHint.classify(errorMessage: msg, stderrTail: stderrTail)
-            ?? Self.fallbackHint(for: stopReason)
+        let cls = ACPErrorHint.classify(errorMessage: msg, stderrTail: stderrTail)
         acpError = msg
-        acpErrorHint = hint
+        acpErrorHint = cls?.hint ?? Self.fallbackHint(for: stopReason)
         acpErrorDetails = stderrTail.isEmpty ? nil : stderrTail
+        acpErrorOAuthProvider = cls?.oauthProvider
     }
 
     /// Same as `recordPromptStopFailure` but pulls stderr from the
@@ -182,11 +190,11 @@ public final class RichChatViewModel {
     private func recordPromptStopFailureUsingProvider(stopReason: String) async {
         let msg = "Prompt ended without a response (stopReason: \(stopReason))."
         let stderrTail = await acpStderrProvider?() ?? ""
-        let hint = ACPErrorHint.classify(errorMessage: msg, stderrTail: stderrTail)
-            ?? Self.fallbackHint(for: stopReason)
+        let cls = ACPErrorHint.classify(errorMessage: msg, stderrTail: stderrTail)
         acpError = msg
-        acpErrorHint = hint
+        acpErrorHint = cls?.hint ?? Self.fallbackHint(for: stopReason)
         acpErrorDetails = stderrTail.isEmpty ? nil : stderrTail
+        acpErrorOAuthProvider = cls?.oauthProvider
     }
 
     private static func fallbackHint(for stopReason: String) -> String? {

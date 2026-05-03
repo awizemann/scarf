@@ -6,6 +6,14 @@ struct CredentialPoolsView: View {
     @State private var viewModel: CredentialPoolsViewModel
     @State private var showAddSheet = false
     @State private var pendingRemove: HermesCredential?
+    /// When non-nil, `AddCredentialSheet` opens pre-seeded with this
+    /// provider name + OAuth type — driven by the chat banner's
+    /// "Re-authenticate" button via `AppCoordinator.pendingOAuthReauth`,
+    /// or by clicking the per-row "Re-authenticate" button in this
+    /// view. Reset to nil when the sheet dismisses so the next plain
+    /// "Add Credential" press doesn't accidentally inherit it.
+    @State private var reauthInitialProvider: String?
+    @Environment(AppCoordinator.self) private var coordinator
 
     init(context: ServerContext) {
         _viewModel = State(initialValue: CredentialPoolsViewModel(context: context))
@@ -42,9 +50,15 @@ struct CredentialPoolsView: View {
             label: "Loading credentials…",
             isEmpty: viewModel.pools.isEmpty && viewModel.oauthProviders.isEmpty
         )
-        .onAppear { viewModel.load() }
-        .sheet(isPresented: $showAddSheet) {
-            AddCredentialSheet(viewModel: viewModel) {
+        .onAppear {
+            viewModel.load()
+            consumePendingReauth()
+        }
+        .onChange(of: coordinator.pendingOAuthReauth) { _, _ in
+            consumePendingReauth()
+        }
+        .sheet(isPresented: $showAddSheet, onDismiss: { reauthInitialProvider = nil }) {
+            AddCredentialSheet(viewModel: viewModel, initialProvider: reauthInitialProvider) {
                 showAddSheet = false
             }
         }
@@ -62,6 +76,19 @@ struct CredentialPoolsView: View {
         } message: {
             Text("This removes the credential from hermes. The upstream provider key is not revoked.")
         }
+    }
+
+    /// Drain any pending re-auth hand-off from the chat banner: the
+    /// banner's "Re-authenticate" button writes to
+    /// `coordinator.pendingOAuthReauth` and switches to this view; we
+    /// pick the value up here, seed the sheet's initial provider, and
+    /// clear the slot so navigating back to this view doesn't re-open
+    /// the sheet.
+    private func consumePendingReauth() {
+        guard let pending = coordinator.pendingOAuthReauth else { return }
+        reauthInitialProvider = pending
+        showAddSheet = true
+        coordinator.pendingOAuthReauth = nil
     }
 
     private var header: some View {
@@ -166,13 +193,19 @@ struct CredentialPoolsView: View {
                         }
                     }
                     Spacer()
+                    Button("Re-authenticate") {
+                        reauthInitialProvider = provider.provider
+                        showAddSheet = true
+                    }
+                    .controlSize(.small)
+                    .help("Run `hermes auth add \(provider.provider) --type oauth` again to refresh this provider's tokens.")
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(.quaternary.opacity(0.3))
             }
             HStack {
-                Text("Managed by `hermes auth add <provider>` — Scarf is read-only here.")
+                Text("Click Re-authenticate to refresh tokens. Removing or rotating providers is still done via `hermes auth …` in a terminal.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                 Spacer()
@@ -337,7 +370,24 @@ struct CredentialPoolsView: View {
 ///    OAuth flow so the user can paste the authorization code back.
 private struct AddCredentialSheet: View {
     @Bindable var viewModel: CredentialPoolsViewModel
+    /// Optional pre-fill from the re-auth path. When non-nil, the sheet
+    /// opens with this provider name + OAuth selected, mirroring the
+    /// state the user would otherwise have to type. Plain "Add
+    /// Credential" presses leave it nil.
+    let initialProvider: String?
     let onDismiss: () -> Void
+
+    init(
+        viewModel: CredentialPoolsViewModel,
+        initialProvider: String? = nil,
+        onDismiss: @escaping () -> Void
+    ) {
+        self.viewModel = viewModel
+        self.initialProvider = initialProvider
+        self.onDismiss = onDismiss
+        _providerID = State(initialValue: initialProvider ?? "")
+        _authType = State(initialValue: initialProvider == nil ? .apiKey : .oauth)
+    }
 
     enum AuthType: String, CaseIterable, Identifiable {
         case apiKey = "API Key"
@@ -352,8 +402,8 @@ private struct AddCredentialSheet: View {
         }
     }
 
-    @State private var providerID: String = ""
-    @State private var authType: AuthType = .apiKey
+    @State private var providerID: String
+    @State private var authType: AuthType
     @State private var apiKey: String = ""
     @State private var label: String = ""
     @State private var providers: [HermesProviderInfo] = []

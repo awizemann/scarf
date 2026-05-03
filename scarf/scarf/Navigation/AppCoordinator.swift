@@ -108,4 +108,12 @@ final class AppCoordinator {
     /// session) — a new session needs a cwd override Scarf doesn't
     /// yet have an id for.
     var pendingProjectChat: String?
+
+    /// Lowercase OAuth provider name to re-authenticate. Set by the
+    /// chat error banner's "Re-authenticate" button, consumed by
+    /// CredentialPoolsView, which auto-presents the OAuth sheet seeded
+    /// to this provider. Cleared by the consumer once handled. Sister
+    /// of `pendingProjectChat` — a hand-off slot, not a long-lived
+    /// state value.
+    var pendingOAuthReauth: String?
 }

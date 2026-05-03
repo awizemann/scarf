@@ -265,25 +265,73 @@ import Foundation
             errorMessage: "No Anthropic credentials found",
             stderrTail: ""
         )
-        #expect(noCreds?.contains("ANTHROPIC_API_KEY") == true)
+        #expect(noCreds?.hint.contains("ANTHROPIC_API_KEY") == true)
+        #expect(noCreds?.oauthProvider == nil)
 
         let missingBinary = ACPErrorHint.classify(
             errorMessage: "",
             stderrTail: "No such file or directory: 'npx'"
         )
-        #expect(missingBinary?.contains("npx") == true)
+        #expect(missingBinary?.hint.contains("npx") == true)
 
         let rateLimit = ACPErrorHint.classify(
             errorMessage: "",
             stderrTail: "HTTP 429 Too Many Requests: rate limit"
         )
-        #expect(rateLimit?.contains("rate-limit") == true)
+        #expect(rateLimit?.hint.contains("rate-limit") == true)
 
         let unknown = ACPErrorHint.classify(
             errorMessage: "weird thing",
             stderrTail: "other weird thing"
         )
         #expect(unknown == nil)
+    }
+
+    @Test func errorHintsClassifyOAuthRefreshRevoked() {
+        // Primary trigger — Hermes's verbatim message when an OAuth
+        // refresh token can't mint a new access token. Provider name
+        // appears alongside; classifier should extract it.
+        let revoked = ACPErrorHint.classify(
+            errorMessage: "",
+            stderrTail: "Refresh session has been revoked. Run `hermes model` to re-authenticate."
+        )
+        #expect(revoked?.hint.contains("Re-authenticate") == true)
+
+        // With provider context — surfaces the affected provider name
+        // so the chat banner can offer a one-click re-auth that targets
+        // the right OAuth flow.
+        let revokedWithProvider = ACPErrorHint.classify(
+            errorMessage: "",
+            stderrTail: "Provider claude: Refresh session has been revoked. Run `hermes model` to re-authenticate."
+        )
+        #expect(revokedWithProvider?.oauthProvider == "claude")
+
+        // 401 + OAuth provider name — broader catchall for providers
+        // that don't print the verbatim "revoked" string.
+        let unauthorized = ACPErrorHint.classify(
+            errorMessage: "",
+            stderrTail: "HTTP 401 Unauthorized from nous portal"
+        )
+        #expect(unauthorized?.oauthProvider == "nous")
+        #expect(unauthorized?.hint.contains("OAuth") == true)
+
+        // Unauthorized on a non-OAuth provider (API-key based) should
+        // NOT classify as OAuth revocation — no `oauthProvider` known
+        // to dispatch the re-auth flow against.
+        let unauthorizedNonOAuth = ACPErrorHint.classify(
+            errorMessage: "",
+            stderrTail: "HTTP 401 Unauthorized for groq"
+        )
+        #expect(unauthorizedNonOAuth?.oauthProvider == nil)
+
+        // Word-boundary check — "anthropicapi" must not false-trigger
+        // on "anthropic". Without word boundaries this catches the
+        // wrong cases.
+        let substringNoMatch = ACPErrorHint.classify(
+            errorMessage: "",
+            stderrTail: "401 unauthorized: anthropicapi.example.com"
+        )
+        #expect(substringNoMatch?.oauthProvider != "anthropic")
     }
 
     // MARK: - Helpers

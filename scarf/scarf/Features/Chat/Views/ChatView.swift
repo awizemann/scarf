@@ -116,6 +116,15 @@ struct ChatView: View {
                             .lineLimit(showErrorDetails ? nil : 2)
                     }
                     Spacer()
+                    if let provider = viewModel.acpErrorOAuthProvider {
+                        Button("Re-authenticate") {
+                            coordinator.pendingOAuthReauth = provider
+                            coordinator.selectedSection = .credentialPools
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .help("Open Credential Pools and re-authenticate \(provider).")
+                    }
                     if viewModel.acpErrorDetails != nil {
                         Button(showErrorDetails ? "Hide details" : "Show details") {
                             showErrorDetails.toggle()
