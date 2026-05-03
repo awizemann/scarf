@@ -51,7 +51,19 @@ public enum HermesProfileResolver {
     /// Returns the default `~/.hermes` when no profile is active OR when
     /// the configured profile is invalid (logged) — so the worst-case
     /// failure mode is "Scarf shows what it always showed before."
+    ///
+    /// **Test override.** Setting `SCARF_HERMES_HOME` in the environment
+    /// pins this resolver to the supplied absolute path and bypasses both
+    /// the cache and the `active_profile` lookup. Used by the E2E test
+    /// harness (`TemplateE2ETests`, `TemplateInstallUITests`) to drive
+    /// Scarf against an isolated tmpdir Hermes home so the user's real
+    /// `~/.hermes` is never touched. Read on every call (cheap; a single
+    /// `ProcessInfo` lookup) so tests can flip it across test methods
+    /// without stale-cache surprises.
     public static func resolveLocalHome() -> String {
+        if let override = scarfHermesHomeOverride() {
+            return override
+        }
         return refreshIfNeeded().home
     }
 
@@ -60,7 +72,28 @@ public enum HermesProfileResolver {
     /// reading from (issue #50 follow-up: prevents the next variant
     /// of "where's my data — wrong profile" by making it visible).
     public static func activeProfileName() -> String {
+        if scarfHermesHomeOverride() != nil {
+            return "test-override"
+        }
         return refreshIfNeeded().name
+    }
+
+    /// Read `SCARF_HERMES_HOME` from the environment. Returns `nil` when
+    /// unset or empty so production callers fall through to the profile
+    /// resolver. The override must be an absolute path — relative paths
+    /// are rejected (would land relative to the cwd of whatever process
+    /// happened to invoke the resolver, which is not what tests want).
+    private static func scarfHermesHomeOverride() -> String? {
+        guard let raw = ProcessInfo.processInfo.environment["SCARF_HERMES_HOME"] else {
+            return nil
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard trimmed.hasPrefix("/") else {
+            logger.warning("SCARF_HERMES_HOME=\(trimmed, privacy: .public) is not absolute; ignoring.")
+            return nil
+        }
+        return trimmed
     }
 
     /// Force a re-read on the next call, regardless of TTL. Test helper.

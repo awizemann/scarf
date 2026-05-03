@@ -5,6 +5,76 @@
     {
       "author": {
         "name": "Alan Wizemann",
+        "url": "https://github.com/awizemann"
+      },
+      "bundleSha256": "4889bc63c25e928ce96cf4032f248435348ee72d3b9c30ae5282361605a8616d",
+      "bundleSize": 8049,
+      "category": "news",
+      "config": {
+        "modelRecommendation": {
+          "preferred": "claude-haiku-4",
+          "rationale": "Simple HTTP fetch + filter + markdown render. Haiku is plenty fast and the cheapest option for a daily run."
+        },
+        "schema": [
+          {
+            "default": [],
+            "description": "Keywords or phrases to highlight in the digest (case-insensitive substring match against story titles). Leave empty to include every top story above the score threshold.",
+            "itemType": "string",
+            "key": "topics",
+            "label": "Highlight Topics (optional)",
+            "maxItems": 20,
+            "minItems": 0,
+            "required": false,
+            "type": "list"
+          },
+          {
+            "default": 100,
+            "description": "Only include stories at or above this point score. HN's front page averages ~150; lower this to widen the net, raise it to focus on viral-only items.",
+            "key": "min_score",
+            "label": "Minimum Score",
+            "max": 1000,
+            "min": 1,
+            "required": false,
+            "type": "number"
+          },
+          {
+            "default": 15,
+            "description": "Cap on how many stories appear in each digest. Avoids blowing up the dashboard list when HN has a busy day.",
+            "key": "max_items",
+            "label": "Maximum Items",
+            "max": 50,
+            "min": 5,
+            "required": false,
+            "type": "number"
+          }
+        ]
+      },
+      "contents": {
+        "agentsMd": true,
+        "config": 3,
+        "cron": 1,
+        "dashboard": true
+      },
+      "description": "A daily digest of HackerNews top stories. Pulls Hacker News' Firebase API, filters by minimum score and optional topics, prepends a markdown digest to digest.md, and keeps the dashboard's top stories list current. No API keys required.",
+      "detailSlug": "awizemann-hackernews-digest",
+      "id": "awizemann/hackernews-digest",
+      "installUrl": "https://raw.githubusercontent.com/awizemann/scarf/main/templates/awizemann/hackernews-digest/hackernews-digest.scarftemplate",
+      "minHermesVersion": "0.9.0",
+      "minScarfVersion": "2.3.0",
+      "name": "HackerNews Daily Digest",
+      "tags": [
+        "news",
+        "digest",
+        "hackernews",
+        "cron",
+        "starter",
+        "configurable"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "author": {
+        "name": "Alan Wizemann",
         "url": "https://github.com/awizemann/scarf"
       },
       "bundleSha256": "0a20802a8830a7cfdd1afa2888e42e113c9a17a37439384a3037d32ad1f24c1f",

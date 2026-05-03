@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 2,
+  "id": "awizemann/hackernews-digest",
+  "name": "HackerNews Daily Digest",
+  "version": "1.0.0",
+  "minScarfVersion": "2.3.0",
+  "minHermesVersion": "0.9.0",
+  "author": {
+    "name": "Alan Wizemann",
+    "url": "https://github.com/awizemann"
+  },
+  "description": "A daily digest of HackerNews top stories. Pulls Hacker News' Firebase API, filters by minimum score and optional topics, prepends a markdown digest to digest.md, and keeps the dashboard's top stories list current. No API keys required.",
+  "category": "news",
+  "tags": ["news", "digest", "hackernews", "cron", "starter", "configurable"],
+  "contents": {
+    "dashboard": true,
+    "agentsMd": true,
+    "cron": 1,
+    "config": 3
+  },
+  "config": {
+    "schema": [
+      {
+        "key": "topics",
+        "type": "list",
+        "itemType": "string",
+        "label": "Highlight Topics (optional)",
+        "description": "Keywords or phrases to highlight in the digest (case-insensitive substring match against story titles). Leave empty to include every top story above the score threshold.",
+        "required": false,
+        "minItems": 0,
+        "maxItems": 20,
+        "default": []
+      },
+      {
+        "key": "min_score",
+        "type": "number",
+        "label": "Minimum Score",
+        "description": "Only include stories at or above this point score. HN's front page averages ~150; lower this to widen the net, raise it to focus on viral-only items.",
+        "required": false,
+        "min": 1,
+        "max": 1000,
+        "default": 100
+      },
+      {
+        "key": "max_items",
+        "type": "number",
+        "label": "Maximum Items",
+        "description": "Cap on how many stories appear in each digest. Avoids blowing up the dashboard list when HN has a busy day.",
+        "required": false,
+        "min": 5,
+        "max": 50,
+        "default": 15
+      }
+    ],
+    "modelRecommendation": {
+      "preferred": "claude-haiku-4",
+      "rationale": "Simple HTTP fetch + filter + markdown render. Haiku is plenty fast and the cheapest option for a daily run."
+    }
+  }
+}
