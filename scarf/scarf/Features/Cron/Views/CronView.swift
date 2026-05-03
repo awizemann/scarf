@@ -12,7 +12,10 @@ import ScarfDesign
 struct CronView: View {
     @State private var viewModel: CronViewModel
     @State private var pendingDelete: HermesCronJob?
+    @State private var showOutputPanel: Bool = false
     @Environment(\.hermesCapabilities) private var capabilitiesStore
+    @Environment(AppCoordinator.self) private var coordinator
+    @Environment(HermesFileWatcher.self) private var fileWatcher
 
     init(context: ServerContext) {
         _viewModel = State(initialValue: CronViewModel(context: context))
@@ -36,6 +39,13 @@ struct CronView: View {
         .navigationTitle("Cron Jobs")
         .loadingOverlay(viewModel.isLoading, label: "Loading cron jobs…", isEmpty: viewModel.jobs.isEmpty)
         .onAppear { viewModel.load() }
+        // Reload on Hermes file mutations — Hermes flips `state` between
+        // "scheduled" and "running" inside `~/.hermes/cron/jobs.json`
+        // when a job starts/finishes, and writes a new run-output file
+        // under `~/.hermes/cron/output/`. The watcher gives us the
+        // running indicator + log tail refresh "for free" without a
+        // polling timer. Same wiring ActivityView uses.
+        .onChange(of: fileWatcher.lastChangeDate) { viewModel.load() }
         .sheet(isPresented: $viewModel.showCreateSheet) {
             CronJobEditor(mode: .create, availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir) { form in
                 viewModel.createJob(
@@ -172,6 +182,13 @@ struct CronView: View {
                     Circle()
                         .fill(statusDotColor(job))
                         .frame(width: 7, height: 7)
+                        .opacity(job.state == "running" ? 0.55 : 1.0)
+                        .animation(
+                            job.state == "running"
+                                ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true)
+                                : .default,
+                            value: job.state
+                        )
                 }
                 HStack(spacing: 10) {
                     Text(job.schedule.expression ?? job.schedule.display ?? "—")
@@ -221,7 +238,13 @@ struct CronView: View {
     }
 
     private func statusDotColor(_ job: HermesCronJob) -> Color {
+        // Order matters: a currently-running job overrides a stale
+        // lastError so the user sees "yes, retrying right now" rather
+        // than "still showing the old failure." Disabled wins over
+        // everything else — a paused job isn't running, regardless
+        // of state-field churn.
         if !job.enabled { return ScarfColor.foregroundFaint }
+        if job.state == "running" { return ScarfColor.info }
         if job.lastError != nil { return ScarfColor.danger }
         return ScarfColor.success
     }
@@ -272,6 +295,9 @@ struct CronView: View {
                         .foregroundStyle(ScarfColor.foregroundPrimary)
                     ScarfBadge(job.enabled ? "active" : "paused",
                                kind: job.enabled ? .success : .neutral)
+                    if job.state == "running" {
+                        ScarfBadge("running…", kind: .info)
+                    }
                 }
                 Text(CronScheduleFormatter.humanReadable(from: job.schedule))
                     .scarfStyle(.footnote)
@@ -420,24 +446,163 @@ struct CronView: View {
         }
 
         if let error = job.lastError {
+            errorBanner(job: job, error: error)
+        }
+
+        outputPanel(job: job)
+    }
+
+    /// Last-error surface. When `ACPErrorHint` recognizes the message
+    /// (OAuth refresh-revoked, missing credentials, SSH failure, etc.),
+    /// it renders the human hint + raw error + a re-auth button when
+    /// applicable. Otherwise falls back to the legacy single-line
+    /// red text — same chrome the view used pre-PR for unrecognized
+    /// errors. Mirrors `ChatView.errorBanner` so the recovery flow is
+    /// identical between cron and chat.
+    @ViewBuilder
+    private func errorBanner(job: HermesCronJob, error: String) -> some View {
+        if let classification = viewModel.selectedErrorClassification {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(ScarfColor.warning)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(classification.hint)
+                            .scarfStyle(.body)
+                            .foregroundStyle(ScarfColor.foregroundPrimary)
+                            .textSelection(.enabled)
+                        Text(error)
+                            .scarfStyle(.caption)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
+                            .textSelection(.enabled)
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength: ScarfSpace.s2)
+                    if let provider = classification.oauthProvider {
+                        Button("Re-authenticate") {
+                            coordinator.pendingOAuthReauth = provider
+                            coordinator.selectedSection = .credentialPools
+                        }
+                        .buttonStyle(ScarfPrimaryButton())
+                        .help("Open Credential Pools and re-authenticate \(provider).")
+                    }
+                }
+            }
+            .padding(ScarfSpace.s3)
+            .background(
+                RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                    .fill(ScarfColor.warning.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                    .strokeBorder(ScarfColor.warning.opacity(0.25), lineWidth: 1)
+            )
+        } else {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
                 Text(error)
                     .scarfStyle(.caption)
+                    .textSelection(.enabled)
             }
             .foregroundStyle(ScarfColor.danger)
         }
+    }
 
-        if let output = viewModel.jobOutput {
-            sectionBlock("LAST OUTPUT") {
-                Text(output)
-                    .font(ScarfFont.monoSmall)
-                    .foregroundStyle(ScarfColor.foregroundPrimary)
-                    .textSelection(.enabled)
-                    .padding(ScarfSpace.s3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+    /// Per-job run-output panel. Always visible; collapsed by default
+    /// with a one-line summary so the detail pane stays scannable when
+    /// the user has dozens of cron jobs. Expanded body mirrors the
+    /// dark monospaced tail layout `LogsView` uses, fed by
+    /// `HermesFileService.loadCronOutput` (Hermes writes per-run files
+    /// under `~/.hermes/cron/output/<jobId>-*`). Reload happens via the
+    /// outer `HermesFileWatcher` `.onChange` — when a fresh run lands a
+    /// new output file, the VM re-reads on the next mtime tick.
+    @ViewBuilder
+    private func outputPanel(job: HermesCronJob) -> some View {
+        let summary = outputSummary(job)
+        VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+            Button {
+                showOutputPanel.toggle()
+            } label: {
+                HStack(spacing: ScarfSpace.s2) {
+                    Image(systemName: showOutputPanel ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                    Text("LAST RUN OUTPUT")
+                        .scarfStyle(.captionUppercase)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                    Text(summary)
+                        .font(ScarfFont.monoSmall)
+                        .foregroundStyle(ScarfColor.foregroundFaint)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showOutputPanel {
+                if let output = viewModel.jobOutput, !output.isEmpty {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            Text(output)
+                                .font(ScarfFont.monoSmall)
+                                .foregroundStyle(ScarfColor.foregroundPrimary)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(ScarfSpace.s3)
+                                .id("cron-output-bottom")
+                        }
+                        .frame(maxHeight: 320)
+                        .background(
+                            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                                .fill(Color(red: 0.07, green: 0.06, blue: 0.05))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                                .strokeBorder(ScarfColor.border, lineWidth: 1)
+                        )
+                        // Auto-scroll to the latest line whenever the
+                        // output content changes (a new run lands).
+                        .onChange(of: output) {
+                            withAnimation(.easeOut(duration: 0.18)) {
+                                proxy.scrollTo("cron-output-bottom", anchor: .bottom)
+                            }
+                        }
+                        .onAppear {
+                            proxy.scrollTo("cron-output-bottom", anchor: .bottom)
+                        }
+                    }
+                } else {
+                    Text("No output yet — this job hasn't run, or its output file is gone.")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(ScarfSpace.s3)
+                        .background(
+                            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                                .fill(ScarfColor.backgroundSecondary)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                                .strokeBorder(ScarfColor.border, lineWidth: 1)
+                        )
+                }
             }
         }
+    }
+
+    /// One-line summary rendered next to the LAST RUN OUTPUT chevron
+    /// when the panel is collapsed. Gives a quick "yes there's content"
+    /// (or "no output yet") read without expanding.
+    private func outputSummary(_ job: HermesCronJob) -> String {
+        let timestamp = job.lastRunAt.map { CronScheduleFormatter.formatNextRun(iso: $0) } ?? "never"
+        let status: String = {
+            if job.state == "running" { return "running…" }
+            if job.lastError != nil { return "error" }
+            if job.lastRunAt != nil { return "ok" }
+            return "no runs yet"
+        }()
+        return "\(timestamp) — \(status)"
     }
 
     @ViewBuilder

@@ -490,12 +490,35 @@ struct HermesFileService: Sendable {
         }
     }
 
+    /// Read the most-recent run output for a cron job. Hermes writes
+    /// `~/.hermes/cron/output/<jobId>/<YYYY-MM-DD_HH-MM-SS>.md` per run
+    /// (one file per execution); we resolve the per-job subdir, take
+    /// the lexicographically-last filename (which is the newest given
+    /// the timestamp prefix), and return its contents. Returns nil
+    /// when the subdir is missing, empty, or the read fails — the cron
+    /// detail surface treats nil as "no output yet."
+    ///
+    /// A legacy flat-file layout (`<dir>/<filename containing jobId>`)
+    /// is checked as a fallback so older Hermes installs that used a
+    /// non-nested layout still surface their last run.
     nonisolated func loadCronOutput(jobId: String) -> String? {
         let dir = context.paths.cronOutputDir
-        guard let files = try? transport.listDirectory(dir) else { return nil }
-        let matching = files.filter { $0.contains(jobId) }.sorted().last
-        guard let filename = matching else { return nil }
-        return readFile(dir + "/" + filename)
+        let perJobDir = dir + "/" + jobId
+        if let runs = try? transport.listDirectory(perJobDir),
+           let latest = runs.sorted().last {
+            if let content = readFile(perJobDir + "/" + latest) {
+                return content
+            }
+        }
+        // Legacy fallback: pre-subdir layouts had files like
+        // `<jobId>-<timestamp>.log` directly under cronOutputDir. Keep
+        // matching them so users on older Hermes versions still see
+        // their tail.
+        if let files = try? transport.listDirectory(dir),
+           let matching = files.filter({ $0.contains(jobId) }).sorted().last {
+            return readFile(dir + "/" + matching)
+        }
+        return nil
     }
 
     // MARK: - Skills

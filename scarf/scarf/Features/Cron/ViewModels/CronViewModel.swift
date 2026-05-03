@@ -24,6 +24,16 @@ final class CronViewModel {
     var editingJob: HermesCronJob?
     var isLoading = false
 
+    /// Classified hint for the selected job's `lastError`, computed via
+    /// `ACPErrorHint.classify` so cron rows surface the same OAuth-revoked
+    /// affordance that ChatView's banner offers. `nil` when the selected
+    /// job has no error or the error doesn't match a known pattern — the
+    /// detail pane falls back to rendering `lastError` raw.
+    var selectedErrorClassification: ACPErrorHint.Classification? {
+        guard let job = selectedJob, let lastError = job.lastError, !lastError.isEmpty else { return nil }
+        return ACPErrorHint.classify(errorMessage: lastError, stderrTail: "")
+    }
+
     func load() {
         isLoading = true
         let svc = fileService
