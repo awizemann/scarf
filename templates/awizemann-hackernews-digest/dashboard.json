@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "title": "HackerNews Digest",
+  "description": "A daily roll-up of HackerNews top stories above your configured score threshold. The stat widgets and Top Stories list update each time the cron job runs; the digest itself is prepended to `digest.md` in the project root.",
+  "theme": { "accent": "orange" },
+  "sections": [
+    {
+      "title": "Today's Digest",
+      "columns": 3,
+      "widgets": [
+        {
+          "type": "stat",
+          "title": "Top Story Score",
+          "value": 0,
+          "icon": "flame.fill",
+          "color": "orange",
+          "subtitle": "highest-scoring item"
+        },
+        {
+          "type": "stat",
+          "title": "Items Tracked",
+          "value": 0,
+          "icon": "list.bullet.rectangle",
+          "color": "blue",
+          "subtitle": "above your score threshold"
+        },
+        {
+          "type": "stat",
+          "title": "Last Run",
+          "value": "never",
+          "icon": "clock",
+          "color": "gray",
+          "subtitle": "ISO-8601 timestamp"
+        }
+      ]
+    },
+    {
+      "title": "Top Stories",
+      "columns": 1,
+      "widgets": [
+        {
+          "type": "list",
+          "title": "Top Stories (populated after first run)",
+          "items": [
+            { "text": "Run the digest once to populate — the agent reads your Configuration, fetches HackerNews' top stories, and fills this list.", "status": "pending" }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "How to Use",
+      "columns": 1,
+      "widgets": [
+        {
+          "type": "text",
+          "title": "Quick Start",
+          "format": "markdown",
+          "content": "**1.** Review your configuration — click the **slider icon** (top-right of this dashboard) to open Configuration. Set `min_score`, `max_items`, and any `topics` keywords you want highlighted.\n\n**2.** Enable the `[tmpl:awizemann/hackernews-digest] Daily HN digest` cron job in the Cron sidebar. It ships paused — nothing runs until you say so.\n\n**3.** Ask your agent: *\"Run the HN digest now.\"* The Top Stories list populates, the stat widgets update, and a fresh entry lands at the top of `digest.md`.\n\n**4.** Daily at 8 AM the cron job fires automatically. Change the schedule in the Cron sidebar if you want a different cadence.\n\nSee `README.md` and `AGENTS.md` in the project root for the full spec."
+        }
+      ]
+    }
+  ]
+}
