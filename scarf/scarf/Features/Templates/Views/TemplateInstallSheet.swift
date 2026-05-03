@@ -402,6 +402,7 @@ struct TemplateInstallSheet: View {
             }
             .keyboardShortcut(.defaultAction)
             .buttonStyle(ScarfPrimaryButton())
+            .accessibilityIdentifier("templateInstall.success.openProject")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

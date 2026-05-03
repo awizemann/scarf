@@ -94,6 +94,7 @@ struct TemplateConfigSheet: View {
                 onCancel()
             }
             .keyboardShortcut(.cancelAction)
+            .accessibilityIdentifier("templateConfig.cancelButton")
             Spacer()
             Button(commitLabel) {
                 if let finalized = viewModel.commit(project: project) {
@@ -108,6 +109,7 @@ struct TemplateConfigSheet: View {
             }
             .keyboardShortcut(.defaultAction)
             .buttonStyle(ScarfPrimaryButton())
+            .accessibilityIdentifier("templateConfig.commitButton")
         }
         .padding(16)
     }

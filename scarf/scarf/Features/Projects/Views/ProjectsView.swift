@@ -236,6 +236,15 @@ struct ProjectsView: View {
             } label: {
                 Label("Templates", systemImage: "shippingbox")
             }
+            // `.accessibilityElement(children: .ignore)` collapses
+            // the inner Label's automatic accessibility tree so our
+            // explicit identifier sticks. Without it, SwiftUI uses
+            // the systemImage name (`chevron.down` in macOS toolbar
+            // contexts) as the menu button's accessibility identifier
+            // and our `.accessibilityIdentifier` is silently
+            // overridden — verified via XCUITest tree dump.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Templates")
             .accessibilityIdentifier("templates.toolbar.menu")
         }
     }

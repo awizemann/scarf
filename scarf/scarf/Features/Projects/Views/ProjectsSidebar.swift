@@ -161,6 +161,7 @@ struct ProjectsSidebar: View {
                 .truncationMode(.tail)
         }
         .tag(project)
+        .accessibilityIdentifier("projects.row.\(project.name)")
         .contextMenu {
             projectContextMenu(project)
         }
@@ -190,6 +191,7 @@ struct ProjectsSidebar: View {
             Button("Uninstall Template (remove installed files)…", systemImage: "trash") {
                 onUninstallTemplate(project)
             }
+            .accessibilityIdentifier("projects.contextMenu.uninstallTemplate")
             Divider()
         }
         Button("Remove from List (keep files)…", systemImage: "minus.circle") {

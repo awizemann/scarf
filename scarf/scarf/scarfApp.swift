@@ -43,6 +43,22 @@ struct ScarfApp: App {
         Task.detached(priority: .utility) {
             _ = HermesFileService.enrichedEnvironment()
         }
+
+        // Test-mode launch-URL handoff. When XCUITest passes
+        // `--scarf-test-install-url <https-url>`, route the URL
+        // through `TemplateURLRouter` so `ProjectsView`'s onAppear
+        // hook dispatches it as if the user had clicked a
+        // `scarf://install` deep link. Bypasses the SwiftUI/AppKit
+        // Menu accessibility-bridging issues that otherwise block
+        // XCUITest from driving the toolbar menu's "Browse Catalog…"
+        // / "Install from URL…" items reliably. Production launches
+        // (no flag) untouched.
+        if TestModeFlags.shared.isTestMode,
+           let idx = CommandLine.arguments.firstIndex(of: "--scarf-test-install-url"),
+           idx + 1 < CommandLine.arguments.count,
+           let url = URL(string: "scarf://install?url=" + CommandLine.arguments[idx + 1]) {
+            TemplateURLRouter.shared.handle(url)
+        }
     }
 
     var body: some Scene {

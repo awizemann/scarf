@@ -90,6 +90,7 @@ struct TemplateUninstallSheet: View {
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(ScarfPrimaryButton())
                     .tint(.red)
+                    .accessibilityIdentifier("templateUninstall.confirmRemove")
             }
             .padding(.top, 8)
         }
@@ -298,6 +299,7 @@ struct TemplateUninstallSheet: View {
             }
             .keyboardShortcut(.defaultAction)
             .buttonStyle(ScarfPrimaryButton())
+            .accessibilityIdentifier("templateUninstall.success.done")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()

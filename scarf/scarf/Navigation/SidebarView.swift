@@ -166,6 +166,7 @@ struct SidebarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("sidebar.section.\(item.rawValue)")
     }
 
     // MARK: - Footer
