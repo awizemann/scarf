@@ -6,6 +6,198 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.7.0</title>
+      <sparkle:version>32</sparkle:version>
+      <sparkle:shortVersionString>2.7.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Tue, 05 May 2026 18:47:18 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<h2>What&#x27;s in 2.7.0</h2>
+<p>The biggest release since 2.6.0 — a six-week stretch covering <strong>remote-context performance</strong>, a <strong>new project authoring flow</strong>, <strong>dashboard widgets</strong>, <strong>OAuth resilience</strong>, and a top-to-bottom <strong>performance instrumentation harness</strong> that drove the bulk of the rest. 36 commits, no schema bump, no Hermes capability bump.</p>
+<p>The throughline: Scarf got materially faster and more honest on slow remote SSH links, where 30-second sqlite timeouts and silently-empty UI used to be common. The skeleton-then-hydrate pattern, SSH cancellation propagation, and ScarfMon-driven diagnosis are the shape of how that work gets done now.</p>
+<hr>
+<h3>Remote-context performance — chats and Activity in seconds, not 30s timeouts</h3>
+<p>Resuming a chat on a slow remote (a 420ms-RTT droplet, an underprovisioned VPS, a tunnel through 4G) used to fetch the full message column set in one shot, which routinely tripped the 30s SSH timeout on chats with multi-page tool result blobs. The 160-message session was broken; the 30-message session was broken too. Activity didn&#x27;t load at all.</p>
+<p>v2.7 introduces a <strong>skeleton-then-hydrate pattern</strong> that bounds the wire payload by what the user actually needs to see RIGHT NOW, then fills in the heavy stuff in the background:</p>
+<ul>
+  <li><strong>Chat skeleton.</strong> <a href="https://github.com/awizemann/scarf/blob/main/scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift"><code>fetchSkeletonMessages</code></a> selects user + assistant rows only (skips <code>role=&#x27;tool&#x27;</code>) with <code>tool_calls</code> / <code>reasoning</code> / <code>reasoning_content</code> hard-NULLed at the SQL level. Wire payload bounded by conversational text alone — typically a few KB. The chat appears in seconds. Background <code>startToolHydration</code> pages through <code>hydrateAssistantToolCalls</code> in 5-id batches to splice tool calls in. Tool-result CONTENT is <strong>opt-in</strong> via Settings → Display → &quot;Load tool results in past chats&quot; (default off); the inspector pane lazy-fetches per-result content via <code>fetchToolResult(callId:)</code> when you open a card.</li>
+  <li><strong>Activity skeleton.</strong> <a href="https://github.com/awizemann/scarf/blob/main/scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift"><code>fetchRecentToolCallSkeleton</code></a> returns metadata-only rows (id + session_id + role + timestamp; everything else NULLed). Activity opens in &lt;1s on remote with placeholder rows; real per-call entries swap in as paged hydration completes. New &quot;Loading tool details…&quot; pill in the page header surfaces hydration progress.</li>
+  <li><strong>Single-id whale recovery.</strong> When a 5-id batch trips the 30s timeout (one row carries an oversized <code>tool_calls</code> blob — a long Edit&#x27;s args, a big diff), an L1 single-id retry isolates the offending row so the rest of the batch still hydrates. Whale row stays bare; assistant message stays readable.</li>
+  <li><strong>Lazy tool result loading in the inspector.</strong> Default-off avoids the bulk fetch. When you focus a tool call card, ChatInspectorPane fires <code>loadToolResultIfMissing(callId:)</code> which splices a single result into the message stream without re-fetching anything else.</li>
+</ul>
+<p>Effect: a 160-message thinking-model session that used to time out at exactly 30s now opens in under 2 seconds with placeholder cards filling in over the next few. Activity loads in 500-800ms.</p>
+<h4>SSH cancellation that actually cancels</h4>
+<p><code>Task.detached { … }</code> doesn&#x27;t inherit cancellation from the awaiting parent, and <code>Task&lt;…&gt; { … }</code> (unstructured) also drops the signal. Without explicit bridging, cancelling a chat-load Task only unwinds Swift state — the underlying ssh subprocess kept running for the full 30s, pinning a remote sqlite query and a ControlMaster session slot. This produced the &quot;third chat hangs&quot; / &quot;dashboard spins after rapid switching&quot; symptom.</p>
+<p>v2.7 wires <code>withTaskCancellationHandler</code> through <a href="https://github.com/awizemann/scarf/blob/main/scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHScriptRunner.swift"><code>SSHScriptRunner.run</code></a> and <a href="https://github.com/awizemann/scarf/blob/main/scarf/Packages/ScarfCore/Sources/ScarfCore/Services/Backends/RemoteSQLiteBackend.swift"><code>RemoteSQLiteBackend.query</code></a> so parent cancellation reaches the <code>Process</code> and calls <code>proc.terminate()</code> within 100ms. New <code>ssh.cancelled</code> ScarfMon event surfaces this.</p>
+<h4>In-flight coalescing for <code>loadRecentSessions</code></h4>
+<p>File-watcher deltas during an active stream used to stack 2-3 parallel sessions-list reload tasks (the 500ms <code>scheduleSessionsRefresh</code> debounce only suppresses a pending tick, not one already executing). Subsequent callers now await the in-flight load instead of spawning a parallel SSH subprocess. New <code>mac.loadRecentSessions.coalesced</code> event tracks dedup hits.</p>
+<h4>Loading-state UX hardening</h4>
+<p>The Mac chat sidebar greys out and disables row taps the moment a session-switch is initiated (synchronously, before <code>client.start()</code> returns), with a floating ProgressView showing the current phase: <strong>&quot;Spawning hermes acp…&quot;</strong> → <strong>&quot;Authenticating…&quot;</strong> → <strong>&quot;Loading session…&quot;</strong> → <strong>&quot;Loading history…&quot;</strong> → <strong>&quot;Ready&quot;</strong>. Pre-fix the sidebar looked engageable while the 5-7 second SSH+ACP boot was still in flight, and the user could queue up a second session-switch behind the first. New <code>isStartingSession</code> flag flips on user click for instant feedback.</p>
+<h4>Partial-result + mismatch + pinned-model banners</h4>
+<ul>
+  <li><strong>Partial-result banner.</strong> When the skeleton fetch trips an SSH transport failure (rather than a clean empty result), the chat surfaces &quot;Couldn&#x27;t load full chat history — the connection to <em>server</em> timed out&quot; through the existing <code>acpError</code> triplet, plus forces <code>hasMoreHistory = true</code> so the &quot;Load earlier&quot; affordance shows up. Replaces the pre-fix silent empty transcript.</li>
+  <li><strong>Model/provider mismatch banner.</strong> <a href="https://github.com/awizemann/scarf/blob/main/scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift"><code>ModelPreflight.detectMismatch</code></a> recognizes when <code>model.default</code> carries a <code>&lt;provider&gt;/...</code> prefix that disagrees with <code>model.provider</code> (e.g. <code>anthropic/claude-sonnet-4.6</code> + <code>provider: nous</code> after switching OAuth via Credential Pools). Banner offers one-click fix in either direction.</li>
+  <li><strong>Pinned-model failure hint.</strong> ACP error classifier now recognizes <code>model_not_found</code> / <code>404 messages</code> / <code>model is not available</code> and surfaces &quot;This session was created with a model the provider no longer offers — start a new chat to use your current model&quot; so the pinned-model failure mode has a clear recovery path.</li>
+  <li><strong>OAuth-completion provider swap.</strong> After a successful OAuth in Credential Pools, if the just-authed provider differs from <code>model.provider</code>, surface &quot;Switch active provider to <em>name</em>?&quot; with [Switch] / [Keep current] instead of auto-dismissing.</li>
+</ul>
+<hr>
+<h3>New Project from Scratch wizard + Keychain-backed cron secrets</h3>
+<p>A <strong>third project entry point</strong> alongside Browse Catalog and Add Existing Project: a wizard that scaffolds a Scarf-standard project skeleton (<code>&lt;project&gt;/.scarf/dashboard.json</code> + AGENTS.md marker block), registers it, and hands off to a chat session that auto-activates the bundled <code>scarf-template-author</code> skill. The skill drives the rest conversationally — widgets, optional config schema, optional cron — and writes the final files itself. Wizard stays minimal because the agent does configuration better than a multi-step form. The skill ships bundled inside <code>Scarf.app/Contents/Resources/BuiltinSkills.bundle/</code> and copies into <code>~/.hermes/skills/</code> on launch (idempotent + version-gated).</p>
+<p><strong>Cron + Keychain — <code>$SCARF_&lt;SLUG&gt;_&lt;FIELD&gt;</code> env vars.</strong> Cron prompts that referenced <code>secret</code>-typed config fields used to get the literal <code>keychain://...</code> URI back when reading <code>config.json</code>, producing 401s. v2.7 mirrors resolved Keychain values into <code>~/.hermes/.env</code> under a marker-bounded block keyed by template slug:</p>
+<pre><code># scarf-secrets:begin local-news-aggregator
+SCARF_LOCAL_NEWS_AGGREGATOR_API_TOKEN=actual-value
+SCARF_LOCAL_NEWS_AGGREGATOR_RSS_URL=https://example.com/feed
+# scarf-secrets:end local-news-aggregator</code></pre>
+<p>Hermes already reloads <code>~/.hermes/.env</code> per cron tick, so credential rotation is automatic — just edit the value in Configuration → next tick sees it. The mirror runs at every state-change point: install, post-install Configuration save, uninstall, &quot;Remove from List&quot;, and on app launch (reconciliation pass over registered projects). Source of truth stays in the Keychain — <code>config.json</code> keeps <code>keychain://</code> URIs unchanged. Mode 0600 enforced on <code>~/.hermes/.env</code>.</p>
+<p>Cron prompts now reference these env vars directly:</p>
+<pre><code>{
+  &quot;prompt&quot;: &quot;Use the terminal: curl -sS -H \&quot;Authorization: Bearer $SCARF_LOCAL_NEWS_AGGREGATOR_API_TOKEN\&quot; \&quot;$SCARF_LOCAL_NEWS_AGGREGATOR_RSS_URL\&quot; -o {{PROJECT_DIR}}/.scarf/feed.xml&quot;
+}</code></pre>
+<p><strong>Migration.</strong> First launch of v2.7 walks the project registry and writes the managed block per schemaful project — automatic. Existing cron prompts you wrote against the old (broken) <code>config.json</code> pattern still need updating: open the cron job in Scarf&#x27;s Cron sidebar and edit the prompt, or ask the agent in chat (&quot;Update my Local News cron job&#x27;s prompt to use the new env var convention&quot;) — the bundled <code>scarf-template-author</code> skill (now v1.1.0) documents the convention with worked examples.</p>
+<p>Also fixes <a href="https://github.com/awizemann/scarf/issues/75">#75</a> — <code>_NSDetectedLayoutRecursion</code> on the Configuration form for projects whose form transitioned between stages with different intrinsic heights.</p>
+<hr>
+<h3>Project dashboards — file-reading widgets, sparklines, typed status</h3>
+<p>Five new widget types, project-wide auto-refresh, and a structured error card for unknown widgets. Backwards-compatible — every existing <code>dashboard.json</code> renders byte-identically.</p>
+<ul>
+  <li><strong>Project-wide auto-refresh.</strong> <a href="https://github.com/awizemann/scarf/blob/main/scarf/scarf/Core/Services/HermesFileWatcher.swift"><code>HermesFileWatcher</code></a> used to watch each project&#x27;s <code>dashboard.json</code> specifically. v2.7 promotes that to a watch on the entire <code>&lt;project&gt;/.scarf/</code> directory. A <code>markdown_file</code> or <code>log_tail</code> widget pointing at <code>&lt;project&gt;/.scarf/reports/foo.md</code> refreshes the moment a cron job rewrites the file. <strong>By convention, place files the dashboard reads inside <code>.scarf/</code></strong> so the watch picks them up.</li>
+  <li><strong><code>markdown_file</code></strong> — renders a markdown file from disk through the same <code>MarkdownContentView</code> pipeline used by inline <code>text</code> widgets.</li>
+  <li><strong><code>log_tail</code></strong> — last <code>lines</code> of a file (default 20, max 200), monospaced, ANSI codes stripped.</li>
+  <li><strong><code>cron_status</code></strong> — last run / next run / state for one Hermes cron job by <code>jobId</code>, plus a small inline log tail. Read-only — Run/Pause/Resume controls stay on the Cron tab.</li>
+  <li><strong><code>image</code></strong> — local file (<code>path</code> relative to project root) or remote <code>url</code>. Optional <code>height</code> cap. Useful for matplotlib/Plotly PNGs the cron job generates.</li>
+  <li><strong><code>status_grid</code></strong> — compact NxM grid of colored cells, one per service / item, with hover labels.</li>
+  <li><strong><code>stat</code> widget gains inline sparklines.</strong> Optional <code>sparkline: [Number]</code> field. SVG-only render, dozens per dashboard cost nothing.</li>
+  <li><strong>Typed status badges.</strong> <code>list</code> items and <code>status_grid</code> cells share a typed enum (<code>success</code>, <code>warning</code>, <code>danger</code>, <code>info</code>, <code>pending</code>, <code>done</code>, <code>neutral</code>) with lenient decode for synonyms (<code>ok</code>/<code>up</code> → success, <code>down</code>/<code>error</code> → danger). Unknown strings render as plain text.</li>
+  <li><strong>Structured widget error card.</strong> Replaces the legacy &quot;Unknown: \&lt;type\&gt;&quot; placeholder with a card surfacing the title, specific reason, and a hint.</li>
+  <li><strong>Schema mirror.</strong> The widget vocabulary lives once at <a href="https://github.com/awizemann/scarf/blob/main/tools/widget-schema.json"><code>tools/widget-schema.json</code></a>; the catalog validator reads from it and enforces per-type required fields.</li>
+</ul>
+<hr>
+<h3>OAuth resilience + Credential Pools</h3>
+<ul>
+  <li><strong>Daily OAuth keepalive cron.</strong> Prevents Anthropic OAuth refresh tokens from expiring after weeks of inactivity. New cron job <code>[scarf:oauth-keepalive]</code> (managed by Scarf) pings Hermes on a daily cadence; the in-app Refresh All Sessions action mirrors the same path on demand.</li>
+  <li><strong>Remote re-auth.</strong> Re-authenticating against a remote droplet&#x27;s OAuth provider used to be blocked by the lack of a stdin path through SSHTransport. The OAuth flow now drives a remote <code>hermes auth add</code> correctly with stdin forwarded.</li>
+  <li><strong>OAuth remove button.</strong> Per-provider remove action in Credential Pools (auth.json edit), with confirmation dialog. Companion auto-refresh of the view when <code>auth.json</code> changes externally (file-watcher).</li>
+  <li><strong><code>resolve_provider_client</code> error classification.</strong> When an auxiliary task references a provider whose credentials aren&#x27;t loaded, Hermes prints <code>resolve_provider_client: &lt;name&gt; requested but &lt;Display Name&gt; not configured</code> to stderr — pre-fix this surfaced in chat as the opaque <code>-32603 Internal error</code> with no actionable detail. Now classified into a clear hint pointing at Settings → Aux Models.</li>
+  <li><strong>Aux Tab unknown-task surface.</strong> When <code>config.yaml</code> has an <code>auxiliary.&lt;task&gt;</code> block for a task Scarf doesn&#x27;t know about (newer Hermes added it; Scarf hasn&#x27;t caught up), render it as a plain row with the raw provider/model values instead of dropping it silently.</li>
+  <li><strong>Credential Pools refresh after OAuth sheet dismiss.</strong> Closing the OAuth sheet after a successful add now refreshes the list immediately instead of leaving the just-added pool hidden until the next file-watcher tick.</li>
+</ul>
+<hr>
+<h3>ScarfMon — performance instrumentation harness</h3>
+<p>The diagnostic surface that drove the bulk of the v2.7 perf work. Off by default; signpost-only mode (Instruments-friendly) is free; Full mode (4096-entry in-memory ring buffer + os.Logger) is a click away in Settings → Diagnostics → Performance. Wiki: https://github.com/awizemann/scarf/wiki/Performance-Monitoring</p>
+<ul>
+  <li><strong>Phases 1-3</strong> built the core: dispatcher + ring buffer + 3 backends, chat / transport / sqlite measure points, diagnostic counters for chat-render bursts, finalize-burst dampening.</li>
+  <li><strong>Tier A + B</strong> added per-feature instrumentation: iOS file watcher, sessions list, model catalog, dashboard widgets, image encoder, message hydration.</li>
+  <li><strong>Nous picker investigation</strong> localized a 60s + 120s beach-ball to a specific path (Nous catalog <code>readCache</code>), then killed the 120s one with dedupe + 5s timeout.</li>
+  <li><strong>Tier C catch-up</strong> (this release): instrumented Memory / Skills / Cron / Curator load paths so future captures show how often these tabs cost multiple sequential SFTP RTTs on remote.</li>
+  <li><strong>Per-call bytes recorded</strong> on transport + sqlite events so captures show payload sizes alongside latencies.</li>
+  <li><strong><code>mac.emptyAssistantTurn</code> event</strong> documents the Nous quirk where the model returns a thought stream with no body (the bubble looks like Hermes is &quot;still thinking&quot; but the turn already finished).</li>
+</ul>
+<p>Adding a new measure point is two lines. The harness covers Mac and iOS uniformly. The &quot;Copy as JSON&quot; button exports the ring buffer for paste-into-issue diagnosis.</p>
+<hr>
+<h3>Other fixes + polish</h3>
+<ul>
+  <li><strong>Sessions sidebar reload debounce</strong> — file-watcher deltas during streaming used to flicker the sessions list. Coalesced into one trailing fetch ~500ms after the last tick.</li>
+  <li><strong>Session-load pagination + race guard</strong> — switching to a small chat while a larger one is mid-fetch could last-write-wins the small chat away. Three race-checks against <code>self.sessionId</code> prevent the stale fetch from overwriting.</li>
+  <li><strong>Sessions + previews batched</strong> — two separate SSH calls folded into one <code>queryBatch</code> round trip, halving the round-trips for every sidebar refresh.</li>
+  <li><strong>Remote SQLite query timeout</strong> bumped 15→30s to better tolerate slow links; in-flight query coalescing dedupes concurrent identical queries.</li>
+  <li><strong><code>Thread.sleep</code> spin replaced</strong> with a kernel-wait via <code>DispatchGroup</code> for <code>runLocal</code> timeout; under concurrent SSH load the old loop accumulated spin-blocked threads and produced 7-second outliers in <code>loadRecentSessions</code>.</li>
+  <li><strong>Window position + size</strong> persists across launches.</li>
+  <li><strong>Sidebar reorder</strong> — Projects promoted to first section; profile chip moved under server name.</li>
+  <li><strong><code>stop</code> badge suppressed</strong> on metadata footer for normal turn ends (it was firing for every clean completion, looking like an error).</li>
+  <li><strong>Nous picker search field</strong> + <code>model-picker</code> filter for the long Nous overlay model list.</li>
+  <li><strong><code>oauth-keepalive</code> cron create</strong> — drop the <code>--silent</code> flag Hermes doesn&#x27;t accept.</li>
+  <li><strong>Snapshot pipeline rewritten</strong> — replaced the <code>sqlite3 .backup</code>-then-download pipeline with direct SSH-streamed query execution (issue <a href="https://github.com/awizemann/scarf/issues/74">#74</a>). Eliminates the multi-minute snapshot wait on multi-GB state.db files. Companion fix: pre-expand <code>~/</code> in Swift via <code>resolvedUserHome</code> so sqlite3 finds the DB without depending on the remote shell&#x27;s tilde expansion.</li>
+  <li><strong>Aux nested-YAML parser</strong> — corrected the parser so the unknown-task surface works on remote (was previously dropping aux blocks whose <code>provider:</code> value lived on a separate line).</li>
+  <li><strong><code>ModelPreflight</code> newline trim bug</strong> — <code>.whitespaces</code> doesn&#x27;t strip newlines; switched both trims to <code>.whitespacesAndNewlines</code> so a stray <code>\n</code> in a hand-edited config.yaml doesn&#x27;t false-positive the mismatch banner.</li>
+</ul>
+<hr>
+<h3>What&#x27;s measured today</h3>
+<p>321 ScarfCore tests pass (302 prior + 19 new ModelPreflight). New ScarfMon events documented in the <a href="https://github.com/awizemann/scarf/wiki/Performance-Monitoring">Performance-Monitoring wiki</a>.</p>
+<h3>Compatibility</h3>
+<ul>
+  <li>macOS 14+ (unchanged).</li>
+  <li>Hermes target: still <strong>v2026.4.30 (v0.12.0)</strong>. No new Hermes capability gates added.</li>
+  <li>Existing <code>dashboard.json</code> files render unchanged.</li>
+  <li>Existing <code>.scarftemplate</code> bundles install unchanged. Catalog manifest schemaVersion stays at 1/2/3 — no bump.</li>
+  <li>Existing <code>~/.hermes/.env</code> content is preserved byte-identically — Scarf only writes inside its <code># scarf-secrets:begin &lt;slug&gt;</code> / <code># scarf-secrets:end &lt;slug&gt;</code> regions.</li>
+  <li>The skeleton-then-hydrate chat loader and SSH cancellation propagation are <strong>Mac-only</strong> in this release; ScarfGo (iOS) keeps its existing chat path.</li>
+</ul>
+<h3>What&#x27;s deferred</h3>
+<ul>
+  <li><strong>Per-widget data sources + per-widget refresh granularity.</strong> The general &quot;widget points at a typed data source&quot; abstraction is the next-largest win in dashboards but materially expands the model + JS mirror + validator surface. The project-wide watch covers the common cron-driven workflow without it.</li>
+  <li><strong>Cross-project health digest sidebar rollup.</strong> Counting attention-needed projects across the registry — scoped but didn&#x27;t pull its weight. The typed status enum makes it cheap to add later.</li>
+  <li><strong>Automatic cron-prompt rewriter on upgrade.</strong> Heuristic rewrites of free-form prompts are risky; the docs + agent-assisted path ships in v2.7. Revisit a &quot;scan + fix&quot; UI in v2.8 if real users miss the migration.</li>
+  <li><strong>iOS New Project wizard + iOS Keychain-env mirror.</strong> ScarfGo&#x27;s project surface is read-only; the wizard&#x27;s chat-handoff pattern depends on Mac-only ACP plumbing.</li>
+  <li><strong>iOS skeleton-then-hydrate loaders.</strong> Same data-service surfaces are public, but the iOS chat lifecycle is structured differently. Defer until iOS dogfooding shows the same payload-size pain.</li>
+  <li><strong>Tier C redesigns (Memory/Skills/Cron/Curator).</strong> Instrumented in v2.7; redesign waits for capture data showing which path actually needs the skeleton-then-hydrate treatment.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.7.0/Scarf-v2.7.0-Universal.zip"
+                 sparkle:edSignature="JfHK1sKbP3ubbznXx3uY/a3kY2szkWpTUQmtHJE54Uv970T5PxgIHCTwsimqtZCPepUTv2qK4TRQfqHJBKUmCA=="
+                 length="18793474"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.6.5</title>
       <sparkle:version>31</sparkle:version>
       <sparkle:shortVersionString>2.6.5</sparkle:shortVersionString>
