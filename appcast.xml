@@ -6,6 +6,114 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.7.1</title>
+      <sparkle:version>33</sparkle:version>
+      <sparkle:shortVersionString>2.7.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Thu, 07 May 2026 10:51:54 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<h2>What&#x27;s in 2.7.1</h2>
+<p>A patch release covering three bug reports filed against 2.7.0, plus follow-up cleanups in the same neighborhood. No data migrations, no UI surface changes — drop-in replacement for 2.7.0 on Mac.</p>
+<h3>Bug fixes</h3>
+<h4>Mac</h4>
+<ul>
+  <li><strong><a href="https://github.com/awizemann/scarf/issues/77">#77</a> — Sessions screen renders empty even when Dashboard reports sessions exist.</strong> v2.7.0 folded the Sessions tab&#x27;s two SQL queries (sessions list + previews) into a single batched SSH round-trip for perf. The combined wire payload for any user with ~150+ sessions crossed macOS&#x27;s 16–64 KB pipe-buffer threshold; without a concurrent reader draining the pipe, the remote <code>sqlite3 -json</code> blocked, the script never finished, our 30-second timeout fired, and the call returned an empty result. <code>SSHScriptRunner</code> now drains stdout/stderr concurrently with the running process via <code>FileHandle.readabilityHandler</code>, so the kernel pipe never fills. Same fix applied to the local-execution path. New regression test pushes 256 KB of synthetic output through the runner and asserts full delivery — would have wedged pre-fix.</li>
+</ul>
+<ul>
+  <li><strong><a href="https://github.com/awizemann/scarf/issues/78">#78</a> — Skills &quot;What&#x27;s New&quot; pill contradicts the Updates sub-tab.</strong> The pill at the top of the Skills page was rendering on every sub-tab, including Updates. It counts <strong>local</strong> file deltas since the user last clicked &quot;Mark as seen&quot; (e.g. &quot;18 new&quot; = 18 skills landed on disk that you haven&#x27;t acknowledged), while the Updates body runs <code>hermes skills check</code> to find skills with newer <strong>upstream</strong> versions available — a different concept. Two surfaces using the word &quot;update&quot; for two different things made the screen contradict itself. Two changes: the pill now renders only on the Installed sub-tab (Mac and ScarfGo), and its label says &quot;X <strong>changed</strong> since you last looked&quot; instead of &quot;X updated&quot; so the local-file vocabulary doesn&#x27;t collide with upstream-update vocabulary anywhere on the page.</li>
+</ul>
+<ul>
+  <li><strong><a href="https://github.com/awizemann/scarf/issues/79">#79</a> — Skills hub search returns nothing for terms visible in Browse.</strong> With the source picker on &quot;All Sources&quot;, <code>hermes skills search &lt;query&gt;</code> (no <code>--source</code> flag) routes through Hermes&#x27;s centralized index and skips external API sources (skills-sh, github, clawhub, lobehub, well-known) — but Browse still aggregates from those sources, so a skill like <code>honcho</code> would show up in Browse and disappear in search. Same picker, same query, contradictory results. Rather than chase Hermes&#x27;s index gaps, &quot;All Sources&quot; search now means &quot;filter what you can already see&quot;: Scarf caches the most recent Browse payload and runs a client-side substring filter (case-insensitive against name, description, and identifier) against it, instantly. Source-specific searches still shell out to <code>hermes skills search --source &lt;s&gt;</code> for full upstream search semantics. Five new tests cover the filter behavior.</li>
+</ul>
+<ul>
+  <li><strong><code>hermesPIDResult()</code> — narrow the Hermes &quot;is it running?&quot; probe to the gateway.</strong> Previously <code>pgrep -f hermes</code>, which matched any process with &quot;hermes&quot; in its argv: chat sessions Scarf itself spawns, <code>hermes -z</code> one-shots, log tails, even the README in an editor. The Dashboard &quot;Hermes is running&quot; badge could read true even when the gateway daemon was down. Tightened to a regex that matches only the gateway shape — <code>python -m hermes_cli.main gateway run …</code> and <code>/path/to/hermes gateway run …</code>. All callers (DashboardViewModel, HealthViewModel, SettingsViewModel, scarfApp, stopHermes) want the gateway PID specifically. Cherry-picked from <a href="https://github.com/awizemann/scarf/pull/76">#76</a> — thanks to <a href="https://github.com/unixwzrd">@unixwzrd</a> for the diagnosis and regex.</li>
+</ul>
+<ul>
+  <li><strong><code>HealthViewModel.stopDashboard()</code> — stop the dashboard by port, not <code>pkill -f</code>.</strong> External-instance fallback used to be <code>pkill -f &quot;hermes dashboard&quot;</code>, broad enough to match shell history, log tails, README readers — anything with the substring in its argv. Now <code>lsof -tiTCP:&lt;port&gt; -sTCP:LISTEN</code> resolves the PID actually bound to the dashboard port and only that one process gets <code>SIGTERM</code>. Trusting the port is correct here: Scarf owns the configured port and the user-visible intent is &quot;stop the thing on this port.&quot; Direction cherry-picked from <a href="https://github.com/awizemann/scarf/pull/76">#76</a>; the <code>-c hermes</code> filter from the original was dropped because Hermes installs as a Python shebang script and the kernel COMM is <code>python</code>, not <code>hermes</code> — <code>-c hermes</code> would silently miss every standard install.</li>
+</ul>
+<h3>Documentation + tooling</h3>
+<ul>
+  <li><strong><code>scripts/local-build.sh</code> + <code>BUILDING.md</code> for contributor builds.</strong> New unsigned single-arch Debug build script for contributors without an Apple Developer account. Detects arm64 / x86_64, verifies xcode-select / xcrun / xcodebuild, probes the Metal toolchain (offers an interactive install on TTY, errors cleanly on CI), resolves Swift packages, builds Debug with signing disabled. Optional one-touch <code>ditto</code> to <code>/Applications/scarf.app</code> on explicit y/N. The canonical Release universal CLI in <code>README.md</code> is unchanged — <code>local-build.sh</code> is an alternative for contributors, not a replacement for the shipping build. Cherry-picked from <a href="https://github.com/awizemann/scarf/pull/76">#76</a>.</li>
+</ul>
+<ul>
+  <li><strong><code>BUILDING.md</code> + <code>CONTRIBUTING.md</code> — restored Sonoma compatibility messaging.</strong> The runtime min is <strong>macOS 14.6 (Sonoma)</strong> — that&#x27;s the <code>MACOSX_DEPLOYMENT_TARGET</code> on the main <code>scarf</code> target and is intentional. Build min is <strong>Xcode 16.0</strong> (needed for Swift 6 strict-concurrency features). The legacy CONTRIBUTING.md line had drifted to &quot;Xcode 26.3+ / macOS 26.2+&quot;, which would have steered Sonoma contributors and users away from a build that actually runs on their box. Corrected, with a load-bearing-callout in BUILDING.md so future doc edits don&#x27;t silently raise the floor again.</li>
+</ul>
+<h3>Migrating from 2.7.0</h3>
+<p>Sparkle will offer the update automatically. No config migration, no schema changes. Existing sessions, skills, and projects are untouched.</p>
+<p>If you&#x27;ve been working around #77 by collapsing the sidebar or restarting Scarf to repopulate the Sessions list, you can stop — sessions should load reliably now.</p>
+<h3>Acknowledgements</h3>
+<ul>
+  <li><a href="https://github.com/bricelb">@bricelb</a> for the three v2.7.0 bug reports (<a href="https://github.com/awizemann/scarf/issues/77">#77</a>, <a href="https://github.com/awizemann/scarf/issues/78">#78</a>, <a href="https://github.com/awizemann/scarf/issues/79">#79</a>) — well-instrumented reproductions including screenshots and environment details made the diagnosis straightforward.</li>
+  <li><a href="https://github.com/unixwzrd">@unixwzrd</a> for <a href="https://github.com/awizemann/scarf/pull/76">#76</a> — the gateway-pgrep tighten, the <code>pkill -f &quot;hermes dashboard&quot;</code> direction, and the <code>local-build.sh</code> contributor flow are all cherry-picked from that PR.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.7.1/Scarf-v2.7.1-Universal.zip"
+                 sparkle:edSignature="P9whuwJ264TN1XLaUNvzQK+yKmK2fiyccgKa6TixK3mkIPyVl2XrwPhyHgoMFOQ/c14l+4sizWolx67BSwXBAg=="
+                 length="18806277"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.7.0</title>
       <sparkle:version>32</sparkle:version>
       <sparkle:shortVersionString>2.7.0</sparkle:shortVersionString>
