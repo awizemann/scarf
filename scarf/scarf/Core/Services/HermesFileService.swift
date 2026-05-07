@@ -1233,14 +1233,17 @@ struct HermesFileService: Sendable {
     }
 
     /// Error-surfacing variant. `.success(nil)` means `pgrep` ran successfully
-    /// and found no hermes process (Hermes is genuinely not running).
+    /// and found no Hermes gateway process (Hermes is genuinely not running).
     /// `.failure` means we couldn't probe at all (pgrep missing, connection
     /// down, permission issue) — a *different* UX from "not running".
     nonisolated func hermesPIDResult() -> Result<pid_t?, Error> {
         do {
             let result = try transport.runProcess(
                 executable: "/usr/bin/pgrep",
-                args: ["-f", "hermes"],
+                // Match the real gateway process shape without catching shell
+                // commands, dashboards, or log collectors that merely contain
+                // "hermes" in their argv.
+                args: ["-f", #"(^|[[:space:]])-m[[:space:]]+hermes_cli\.main[[:space:]]+gateway[[:space:]]+run([[:space:]]|$)|(^|[[:space:]/])hermes[[:space:]]+gateway[[:space:]]+run([[:space:]]|$)"#],
                 stdin: nil,
                 timeout: 5
             )

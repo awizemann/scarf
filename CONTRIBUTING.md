@@ -5,8 +5,10 @@ Thanks for your interest in contributing to Scarf.
 ## Getting Started
 
 1. Fork and clone the repo
-2. Open `scarf/scarf.xcodeproj` in Xcode 26.3+
-3. Build and run (requires macOS 26.2+ and Hermes installed at `~/.hermes/`)
+2. Open `scarf/scarf.xcodeproj` in Xcode 16.0+
+3. Build and run, or use `./scripts/local-build.sh` for an unsigned local Debug build
+
+See [BUILDING.md](BUILDING.md) for command-line build prerequisites.
 
 ## Architecture
 

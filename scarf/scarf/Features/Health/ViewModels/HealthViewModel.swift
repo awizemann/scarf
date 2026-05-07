@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import ScarfCore
 #if canImport(AppKit)
 import AppKit
@@ -592,8 +593,8 @@ final class HealthViewModel {
     }
 
     /// Stop the dashboard. If Scarf spawned it, send SIGTERM directly. If an
-    /// external instance is running, fall back to `pkill -f "hermes dashboard"`
-    /// so the Stop button works regardless of who launched it.
+    /// external instance is running, find the Hermes listener on the dashboard
+    /// port and kill that PID only.
     func stopDashboard() {
         guard !context.isRemote else { return }
         dashboardStatus = WebDashboardStatus(
@@ -606,13 +607,8 @@ final class HealthViewModel {
         if let proc = dashboardProcess, proc.isRunning {
             proc.terminate()
             dashboardProcess = nil
-        } else {
-            // External instance — best-effort pkill.
-            let kill = Process()
-            kill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-            kill.arguments = ["-f", "hermes dashboard"]
-            _ = try? kill.run()
-            kill.waitUntilExit()
+        } else if let pid = Self.dashboardListenerPID(port: dashboardStatus.port) {
+            _ = Darwin.kill(pid, SIGTERM)
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
@@ -628,6 +624,34 @@ final class HealthViewModel {
                     self.actionMessage = nil
                 }
             }
+        }
+    }
+
+    /// Returns the process listening on the dashboard port, limited by command
+    /// name so a shell command or log tail containing "hermes dashboard" is not
+    /// matched by substring.
+    private static func dashboardListenerPID(port: Int) -> pid_t? {
+        let lsof = Process()
+        lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        lsof.arguments = ["-tiTCP:\(port)", "-sTCP:LISTEN", "-c", "hermes"]
+
+        let output = Pipe()
+        lsof.standardOutput = output
+        lsof.standardError = FileHandle.nullDevice
+
+        do {
+            try lsof.run()
+            lsof.waitUntilExit()
+            guard lsof.terminationStatus == 0 else { return nil }
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            let text = String(data: data, encoding: .utf8) ?? ""
+            return text
+                .split(whereSeparator: \.isNewline)
+                .compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
+                .first
+        } catch {
+            Self.dashboardLogger.warning("Failed to locate Hermes dashboard listener: \(error.localizedDescription, privacy: .public)")
+            return nil
         }
     }
 

@@ -226,6 +226,8 @@ ditto -xk ~/Downloads/Scarf-vX.X.X-Universal.zip ~/Downloads/
 
 ### Build from Source
 
+See [BUILDING.md](BUILDING.md) for contributor-focused command-line build setup.
+
 ```bash
 git clone https://github.com/awizemann/scarf.git
 cd scarf/scarf
@@ -235,7 +237,7 @@ open scarf.xcodeproj
 Or from the command line:
 
 ```bash
-xcodebuild -project scarf/scarf.xcodeproj -scheme scarf -configuration Release -arch arm64 -arch x86_64 ONLY_ACTIVE_ARCH=NO build
+./scripts/local-build.sh
 ```
 
 ## Architecture
