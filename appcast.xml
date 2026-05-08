@@ -6,6 +6,176 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.7.5</title>
+      <sparkle:version>34</sparkle:version>
+      <sparkle:shortVersionString>2.7.5</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Fri, 08 May 2026 10:56:09 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<h2>What&#x27;s in 2.7.5</h2>
+<p>A feature release that lifts Scarf&#x27;s Kanban surface from a read-only list (the v2.6 placeholder shipped while upstream Kanban was still mid-rework) to a full drag-and-drop board with the complete Hermes v0.12 mutation surface wired up — plus per-project boards bound to a Scarf-minted tenant slug, and a read-only board on iOS for at-a-glance status from your phone. No data migrations, no schema changes; pre-v0.12 hosts gracefully hide the surface.</p>
+<h3>New features</h3>
+<h4>Mac</h4>
+<ul>
+  <li><strong>Drag-and-drop Kanban board</strong> (<a href="scarf/scarf/Features/Kanban/Views/KanbanBoardView.swift">scarf/Features/Kanban/Views/KanbanBoardView.swift</a>). Five visible columns — Triage / Up Next (<code>todo</code> + <code>ready</code>) / Running / Blocked / Done — collapsing Hermes&#x27;s seven status values into a layout that doesn&#x27;t waste space on <code>ready</code>, which the dispatcher only ever holds for a few seconds. Triage hides itself when empty; archived hides behind a header toggle. Drop a card onto a column and Scarf maps the gesture to the right Hermes verbs through a pure transition planner: drop-on-Running fires <code>kanban dispatch</code> (the dispatcher then spawns a worker), drop-on-Blocked opens a sheet asking for a reason and calls <code>kanban block</code>, drop-on-Done opens a result sheet and calls <code>kanban complete</code>, blocked → running chains <code>unblock</code> + <code>dispatch</code>. Forbidden transitions (anything dropped on Done; anything dragged out of Triage) reject with a red drop-target stroke and a tooltip explaining why — Done is terminal, Triage is promoted by a specifier worker, neither has a CLI verb that maps cleanly. Optimistic local updates apply on drop and revert on CLI failure with a toast, so the UI feels instant.</li>
+</ul>
+<ul>
+  <li><strong>Side-pane inspector</strong> (<a href="scarf/scarf/Features/Kanban/Views/KanbanInspectorPane.swift">KanbanInspectorPane.swift</a>). Click a card and a 420 px pane slides in from the trailing edge. Not a modal sheet — modal would block triaging the next card after closing. Header carries the status, an inline assignee menu (more on that below), workspace kind, and tenant; below that, four tabs render <code>hermes kanban show &lt;id&gt;</code> data: <strong>Comments</strong> (with an inline composer that calls <code>kanban comment</code>), <strong>Events</strong> (the <code>task_events</code> log with per-kind glyphs), <strong>Runs</strong> (one row per attempt with outcome badge + summary + error), and <strong>Log</strong> — the worker&#x27;s captured stdout/stderr from <code>hermes kanban log &lt;id&gt;</code>, polled every 2 s while the task is running with a &quot;● streaming&quot; indicator and auto-scroll to the latest line, snapshot-only with a refresh button when the task is in a terminal state. The action bar at the bottom has all the per-status verbs — Start (which is <code>claim</code> rebranded as a user-visible action), Complete, Block, Unblock, Archive — every one with a help tooltip explaining what it does and what Hermes verb it invokes. The &quot;Archive&quot; tooltip explicitly notes Hermes has no hard-delete: archived tasks remain in <code>~/.hermes/kanban.db</code> and are recoverable via the &quot;Show archived&quot; toggle until <code>hermes kanban gc</code> runs.</li>
+</ul>
+<ul>
+  <li><strong>Inspector auto-refresh.</strong> While the inspector is open, the detail (header, action buttons, comments, events, runs) re-fetches every 5 s on the same cadence as the board itself, so a worker transition (e.g. running → done elsewhere) is reflected without the user having to close + reopen. The Log tab&#x27;s 2 s poll runs separately and self-cancels the moment the task transitions out of <code>running</code>.</li>
+</ul>
+<ul>
+  <li><strong>Inline assignee picker on the inspector header.</strong> The assignee badge is a clickable menu — set means a <code>.brand</code> (rust) chip, unassigned means a <code>.warning</code> (yellow) chip so the eye catches it instantly. Tapping opens a menu of every known profile (union of <code>~/.hermes/profiles/</code>, current task assignees, and the active local profile from <code>HermesProfileResolver</code>) plus an &quot;Unassigned&quot; option. Selection routes through <code>kanban assign</code> and immediately follows with <code>kanban dispatch</code> so the task gets picked up promptly. Solves the &quot;I assigned a profile but nothing happened&quot; gap end-to-end without the user touching a terminal.</li>
+</ul>
+<ul>
+  <li><strong>Health banner in the inspector.</strong> Surfaces two conditions that previously left users staring at a stuck task with no explanation. <strong>Yellow</strong> when the task is unassigned in <code>ready</code> / <code>todo</code>: <em>&quot;Won&#x27;t run automatically — Hermes&#x27;s dispatcher silently skips tasks with no assignee.&quot;</em> The dispatcher&#x27;s own <code>--json</code> output literally lists these under <code>skipped_unassigned</code>; we now surface that to the human. <strong>Red</strong> when the most-recently-completed run ended in a non-success outcome (<code>stale_lock</code> / <code>crashed</code> / <code>gave_up</code> / <code>timed_out</code> / <code>spawn_failed</code> / <code>reclaimed</code> / <code>failed</code>): banner displays the outcome label + the raw <code>error</code> field from the run record, so you don&#x27;t have to dig into the Runs tab to discover it. The red banner is suppressed while a fresh attempt is running — once status flips back to <code>running</code>, the previous outcome is stale signal and the Log tab&#x27;s live stream is the right thing to look at.</li>
+</ul>
+<ul>
+  <li><strong>Card-level signals.</strong> Cards in <code>running</code> get a 2 px <code>ScarfColor.info</code> left edge + a subtle title shimmer so live work is obvious at a glance. Blocked cards get a 2 px <code>ScarfColor.warning</code> left edge + a ⚠ glyph next to the title. Done cards dim to 0.7 opacity in light mode, 0.55 in dark, with a green ✓ in the title row. Cards in <code>ready</code> / <code>todo</code> with no assignee get a yellow ⚠ glyph in the title row with a tooltip explaining the dispatcher won&#x27;t pick them up — same signal as the inspector banner, just at the board level so triage is one keypress away.</li>
+</ul>
+<ul>
+  <li><strong><code>Board | List</code> toggle at the top of the route.</strong> The v2.6 read-only list view is preserved in <code>KanbanListView.swift</code> and surfaced via a segmented picker, so users on narrow windows or anyone who prefers a flat sortable list can opt in. Choice persists across launches via <code>@AppStorage</code>.</li>
+</ul>
+<ul>
+  <li><strong>New Task sheet</strong> (<a href="scarf/scarf/Features/Kanban/Views/KanbanCreateSheet.swift">KanbanCreateSheet.swift</a>). Title, body (markdown supported), assignee (defaults to <code>HermesProfileResolver.activeProfileName()</code> so newly-created tasks actually run), workspace kind (segmented <code>Scratch / Worktree / Project Dir</code>; locked to Project Dir on per-project boards), priority slider, comma-separated skills with autocomplete from <code>~/.hermes/skills/</code>, optional tenant (hidden on per-project boards — the slug is implicit), and a &quot;Send to triage&quot; toggle. Submit fires <code>kanban create --json</code> and immediately follows with <code>kanban dispatch</code> so an assigned task transitions <code>ready</code> → <code>running</code> within seconds rather than waiting for the gateway dispatcher&#x27;s internal cycle.</li>
+</ul>
+<ul>
+  <li><strong>Kanban moved from Manage → Monitor in the sidebar.</strong> It&#x27;s runtime work-in-progress, not configuration. Sits between Activity and the rest of Manage so users see &quot;what&#x27;s happening right now&quot; at a glance.</li>
+</ul>
+<h4>Per-project Kanban</h4>
+<ul>
+  <li><strong><code>DashboardTab.kanban</code> on every project</strong>, capability-gated on <code>HermesCapabilities.hasKanban</code>. Renders a project-scoped <code>KanbanBoardView</code> filtered to the project&#x27;s tenant slug. Workspace defaults in the New Task sheet are pre-pinned to <code>dir:&lt;project.path&gt;</code>. Empty state explains the project doesn&#x27;t have any tasks yet and offers a &quot;New Task&quot; CTA — the empty board IS the discovery surface.</li>
+</ul>
+<ul>
+  <li><strong>Tenant minting via <a href="scarf/scarf/Core/Services/KanbanTenantResolver.swift">KanbanTenantResolver</a>.</strong> Each Scarf project gets a stable <code>scarf:&lt;slug&gt;</code> tenant minted on first kanban interaction and persisted to <code>&lt;project&gt;/.scarf/manifest.json</code> (new optional <code>kanbanTenant</code> field on <code>ProjectTemplateManifest</code>). Slug rules: lowercased, hyphenated, ≤ 48 chars, <code>scarf:</code> prefix to avoid collision with hand-typed tenants. Once minted, the tenant is <strong>immutable across rename</strong> — tasks already on the board carry the original slug, so renaming the project doesn&#x27;t orphan them. Bare projects (no manifest) get a sentinel manifest written with <code>id: scarf/&lt;project-id&gt;</code> + <code>version: 0.0.0</code> + just the <code>kanbanTenant</code> set; the <code>ProjectAgentContextService</code> reader recognizes the sentinel and refuses to surface it as a &quot;Template&quot; line in the AGENTS.md block, so the project doesn&#x27;t suddenly start advertising a fake template to the agent.</li>
+</ul>
+<ul>
+  <li><strong>Agent-side tenant injection.</strong> <a href="scarf/scarf/Core/Services/ProjectAgentContextService.swift">ProjectAgentContextService.renderBlock</a> emits a &quot;Kanban tenant&quot; line inside the <code>&lt;!-- scarf-project --&gt;</code> markers in <code>&lt;project&gt;/AGENTS.md</code> whenever a tenant exists, instructing the agent to pass <code>--tenant scarf:&lt;slug&gt;</code> on <code>hermes kanban create</code>. <code>ChatViewModel.startACPSession</code> already calls <code>refresh(for:)</code> before opening every project chat, so the agent reads a fresh tenant on every session start with no extra wiring. Agents are imperfect at flag discipline; a forgotten <code>--tenant</code> lands the task in the global &quot;Untagged&quot; group rather than failing — acceptable v2.7.5 behavior.</li>
+</ul>
+<ul>
+  <li><strong><code>kanban_summary</code> dashboard widget</strong> (<a href="scarf/scarf/Features/Projects/Views/Widgets/KanbanSummaryWidgetView.swift">KanbanSummaryWidgetView.swift</a>). New widget kind for project dashboards: shows the top three <code>running</code> / <code>blocked</code> / <code>todo</code> tasks for the project&#x27;s tenant by priority, plus a glance footer (<code>&quot;12 todo · 3 running · 5 blocked&quot;</code>) sourced from <code>kanban stats</code>. Polls every 10 s while the dashboard is foregrounded. Widget vocabulary registered in <a href="tools/widget-schema.json">tools/widget-schema.json</a> and rendered on the catalog site via <a href="site/widgets.js">site/widgets.js</a>; template authors can drop a <code>{ kind: kanban_summary, max_rows: 3 }</code> block into <code>dashboard.json</code>.</li>
+</ul>
+<h4>iOS / iPadOS</h4>
+<ul>
+  <li><strong>Read-only Kanban tab on <code>ProjectDetailView</code></strong> (<a href="scarf/Scarf%20iOS/Kanban/ScarfGoKanbanView.swift">Scarf iOS/Kanban/ScarfGoKanbanView.swift</a>). Same five-column collapse rendered as a horizontally-paged segmented <code>Picker</code> of single-column lists — HIG-friendly on iPhone where a 5-column grid forces unreadable card widths. Pulls live status, assignee, workspace, skills, priority chips. Tap a card → modal <code>NavigationStack</code> detail sheet (<a href="scarf/Scarf%20iOS/Kanban/ScarfGoKanbanDetailSheet.swift">ScarfGoKanbanDetailSheet.swift</a>) with the same Comments / Events / Runs tabs the Mac inspector has. Read-only in v2.7.5 — mutations + drag-drop on iPad land in v2.8 once the Mac flow is fully shaken out. Card titles use semantic <code>.headline</code> (not <code>ScarfFont</code>) so Dynamic Type works; chrome (badges) stays on <code>ScarfBadge</code> for fixed visual weight per the project&#x27;s iOS conventions.</li>
+</ul>
+<h4>ScarfCore</h4>
+<ul>
+  <li><strong><code>KanbanService</code> actor</strong> (<a href="scarf/Packages/ScarfCore/Sources/ScarfCore/Services/KanbanService.swift">Packages/ScarfCore/Sources/ScarfCore/Services/KanbanService.swift</a>) — pure-I/O Sendable actor wrapping every Hermes v0.12 verb (<code>list / show / runs / stats / assignees / create / assign / claim / comment / complete / block / unblock / archive / dispatch / link / unlink / log</code>). Dispatches each CLI invocation through <code>Task.detached(priority: .utility)</code> matching the existing concurrency conventions. Errors land in <a href="scarf/Packages/ScarfCore/Sources/ScarfCore/Models/KanbanError.swift">KanbanError</a> and surface as inline banners (not modal alerts) since the board is high-frequency. The &quot;no matching tasks&quot; stdout sentinel is normalized to <code>[]</code> rather than thrown.</li>
+</ul>
+<ul>
+  <li><strong>Pure transition planner.</strong> <code>KanbanService.plan(for: KanbanTransition)</code> is a synchronous function that maps a <code>(from, to)</code> column pair to the right verb sequence — <code>(.upNext, .running) → [.dispatch]</code>, <code>(.blocked, .running) → [.unblock, .dispatch]</code>, etc. Disallowed transitions throw <code>KanbanError.forbiddenTransition</code> with a user-actionable reason. The planner is fully tested in <code>KanbanModelsTests.swift</code>. Critically: <code>dispatch</code> (not <code>claim</code>) is the verb used for Up-Next → Running. Hermes&#x27;s <code>claim</code> is documented as &quot;manual alternative to the dispatcher&quot; and assumes the caller spawns the worker themselves — Scarf doesn&#x27;t, so calling <code>claim</code> from drag-drop reserved tasks but never spawned work, and the dispatcher reclaimed them ~15 minutes later (<code>stale_lock</code>). <code>dispatch</code> is the right primitive for a GUI client.</li>
+</ul>
+<ul>
+  <li><strong>Cross-platform <a href="scarf/Packages/ScarfCore/Sources/ScarfCore/Services/KanbanTenantReader.swift">KanbanTenantReader</a>.</strong> Read-only projection over <code>&lt;project&gt;/.scarf/manifest.json</code>&#x27;s <code>kanbanTenant</code> field. The full <code>ProjectTemplateManifest</code> type lives in the Mac target; this lightweight reader gives iOS a way to filter the per-project board by tenant without linking the full manifest model.</li>
+</ul>
+<ul>
+  <li><strong>Timestamp decoding tolerates both shapes.</strong> Hermes emits <code>created_at</code> / <code>started_at</code> / <code>completed_at</code> / <code>last_heartbeat_at</code> etc. as Unix integer seconds (its SQLite columns are INTEGER), but earlier wire docs implied ISO-8601 strings. The decoder now accepts either an integer or a string and normalizes to ISO-8601 so downstream code only handles one type. Locked in by <code>decodeUnixIntegerTimestamps</code> in <code>KanbanModelsTests</code>.</li>
+</ul>
+<ul>
+  <li><strong><code>KanbanBoardViewModel</code> optimistic merge.</strong> Holds <code>optimisticOverrides: [taskId: status]</code> for in-flight drags; the polled response merges with optimistic state until the server confirms the new status, so a stale poll arriving milliseconds after a drop can&#x27;t snap the card back to its old column. On CLI failure the override is removed and the message lands in the inline banner.</li>
+</ul>
+<h3>Dispatch + assignee fixes</h3>
+<p>A diagnostic round driving real tasks end-to-end exposed a connected bug pattern that the polish pass closed:</p>
+<ul>
+  <li><strong>Hermes&#x27;s dispatcher silently skips unassigned tasks</strong> — its <code>kanban dispatch --json</code> output literally lists them under a <code>skipped_unassigned</code> key and moves on. Tasks created without an assignee sat in <code>ready</code> indefinitely and the user had no signal anything was wrong. The New Task sheet now defaults to the active Hermes profile, the inspector header shows a yellow &quot;Unassigned&quot; chip + warning banner, every <code>ready</code> / <code>todo</code> card without an assignee gets a ⚠ glyph + tooltip, and the inspector&#x27;s inline assignee picker fixes it in one click.</li>
+</ul>
+<ul>
+  <li><strong>Drag-to-Running used to call <code>claim</code></strong>, which is a manual alternative to the dispatcher. Status flipped to <code>running</code>, but no worker spawned (Scarf doesn&#x27;t host workers), and 15 minutes later the dispatcher reclaimed the task with a <code>stale_lock</code> outcome. Replaced with <code>dispatch</code> end-to-end so the gateway-running dispatcher actually does the spawning.</li>
+</ul>
+<ul>
+  <li><strong><code>hermes kanban assignees</code> empty-state was leaking into the picker.</strong> The CLI prints a literal sentinel <code>(no assignees — create a profile with hermes -p &lt;name&gt; setup)</code> when the table is empty; the parser was tokenizing it on whitespace and offering <code>(no</code> as a profile in the menu. Parser now skips the sentinel, validates each candidate against <code>^[a-zA-Z0-9_-]+$</code>, and falls back cleanly to the active local profile when the table is empty.</li>
+</ul>
+<ul>
+  <li><strong><code>spawn_failed</code> from &quot;executable not found on PATH&quot;</strong> — most subtle of the lot. macOS GUI apps inherit a launch-services PATH (<code>/usr/bin:/bin:/usr/sbin:/sbin</code>) that doesn&#x27;t include <code>~/.local/bin</code> (where pipx installs <code>hermes</code>) or <code>/opt/homebrew/bin</code>. Scarf was finding <code>hermes</code> for its own invocation via the absolute-path resolver in <code>HermesPathSet.hermesBinaryCandidates</code>, but when the dispatcher then spawned a worker process, that worker inherited Scarf&#x27;s GUI PATH and couldn&#x27;t find <code>hermes</code> by name — recording an <code>outcome=spawn_failed</code> run with the exact &quot;executable not found on PATH&quot; message. <code>LocalTransport</code> now grows an <code>environmentEnricher</code> static (mirroring <code>SSHTransport.environmentEnricher</code>) wired by <code>scarfApp.swift</code> to the same <code>HermesFileService.enrichedEnvironment()</code> login-shell probe the SSH transport uses. Every local subprocess Scarf spawns now sees the user&#x27;s full PATH and credential env, so a spawned-from-Scarf hermes can spawn its children by name without reaching for absolute paths. Defense-in-depth: <code>subprocessEnvironment(forExecutable:)</code> also unconditionally prepends the executable&#x27;s parent directory to PATH, so the fix works even if the enricher hasn&#x27;t been wired (early startup, tests).</li>
+</ul>
+<h3>Migrating from 2.7.1</h3>
+<p>Sparkle will offer the update automatically. No config migration, no schema changes — <code>~/.hermes/kanban.db</code> is shared across all Hermes clients and Scarf only reads/writes through the documented CLI surface. Existing Scarf projects pick up the new project Kanban tab on first open; the tenant slug is minted lazily on first kanban interaction inside the project, so projects with no kanban activity stay byte-identical until the user opens the tab.</p>
+<p>If you have an existing project with a Scarf-managed <code>manifest.json</code>, the new optional <code>kanbanTenant</code> field is added on next mint and lives alongside any template-author config schema without touching it. Templates do not ship <code>kanbanTenant</code> (it&#x27;s user-machine-scoped state); the export pipeline strips it.</p>
+<p>If you&#x27;ve been running tasks via the v2.6 read-only list and your Hermes host already runs the gateway dispatcher, your existing kanban tasks should appear on the board automatically — there&#x27;s no migration step. Tasks created without an assignee in v2.6 will now show the yellow &quot;Unassigned&quot; warning until you fix them through the inline picker.</p>
+<h3>Known limitations</h3>
+<ul>
+  <li><strong>Within-column reorder is not supported.</strong> Hermes has no <code>update</code> verb and no <code>position</code> column on the tasks table — <code>priority</code> is write-once at create time. Sort order inside each column is <code>priority DESC, created_at DESC</code>, matching the dispatcher&#x27;s actual run order. We considered a client-side ordering sidecar; rejected because the on-screen order would diverge from what runs next, which is worse than no manual order. Will revisit if Hermes ships an <code>update --priority</code> verb.</li>
+</ul>
+<ul>
+  <li><strong>No live <code>watch</code> streaming yet.</strong> The board polls every 5 s; the inspector polls detail on the same cadence and the Log tab on a 2 s cadence while running. <code>hermes kanban watch --json</code> event streaming + reconnect-with-backoff lands in v2.8 along with iOS write surfaces.</li>
+</ul>
+<ul>
+  <li><strong>No bulk re-tag for legacy NULL-tenant tasks.</strong> Tasks created before this release (assignee or no assignee) appear in the global &quot;Untagged&quot; group on the global board. Hermes has no <code>tenant</code> mutation verb post-create, so retagging would be archive + recreate — too destructive to ship in this release.</li>
+</ul>
+<h3>Acknowledgements</h3>
+<ul>
+  <li>Driven end-to-end against a fresh local Hermes v0.12.0 install with the gateway dispatcher running. Real bug surface mostly came from doing instead of speculating: the <code>claim</code> vs <code>dispatch</code> distinction, the silent <code>skipped_unassigned</code> behavior, the <code>(no</code> parse leak, the integer-vs-ISO timestamp shape, and the stale &quot;Last run&quot; banner during a fresh attempt all surfaced from driving real tasks and watching what actually happened.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.7.5/Scarf-v2.7.5-Universal.zip"
+                 sparkle:edSignature="6QLmonqLdavcU3+u7NE3oYL4Iui4wZZ0r9OWM+kj0uJ3tM32C14N35g7kXmADvo50YONIAmxqfkYWo/AIX70AA=="
+                 length="19346988"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.7.1</title>
       <sparkle:version>33</sparkle:version>
       <sparkle:shortVersionString>2.7.1</sparkle:shortVersionString>
