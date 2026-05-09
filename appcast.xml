@@ -6,6 +6,169 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.8.0</title>
+      <sparkle:version>35</sparkle:version>
+      <sparkle:shortVersionString>2.8.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Sat, 09 May 2026 19:02:51 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<h2>What&#x27;s in 2.8.0</h2>
+<p>A coordinated catch-up release adopting Hermes v0.13.0 (v2026.5.7) — &quot;The Tenacity Release&quot; — across Scarf&#x27;s full surface area. v2.8.0 ships <strong>Persistent Goals</strong>, <strong>ACP <code>/queue</code></strong>, <strong>Kanban diagnostics + recovery UX</strong>, <strong>Curator archive/prune</strong>, <strong>Google Chat (20th platform) + cross-platform allowlists</strong>, a refreshed <strong>provider catalog</strong> with five new models, and a slate of settings + UX polish — all behind capability flags so pre-v0.13 hosts continue to render the v2.7.5 surface unchanged.</p>
+<p>No data migrations, no schema changes. <code>~/.hermes/state.db</code> columns are unchanged from v0.11/v0.12. Existing <code>~/.hermes/scarf/</code> sidecars are untouched. Sparkle picks the update up automatically.</p>
+<h3>New features</h3>
+<h4>Persistent Goals + ACP <code>/queue</code> (chat)</h4>
+<ul>
+  <li><strong><code>/goal &lt;text&gt;</code> slash command</strong> — locks the agent on a target that persists across turns. Surfaced via the chat slash menu (gated on <code>HermesCapabilities.hasGoals</code>) and rendered as an <code>info</code>-tinted &quot;Goal locked: …&quot; pill in the chat header. The pill exposes a &quot;Clear goal&quot; context-menu item that dispatches <code>/goal --clear</code>. Optimistic local mirror — Hermes is the authoritative owner; Scarf paints the pill the moment the user sends <code>/goal …</code> so the affordance feels instant.</li>
+  <li><strong><code>/queue &lt;text&gt;</code> slash command</strong> — queues a prompt to run after the current turn completes. Joins <code>/steer</code> and <code>/goal</code> in <code>RichChatViewModel.nonInterruptiveCommands</code> (the chat keeps &quot;Agent working…&quot; off when sent). A header chip shows the queued count; tap opens a popover listing prompts + relative timestamps. Per-entry deletion isn&#x27;t exposed (Hermes has no remove-by-id verb), and the popover header makes that explicit so users understand the local mirror&#x27;s role.</li>
+  <li><strong><code>/steer</code> on idle</strong> — pre-v0.13 was a no-op when no turn was in flight; v0.13 runs it as a regular prompt. The composer&#x27;s slash button now greys <code>/steer</code> only on pre-v0.13 hosts (gated on <code>hasACPSteerOnIdle</code>).</li>
+  <li><strong>Static slash-menu fallbacks</strong> — pre-session, the menu surfaces <code>/new</code> (with optional <code>[&lt;name&gt;]</code> argument hint on v0.13). Active-session-only fallbacks (<code>/clear</code>, <code>/compact</code>, <code>/cost</code>, <code>/model</code>, <code>/tools</code>, <code>/reload-skills</code>, <code>/help</code>, <code>/exit</code>) round out resumed sessions where Hermes ACP doesn&#x27;t re-emit <code>available_commands_update</code> after <code>session/load</code>. Deduped against the ACP-advertised set so the canonical entry always wins once a session opens.</li>
+</ul>
+<h4>Kanban v0.13 diagnostics + recovery UX</h4>
+<ul>
+  <li><strong>Hallucination-gate verify / reject</strong> — worker-created cards land with <code>hallucination_gate_status: pending</code>. The inspector renders a yellow banner (&quot;Created by a worker — verify before running&quot;) with a Verify and Reject button. Cards in pending state dim 0.6 with a yellow ⚠ glyph in the title row.</li>
+  <li><strong>Diagnostics rendering</strong> — new typed-mirror enum <code>KanbanDiagnosticKind</code> with severity (info / warning / critical). Per-task and per-run diagnostics surface in the inspector Runs tab as chip-lists; auto-block reasons render verbatim in the existing red banner. Darwin zombie detections show as a distinct <code>darwin_zombie_detected</code> kind.</li>
+  <li><strong>Per-task <code>max_retries</code></strong> — added to the create sheet (default 3) and shown as a header chip in the inspector. Write-once at create time, matching Hermes&#x27;s pattern.</li>
+  <li><strong>Multiline title/body</strong> — the create sheet&#x27;s Title field accepts multiline input, capped to four visible rows.</li>
+  <li><strong>Tolerant decoding</strong> — every new field uses <code>decodeIfPresent</code>. Pre-v0.13 JSON parses cleanly with the new fields defaulting to nil, and the v2.7.5 board surface is unchanged on older hosts.</li>
+</ul>
+<h4>Curator archive + prune</h4>
+<ul>
+  <li><strong>Archived skills section</strong> in <code>CuratorView</code> showing <code>hermes curator list-archived</code> output. Each row exposes Restore (returns to the active leaderboard) and Prune (destructive — opens a custom confirm sheet matching the template-uninstall pattern, with <code>ScarfDestructiveButton</code> &quot;Prune permanently&quot; and Cancel as the default keyboard action).</li>
+  <li><strong>Bulk prune</strong> — a header action (gated on archived list non-empty) that enumerates every archived skill in the confirm sheet before a single-tap destructive action. Per-skill prune buttons are present per row when Hermes supports <code>prune &lt;name&gt;</code>; otherwise only the bulk action is exposed.</li>
+  <li><strong>Synchronous &quot;Run Now&quot;</strong> — v0.13 <code>hermes curator run</code> blocks until done. The Run Now button shows a progress affordance for the duration; pre-v0.13 falls back to fire-and-forget.</li>
+  <li><strong>New <code>CuratorService</code> actor</strong> in ScarfCore (<a href="scarf/Packages/ScarfCore/Sources/ScarfCore/Services/CuratorService.swift">scarf/Packages/ScarfCore/Sources/ScarfCore/Services/CuratorService.swift</a>) — pure-I/O Sendable actor mirroring <code>KanbanService</code>&#x27;s shape, with defensive <code>--json</code> retry-without-flag fallback for verbs that may not support it on all v0.13 patch releases.</li>
+  <li>The legacy <code>CuratorRestoreSheet</code> flow (SAFE-list-restore for v0.12) is preserved; it predates the v0.13 archive surface and serves a distinct case.</li>
+</ul>
+<h4>Messaging Gateway expansion</h4>
+<ul>
+  <li><strong>Google Chat</strong> — 20th platform. New entry in the Mac Platforms tab, gated on <code>HermesCapabilities.hasGoogleChatPlatform</code>.</li>
+  <li><strong>Cross-platform allowlists</strong> — per-platform editor for <code>allowed_channels</code> (Slack / Mattermost / Google Chat), <code>allowed_chats</code> (Telegram / WhatsApp), and <code>allowed_rooms</code> (Matrix / DingTalk). New <code>AllowlistEditor</code> component plus the <code>GatewayAllowlistKind</code> / <code>GatewayPlatformSettings</code> ScarfCore types. Persisted to <code>~/.hermes/config.yaml</code> via a new <code>GatewayConfigWriter</code> since <code>hermes config set</code> doesn&#x27;t write list blocks.</li>
+  <li><strong>Per-platform behavior toggles</strong> — <code>busy_ack_enabled</code> (suppress per-message &quot;agent is working…&quot; acks), <code>gateway_restart_notification</code> (post a &quot;Gateway restarted&quot; notice on boot), and a slash-command auto-delete TTL (seconds, 0 to disable). Each appears in the new <code>GatewayBehaviorSection</code> component.</li>
+  <li><strong><code>hermes gateway list</code> cross-profile digest</strong> — inline status row in <code>MessagingGatewayView</code> showing which profile is running which platform across all profiles. New <code>HermesGatewayListService</code> actor parses <code>hermes gateway list --json</code>. Hidden when the verb fails (pre-v0.13 hosts) or no profiles are registered.</li>
+  <li><strong><code>MessagingGatewayViewModel</code></strong> — internal rename from <code>GatewayViewModel</code> to disambiguate from the v0.10 Tool Gateway feature. The user-facing label was already &quot;Messaging Gateway&quot; since v0.10.</li>
+  <li><strong><code>[[as_document]]</code> hint</strong> — informational tooltip in skill detail surfaces explaining the new media-routing directive for skills that reference it.</li>
+</ul>
+<h4>Provider catalog refresh</h4>
+<ul>
+  <li><strong>Five new models</strong> — <code>deepseek/deepseek-v4-pro</code>, <code>x-ai/grok-4.3</code>, <code>openrouter/owl-alpha</code> (free tier), <code>tencent/hy3-preview</code>, and <code>arcee/trinity-large-thinking</code> (with temperature + compression overrides). Surfaced through <code>models_dev_cache.json</code>; no manual entries required.</li>
+  <li><strong>Grok rename</strong> — <code>x-ai/grok-4.20-beta</code> → <code>x-ai/grok-4.20</code>. Implemented via read-time alias resolution in <code>ModelCatalogService.modelAliases</code> so existing user configs with the <code>-beta</code> suffix keep validating without YAML rewrites. Three composite-keyed aliases cover the openrouter / xai / vercel routes.</li>
+  <li><strong>Vercel AI Gateway demoted</strong> — sort comparator change in <code>loadProviders()</code> puts Vercel last, after the alphabetical group.</li>
+  <li><strong><code>image_gen.model</code> honored</strong> — pre-v0.13 the key was advertised but ignored; v0.13 actually drives the image-generation path. Surfaced in <code>Settings → Auxiliary</code> with a curated picker (<code>OpenAI gpt-image-1</code>, <code>Imagen 3/4</code>, <code>Stable Image Ultra</code>, <code>FLUX 1.1 Pro</code>, <code>DALL·E 3</code>); free-form entry is also accepted. Gated on <code>hasImageGenModel</code>.</li>
+  <li><strong>OpenRouter response caching</strong> — toggle in <code>Settings → Auxiliary</code> writing <code>openrouter.response_cache.enabled</code> to <code>config.yaml</code>. Off by default in Scarf&#x27;s parser. Gated on <code>hasOpenRouterResponseCache</code>.</li>
+</ul>
+<h4>Settings tab additions</h4>
+<ul>
+  <li><strong>MCP SSE transport</strong> — MCP add-server flow gains a Transport picker (<code>stdio</code> / <code>http</code> / <code>sse</code>) with <code>sse_read_timeout</code> field for SSE servers. The YAML round-trip preserves OAuth + headers identically to the existing <code>.http</code> shape. Gated on <code>hasMCPSSETransport</code>.</li>
+  <li><strong>Cron <code>--no-agent</code> watchdog mode</strong> — toggle in the Cron edit sheet that maps to <code>hermes cron create/update --no-agent</code>. When ON, the prompt + context fields hide (the AI call is skipped). Defensive write-path strips the flag on pre-v0.13 hosts mirroring the <code>--workdir</code> pattern. New <code>HermesCronJob.noAgent: Bool</code> field with <code>decodeIfPresent</code> so pre-v0.13 reads keep parsing. Gated on <code>hasCronNoAgent</code>.</li>
+  <li><strong>Web Tools per-capability backends</strong> — new <code>Settings → Web Tools</code> tab with separate pickers for <code>web_search</code> and <code>web_extract</code>. SearXNG appears in the search picker only. The legacy single <code>web_tools.backend</code> is still readable for round-trip safety on mixed-version installs. Gated on <code>hasWebToolsBackendSplit</code>.</li>
+  <li><strong>Profiles <code>--no-skills</code></strong> — &quot;Empty profile (no skills)&quot; toggle in the create-profile flow that appends <code>--no-skills</code> to <code>hermes profile create</code>. Disabled when &quot;Clone all&quot; is on (mutually exclusive). Gated on <code>hasProfileNoSkills</code>.</li>
+</ul>
+<h4>UX polish</h4>
+<ul>
+  <li><strong>Context compression count</strong> in the chat status bar. v0.13 emits the count alongside the token tally on the <code>session/prompt</code> response; Scarf renders a <code>🗜 ×N</code> chip next to the token count when <code>count &gt; 0</code>. Gated on <code>hasContextCompressionCount</code>.</li>
+  <li><strong><code>/new &lt;name&gt;</code> argument hint</strong> — bracket-aware so v0.13 hosts show <code>[&lt;name&gt;]</code> and pre-v0.13 hosts show no hint.</li>
+  <li><strong><code>HermesUpdaterCommandBuilder</code></strong> — forward-compat plumbing for <code>hermes update --yes</code>. No in-app surface in v2.8.0 (Scarf doesn&#x27;t currently expose a &quot;Run hermes update&quot; command); the builder is wired so a future Settings affordance can opt in cleanly.</li>
+  <li><strong>Redaction default-flip awareness</strong> — the existing <code>Settings → Advanced → Redaction</code> toggle hint copy now branches on <code>HermesCapabilities.isV013OrLater</code>. v0.13+ hosts read &quot;Recommended: ON. Hermes v0.13 defaults to redacting secrets unless you opt out&quot;; pre-v0.13 keeps the v2.7 hint.</li>
+  <li><strong><code>display.language</code> picker</strong> — new <code>Settings → General → Locale</code> row. 8 options: default, zh, ja, de, es, fr, uk, tr. Hermes does the actual translation; Scarf just persists <code>display.language</code> to <code>config.yaml</code>. Gated on <code>hasDisplayLanguage</code>.</li>
+  <li><strong>xAI Custom Voices badge</strong> — <code>Settings → Voice</code> shows a &quot;Cloning supported&quot; <code>ScarfBadge</code> next to the xAI TTS provider entry. Informational only; voice management itself happens via <code>hermes voice</code> CLI. Gated on <code>hasXAIVoiceCloning</code>.</li>
+</ul>
+<h4>ScarfGo iOS catch-up (read-only)</h4>
+<p>Following the Phase H precedent, iOS mirrors selected v2.8 surfaces as read-only — write parity is deferred to v2.8.x.</p>
+<ul>
+  <li><strong>Goal pill + queue chip</strong> in the iOS chat header (<code>projectContextBar</code>). Tap is a no-op; the Mac app owns mutations.</li>
+  <li><strong>Kanban v0.13 diagnostics</strong> in <code>ScarfGoKanbanDetailSheet</code> — <code>retries: N</code> chip, &quot;Worker-created — verify on Mac&quot; hallucination badge, red <code>auto_blocked_reason</code> banner, tappable diagnostics chip-lists with severity-tinted badges and a new <code>DiagnosticDetailSheet</code> (replacing Mac&#x27;s <code>.help()</code> tooltip on touch).</li>
+  <li><strong>Curator Archived list</strong> in <code>Scarf iOS/Curator/CuratorView.swift</code> — read-only, with footer pointing users to the Mac app for Restore / Prune actions.</li>
+  <li><strong>Settings → Platforms extension</strong> — Google Chat status row, busy-ack and restart-notification summary rows across <code>gatewayPlatforms</code> (handles disagreement with &quot;mixed (N platforms)&quot;), allowlist DisclosureGroups with monospaced &quot;platform: id&quot; entries when expanded.</li>
+  <li><strong>&quot;v0.13 features active&quot; badge</strong> in iOS Settings (gated on <code>caps.isV013OrLater</code>). Tap presents <code>V013FeaturesSheet</code> listing the new affordances.</li>
+</ul>
+<h3>Capability gating</h3>
+<p>v2.8.0 adds 22 new flags on <code>HermesCapabilities</code> (each gating one v0.13 surface), plus an <code>isV013OrLater</code> convenience predicate. Every new affordance is gated; pre-v0.13 hosts see the v2.7.5 surface byte-identical to before. The HermesVersionBanner threshold remains pre-v0.12 — v0.12 → v0.13 nudging happens via the iOS Settings badge (positive surface) rather than a global yellow banner (which was reserved for &quot;missing every new feature&quot; cases).</p>
+<h3>Bug fixes uncovered during v0.13.0 dogfooding</h3>
+<ul>
+  <li><strong>Dashboard flicker on v0.13 hosts</strong> — Hermes v0.13 writes to <code>state.db-wal</code> and rotating logs at ~10 Hz during gateway activity. Each FSEvents fire ticked <code>lastChangeDate</code>, every observing view re-fired its load handler against it, and on Local hosts the dashboard stacked 5+ concurrent <code>dashboardSnapshot</code> calls in 200 ms — sqlite contention on the read-only handle surfaced as <code>BackendError error 3</code>, plus visible flicker. Two-part fix: <code>HermesFileWatcher.scheduleCoalescedTick</code> coalesces FSEvents into one observable mutation per 500 ms quiet window with a 1.5 s max-wait floor (so a coincident <code>gateway_state.json</code> Start/Stop touch can&#x27;t be starved indefinitely under sustained WAL writes); <code>DashboardViewModel.load()</code> holds a single in-flight <code>Task&lt;Void, Never&gt;</code> handle so concurrent triggers await the in-flight load instead of stacking.</li>
+  <li><strong>Sparse slash menu on resumed sessions</strong> — Hermes ACP only emits <code>available_commands_update</code> after <code>session/new</code>, not after <code>session/load</code>. Combined with <code>RichChatViewModel.reset()</code> clearing <code>acpCommands</code> on every session switch, resumed sessions landed at a 4-command fallback even though the agent identity hadn&#x27;t changed. Fix: stop wiping <code>acpCommands</code> in <code>reset()</code> (they&#x27;re agent-level, not session-level), and add an active-session-only static fallback set covering the standard agent commands so cold-start LOAD users see a rich menu immediately.</li>
+</ul>
+<h3>Migrating from 2.7.5</h3>
+<p>Sparkle delivers the update automatically. No config migration, no schema changes — same <code>~/.hermes/state.db</code> columns as v0.11/v0.12, same Scarf-owned sidecars at <code>~/.hermes/scarf/</code>. Existing v2.7.5 Kanban tenants stay valid; existing project manifests are unchanged. Settings tabs grow new rows; existing rows render identically.</p>
+<p>If you&#x27;re connecting to a Hermes v0.13.0 host for the first time after this update, the new surfaces light up automatically — no flag flip in the app. Pre-v0.13 hosts continue to render the v2.7.5 surface; nothing breaks if you upgrade Scarf before upgrading Hermes.</p>
+<h3>Known limitations</h3>
+<ul>
+  <li><strong>iOS write surfaces</strong> (Verify hallucination gate, Reject, Curator archive/prune actions, allowlist editor, <code>/goal</code> send, <code>/queue</code> send) are explicitly out of scope for v2.8.0 and slated for v2.8.x. iOS surfaces are read-only mirrors per the Phase H precedent.</li>
+  <li><strong>Auto-resumed-from-checkpoint indicator</strong> — Hermes v0.13&#x27;s &quot;auto-resume after gateway restart&quot; feature is server-side; whether the ACP adapter advertises a Scarf-visible signal is unclear pending live host verification. Deferred to v2.8.1.</li>
+  <li><strong>xAI voice cloning management UX</strong> — only the &quot;Cloning supported&quot; badge ships in v2.8.0. A full voice-management surface is a follow-up.</li>
+  <li><strong>Bulk re-tag for legacy NULL-tenant Kanban tasks</strong> — carryover from v2.7.5; Hermes still has no <code>tenant</code> mutation verb post-create.</li>
+  <li><strong>Cluster A wire-shape TODOs</strong> — 25 <code>// TODO(WS-N-Q&lt;n&gt;)</code> markers across the codebase flag fields and CLI flags whose exact shape couldn&#x27;t be verified from release notes alone. Each has a tolerant-decode default that fails closed (hides the affordance rather than throwing); a pre-merge sweep on a v0.13 host can confirm or fix each in seconds.</li>
+</ul>
+<h3>Acknowledgements</h3>
+<p>v2.8.0 was driven by a 9-stream coordinated multi-agent build: WS-1 capability flag foundation through WS-9 iOS catch-up, with planning artifacts archived under <a href="scarf/docs/v2.8/">scarf/docs/v2.8/</a> for future reference. Bug fixes for the dashboard flicker and sparse-slash-menu issues were caught during a fresh end-to-end dogfood pass against a live Hermes v0.13.0 install — the kind of surface-level UX bugs that only show up under real-world <code>state.db-wal</code> write rates and real-world resume flows. As always, real bugs come from doing instead of speculating.</p>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.8.0/Scarf-v2.8.0-Universal.zip"
+                 sparkle:edSignature="m5HQUKgxfWa5u88gEVCGWMIKaogBIsjPspQG97y1KcrW1w6S5XF1s0v1oRaRWMyIlj46BD+937Inu2Ii5TbXAg=="
+                 length="19771149"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.7.5</title>
       <sparkle:version>34</sparkle:version>
       <sparkle:shortVersionString>2.7.5</sparkle:shortVersionString>
