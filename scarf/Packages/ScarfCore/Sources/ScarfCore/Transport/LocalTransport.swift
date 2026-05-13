@@ -190,9 +190,19 @@ public struct LocalTransport: ServerTransport {
         proc.standardOutput = stdoutPipe
         proc.standardError = stderrPipe
         if stdin != nil { proc.standardInput = stdinPipe }
+        let pipeCapture = ProcessPipeDrainer.start(
+            stdout: stdoutPipe.fileHandleForReading,
+            stderr: stderrPipe.fileHandleForReading
+        )
         do {
             try proc.run()
         } catch {
+            try? stdoutPipe.fileHandleForWriting.close()
+            try? stderrPipe.fileHandleForWriting.close()
+            if stdin != nil {
+                try? stdinPipe.fileHandleForReading.close()
+            }
+            _ = pipeCapture.wait()
             throw TransportError.other(message: "Failed to launch \(executable): \(error.localizedDescription)")
         }
         // Parent has its own copy of every pipe end after fork. The child
@@ -218,20 +228,20 @@ public struct LocalTransport: ServerTransport {
             }
             if proc.isRunning {
                 proc.terminate()
-                let partial = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
+                proc.waitUntilExit()
+                let captured = pipeCapture.wait()
                 try? stdoutPipe.fileHandleForReading.close()
                 try? stderrPipe.fileHandleForReading.close()
-                throw TransportError.timeout(seconds: timeout, partialStdout: partial)
+                throw TransportError.timeout(seconds: timeout, partialStdout: captured.stdout)
             }
         } else {
             proc.waitUntilExit()
         }
-        let out = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
-        let err = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
+        let captured = pipeCapture.wait()
         try? stdoutPipe.fileHandleForReading.close()
         try? stderrPipe.fileHandleForReading.close()
         try? stdinPipe.fileHandleForWriting.close()
-        return ProcessResult(exitCode: proc.terminationStatus, stdout: out, stderr: err)
+        return ProcessResult(exitCode: proc.terminationStatus, stdout: captured.stdout, stderr: captured.stderr)
         #endif
     }
 

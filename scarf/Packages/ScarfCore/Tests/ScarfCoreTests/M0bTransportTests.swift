@@ -126,6 +126,32 @@ import Foundation
         #expect(explicit.contextID != ServerContext.local.id)
     }
 
+    @Test func localTransportRunProcessDrainsLargeStdoutAndStderr() throws {
+        let script = """
+        for i in $(seq 1 256); do
+            printf '%04d:' "$i"
+            printf '%.0sx' $(seq 1 1018)
+            printf '\\n'
+        done
+        for i in $(seq 1 256); do
+            printf '%04d:' "$i" >&2
+            printf '%.0sy' $(seq 1 1018) >&2
+            printf '\\n' >&2
+        done
+        """
+
+        let result = try LocalTransport().runProcess(
+            executable: "/bin/sh",
+            args: ["-c", script],
+            stdin: nil,
+            timeout: 10
+        )
+
+        #expect(result.exitCode == 0)
+        #expect(result.stdout.count >= 256 * 1024)
+        #expect(result.stderr.count >= 256 * 1024)
+    }
+
     @Test func sshTransportStaticPathsAreStable() {
         // controlDirPath() is used by Mac tests (`ControlPathTests`) to check
         // the macOS 104-byte sun_path limit. Pin the format here so the
