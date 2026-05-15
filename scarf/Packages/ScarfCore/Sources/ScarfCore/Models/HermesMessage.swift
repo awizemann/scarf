@@ -195,23 +195,55 @@ public struct HermesToolCall: Identifiable, Sendable, Codable {
     }
 
     public var argumentsSummary: String {
-        guard let data = arguments.data(using: .utf8),
+        let trimmed = arguments.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != "{}", trimmed != "[]" else { return "" }
+        guard let data = trimmed.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return arguments
+            return Self.compactSummary(trimmed)
         }
+
         if let command = json["command"] as? String {
-            return command
+            return Self.compactSummary(command)
         }
-        if let path = json["path"] as? String {
-            return path
+        if let pattern = json["pattern"] as? String {
+            if let path = json["path"] as? String,
+               !path.isEmpty,
+               path != "." {
+                return Self.compactSummary("\(pattern) in \(path)")
+            }
+            return Self.compactSummary(pattern)
+        }
+        if let summary = json["summary"] as? String {
+            return Self.compactSummary(summary)
         }
         if let query = json["query"] as? String {
-            return query
+            return Self.compactSummary(query)
         }
         if let url = json["url"] as? String {
-            return url
+            return Self.compactSummary(url)
         }
-        return arguments.prefix(120) + (arguments.count > 120 ? "..." : "")
+        if let path = json["path"] as? String {
+            return Self.compactSummary(path)
+        }
+        if let ref = json["ref"] as? String {
+            return Self.compactSummary(ref)
+        }
+        if let text = json["text"] as? String {
+            return Self.compactSummary(text)
+        }
+        if let prompt = json["prompt_text"] as? String {
+            return Self.compactSummary(prompt)
+        }
+        return Self.compactSummary(trimmed)
+    }
+
+    private static func compactSummary(_ raw: String, limit: Int = 120) -> String {
+        let singleLine = raw
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard singleLine.count > limit else { return singleLine }
+        return String(singleLine.prefix(limit - 1)) + "…"
     }
 }
 

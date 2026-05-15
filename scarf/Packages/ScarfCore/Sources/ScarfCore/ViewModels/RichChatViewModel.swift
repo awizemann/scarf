@@ -2097,6 +2097,10 @@ public final class RichChatViewModel {
         currentLocal: [HermesMessage]
     ) -> [HermesMessage] {
         let dbUserContents = Set(fetched.filter(\.isUser).map(\.content))
+        let dbAssistantContents = Set(fetched.filter(\.isAssistant).map(\.content))
+        let dbAssistantToolCallIds = Set(fetched.flatMap { msg in
+            msg.isAssistant ? msg.toolCalls.map(\.callId) : []
+        })
         let dbToolCallIds = Set(fetched.compactMap { $0.role == "tool" ? $0.toolCallId : nil })
         var merged = fetched
         for msg in currentLocal {
@@ -2113,6 +2117,22 @@ public final class RichChatViewModel {
             }
             if msg.isUser, !dbUserContents.contains(msg.content) {
                 merged.append(msg)
+                continue
+            }
+            if msg.isAssistant {
+                // Finalized local assistant rows are negative-id until
+                // Hermes commits the same turn to state.db. A watcher or
+                // polling tick can arrive in that tiny gap after the reply
+                // is visible but before persistence completes; dropping the
+                // negative row makes the last exchange appear to vanish.
+                // Keep it unless a semantic DB twin has caught up.
+                let hasTextTwin = !msg.content.isEmpty && dbAssistantContents.contains(msg.content)
+                let localCallIds = Set(msg.toolCalls.map(\.callId))
+                let hasToolTwin = !localCallIds.isEmpty
+                    && localCallIds.isSubset(of: dbAssistantToolCallIds)
+                if !hasTextTwin && !hasToolTwin {
+                    merged.append(msg)
+                }
                 continue
             }
             if msg.role == "tool", let callId = msg.toolCallId, !dbToolCallIds.contains(callId) {
@@ -2148,7 +2168,12 @@ public final class RichChatViewModel {
                 let resultCallIds = Set(fetched.compactMap { $0.isToolResult ? $0.toolCallId : nil })
                 return !allCallIds.subtracting(resultCallIds).isEmpty
             }
-            return last.finishReason == nil
+            // Persisted assistant rows can legitimately have a nil
+            // finish_reason (older Hermes rows and skeleton loads). A
+            // plain assistant at the tail is not enough evidence that the
+            // agent is still active; otherwise resumed sessions disable the
+            // chat list forever.
+            return false
         }
         return false
     }

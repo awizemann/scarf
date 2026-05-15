@@ -43,11 +43,13 @@ struct ToolCallCard: View {
                         .font(ScarfFont.monoSmall)
                         .fontWeight(.semibold)
                         .foregroundStyle(ScarfColor.foregroundPrimary)
-                    Text(call.argumentsSummary)
-                        .font(ScarfFont.monoSmall)
-                        .foregroundStyle(ScarfColor.foregroundMuted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    if !call.argumentsSummary.isEmpty {
+                        Text(call.argumentsSummary)
+                            .font(ScarfFont.monoSmall)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
                     Spacer(minLength: 8)
                     if result != nil {
                         Image(systemName: "checkmark.circle.fill")

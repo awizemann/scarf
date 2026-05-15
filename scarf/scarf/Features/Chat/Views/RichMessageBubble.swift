@@ -307,6 +307,13 @@ struct RichMessageBubble: View, Equatable {
                             .foregroundStyle(ScarfColor.foregroundPrimary)
                             .lineLimit(1)
                             .truncationMode(.tail)
+                        if !call.argumentsSummary.isEmpty {
+                            Text(call.argumentsSummary)
+                                .font(ChatFontScale.monoSmall(chatFontScale))
+                                .foregroundStyle(ScarfColor.foregroundMuted)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
                         Spacer(minLength: 6)
                         compactStatusIcon(call: call, result: result)
                     }

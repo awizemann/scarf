@@ -296,8 +296,8 @@ struct MessageGroupView: View, Equatable {
             // shape up front; a single re-render at hydration end
             // applies coalescing if it's still appropriate.
             let assistantBubbles = isHydratingTools
-                ? group.assistantMessages.filter(\.isAssistant)
-                : group.coalescedAssistantBubbles.filter(\.isAssistant)
+                ? group.assistantMessages.filter(Self.shouldRenderAssistantBubble)
+                : group.coalescedAssistantBubbles.filter(Self.shouldRenderAssistantBubble)
             ForEach(Array(assistantBubbles.enumerated()), id: \.offset) { _, message in
                 RichMessageBubble(
                     message: message,
@@ -320,6 +320,21 @@ struct MessageGroupView: View, Equatable {
                 toolSummary
             }
         }
+    }
+
+    /// Suppress skeleton assistant rows whose only persisted signal is
+    /// `finish_reason = tool_calls` while Phase 2 is still hydrating the
+    /// actual `tool_calls` JSON. Without this, reopening a tool-heavy
+    /// chat briefly renders empty assistant bubbles that show only
+    /// metadata like “· tool_calls · 12:16”. Once hydration supplies
+    /// `message.toolCalls`, the row becomes visible as a normal tool-card
+    /// bubble; if hydration fails, the empty artifact stays hidden.
+    private static func shouldRenderAssistantBubble(_ message: HermesMessage) -> Bool {
+        guard message.isAssistant else { return false }
+        return message.id == 0
+            || !message.content.isEmpty
+            || message.hasReasoning
+            || !message.toolCalls.isEmpty
     }
 
     @ViewBuilder

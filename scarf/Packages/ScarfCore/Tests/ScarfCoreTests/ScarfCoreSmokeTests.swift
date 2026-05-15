@@ -73,6 +73,25 @@ import Foundation
         #expect(call.argumentsSummary == "/tmp")
     }
 
+    @Test func hermesToolCallArgumentSummariesAreUseful() {
+        let terminal = HermesToolCall(
+            callId: "c2",
+            functionName: "terminal",
+            arguments: "{\"command\":\"git status --short --branch\",\"workdir\":\"/tmp/repo\"}"
+        )
+        #expect(terminal.argumentsSummary == "git status --short --branch")
+
+        let search = HermesToolCall(
+            callId: "c3",
+            functionName: "search_files",
+            arguments: "{\"pattern\":\"RichChat\",\"path\":\"scarf/scarf\"}"
+        )
+        #expect(search.argumentsSummary == "RichChat in scarf/scarf")
+
+        let empty = HermesToolCall(callId: "c4", functionName: "terminal", arguments: "{}")
+        #expect(empty.argumentsSummary == "")
+    }
+
     @Test func hermesConfigEmptyAndMemberwise() {
         // `.empty` exercises every nested init internally — if any nested
         // settings struct's init drifted, HermesConfig.empty would fail to

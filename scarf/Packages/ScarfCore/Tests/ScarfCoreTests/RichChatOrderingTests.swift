@@ -23,7 +23,8 @@ import Foundation
         role: String,
         content: String = "",
         timestamp: Date,
-        toolCallId: String? = nil
+        toolCallId: String? = nil,
+        toolCalls: [HermesToolCall] = []
     ) -> HermesMessage {
         HermesMessage(
             id: id,
@@ -31,7 +32,7 @@ import Foundation
             role: role,
             content: content,
             toolCallId: toolCallId,
-            toolCalls: [],
+            toolCalls: toolCalls,
             toolName: nil,
             timestamp: timestamp,
             tokenCount: nil,
@@ -186,6 +187,50 @@ import Foundation
         let toolRows = merged.filter { $0.role == "tool" }
         #expect(toolRows.count == 1)
         #expect(toolRows.first?.id == 11)
+    }
+
+    @Test func pollingPreservesFinalizedAssistantUntilDBCatchesUp() {
+        // PromptComplete finalizes the visible assistant reply as a
+        // negative-id local row. A DB watcher can fire before Hermes has
+        // persisted the same assistant; the merge must not make the last
+        // exchange disappear.
+        let t = Date()
+        let dbUser = Self.msg(id: 10, role: "user", content: "q", timestamp: t)
+        let localAssistant = Self.msg(
+            id: -2,
+            role: "assistant",
+            content: "visible answer",
+            timestamp: t.addingTimeInterval(0.5)
+        )
+        let merged = RichChatViewModel.mergedAfterPoll(
+            fetched: [dbUser],
+            currentLocal: [dbUser, localAssistant]
+        )
+        #expect(merged.contains { $0.id == -2 && $0.content == "visible answer" })
+    }
+
+    @Test func pollingDropsFinalizedAssistantOnceDBHasTextTwin() {
+        let t = Date()
+        let dbUser = Self.msg(id: 10, role: "user", content: "q", timestamp: t)
+        let dbAssistant = Self.msg(
+            id: 11,
+            role: "assistant",
+            content: "visible answer",
+            timestamp: t.addingTimeInterval(0.4)
+        )
+        let localAssistant = Self.msg(
+            id: -2,
+            role: "assistant",
+            content: "visible answer",
+            timestamp: t.addingTimeInterval(0.5)
+        )
+        let merged = RichChatViewModel.mergedAfterPoll(
+            fetched: [dbUser, dbAssistant],
+            currentLocal: [dbUser, localAssistant]
+        )
+        let assistants = merged.filter(\.isAssistant)
+        #expect(assistants.count == 1)
+        #expect(assistants.first?.id == 11)
     }
 
     @Test func pollingMergeIsChronologicallyOrdered() {

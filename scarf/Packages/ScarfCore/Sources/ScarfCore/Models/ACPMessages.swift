@@ -215,7 +215,13 @@ public struct ACPToolCallEvent: Sendable {
     public var argumentsJSON: String {
         guard let input = rawInput,
               let data = try? JSONSerialization.data(withJSONObject: input),
-              let str = String(data: data, encoding: .utf8) else { return "{}" }
+              let str = String(data: data, encoding: .utf8) else {
+            let summary = argumentsSummary
+            guard !summary.isEmpty,
+                  let data = try? JSONSerialization.data(withJSONObject: ["summary": summary]),
+                  let str = String(data: data, encoding: .utf8) else { return "{}" }
+            return str
+        }
         return str
     }
 }
@@ -321,7 +327,7 @@ public enum ACPEventParser {
                 kind: update["kind"] as? String ?? "other",
                 status: update["status"] as? String ?? "pending",
                 content: extractContentArrayText(from: update),
-                rawInput: update["rawInput"] as? [String: Any]
+                rawInput: extractToolInput(from: update)
             )
             return .toolCallStart(sessionId: sessionId, call: event)
 
@@ -384,5 +390,24 @@ public enum ACPEventParser {
             }.joined(separator: "\n")
         }
         return ""
+    }
+
+    /// Hermes/ACP providers have emitted tool arguments under several
+    /// shapes over time (`rawInput`, `raw_input`, `input`, `arguments`;
+    /// dictionary or pre-encoded JSON string). Normalize them here so
+    /// live tool cards do not fall back to a useless literal `{}`.
+    nonisolated private static func extractToolInput(from update: [String: Any]) -> [String: Any]? {
+        for key in ["rawInput", "raw_input", "input", "arguments"] {
+            guard let value = update[key] else { continue }
+            if let dict = value as? [String: Any] {
+                return dict
+            }
+            if let string = value as? String,
+               let data = string.data(using: .utf8),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                return obj
+            }
+        }
+        return nil
     }
 }
