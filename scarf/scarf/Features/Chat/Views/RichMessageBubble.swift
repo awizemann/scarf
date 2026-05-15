@@ -573,6 +573,9 @@ private struct MessageMediaAttachment: Equatable, Identifiable {
 
 private struct MessageMediaAttachmentView: View, Equatable {
     let media: MessageMediaAttachment
+    @Environment(\.serverContext) private var serverContext
+    @State private var fileBackedImage: NSImage?
+    @State private var fileBackedImageError: String?
 
     static func == (lhs: MessageMediaAttachmentView, rhs: MessageMediaAttachmentView) -> Bool {
         lhs.media == rhs.media
@@ -620,19 +623,37 @@ private struct MessageMediaAttachmentView: View, Equatable {
             Button("Copy Path") { copyMediaReference() }
         }
     }
-
     @ViewBuilder
     private var imagePreview: some View {
         if media.url.isFileURL {
-            if let image = platformImage(from: media.url) {
-                Image(nsImage: image)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: 560, maxHeight: 360)
-                    .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous))
-            } else {
-                filePreview(icon: media.isReachableLocalFile ? "photo" : "photo.badge.exclamationmark")
+            Group {
+                if let image = fileBackedImage {
+                    Image(nsImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: 560, maxHeight: 360)
+                        .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous))
+                } else if let fileBackedImageError {
+                    filePreview(
+                        icon: fileBackedImageError == "File not found" ? "photo.badge.exclamationmark" : "photo",
+                        message: fileBackedImageError
+                    )
+                } else {
+                    ProgressView()
+                        .frame(maxWidth: 560, minHeight: 160, alignment: .center)
+                }
+            }
+            .task(id: "\(serverContext.id.uuidString)|\(media.id)") {
+                await loadFileBackedImage()
+            }
+            .onChange(of: media.id) { _, _ in
+                fileBackedImage = nil
+                fileBackedImageError = nil
+            }
+            .onChange(of: serverContext.id) { _, _ in
+                fileBackedImage = nil
+                fileBackedImageError = nil
             }
         } else {
             AsyncImage(url: media.url) { phase in
@@ -656,6 +677,27 @@ private struct MessageMediaAttachmentView: View, Equatable {
         }
     }
 
+    private func loadFileBackedImage() async {
+        let path = media.url.path
+        let context = serverContext
+        let result: (image: NSImage?, error: String?) = await Task.detached {
+            let transport = context.makeTransport()
+            guard transport.fileExists(path) else { return (nil, "File not found") }
+            do {
+                let data = try transport.readFile(path)
+                if let image = NSImage(data: data) {
+                    return (image, nil)
+                }
+                return (nil, "Preview unavailable")
+            } catch {
+                return (nil, "Preview unavailable")
+            }
+        }.value
+
+        fileBackedImage = result.image
+        fileBackedImageError = result.error
+    }
+
     @ViewBuilder
     private var videoPreview: some View {
         if media.isReachableLocalFile || !media.url.isFileURL {
@@ -668,12 +710,12 @@ private struct MessageMediaAttachmentView: View, Equatable {
         }
     }
 
-    private func filePreview(icon: String) -> some View {
+    private func filePreview(icon: String, message: String? = nil) -> some View {
         HStack(spacing: ScarfSpace.s2) {
             Image(systemName: icon)
                 .font(.system(size: 24))
                 .foregroundStyle(ScarfColor.foregroundMuted)
-            Text(media.isReachableLocalFile ? "Preview unavailable" : "File not found")
+            Text(message ?? (media.isReachableLocalFile ? "Preview unavailable" : "File not found"))
                 .font(ChatFontScale.caption(1.0))
                 .foregroundStyle(ScarfColor.foregroundMuted)
         }
@@ -705,10 +747,6 @@ private struct MessageMediaAttachmentView: View, Equatable {
 #endif
     }
 
-    private func platformImage(from url: URL) -> NSImage? {
-        guard url.isFileURL else { return nil }
-        return NSImage(contentsOf: url)
-    }
 }
 
 #if canImport(AppKit)
