@@ -128,14 +128,142 @@ public struct MessageGroup: Identifiable {
     }
 }
 
+struct PendingLocalUserMessageStore: Sendable {
+    private struct Record: Codable {
+        let id: Int
+        let sessionId: String
+        let content: String
+        let timestamp: Date?
+    }
+
+    private static let keyPrefix = "com.scarf.pending-local-user-messages.v1."
+
+    private let readData: @Sendable (ServerID) -> Data?
+    private let writeData: @Sendable (Data?, ServerID) -> Void
+
+    static func userDefaults(_ defaults: UserDefaults = .standard) -> Self {
+        let defaultsBox = UserDefaultsBox(defaults)
+        return Self(
+            readData: { defaultsBox.defaults.data(forKey: Self.keyPrefix + $0.uuidString) },
+            writeData: { data, serverID in
+                let key = Self.keyPrefix + serverID.uuidString
+                if let data {
+                    defaultsBox.defaults.set(data, forKey: key)
+                } else {
+                    defaultsBox.defaults.removeObject(forKey: key)
+                }
+            }
+        )
+    }
+
+    static func inMemory(initial: [String: [HermesMessage]] = [:]) -> Self {
+        let box = LockedBox<[ServerID: Data]>([:])
+        let encoder = JSONEncoder()
+        if !initial.isEmpty,
+           let data = try? encoder.encode(Self.encode(initial)) {
+            box.withLock { $0[ServerContext.local.id] = data }
+        }
+        return Self(
+            readData: { serverID in box.withLock { $0[serverID] } },
+            writeData: { data, serverID in
+                box.withLock { store in
+                    if let data { store[serverID] = data }
+                    else { store.removeValue(forKey: serverID) }
+                }
+            }
+        )
+    }
+
+    func read(for serverID: ServerID) -> [String: [HermesMessage]] {
+        guard let data = readData(serverID),
+              let records = try? JSONDecoder().decode([String: [Record]].self, from: data)
+        else { return [:] }
+        return records.mapValues { rows in
+            rows.map { row in
+                HermesMessage(
+                    id: row.id,
+                    sessionId: row.sessionId,
+                    role: "user",
+                    content: row.content,
+                    toolCallId: nil,
+                    toolCalls: [],
+                    toolName: nil,
+                    timestamp: row.timestamp,
+                    tokenCount: nil,
+                    finishReason: nil,
+                    reasoning: nil
+                )
+            }
+        }
+    }
+
+    func write(_ pending: [String: [HermesMessage]], for serverID: ServerID) {
+        let sanitized = pending
+            .mapValues { messages in messages.filter { $0.isUser && $0.id < 0 && !$0.content.isEmpty } }
+            .filter { !$0.value.isEmpty }
+        guard !sanitized.isEmpty else {
+            writeData(nil, serverID)
+            return
+        }
+        guard let data = try? JSONEncoder().encode(Self.encode(sanitized)) else { return }
+        writeData(data, serverID)
+    }
+
+    private static func encode(_ pending: [String: [HermesMessage]]) -> [String: [Record]] {
+        pending.mapValues { messages in
+            messages.map { msg in
+                Record(id: msg.id, sessionId: msg.sessionId, content: msg.content, timestamp: msg.timestamp)
+            }
+        }
+    }
+}
+
+private final class UserDefaultsBox: @unchecked Sendable {
+    let defaults: UserDefaults
+
+    init(_ defaults: UserDefaults) {
+        self.defaults = defaults
+    }
+}
+
+private final class LockedBox<Value>: @unchecked Sendable {
+    private var value: Value
+    private let lock = NSLock()
+
+    init(_ value: Value) {
+        self.value = value
+    }
+
+    func withLock<T>(_ body: (inout Value) -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body(&value)
+    }
+}
+
 @Observable
 public final class RichChatViewModel {
     public let context: ServerContext
     private let dataService: HermesDataService
+    private let pendingLocalUserMessageStore: PendingLocalUserMessageStore
 
     public init(context: ServerContext = .local) {
         self.context = context
         self.dataService = HermesDataService(context: context)
+        self.pendingLocalUserMessageStore = .userDefaults()
+        self.pendingLocalUserMessages = pendingLocalUserMessageStore.read(for: context.id)
+        // Quick-commands load happens in `reset()`, which every chat-start
+        // path calls before the user can interact (iOS: ChatController.start;
+        // Mac: ChatViewModel.startNewSession/resumeSession/continueLastSession).
+        // Calling it here too caused two parallel SFTP reads of config.yaml
+        // on iOS chat startup.
+    }
+
+    init(context: ServerContext = .local, pendingLocalUserMessageStore: PendingLocalUserMessageStore) {
+        self.context = context
+        self.dataService = HermesDataService(context: context)
+        self.pendingLocalUserMessageStore = pendingLocalUserMessageStore
+        self.pendingLocalUserMessages = pendingLocalUserMessageStore.read(for: context.id)
         // Quick-commands load happens in `reset()`, which every chat-start
         // path calls before the user can interact (iOS: ChatController.start;
         // Mac: ChatViewModel.startNewSession/resumeSession/continueLastSession).
@@ -1078,6 +1206,58 @@ public final class RichChatViewModel {
         // the id → different-id transition on session swap. Resetting
         // for nil avoids stamping the gap with a stale timestamp.
         sessionOpenedAt = (id == nil) ? nil : Date()
+        if let id {
+            attachOrphanLocalUserMessages(to: id)
+        }
+    }
+
+    private func persistPendingLocalUserMessages() {
+        pendingLocalUserMessageStore.write(pendingLocalUserMessages, for: context.id)
+    }
+
+    private func attachOrphanLocalUserMessages(to sessionId: String) {
+        var changedMessages = false
+        var newlyPending: [HermesMessage] = []
+        messages = messages.map { msg in
+            guard msg.isUser, msg.id < 0, msg.sessionId.isEmpty else { return msg }
+            changedMessages = true
+            let attached = HermesMessage(
+                id: msg.id,
+                sessionId: sessionId,
+                role: msg.role,
+                content: msg.content,
+                toolCallId: msg.toolCallId,
+                toolCalls: msg.toolCalls,
+                toolName: msg.toolName,
+                timestamp: msg.timestamp,
+                tokenCount: msg.tokenCount,
+                finishReason: msg.finishReason,
+                reasoning: msg.reasoning,
+                reasoningContent: msg.reasoningContent
+            )
+            newlyPending.append(attached)
+            return attached
+        }
+        guard changedMessages else { return }
+        var existing = pendingLocalUserMessages[sessionId] ?? []
+        for msg in newlyPending where !existing.contains(where: { $0.id == msg.id || $0.content == msg.content }) {
+            existing.append(msg)
+        }
+        pendingLocalUserMessages[sessionId] = existing
+        persistPendingLocalUserMessages()
+        buildMessageGroups()
+    }
+
+    private func reconcilePendingLocalUserMessages(sessionId: String, fetched: [HermesMessage]) {
+        guard let pending = pendingLocalUserMessages[sessionId], !pending.isEmpty else { return }
+        let dbUserContents = Set(fetched.filter { $0.isUser && $0.id >= 0 }.map(\.content))
+        let stillPending = pending.filter { !dbUserContents.contains($0.content) }
+        if stillPending.isEmpty {
+            pendingLocalUserMessages.removeValue(forKey: sessionId)
+        } else {
+            pendingLocalUserMessages[sessionId] = stillPending
+        }
+        persistPendingLocalUserMessages()
     }
 
     public func cleanup() async {
@@ -1133,6 +1313,7 @@ public final class RichChatViewModel {
         // persists the row can still re-inject it on return (#63).
         if let sid = sessionId {
             pendingLocalUserMessages[sid, default: []].append(message)
+            persistPendingLocalUserMessages()
         }
         // Per-turn stopwatch (v2.5): record the start time only when
         // we're entering a fresh agent turn. /steer-style mid-run sends
@@ -1846,6 +2027,7 @@ public final class RichChatViewModel {
             } else {
                 pendingLocalUserMessages[sessionId] = stillPending
             }
+            persistPendingLocalUserMessages()
         }
         currentSession = session
         let minId = messages.map(\.id).min() ?? 0
@@ -2127,6 +2309,7 @@ public final class RichChatViewModel {
             lastKnownFingerprint = fingerprint
 
             messages = Self.mergedAfterPoll(fetched: fetched, currentLocal: messages)
+            reconcilePendingLocalUserMessages(sessionId: sessionId, fetched: fetched)
             currentSession = session
             buildMessageGroups()
 

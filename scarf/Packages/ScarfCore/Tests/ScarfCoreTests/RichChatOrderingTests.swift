@@ -147,6 +147,34 @@ import Foundation
 
     // MARK: - mergedAfterPoll
 
+    @Test func pendingLocalUserMessageIsPersistedForResumeAfterQuit() {
+        let store = PendingLocalUserMessageStore.inMemory()
+        let vm = RichChatViewModel(pendingLocalUserMessageStore: store)
+        vm.setSessionId("s1")
+        vm.addUserMessage(text: "build and update my work laptop")
+
+        let reloaded = PendingLocalUserMessageStore.inMemory(initial: store.read(for: ServerContext.local.id))
+        let vmAfterQuit = RichChatViewModel(pendingLocalUserMessageStore: reloaded)
+        let pending = reloaded.read(for: vmAfterQuit.context.id)
+
+        #expect(pending["s1"]?.map(\.content) == ["build and update my work laptop"])
+    }
+
+    @Test func pendingLocalUserMessageCreatedBeforeNewSessionIdGetsAttachedAndPersisted() {
+        let store = PendingLocalUserMessageStore.inMemory()
+        let vm = RichChatViewModel(pendingLocalUserMessageStore: store)
+
+        // Mac `autoStartACPAndSend` appends the optimistic user bubble before
+        // `session/new` returns an id. Quitting in that window used to lose the
+        // only copy because the pending cache was keyed by nil and stayed RAM-only.
+        vm.addUserMessage(text: "first prompt in a new chat")
+        vm.setSessionId("fresh-session")
+
+        let pending = store.read(for: ServerContext.local.id)
+        #expect(vm.messages.first?.sessionId == "fresh-session")
+        #expect(pending["fresh-session"]?.map(\.content) == ["first prompt in a new chat"])
+    }
+
     @Test func pollingPreservesStreamingMessage() {
         // A polling tick lands while the assistant is mid-stream.
         // `fetched` only carries the user prompt that Hermes has
