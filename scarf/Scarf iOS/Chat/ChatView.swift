@@ -44,6 +44,11 @@ struct ChatView: View {
     @State private var showPhotoPicker = false
     @State private var isEncodingAttachment = false
     @State private var attachmentError: String?
+    /// Tracks the last transcript tail we explicitly pinned to the bottom.
+    /// iOS `LazyVStack` + `.defaultScrollAnchor(.bottom)` can temporarily
+    /// overshoot into blank space when a send inserts the optimistic user
+    /// bubble and the keyboard/composer changes height in the same layout pass.
+    @State private var initialBottomAnchor: String?
 
     private static let maxAttachments = 5
 
@@ -304,69 +309,102 @@ struct ChatView: View {
 
     @ViewBuilder
     private var messageList: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
-                if controller.vm.messages.isEmpty, controller.state == .ready || controller.state == .idle {
-                    if controller.vm.sessionId != nil {
-                        // Resumed-session path: session ID is set but
-                        // no messages loaded. ACP-native sessions don't
-                        // persist their transcript to state.db (only
-                        // CLI/terminal sessions do), so resuming one
-                        // reconnects to the agent but can't surface
-                        // the history client-side. Explain to the user
-                        // rather than showing a blank canvas.
-                        resumedEmptyState
-                    } else {
-                        emptyState
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    if controller.vm.messages.isEmpty,
+                       controller.state == .ready || controller.state == .idle {
+                        if controller.vm.sessionId != nil {
+                            // Resumed-session path: session ID is set but
+                            // no messages loaded. ACP-native sessions don't
+                            // persist their transcript to state.db (only
+                            // CLI/terminal sessions do), so resuming one
+                            // reconnects to the agent but can't surface
+                            // the history client-side. Explain to the user
+                            // rather than showing a blank canvas.
+                            resumedEmptyState
+                        } else {
+                            emptyState
+                        }
                     }
-                }
-                if controller.vm.hasMoreHistory {
-                    loadEarlierButton
-                }
-                ForEach(controller.vm.messages) { msg in
-                    MessageBubble(
-                        message: msg,
-                        turnDuration: controller.vm.turnDuration(forMessageId: msg.id)
-                    )
-                    .equatable()
-                    .id(msg.id)
-                }
-                if controller.vm.isGenerating {
-                    HStack {
-                        ProgressView()
-                        Text("Agent is thinking…")
-                            .font(.caption)
-                            .foregroundStyle(ScarfColor.foregroundMuted)
+                    if controller.vm.hasMoreHistory {
+                        loadEarlierButton
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal)
-                } else if controller.vm.isPostProcessing {
-                    HStack(spacing: 6) {
-                        Image(systemName: "ellipsis")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                        Text("Finishing up…")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                    ForEach(controller.vm.messages) { msg in
+                        MessageBubble(
+                            message: msg,
+                            turnDuration: controller.vm.turnDuration(forMessageId: msg.id)
+                        )
+                        .equatable()
+                        .id(msg.id)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal)
+                    if controller.vm.isGenerating {
+                        HStack {
+                            ProgressView()
+                            Text("Agent is thinking…")
+                                .font(.caption)
+                                .foregroundStyle(ScarfColor.foregroundMuted)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                        .id("typing-indicator")
+                    } else if controller.vm.isPostProcessing {
+                        HStack(spacing: 6) {
+                            Image(systemName: "ellipsis")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Text("Finishing up…")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                        .id("post-processing-indicator")
+                    }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id("bottom-anchor")
+                }
+                .padding(.vertical)
+            }
+            // Do not use `.defaultScrollAnchor(.bottom)` with this LazyVStack.
+            // When the composer/keyboard and optimistic user bubble change in
+            // the same send pass, SwiftUI can scroll to estimated lazy heights
+            // and leave the user staring at blank overscroll, which looks like
+            // the whole chat disappeared. Pin explicitly after layout settles.
+            .task(id: initialScrollKey) {
+                guard !controller.vm.messages.isEmpty else {
+                    initialBottomAnchor = nil
+                    return
+                }
+                guard initialBottomAnchor != initialScrollKey else { return }
+                initialBottomAnchor = initialScrollKey
+                await Task.yield()
+                await MainActor.run {
+                    proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                }
+                try? await Task.sleep(nanoseconds: 80_000_000)
+                guard !Task.isCancelled, initialBottomAnchor == initialScrollKey else { return }
+                await MainActor.run {
+                    proxy.scrollTo("bottom-anchor", anchor: .bottom)
                 }
             }
-            .padding(.vertical)
+            .onChange(of: controller.vm.scrollTrigger) {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                }
+            }
+            // Drag the messages downward to interactively collapse the
+            // keyboard — the standard iOS chat gesture. Without this the
+            // keyboard could never be dismissed once it rose, hiding the
+            // top-trailing nav button on small phones (issue #51).
+            .scrollDismissesKeyboard(.interactively)
         }
-        // iOS 17+ keeps the scroll pinned to the newest content at
-        // the bottom; iOS 18's `.sizeChanges` variant also tracks
-        // when a message grows (streaming chunks, Expand-all on a
-        // code block). Replaces the old manual proxy.scrollTo dance
-        // which fought with the user's own scroll gestures.
-        .defaultScrollAnchor(.bottom)
-        .defaultScrollAnchor(.bottom, for: .sizeChanges)
-        // Drag the messages downward to interactively collapse the
-        // keyboard — the standard iOS chat gesture. Without this the
-        // keyboard could never be dismissed once it rose, hiding the
-        // top-trailing nav button on small phones (issue #51).
-        .scrollDismissesKeyboard(.interactively)
+    }
+
+    private var initialScrollKey: String {
+        controller.vm.messages.last.map { "initial-\($0.id)" } ?? "empty"
     }
 
     /// "Load earlier messages" affordance pinned above the oldest
