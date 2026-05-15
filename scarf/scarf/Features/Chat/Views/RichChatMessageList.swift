@@ -33,8 +33,6 @@ struct RichChatMessageList: View {
     var isHydratingTools: Bool = false
 
     @State private var initialBottomAnchor: String?
-    @State private var lastOlderSentinelID: String?
-    @State private var lastNewerSentinelID: String?
 
     /// Scrolling strategy: bounded input (`groups` is already windowed by
     /// `RichChatViewModel`) plus `LazyVStack`. We avoid the old
@@ -72,7 +70,7 @@ struct RichChatMessageList: View {
 
                     if hasMoreHistory, let onLoadEarlier {
                         historySentinel(
-                            id: firstAnchorID,
+                            id: olderSentinelID,
                             label: isLoadingEarlier ? "Loading earlier…" : "Loading earlier messages",
                             systemImage: "arrow.up.circle",
                             isLoading: isLoadingEarlier
@@ -98,7 +96,7 @@ struct RichChatMessageList: View {
 
                     if hasNewerHistory, let onLoadNewer {
                         historySentinel(
-                            id: lastAnchorID,
+                            id: newerSentinelID,
                             label: "Load newer messages",
                             systemImage: "arrow.down.circle",
                             isLoading: false
@@ -131,6 +129,12 @@ struct RichChatMessageList: View {
                     initialBottomAnchor = nil
                     return
                 }
+                // Only auto-pin on the initial/latest window. When the user is
+                // browsing an older in-memory slice, `groups.last` changes as
+                // the window slides; treating that as an "initial load" yanks
+                // the scroll position to the bottom of the slice and can make
+                // the transcript appear to disappear for a frame.
+                guard !hasNewerHistory else { return }
                 guard initialBottomAnchor != initialScrollKey else { return }
                 initialBottomAnchor = initialScrollKey
                 await MainActor.run {
@@ -164,6 +168,9 @@ struct RichChatMessageList: View {
         return "group-0"
     }
 
+    private var olderSentinelID: String { "older-sentinel-\(firstAnchorID)" }
+    private var newerSentinelID: String { "newer-sentinel-\(lastAnchorID)" }
+
     @ViewBuilder
     private func historySentinel(
         id: String,
@@ -172,30 +179,28 @@ struct RichChatMessageList: View {
         isLoading: Bool,
         action: @escaping () async -> Void
     ) -> some View {
-        HStack(spacing: 6) {
-            if isLoading {
-                ProgressView().scaleEffect(0.7)
-            } else {
-                Image(systemName: systemImage).font(.caption)
+        Button {
+            guard !isLoading else { return }
+            Task { await action() }
+        } label: {
+            HStack(spacing: 6) {
+                if isLoading {
+                    ProgressView().scaleEffect(0.7)
+                } else {
+                    Image(systemName: systemImage).font(.caption)
+                }
+                Text(label).font(.caption)
             }
-            Text(label).font(.caption)
         }
+        .buttonStyle(.plain)
+        .disabled(isLoading)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .background(.regularMaterial, in: Capsule())
         .frame(maxWidth: .infinity)
         .padding(.vertical, 4)
-        .onAppear {
-            if systemImage.contains("up") {
-                guard lastOlderSentinelID != id else { return }
-                lastOlderSentinelID = id
-            } else {
-                guard lastNewerSentinelID != id else { return }
-                lastNewerSentinelID = id
-            }
-            Task { await action() }
-        }
+        .id(id)
     }
 
     private func loadEarlierAndPreserveAnchor(
