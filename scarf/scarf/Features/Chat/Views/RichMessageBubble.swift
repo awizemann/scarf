@@ -3,6 +3,7 @@ import ScarfCore
 import ScarfDesign
 #if canImport(AppKit)
 import AppKit
+import AVKit
 #endif
 
 struct RichMessageBubble: View, Equatable {
@@ -657,12 +658,14 @@ private struct MessageMediaAttachmentView: View, Equatable {
 
     @ViewBuilder
     private var videoPreview: some View {
-        // Do not embed AVKit's SwiftUI `VideoPlayer` inline here. On macOS 26.4
-        // the `_AVKit_SwiftUI` metadata path can abort the whole process when a
-        // chat row containing a video attachment is materialized. Keep video
-        // attachments safe and useful by rendering a compact file card with the
-        // normal Open/Copy actions; the system player opens out-of-process.
-        filePreview(icon: media.isReachableLocalFile ? "film" : "film.badge.exclamationmark")
+        if media.isReachableLocalFile || !media.url.isFileURL {
+            AppKitInlineVideoPlayer(url: media.url)
+                .frame(maxWidth: 560)
+                .frame(height: 315)
+                .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous))
+        } else {
+            filePreview(icon: "film.badge.exclamationmark")
+        }
     }
 
     private func filePreview(icon: String) -> some View {
@@ -707,6 +710,61 @@ private struct MessageMediaAttachmentView: View, Equatable {
         return NSImage(contentsOf: url)
     }
 }
+
+#if canImport(AppKit)
+private struct AppKitInlineVideoPlayer: NSViewRepresentable, Equatable {
+    let url: URL
+
+    static func == (lhs: AppKitInlineVideoPlayer, rhs: AppKitInlineVideoPlayer) -> Bool {
+        lhs.url == rhs.url
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(url: url)
+    }
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.controlsStyle = .inline
+        view.videoGravity = .resizeAspect
+        view.player = context.coordinator.player
+        return view
+    }
+
+    func updateNSView(_ nsView: AVPlayerView, context: Context) {
+        context.coordinator.update(url: url)
+        if nsView.player !== context.coordinator.player {
+            nsView.player = context.coordinator.player
+        }
+    }
+
+    static func dismantleNSView(_ nsView: AVPlayerView, coordinator: Coordinator) {
+        coordinator.player.pause()
+        nsView.player = nil
+    }
+
+    final class Coordinator {
+        private(set) var url: URL
+        private(set) var player: AVPlayer
+
+        init(url: URL) {
+            self.url = url
+            self.player = AVPlayer(url: url)
+        }
+
+        func update(url: URL) {
+            guard url != self.url else { return }
+            player.pause()
+            self.url = url
+            self.player = AVPlayer(url: url)
+        }
+
+        deinit {
+            player.pause()
+        }
+    }
+}
+#endif
 
 private func parseContentBlocks(_ content: String) -> [ContentBlock] {
     var blocks: [ContentBlock] = []
