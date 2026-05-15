@@ -73,16 +73,18 @@ public enum HistoryPageSize: Sendable {
 /// chunks before falling through to the DB hop.
 public enum RenderWindow: Sendable {
     /// Initial trailing window of message groups to render. Tuned
-    /// down from 50 → 30 after dogfooding showed scroll lag on
+    /// down from 50 → 30 → 15 after dogfooding showed scroll lag on
     /// long sessions even with the v2.7-era equatable +
     /// parse-deferral optimizations — the eager VStack still pays
-    /// per-bubble layout cost up front.
-    public nonisolated static let initial = 30
+    /// per-bubble layout cost up front. Fifteen groups keeps roughly
+    /// the latest screenful-plus hot while preserving the official
+    /// eager-stack chat layout and stable bottom anchoring.
+    public nonisolated static let initial = 15
     /// How many additional groups to reveal per "Load earlier" tap
     /// before falling through to the DB-paging path. Matches
-    /// `initial` so each tap roughly doubles the visible history
-    /// from cold-load.
-    public nonisolated static let step = 30
+    /// `initial` so each tap reveals a small, predictable batch
+    /// without suddenly materializing dozens of heavy bubbles.
+    public nonisolated static let step = 15
 }
 
 // MARK: - File Size Formatting
