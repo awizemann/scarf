@@ -1,6 +1,10 @@
 import SwiftUI
 import ScarfCore
 import ScarfDesign
+import AVKit
+#if canImport(AppKit)
+import AppKit
+#endif
 
 struct RichMessageBubble: View, Equatable {
     let message: HermesMessage
@@ -166,7 +170,7 @@ struct RichMessageBubble: View, Equatable {
         // The Equatable short-circuit on RichMessageBubble (id != 0)
         // then memoizes the parsed blocks for the lifetime of the
         // bubble — no per-render cache needed.
-        if message.id == 0 {
+        if message.id == 0 && !Self.contentMayContainMedia(message.content) {
             MarkdownContentView(content: message.content)
         } else {
             let blocks = parseContentBlocks(message.content)
@@ -177,6 +181,8 @@ struct RichMessageBubble: View, Equatable {
                         MarkdownContentView(content: text)
                     case .code(let code, let language):
                         CodeBlockView(code: code, language: language)
+                    case .media(let media):
+                        MessageMediaAttachmentView(media: media)
                     }
                 }
             }
@@ -454,6 +460,14 @@ struct RichMessageBubble: View, Equatable {
         return !["stop", "end_turn", "end-turn", ""].contains(normalized)
     }
 
+    private static func contentMayContainMedia(_ content: String) -> Bool {
+        content.split(separator: "\n", omittingEmptySubsequences: false).contains { line in
+            line.trimmingCharacters(in: .whitespacesAndNewlines)
+                .uppercased()
+                .hasPrefix("MEDIA:")
+        }
+    }
+
     /// Visual tone for an abnormal finish-reason badge. Severity
     /// scales: warning (yellow) for "the response was cut short" cases
     /// the user can usually retry, danger (red) for outright failures
@@ -510,6 +524,210 @@ private struct SpeakMessageButton: View {
 private enum ContentBlock {
     case text(String)
     case code(String, String?)
+    case media(MessageMediaAttachment)
+}
+
+private struct MessageMediaAttachment: Equatable, Identifiable {
+    enum Kind: Equatable {
+        case image
+        case video
+        case file
+    }
+
+    let id: String
+    let url: URL
+    let kind: Kind
+
+    var displayName: String {
+        url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
+    }
+
+    var isReachableLocalFile: Bool {
+        guard url.isFileURL else { return true }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    init?(rawValue: String) {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let parsedURL: URL
+        if let url = URL(string: trimmed), url.scheme == "http" || url.scheme == "https" || url.scheme == "file" {
+            parsedURL = url
+        } else {
+            parsedURL = URL(fileURLWithPath: (trimmed as NSString).expandingTildeInPath)
+        }
+
+        self.id = parsedURL.absoluteString
+        self.url = parsedURL
+        let ext = parsedURL.pathExtension.lowercased()
+        if ["png", "jpg", "jpeg", "gif", "heic", "webp", "tiff", "bmp"].contains(ext) {
+            self.kind = .image
+        } else if ["mp4", "mov", "m4v", "webm", "avi", "mkv"].contains(ext) {
+            self.kind = .video
+        } else {
+            self.kind = .file
+        }
+    }
+}
+
+private struct MessageMediaAttachmentView: View, Equatable {
+    let media: MessageMediaAttachment
+
+    static func == (lhs: MessageMediaAttachmentView, rhs: MessageMediaAttachmentView) -> Bool {
+        lhs.media == rhs.media
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+            switch media.kind {
+            case .image:
+                imagePreview
+            case .video:
+                videoPreview
+            case .file:
+                filePreview(icon: "doc")
+            }
+
+            HStack(spacing: ScarfSpace.s2) {
+                Image(systemName: iconName)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(ScarfColor.accent)
+                Text(media.displayName)
+                    .font(ChatFontScale.caption(1.0))
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: ScarfSpace.s2)
+                Button("Open") {
+                    openMedia()
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            }
+        }
+        .padding(ScarfSpace.s2)
+        .background(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .fill(ScarfColor.backgroundPrimary)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .strokeBorder(ScarfColor.border, lineWidth: 1)
+        )
+        .contextMenu {
+            Button("Open") { openMedia() }
+            Button("Copy Path") { copyMediaReference() }
+        }
+    }
+
+    @ViewBuilder
+    private var imagePreview: some View {
+        if media.url.isFileURL {
+            if let image = platformImage(from: media.url) {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 560, maxHeight: 360)
+                    .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous))
+            } else {
+                filePreview(icon: media.isReachableLocalFile ? "photo" : "photo.badge.exclamationmark")
+            }
+        } else {
+            AsyncImage(url: media.url) { phase in
+                switch phase {
+                case .empty:
+                    ProgressView()
+                        .frame(maxWidth: 560, minHeight: 160, alignment: .center)
+                case .success(let image):
+                    image
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: 560, maxHeight: 360)
+                case .failure:
+                    filePreview(icon: "photo.badge.exclamationmark")
+                @unknown default:
+                    filePreview(icon: "photo.badge.exclamationmark")
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous))
+        }
+    }
+
+    @ViewBuilder
+    private var videoPreview: some View {
+        if media.isReachableLocalFile || !media.url.isFileURL {
+            InlineVideoPlayer(url: media.url)
+                .frame(maxWidth: 560)
+                .frame(height: 315)
+                .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous))
+        } else {
+            filePreview(icon: "film.badge.exclamationmark")
+        }
+    }
+
+    private func filePreview(icon: String) -> some View {
+        HStack(spacing: ScarfSpace.s2) {
+            Image(systemName: icon)
+                .font(.system(size: 24))
+                .foregroundStyle(ScarfColor.foregroundMuted)
+            Text(media.isReachableLocalFile ? "Preview unavailable" : "File not found")
+                .font(ChatFontScale.caption(1.0))
+                .foregroundStyle(ScarfColor.foregroundMuted)
+        }
+        .frame(maxWidth: 560, minHeight: 72, alignment: .center)
+        .background(
+            RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
+                .fill(ScarfColor.backgroundSecondary)
+        )
+    }
+
+    private var iconName: String {
+        switch media.kind {
+        case .image: return "photo"
+        case .video: return "play.rectangle"
+        case .file: return "paperclip"
+        }
+    }
+
+    private func openMedia() {
+#if canImport(AppKit)
+        NSWorkspace.shared.open(media.url)
+#endif
+    }
+
+    private func copyMediaReference() {
+#if canImport(AppKit)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(media.url.isFileURL ? media.url.path : media.url.absoluteString, forType: .string)
+#endif
+    }
+
+    private func platformImage(from url: URL) -> NSImage? {
+        guard url.isFileURL else { return nil }
+        return NSImage(contentsOf: url)
+    }
+}
+
+private struct InlineVideoPlayer: View, Equatable {
+    let url: URL
+    @State private var player: AVPlayer
+
+    init(url: URL) {
+        self.url = url
+        _player = State(initialValue: AVPlayer(url: url))
+    }
+
+    static func == (lhs: InlineVideoPlayer, rhs: InlineVideoPlayer) -> Bool {
+        lhs.url == rhs.url
+    }
+
+    var body: some View {
+        VideoPlayer(player: player)
+            .onDisappear { player.pause() }
+    }
 }
 
 private func parseContentBlocks(_ content: String) -> [ContentBlock] {
@@ -520,12 +738,18 @@ private func parseContentBlocks(_ content: String) -> [ContentBlock] {
     var codeLanguage: String?
     var inCode = false
 
+    func flushText() {
+        let text = currentText.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty {
+            blocks.append(.text(text))
+        }
+        currentText = []
+    }
+
     for line in lines {
+        let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
         if !inCode && line.hasPrefix("```") {
-            if !currentText.isEmpty {
-                blocks.append(.text(currentText.joined(separator: "\n")))
-                currentText = []
-            }
+            flushText()
             inCode = true
             let lang = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
             codeLanguage = lang.isEmpty ? nil : lang
@@ -536,6 +760,14 @@ private func parseContentBlocks(_ content: String) -> [ContentBlock] {
             inCode = false
         } else if inCode {
             currentCode.append(line)
+        } else if trimmedLine.uppercased().hasPrefix("MEDIA:") {
+            flushText()
+            let rawMedia = String(trimmedLine.dropFirst("MEDIA:".count))
+            if let media = MessageMediaAttachment(rawValue: rawMedia) {
+                blocks.append(.media(media))
+            } else {
+                currentText.append(line)
+            }
         } else {
             currentText.append(line)
         }
@@ -544,12 +776,7 @@ private func parseContentBlocks(_ content: String) -> [ContentBlock] {
     if inCode && !currentCode.isEmpty {
         blocks.append(.code(currentCode.joined(separator: "\n"), codeLanguage))
     }
-    if !currentText.isEmpty {
-        let text = currentText.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty {
-            blocks.append(.text(text))
-        }
-    }
+    flushText()
 
     return blocks
 }
