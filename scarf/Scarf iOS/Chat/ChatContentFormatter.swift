@@ -1,92 +1,133 @@
 import Foundation
 
-/// Splits a chat message body into alternating text + fenced-code
-/// segments so ChatView can render each part appropriately. Text
-/// gets the existing AttributedString(markdown:) path; code gets a
-/// horizontally-scrollable monospaced block (pass-1 UX: long lines
-/// wrapped onto 4–5 visual rows each, which ate vertical space and
-/// made code unreadable on an iPhone).
+/// Splits a chat message body into alternating text, fenced-code, and media
+/// segments so ChatView can render each part appropriately. Text gets the
+/// existing AttributedString(markdown:) path; code gets a horizontally-
+/// scrollable monospaced block; standalone `MEDIA:` lines become inline
+/// attachments.
 ///
-/// Keeps the parser deliberately simple: we recognise the common
-/// fenced form (```\n...\n``` and ```lang\n...\n```) and leave
-/// everything else in the .text bucket. Inline `backticks` stay in
-/// the text segment — AttributedString handles those fine.
+/// Keeps the parser deliberately simple: it recognises the common fenced form
+/// (```\n...\n``` and ```lang\n...\n```) and only treats `MEDIA:` as special
+/// outside fences. Inline `backticks` stay in the text segment —
+/// AttributedString handles those fine.
 enum ChatContentFormatter {
 
     enum Segment: Equatable {
         case text(String)
         case code(language: String?, body: String)
+        case media(ChatMediaAttachment)
     }
 
     /// Split the given message body into an ordered list of segments.
-    /// A body with no fenced code yields a single `.text` segment.
+    /// A body with no fenced code and no MEDIA lines yields a single `.text` segment.
     static func segments(for body: String) -> [Segment] {
-        // Fast path: no fences at all.
-        guard body.contains("```") else { return [.text(body)] }
+        guard body.contains("```") || body.localizedCaseInsensitiveContains("MEDIA:") else {
+            return [.text(body)]
+        }
 
         var result: [Segment] = []
-        var pending = ""
-        var i = body.startIndex
+        let lines = body.components(separatedBy: "\n")
+        var pendingText: [String] = []
+        var pendingCode: [String] = []
+        var codeLanguage: String?
+        var inCode = false
 
-        while i < body.endIndex {
-            // Try to match a fence opening at this position.
-            if body[i...].hasPrefix("```") {
-                // Flush the accumulated text.
-                if !pending.isEmpty {
-                    result.append(.text(pending))
-                    pending = ""
-                }
+        func flushText() {
+            let text = pendingText.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                result.append(.text(text))
+            }
+            pendingText = []
+        }
 
-                // Parse the optional language token up to the first newline.
-                let afterFence = body.index(i, offsetBy: 3)
-                var j = afterFence
-                while j < body.endIndex, body[j] != "\n" {
-                    j = body.index(after: j)
-                }
-                let lang = String(body[afterFence..<j]).trimmingCharacters(in: .whitespaces)
-
-                // Skip the newline after the language line, if any.
-                let bodyStart = (j < body.endIndex) ? body.index(after: j) : j
-
-                // Scan for the closing fence.
-                var k = bodyStart
-                while k < body.endIndex {
-                    if body[k...].hasPrefix("```") {
-                        break
-                    }
-                    k = body.index(after: k)
-                }
-                let codeBody = String(body[bodyStart..<k])
-                result.append(.code(
-                    language: lang.isEmpty ? nil : lang,
-                    body: codeBody.hasSuffix("\n") ? String(codeBody.dropLast()) : codeBody
-                ))
-
-                if k < body.endIndex {
-                    // Skip the closing ```.
-                    i = body.index(k, offsetBy: 3)
-                    // Skip a single trailing newline if present so
-                    // the next text segment doesn't start with a
-                    // cosmetic blank line.
-                    if i < body.endIndex, body[i] == "\n" {
-                        i = body.index(after: i)
-                    }
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !inCode && line.hasPrefix("```") {
+                flushText()
+                inCode = true
+                let lang = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                codeLanguage = lang.isEmpty ? nil : lang
+            } else if inCode && line.hasPrefix("```") {
+                result.append(.code(language: codeLanguage, body: pendingCode.joined(separator: "\n")))
+                pendingCode = []
+                codeLanguage = nil
+                inCode = false
+            } else if inCode {
+                pendingCode.append(line)
+            } else if trimmed.uppercased().hasPrefix("MEDIA:") {
+                flushText()
+                let rawMedia = String(trimmed.dropFirst("MEDIA:".count))
+                if let media = ChatMediaAttachment(rawValue: rawMedia) {
+                    result.append(.media(media))
                 } else {
-                    // Unterminated fence — keep everything we saw
-                    // as text instead, preserving user input rather
-                    // than silently swallowing it.
-                    pending = String(body[i..<body.endIndex])
-                    i = body.endIndex
+                    pendingText.append(line)
                 }
             } else {
-                pending.append(body[i])
-                i = body.index(after: i)
+                pendingText.append(line)
             }
         }
 
-        if !pending.isEmpty {
-            result.append(.text(pending))
+        if inCode {
+            let unterminated = "```" + (codeLanguage.map { $0 } ?? "") + "\n" + pendingCode.joined(separator: "\n")
+            pendingText.append(unterminated)
         }
+        flushText()
+
         return result
+    }
+}
+
+struct ChatMediaAttachment: Equatable, Identifiable {
+    enum Kind: Equatable {
+        case image
+        case video
+        case file
+    }
+
+    let id: String
+    let rawReference: String
+    let url: URL
+    let filePath: String?
+    let kind: Kind
+
+    var displayName: String {
+        if let filePath {
+            return (filePath as NSString).lastPathComponent.isEmpty ? filePath : (filePath as NSString).lastPathComponent
+        }
+        return url.lastPathComponent.isEmpty ? url.absoluteString : url.lastPathComponent
+    }
+
+    var isFileBacked: Bool { filePath != nil }
+
+    init?(rawValue: String) {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let parsedURL: URL
+        let path: String?
+        if let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) {
+            parsedURL = url
+            path = nil
+        } else if let url = URL(string: trimmed), url.scheme?.lowercased() == "file" {
+            parsedURL = url
+            path = url.path
+        } else {
+            parsedURL = URL(fileURLWithPath: trimmed)
+            path = trimmed
+        }
+
+        self.rawReference = trimmed
+        self.url = parsedURL
+        self.filePath = path
+        self.id = trimmed
+
+        let ext = (path.map { ($0 as NSString).pathExtension } ?? parsedURL.pathExtension).lowercased()
+        if ["png", "jpg", "jpeg", "gif", "heic", "webp", "tiff", "bmp"].contains(ext) {
+            self.kind = .image
+        } else if ["mp4", "mov", "m4v", "webm", "avi", "mkv"].contains(ext) {
+            self.kind = .video
+        } else {
+            self.kind = .file
+        }
     }
 }

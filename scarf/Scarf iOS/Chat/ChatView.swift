@@ -2,6 +2,7 @@ import SwiftUI
 import ScarfCore
 import ScarfIOS
 import ScarfDesign
+import AVKit
 import os
 #if canImport(PhotosUI)
 import PhotosUI
@@ -2367,6 +2368,8 @@ private struct MessageBubble: View, Equatable {
                                 .textSelection(.enabled)
                         case .code(let lang, let body):
                             CodeBlockView(language: lang, body: body)
+                        case .media(let media):
+                            IOSMessageMediaAttachmentView(media: media)
                         }
                     }
                 }
@@ -2418,6 +2421,237 @@ private struct MessageBubble: View, Equatable {
             return Text(attributed)
         }
         return Text(body)
+    }
+}
+
+private struct IOSMessageMediaAttachmentView: View {
+    let media: ChatMediaAttachment
+
+    @Environment(\.serverContext) private var serverContext
+    @State private var image: UIImage?
+    @State private var imageError: String?
+    @State private var videoPlayer: AVPlayer?
+    @State private var videoError: String?
+    @State private var temporaryVideoURL: URL?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            switch media.kind {
+            case .image:
+                imagePreview
+            case .video:
+                videoPreview
+            case .file:
+                filePreview(icon: "paperclip", message: "Preview unavailable")
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: iconName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ScarfColor.accent)
+                Text(media.displayName)
+                    .font(.caption2)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 8)
+                if !media.isFileBacked {
+                    Link("Open", destination: media.url)
+                        .font(.caption2)
+                }
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .fill(ScarfColor.backgroundPrimary.opacity(0.8))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .strokeBorder(ScarfColor.border, lineWidth: 1)
+        )
+        .contextMenu {
+            Button {
+                UIPasteboard.general.string = media.rawReference
+            } label: {
+                Label("Copy Path", systemImage: "doc.on.doc")
+            }
+            if !media.isFileBacked {
+                ShareLink(item: media.url) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var imagePreview: some View {
+        if media.isFileBacked {
+            Group {
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: 280, maxHeight: 320)
+                        .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous))
+                } else if let imageError {
+                    filePreview(icon: imageError == "File not found" ? "photo.badge.exclamationmark" : "photo", message: imageError)
+                } else {
+                    ProgressView()
+                        .frame(maxWidth: 280, minHeight: 140, alignment: .center)
+                }
+            }
+            .task(id: "\(serverContext.id.uuidString)|\(media.id)") {
+                await loadFileBackedImage()
+            }
+            .onChange(of: media.id) { _, _ in resetImageState() }
+            .onChange(of: serverContext.id) { _, _ in resetImageState() }
+        } else {
+            AsyncImage(url: media.url) { phase in
+                switch phase {
+                case .empty:
+                    ProgressView()
+                        .frame(maxWidth: 280, minHeight: 140, alignment: .center)
+                case .success(let loaded):
+                    loaded
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: 280, maxHeight: 320)
+                        .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous))
+                case .failure:
+                    filePreview(icon: "photo.badge.exclamationmark", message: "Preview unavailable")
+                @unknown default:
+                    filePreview(icon: "photo.badge.exclamationmark", message: "Preview unavailable")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var videoPreview: some View {
+        Group {
+            if let videoPlayer {
+                VideoPlayer(player: videoPlayer)
+                    .frame(maxWidth: 280)
+                    .frame(height: 180)
+                    .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous))
+            } else if let videoError {
+                filePreview(icon: videoError == "File not found" ? "film.badge.exclamationmark" : "film", message: videoError)
+            } else {
+                ProgressView()
+                    .frame(maxWidth: 280, minHeight: 140, alignment: .center)
+            }
+        }
+        .task(id: "\(serverContext.id.uuidString)|\(media.id)") {
+            await loadVideoPlayer()
+        }
+        .onDisappear {
+            videoPlayer?.pause()
+            cleanupTemporaryVideo()
+        }
+        .onChange(of: media.id) { _, _ in resetVideoState() }
+        .onChange(of: serverContext.id) { _, _ in resetVideoState() }
+    }
+
+    private func loadFileBackedImage() async {
+        guard let path = media.filePath else { return }
+        let context = serverContext
+        let result: (data: Data?, error: String?) = await Task.detached {
+            let transport = context.makeTransport()
+            guard transport.fileExists(path) else { return (nil, "File not found") }
+            do { return (try transport.readFile(path), nil) }
+            catch { return (nil, "Preview unavailable") }
+        }.value
+
+        if let data = result.data, let decoded = UIImage(data: data) {
+            image = decoded
+            imageError = nil
+        } else {
+            image = nil
+            imageError = result.error ?? "Preview unavailable"
+        }
+    }
+
+    private func loadVideoPlayer() async {
+        if !media.isFileBacked {
+            videoPlayer?.pause()
+            videoPlayer = AVPlayer(url: media.url)
+            videoError = nil
+            return
+        }
+
+        guard let path = media.filePath else { return }
+        let context = serverContext
+        let ext = (path as NSString).pathExtension.isEmpty ? "mp4" : (path as NSString).pathExtension
+        let result: (url: URL?, error: String?) = await Task.detached {
+            let transport = context.makeTransport()
+            guard transport.fileExists(path) else { return (nil, "File not found") }
+            do {
+                let data = try transport.readFile(path)
+                let temp = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("scarf-chat-video-\(UUID().uuidString)")
+                    .appendingPathExtension(ext)
+                try data.write(to: temp, options: .atomic)
+                return (temp, nil)
+            } catch {
+                return (nil, "Preview unavailable")
+            }
+        }.value
+
+        if let url = result.url {
+            cleanupTemporaryVideo()
+            temporaryVideoURL = url
+            videoPlayer?.pause()
+            videoPlayer = AVPlayer(url: url)
+            videoError = nil
+        } else {
+            videoPlayer?.pause()
+            videoPlayer = nil
+            videoError = result.error ?? "Preview unavailable"
+        }
+    }
+
+    private func resetImageState() {
+        image = nil
+        imageError = nil
+    }
+
+    private func resetVideoState() {
+        videoPlayer?.pause()
+        videoPlayer = nil
+        videoError = nil
+        cleanupTemporaryVideo()
+    }
+
+    private func cleanupTemporaryVideo() {
+        if let temporaryVideoURL {
+            try? FileManager.default.removeItem(at: temporaryVideoURL)
+            self.temporaryVideoURL = nil
+        }
+    }
+
+    private func filePreview(icon: String, message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(ScarfColor.foregroundMuted)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(ScarfColor.foregroundMuted)
+        }
+        .frame(maxWidth: 280, minHeight: 72, alignment: .center)
+        .background(
+            RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
+                .fill(ScarfColor.backgroundSecondary)
+        )
+    }
+
+    private var iconName: String {
+        switch media.kind {
+        case .image: return "photo"
+        case .video: return "play.rectangle"
+        case .file: return "paperclip"
+        }
     }
 }
 
