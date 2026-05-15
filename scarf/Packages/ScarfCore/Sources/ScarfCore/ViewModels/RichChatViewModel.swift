@@ -132,11 +132,26 @@ struct PendingLocalUserMessageStore: Sendable {
     private struct Record: Codable {
         let id: Int
         let sessionId: String
+        let role: String?
         let content: String
+        let toolCallId: String?
+        let toolCalls: [HermesToolCall]?
+        let toolName: String?
         let timestamp: Date?
+        let tokenCount: Int?
+        let finishReason: String?
+        let reasoning: String?
+        let reasoningContent: String?
     }
 
-    private static let keyPrefix = "com.scarf.pending-local-user-messages.v1."
+    private static let keyPrefix = "com.scarf.pending-local-user-messages.v2."
+    private static let legacyKeyPrefix = "com.scarf.pending-local-user-messages.v1."
+    /// Temporary bucket for optimistic user messages created before
+    /// `session/new` / `session/load` has yielded a concrete id. This is
+    /// intentionally internal (not private) so regression tests can assert the
+    /// exact durability edge case: quit after the bubble appears but before
+    /// Scarf has a session id to key it by.
+    static let orphanSessionKey = "__scarf_orphan_session__"
 
     private let readData: @Sendable (ServerID) -> Data?
     private let writeData: @Sendable (Data?, ServerID) -> Void
@@ -144,7 +159,10 @@ struct PendingLocalUserMessageStore: Sendable {
     static func userDefaults(_ defaults: UserDefaults = .standard) -> Self {
         let defaultsBox = UserDefaultsBox(defaults)
         return Self(
-            readData: { defaultsBox.defaults.data(forKey: Self.keyPrefix + $0.uuidString) },
+            readData: { serverID in
+                defaultsBox.defaults.data(forKey: Self.keyPrefix + serverID.uuidString)
+                    ?? defaultsBox.defaults.data(forKey: Self.legacyKeyPrefix + serverID.uuidString)
+            },
             writeData: { data, serverID in
                 let key = Self.keyPrefix + serverID.uuidString
                 if let data {
@@ -152,6 +170,7 @@ struct PendingLocalUserMessageStore: Sendable {
                 } else {
                     defaultsBox.defaults.removeObject(forKey: key)
                 }
+                defaultsBox.defaults.removeObject(forKey: Self.legacyKeyPrefix + serverID.uuidString)
             }
         )
     }
@@ -183,15 +202,16 @@ struct PendingLocalUserMessageStore: Sendable {
                 HermesMessage(
                     id: row.id,
                     sessionId: row.sessionId,
-                    role: "user",
+                    role: row.role ?? "user",
                     content: row.content,
-                    toolCallId: nil,
-                    toolCalls: [],
-                    toolName: nil,
+                    toolCallId: row.toolCallId,
+                    toolCalls: row.toolCalls ?? [],
+                    toolName: row.toolName,
                     timestamp: row.timestamp,
-                    tokenCount: nil,
-                    finishReason: nil,
-                    reasoning: nil
+                    tokenCount: row.tokenCount,
+                    finishReason: row.finishReason,
+                    reasoning: row.reasoning,
+                    reasoningContent: row.reasoningContent
                 )
             }
         }
@@ -199,7 +219,11 @@ struct PendingLocalUserMessageStore: Sendable {
 
     func write(_ pending: [String: [HermesMessage]], for serverID: ServerID) {
         let sanitized = pending
-            .mapValues { messages in messages.filter { $0.isUser && $0.id < 0 && !$0.content.isEmpty } }
+            .mapValues { messages in
+                messages.filter { msg in
+                    msg.id < 0 && !msg.content.isEmpty && (msg.isUser || msg.isAssistant || msg.isToolResult)
+                }
+            }
             .filter { !$0.value.isEmpty }
         guard !sanitized.isEmpty else {
             writeData(nil, serverID)
@@ -212,7 +236,20 @@ struct PendingLocalUserMessageStore: Sendable {
     private static func encode(_ pending: [String: [HermesMessage]]) -> [String: [Record]] {
         pending.mapValues { messages in
             messages.map { msg in
-                Record(id: msg.id, sessionId: msg.sessionId, content: msg.content, timestamp: msg.timestamp)
+                Record(
+                    id: msg.id,
+                    sessionId: msg.sessionId,
+                    role: msg.role,
+                    content: msg.content,
+                    toolCallId: msg.toolCallId,
+                    toolCalls: msg.toolCalls.isEmpty ? nil : msg.toolCalls,
+                    toolName: msg.toolName,
+                    timestamp: msg.timestamp,
+                    tokenCount: msg.tokenCount,
+                    finishReason: msg.finishReason,
+                    reasoning: msg.reasoning,
+                    reasoningContent: msg.reasoningContent
+                )
             }
         }
     }
@@ -259,9 +296,13 @@ public final class RichChatViewModel {
         // on iOS chat startup.
     }
 
-    init(context: ServerContext = .local, pendingLocalUserMessageStore: PendingLocalUserMessageStore) {
+    init(
+        context: ServerContext = .local,
+        dataService: HermesDataService? = nil,
+        pendingLocalUserMessageStore: PendingLocalUserMessageStore
+    ) {
         self.context = context
-        self.dataService = HermesDataService(context: context)
+        self.dataService = dataService ?? HermesDataService(context: context)
         self.pendingLocalUserMessageStore = pendingLocalUserMessageStore
         self.pendingLocalUserMessages = pendingLocalUserMessageStore.read(for: context.id)
         // Quick-commands load happens in `reset()`, which every chat-start
@@ -1215,6 +1256,63 @@ public final class RichChatViewModel {
         pendingLocalUserMessageStore.write(pendingLocalUserMessages, for: context.id)
     }
 
+    private func rememberPendingLocalMessage(_ message: HermesMessage) {
+        guard message.id < 0,
+              !message.content.isEmpty,
+              message.isUser || message.isAssistant || message.isToolResult else { return }
+        let key = message.sessionId.isEmpty
+            ? PendingLocalUserMessageStore.orphanSessionKey
+            : message.sessionId
+        var rows = pendingLocalUserMessages[key] ?? []
+        if let idx = rows.firstIndex(where: { $0.id == message.id }) {
+            rows[idx] = message
+        } else if !rows.contains(where: {
+            $0.role == message.role
+                && $0.content == message.content
+                && $0.toolCallId == message.toolCallId
+        }) {
+            rows.append(message)
+        }
+        pendingLocalUserMessages[key] = rows
+        persistPendingLocalUserMessages()
+    }
+
+    private func updatePendingLocalMessages(sessionId: String, mergedMessages: [HermesMessage], fetched: [HermesMessage]) {
+        let surviving = mergedMessages.filter { msg in
+            msg.id < 0
+                && msg.sessionId == sessionId
+                && (msg.isUser || msg.isAssistant || msg.isToolResult)
+                && !Self.hasSemanticDBTwin(for: msg, in: fetched)
+        }
+        if surviving.isEmpty {
+            pendingLocalUserMessages.removeValue(forKey: sessionId)
+        } else {
+            pendingLocalUserMessages[sessionId] = surviving
+        }
+        persistPendingLocalUserMessages()
+    }
+
+    nonisolated private static func hasSemanticDBTwin(for local: HermesMessage, in fetched: [HermesMessage]) -> Bool {
+        guard local.id < 0 else { return true }
+        if local.isUser {
+            return fetched.contains { $0.isUser && $0.id >= 0 && $0.content == local.content }
+        }
+        if local.isAssistant {
+            return fetched.contains { db in
+                guard db.isAssistant, db.id >= 0 else { return false }
+                let hasTextTwin = !local.content.isEmpty && db.content == local.content
+                let localCallIds = Set(local.toolCalls.map(\.callId))
+                let dbCallIds = Set(db.toolCalls.map(\.callId))
+                let hasToolTwin = !localCallIds.isEmpty && localCallIds.isSubset(of: dbCallIds)
+                return hasTextTwin || hasToolTwin
+            }
+        }
+        if local.isToolResult, let callId = local.toolCallId {
+            return fetched.contains { $0.isToolResult && $0.id >= 0 && $0.toolCallId == callId }
+        }
+        return false
+    }
+
     private func attachOrphanLocalUserMessages(to sessionId: String) {
         var changedMessages = false
         var newlyPending: [HermesMessage] = []
@@ -1238,6 +1336,33 @@ public final class RichChatViewModel {
             newlyPending.append(attached)
             return attached
         }
+        // Also attach orphan rows that were persisted to UserDefaults before
+        // the app was quit/relaunched. The original in-memory `messages` array
+        // is gone in that case, so relying only on the map above loses exactly
+        // the prompt the user is trying to recover.
+        if let persistedOrphans = pendingLocalUserMessages.removeValue(forKey: PendingLocalUserMessageStore.orphanSessionKey) {
+            for msg in persistedOrphans where msg.isUser && msg.id < 0 && msg.sessionId.isEmpty {
+                changedMessages = true
+                let attached = HermesMessage(
+                    id: msg.id,
+                    sessionId: sessionId,
+                    role: msg.role,
+                    content: msg.content,
+                    toolCallId: msg.toolCallId,
+                    toolCalls: msg.toolCalls,
+                    toolName: msg.toolName,
+                    timestamp: msg.timestamp,
+                    tokenCount: msg.tokenCount,
+                    finishReason: msg.finishReason,
+                    reasoning: msg.reasoning,
+                    reasoningContent: msg.reasoningContent
+                )
+                if !messages.contains(where: { $0.id == attached.id || ($0.isUser && $0.content == attached.content) }) {
+                    messages.append(attached)
+                }
+                newlyPending.append(attached)
+            }
+        }
         guard changedMessages else { return }
         var existing = pendingLocalUserMessages[sessionId] ?? []
         for msg in newlyPending where !existing.contains(where: { $0.id == msg.id || $0.content == msg.content }) {
@@ -1249,15 +1374,7 @@ public final class RichChatViewModel {
     }
 
     private func reconcilePendingLocalUserMessages(sessionId: String, fetched: [HermesMessage]) {
-        guard let pending = pendingLocalUserMessages[sessionId], !pending.isEmpty else { return }
-        let dbUserContents = Set(fetched.filter { $0.isUser && $0.id >= 0 }.map(\.content))
-        let stillPending = pending.filter { !dbUserContents.contains($0.content) }
-        if stillPending.isEmpty {
-            pendingLocalUserMessages.removeValue(forKey: sessionId)
-        } else {
-            pendingLocalUserMessages[sessionId] = stillPending
-        }
-        persistPendingLocalUserMessages()
+        updatePendingLocalMessages(sessionId: sessionId, mergedMessages: messages, fetched: fetched)
     }
 
     public func cleanup() async {
@@ -1311,10 +1428,9 @@ public final class RichChatViewModel {
         // Track the local message in the pending-user-messages cache
         // so a reset/resume cycle on this session before Hermes
         // persists the row can still re-inject it on return (#63).
-        if let sid = sessionId {
-            pendingLocalUserMessages[sid, default: []].append(message)
-            persistPendingLocalUserMessages()
-        }
+        let pendingKey = sessionId ?? PendingLocalUserMessageStore.orphanSessionKey
+        pendingLocalUserMessages[pendingKey, default: []].append(message)
+        persistPendingLocalUserMessages()
         // Per-turn stopwatch (v2.5): record the start time only when
         // we're entering a fresh agent turn. /steer-style mid-run sends
         // arrive while isAgentWorking is already true; preserve the
@@ -1556,7 +1672,7 @@ public final class RichChatViewModel {
         // Add tool result message
         let id = nextLocalId
         nextLocalId -= 1
-        messages.append(HermesMessage(
+        let toolResult = HermesMessage(
             id: id,
             sessionId: sessionId ?? "",
             role: "tool",
@@ -1568,7 +1684,9 @@ public final class RichChatViewModel {
             tokenCount: nil,
             finishReason: nil,
             reasoning: nil
-        ))
+        )
+        messages.append(toolResult)
+        rememberPendingLocalMessage(toolResult)
         buildMessageGroups()
     }
 
@@ -1811,7 +1929,7 @@ public final class RichChatViewModel {
             // ahead of its actual position — the prompt-jump bug.
             let preservedTimestamp = messages[idx].timestamp ?? Date()
             withTransaction(Transaction(animation: nil)) {
-                messages[idx] = HermesMessage(
+                let finalized = HermesMessage(
                     id: id,
                     sessionId: sessionId ?? "",
                     role: "assistant",
@@ -1824,6 +1942,8 @@ public final class RichChatViewModel {
                     finishReason: streamingToolCalls.isEmpty ? "stop" : nil,
                     reasoning: streamingThinkingText.isEmpty ? nil : streamingThinkingText
                 )
+                messages[idx] = finalized
+                rememberPendingLocalMessage(finalized)
             }
             // Capture per-turn duration so the chat UI can render the
             // stopwatch pill (v2.5). Skips assistants we don't have a
@@ -1962,10 +2082,39 @@ public final class RichChatViewModel {
             ScarfMon.event(.sessionLoad, "mac.hydrateMessages.dropped", count: 1)
             return
         }
-        // The DB has more on-disk history when the initial fetch
-        // saturated the limit. The "Load earlier" affordance reads
-        // this flag.
+        // A tool-heavy latest turn can have 25+ assistant rows whose only
+        // persisted payload is `tool_calls`. Phase-1 intentionally blanks
+        // those rows until hydration, so the initial page can contain a final
+        // assistant answer but not the user prompts that caused it. Pull a few
+        // additional lightweight skeleton pages until at least one user row is
+        // present; otherwise a reload looks like the latest user messages were
+        // lost even though they are in state.db.
         var moreHistory = allMessages.count >= pageSize
+        while moreHistory,
+              !allMessages.contains(where: { $0.isUser }),
+              allMessages.count < HistoryPageSize.reconcile,
+              let oldest = allMessages.map(\.id).min()
+        {
+            let earlier = await dataService.fetchSkeletonMessages(
+                sessionId: sessionId,
+                limit: pageSize,
+                before: oldest
+            )
+            if let err = earlier.transportError, transportFailure == nil {
+                transportFailure = err
+            }
+            guard self.sessionId == loadingForSession else {
+                ScarfMon.event(.sessionLoad, "mac.hydrateMessages.dropped", count: 1)
+                return
+            }
+            guard !earlier.messages.isEmpty else {
+                moreHistory = false
+                break
+            }
+            allMessages = earlier.messages + allMessages
+            moreHistory = earlier.messages.count >= pageSize
+            ScarfMon.event(.sessionLoad, "mac.hydrateMessages.contextRows", count: earlier.messages.count)
+        }
         let session = await dataService.fetchSession(id: sessionId)
 
         // If the ACP session is different from the origin, load its messages too
@@ -1989,45 +2138,18 @@ public final class RichChatViewModel {
             }
         }
 
-        // Issue #63 — re-inject any locally-created user messages
-        // we still have on file for this session that haven't yet
-        // shown up in state.db. Covers two paths:
-        //   1. The user just sent a prompt then resumed a different
-        //      session before Hermes persisted the row. `reset()` had
-        //      cleared `messages` but the per-session pending cache
-        //      survived; restore the row here so the bubble doesn't
-        //      come back blank.
-        //   2. The DB-resume path on first load — a previously-pending
-        //      message Hermes is still mid-write may not appear in
-        //      this fetch. We merge it in, and drop it from the cache
-        //      as soon as a matching DB row (same content, persisted
-        //      id ≥ 0) shows up.
+        // Issue #63 / desktop durability — re-inject any locally-created
+        // transcript rows (user prompt, finalized assistant reply, tool result)
+        // that are still missing from state.db. Hermes can lag or skip the
+        // final DB flush while the desktop app has already rendered the turn;
+        // without this local sidecar, reopening the conversation makes the
+        // latest exchange disappear forever from Scarf's point of view.
         let pendingForSession = pendingLocalUserMessages[sessionId] ?? []
         if pendingForSession.isEmpty {
             messages = allMessages
         } else {
-            var merged = allMessages
-            var stillPending: [HermesMessage] = []
-            for local in pendingForSession {
-                let persisted = merged.contains { msg in
-                    msg.isUser && msg.id >= 0 && msg.content == local.content
-                }
-                if persisted {
-                    continue // DB caught up — drop the local copy
-                }
-                if !merged.contains(where: { $0.id == local.id }) {
-                    merged.append(local)
-                }
-                stillPending.append(local)
-            }
-            merged.sort(by: HermesMessage.chronologicalOrder)
-            messages = merged
-            if stillPending.isEmpty {
-                pendingLocalUserMessages.removeValue(forKey: sessionId)
-            } else {
-                pendingLocalUserMessages[sessionId] = stillPending
-            }
-            persistPendingLocalUserMessages()
+            messages = Self.mergedAfterPoll(fetched: allMessages, currentLocal: pendingForSession)
+            updatePendingLocalMessages(sessionId: sessionId, mergedMessages: messages, fetched: allMessages)
         }
         currentSession = session
         let minId = messages.map(\.id).min() ?? 0

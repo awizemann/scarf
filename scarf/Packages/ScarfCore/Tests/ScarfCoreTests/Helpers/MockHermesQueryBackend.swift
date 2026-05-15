@@ -27,6 +27,11 @@ final actor MockHermesQueryBackend: HermesQueryBackend {
     /// the broad one swallowing the narrow one.
     private var scriptedResults: [String: [Row]] = [:]
 
+    /// Map of SQL prefix → queued row pages. Lookup picks the longest
+    /// matching prefix and consumes one page per query. Used when the same
+    /// SQL shape is called repeatedly with different params (pagination).
+    private var scriptedResultQueues: [String: [[Row]]] = [:]
+
     /// Map of SQL prefix → backend error to throw instead of returning
     /// rows. Used to test the data-service's error-swallowing paths.
     private var scriptedFailures: [String: BackendError] = [:]
@@ -62,6 +67,13 @@ final actor MockHermesQueryBackend: HermesQueryBackend {
     /// Seed an arbitrary row sequence for queries that share `prefix`.
     func _seedRows(forSQLPrefix prefix: String, _ rows: [Row]) {
         scriptedResults[prefix] = rows
+    }
+
+    /// Seed a sequence of row pages for repeated queries matching `prefix`.
+    /// Each query consumes the next page; once exhausted, lookup falls back to
+    /// the static rows map or returns empty.
+    func _seedRowsSequence(forSQLPrefix prefix: String, _ pages: [[Row]]) {
+        scriptedResultQueues[prefix] = pages
     }
 
     /// Make `query` throw the specified `error` whenever it sees a SQL
@@ -115,6 +127,9 @@ final actor MockHermesQueryBackend: HermesQueryBackend {
     /// callers should not register two equal-length matchers for the
     /// same SQL because the resolution order is undefined.
     private func longestMatchingRows(for sql: String) -> [Row]? {
+        if let queued = longestMatchingQueuedRows(for: sql) {
+            return queued
+        }
         var bestMatch: (key: String, rows: [Row])?
         for (prefix, rows) in scriptedResults {
             if sql.hasPrefix(prefix) {
@@ -128,6 +143,25 @@ final actor MockHermesQueryBackend: HermesQueryBackend {
             }
         }
         return bestMatch?.rows
+    }
+
+    private func longestMatchingQueuedRows(for sql: String) -> [Row]? {
+        var bestKey: String?
+        for (prefix, pages) in scriptedResultQueues {
+            guard !pages.isEmpty, sql.hasPrefix(prefix) else { continue }
+            if let current = bestKey {
+                if prefix.count > current.count {
+                    bestKey = prefix
+                }
+            } else {
+                bestKey = prefix
+            }
+        }
+        guard let bestKey else { return nil }
+        var pages = scriptedResultQueues[bestKey] ?? []
+        let rows = pages.removeFirst()
+        scriptedResultQueues[bestKey] = pages
+        return rows
     }
 
     private func longestMatchingFailure(for sql: String) -> BackendError? {

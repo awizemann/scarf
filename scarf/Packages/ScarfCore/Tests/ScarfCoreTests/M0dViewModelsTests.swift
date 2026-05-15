@@ -161,7 +161,9 @@ import Foundation
         // supportsCompress defers to `availableCommands`, which is empty at
         // start → false.
         #expect(vm.supportsCompress == false)
-        #expect(vm.hasBroaderCommandMenu == false)
+        // `/steer` is now always discoverable in the slash menu, even before
+        // ACP advertises commands for an active session.
+        #expect(vm.hasBroaderCommandMenu == true)
         // v0.13: compression count starts at 0 so the SessionInfoBar chip
         // stays hidden on fresh sessions.
         #expect(vm.acpCompressionCount == 0)
@@ -169,6 +171,8 @@ import Foundation
 
     @Test @MainActor func richChatTracksCompressionCountFromPromptResults() {
         let vm = RichChatViewModel(context: .local)
+        vm.setSessionId("s")
+        vm.addUserMessage(text: "track compression")
         let response = ACPPromptResult(
             stopReason: "end_turn",
             inputTokens: 100, outputTokens: 50,

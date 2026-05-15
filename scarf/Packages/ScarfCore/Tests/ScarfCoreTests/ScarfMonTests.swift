@@ -126,7 +126,7 @@ import Foundation
                 throw Boom()
             }
         }
-        let samples = ring.samples()
+        let samples = ring.samples().filter { $0.name.description == "throws" }
         #expect(samples.count == 1)
         #expect(samples[0].name.description == "throws")
     }

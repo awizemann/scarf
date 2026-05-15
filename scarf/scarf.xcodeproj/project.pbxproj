@@ -530,7 +530,7 @@
 				CODE_SIGN_ENTITLEMENTS = "Scarf iOS/Scarf_iOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 35;
-				DEVELOPMENT_TEAM = 3Q6X2L86C4;
+				DEVELOPMENT_TEAM = K98H4RJ4HT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Scarf iOS/Info.plist";
@@ -547,7 +547,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 2.8.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.scarfgo.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.scarfgb.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -572,7 +572,7 @@
 				CODE_SIGN_ENTITLEMENTS = "Scarf iOS/Scarf_iOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 35;
-				DEVELOPMENT_TEAM = 3Q6X2L86C4;
+				DEVELOPMENT_TEAM = K98H4RJ4HT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Scarf iOS/Info.plist";
@@ -589,7 +589,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 2.8.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.scarfgo.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.scarfgb.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

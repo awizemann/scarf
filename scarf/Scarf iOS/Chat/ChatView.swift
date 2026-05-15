@@ -678,11 +678,9 @@ struct ChatView: View {
             }
             TextField(
                 "Message…",
-                text: $controller.draft,
-                axis: .vertical
+                text: $controller.draft
             )
             .textFieldStyle(.plain)
-            .lineLimit(1...5)
             .padding(.horizontal, ScarfSpace.s3)
             .padding(.vertical, ScarfSpace.s2)
             .frame(minHeight: 44)
@@ -705,28 +703,6 @@ struct ChatView: View {
             // so we coalesce per-keystroke writes.
             .onChange(of: controller.draft) { _, _ in
                 controller.scheduleDraftSave()
-            }
-            // Explicit dismiss-keyboard affordance, complementing the
-            // interactive scroll-to-dismiss on the message list. iOS
-            // shows a keyboard accessory toolbar above the system
-            // keyboard whenever a focused TextField is on screen;
-            // putting a "Done" chevron there is the most-discoverable
-            // dismissal pattern (issue #51). Pinned to the LEADING
-            // edge (Spacer trails) so the chevron doesn't visually
-            // stack above the trailing-edge send button in the
-            // composer below — that stacking was the complaint in
-            // issue #57. Matches iOS convention (Notes, Mail, Reminders
-            // all put accessory dismiss on the leading side).
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Button {
-                        composerFocused = false
-                    } label: {
-                        Image(systemName: "keyboard.chevron.compact.down")
-                    }
-                    .accessibilityLabel("Hide keyboard")
-                    Spacer()
-                }
             }
 
             // Big circular send button. Filled with the brand accent when

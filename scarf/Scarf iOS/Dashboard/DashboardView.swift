@@ -340,8 +340,8 @@ struct DashboardView: View {
                     Label(session.source, systemImage: session.sourceIcon)
                         .font(.caption)
                         .foregroundStyle(ScarfColor.foregroundMuted)
-                    if let started = session.startedAt {
-                        Text(started, format: .relative(presentation: .numeric))
+                    if let activity = sessionActivityDate(session) {
+                        Text(activityLabel(for: activity))
                             .font(.caption)
                             .foregroundStyle(ScarfColor.foregroundMuted)
                     }
@@ -375,5 +375,20 @@ struct DashboardView: View {
             return String(format: "%.1fK", Double(count) / 1_000)
         }
         return "\(count)"
+    }
+
+    /// Use a fixed timestamp label in session/activity lists. SwiftUI's
+    /// relative `Text(Date, format: .relative...)` keeps re-evaluating
+    /// against `Date()` and made every active row read as "now"; this
+    /// shows the stored session time instead.
+    private func sessionActivityDate(_ session: HermesSession) -> Date? {
+        session.endedAt ?? session.startedAt
+    }
+
+    private func activityLabel(for date: Date) -> String {
+        if Calendar.current.isDateInToday(date) {
+            return date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+        }
+        return date.formatted(.dateTime.month(.abbreviated).day().hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
     }
 }

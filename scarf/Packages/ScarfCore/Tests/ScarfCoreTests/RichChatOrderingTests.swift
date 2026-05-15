@@ -41,6 +41,39 @@ import Foundation
         )
     }
 
+    #if canImport(SQLite3)
+    private static func row(_ pairs: [(String, SQLValue)]) -> Row {
+        var values: [SQLValue] = []
+        var columnIndex: [String: Int] = [:]
+        for (idx, pair) in pairs.enumerated() {
+            values.append(pair.1)
+            columnIndex[pair.0] = idx
+        }
+        return Row(values: values, columnIndex: columnIndex)
+    }
+
+    private static func skeletonRow(
+        id: Int,
+        role: String,
+        content: String = "",
+        sessionId: String = "s1",
+        timestamp: Double = 1_700_000_000
+    ) -> Row {
+        row([
+            ("id", .integer(Int64(id))),
+            ("session_id", .text(sessionId)),
+            ("role", .text(role)),
+            ("content", .text(content)),
+            ("tool_call_id", .null),
+            ("tool_calls", .null),
+            ("tool_name", .null),
+            ("timestamp", .real(timestamp + Double(id))),
+            ("token_count", .null),
+            ("finish_reason", .null)
+        ])
+    }
+    #endif
+
     // MARK: - chronologicalOrder
 
     @Test func userBeforeAssistantOnTimestampTie() {
@@ -105,6 +138,40 @@ import Foundation
         #expect(combined.map(\.id) == [50, 1, 51, 2])
     }
 
+    // MARK: - loadSessionHistory
+
+    #if canImport(SQLite3)
+    @Test func loadSessionHistoryPullsEarlierPageWhenLatestSkeletonHasNoUserRows() async {
+        let mock = MockHermesQueryBackend()
+        let service = HermesDataService(context: .local, backend: mock)
+        let vm = RichChatViewModel(
+            dataService: service,
+            pendingLocalUserMessageStore: .inMemory()
+        )
+
+        let latestAssistantOnlyPage = stride(from: 126, through: 102, by: -1).map {
+            Self.skeletonRow(id: $0, role: "assistant", content: "")
+        }
+        let earlierPageWithMissingPrompt = [
+            Self.skeletonRow(id: 101, role: "assistant", content: "ok"),
+            Self.skeletonRow(id: 100, role: "user", content: "mes derniers messages")
+        ]
+        await mock._seedRowsSequence(
+            forSQLPrefix: "SELECT id, session_id, role, content, tool_call_id, NULL AS tool_calls",
+            [latestAssistantOnlyPage, earlierPageWithMissingPrompt]
+        )
+
+        await vm.loadSessionHistory(sessionId: "s1")
+
+        #expect(vm.messages.contains { $0.isUser && $0.content == "mes derniers messages" })
+        #expect(vm.messages.map(\.id).prefix(2) == [100, 101])
+        let log = await mock.queryLog
+        let skeletonFetches = log.filter { $0.sql.contains("role IN ('user','assistant')") }
+        #expect(skeletonFetches.count >= 2)
+        #expect(skeletonFetches[1].params.contains(.integer(102)))
+    }
+    #endif
+
     // MARK: - render window
 
     @Test func visibleGroupsStartsPinnedToLatestSmallWindow() {
@@ -160,6 +227,54 @@ import Foundation
         #expect(pending["s1"]?.map(\.content) == ["build and update my work laptop"])
     }
 
+    @Test func pendingLocalAssistantMessageIsPersistedForResumeAfterQuit() {
+        let store = PendingLocalUserMessageStore.inMemory()
+        let vm = RichChatViewModel(pendingLocalUserMessageStore: store)
+        vm.setSessionId("s1")
+        vm.addUserMessage(text: "question")
+        vm.handleACPEvent(.messageChunk(sessionId: "s1", text: "answer that Hermes has not flushed"))
+        vm.handleACPEvent(.promptComplete(sessionId: "s1", response: ACPPromptResult(
+            stopReason: "end_turn",
+            inputTokens: 0,
+            outputTokens: 0,
+            thoughtTokens: 0,
+            cachedReadTokens: 0
+        )))
+
+        let reloaded = PendingLocalUserMessageStore.inMemory(initial: store.read(for: ServerContext.local.id))
+        let pending = reloaded.read(for: vm.context.id)
+
+        #expect(pending["s1"]?.contains { $0.isAssistant && $0.content == "answer that Hermes has not flushed" } == true)
+    }
+
+    #if canImport(SQLite3)
+    @Test func loadSessionHistoryReinjectsLocalAssistantMissingFromDB() async {
+        let mock = MockHermesQueryBackend()
+        let service = HermesDataService(context: .local, backend: mock)
+        let t = Date(timeIntervalSince1970: 1_700_000_000)
+        let localAssistant = Self.msg(
+            id: -2,
+            role: "assistant",
+            content: "local answer only",
+            timestamp: t.addingTimeInterval(1)
+        )
+        let store = PendingLocalUserMessageStore.inMemory(initial: ["s1": [localAssistant]])
+        let vm = RichChatViewModel(
+            dataService: service,
+            pendingLocalUserMessageStore: store
+        )
+        await mock._seedRowsSequence(
+            forSQLPrefix: "SELECT id, session_id, role, content, tool_call_id, NULL AS tool_calls",
+            [[Self.skeletonRow(id: 1, role: "user", content: "question")]]
+        )
+
+        await vm.loadSessionHistory(sessionId: "s1")
+
+        #expect(vm.messages.contains { $0.isAssistant && $0.content == "local answer only" })
+        #expect(store.read(for: vm.context.id)["s1"]?.contains { $0.isAssistant && $0.content == "local answer only" } == true)
+    }
+    #endif
+
     @Test func pendingLocalUserMessageCreatedBeforeNewSessionIdGetsAttachedAndPersisted() {
         let store = PendingLocalUserMessageStore.inMemory()
         let vm = RichChatViewModel(pendingLocalUserMessageStore: store)
@@ -173,6 +288,26 @@ import Foundation
         let pending = store.read(for: ServerContext.local.id)
         #expect(vm.messages.first?.sessionId == "fresh-session")
         #expect(pending["fresh-session"]?.map(\.content) == ["first prompt in a new chat"])
+        #expect(pending[PendingLocalUserMessageStore.orphanSessionKey] == nil)
+    }
+
+    @Test func orphanPendingLocalUserMessageSurvivesQuitBeforeSessionId() {
+        let store = PendingLocalUserMessageStore.inMemory()
+        let vm = RichChatViewModel(pendingLocalUserMessageStore: store)
+
+        vm.addUserMessage(text: "quit before session id")
+        let persistedBeforeQuit = store.read(for: ServerContext.local.id)
+        #expect(persistedBeforeQuit[PendingLocalUserMessageStore.orphanSessionKey]?.map(\.content) == ["quit before session id"])
+
+        let reloaded = PendingLocalUserMessageStore.inMemory(initial: persistedBeforeQuit)
+        let vmAfterQuit = RichChatViewModel(pendingLocalUserMessageStore: reloaded)
+        vmAfterQuit.setSessionId("fresh-session")
+
+        let pendingAfterAttach = reloaded.read(for: ServerContext.local.id)
+        #expect(vmAfterQuit.messages.first?.sessionId == "fresh-session")
+        #expect(vmAfterQuit.messages.first?.content == "quit before session id")
+        #expect(pendingAfterAttach["fresh-session"]?.map(\.content) == ["quit before session id"])
+        #expect(pendingAfterAttach[PendingLocalUserMessageStore.orphanSessionKey] == nil)
     }
 
     @Test func pollingPreservesStreamingMessage() {
