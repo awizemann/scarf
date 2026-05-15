@@ -1,7 +1,6 @@
 import SwiftUI
 import ScarfCore
 import ScarfDesign
-import AVKit
 #if canImport(AppKit)
 import AppKit
 #endif
@@ -658,14 +657,12 @@ private struct MessageMediaAttachmentView: View, Equatable {
 
     @ViewBuilder
     private var videoPreview: some View {
-        if media.isReachableLocalFile || !media.url.isFileURL {
-            InlineVideoPlayer(url: media.url)
-                .frame(maxWidth: 560)
-                .frame(height: 315)
-                .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous))
-        } else {
-            filePreview(icon: "film.badge.exclamationmark")
-        }
+        // Do not embed AVKit's SwiftUI `VideoPlayer` inline here. On macOS 26.4
+        // the `_AVKit_SwiftUI` metadata path can abort the whole process when a
+        // chat row containing a video attachment is materialized. Keep video
+        // attachments safe and useful by rendering a compact file card with the
+        // normal Open/Copy actions; the system player opens out-of-process.
+        filePreview(icon: media.isReachableLocalFile ? "film" : "film.badge.exclamationmark")
     }
 
     private func filePreview(icon: String) -> some View {
@@ -708,25 +705,6 @@ private struct MessageMediaAttachmentView: View, Equatable {
     private func platformImage(from url: URL) -> NSImage? {
         guard url.isFileURL else { return nil }
         return NSImage(contentsOf: url)
-    }
-}
-
-private struct InlineVideoPlayer: View, Equatable {
-    let url: URL
-    @State private var player: AVPlayer
-
-    init(url: URL) {
-        self.url = url
-        _player = State(initialValue: AVPlayer(url: url))
-    }
-
-    static func == (lhs: InlineVideoPlayer, rhs: InlineVideoPlayer) -> Bool {
-        lhs.url == rhs.url
-    }
-
-    var body: some View {
-        VideoPlayer(player: player)
-            .onDisappear { player.pause() }
     }
 }
 
