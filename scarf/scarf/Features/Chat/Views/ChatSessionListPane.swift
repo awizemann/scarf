@@ -429,13 +429,13 @@ private struct ChatSessionRow: View {
                         .truncationMode(.tail)
                         .foregroundStyle(isActive ? ScarfColor.accentActive : ScarfColor.foregroundPrimary)
                     Spacer(minLength: 0)
+                }
+                HStack(spacing: 6) {
                     if let started = session.startedAt {
                         Text(started, style: .relative)
                             .font(ScarfFont.caption2)
                             .foregroundStyle(ScarfColor.foregroundFaint)
                     }
-                }
-                HStack(spacing: 6) {
                     if let projectName, !projectName.isEmpty {
                         HStack(spacing: 3) {
                             Image(systemName: "folder.fill")

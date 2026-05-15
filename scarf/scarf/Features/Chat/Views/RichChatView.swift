@@ -44,7 +44,9 @@ struct RichChatView: View {
         HStack(spacing: 0) {
             if showSessionsList {
                 ChatSessionListPane(chatViewModel: chatViewModel, richChat: richChat)
-                    .frame(width: 264)
+                    // Give session titles more breathing room without changing
+                    // the fixed 3-pane layout or the user's pane toggles.
+                    .frame(width: 304)
                     .transition(.move(edge: .leading).combined(with: .opacity))
                 Divider().background(ScarfColor.border)
             }
