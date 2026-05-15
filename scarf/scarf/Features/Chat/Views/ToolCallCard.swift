@@ -9,10 +9,10 @@ struct ToolCallCard: View {
     /// Bumps the card's tint + border so users can see at a glance
     /// which tool the inspector pane is currently showing.
     var isFocused: Bool = false
-    /// Called when the user clicks the card. Wired to set
-    /// `chatViewModel.focusedToolCallId = call.callId` from
-    /// `RichMessageBubble` (Mac). Inline expansion still toggles on the
-    /// same click — power users get both paths from one gesture.
+    /// Optional secondary action for surfaces that still want to route
+    /// a specific call into the side inspector. The primary click only
+    /// expands inline; opening the inspector for every tool tap proved
+    /// too heavy for normal transcript reading.
     var onFocus: (() -> Void)? = nil
 
     @State private var expanded = false
@@ -26,7 +26,6 @@ struct ToolCallCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                onFocus?()
                 withAnimation(ScarfAnimation.fast) { expanded.toggle() }
             } label: {
                 HStack(spacing: 9) {

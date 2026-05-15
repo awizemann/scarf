@@ -137,14 +137,26 @@ struct RichChatMessageList: View {
                 guard !hasNewerHistory else { return }
                 guard initialBottomAnchor != initialScrollKey else { return }
                 initialBottomAnchor = initialScrollKey
+                // Let LazyVStack finish its first layout pass before pinning.
+                // A direct scroll in the same task can run against estimated
+                // row heights, leaving an opened chat near the top/middle
+                // instead of at the latest turn. A second delayed pin catches
+                // expensive Markdown/tool rows whose final height lands one
+                // run-loop later without reintroducing continuous auto-scroll
+                // while the user browses history.
+                await Task.yield()
+                await MainActor.run {
+                    proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                }
+                try? await Task.sleep(nanoseconds: 80_000_000)
+                guard !Task.isCancelled, initialBottomAnchor == initialScrollKey else { return }
                 await MainActor.run {
                     proxy.scrollTo("bottom-anchor", anchor: .bottom)
                 }
             }
             .onChange(of: scrollTrigger) {
-                let target = lastAnchorID
                 withAnimation(.easeOut(duration: 0.15)) {
-                    proxy.scrollTo(target == "group-0" ? "bottom-anchor" : target, anchor: .bottom)
+                    proxy.scrollTo("bottom-anchor", anchor: .bottom)
                 }
             }
         }
@@ -406,25 +418,9 @@ struct MessageGroupView: View, Equatable {
     private var toolSummary: some View {
         let kinds = group.toolKindCounts
         if !kinds.isEmpty {
-            let firstCallId = group.assistantMessages
-                .flatMap(\.toolCalls)
-                .first?.callId
-            let isInteractive = (toolCardStyle == .hidden) && firstCallId != nil
-            Group {
-                if isInteractive, let firstCallId {
-                    Button {
-                        chatViewModel.focusedToolCallId = firstCallId
-                    } label: {
-                        toolSummaryPill(kinds, interactive: true)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Click to inspect tool calls")
-                } else {
-                    toolSummaryPill(kinds, interactive: false)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.vertical, 2)
+            toolSummaryPill(kinds, interactive: false)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 2)
         }
     }
 

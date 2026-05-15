@@ -107,7 +107,7 @@ struct ScarfGoTabRoot: View {
             // 3 — Chat: the reason the app is on your phone. Centered
             // among the 5 tabs for thumb reach + visual prominence.
             NavigationStack {
-                ChatView(config: config, key: key)
+                ChatConversationsLanding(config: config, key: key, serverID: serverID)
             }
             .tabItem {
                 Label("Chat", systemImage: "bubble.left.and.bubble.right.fill")
@@ -164,6 +164,105 @@ struct ScarfGoTabRoot: View {
         .onChange(of: scenePhase) { _, newPhase in
             coordinator.setScenePhase(newPhase)
         }
+    }
+}
+
+/// Chat tab landing: selecting the tab browses existing conversations instead
+/// of mounting ChatView immediately. That avoids creating ACP placeholder
+/// sessions just because the user tapped the tab; a fresh ACP session is only
+/// created after the user opens New Chat and sends the first prompt.
+private struct ChatConversationsLanding: View {
+    let config: IOSServerConfig
+    let key: SSHKeyBundle
+    @State private var vm: IOSDashboardViewModel
+
+    init(config: IOSServerConfig, key: SSHKeyBundle, serverID: ServerID) {
+        self.config = config
+        self.key = key
+        _vm = State(initialValue: IOSDashboardViewModel(context: config.toServerContext(id: serverID)))
+    }
+
+    var body: some View {
+        List {
+            Section {
+                NavigationLink {
+                    ChatView(config: config, key: key)
+                } label: {
+                    Label("New chat", systemImage: "plus.bubble")
+                        .font(.headline)
+                        .foregroundStyle(.tint)
+                }
+            }
+
+            Section("Conversations") {
+                if vm.isLoading {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                } else if let error = vm.lastError {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Couldn't load chats")
+                            .font(.headline)
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
+                        Button("Retry") { Task { await vm.refresh() } }
+                    }
+                    .padding(.vertical, 6)
+                } else if vm.allSessions.isEmpty {
+                    ContentUnavailableView(
+                        "No chats yet",
+                        systemImage: "bubble.left.and.bubble.right",
+                        description: Text("Start a new chat when you're ready. No ACP session is created until you send a message.")
+                    )
+                } else {
+                    ForEach(vm.allSessions) { session in
+                        NavigationLink {
+                            ChatView(config: config, key: key, initialSessionID: session.id)
+                        } label: {
+                            chatRow(session)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Chats")
+        .navigationBarTitleDisplayMode(.large)
+        .refreshable { await vm.refresh() }
+        .task { await vm.load() }
+    }
+
+    private func chatRow(_ session: HermesSession) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(session.displayTitle)
+                .font(.body.weight(.medium))
+                .lineLimit(1)
+            if let preview = vm.sessionPreviews[session.id], !preview.isEmpty {
+                Text(preview)
+                    .font(.subheadline)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .lineLimit(2)
+            }
+            HStack(spacing: 8) {
+                if let started = session.startedAt {
+                    Text(started, style: .relative)
+                }
+                if session.messageCount > 0 {
+                    Text("\(session.messageCount) msg")
+                }
+                if session.toolCallCount > 0 {
+                    Text("\(session.toolCallCount) tools")
+                }
+                if let project = vm.projectName(for: session) {
+                    Text(project)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(ScarfColor.foregroundFaint)
+        }
+        .padding(.vertical, 3)
     }
 }
 

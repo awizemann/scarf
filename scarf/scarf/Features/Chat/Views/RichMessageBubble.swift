@@ -33,6 +33,7 @@ struct RichMessageBubble: View, Equatable {
     private var reasoningStyle: ReasoningStyle {
         ReasoningStyle(rawValue: reasoningStyleRaw) ?? .disclosure
     }
+    @State private var expandedCompactToolCallId: String?
 
     /// SwiftUI body short-circuit (issue #46). Settled bubbles
     /// (`message.id != 0`) are immutable — id equality plus a couple
@@ -278,63 +279,99 @@ struct RichMessageBubble: View, Equatable {
                     call: call,
                     result: toolResults[call.callId],
                     isFocused: chatViewModel.focusedToolCallId == call.callId,
-                    onFocus: { chatViewModel.focusedToolCallId = call.callId }
+                    onFocus: nil
                 )
             }
         }
     }
 
-    /// One-line tappable chip per call. Click sets focus so the right-
-    /// pane inspector opens with the same data the inline expand
-    /// shows. Status dot mirrors the full-card status icon: in-flight
+    /// One-line tappable chip per call. Click expands the row inline
+    /// instead of summoning the side inspector; users can inspect tool
+    /// details without the chat layout shifting sideways. Status dot
+    /// mirrors the full-card status icon: in-flight
     /// progress / success check / non-zero exit code → danger.
     private var toolCallsCompact: some View {
         VStack(alignment: .leading, spacing: 3) {
             ForEach(message.toolCalls) { call in
                 let result = toolResults[call.callId]
-                let isFocused = chatViewModel.focusedToolCallId == call.callId
+                let isExpanded = expandedCompactToolCallId == call.callId
                 let color = compactToolColor(for: call.toolKind)
-                Button {
-                    chatViewModel.focusedToolCallId = call.callId
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: call.toolKind.icon)
-                            .font(.system(size: 10))
-                            .foregroundStyle(color)
-                        Text(call.functionName)
-                            .font(ChatFontScale.monoSmall(chatFontScale))
-                            .fontWeight(.medium)
-                            .foregroundStyle(ScarfColor.foregroundPrimary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        if !call.argumentsSummary.isEmpty {
-                            Text(call.argumentsSummary)
-                                .font(ChatFontScale.monoSmall(chatFontScale))
-                                .foregroundStyle(ScarfColor.foregroundMuted)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
+                VStack(alignment: .leading, spacing: 4) {
+                    Button {
+                        withAnimation(ScarfAnimation.fast) {
+                            expandedCompactToolCallId = isExpanded ? nil : call.callId
                         }
-                        Spacer(minLength: 6)
-                        compactStatusIcon(call: call, result: result)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: call.toolKind.icon)
+                                .font(.system(size: 10))
+                                .foregroundStyle(color)
+                            Text(call.functionName)
+                                .font(ChatFontScale.monoSmall(chatFontScale))
+                                .fontWeight(.medium)
+                                .foregroundStyle(ScarfColor.foregroundPrimary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            if !call.argumentsSummary.isEmpty {
+                                Text(call.argumentsSummary)
+                                    .font(ChatFontScale.monoSmall(chatFontScale))
+                                    .foregroundStyle(ScarfColor.foregroundMuted)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            Spacer(minLength: 6)
+                            compactStatusIcon(call: call, result: result)
+                            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 9))
+                                .foregroundStyle(ScarfColor.foregroundFaint)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(color.opacity(isExpanded ? 0.16 : 0.08))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .strokeBorder(
+                                            color.opacity(isExpanded ? 0.45 : 0.20),
+                                            lineWidth: isExpanded ? 1.2 : 1
+                                        )
+                                )
+                        )
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(
-                        RoundedRectangle(cornerRadius: 5)
-                            .fill(color.opacity(isFocused ? 0.16 : 0.08))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 5)
-                                    .strokeBorder(
-                                        color.opacity(isFocused ? 0.45 : 0.20),
-                                        lineWidth: isFocused ? 1.2 : 1
-                                    )
-                            )
-                    )
+                    .buttonStyle(.plain)
+                    .help("Click to expand this tool call inline")
+                    if isExpanded {
+                        compactToolInlineDetails(call: call, result: result)
+                    }
                 }
-                .buttonStyle(.plain)
-                .help("Click to inspect this tool call")
             }
         }
+    }
+
+    @ViewBuilder
+    private func compactToolInlineDetails(call: HermesToolCall, result: HermesMessage?) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if !call.arguments.isEmpty && call.arguments != "{}" {
+                Text("ARGUMENTS")
+                    .font(ChatFontScale.captionStrong(chatFontScale))
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                Text(call.arguments)
+                    .font(ChatFontScale.monoSmall(chatFontScale))
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
+                    .textSelection(.enabled)
+                    .padding(7)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(ScarfColor.backgroundSecondary, in: RoundedRectangle(cornerRadius: 6))
+            }
+            if let result, !result.content.isEmpty {
+                Text("RESULT")
+                    .font(ChatFontScale.captionStrong(chatFontScale))
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                ToolResultContent(content: result.content)
+            }
+        }
+        .padding(.leading, 4)
     }
 
     @ViewBuilder

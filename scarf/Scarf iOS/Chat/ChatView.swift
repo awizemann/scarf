@@ -24,6 +24,7 @@ import PhotosUI
 struct ChatView: View {
     let config: IOSServerConfig
     let key: SSHKeyBundle
+    private let initialSessionID: String?
 
     @Environment(\.scarfGoCoordinator) private var coordinator
     @Environment(\.serverContext) private var envContext
@@ -96,9 +97,10 @@ struct ChatView: View {
     /// blocking access to the toolbar nav button on small phones.)
     @FocusState private var composerFocused: Bool
 
-    init(config: IOSServerConfig, key: SSHKeyBundle) {
+    init(config: IOSServerConfig, key: SSHKeyBundle, initialSessionID: String? = nil) {
         self.config = config
         self.key = key
+        self.initialSessionID = initialSessionID
         let ctx = config.toServerContext(id: Self.sharedContextID)
         _controller = State(initialValue: ChatController(context: ctx))
     }
@@ -172,14 +174,20 @@ struct ChatView: View {
             // consume + clear here on first appear. Resume wins over
             // project-chat if both somehow get set in a single hop —
             // but in practice the coordinator never sets both at once.
-            if let sessionID = coordinator?.pendingResumeSessionID {
+            if let sessionID = initialSessionID {
+                await controller.startResuming(sessionID: sessionID)
+            } else if let sessionID = coordinator?.pendingResumeSessionID {
                 coordinator?.pendingResumeSessionID = nil
                 await controller.startResuming(sessionID: sessionID)
             } else if let projectPath = coordinator?.pendingProjectChat {
                 coordinator?.pendingProjectChat = nil
                 await consumePendingProjectChat(projectPath)
             } else {
-                await controller.start()
+                // Opening the Chat tab/new-chat screen should not create an
+                // ACP placeholder session by itself. Stay idle; `send()` will
+                // lazily open `hermes acp` + `session/new` only once the user
+                // actually submits a prompt.
+                controller.prepareFreshDraft()
             }
         }
         // React to coordinator changes that happen while Chat is
@@ -298,7 +306,7 @@ struct ChatView: View {
     private var messageList: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
-                if controller.vm.messages.isEmpty, controller.state == .ready {
+                if controller.vm.messages.isEmpty, controller.state == .ready || controller.state == .idle {
                     if controller.vm.sessionId != nil {
                         // Resumed-session path: session ID is set but
                         // no messages loaded. ACP-native sessions don't
@@ -686,7 +694,7 @@ struct ChatView: View {
                 RoundedRectangle(cornerRadius: ScarfRadius.xl, style: .continuous)
                     .strokeBorder(ScarfColor.borderStrong, lineWidth: 1)
             )
-            .disabled(controller.state != .ready)
+            .disabled(!composerAcceptsInput)
             .submitLabel(.send)
             .focused($composerFocused)
             .onSubmit {
@@ -750,18 +758,23 @@ struct ChatView: View {
         }
     }
 
-    /// Send is enabled when ready AND we have either text or at least
-    /// one attachment. Image-only sends are valid for vision models.
+    /// Send is enabled while idle (lazy-start on first prompt) or ready,
+    /// when we have either text or at least one attachment. Image-only sends
+    /// are valid for vision models.
     private var canSendComposer: Bool {
-        guard controller.state == .ready else { return false }
+        guard composerAcceptsInput else { return false }
         if !controller.attachments.isEmpty { return true }
         return !controller.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var composerAcceptsInput: Bool {
+        controller.state == .idle || controller.state == .ready
     }
 
     /// Mirror of the `.disabled(...)` predicate on the paperclip button.
     /// Pulled out so the button's foreground branch reads cleanly.
     private var attachDisabled: Bool {
-        controller.state != .ready || controller.attachments.count >= Self.maxAttachments
+        !composerAcceptsInput || controller.attachments.count >= Self.maxAttachments
     }
 
     /// Pull JPEG/PNG bytes out of each PhotosPickerItem and feed them
@@ -1251,6 +1264,15 @@ final class ChatController {
         self.vm = RichChatViewModel(context: context)
     }
 
+    /// Prepare an explicit new-chat screen without spawning Hermes ACP or
+    /// creating a placeholder `session/new` row. The first real prompt calls
+    /// `start()` from `send()` and creates the ACP session just-in-time.
+    func prepareFreshDraft() {
+        guard state == .idle else { return }
+        vm.reset()
+        loadDraft()
+    }
+
     /// Pre-flight: returns true when `config.yaml` has both
     /// `model.default` and `model.provider`. Returns false and stashes
     /// the start intent so the preflight sheet can replay it after the
@@ -1446,11 +1468,15 @@ final class ChatController {
     }
 
     private func _sendImpl() async {
-        guard state == .ready, let client else { return }
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         // v0.12+ allows image-only sends — vision models accept "describe
         // this" with no text. Bail only when both fields are empty.
         guard !text.isEmpty || !attachments.isEmpty else { return }
+
+        if state == .idle {
+            await start()
+        }
+        guard state == .ready, let client else { return }
 
         // Client-side slash intercept. Hermes ACP doesn't intercept `/new`
         // server-side — sending it as a prompt routes to the LLM, which
@@ -1888,7 +1914,8 @@ final class ChatController {
         }
     }
 
-    /// User tapped "New chat". Stop, reset the VM, start again.
+    /// User tapped "New chat". Stop and reset into an idle composer; do
+    /// not create ACP/session-new until the first prompt is sent.
     func resetAndStartNewSession() async {
         await stop()
         vm.reset()
@@ -1897,7 +1924,7 @@ final class ChatController {
         // Quick-chat sessions don't have a project; clear any leftover
         // project-scoped slash commands from a prior session.
         vm.loadProjectScopedCommands(at: nil)
-        await start()
+        prepareFreshDraft()
     }
 
     /// User tapped "In project… <project>". Stop, reset, and start
