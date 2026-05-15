@@ -382,7 +382,7 @@ struct DashboardView: View {
     /// against `Date()` and made every active row read as "now"; this
     /// shows the stored session time instead.
     private func sessionActivityDate(_ session: HermesSession) -> Date? {
-        session.endedAt ?? session.startedAt
+        session.lastActivityAt
     }
 
     private func activityLabel(for date: Date) -> String {

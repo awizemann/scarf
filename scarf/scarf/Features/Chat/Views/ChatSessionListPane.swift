@@ -431,8 +431,8 @@ private struct ChatSessionRow: View {
                     Spacer(minLength: 0)
                 }
                 HStack(spacing: 6) {
-                    if let started = session.startedAt {
-                        Text(started, style: .relative)
+                    if let activity = session.lastActivityAt {
+                        Text(activity, style: .relative)
                             .font(ScarfFont.caption2)
                             .foregroundStyle(ScarfColor.foregroundFaint)
                     }

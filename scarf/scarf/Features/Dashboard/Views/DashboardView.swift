@@ -605,7 +605,7 @@ struct SessionRow: View {
                     .foregroundStyle(ScarfColor.foregroundPrimary)
                     .lineLimit(1)
                 HStack(spacing: 6) {
-                    if let date = session.startedAt {
+                    if let date = session.lastActivityAt {
                         Text(date, style: .relative)
                             .scarfStyle(.caption)
                             .foregroundStyle(ScarfColor.foregroundFaint)

@@ -246,8 +246,8 @@ private struct ChatConversationsLanding: View {
                     .lineLimit(2)
             }
             HStack(spacing: 8) {
-                if let started = session.startedAt {
-                    Text(started, style: .relative)
+                if let activity = session.lastActivityAt {
+                    Text(activity, style: .relative)
                 }
                 if session.messageCount > 0 {
                     Text("\(session.messageCount) msg")

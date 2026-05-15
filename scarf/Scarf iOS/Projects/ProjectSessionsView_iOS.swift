@@ -144,10 +144,10 @@ private struct ProjectSessionRow_iOS: View {
                     Text(session.id.prefix(12))
                         .font(.caption2.monospaced())
                         .foregroundStyle(.tertiary)
-                    if let started = formattedStart {
+                    if let activity = formattedActivity {
                         Text("·")
                             .foregroundStyle(.tertiary)
-                        Text(started)
+                        Text(activity)
                             .font(.caption2)
                             .foregroundStyle(ScarfColor.foregroundMuted)
                     }
@@ -171,8 +171,8 @@ private struct ProjectSessionRow_iOS: View {
         return "Untitled session"
     }
 
-    private var formattedStart: String? {
-        guard let date = session.startedAt else { return nil }
+    private var formattedActivity: String? {
+        guard let date = session.lastActivityAt else { return nil }
         let formatter = DateFormatter()
         formatter.dateStyle = .short
         formatter.timeStyle = .short

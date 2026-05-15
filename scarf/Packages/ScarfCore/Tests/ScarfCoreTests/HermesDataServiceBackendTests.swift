@@ -81,7 +81,10 @@ import Foundation
         #expect(log.count == 1)
         let first = log[0]
         #expect(first.sql.hasPrefix("SELECT id, source"))
-        #expect(first.sql.contains("FROM sessions WHERE parent_session_id IS NULL ORDER BY started_at DESC LIMIT ?"))
+        #expect(first.sql.contains("FROM sessions WHERE parent_session_id IS NULL ORDER BY"))
+        #expect(first.sql.contains("MAX(m.timestamp)"))
+        #expect(first.sql.contains("ORDER BY"))
+        #expect(first.sql.contains("DESC, started_at DESC LIMIT ?"))
         // QueryDefaults.sessionLimit == 100.
         #expect(first.params == [.integer(100)])
     }
@@ -230,10 +233,13 @@ import Foundation
         #expect(stmts[0].sql.contains("FROM sessions"))
         // 1: recent sessions — selects session columns with a LIMIT param.
         #expect(stmts[1].sql.hasPrefix("SELECT id, source"))
-        #expect(stmts[1].sql.contains("ORDER BY started_at DESC LIMIT ?"))
-        // 2: session previews — joins messages with first user message.
+        #expect(stmts[1].sql.contains("MAX(m.timestamp)"))
+        #expect(stmts[1].sql.contains("DESC, started_at DESC LIMIT ?"))
+        // 2: session previews — joins messages with latest user/assistant message.
         #expect(stmts[2].sql.contains("INNER JOIN"))
-        #expect(stmts[2].sql.contains("MIN(id)"))
+        #expect(stmts[2].sql.contains("MAX(id)"))
+        #expect(stmts[2].sql.contains("role IN ('user', 'assistant')"))
+        #expect(!stmts[2].sql.contains("MIN(id)"))
         // 3: recent tool calls — selects messages WHERE tool_calls IS NOT NULL.
         #expect(stmts[3].sql.contains("WHERE tool_calls IS NOT NULL"))
     }

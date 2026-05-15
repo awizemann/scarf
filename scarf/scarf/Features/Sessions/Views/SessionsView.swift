@@ -24,8 +24,8 @@ struct SessionsView: View {
         _viewModel = State(initialValue: SessionsViewModel(context: context))
     }
 
-    /// Top-of-list filter pills. `today` filters by `startedAt` falling
-    /// within the current calendar day; `starred` is a placeholder —
+    /// Top-of-list filter pills. `today` filters by `lastActivityAt`
+    /// falling within the current calendar day; `starred` is a placeholder —
     /// `HermesSession` has no starred/pinned field today, so the count
     /// reads 0 and the filter is a no-op until upstream Hermes adds one.
     enum QuickFilter: String, CaseIterable, Identifiable {
@@ -159,7 +159,7 @@ struct SessionsView: View {
     private func quickFilterCount(_ filter: QuickFilter) -> Int {
         switch filter {
         case .all:     return viewModel.sessions.count
-        case .today:   return viewModel.sessions.filter { Self.isToday($0.startedAt) }.count
+        case .today:   return viewModel.sessions.filter { Self.isToday($0.lastActivityAt) }.count
         case .starred: return 0  // No starred field on HermesSession yet.
         }
     }
@@ -176,7 +176,7 @@ struct SessionsView: View {
         let base = viewModel.filteredSessions
         switch quickFilter {
         case .all:     return base
-        case .today:   return base.filter { Self.isToday($0.startedAt) }
+        case .today:   return base.filter { Self.isToday($0.lastActivityAt) }
         case .starred: return base
         }
     }
@@ -600,7 +600,7 @@ private struct SessionTableRow: View {
     }
 
     private var updatedLabel: String {
-        guard let date = session.startedAt else { return "—" }
+        guard let date = session.lastActivityAt else { return "—" }
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .short
         return f.localizedString(for: date, relativeTo: Date())

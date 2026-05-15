@@ -125,6 +125,7 @@ public actor HermesDataService {
         if hasV011Schema {
             cols += ", api_call_count"
         }
+        cols += ", \(sessionLastActivityExpression) AS last_activity_at"
         return cols
     }
 
@@ -194,10 +195,27 @@ public actor HermesDataService {
         return cols
     }
 
+    /// Sort top-level chat/session lists by the latest observable activity,
+    /// not by the session creation time. Older sessions that receive new
+    /// messages should bubble back to the top of Scarf's chat lists.
+    private var sessionLastActivityExpression: String {
+        """
+        MAX(
+            COALESCE((SELECT MAX(m.timestamp) FROM messages m WHERE m.session_id = sessions.id), 0),
+            COALESCE(ended_at, 0),
+            COALESCE(started_at, 0)
+        )
+        """
+    }
+
+    private var sessionLastActivityOrder: String {
+        "\(sessionLastActivityExpression) DESC, started_at DESC"
+    }
+
     // MARK: - Session Queries
 
     public func fetchSessions(limit: Int = QueryDefaults.sessionLimit) async -> [HermesSession] {
-        let sql = "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id IS NULL ORDER BY started_at DESC LIMIT ?"
+        let sql = "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id IS NULL ORDER BY \(sessionLastActivityOrder) LIMIT ?"
         do {
             let rows = try await backend.query(sql, params: [.integer(Int64(limit))])
             return rows.map { sessionFromRow($0) }
@@ -208,7 +226,7 @@ public actor HermesDataService {
     }
 
     public func fetchSessionsInPeriod(since: Date) async -> [HermesSession] {
-        let sql = "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id IS NULL AND started_at >= ? ORDER BY started_at DESC"
+        let sql = "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id IS NULL AND \(sessionLastActivityExpression) >= ? ORDER BY \(sessionLastActivityOrder)"
         do {
             let rows = try await backend.query(sql, params: [.real(since.timeIntervalSince1970)])
             return rows.map { sessionFromRow($0) }
@@ -638,8 +656,10 @@ public actor HermesDataService {
 
     public func fetchSessionPreviews(limit: Int = QueryDefaults.sessionPreviewLimit) async -> [String: String] {
         // Already bounded by `substr(content, 1, previewContentLength)`
-        // — wire payload caps at ~limit × 100 bytes. v2.8 added
-        // ScarfMon instrumentation + transport-error logging for
+        // — wire payload caps at ~limit × 100 bytes. Preview rows use the
+        // latest user/assistant message (not the first prompt, not tool
+        // result blobs) so iOS chat/session lists show where the
+        // conversation currently ended.
         // parity with `fetchRecentToolCallsOutcome`; if this query
         // ever does start timing out on a slow remote we'll see it
         // in captures rather than swallowing the error and returning
@@ -649,11 +669,11 @@ public actor HermesDataService {
                 SELECT m.session_id, substr(m.content, 1, \(QueryDefaults.previewContentLength))
                 FROM messages m
                 INNER JOIN (
-                    SELECT session_id, MIN(id) as min_id
+                    SELECT session_id, MAX(id) as max_id
                     FROM messages
-                    WHERE role = 'user' AND content <> ''
+                    WHERE role IN ('user', 'assistant') AND content <> ''
                     GROUP BY session_id
-                ) first ON m.id = first.min_id
+                ) last ON m.id = last.max_id
                 ORDER BY m.timestamp DESC
                 LIMIT ?
                 """
@@ -925,7 +945,7 @@ public actor HermesDataService {
         let statements: [(sql: String, params: [SQLValue])] = [
             (statsSQL(), []),
             (
-                "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id IS NULL ORDER BY started_at DESC LIMIT ?",
+                "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id IS NULL ORDER BY \(sessionLastActivityOrder) LIMIT ?",
                 [.integer(Int64(sessionLimit))]
             ),
             (
@@ -933,11 +953,11 @@ public actor HermesDataService {
                 SELECT m.session_id, substr(m.content, 1, \(QueryDefaults.previewContentLength))
                 FROM messages m
                 INNER JOIN (
-                    SELECT session_id, MIN(id) as min_id
+                    SELECT session_id, MAX(id) as max_id
                     FROM messages
-                    WHERE role = 'user' AND content <> ''
+                    WHERE role IN ('user', 'assistant') AND content <> ''
                     GROUP BY session_id
-                ) first ON m.id = first.min_id
+                ) last ON m.id = last.max_id
                 ORDER BY m.timestamp DESC
                 LIMIT ?
                 """,
@@ -1001,7 +1021,7 @@ public actor HermesDataService {
         let previewLimit = limit
         let statements: [(sql: String, params: [SQLValue])] = [
             (
-                "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id IS NULL ORDER BY started_at DESC LIMIT ?",
+                "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id IS NULL ORDER BY \(sessionLastActivityOrder) LIMIT ?",
                 [.integer(Int64(limit))]
             ),
             (
@@ -1009,11 +1029,11 @@ public actor HermesDataService {
                 SELECT m.session_id, substr(m.content, 1, \(QueryDefaults.previewContentLength))
                 FROM messages m
                 INNER JOIN (
-                    SELECT session_id, MIN(id) as min_id
+                    SELECT session_id, MAX(id) as max_id
                     FROM messages
-                    WHERE role = 'user' AND content <> ''
+                    WHERE role IN ('user', 'assistant') AND content <> ''
                     GROUP BY session_id
-                ) first ON m.id = first.min_id
+                ) last ON m.id = last.max_id
                 ORDER BY m.timestamp DESC
                 LIMIT ?
                 """,
@@ -1120,6 +1140,9 @@ public actor HermesDataService {
         // never reach this code path because hasV011Schema gates the
         // SELECT shape.
         let apiCallCount: Int = hasV011Schema ? row.int(at: 20) : 0
+        let lastActivityAt = row.columnIndex["last_activity_at"].flatMap { row.date(at: $0) }
+            ?? row.date(at: 7)
+            ?? row.date(at: 6)
         return HermesSession(
             id: row.string(at: 0),
             source: row.string(at: 1),
@@ -1141,7 +1164,8 @@ public actor HermesDataService {
             actualCostUSD: hasV07Schema ? row.optionalDouble(at: 17) : nil,
             costStatus: hasV07Schema ? row.optionalString(at: 18) : nil,
             billingProvider: hasV07Schema ? row.optionalString(at: 19) : nil,
-            apiCallCount: apiCallCount
+            apiCallCount: apiCallCount,
+            lastActivityAt: lastActivityAt
         )
     }
 

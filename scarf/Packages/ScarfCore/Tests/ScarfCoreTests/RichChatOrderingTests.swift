@@ -328,6 +328,42 @@ import Foundation
         #expect(merged.last?.id == 0)
     }
 
+    @Test func databaseReconcileDropsStreamingMessageWhenDBCatchesUp() {
+        // ACP-mode DB reconcile can fire after Hermes has persisted an
+        // equal-or-longer assistant row. Drop the local id==0 bubble before
+        // the normal merge so the transcript doesn't render duplicate replies.
+        let t = Date()
+        let dbUser = Self.msg(id: 1, role: "user", content: "ping", timestamp: t)
+        let dbAssistant = Self.msg(id: 2, role: "assistant", content: "pong complete", timestamp: t.addingTimeInterval(0.2))
+        let streamingLocal = Self.msg(id: 0, role: "assistant", content: "pong", timestamp: t.addingTimeInterval(0.1))
+
+        let locals = RichChatViewModel.currentLocalForDatabaseReconcile(
+            fetched: [dbUser, dbAssistant],
+            currentLocal: [dbUser, streamingLocal]
+        )
+        let merged = RichChatViewModel.mergedAfterPoll(
+            fetched: [dbUser, dbAssistant],
+            currentLocal: locals
+        )
+
+        #expect(!merged.contains { $0.id == 0 })
+        #expect(merged.filter(\.isAssistant).map(\.id) == [2])
+    }
+
+    @Test func databaseReconcilePreservesStreamingMessageWhenDBStillBehind() {
+        let t = Date()
+        let dbUser = Self.msg(id: 1, role: "user", content: "ping", timestamp: t)
+        let streamingLocal = Self.msg(id: 0, role: "assistant", content: "pong", timestamp: t.addingTimeInterval(0.1))
+
+        let locals = RichChatViewModel.currentLocalForDatabaseReconcile(
+            fetched: [dbUser],
+            currentLocal: [dbUser, streamingLocal]
+        )
+        let merged = RichChatViewModel.mergedAfterPoll(fetched: [dbUser], currentLocal: locals)
+
+        #expect(merged.contains { $0.id == 0 && $0.content == "pong" })
+    }
+
     @Test func pollingPreservesPendingUserMessage() {
         // Optimistic user msg created locally (negative id) before
         // Hermes persisted it. `fetched` is empty for this content;

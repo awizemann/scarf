@@ -2403,6 +2403,22 @@ public final class RichChatViewModel {
         }
     }
 
+    /// Debounced DB reconcile used while an ACP session is connected.
+    ///
+    /// ACP events remain the primary live source for the transcript, but
+    /// Hermes also persists rows to `state.db`. When Scarf intentionally
+    /// drops ACP replay events for a loaded session, or when an ACP event is
+    /// missed, the file watcher can use this path to catch the transcript up
+    /// from SQLite without changing the live agent-working state.
+    public func scheduleDatabaseReconcile() {
+        debounceTask?.cancel()
+        debounceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            await self?.reconcileMessagesFromDatabasePreservingACPState()
+        }
+    }
+
     public func refreshMessages() async {
         // Polling tick (terminal mode): pull a fresh snapshot so remote
         // reflects Hermes writes since the last tick. On local this is a
@@ -2447,6 +2463,52 @@ public final class RichChatViewModel {
                 if wasWorking && !derivedWorking {
                     stopActivePolling()
                 }
+            }
+        }
+    }
+
+    /// SQLite reconcile for ACP mode. Unlike `refreshMessages()`, this does
+    /// not derive or mutate `isAgentWorking`: ACP lifecycle events still own
+    /// the live prompt state. It only imports newly persisted rows when the
+    /// message fingerprint changes.
+    private func reconcileMessagesFromDatabasePreservingACPState() async {
+        let opened = await dataService.refresh()
+        guard opened, let sessionId else { return }
+
+        let fingerprint = await dataService.fetchMessageFingerprint(sessionId: sessionId)
+        guard fingerprint != lastKnownFingerprint else { return }
+
+        let fetched = await dataService.fetchMessages(sessionId: sessionId, limit: HistoryPageSize.polling)
+        let session = await dataService.fetchSession(id: sessionId)
+        lastKnownFingerprint = fingerprint
+
+        let locals = Self.currentLocalForDatabaseReconcile(fetched: fetched, currentLocal: messages)
+        messages = Self.mergedAfterPoll(fetched: fetched, currentLocal: locals)
+        reconcilePendingLocalUserMessages(sessionId: sessionId, fetched: fetched)
+        currentSession = session
+        buildMessageGroups()
+    }
+
+    /// Remove a local streaming row when SQLite has already caught up with
+    /// an equal-or-longer assistant row. Regular polling keeps id==0 rows
+    /// unconditionally because DB usually lags the stream; ACP-mode reconcile
+    /// runs from file-watcher WAL ticks and can otherwise display both the
+    /// persisted assistant row and the in-memory streaming bubble.
+    nonisolated static func currentLocalForDatabaseReconcile(
+        fetched: [HermesMessage],
+        currentLocal: [HermesMessage]
+    ) -> [HermesMessage] {
+        let persistedAssistantContents = fetched
+            .filter(\.isAssistant)
+            .map(\.content)
+            .filter { !$0.isEmpty }
+
+        guard !persistedAssistantContents.isEmpty else { return currentLocal }
+
+        return currentLocal.filter { msg in
+            guard msg.id == 0, msg.isAssistant, !msg.content.isEmpty else { return true }
+            return !persistedAssistantContents.contains { persisted in
+                persisted.contains(msg.content)
             }
         }
     }

@@ -86,9 +86,16 @@ struct RichChatView: View {
                 showInspector = true
             }
         }
-        // DB polling fallback for terminal mode only — never overwrite ACP messages
+        // ACP events still drive the live transcript, but also reconcile from
+        // SQLite on WAL ticks so resumed/replayed ACP work that Scarf drops
+        // from the event stream can still catch up from persisted rows. The
+        // reconcile path preserves ACP working/streaming state and only imports
+        // rows when the DB message fingerprint changes.
         .onChange(of: fileWatcher.lastChangeDate) {
-            if !isACPMode, !richChat.hasMessages, richChat.sessionId != nil {
+            guard richChat.sessionId != nil else { return }
+            if isACPMode {
+                richChat.scheduleDatabaseReconcile()
+            } else if !richChat.hasMessages {
                 richChat.scheduleRefresh()
             }
         }

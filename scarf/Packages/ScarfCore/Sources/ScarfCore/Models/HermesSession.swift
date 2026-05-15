@@ -9,6 +9,10 @@ public struct HermesSession: Identifiable, Sendable {
     public let parentSessionId: String?
     public let startedAt: Date?
     public let endedAt: Date?
+    /// Latest observable session activity: last message timestamp when
+    /// available, otherwise the end/start timestamp. Used for chat-list
+    /// ordering and relative-date labels.
+    public let lastActivityAt: Date?
     public let endReason: String?
     public let messageCount: Int
     public let toolCallCount: Int
@@ -50,7 +54,8 @@ public struct HermesSession: Identifiable, Sendable {
         actualCostUSD: Double?,
         costStatus: String?,
         billingProvider: String?,
-        apiCallCount: Int = 0
+        apiCallCount: Int = 0,
+        lastActivityAt: Date? = nil
     ) {
         self.id = id
         self.source = source
@@ -60,6 +65,7 @@ public struct HermesSession: Identifiable, Sendable {
         self.parentSessionId = parentSessionId
         self.startedAt = startedAt
         self.endedAt = endedAt
+        self.lastActivityAt = lastActivityAt ?? endedAt ?? startedAt
         self.endReason = endReason
         self.messageCount = messageCount
         self.toolCallCount = toolCallCount
@@ -105,7 +111,8 @@ public struct HermesSession: Identifiable, Sendable {
             cacheReadTokens: cacheReadTokens, cacheWriteTokens: cacheWriteTokens,
             estimatedCostUSD: estimatedCostUSD, reasoningTokens: reasoningTokens,
             actualCostUSD: actualCostUSD, costStatus: costStatus,
-            billingProvider: billingProvider
+            billingProvider: billingProvider, apiCallCount: apiCallCount,
+            lastActivityAt: lastActivityAt
         )
     }
 }

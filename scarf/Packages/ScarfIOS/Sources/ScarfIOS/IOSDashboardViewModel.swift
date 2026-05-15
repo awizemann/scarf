@@ -111,8 +111,8 @@ public final class IOSDashboardViewModel {
     /// all 25 recent sessions (no filtering). `projectName` is the
     /// ProjectEntry.name that's the key in `sessionProjectNames`, so
     /// the filter is an O(n) dict lookup per session — cheap at our
-    /// 25-session window. Sorting is preserved (newest first) from
-    /// the upstream `fetchSessions(limit:)` query.
+    /// 25-session window. Sorting is preserved (latest activity first)
+    /// from the upstream `fetchSessions(limit:)` query.
     public func sessions(filteredBy projectName: String?) -> [HermesSession] {
         guard let projectName, !projectName.isEmpty else { return allSessions }
         return allSessions.filter { session in
