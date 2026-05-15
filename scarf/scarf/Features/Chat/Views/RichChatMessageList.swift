@@ -20,8 +20,10 @@ struct RichChatMessageList: View {
     /// history that hasn't been paged in yet. Hidden by default so
     /// existing callers who haven't opted in see no UI change.
     var hasMoreHistory: Bool = false
+    var hasNewerHistory: Bool = false
     var isLoadingEarlier: Bool = false
-    var onLoadEarlier: (() -> Void)? = nil
+    var onLoadEarlier: (() async -> Void)? = nil
+    var onLoadNewer: (() async -> Void)? = nil
     /// True while the v2.8 two-phase loader's background hydration
     /// is filling in `toolCalls` JSON + tool-result rows. Forwarded
     /// to `MessageGroupView` so it can skip render-side bubble
@@ -30,23 +32,15 @@ struct RichChatMessageList: View {
     /// land, which the user perceives as bubbles spawning one-by-one.
     var isHydratingTools: Bool = false
 
-    /// Scrolling strategy: plain `VStack` (not `LazyVStack`) plus
-    /// `.defaultScrollAnchor(.bottom)`.
-    ///
-    /// `LazyVStack` was causing the classic "loaded session shows whitespace
-    /// and the chat is above" bug: lazy rows return estimated heights before
-    /// they render, `.defaultScrollAnchor(.bottom)` positions the viewport
-    /// at the *estimated* bottom (which overshoots the real content), and
-    /// when rows materialize and real heights land, the viewport ends up
-    /// past the content. Attempts to correct via `proxy.scrollTo(lastID)`
-    /// failed because unrendered rows have no resolvable ID.
-    ///
-    /// Switching to `VStack` materializes every row immediately, so
-    /// `.defaultScrollAnchor(.bottom)` has real heights to work with and
-    /// can't overshoot. For typical Hermes sessions (<500 messages) the
-    /// first-render cost is acceptable. If ever needed for huge sessions
-    /// we can reintroduce lazy with a preference-key-based height
-    /// measurement, but that's a much larger change.
+    @State private var initialBottomAnchor: String?
+    @State private var lastOlderSentinelID: String?
+    @State private var lastNewerSentinelID: String?
+
+    /// Scrolling strategy: bounded input (`groups` is already windowed by
+    /// `RichChatViewModel`) plus `LazyVStack`. We avoid the old
+    /// `.defaultScrollAnchor(.bottom)` overshoot by using explicit anchors:
+    /// initial load and "jump to bottom" scroll to `bottom-anchor`; prepends
+    /// preserve the previously-first visible group.
     var body: some View {
         // ScarfMon — confirms whether the parent re-issues the
         // ForEach. If this fires once and we still see RichMessageBubble.body
@@ -55,7 +49,7 @@ struct RichChatMessageList: View {
         let _: Void = ScarfMon.event(.chatRender, "mac.RichChatMessageList.body")
         return ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     if groups.isEmpty && !isWorking {
                         // Fill the scroll view's visible height so Spacers
                         // can vertically center the placeholder. Previously
@@ -77,27 +71,14 @@ struct RichChatMessageList: View {
                     }
 
                     if hasMoreHistory, let onLoadEarlier {
-                        Button {
-                            onLoadEarlier()
-                        } label: {
-                            HStack(spacing: 6) {
-                                if isLoadingEarlier {
-                                    ProgressView().scaleEffect(0.7)
-                                } else {
-                                    Image(systemName: "arrow.up.circle")
-                                        .font(.caption)
-                                }
-                                Text(isLoadingEarlier ? "Loading earlier…" : "Load earlier messages")
-                                    .font(.caption)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(.regularMaterial, in: Capsule())
+                        historySentinel(
+                            id: firstAnchorID,
+                            label: isLoadingEarlier ? "Loading earlier…" : "Loading earlier messages",
+                            systemImage: "arrow.up.circle",
+                            isLoading: isLoadingEarlier
+                        ) {
+                            await loadEarlierAndPreserveAnchor(proxy: proxy, action: onLoadEarlier)
                         }
-                        .buttonStyle(.plain)
-                        .disabled(isLoadingEarlier)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
                     }
 
                     ForEach(groups) { group in
@@ -114,6 +95,21 @@ struct RichChatMessageList: View {
                         typingIndicator
                             .id("typing-indicator")
                     }
+
+                    if hasNewerHistory, let onLoadNewer {
+                        historySentinel(
+                            id: lastAnchorID,
+                            label: "Load newer messages",
+                            systemImage: "arrow.down.circle",
+                            isLoading: false
+                        ) {
+                            await onLoadNewer()
+                        }
+                    }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id("bottom-anchor")
                 }
                 .padding()
                 // Intentionally NO `.animation(_:value:)` on this VStack.
@@ -130,14 +126,28 @@ struct RichChatMessageList: View {
                 // the empty-state fade was a minor flourish, not a
                 // load-bearing affordance.
             }
-            .defaultScrollAnchor(.bottom)
+            .task(id: initialScrollKey) {
+                guard !groups.isEmpty else {
+                    initialBottomAnchor = nil
+                    return
+                }
+                guard initialBottomAnchor != initialScrollKey else { return }
+                initialBottomAnchor = initialScrollKey
+                await MainActor.run {
+                    proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                }
+            }
             .onChange(of: scrollTrigger) {
                 let target = lastAnchorID
                 withAnimation(.easeOut(duration: 0.15)) {
-                    proxy.scrollTo(target, anchor: .bottom)
+                    proxy.scrollTo(target == "group-0" ? "bottom-anchor" : target, anchor: .bottom)
                 }
             }
         }
+    }
+
+    private var initialScrollKey: String {
+        groups.last.map { "initial-\($0.id)" } ?? "empty"
     }
 
     /// Anchor ID used by the explicit scrollTrigger path. Prefers the typing
@@ -147,6 +157,56 @@ struct RichChatMessageList: View {
         if isWorking { return "typing-indicator" }
         if let last = groups.last { return "group-\(last.id)" }
         return "group-0"
+    }
+
+    private var firstAnchorID: String {
+        if let first = groups.first { return "group-\(first.id)" }
+        return "group-0"
+    }
+
+    @ViewBuilder
+    private func historySentinel(
+        id: String,
+        label: String,
+        systemImage: String,
+        isLoading: Bool,
+        action: @escaping () async -> Void
+    ) -> some View {
+        HStack(spacing: 6) {
+            if isLoading {
+                ProgressView().scaleEffect(0.7)
+            } else {
+                Image(systemName: systemImage).font(.caption)
+            }
+            Text(label).font(.caption)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(.regularMaterial, in: Capsule())
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+        .onAppear {
+            if systemImage.contains("up") {
+                guard lastOlderSentinelID != id else { return }
+                lastOlderSentinelID = id
+            } else {
+                guard lastNewerSentinelID != id else { return }
+                lastNewerSentinelID = id
+            }
+            Task { await action() }
+        }
+    }
+
+    private func loadEarlierAndPreserveAnchor(
+        proxy: ScrollViewProxy,
+        action: @escaping () async -> Void
+    ) async {
+        let anchor = firstAnchorID
+        await action()
+        await MainActor.run {
+            proxy.scrollTo(anchor, anchor: .top)
+        }
     }
 
     private var emptyState: some View {

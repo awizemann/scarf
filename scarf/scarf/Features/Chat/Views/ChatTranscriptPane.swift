@@ -53,13 +53,22 @@ struct ChatTranscriptPane: View {
                 // Two-stage Load-earlier: bumps the render window first
                 // (cheap derived-property change), only hops to the DB
                 // once the in-memory tail is exhausted.
-                hasMoreHistory: richChat.hasHiddenInMemoryGroups || richChat.hasMoreHistory,
+                hasMoreHistory: richChat.hasHiddenOlderInMemoryGroups || richChat.hasMoreHistory,
+                hasNewerHistory: richChat.hasHiddenNewerInMemoryGroups,
                 isLoadingEarlier: richChat.isLoadingEarlier,
                 onLoadEarlier: {
-                    if richChat.hasHiddenInMemoryGroups {
-                        richChat.extendRenderWindow()
+                    if richChat.hasHiddenOlderInMemoryGroups {
+                        richChat.showEarlierInMemory()
+                        richChat.hydrateVisibleToolDetails()
                     } else {
-                        Task { await richChat.loadEarlier() }
+                        await richChat.loadEarlier()
+                    }
+                },
+                onLoadNewer: {
+                    richChat.showNewerInMemory()
+                    richChat.hydrateVisibleToolDetails()
+                    if !richChat.hasHiddenNewerInMemoryGroups {
+                        richChat.requestScrollToBottom()
                     }
                 },
                 isHydratingTools: richChat.isHydratingTools

@@ -62,15 +62,13 @@ public enum HistoryPageSize: Sendable {
 
 /// In-memory rendering window for the chat transcript. Sits ON TOP of
 /// `HistoryPageSize` (which bounds DB I/O) — `RenderWindow` bounds how
-/// many bubbles the eager-VStack `RichChatMessageList` materializes
+/// many message groups the chat transcript asks SwiftUI to materialize
 /// at once.
 ///
 /// Why a window on top of an already-paginated load: a long live
 /// session accumulates messages without ever hitting the DB-paging
-/// path, and `LazyVStack` is off the table (it caused the documented
-/// "blank space at bottom" bug — see `RichChatMessageList.swift:26-42`).
-/// The "Load earlier messages" affordance grows the window in `step`
-/// chunks before falling through to the DB hop.
+/// path. The transcript keeps a bounded viewport over the grouped
+/// history and moves that viewport as the user scrolls older/newer.
 public enum RenderWindow: Sendable {
     /// Initial trailing window of message groups to render. Tuned
     /// down from 50 → 30 → 15 after dogfooding showed scroll lag on
@@ -80,9 +78,12 @@ public enum RenderWindow: Sendable {
     /// the latest screenful-plus hot while preserving the official
     /// eager-stack chat layout and stable bottom anchoring.
     public nonisolated static let initial = 15
-    /// How many additional groups to reveal per "Load earlier" tap
-    /// before falling through to the DB-paging path. Matches
-    /// `initial` so each tap reveals a small, predictable batch
+    /// Maximum number of groups kept in the transcript view at once.
+    /// Older/newer scroll sentinels slide this fixed-size window over
+    /// `messageGroups` instead of growing it without bound.
+    public nonisolated static let capacity = 45
+    /// How many groups to slide per sentinel trigger. Matches
+    /// `initial` so each scroll reveals a small, predictable batch
     /// without suddenly materializing dozens of heavy bubbles.
     public nonisolated static let step = 15
 }

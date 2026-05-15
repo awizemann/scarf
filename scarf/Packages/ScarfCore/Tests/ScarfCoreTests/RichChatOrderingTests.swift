@@ -105,6 +105,46 @@ import Foundation
         #expect(combined.map(\.id) == [50, 1, 51, 2])
     }
 
+    // MARK: - render window
+
+    @Test func visibleGroupsStartsPinnedToLatestSmallWindow() {
+        let vm = RichChatViewModel()
+        vm.messageGroups = (0..<60).map { idx in
+            MessageGroup(id: idx, userMessage: nil, assistantMessages: [], toolResults: [:])
+        }
+        #expect(vm.visibleGroups.count == RenderWindow.initial)
+        #expect(vm.visibleGroups.first?.id == 45)
+        #expect(vm.visibleGroups.last?.id == 59)
+        #expect(vm.hasHiddenOlderInMemoryGroups)
+        #expect(!vm.hasHiddenNewerInMemoryGroups)
+    }
+
+    @Test func renderWindowSlidesOlderAndNewerWithFixedCapacity() {
+        let vm = RichChatViewModel()
+        vm.messageGroups = (0..<80).map { idx in
+            MessageGroup(id: idx, userMessage: nil, assistantMessages: [], toolResults: [:])
+        }
+        #expect(vm.showEarlierInMemory())
+        #expect(vm.visibleGroups.count == RenderWindow.capacity)
+        #expect(vm.visibleGroups.first?.id == 35)
+        #expect(vm.visibleGroups.last?.id == 79)
+        #expect(vm.hasHiddenOlderInMemoryGroups)
+        #expect(!vm.hasHiddenNewerInMemoryGroups)
+
+        #expect(vm.showEarlierInMemory())
+        #expect(vm.visibleGroups.count == RenderWindow.capacity)
+        #expect(vm.visibleGroups.first?.id == 20)
+        #expect(vm.visibleGroups.last?.id == 64)
+        #expect(vm.hasHiddenOlderInMemoryGroups)
+        #expect(vm.hasHiddenNewerInMemoryGroups)
+
+        #expect(vm.showNewerInMemory())
+        #expect(vm.visibleGroups.count == RenderWindow.initial)
+        #expect(vm.visibleGroups.first?.id == 65)
+        #expect(vm.visibleGroups.last?.id == 79)
+        #expect(!vm.hasHiddenNewerInMemoryGroups)
+    }
+
     // MARK: - mergedAfterPoll
 
     @Test func pollingPreservesStreamingMessage() {

@@ -147,33 +147,81 @@ public final class RichChatViewModel {
     public var messages: [HermesMessage] = []
     public var currentSession: HermesSession?
     public var messageGroups: [MessageGroup] = []
-    /// Trailing-window cap on how many `messageGroups` the chat list
-    /// renders at once. Sits on top of `HistoryPageSize.initial` (which
-    /// bounds DB I/O): even when `messageGroups` grows past this during
-    /// a long live session, only the trailing slice materializes in the
-    /// eager `VStack`. The "Load earlier" button bumps this in
-    /// `RenderWindow.step` chunks via `extendRenderWindow()` before
-    /// falling through to the DB-paging path.
-    public var renderWindow: Int = RenderWindow.initial
-    /// Trailing slice of `messageGroups`. Critical: this windows the
-    /// existing groups array — do NOT rebuild groups from a windowed
-    /// `messages` slice or `groupIndex` will renumber and break the
-    /// `MessageGroupView.==` equatable short-circuit.
-    public var visibleGroups: [MessageGroup] {
-        guard messageGroups.count > renderWindow else { return messageGroups }
-        return Array(messageGroups.suffix(renderWindow))
+    /// Maximum number of conversation groups exposed to SwiftUI at once.
+    /// `messages` may hold more history, but the transcript receives only a
+    /// small sliding window; combined with `LazyVStack` this prevents old
+    /// bubbles from staying materialized while the user reads the current turn.
+    public var renderWindow: Int = RenderWindow.capacity
+    /// Nil means the visible window is pinned to the newest groups. A concrete
+    /// value means the user is browsing an older in-memory window whose start
+    /// index is `renderWindowStart`. `buildMessageGroups()` preserves this
+    /// window best-effort across hydration/rebuilds.
+    public private(set) var renderWindowStart: Int? = nil
+
+    private var activeRenderWindowSize: Int {
+        renderWindowStart == nil ? RenderWindow.initial : renderWindow
     }
-    /// True when the in-memory `messageGroups` has more entries than
-    /// the current `renderWindow` exposes — chat list shows the
-    /// "Load earlier" button and tapping it grows the window before
-    /// falling through to a DB hop.
-    public var hasHiddenInMemoryGroups: Bool { messageGroups.count > renderWindow }
-    /// Reveal another `RenderWindow.step` groups from the existing
-    /// in-memory `messageGroups`. Pure derived-property change — no
-    /// group rebuild, no I/O. Group ids stay stable so `ForEach`
-    /// prepends old groups without recreating the visible tail.
+
+    private var visibleWindowBounds: Range<Int> {
+        guard !messageGroups.isEmpty else { return 0..<0 }
+        let capacity = min(activeRenderWindowSize, messageGroups.count)
+        guard messageGroups.count > capacity else { return messageGroups.startIndex..<messageGroups.endIndex }
+        let start: Int
+        if let renderWindowStart {
+            start = min(max(0, renderWindowStart), max(0, messageGroups.count - capacity))
+        } else {
+            start = max(0, messageGroups.count - capacity)
+        }
+        let end = min(messageGroups.count, start + capacity)
+        return start..<end
+    }
+
+    /// Sliding slice of `messageGroups`. Group IDs remain stable because they
+    /// are derived from persisted message IDs, not the current array offset.
+    public var visibleGroups: [MessageGroup] {
+        Array(messageGroups[visibleWindowBounds])
+    }
+
+    public var hasHiddenOlderInMemoryGroups: Bool { visibleWindowBounds.lowerBound > 0 }
+    public var hasHiddenNewerInMemoryGroups: Bool { visibleWindowBounds.upperBound < messageGroups.count }
+    /// Backward-compatible alias used by existing macOS/iOS call sites.
+    public var hasHiddenInMemoryGroups: Bool { hasHiddenOlderInMemoryGroups }
+
+    /// Move the sliding render window older without touching SQLite.
+    @discardableResult
+    public func showEarlierInMemory(by delta: Int = RenderWindow.step) -> Bool {
+        let bounds = visibleWindowBounds
+        guard bounds.lowerBound > 0 else { return false }
+        renderWindowStart = max(0, bounds.lowerBound - delta)
+        return true
+    }
+
+    /// Move the sliding render window newer without touching SQLite.
+    @discardableResult
+    public func showNewerInMemory(by delta: Int = RenderWindow.step) -> Bool {
+        let bounds = visibleWindowBounds
+        guard bounds.upperBound < messageGroups.count else {
+            renderWindowStart = nil
+            return false
+        }
+        let maxStart = max(0, messageGroups.count - renderWindow)
+        let next = min(maxStart, bounds.lowerBound + delta)
+        renderWindowStart = next >= maxStart ? nil : next
+        return true
+    }
+
+    public func jumpToLatest() {
+        renderWindowStart = nil
+    }
+
+    public func hydrateVisibleToolDetails() {
+        guard let sessionId else { return }
+        startToolHydration(loadingForSession: sessionId)
+    }
+
+    /// Compatibility shim for the old "grow trailing window" behavior.
     public func extendRenderWindow(by delta: Int = RenderWindow.step) {
-        renderWindow = min(renderWindow + delta, messageGroups.count)
+        _ = showEarlierInMemory(by: delta)
     }
     /// True while the v2.8 two-phase loader's background hydration
     /// (tool_calls JSON + tool result rows) is in flight. Chat header
@@ -850,6 +898,7 @@ public final class RichChatViewModel {
     public var hasMessages: Bool { !messages.isEmpty }
 
     public func requestScrollToBottom() {
+        jumpToLatest()
         scrollTrigger = UUID()
     }
 
@@ -960,7 +1009,8 @@ public final class RichChatViewModel {
         Task { await dataService.close() }
         messages = []
         messageGroups = []
-        renderWindow = RenderWindow.initial
+        renderWindow = RenderWindow.capacity
+        renderWindowStart = nil
         currentSession = nil
         lastKnownFingerprint = nil
         sessionId = nil
@@ -1811,6 +1861,7 @@ public final class RichChatViewModel {
             .map(\.id)
             .min()
         hasMoreHistory = moreHistory
+        renderWindowStart = nil
         ScarfMon.event(.sessionLoad, "mac.hydrateMessages.rows", count: messages.count)
         buildMessageGroups()
 
@@ -1864,11 +1915,12 @@ public final class RichChatViewModel {
             // we just loaded. Doing this on MainActor keeps us in step
             // with the observable view of `messages`; the actual
             // SQL calls happen in `await` slots that release the actor.
-            let assistantIds = self.messages
+            let visibleMessages = self.visibleGroups.flatMap(\.allMessages)
+            let assistantIds = visibleMessages
                 .filter { $0.isAssistant && $0.id > 0 }
                 .map(\.id)
-            guard let minId = self.messages.map(\.id).min(),
-                  let maxId = self.messages.map(\.id).max(),
+            guard let minId = visibleMessages.map(\.id).min(),
+                  let maxId = visibleMessages.map(\.id).max(),
                   !assistantIds.isEmpty || minId < maxId else {
                 return
             }
@@ -1995,17 +2047,18 @@ public final class RichChatViewModel {
     public func loadEarlier(pageSize: Int = HistoryPageSize.initial) async {
         guard !isLoadingEarlier, hasMoreHistory else { return }
         guard let sessionId, let oldest = oldestLoadedMessageID else { return }
+        let previousFirstVisibleID = visibleGroups.first?.id
         isLoadingEarlier = true
         defer { isLoadingEarlier = false }
 
         let opened = await dataService.open()
         guard opened else { return }
 
-        let older = await dataService.fetchMessages(
+        let older = await dataService.fetchSkeletonMessages(
             sessionId: sessionId,
             limit: pageSize,
             before: oldest
-        )
+        ).messages
         guard !older.isEmpty else {
             hasMoreHistory = false
             return
@@ -2016,6 +2069,17 @@ public final class RichChatViewModel {
         // the bottom of the table — no further pages worth fetching.
         hasMoreHistory = older.count >= pageSize
         buildMessageGroups()
+        // Show the freshly-prepended page while keeping the old first
+        // visible group just below it. This is the bounded-window version
+        // of preserving scroll position: SwiftUI receives at most
+        // `renderWindow` groups, not the whole accumulated transcript.
+        if let previousFirstVisibleID,
+           let previousIndex = messageGroups.firstIndex(where: { $0.id == previousFirstVisibleID }) {
+            renderWindowStart = max(0, previousIndex - RenderWindow.step)
+        } else {
+            renderWindowStart = 0
+        }
+        startToolHydration(loadingForSession: sessionId)
     }
 
     // MARK: - DB Polling (terminal mode fallback)
@@ -2189,10 +2253,14 @@ public final class RichChatViewModel {
 
         func flushGroup() {
             if currentUser != nil || !currentAssistant.isEmpty {
-                // Use stable sequential IDs so SwiftUI doesn't re-create views
-                // when streaming messages finalize (id changes from 0 to -N)
+                // Stable identity is essential once old pages are prepended:
+                // offset-based group IDs would shift every visible bubble and
+                // break scroll-anchor preservation. Prefer the user row id for
+                // a turn; assistant-only/tool groups fall back to their first
+                // assistant/tool row id.
+                let stableID = currentUser?.id ?? currentAssistant.first?.id ?? groupIndex
                 groups.append(MessageGroup(
-                    id: groupIndex,
+                    id: stableID,
                     userMessage: currentUser,
                     assistantMessages: currentAssistant,
                     toolResults: currentToolResults
