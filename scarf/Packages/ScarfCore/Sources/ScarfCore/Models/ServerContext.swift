@@ -151,6 +151,9 @@ public struct ServerContext: Sendable, Hashable, Identifiable {
         case .local:
             return LocalTransport(contextID: id)
         case .ssh(let config):
+            if let gateway = try? GatewayScarfConnectionConfig.load() {
+                return GatewayServerTransport(contextID: id, config: gateway)
+            }
             if let factory = ServerContext.sshTransportFactory {
                 return factory(id, config, displayName)
             }

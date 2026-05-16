@@ -27,6 +27,15 @@ extension ACPClient {
     /// minus `TERM` (ACP speaks raw JSON over stdio, any terminal
     /// escape sequence would corrupt it).
     nonisolated private static func makeProcessChannel(for context: ServerContext) async throws -> any ACPChannel {
+        if context.isRemote, let gateway = try? GatewayScarfConnectionConfig.load() {
+            return try await GatewayACPChannel(
+                config: gateway,
+                executable: context.paths.hermesBinary,
+                args: ["acp"],
+                projectDirectory: await context.resolvedUserHome()
+            )
+        }
+
         let transport = context.makeTransport()
         let proc = transport.makeProcess(
             executable: context.paths.hermesBinary,

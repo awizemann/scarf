@@ -115,6 +115,78 @@ public struct GatewayScarfClient: Sendable {
         try await get("/v1/logs?source=\(Self.percentEncode(source))&lines=\(lines)")
     }
 
+    public func statFile(path: String) async throws -> GatewayFileStatResponse {
+        try await get("/v1/files/stat?path=\(Self.percentEncodeQuery(path))")
+    }
+
+    public func readFile(path: String, encoding: String = "base64") async throws -> GatewayFileReadResponse {
+        try await get("/v1/files/read?path=\(Self.percentEncodeQuery(path))&encoding=\(Self.percentEncodeQuery(encoding))")
+    }
+
+    public func listDirectory(path: String) async throws -> GatewayFileListResponse {
+        try await get("/v1/files/list?path=\(Self.percentEncodeQuery(path))")
+    }
+
+    public func writeFile(path: String, data: Data) async throws -> GatewayFileWriteResponse {
+        let body = GatewayFileWriteRequest(path: path, encoding: "base64", data: data.base64EncodedString(), atomic: true, mode: nil)
+        return try await post("/v1/files/write", body: body)
+    }
+
+    public func createDirectory(path: String) async throws -> GatewayStatusPathResponse {
+        try await post("/v1/files/mkdir", body: GatewayMkdirRequest(path: path, parents: true))
+    }
+
+    public func deleteFile(path: String) async throws -> GatewayStatusPathResponse {
+        let request = try makeRequest(path: "/v1/files?path=\(Self.percentEncodeQuery(path))", method: "DELETE")
+        let (data, response) = try await transport.data(for: request)
+        return try decode(GatewayStatusPathResponse.self, from: data, response: response, expectedStatus: 200)
+    }
+
+    public func watchSnapshot(paths: [String]) async throws -> GatewayWatchSnapshotResponse {
+        try await post("/v1/files/watch-snapshot", body: GatewayWatchSnapshotRequest(paths: paths))
+    }
+
+    public func runProcess(executable: String, args: [String], stdin: Data? = nil, timeout: TimeInterval? = nil) async throws -> GatewayProcessRunResponse {
+        let body = GatewayProcessRunRequest(
+            executable: executable,
+            args: args,
+            stdinEncoding: stdin == nil ? nil : "base64",
+            stdin: stdin?.base64EncodedString(),
+            cwd: nil,
+            timeoutMs: timeout.map { Int($0 * 1000) }
+        )
+        return try await post("/v1/processes/run", body: body)
+    }
+
+    public func runScript(script: String, timeout: TimeInterval? = nil) async throws -> GatewayProcessRunResponse {
+        try await post("/v1/scripts/run", body: GatewayScriptRunRequest(script: script, cwd: nil, timeoutMs: timeout.map { Int($0 * 1000) }))
+    }
+
+    public func createACPSession(executable: String? = nil, args: [String]? = nil, projectDirectory: String? = nil) async throws -> GatewayACPSessionResponse {
+        try await post("/v1/acp/sessions", body: GatewayACPSessionCreateRequest(executable: executable, args: args, projectDirectory: projectDirectory), expectedStatus: 201)
+    }
+
+    public func sendACPLine(sessionId: String, line: String) async throws -> GatewayACPActionResponse {
+        try await post("/v1/acp/sessions/\(Self.percentEncode(sessionId))/stdin", body: GatewayACPStdinRequest(line: line))
+    }
+
+    public func closeACPSession(sessionId: String) async throws -> GatewayACPActionResponse {
+        let request = try makeRequest(path: "/v1/acp/sessions/\(Self.percentEncode(sessionId))", method: "DELETE")
+        let (data, response) = try await transport.data(for: request)
+        return try decode(GatewayACPActionResponse.self, from: data, response: response, expectedStatus: 200)
+    }
+
+    public func acpEvents(sessionId: String, lastEventId: String? = nil) async throws -> String {
+        let suffix = lastEventId.map { "?lastEventId=\(Self.percentEncodeQuery($0))" } ?? ""
+        let request = try makeRequest(path: "/v1/acp/sessions/\(Self.percentEncode(sessionId))/events\(suffix)", method: "GET")
+        let (data, response) = try await transport.data(for: request)
+        guard response.statusCode == 200 else {
+            let errorPayload = try? decoder.decode(GatewayScarfErrorEnvelope.self, from: data)
+            throw GatewayScarfClientError.httpStatus(response.statusCode, errorPayload?.error.message ?? String(data: data, encoding: .utf8) ?? "")
+        }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
     public func createSession(title: String? = nil, projectDirectory: String? = nil) async throws -> GatewayScarfSession {
         let body = GatewayScarfCreateSessionRequest(projectDirectory: projectDirectory, title: title)
         return try await post("/v1/sessions", body: body, expectedStatus: 201)
@@ -171,6 +243,10 @@ public struct GatewayScarfClient: Sendable {
     private static func percentEncode(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
     }
+
+    private static func percentEncodeQuery(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
+    }
 }
 
 public enum GatewayScarfClientError: Error, Equatable {
@@ -213,6 +289,12 @@ public struct GatewayScarfCapabilities: Codable, Sendable, Equatable {
     public let skills: Bool
     public let logs: Bool
     public let projectContext: Bool
+    public let files: Bool?
+    public let watches: Bool?
+    public let processes: Bool?
+    public let scripts: Bool?
+    public let sqlite: Bool?
+    public let acp: Bool?
 }
 
 public struct GatewayScarfRawCapabilities: Codable, Sendable, Equatable {
@@ -285,6 +367,115 @@ private struct GatewayScarfCreateSessionRequest: Codable {
 
 private struct GatewayScarfMessageRequest: Codable {
     let text: String
+}
+
+
+public struct GatewayFileStatResponse: Codable, Sendable, Equatable {
+    public let path: String
+    public let exists: Bool
+    public let stat: GatewayFileStat?
+}
+
+public struct GatewayFileStat: Codable, Sendable, Equatable {
+    public let size: Int64
+    public let mtime: String
+    public let isDirectory: Bool
+}
+
+public struct GatewayFileReadResponse: Codable, Sendable, Equatable {
+    public let path: String
+    public let encoding: String
+    public let data: String
+}
+
+public struct GatewayFileEntry: Codable, Sendable, Equatable {
+    public let name: String
+    public let path: String
+    public let isDirectory: Bool
+    public let size: Int64
+    public let mtime: String
+}
+
+public struct GatewayFileListResponse: Codable, Sendable, Equatable {
+    public let path: String
+    public let entries: [GatewayFileEntry]
+}
+
+public struct GatewayFileWriteRequest: Codable, Sendable, Equatable {
+    public let path: String
+    public let encoding: String
+    public let data: String
+    public let atomic: Bool
+    public let mode: String?
+}
+
+public struct GatewayFileWriteResponse: Codable, Sendable, Equatable {
+    public let path: String
+    public let status: String
+    public let bytesWritten: Int
+}
+
+public struct GatewayMkdirRequest: Codable, Sendable, Equatable {
+    public let path: String
+    public let parents: Bool
+}
+
+public struct GatewayStatusPathResponse: Codable, Sendable, Equatable {
+    public let path: String
+    public let status: String
+}
+
+public struct GatewayWatchSnapshotRequest: Codable, Sendable, Equatable {
+    public let paths: [String]
+}
+
+public struct GatewayWatchSnapshotResponse: Codable, Sendable, Equatable {
+    public let signature: String
+    public let files: [GatewayFileStatResponse]
+}
+
+public struct GatewayProcessRunRequest: Codable, Sendable, Equatable {
+    public let executable: String
+    public let args: [String]
+    public let stdinEncoding: String?
+    public let stdin: String?
+    public let cwd: String?
+    public let timeoutMs: Int?
+}
+
+public struct GatewayScriptRunRequest: Codable, Sendable, Equatable {
+    public let script: String
+    public let cwd: String?
+    public let timeoutMs: Int?
+}
+
+public struct GatewayProcessRunResponse: Codable, Sendable, Equatable {
+    public let exitCode: Int
+    public let stdoutEncoding: String
+    public let stdout: String
+    public let stderrEncoding: String
+    public let stderr: String
+    public let timedOut: Bool
+}
+
+public struct GatewayACPSessionCreateRequest: Codable, Sendable, Equatable {
+    public let executable: String?
+    public let args: [String]?
+    public let projectDirectory: String?
+}
+
+public struct GatewayACPSessionResponse: Codable, Sendable, Equatable {
+    public let acpSessionId: String
+    public let status: String
+}
+
+public struct GatewayACPActionResponse: Codable, Sendable, Equatable {
+    public let acpSessionId: String
+    public let status: String
+}
+
+public struct GatewayACPStdinRequest: Codable, Sendable, Equatable {
+    public let line: String
 }
 
 private struct EmptyBody: Codable {}
