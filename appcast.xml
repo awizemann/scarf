@@ -6,6 +6,144 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.9.0</title>
+      <sparkle:version>36</sparkle:version>
+      <sparkle:shortVersionString>2.9.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Sat, 16 May 2026 15:49:06 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.9.0</p>
+<p>Hermes v0.14.0 (v2026.5.16) — &quot;Foundation Release&quot; — catch-up. Adds support for the new ACP slash commands, two new providers, two new gateway platforms, two new web-search backends, the local OpenAI-compatible proxy, ACP browser-tools setup, the per-turn file-mutation verifier surface, a YOLO mode warning, and a long tail of settings and config additions. Bundles 9 pending fixes and feature commits that landed since v2.8.0.</p>
+<h2>Hermes v0.14 catch-up</h2>
+<h3>Chat</h3>
+<ul>
+  <li><strong><code>/subgoal</code> slash command</strong> — append extra success criteria to an active <code>/goal</code> loop. Surfaced as a trailing line on the goal pill. Forms: <code>&lt;text&gt;</code>, <code>remove N</code>, <code>clear</code>.</li>
+  <li><strong><code>/yolo</code> slash command</strong> — toggle YOLO mode (skip dangerous-command approvals) without leaving chat. Pairs with a new chat-header warning badge when YOLO is on.</li>
+  <li><strong><code>/sessions</code> slash command</strong> — browse and resume prior sessions from inside an active chat.</li>
+  <li><strong><code>/codex-runtime</code> slash command</strong> — toggle the Codex app-server runtime for OpenAI/Codex models.</li>
+  <li><strong>Per-turn file-mutation verifier</strong> — v0.14 Hermes appends a verifier footer to assistant turns that wrote files (configurable via <code>file_mutation_verifier</code>). The footer flows through Scarf chat as plain agent output; bespoke card-style rendering is deferred until the upstream format stabilizes.</li>
+  <li><strong>YOLO mode warning banner</strong> — chat-header badge when <code>agent.approval_mode = yolo</code>. Mirrors the warning Hermes itself surfaces in its banner.</li>
+</ul>
+<h3>Providers</h3>
+<ul>
+  <li><strong>xAI Grok OAuth (SuperGrok)</strong> — sign in with your xAI account, talk to Grok models from Scarf. Subscription-gated; surfaces in the Models picker with a &quot;Subscription&quot; pill.</li>
+  <li><strong>NovitaAI</strong> — new API-key inference provider.</li>
+  <li><strong>Alibaba Cloud → Qwen Cloud</strong> — display rename to match Hermes&#x27;s picker. Provider wire ID stays <code>alibaba</code> so existing config keys keep working.</li>
+</ul>
+<h3>Platforms</h3>
+<ul>
+  <li><strong>LINE Messaging API</strong> — 21st gateway platform.</li>
+  <li><strong>SimpleX Chat</strong> — 22nd gateway platform. Requires a local <code>simplex-chat</code> daemon running in WebSocket mode (setup instructions in the Discovery panel).</li>
+</ul>
+<h3>Web Tools</h3>
+<ul>
+  <li><strong>Brave Search (free tier)</strong> + <strong>DuckDuckGo (DDGS)</strong> — two new web-search backends. Brave honors a <code>BRAVE_SEARCH_API_KEY</code> env var for higher quotas; DDGS works anonymously.</li>
+</ul>
+<h3>MCP, plugins, and config</h3>
+<ul>
+  <li><strong>MCP <code>supports_parallel_tool_calls</code></strong> — new optional flag on MCP server entries; the agent batches concurrent tool calls instead of serializing.</li>
+  <li><strong>OpenRouter <code>min_coding_score</code></strong> — knob for the Pareto Code router (<code>openrouter/pareto-code</code>). Routes to the cheapest model meeting your quality bar (0.0–1.0, default 0.65).</li>
+  <li><strong>Custom provider <code>api_mode</code></strong> — explicit wire-protocol selection (<code>chat_completions</code> / <code>anthropic_messages</code> / <code>codex_responses</code>).</li>
+  <li><strong>Plugin <code>tool_override</code> badge</strong> — plugins that replace a built-in tool now show a badge in PluginsView.</li>
+  <li><strong><code>docker_extra_args</code></strong> — extra flags passed verbatim to <code>docker run</code> for the docker-backed terminal backend.</li>
+  <li><strong><code>display.timestamps</code></strong> — per-message timestamps toggle.</li>
+  <li><strong>Cron <code>deliver=all</code></strong> — fan-out cron job delivery to every connected channel.</li>
+  <li><strong>Discord channel-history backfill</strong> — toggle the v0.14 default-on backfill behavior per profile.</li>
+</ul>
+<h3>New feature surfaces</h3>
+<ul>
+  <li><strong>Hermes Proxy</strong> — new sidebar destination under Configure. Runs <code>hermes proxy start</code> with the user&#x27;s OAuth-authenticated upstream (Nous Portal in v0.14, more adapters coming). Surfaces the endpoint URL (<code>http://127.0.0.1:8645/v1</code>), routed-provider status, and a tail of the startup log. Use it to point Codex / Aider / Cline / VS Code Continue at your Hermes subscription.</li>
+  <li><strong>ACP browser tools setup</strong> — Health view gains a &quot;Run setup&quot; button that calls <code>hermes acp --setup-browser</code> to install Chromium and provision Playwright in one shot.</li>
+</ul>
+<h2>Performance + reliability fixes (post-v2.8.0)</h2>
+<ul>
+  <li><strong>Per-project model presets + mid-chat switcher</strong> — save named model+provider presets, bind one to a project, or switch mid-chat via a popover from the chat header.</li>
+  <li><strong>Kanban toolset enable</strong> — direct YAML write with detector-based verification (the CLI flow had a regression that didn&#x27;t persist correctly).</li>
+  <li><strong>MetricKit crash + hang diagnostics</strong> — Scarf-iOS persists MetricKit reports across launches so post-mortems work after a TestFlight crash.</li>
+  <li><strong>JSON read caps</strong> — session-attribution and project-dashboard JSON reads now bound their input to defend against pathological files.</li>
+  <li><strong>Scroll crash + background-lifecycle hardening</strong> — eliminates a scroll-view crash and tightens behavior when the app suspends mid-chat.</li>
+  <li><strong>Selectable text across paragraphs</strong> in chat transcript (#93).</li>
+  <li><strong>Process pipe draining</strong> for large Kanban outputs (#95).</li>
+  <li><strong>Transcript render perf</strong> — chat transcript scrolls faster on long conversations, plus a cron-filter and two-stage load-earlier.</li>
+  <li><strong>iOS slash command parity</strong> — iOS chat now sees the same slash menu as Mac, plus four TestFlight-reported fixes.</li>
+</ul>
+<h2>Hermes compatibility</h2>
+<p>Targets Hermes v0.14.0 (v2026.5.16). Pre-v0.14 hosts continue to work — every v0.14 surface is capability-gated on <code>HermesCapabilities.has*</code> flags so older Hermes installs gracefully hide new affordances rather than throwing.</p>
+<p>Note: the new <code>/handoff</code> slash command in Hermes v0.14 is messaging-platform handoff (CLI-only). Mid-chat model switching in Scarf continues to use the existing <code>session/set_model</code> RPC path via the chat-header model badge.</p>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>The Sparkle appcast at <code>https://awizemann.github.io/scarf/appcast.xml</code> will offer this update automatically on next launch.</li>
+  <li>macOS 14.6+ (Sonoma) deployment target unchanged.</li>
+  <li>No breaking changes to <code>~/.hermes/</code> state. The Scarf sidecar at <code>~/.hermes/scarf/</code> gains a new optional file for per-project Hermes proxy bindings (created lazily on first use).</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.9.0/Scarf-v2.9.0-Universal.zip"
+                 sparkle:edSignature="bqPABt315aHEi0BPMYalZzN7JyM/xncRydCZPWgPEu0dSphcBQW328neKugOkO9hnimCQ6mcY0nkq6OLM2gdDg=="
+                 length="20265172"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.8.0</title>
       <sparkle:version>35</sparkle:version>
       <sparkle:shortVersionString>2.8.0</sparkle:shortVersionString>
