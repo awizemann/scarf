@@ -56,14 +56,47 @@ import Testing
         #expect(response.response == "pong")
     }
 
+    @Test func connectionConfigPrefersEnvironmentAndCanReadDiskConfig() throws {
+        let diskURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("gateway-scarf.json")
+        try FileManager.default.createDirectory(at: diskURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(#"{"baseURL":"http://192.168.1.198:8765","token":"disk-token"}"#.utf8).write(to: diskURL)
+
+        let diskMaybe = try GatewayScarfConnectionConfig.load(environment: [:], fileURL: diskURL)
+        let envMaybe = try GatewayScarfConnectionConfig.load(
+            environment: ["GATEWAY_SCARF_BASE_URL": "http://mac-mini.local:8765", "GATEWAY_SCARF_TOKEN": "env-token"],
+            fileURL: diskURL
+        )
+        let disk = try #require(diskMaybe)
+        let env = try #require(envMaybe)
+
+        #expect(disk.baseURL.absoluteString == "http://192.168.1.198:8765")
+        #expect(disk.token == "disk-token")
+        #expect(env.baseURL.absoluteString == "http://mac-mini.local:8765")
+        #expect(env.token == "env-token")
+    }
+
+    @Test func connectionConfigCanBeSavedForInterfaceSettings() throws {
+        let diskURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("gateway-scarf.json")
+        let config = try GatewayScarfConnectionConfig(baseURLString: " http://192.168.1.198:8765 ", token: " gateway-token ")
+
+        try config.save(to: diskURL)
+        let loadedMaybe = try GatewayScarfConnectionConfig.load(environment: [:], fileURL: diskURL)
+        let loaded = try #require(loadedMaybe)
+
+        #expect(loaded.baseURL.absoluteString == "http://192.168.1.198:8765")
+        #expect(loaded.token == "gateway-token")
+    }
+
     @Test func liveGatewaySmokeWhenEnvironmentIsSet() async throws {
         let env = ProcessInfo.processInfo.environment
-        guard let base = env["GATEWAY_SCARF_INTEGRATION_BASE_URL"],
-              let token = env["GATEWAY_SCARF_INTEGRATION_TOKEN"],
-              let baseURL = URL(string: base) else {
+        guard let config = try GatewayScarfConnectionConfig.load(environment: env) else {
             return
         }
-        let client = GatewayScarfClient(baseURL: baseURL, token: token)
+        let client = config.makeClient()
 
         let health = try await client.health()
         let jobs = try await client.cronJobs()

@@ -20,6 +20,60 @@ public struct URLSessionGatewayScarfTransport: GatewayScarfTransport {
     }
 }
 
+public struct GatewayScarfConnectionConfig: Codable, Sendable, Equatable {
+    public let baseURL: URL
+    public let token: String
+
+    public init(baseURL: URL, token: String) {
+        self.baseURL = baseURL
+        self.token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public init(baseURLString: String, token: String) throws {
+        let trimmedBase = baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmedBase), url.scheme != nil, url.host != nil else {
+            throw GatewayScarfClientError.invalidURL(baseURLString)
+        }
+        self.init(baseURL: url, token: token)
+    }
+
+    public func makeClient(transport: any GatewayScarfTransport = URLSessionGatewayScarfTransport()) -> GatewayScarfClient {
+        GatewayScarfClient(baseURL: baseURL, token: token, transport: transport)
+    }
+
+    public static func load(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileURL: URL = defaultConfigFileURL()
+    ) throws -> GatewayScarfConnectionConfig? {
+        if let base = environment["GATEWAY_SCARF_BASE_URL"] ?? environment["GATEWAY_SCARF_INTEGRATION_BASE_URL"],
+           let token = environment["GATEWAY_SCARF_TOKEN"] ?? environment["GATEWAY_SCARF_INTEGRATION_TOKEN"],
+           !base.isEmpty,
+           !token.isEmpty {
+            return try GatewayScarfConnectionConfig(baseURLString: base, token: token)
+        }
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return nil
+        }
+        let data = try Data(contentsOf: fileURL)
+        return try JSONDecoder().decode(GatewayScarfConnectionConfig.self, from: data)
+    }
+
+    public static func defaultConfigFileURL() -> URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
+        return appSupport.appendingPathComponent("scarf/gateway-scarf.json")
+    }
+
+    public func save(to fileURL: URL = defaultConfigFileURL()) throws {
+        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(self)
+        try data.write(to: fileURL, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+    }
+}
+
 public struct GatewayScarfClient: Sendable {
     public let baseURL: URL
     public let token: String

@@ -9,6 +9,8 @@ import AppKit
 struct ManageServersView: View {
     @Environment(ServerRegistry.self) private var registry
     @State private var showAddSheet = false
+    @State private var showGatewaySettings = false
+    @State private var gatewayConfig: GatewayScarfConnectionConfig?
     @State private var pendingRemoveID: ServerID?
     @State private var diagnosticsContext: ServerContext?
     @State private var importAlert: ImportAlertState?
@@ -35,6 +37,10 @@ struct ManageServersView: View {
             }
         }
         .frame(width: 440, height: 380)
+        .onAppear { reloadGatewayConfig() }
+        .sheet(isPresented: $showGatewaySettings, onDismiss: reloadGatewayConfig) {
+            GatewayScarfSettingsSheet()
+        }
         .sheet(isPresented: $showAddSheet) {
             AddServerSheet { name, config in
                 _ = registry.addServer(displayName: name, config: config)
@@ -103,9 +109,15 @@ struct ManageServersView: View {
             .fixedSize()
             .help("Export or import the list of remote servers. SSH keys aren't included — you copy those separately.")
             Button {
+                showGatewaySettings = true
+            } label: {
+                Label("Gateway", systemImage: "network")
+            }
+            .buttonStyle(.borderless)
+            Button {
                 showAddSheet = true
             } label: {
-                Label("Add", systemImage: "plus")
+                Label("SSH", systemImage: "plus")
             }
             .buttonStyle(.borderless)
         }
@@ -194,8 +206,9 @@ struct ManageServersView: View {
             Image(systemName: "server.rack")
                 .font(.system(size: 28))
                 .foregroundStyle(.secondary)
-            Text("No remote servers").scarfStyle(.headline)
-            Text("Click Add to connect to a remote Hermes installation over SSH.")
+            Text("No SSH servers")
+                .scarfStyle(.headline)
+            Text(gatewayConfig == nil ? "Configure Gateway Scarf to connect by URL, or add an SSH server if you still need direct shell access." : "Gateway Scarf is configured. Add SSH only if you still need direct shell access.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -208,6 +221,23 @@ struct ManageServersView: View {
     private var list: some View {
         let defaultID = registry.defaultServerID
         return List {
+            if let gatewayConfig {
+                HStack(spacing: 10) {
+                    Image(systemName: "network")
+                        .foregroundStyle(.green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Gateway Scarf").font(.body)
+                        Text(gatewayConfig.baseURL.absoluteString)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Edit") { showGatewaySettings = true }
+                        .buttonStyle(.borderless)
+                }
+                .padding(.vertical, 4)
+            }
+
             // Local sits at the top so users can mark it as the open-on-launch
             // default alongside remote servers. It's synthesized (not in
             // `registry.entries`), so render it explicitly.
@@ -308,6 +338,10 @@ struct ManageServersView: View {
         .buttonStyle(.borderless)
         .disabled(isDefault)
         .help(isDefault ? "Opens on launch" : "Set as default — open this server when Scarf launches.")
+    }
+
+    private func reloadGatewayConfig() {
+        gatewayConfig = try? GatewayScarfConnectionConfig.load(environment: [:])
     }
 
     private func summary(for config: SSHConfig) -> String {
