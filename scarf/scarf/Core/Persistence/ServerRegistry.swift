@@ -51,14 +51,16 @@ final class ServerRegistry {
         let dir = support.appendingPathComponent("scarf", isDirectory: true)
         self.storeURL = dir.appendingPathComponent("servers.json")
         load()
+        reconcileGatewayScarfEntryAtLaunch()
     }
 
     // MARK: - Lookup
 
-    /// The implicit local server plus every persisted remote entry, in list
-    /// order. Use this when populating UI like the toolbar switcher.
+    /// Persisted remote/gateway entries in list order. Local remains available
+    /// as the internal fallback context, but user-facing pickers no longer offer
+    /// it as a configurable target.
     var allContexts: [ServerContext] {
-        [.local] + entries.map { $0.context }
+        entries.map { $0.context }
     }
 
     /// Resolve an ID to a context, or `nil` if the entry no longer exists.
@@ -72,23 +74,23 @@ final class ServerRegistry {
         return nil
     }
 
-    /// The server a fresh window should open into. Returns the ID of the
-    /// remote entry flagged `openOnLaunch`, or Local's ID if none is
-    /// flagged (or if the flagged entry was removed out from under us).
-    /// Consumed by the `WindowGroup`'s `defaultValue` closure.
+    /// The server a fresh window should open into. Prefer the remote/gateway
+    /// entry flagged `openOnLaunch`; otherwise use the first configured entry.
+    /// Local is only the last-resort fallback for a brand-new install.
     var defaultServerID: ServerID {
-        entries.first(where: { $0.openOnLaunch })?.id ?? ServerContext.local.id
+        entries.first(where: { $0.openOnLaunch })?.id ?? entries.first?.id ?? ServerContext.local.id
     }
 
-    /// Flip the default server to `id`. Passing `ServerContext.local.id`
-    /// clears the flag on every remote entry, making Local the implicit
-    /// default. Passing an unknown ID is a no-op. Persisted on return.
+    /// Flip the default server to `id`. Passing an unknown ID is a no-op.
+    /// Local is no longer exposed as a user-configurable default; fresh
+    /// windows fall back to it only when no persisted entries exist.
     ///
     /// Intentionally doesn't fire `onEntriesChanged` — that hook means "the
     /// set of servers changed" and drives the menu-bar fanout rebuild. A
     /// default-flag flip doesn't change the set; SwiftUI views reading
     /// `defaultServerID` redraw via `@Observable`'s tracking of `entries`.
     func setDefaultServer(_ id: ServerID) {
+        guard entries.contains(where: { $0.id == id }) else { return }
         var changed = false
         for idx in entries.indices {
             let shouldBeDefault = (entries[idx].id == id)
@@ -128,6 +130,59 @@ final class ServerRegistry {
         if let cfg = config { entries[idx].kind = .ssh(cfg) }
         save()
         onEntriesChanged?()
+    }
+
+
+    // MARK: - Gateway Scarf entry
+
+    static let gatewayScarfServerID = ServerID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+
+    /// Create/update the synthetic persisted entry that represents Gateway
+    /// Scarf in the normal server picker. The actual transport ignores these
+    /// SSH placeholders once `GatewayScarfConnectionConfig` is present and
+    /// routes through `GatewayServerTransport`; keeping it as `.ssh` gives the
+    /// rest of Scarf a remote `ServerContext` with stable window identity.
+    @discardableResult
+    func ensureGatewayScarfServer(
+        config: GatewayScarfConnectionConfig,
+        setAsDefault: Bool = true
+    ) -> ServerEntry {
+        let host = config.baseURL.host ?? config.baseURL.absoluteString
+        let port = config.baseURL.port
+        let placeholder = SSHConfig(
+            host: host,
+            port: port,
+            remoteHome: HermesPathSet.defaultRemoteHome,
+            projectsRoot: "~/projects"
+        )
+
+        let entry: ServerEntry
+        if let idx = entries.firstIndex(where: { $0.id == Self.gatewayScarfServerID }) {
+            entries[idx].displayName = "Gateway Scarf"
+            entries[idx].kind = .ssh(placeholder)
+            entry = entries[idx]
+        } else {
+            entry = ServerEntry(
+                id: Self.gatewayScarfServerID,
+                displayName: "Gateway Scarf",
+                kind: .ssh(placeholder)
+            )
+            entries.insert(entry, at: 0)
+        }
+
+        if setAsDefault {
+            for idx in entries.indices {
+                entries[idx].openOnLaunch = entries[idx].id == Self.gatewayScarfServerID
+            }
+        }
+        save()
+        onEntriesChanged?()
+        return entries.first(where: { $0.id == Self.gatewayScarfServerID }) ?? entry
+    }
+
+    private func reconcileGatewayScarfEntryAtLaunch() {
+        guard let config = try? GatewayScarfConnectionConfig.load(environment: [:]) else { return }
+        _ = ensureGatewayScarfServer(config: config, setAsDefault: entries.isEmpty)
     }
 
     func removeServer(_ id: ServerID) {

@@ -14,6 +14,7 @@ final class GatewayScarfSettingsViewModel {
     var isSaving: Bool = false
     var testResult: TestResult?
     var saveError: String?
+    private(set) var savedConfig: GatewayScarfConnectionConfig?
 
     enum TestResult: Equatable {
         case success(serviceName: String, hermesVersion: String, capabilities: String)
@@ -69,7 +70,9 @@ final class GatewayScarfSettingsViewModel {
         defer { isSaving = false }
         saveError = nil
         do {
-            try makeConfig().save()
+            let config = try makeConfig()
+            try config.save()
+            savedConfig = config
         } catch {
             saveError = Self.describe(error)
             throw error

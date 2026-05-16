@@ -51,6 +51,14 @@ public extension ACPClient {
         guard case .ssh(let sshConfig) = context.kind else {
             throw ACPChannelError.other("iOS ACPClient requires a remote .ssh context — got \(context.kind)")
         }
+        if let gateway = try? GatewayScarfConnectionConfig.load() {
+            return try await GatewayACPChannel(
+                config: gateway,
+                executable: context.paths.hermesBinary,
+                args: ["acp"],
+                projectDirectory: await context.resolvedUserHome()
+            )
+        }
         let key = try await keyProvider()
         let client = try await openSSHClient(config: sshConfig, key: key)
 

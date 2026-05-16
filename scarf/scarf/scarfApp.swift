@@ -220,28 +220,23 @@ private struct OpenServerCommands: View {
 
     var body: some View {
         Menu("Open Server") {
-            // Local is always slot 1 (⌘1).
-            Button {
-                openWindow(value: ServerContext.local.id)
-            } label: {
-                Label("Local", systemImage: "laptopcomputer")
-            }
-            .keyboardShortcut("1", modifiers: .command)
-
-            if !registry.entries.isEmpty {
-                Divider()
-                // First 8 remote entries get ⌘2…⌘9. Beyond 9 servers,
-                // entries lose their shortcut but remain clickable.
-                ForEach(Array(registry.entries.prefix(8).enumerated()), id: \.element.id) { index, entry in
+            if registry.entries.isEmpty {
+                Text("No Gateway configured")
+                    .foregroundStyle(.secondary)
+            } else {
+                // First 9 configured entries get ⌘1…⌘9. Local is no longer
+                // exposed as a user-facing target; it remains only as the
+                // internal fallback when no Gateway/remote exists.
+                ForEach(Array(registry.entries.prefix(9).enumerated()), id: \.element.id) { index, entry in
                     Button {
                         openWindow(value: entry.id)
                     } label: {
                         Label(entry.displayName, systemImage: "server.rack")
                     }
-                    .keyboardShortcut(KeyEquivalent(Character("\(index + 2)")), modifiers: .command)
+                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
                 }
-                if registry.entries.count > 8 {
-                    ForEach(registry.entries.dropFirst(8)) { entry in
+                if registry.entries.count > 9 {
+                    ForEach(registry.entries.dropFirst(9)) { entry in
                         Button {
                             openWindow(value: entry.id)
                         } label: {
@@ -255,7 +250,7 @@ private struct OpenServerCommands: View {
             // commonly bound to "Open in new tab" by browser/IDE muscle memory
             // and we want to feel additive, not conflicting.
             Button {
-                openWindow(value: ServerContext.local.id)
+                openWindow(value: registry.defaultServerID)
             } label: {
                 Label("Manage Servers…", systemImage: "server.rack")
             }

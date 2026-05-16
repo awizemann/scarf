@@ -141,6 +141,8 @@ final class RootModel {
     private let keyStore: any SSHKeyStore
     private let configStore: any IOSServerConfigStore
 
+    static let gatewayServerID = ServerID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+
     private static let logger = Logger(
         subsystem: "com.scarf.ios",
         category: "RootModel"
@@ -164,10 +166,10 @@ final class RootModel {
             servers = all
             lastError = nil
             if all.isEmpty {
-                // Fresh install or user forgot every server → go
-                // straight to onboarding with a new ID reserved so
-                // completion writes under the right slot.
-                state = .onboarding(forNewServer: ServerID())
+                // Fresh install: show the server list shell instead of forcing
+                // SSH onboarding so the user can configure Gateway Scarf by
+                // URL/token on iOS.
+                state = .serverList
             } else {
                 state = .serverList
             }
@@ -180,7 +182,7 @@ final class RootModel {
             Self.logger.error("RootModel.load failed: \(error.localizedDescription, privacy: .public)")
             servers = [:]
             lastError = "Couldn't load saved servers (\(error.localizedDescription)). Starting fresh."
-            state = .onboarding(forNewServer: ServerID())
+            state = .serverList
         }
     }
 
@@ -189,6 +191,38 @@ final class RootModel {
     /// immediately.
     func refreshServers() async {
         servers = (try? await configStore.listAll()) ?? [:]
+    }
+
+    var gatewayConfig: GatewayScarfConnectionConfig? {
+        try? GatewayScarfConnectionConfig.load(environment: [:])
+    }
+
+    func configureGateway(baseURL: String, token: String) async throws {
+        let config = try GatewayScarfConnectionConfig(baseURLString: baseURL, token: token)
+        try config.save()
+        let server = gatewayIOSServerConfig(for: config)
+        try await configStore.save(server, id: Self.gatewayServerID)
+        servers[Self.gatewayServerID] = server
+        lastError = nil
+        state = .serverList
+    }
+
+    private func gatewayIOSServerConfig(for config: GatewayScarfConnectionConfig) -> IOSServerConfig {
+        IOSServerConfig(
+            host: config.baseURL.host ?? config.baseURL.absoluteString,
+            port: config.baseURL.port,
+            remoteHome: HermesPathSet.defaultRemoteHome,
+            displayName: "Gateway Scarf"
+        )
+    }
+
+    private var placeholderGatewayKey: SSHKeyBundle {
+        SSHKeyBundle(
+            privateKeyPEM: "",
+            publicKeyOpenSSH: "gateway-scarf",
+            comment: "gateway-scarf",
+            createdAt: ISO8601DateFormatter().string(from: Date())
+        )
     }
 
     /// Start onboarding for a new server. The UI passes us the
@@ -237,7 +271,12 @@ final class RootModel {
             if diskConfig == nil {
                 diskConfig = try await configStore.load(id: id)
             }
-            let diskKey: SSHKeyBundle? = try await keyStore.load(for: id)
+            let diskKey: SSHKeyBundle?
+            if id == Self.gatewayServerID, gatewayConfig != nil {
+                diskKey = placeholderGatewayKey
+            } else {
+                diskKey = try await keyStore.load(for: id)
+            }
             guard let config = diskConfig, let key = diskKey else {
                 // Genuine "no row" / "no key" — preserve the pre-A.3
                 // behaviour: re-onboard under this ID so the user keeps

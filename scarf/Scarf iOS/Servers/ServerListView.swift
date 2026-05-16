@@ -41,16 +41,24 @@ struct ServerListView: View {
                 }
 
                 Section {
-                    ForEach(sortedServers, id: \.id) { row in
-                        ServerListRow(row: row) {
-                            Task { await model.connect(to: row.id) }
-                        }
-                        .scarfGoCompactListRow()
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                serverPendingForget = row
-                            } label: {
-                                Label("Forget", systemImage: "trash")
+                    if sortedServers.isEmpty {
+                        ContentUnavailableView(
+                            "No server configured",
+                            systemImage: "network",
+                            description: Text("Configure Gateway Scarf by URL/token, or add an SSH server if you still need direct shell access.")
+                        )
+                    } else {
+                        ForEach(sortedServers, id: \.id) { row in
+                            ServerListRow(row: row) {
+                                Task { await model.connect(to: row.id) }
+                            }
+                            .scarfGoCompactListRow()
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    serverPendingForget = row
+                                } label: {
+                                    Label("Forget", systemImage: "trash")
+                                }
                             }
                         }
                     }
@@ -65,11 +73,18 @@ struct ServerListView: View {
             .navigationTitle("Servers")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        GatewaySettingsView(model: model)
+                    } label: {
+                        Label("Gateway", systemImage: "network")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         model.beginAddServer()
                     } label: {
-                        Label("Add server", systemImage: "plus.circle.fill")
+                        Label("Add SSH server", systemImage: "plus.circle.fill")
                     }
                 }
             }

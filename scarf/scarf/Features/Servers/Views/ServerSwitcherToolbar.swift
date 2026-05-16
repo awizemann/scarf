@@ -19,9 +19,6 @@ struct ServerSwitcherToolbar: View {
                 .font(.caption)
             Divider()
             Section("Open in new window") {
-                if current.id != ServerContext.local.id {
-                    openRow(.local)
-                }
                 ForEach(registry.entries) { entry in
                     if entry.id != current.id {
                         openRow(entry.context)

@@ -8,6 +8,7 @@ import ScarfDesign
 struct GatewayScarfSettingsSheet: View {
     @State private var viewModel = GatewayScarfSettingsViewModel()
     @Environment(\.dismiss) private var dismiss
+    var onSaved: (GatewayScarfConnectionConfig) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -120,6 +121,9 @@ struct GatewayScarfSettingsSheet: View {
             Button("Save") {
                 do {
                     try viewModel.save()
+                    if let config = viewModel.savedConfig {
+                        onSaved(config)
+                    }
                     dismiss()
                 } catch {
                     // saveError is populated by the view model.

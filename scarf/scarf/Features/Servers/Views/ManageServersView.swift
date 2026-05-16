@@ -39,7 +39,9 @@ struct ManageServersView: View {
         .frame(width: 440, height: 380)
         .onAppear { reloadGatewayConfig() }
         .sheet(isPresented: $showGatewaySettings, onDismiss: reloadGatewayConfig) {
-            GatewayScarfSettingsSheet()
+            GatewayScarfSettingsSheet { config in
+                _ = registry.ensureGatewayScarfServer(config: config, setAsDefault: true)
+            }
         }
         .sheet(isPresented: $showAddSheet) {
             AddServerSheet { name, config in
@@ -206,9 +208,9 @@ struct ManageServersView: View {
             Image(systemName: "server.rack")
                 .font(.system(size: 28))
                 .foregroundStyle(.secondary)
-            Text("No SSH servers")
+            Text(gatewayConfig == nil ? "No Gateway configured" : "Gateway configured")
                 .scarfStyle(.headline)
-            Text(gatewayConfig == nil ? "Configure Gateway Scarf to connect by URL, or add an SSH server if you still need direct shell access." : "Gateway Scarf is configured. Add SSH only if you still need direct shell access.")
+            Text(gatewayConfig == nil ? "Configure Gateway Scarf to connect by URL. Add SSH only if you still need direct shell access." : "Gateway Scarf is configured. Add SSH only if you still need direct shell access.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -238,25 +240,7 @@ struct ManageServersView: View {
                 .padding(.vertical, 4)
             }
 
-            // Local sits at the top so users can mark it as the open-on-launch
-            // default alongside remote servers. It's synthesized (not in
-            // `registry.entries`), so render it explicitly.
-            HStack(spacing: 10) {
-                defaultStar(for: ServerContext.local.id, currentDefault: defaultID)
-                Image(systemName: "laptopcomputer")
-                    .foregroundStyle(.blue)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Local").font(.body)
-                    Text("This Mac")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                actionsMenu(for: ServerContext.local, removable: false)
-            }
-            .padding(.vertical, 4)
-
-            ForEach(registry.entries) { entry in
+                        ForEach(registry.entries) { entry in
                 HStack(spacing: 10) {
                     defaultStar(for: entry.id, currentDefault: defaultID)
                     Image(systemName: "server.rack")
