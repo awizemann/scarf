@@ -6,6 +6,97 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.9.1</title>
+      <sparkle:version>37</sparkle:version>
+      <sparkle:shortVersionString>2.9.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Sun, 17 May 2026 20:39:50 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.9.1</p>
+<p>Patch release covering <a href="https://github.com/awizemann/scarf/issues/97">#97</a> — the v2.9.0 mid-chat model switcher and per-project model preset binding both fired <code>session/set_model</code> with the bare model ID, never the colon-prefixed <code>&lt;provider&gt;:&lt;model&gt;</code> wire format Hermes&#x27;s ACP adapter expects. For model IDs Hermes can auto-detect from the name alone (e.g. <code>claude-opus-4-7</code>), this worked. For less-obvious IDs (e.g. OpenRouter&#x27;s <code>&lt;author&gt;/&lt;model&gt;</code> slugs like <code>inclusionai/ring-2.6-1t</code>), Hermes&#x27;s <code>_resolve_model_selection</code> would fall through to <code>detect_provider_for_model</code> and infer the wrong provider — the session ended up routing through whatever provider was previously active, and the user got an opaque rejection from the wrong upstream.</p>
+<h2>Fix</h2>
+<ul>
+  <li><strong><code>ACPClient.setSessionModel</code></strong> gains an optional <code>providerID:</code> parameter. When supplied, the wire <code>modelId</code> is encoded as <code>&quot;&lt;provider&gt;:&lt;model&gt;&quot;</code> (matching <code>acp_adapter/server.py</code>&#x27;s <code>_encode_model_choice</code>). When <code>nil</code> or empty, falls back to the bare-model wire shape so existing call sites that genuinely don&#x27;t know the provider keep working.</li>
+  <li><strong><code>ChatViewModel.switchModelPreset</code></strong> and <strong><code>ChatViewModel.applyProjectModelPreset</code></strong> now pass <code>preset.providerID</code> through. The &quot;Use global default&quot; mid-chat path additionally reads <code>config.provider</code> from <code>config.yaml</code> so reverting to the global default lands on the same provider the CLI would.</li>
+  <li>New public <code>ACPClient.encodeModelChoice(modelID:providerID:)</code> static helper exposes the encoding logic for tests + any future call sites that need the wire form without firing the RPC.</li>
+  <li>6 new tests in <code>M1ACPTests</code> cover the encoding rules: bare model when provider absent / empty / whitespace, colon-prefix when both present, provider lower-casing (matches Hermes), whitespace trimming, empty-model no-op semantics.</li>
+</ul>
+<h2>Not affected</h2>
+<ul>
+  <li>The <code>/model &lt;X&gt;</code> slash command typed in Scarf chat — Scarf passes the literal text through; the parsing bug lives entirely in Hermes&#x27;s ACP <code>_cmd_model</code> handler (per the RCA in <a href="https://github.com/awizemann/scarf/issues/97">#97</a>). Workaround: use the new chat-header model badge in v2.9 instead, which now resolves correctly via this fix.</li>
+  <li>Pre-v0.13 hosts — no <code>session/set_model</code> RPC; preset apply silently no-ops as before.</li>
+  <li>Model presets saved before v2.9.0 with empty <code>providerID</code> — fall back to the bare-model wire shape, identical to v2.9.0 behavior. Re-save the preset to opt into colon-encoding.</li>
+</ul>
+<h2>Hermes compatibility</h2>
+<p>Targets Hermes v0.14.0 (v2026.5.16). The fix is forward-compatible — Hermes&#x27;s <code>_resolve_model_selection</code> accepts both the colon-prefixed and bare-model wire shapes on every release of v0.13+, so v2.9.1 works against v0.13 hosts too.</p>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.9.1/Scarf-v2.9.1-Universal.zip"
+                 sparkle:edSignature="XMZTBWEnqLh33HzXcFyFk0KobS7SLYTUJyLZ6qPhNsmUU9xHCqWYB5sYA0VGwL+wrZ9wdajwYlHViOlCAGAJBw=="
+                 length="20266847"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.9.0</title>
       <sparkle:version>36</sparkle:version>
       <sparkle:shortVersionString>2.9.0</sparkle:shortVersionString>
