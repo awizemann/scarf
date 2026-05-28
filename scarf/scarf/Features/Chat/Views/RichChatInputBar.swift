@@ -203,6 +203,11 @@ struct RichChatInputBar: View {
                         if press.modifiers.contains(.shift) {
                             return .ignored
                         }
+                        // Allow IME composition to consume the return key first
+                        // (e.g. Chinese Pinyin candidate selection) — don't send.
+                        if hasMarkedText() {
+                            return .ignored
+                        }
                         if showMenu, let command = filteredCommands[safe: selectedIndex] {
                             insertCommand(command)
                             return .handled
@@ -366,6 +371,21 @@ struct RichChatInputBar: View {
         }
         .padding(ScarfSpace.s5)
         .frame(width: 380)
+    }
+
+    /// Returns true when an IME (input method editor) is actively composing text
+    /// — e.g. Chinese Pinyin with a candidate window still open. When true, the
+    /// return key should be ignored for sending so the IME can finish composition.
+    private func hasMarkedText() -> Bool {
+#if canImport(AppKit)
+        guard let window = NSApp.keyWindow,
+              let textView = window.firstResponder as? NSTextView else {
+            return false
+        }
+        return textView.hasMarkedText()
+#else
+        return false
+#endif
     }
 
     private var canSend: Bool {
