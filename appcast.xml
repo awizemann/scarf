@@ -6,6 +6,95 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.9.2</title>
+      <sparkle:version>38</sparkle:version>
+      <sparkle:shortVersionString>2.9.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Thu, 28 May 2026 19:13:00 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.9.2</p>
+<p>Patch release fixing two reported bugs in remote chat and session resume.</p>
+<h2>Fixes</h2>
+<h3>Remote Chat no longer blocks on a bare <code>hermes</code> binary (<a href="https://github.com/awizemann/scarf/issues/100">#100</a>)</h3>
+<p>Remote servers where <code>hermes</code> resolves on the login <code>PATH</code> (e.g. a pipx install at <code>~/.local/bin/hermes</code>) but isn&#x27;t pinned to an explicit binary path showed <strong>&quot;Hermes Not Found — Expected at hermes&quot;</strong> in Chat, even though Remote Diagnostics passed 14/14 and the iOS app worked against the same server.</p>
+<p>The pre-flight gate ran <code>fileExists(&quot;hermes&quot;)</code>, which on a remote context executes <code>test -e hermes</code> — a filesystem check against the remote working directory, not a <code>PATH</code> lookup. A bare command name always failed that check, blocking the chat UI, even though the actual ACP launch (<code>bash -lc</code>, a login shell) resolves <code>hermes</code> correctly.</p>
+<p><code>ServerContext.hermesBinaryProbablyResolvable()</code> now distinguishes the two cases: a <strong>path-shaped</strong> binary (absolute/relative, contains <code>/</code>) still gets the accurate <code>fileExists</code> check, while a <strong>bare command name</strong> is presumed resolvable and the authoritative check is deferred to the login-shell ACP launch — whose failure path already surfaces a &quot;command not found&quot; hint if <code>hermes</code> is genuinely absent. Remote chat now opens without needing a <code>~/hermes</code> symlink workaround.</p>
+<h3>Session resume no longer silently drops context (<a href="https://github.com/awizemann/scarf/issues/99">#99</a>)</h3>
+<p>Reopening a chat could spawn a brand-new Hermes session — losing conversation history, task state, and loaded skills — with no error shown.</p>
+<p><code>ACPClient.loadSession</code> assumed any non-throwing response meant the session loaded. But Hermes&#x27;s <code>load_session</code> returns a JSON-RPC <strong><code>result: null</code></strong> (not an error) when a session can&#x27;t be restored into the ACP runtime. Scarf treated that null as success and proceeded against a phantom session id, so prompts landed in fresh context.</p>
+<p><code>loadSession</code> now throws on a null/non-dict result, routing into the existing fallback that creates a fresh session <strong>and replays the conversation transcript from <code>state.db</code></strong> so the thread reads continuously. Restorable sessions resume correctly as before, keeping full context (history, task state, skills) — the fix is specifically the previously-silent not-restorable path.</p>
+<h2>Tests</h2>
+<p>3 new ScarfCore tests: <code>loadSession</code> throws on a null result + succeeds on a dict result (mock round-trip), and <code>hermesBinaryProbablyResolvable</code> returns true for a bare remote name without a transport round-trip.</p>
+<h2>Hermes compatibility</h2>
+<p>Targets Hermes v0.14.0 (v2026.5.16); works against v0.13+ with capability gating. No <code>~/.hermes/</code> schema changes.</p>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.9.2/Scarf-v2.9.2-Universal.zip"
+                 sparkle:edSignature="RfUUTsmkvWw/SpOg9iKGuRueIpOyiKIn/maKzMedz6/PCk8ePzUOUC8Hzlqyf3fdKHQpk26lJrutjJjSxhSTDg=="
+                 length="20269596"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.9.1</title>
       <sparkle:version>37</sparkle:version>
       <sparkle:shortVersionString>2.9.1</sparkle:shortVersionString>
