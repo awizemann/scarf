@@ -6,6 +6,147 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.10.0</title>
+      <sparkle:version>39</sparkle:version>
+      <sparkle:shortVersionString>2.10.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Fri, 29 May 2026 04:09:50 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.10.0</p>
+<p>Hermes v0.15.0 (v2026.5.28) — &quot;The Velocity Release&quot; — catch-up. Adopts the GUI-relevant surface of v0.15 across providers, web search, messaging platforms, voice, the 104-PR Kanban maturation wave, and five larger surfaces (Bitwarden secrets, supply-chain audit, MCP mTLS, skill bundles, per-session ACP edit-approval modes). Every new affordance is capability-gated on <code>HermesCapabilities</code> v0.15 flags — pre-v0.15 hosts render the v2.9.x surface unchanged. All flag/config/wire shapes were verified against the <code>v2026.5.28</code> Hermes source before implementation.</p>
+<h2>Providers &amp; models</h2>
+<ul>
+  <li><strong>OpenAI API as a first-class provider</strong> — wire ID <code>openai-api</code>, distinct from the existing OpenAI Codex runtime. Surfaces in the Models picker. (Bare <code>openai</code> stays a Hermes alias to OpenRouter, so it is intentionally not registered.)</li>
+  <li><strong>Krea image generation</strong> — <code>krea-2-medium</code> ($0.03) and <code>krea-2-large</code> ($0.06) added to the image-generation model list (Settings → Auxiliary).</li>
+  <li><strong>xAI May-15 model retirement</strong> — retired Grok IDs (<code>grok-4-0709</code>, <code>grok-4-fast-<em></code>, <code>grok-4-1-fast-</em></code>, <code>grok-code-fast-1</code>, <code>grok-3</code>) resolve to <code>grok-4.3</code> in the picker, and <code>grok-imagine-image-pro</code> → <code>grok-imagine-image-quality</code>, so a stored retired model still works. The Health view warns when your configured model is retired and offers one-click <code>hermes migrate xai</code>.</li>
+  <li><strong>Vercel removed</strong> — Vercel AI Gateway (provider) and Vercel Sandbox (terminal backend) were deleted from Hermes in v0.15 and are dropped from Scarf&#x27;s picker and terminal-backend list.</li>
+</ul>
+<h2>Web Tools</h2>
+<ul>
+  <li><strong>xAI Web Search</strong> — new <code>web_tools.search.backend</code> option (<code>xai</code>), reusing your Grok OAuth / <code>XAI_API_KEY</code> credentials with no new env var.</li>
+</ul>
+<h2>Platforms</h2>
+<ul>
+  <li><strong>ntfy</strong> — 23rd gateway platform. Push notifications via a topic URL, no account required. New setup form (topic, server, optional publish-topic / token / markdown) under the Platforms tab.</li>
+  <li><strong>Per-platform config</strong> — Telegram <code>disable_topic_auto_rename</code> + <code>ignore_root_dm</code>, Discord <code>allow_any_attachment</code>, Signal group-only <code>require_mention</code>, surfaced in each platform&#x27;s setup form.</li>
+</ul>
+<h2>Voice</h2>
+<ul>
+  <li><strong>xAI TTS <code>auto_speech_tags</code></strong> — opt-in toggle (default off) that inserts light <code>[pause]</code> tags for more natural xAI voice replies.</li>
+</ul>
+<h2>Kanban — the v0.15 maturation wave</h2>
+<ul>
+  <li><strong>Server-side sort</strong> — a sort picker on the board header (<code>--sort</code> by priority, created, status, assignee, title, updated).</li>
+  <li><strong>New lifecycle actions</strong> — Promote (<code>todo</code>/<code>blocked</code> → <code>ready</code>), Schedule / Park, and Delete-permanently (hard-delete archived tasks via <code>archive --rm</code>) as card context actions.</li>
+  <li><strong>New columns</strong> — Scheduled (parked tasks) and Review (post-work verification), collapsed when empty.</li>
+  <li><strong>Worktree + model surfacing</strong> — per-task worktree <code>--branch</code> on create; the inspector shows a task&#x27;s branch and (read-only) model override.</li>
+  <li><strong>Precise chat-scoped board</strong> — the chat-header Kanban chip and the board it opens now filter by the originating ACP <code>session_id</code> (stamped automatically by Hermes), replacing the old tenant + time-window approximation. A &quot;This chat ⇄ All tasks&quot; scope toggle lets you widen the view.</li>
+  <li>Multi-board <code>--board</code> plumbing is wired through the service layer (a board switcher UI and the <code>swarm</code> create-sheet are follow-ups).</li>
+</ul>
+<h2>Secrets</h2>
+<ul>
+  <li><strong>Bitwarden Secrets Manager</strong> — new Settings → Secrets tab for the <code>secrets.bitwarden</code> block: enable it, point Hermes at a bootstrap token (env var, default <code>BWS_ACCESS_TOKEN</code>), set project ID / server URL (US / EU / self-hosted) / cache TTL / auto-install / override-existing. The bootstrap token itself lives in <code>~/.hermes/.env</code>, not in this form.</li>
+</ul>
+<h2>MCP</h2>
+<ul>
+  <li><strong>mTLS client certificates</strong> — client cert / key paths + an SSL-verify control (with optional custom CA bundle) for HTTP and SSE MCP servers, in the server editor.</li>
+  <li><strong>Nous MCP catalog</strong> — a read-only &quot;Browse catalog&quot; sheet showing <code>hermes mcp catalog</code> output.</li>
+</ul>
+<h2>Skills</h2>
+<ul>
+  <li><strong>Skill bundles</strong> — a read-only Bundles tab listing the named skill groups in <code>~/.hermes/skill-bundles/*.yaml</code> (each loadable in Hermes via one <code>/&lt;name&gt;</code> slash command), with each bundle&#x27;s member skills and instruction.</li>
+</ul>
+<h2>Chat</h2>
+<ul>
+  <li><strong>Per-session edit-approval modes</strong> — a chat-header chip to switch a live session between Default (ask before edits), Accept Edits (auto-allow workspace + /tmp edits), and Don&#x27;t Ask (auto-allow except sensitive paths) via ACP <code>session/set_mode</code>. Separate from the global <code>approvals.mode</code> / YOLO surface; sensitive paths always still prompt.</li>
+</ul>
+<h2>Health</h2>
+<ul>
+  <li><strong>Supply-chain audit</strong> — a &quot;Run supply-chain audit&quot; button that runs <code>hermes audit</code> (OSV.dev) and shows the result inline.</li>
+</ul>
+<h2>Fixes &amp; polish (from the pre-release review)</h2>
+<ul>
+  <li><strong>Kanban session scope (correctness)</strong> — the chat-scoped board no longer drops session tasks the agent created without tagging the project tenant; the precise <code>--session</code> filter is now authoritative.</li>
+  <li><strong>Kanban scope pill</strong> — shown for global chats too, so a session-scoped board with no project tenant isn&#x27;t locked to the session filter.</li>
+  <li><strong>MCP SSL-verify</strong> — the verify toggle and the CA-bundle path are independent controls; toggling verification off no longer wipes a typed CA path.</li>
+  <li>Removed dead code left behind when the Kanban time-window heuristic was replaced by session scoping.</li>
+</ul>
+<h2>Hermes compatibility</h2>
+<p>Targets Hermes v0.15.0 (v2026.5.28). Pre-v0.15 hosts continue to work — every v0.15 surface is capability-gated on <code>HermesCapabilities.has*</code> flags so older Hermes installs gracefully hide the new affordances. The bulk of v0.15 (the <code>run_agent.py</code> refactor, cold-start performance, promptware defense, <code>session_search</code> rebuild, the Ink TUI orchestrator, the web dashboard, Docker s6 supervision, the API-server session-control REST) is server-side or other-frontend and benefits Scarf transparently with no Scarf change.</p>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>The Sparkle appcast at <code>https://awizemann.github.io/scarf/appcast.xml</code> will offer this update automatically on next launch.</li>
+  <li>macOS 14.6+ (Sonoma) deployment target unchanged.</li>
+  <li>No breaking changes to <code>~/.hermes/</code> state. New config keys (<code>secrets.bitwarden.<em></code>, <code>platforms.ntfy.</em></code>, <code>tts.xai.auto_speech_tags</code>, MCP <code>client_cert</code>/<code>client_key</code>/<code>ssl_verify</code>, the per-platform flags) are written only when you set them.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.10.0/Scarf-v2.10.0-Universal.zip"
+                 sparkle:edSignature="T6oMmbOGUwTHRyU2a+08cLelf3n3sHy01boIM7O/AjOqpbvK7N9MQj3x6GywcEi42ZZnnf+D1sPDJ63uXlHZDA=="
+                 length="20475606"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.9.2</title>
       <sparkle:version>38</sparkle:version>
       <sparkle:shortVersionString>2.9.2</sparkle:shortVersionString>
