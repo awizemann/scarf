@@ -6,6 +6,124 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.10.1</title>
+      <sparkle:version>40</sparkle:version>
+      <sparkle:shortVersionString>2.10.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Thu, 04 Jun 2026 15:11:29 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.10.1</p>
+<p>A &quot;projects fundamentals&quot; maintenance release built on user feedback after v2.10.0 shipped. Six interlocking fixes that make project work in Scarf feel deterministic again: the slash menu surfaces what you can actually do, the new-project wizard reliably triggers the right skill, the AGENTS.md block teaches the agent what Scarf actually offers, the Skills sidebar finally shows the bundled <code>scarf-template-author</code>, and a new <code>/scarf-*</code> family of slash commands is available in every chat. Plus a Health-view capability diagnostic so the next time something looks sparse, you can tell at a glance whether the version gate is alive.</p>
+<h2>Global <code>/scarf-*</code> slash commands</h2>
+<p>Six bundled slash commands that drive Scarf-specific project workflows — available in <strong>every chat</strong> (pre-session, global, and project-scoped), not just per-project:</p>
+<ul>
+  <li><code>/scarf-new &lt;one-liner&gt;</code> — kicks off the <code>scarf-template-author</code> interview to scaffold a new project from scratch.</li>
+  <li><code>/scarf-help</code> — concise tour of Scarf&#x27;s feature surface (dashboard widgets, Kanban, model presets, slash commands, cron, etc.).</li>
+  <li><code>/scarf-dashboard &lt;change&gt;</code> — design or edit the active project&#x27;s <code>dashboard.json</code>.</li>
+  <li><code>/scarf-widget &lt;kind&gt;</code> — add a single widget to the active dashboard.</li>
+  <li><code>/scarf-cron &lt;description&gt;</code> — schedule a recurring <code>hermes cron</code> job for the active project.</li>
+  <li><code>/scarf-export</code> — prepare + run the <code>.scarftemplate</code> export of the active project.</li>
+</ul>
+<p>The commands live as <code>.md</code> files at <code>~/.hermes/scarf/slash-commands/</code>. A new <code>SlashCommandBootstrapService</code> copies the bundled set into that directory on app launch, with the same idempotent + version-gated upgrade pattern as <code>SkillBootstrapService</code>: a frontmatter <code>version: x.y.z</code> field is the source of truth, hand-edited copies are preserved, future shipped updates land automatically when their version is newer. Per-project commands of the same name (at <code>&lt;project&gt;/.scarf/slash-commands/</code>) still win — author your own <code>/scarf-help</code> and it overrides the bundled one.</p>
+<h2>Skills sidebar: <code>scarf-template-author</code> now appears</h2>
+<p>The bundled <code>scarf-template-author</code> skill was being installed at <code>~/.hermes/skills/scarf-template-author/SKILL.md</code> (flat), but Scarf&#x27;s <code>SkillsScanner</code> expects the <code>&lt;category&gt;/&lt;skill&gt;/SKILL.md</code> two-level layout, so the skill never showed in the Skills sidebar — even though Hermes itself loaded it correctly. <code>SkillBootstrapService</code> now installs into <code>~/.hermes/skills/scarf/&lt;skill&gt;/</code> and auto-migrates the existing flat install on first launch. The skill shows up under a new &quot;scarf&quot; category in the Skills view; no user action needed.</p>
+<h2>Pre-session slash menu</h2>
+<p>Before v2.10.1, opening a fresh app and typing <code>/</code> in the chat input collapsed the menu down to just <code>/new</code> — every session-required command (<code>/clear</code>, <code>/compact</code>, <code>/cost</code>, <code>/model</code>, <code>/tools</code>, <code>/reload-skills</code>, <code>/help</code>, <code>/exit</code>, <code>/yolo</code>, <code>/sessions</code>, <code>/codex-runtime</code>, <code>/steer</code>, <code>/goal</code>, <code>/queue</code>, <code>/subgoal</code>) was filtered out and indistinguishable from &quot;the menu is broken&quot;. Now those commands all stay in the menu, greyed out, with a tooltip that reads <strong>&quot;Available once a chat is open. Press Return on <code>/new</code> (or click an existing session) to start one.&quot;</strong> The pattern matches the existing <code>/steer</code>-on-pre-v0.13-idle grey-out; only the trigger is different.</p>
+<h2>New-project wizard hand-off</h2>
+<p>The &quot;New Project from Scratch&quot; wizard&#x27;s kickoff prompt was a single polite sentence (<em>&quot;Use the <code>scarf-template-author</code> skill to walk me through configuring it…&quot;</em>) that agents routinely treated as a suggestion rather than an instruction — colder models would reply conversationally without firing the skill. The new prompt anchors on <code>SKILL:</code> and <code>PROJECT_PATH:</code> markers that pattern-trained agents recognize as invocation, lists the skill&#x27;s expected interview stages explicitly, and tells the agent to &quot;Start with question 1.&quot; If the user filled in the optional one-liner, it&#x27;s threaded as the answer to question 1 so the agent jumps straight to question 2.</p>
+<p>Also: <code>NewProjectViewModel.commit()</code> now runs <code>SkillBootstrapService.ensureBundledSkillsInstalled()</code> as a synchronous preflight before handing off to chat, so the bundled skill is <strong>guaranteed</strong> on disk before Hermes&#x27;s <code>session/new</code> runs its skill-index scan. The launch-time bootstrap is a detached task that might not have finished yet on cold launch or slow remotes; this makes the wizard self-contained.</p>
+<h2>AGENTS.md <code>scarf-project</code> block: Scarf platform reference</h2>
+<p>The Scarf-managed block in <code>&lt;project&gt;/AGENTS.md</code> previously surfaced only project bookkeeping (path, dashboard location, template id, config field names, cron jobs, Kanban tenant, uninstall manifest). Agents walked into projects with no idea what Scarf actually offers beyond bare Hermes — the most common failure mode being agents proposing a shell script when a dashboard widget would do the job in one line of JSON.</p>
+<p>The block now appends a static &quot;Scarf platform reference&quot; section describing the dashboard widget vocabulary, project slash command authoring (the <code>&lt;!-- scarf-slash:&lt;name&gt; --&gt;</code> expansion marker), the Kanban tenant convention, model presets, the typed configuration schema with Keychain-backed secrets, cron <code>--workdir</code> scoping, where Hermes loads skills from, and the export-to-template flow. The section is idempotent (byte-identical across refreshes), secret-safe (no values appear, only schema field names), and capped around 30 lines so it doesn&#x27;t crowd the agent&#x27;s context.</p>
+<p><code>ProjectTemplateInstaller</code> now also refreshes the block on install (previously only chat-start did) so a freshly-installed template project has the block on disk before the user opens its first chat.</p>
+<h2>Health view: capabilities diagnostic panel</h2>
+<p>The Health view gets a new &quot;Hermes Capabilities&quot; panel at the top of its scroll area showing:</p>
+<ul>
+  <li>The raw <code>hermes --version</code> line as parsed by Scarf</li>
+  <li>A <code>… · N capabilities active</code> summary with per-release flag rows (v0.12 / v0.13 / v0.14 / v0.15) that show green when the connected Hermes is at or above that release</li>
+  <li>A <strong>Re-detect</strong> button that re-runs <code>hermes --version</code> on demand</li>
+  <li>An explanatory note for when a flag is missing (&quot;UI for that release is hidden because the connected Hermes is older&quot;)</li>
+</ul>
+<p>The capabilities store also now auto-refreshes when Scarf returns to the foreground (<code>NSApplication.didBecomeActive</code>) — so if you run <code>hermes update</code> in a Terminal while Scarf is backgrounded, the slash menu, Kanban tab, and other version-gated UI pick up the new version without needing a Scarf relaunch.</p>
+<h2>Repo memory: Memophant</h2>
+<p>Internal note for contributors: as of this release Scarf&#x27;s repo memory (the developer-facing notes, wiki, design system, and CLAUDE.md guidance for AI coding sessions) is managed via <a href="https://github.com/awizemann">Memophant</a>, a memory manager I built for exactly this. Several recent commits on <code>main</code> show as &quot;via Memophant&quot; — those are repo-memory migrations and consolidations, not Scarf app changes. Memophant will be open-sourced shortly; until then the only user-visible artifact is a new managed block at the bottom of <code>CLAUDE.md</code> describing the layout, plus a <code>wiki/</code> working directory and a <code>TASKS.md</code> kanban file. Nothing in Scarf the app depends on Memophant; it&#x27;s a workflow tool for the repo.</p>
+<h2>Hermes compatibility</h2>
+<p>Unchanged from v2.10.0 — targets Hermes v0.15.0 (v2026.5.28). Pre-v0.15 hosts continue to work; the v2.10.1 changes are all Scarf-side (slash command bundle, skill install layout, AGENTS.md block content, Health panel) and require no Hermes upgrade.</p>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>The Sparkle appcast at <code>https://awizemann.github.io/scarf/appcast.xml</code> will offer this update automatically on next launch.</li>
+  <li>macOS 14.6+ (Sonoma) deployment target unchanged.</li>
+  <li><strong>One-time migration runs at first launch</strong>: the existing flat <code>~/.hermes/skills/scarf-template-author/</code> install is removed and re-installed under <code>~/.hermes/skills/scarf/scarf-template-author/</code>. Idempotent and non-fatal — if the migration fails (locked file, permissions), the install proceeds and the old flat copy stays where it was (the agent still loads it, and the Skills view will pick up the categorized copy on the next launch).</li>
+  <li>No breaking changes to <code>~/.hermes/</code> state. The new <code>~/.hermes/scarf/slash-commands/</code> directory is created lazily on first bootstrap.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.10.1/Scarf-v2.10.1-Universal.zip"
+                 sparkle:edSignature="84/8ugLGwxu3HS3L/mF0N2yknJj555HoAsvN/hUpulZe3zw49GRQqFoQ7l1CbHy63jvlQjoydymFkupZGQt5Cg=="
+                 length="20562830"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.10.0</title>
       <sparkle:version>39</sparkle:version>
       <sparkle:shortVersionString>2.10.0</sparkle:shortVersionString>
