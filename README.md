@@ -507,6 +507,81 @@ If you find Scarf useful, consider buying me a coffee.
 
 <a href="https://www.buymeacoffee.com/awizemann"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="40"></a>
 
+## FAQ
+
+### What is Scarf?
+
+Scarf is a native macOS companion app for the Hermes AI agent. It provides full visibility into Hermes operations through a sidebar-based UI with monitoring, interaction, configuration, and management capabilities. Available in 7 languages (English, 简体中文, Deutsch, Français, Español, 日本語, Português Brasil).
+
+### What is Hermes?
+
+[Hermes](https://github.com/hermes-ai/hermes-agent) is an AI agent framework. Scarf connects to Hermes instances (local or remote via SSH) and mirrors all Hermes features through a native GUI. Hermes v0.15.0+ recommended for full v2.10 feature support.
+
+### Key Features by Section
+
+| Section | Features |
+|---------|----------|
+| **Monitor** | Dashboard (health/tokens/cost), Insights (analytics/heatmaps), Sessions Browser (full history/search/export), Activity Feed (tool log) |
+| **Interact** | Rich Chat (ACP streaming/bubbles/markdown/tools/thinking) + Terminal (hermes chat ANSI/Rich), Memory Viewer/Editor, Skills Browser |
+| **Configure** | 13 Platforms setup, Personalities, Quick Commands, Credential Pools, Plugins, Webhooks, Profiles, Hermes Proxy |
+| **Manage** | Tools enable/disable, MCP Servers, Gateway Control, Cron Manager, Health diagnostics, Log Viewer, Settings (10 tabs/60 fields) |
+| **Project Dashboards** | Agent-generated custom dashboards (stats/charts/tables/progress/checklists/web views) |
+| **System** | Hermes process control, Menu bar status icon |
+
+### ScarfGo iPhone Companion
+
+ScarfGo connects to your Hermes server over SSH from iPhone. Native iOS app with:
+- Multi-server support
+- Project-scoped chat
+- Session resume
+- Memory editor
+- Cron list
+- Skills tree
+- Settings (read-only)
+
+**TestFlight:** [Join public beta](https://testflight.apple.com/join/qCrRpcTz)
+
+### Requirements
+
+| Platform | Requirements |
+|----------|-------------|
+| **Scarf macOS** | macOS 14.6+ Sonoma, Hermes v0.6.0+ at `~/.hermes/` |
+| **ScarfGo iOS** | iOS 18.0+, SSH access, Hermes host with `sqlite3` + `hermes` CLI |
+| **Remote servers** | SSH key-based auth, `sqlite3` on remote, `hermes` in PATH or specified path |
+| **Build from source** | Xcode 16.0+ |
+
+### Installation Options
+
+| Method | Steps |
+|--------|-------|
+| **Pre-built Binary** | Download from Releases, move to Applications, handle "damaged" warning if needed |
+| **Homebrew** | `brew install --no-quarantine awizemann/tap/scarf` |
+| **Build from Source** | Clone repo, `xcodebuild`, copy Scarf.app to Applications |
+
+### Multi-Server Setup
+
+Each Scarf window binds to one Hermes server. Open multiple windows for different servers:
+- **Local:** `~/.hermes/` synthesized automatically
+- **Remote:** File → Open Server → Add Server (host/user/port/identity)
+
+Remote connections use system SSH (`~/.ssh/config`, ssh-agent, ProxyJump, ControlMaster).
+
+### Free Policy
+
+Scarf is open-source and free under the MIT License. Optional: [Buy Me a Coffee](https://www.buymeacoffee.com/awizemann) to support development.
+
+### Help Resources
+
+| Resource | Link |
+|----------|------|
+| Scarf Wiki | https://github.com/awizemann/scarf/wiki |
+| ScarfGo Wiki | https://github.com/awizemann/scarf/wiki/ScarfGo |
+| ScarfGo Onboarding | https://github.com/awizemann/scarf/wiki/ScarfGo-Onboarding |
+| Platform Differences | https://github.com/awizemann/scarf/wiki/Platform-Differences |
+| Release Notes Index | https://github.com/awizemann/scarf/wiki/Release-Notes-Index |
+| GitHub Issues | https://github.com/awizemann/scarf/issues |
+| Hermes Agent | https://github.com/hermes-ai/hermes-agent |
+
 ## License
 
 [MIT](LICENSE)
