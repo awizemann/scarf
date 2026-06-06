@@ -6,6 +6,96 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.10.2</title>
+      <sparkle:version>41</sparkle:version>
+      <sparkle:shortVersionString>2.10.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Fri, 05 Jun 2026 21:30:29 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.10.2</p>
+<p>A small bug-fix release. The headline fix lands a long-running paper cut on remote-host workflows, and the version pin catches Scarf&#x27;s tested-against Hermes range up to the latest patch.</p>
+<h2>ACP permission prompts: &quot;Allow Once&quot; / &quot;Allow For Session&quot; actually work now</h2>
+<p>When Hermes asked for permission to run a command (typically a <code>sudo</code> or any policy-gated tool), tapping <strong>Allow Once</strong> or <strong>Allow For Session</strong> in the Mac permission sheet — and the same buttons in the ScarfGo iOS sheet — was reaching Hermes as if the user had <strong>cancelled</strong> the prompt. Hermes correctly refused to run the command and printed <em>&quot;blocked from executing&quot;</em>; the user saw a sheet that responded to taps but had no effect downstream.</p>
+<p>Root cause was a wire-format mismatch in Scarf&#x27;s response to ACP&#x27;s <code>session/request_permission</code>. The Zed-spec <code>RequestPermissionOutcome</code> is a union keyed on a literal field named <code>outcome</code> with values <code>&quot;selected&quot;</code> and <code>&quot;cancelled&quot;</code>. Scarf was sending <code>{kind: &quot;allowed&quot;|&quot;rejected&quot;}</code> instead — fine-looking JSON, but no spec-compliant discriminator, so Hermes (correctly) fell through to its cancellation default. Every Allow tap rode the same code path as a dismissal.</p>
+<p>The fix sends the spec-correct shape: <code>{outcome: {outcome: &quot;selected&quot;, optionId: &quot;&lt;id&gt;&quot;}}</code> for any picked option (Allow Once, Allow For Session, Reject Once, Reject Always — Hermes reads the user&#x27;s intent from the optionId, not the discriminator), and <code>{outcome: {outcome: &quot;cancelled&quot;}}</code> for a true dismissal. The bug affected both Mac and iOS; the report came in from an iOS TestFlight user running sudo against a remote SSH host where prompts are unavoidable.</p>
+<p>Coverage tightened to lock the shape: <code>M4ACPIOSTests</code> now decodes the actual response JSON and asserts the discriminator field name + values, so the pre-fix shape can&#x27;t return via substring-passing test.</p>
+<h2>Hermes v0.15.2 compatibility</h2>
+<p>Scarf&#x27;s verified-compatibility range is extended to <strong>v0.15.2</strong> (released 2026-05-29), the latest patch on the v0.15 Velocity Release line. v0.15.1&#x27;s hotfix wave (dashboard 401 reload fix, Docker <code>--insecure</code> opt-in, MCP bare-command resolution under Docker, Kanban worker SIGTERM, full skills.sh catalog restored, <code>/yolo</code> mid-session, <code>/model</code>/<code>hermes model</code> parity) and v0.15.2&#x27;s packaging fix are transparently back-compat — no Scarf-side gating changes were needed, but the test suite now exercises a v0.15.x parse line and asserts that all 14 v0.15 capability flags stay active across patch releases.</p>
+<p>Users running Hermes in Docker should re-read v0.15.1&#x27;s release notes for the <code>HERMES_DASHBOARD_INSECURE=1</code> opt-in — that&#x27;s an explicit Hermes server-side change unrelated to Scarf.</p>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>Sparkle will offer this update automatically on next launch.</li>
+  <li>macOS 14.6+ (Sonoma) deployment target unchanged.</li>
+  <li>iOS testers: this build is Mac-only. A ScarfGo TestFlight build carrying the same ACP permission fix is queued separately.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.10.2/Scarf-v2.10.2-Universal.zip"
+                 sparkle:edSignature="zqNCjCJ+BcdcBI2CM1meegpJQbtHqVYl4PSxqE6pg5q9PlXMGfcqtRMsLLoQoAWzhDGoyK1dkeSJH/p6jiLYDQ=="
+                 length="20563913"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.10.1</title>
       <sparkle:version>40</sparkle:version>
       <sparkle:shortVersionString>2.10.1</sparkle:shortVersionString>
