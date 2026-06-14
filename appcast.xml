@@ -6,6 +6,116 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.10.3</title>
+      <sparkle:version>42</sparkle:version>
+      <sparkle:shortVersionString>2.10.3</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Sun, 14 Jun 2026 00:32:42 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.10.3</p>
+<p>A reliability and polish release. The headline is a fix for the <strong>100% single-core CPU spin</strong> that hit users with large <code>state.db</code> files, plus a broad performance + correctness sweep from a full code audit. Most of the work is under the hood — every build surface is now warning-clean and the test suite is parallel-safe — but several user-visible paper cuts are fixed too.</p>
+<h2>100% CPU on a single core, fixed (gh#102)</h2>
+<p>On Macs with a large Hermes history, Scarf could peg one core at 100% indefinitely while the Dashboard was open. The root cause was the Dashboard reloading its SQLite handle on <strong>every</strong> file-change tick: each time Hermes touched <code>state.db</code> / <code>state.db-wal</code>, Scarf would <code>close()</code> + re-<code>open()</code> the database, forcing SQLite to re-walk the WAL page map. On a 285 MB DB with a 114 MB uncheckpointed WAL — the reporter&#x27;s real setup — that close+reopen is pure, compounding cost.</p>
+<p>The fix keeps the read-only handle open across loads (a read-only SQLite connection sees Hermes&#x27;s WAL writes transparently, so there&#x27;s nothing to &quot;refresh&quot; in steady state). Close+reopen is now reserved for the schema-migration escape hatch when you upgrade Hermes mid-session. Each file-change tick now runs the four Dashboard queries against the already-open handle in microseconds instead of reopening a 285 MB file.</p>
+<p>&gt; If your WAL has grown large, the upstream driver is Hermes (the only process with write access). A one-time <code>sqlite3 ~/.hermes/state.db &quot;PRAGMA wal_checkpoint(TRUNCATE); VACUUM;&quot;</code> while Hermes is stopped will shrink it.</p>
+<h2>Menu-bar status stopped flashing every 10 seconds (gh#105)</h2>
+<p>Remote-server users saw the menu-bar status chrome flash on a 10-second cadence even when nothing changed. <code>ServerLiveStatus</code> was republishing its <code>@Observable</code> state on every health poll regardless of whether the value actually changed — and SwiftUI invalidates on every setter call, not on real change. A one-line equality guard before each assignment means an unchanging healthy poll no longer re-renders anything; the menu bar stays still through the entire 10s/30s/60s/120s/300s backoff cycle.</p>
+<p>(The companion request in gh#105 — a manual &quot;Hermes binary&quot; path field for Docker-fronted hosts — shipped in v2.10.1.)</p>
+<h2>Reasoning is visible again on resumed thinking-model chats</h2>
+<p>When you reopen a chat with a thinking model, the <strong>REASONING</strong> disclosure now appears and loads the model&#x27;s chain-of-thought on demand — including the newest models that store <em>only</em> the rich <code>reasoning_content</code> (verified against Hermes v0.16&#x27;s source). Previously, the two-phase chat loader deliberately skips the heavy reasoning blob for speed, and for these models the lighter legacy <code>reasoning</code> column is empty — so the disclosure was hidden entirely on resume. Scarf now carries a cheap &quot;reasoning available&quot; signal in the fast path and lazy-loads the full transcript the first time you open the disclosure, so the speed benefit is preserved and the reasoning is one tap away.</p>
+<h2>Snappier sidebar navigation</h2>
+<p>Switching sidebar sections no longer re-runs each feature&#x27;s remote <code>load()</code> over SSH on every re-entry. Feature panes (Settings, Platforms, Plugins, Quick Commands, Models, MCP Servers, Webhooks, Cron) now keep their loaded data and view state across section switches, refreshing only when the underlying files actually change or you hit Reload. On a remote host that&#x27;s several fewer SSH round-trips every time you bounce between sections.</p>
+<h2>Docker config-save errors are now self-diagnostic (gh#112)</h2>
+<p>On the iOS app, a failed <code>hermes config set</code> during chat pre-flight used to surface only a generic &quot;Couldn&#x27;t save model+provider to config.yaml.&quot; For Hermes-in-Docker setups (where <code>hermes</code> is a wrapper around <code>docker compose exec</code>), the wrapper&#x27;s actual diagnostic was being swallowed. The failure banner now shows the real exit code and stderr — missing container, missing TTY, PATH miss, etc. — so you can self-diagnose without capturing a separate log.</p>
+<h2>More fixes from the audit</h2>
+<ul>
+  <li><strong>Loading overlays</strong> on the Insights, Sessions, and Logs panes (no more blank-then-pop on slow remotes).</li>
+  <li><strong>Standard menu commands</strong>: ⌘, opens Settings, a Help menu links the Hermes docs, and ⌘F focuses the Sessions search.</li>
+  <li><strong>Quieter when backgrounded</strong>: the menu-bar live-status poll floors its cadence at 60s while Scarf isn&#x27;t frontmost, killing the idle SSH-poll storm without freezing the always-visible status.</li>
+  <li><strong>Cron corruption is surfaced</strong>: a <code>jobs.json</code> that can&#x27;t be parsed now shows a warning instead of a misleading &quot;No cron jobs yet.&quot;</li>
+  <li><strong>Chat streaming polish</strong>: block markdown is skipped mid-stream (no half-rendered code fences), and the transcript anchors correctly on session activate.</li>
+  <li>A <code>fatalError</code> in the SQL layer became a recoverable <code>throw</code>; per-render formatter allocations were hoisted to cached statics; in-flight remote loads now cancel when you navigate away.</li>
+</ul>
+<h2>Under the hood</h2>
+<ul>
+  <li><strong>Warning-clean across the board.</strong> The macOS app, the iOS app, and the ScarfCore package now build with <strong>zero</strong> compiler warnings, including the full Swift 6 strict-concurrency (main-actor isolation, <code>Sendable</code>) cleanup.</li>
+  <li><strong>A trustworthy test suite.</strong> 613 tests, parallel-safe, and no longer coupled to your real <code>~/.hermes</code> — ScarfCore tests run against isolated temp homes, so a test run can never touch your live Hermes data.</li>
+  <li><strong>Release-signing safeguard.</strong> The release script now preflights the Sparkle EdDSA key against the public key baked into the app, preventing the mis-signed-appcast class of incident.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>Sparkle will offer this update automatically on next launch (or <strong>Scarf → Check for Updates</strong>).</li>
+  <li>macOS 14.6+ (Sonoma) deployment target unchanged.</li>
+  <li><strong>iOS testers:</strong> the gh#112 diagnostic and the reasoning-disclosure fix live in the shared core; a ScarfGo TestFlight build carrying them is queued separately on the iOS track.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.10.3/Scarf-v2.10.3-Universal.zip"
+                 sparkle:edSignature="v7CvWRORo67Mac58DamR4JW3rAopqtHseK/EzjKGhp565rSr9i+bPRxExCJvzfNkyHXPEygYYjAGAS8N6ez3Cg=="
+                 length="20617474"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.10.2</title>
       <sparkle:version>41</sparkle:version>
       <sparkle:shortVersionString>2.10.2</sparkle:shortVersionString>
