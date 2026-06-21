@@ -6,6 +6,117 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.11.0</title>
+      <sparkle:version>43</sparkle:version>
+      <sparkle:shortVersionString>2.11.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Sun, 21 Jun 2026 08:34:59 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.11.0</p>
+<p>A coordinated catch-up to <strong>Hermes v0.16.0 (2026.6.5)</strong>. The headline is a correctness fix for the first <code>state.db</code> schema change since v0.11 — Hermes can now <strong>soft-delete messages</strong> when you rewind a conversation, and Scarf needs to hide them to show you what the agent actually sees. Alongside it: live session titles, a &quot;rewound&quot; indicator, the Spotify-skill-became-a-plugin move, two real gateway-config bugs fixed, and a handful of v0.16 quick wins. Every new surface is capability-gated or schema-detected, so pre-v0.16 hosts render byte-identical to v2.10.3. All flag, config, and wire shapes were verified against the live Hermes v0.16 source before implementation.</p>
+<h2>Rewound messages are hidden, matching what the agent sees</h2>
+<p>v0.16 is the first <code>state.db</code> schema change since v0.11: the <code>messages</code> table gained an <code>active</code> column. When you run <code>/undo</code> in Hermes, the rewound messages are flipped to inactive (a soft delete) rather than being removed — so the agent no longer sees them, but they&#x27;re still on disk. Scarf was reading every row regardless, which meant a rewound chat showed you messages the agent had already discarded.</p>
+<p>Scarf now filters to active messages on <strong>every</strong> message-read path — chat transcript, resume, skeleton loaders, the lot. The filter is schema-gated: Scarf detects the column first (a <code>PRAGMA</code> check locally, a preflight on remote hosts), so connecting to a pre-v0.16 Hermes that doesn&#x27;t have the column still works exactly as before instead of erroring with &quot;no such column.&quot; The net effect: what you see in a rewound conversation now matches what the agent is actually working from.</p>
+<h2>Session titles update live</h2>
+<p>When Hermes generates or regenerates a session&#x27;s title, v0.16 now pushes an ACP notification (<code>session_info_update</code>). Scarf listens for it and updates the title in the Mac chat sidebar in place — no need to navigate away and back to see a freshly-titled session get its name. (Title-setting itself remains a Hermes/gateway concern; there&#x27;s no ACP path to set a title from Scarf, by design.)</p>
+<h2>&quot;Rewound ×N&quot; badge on sessions</h2>
+<p>v0.16 tracks how many times a session has been rewound in a new <code>sessions.rewind_count</code> column. Scarf schema-detects it and surfaces a <strong>&quot;rewound ×N&quot;</strong> badge in the chat sidebar, the Sessions table, and the dashboard rows, so a heavily-edited session is visible at a glance. Like the message filter, this is schema-gated and read by column name, so older hosts simply don&#x27;t show the badge.</p>
+<h2>Spotify sign-in moved to Plugins</h2>
+<p>In v0.16, Spotify is no longer a skill — it became a built-in tool with a native plugin. Scarf follows suit: on a v0.16 host, the Spotify sign-in affordance now lives in the <strong>Plugins</strong> view instead of Skills (the <code>hermes auth spotify</code> PKCE flow is unchanged). The old Skills-view path is kept for pre-v0.16 hosts, so both render correctly depending on what you&#x27;re connected to.</p>
+<h2>Two gateway-config bugs fixed</h2>
+<p>Both were silent failures found while verifying Scarf&#x27;s writes against the live v0.16 source:</p>
+<ul>
+  <li><strong>Platform allowlists now actually apply.</strong> Scarf was reading and writing channel/chat/room allowlists under <code>gateway.platforms.&lt;platform&gt;.*</code>, but Hermes enforces them from the <strong>top-level</strong> platform section (<code>slack.allowed_channels</code>, <code>telegram.allowed_chats</code>, <code>matrix.allowed_rooms</code>, <code>dingtalk.allowed_chats</code>). The mismatch meant an allowlist you set in Scarf silently never took effect. Scarf now writes to the correct top-level location, merging into the existing platform block so your other settings are preserved. (This also fixes DingTalk, which uses <code>allowed_chats</code>, not <code>allowed_rooms</code>.)</li>
+  <li><strong>The gateway digest works again.</strong> <code>hermes gateway list --json</code> doesn&#x27;t exist in v0.16 — the command prints a text table and errors on the flag — so Scarf&#x27;s cross-profile gateway digest was silently hiding. Scarf now runs the plain command and parses the text output (status, profile, PID), so the digest shows up.</li>
+</ul>
+<h2>v0.16 quick wins</h2>
+<ul>
+  <li><strong>Optimize sessions database</strong> — a new Health-view action wired to <code>hermes sessions optimize</code> (FTS merge + VACUUM), gated on the host advertising it.</li>
+  <li><strong>Kanban goal pill</strong> — cards now decode <code>goal_mode</code> / <code>goal_max_turns</code> and render a <strong>&quot;Goal · N&quot;</strong> pill when a task is running in goal mode.</li>
+  <li><strong>Session rename</strong> is gated on the v0.16 <code>hermes sessions rename</code> capability (the rename path Scarf already drove).</li>
+</ul>
+<h2>Under the hood</h2>
+<ul>
+  <li><strong>Config-shape corrections, verified against live v0.16.</strong> OpenRouter response-caching is now written as a scalar bool — so toggling it <em>off</em> actually takes effect (the old nested shape wrote a value Hermes always read as &quot;on&quot;). The MCP SSE server-add path was corrected to match the real <code>hermes mcp add</code> flags (URL on add, then <code>transport: sse</code> stamped into the YAML). A dead Kanban <code>verify</code> verb was removed (Reject now routes through the real <code>comment</code> + <code>archive</code> verbs). The <code>curator list-archived</code> text output is parsed directly instead of retrying a non-existent <code>--json</code> flag. ACP <code>/goal</code> and <code>/subgoal</code> were de-advertised from the slash-command surface, since they&#x27;re gateway-only in v0.16 and no-op over ACP.</li>
+  <li><strong>New providers and models flow automatically.</strong> AWS Bedrock is registered as an overlay-only provider; the other v0.16 providers self-surface from the model catalog with no Scarf change, and new models (deepseek-v4-flash, MiniMax-M3, qwen3.7-plus, gemini-3.5-flash) appear automatically. The upstream catalog now refreshes hourly.</li>
+  <li><strong>New capability flags</strong> — <code>hasSessionsRename</code>, <code>hasSessionsOptimize</code>, <code>hasKanbanGoalMode</code>, <code>hasInsightsCommand</code>, <code>hasDashboardCommand</code>, plus the <code>isV016OrLater</code> predicate — gate every surface above.</li>
+  <li><strong>628 ScarfCore tests</strong> pass, including new soft-delete SQL-shape, allowlist sibling-preservation, config round-trip, and gateway text-parser tests.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>Sparkle will offer this update automatically on next launch (or <strong>Scarf → Check for Updates</strong>).</li>
+  <li>macOS 14.6+ (Sonoma) deployment target unchanged.</li>
+  <li><strong>Fully backward compatible.</strong> Every v0.16 surface is capability-gated or schema-detected; if you&#x27;re still on Hermes v0.15.x or earlier, Scarf renders exactly as v2.10.3 did. There are no data migrations.</li>
+  <li><strong>iOS testers:</strong> the shared-core changes (the <code>messages.active</code> filter, rewind count, config-shape fixes) ride in ScarfCore; a ScarfGo TestFlight build carrying them is queued separately on the iOS track.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.11.0/Scarf-v2.11.0-Universal.zip"
+                 sparkle:edSignature="X2SNAms7sl5Q12541NT2K9hOGxUVvLZIq/qepP3t2EfyM2ApOKYbpZ2yCPrI64S6rgcd3XCDXgjzZYO2JLMdCw=="
+                 length="20593824"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.10.3</title>
       <sparkle:version>42</sparkle:version>
       <sparkle:shortVersionString>2.10.3</sparkle:shortVersionString>
