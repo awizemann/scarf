@@ -6,6 +6,121 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.12.0</title>
+      <sparkle:version>44</sparkle:version>
+      <sparkle:shortVersionString>2.12.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Mon, 22 Jun 2026 04:27:05 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.12.0</p>
+<p>A coordinated catch-up to <strong>Hermes v0.17.0 (2026.6.19)</strong> — by far the largest Hermes release yet, though Scarf only needed a focused slice of it — bundled with a <strong>remote-chat performance fix</strong> that anyone running Scarf against an SSH host will feel immediately. The audit of v0.17 also turned up several pre-existing bugs in Scarf&#x27;s own CLI plumbing, which are fixed here. Every new v0.17 surface is capability-gated, so pre-v0.17 hosts render byte-identical to v2.11.0, and all flag/config/wire shapes were verified against the live Hermes v0.17 source before implementation.</p>
+<h2>Remote chat is responsive again</h2>
+<p>If you chat against a remote Hermes over SSH, typing into an active session could lag and spike CPU. Root cause: during a live chat, every persisted message bumps <code>state.db-wal</code>&#x27;s modification time, which fires Scarf&#x27;s file watcher — and several view models were doing <strong>synchronous</strong> SSH/scp reads <strong>on the main thread</strong> on every tick. The biggest offender was the chat&#x27;s credential preflight (reading <code>.env</code> + <code>auth.json</code> over SSH per tick), alongside the sessions-list, platforms, and projects refreshes. A ScarfMon capture showed <code>loadRecentSessions</code> taking 2.7–4.2 s while the chat render itself measured ~0 ms — the lag was main-thread I/O contention, not rendering.</p>
+<p>Every watcher-driven read now runs off the main actor (debounced where appropriate), with cancel-prior + recency guards so a slower older read can&#x27;t clobber fresher state. Two adversarial review passes verified the concurrency ordering. (Split from the original Dashboard CPU spin fixed in v2.10.3; thanks to the reporter whose ScarfMon dump localized it.)</p>
+<h2>Four broken Health/Settings actions, fixed</h2>
+<p>Auditing v0.17 surfaced four Scarf actions that had been quietly broken — in some cases since they shipped — because they invoked the <code>hermes</code> CLI with the wrong verb or flags:</p>
+<ul>
+  <li><strong>Run supply-chain audit</strong> called a bare <code>hermes audit</code>, which isn&#x27;t a command — it was being interpreted as a chat prompt and burning an agent turn instead of running the scan. It now calls <code>hermes security audit</code>.</li>
+  <li><strong>Migrate retired xAI model</strong> ran <code>hermes migrate xai</code>, which is dry-run by default — so it printed a plan, wrote nothing, and still reported success while the retired-model warning never cleared. It now passes <code>--apply</code> (and no longer claims success on a no-op).</li>
+  <li><strong>Set up browser tools</strong> passed <code>--assume-yes</code>, which the CLI rejects; the correct flag is <code>--yes</code>.</li>
+  <li><strong>WhatsApp recipient allowlist</strong> wrote <code>whatsapp.allowed_chats</code>, a key Hermes never reads (WhatsApp gates senders via <code>allow_from</code>), so the allowlist silently did nothing. It&#x27;s been removed from the chat-id editor rather than left lying. Saving a setting that fails now surfaces the real reason (e.g. an administrator-managed key) instead of a generic &quot;Failed to save.&quot;</li>
+</ul>
+<h2>Curator &quot;Prune&quot; is now &quot;Archive idle skills&quot; — and it actually works</h2>
+<p>Scarf&#x27;s Curator screen had a destructive <strong>&quot;Prune Archived&quot;</strong> action that claimed to <em>permanently delete archived skills from disk</em>. It turns out no such Hermes command exists — <code>hermes curator prune</code> does the opposite: it <strong>bulk-archives _active_ skills that have been idle for N days</strong>, and archiving is fully reversible via Restore. On top of the wrong mental model, Scarf invoked it with a flag that doesn&#x27;t exist and without the confirmation-skip flag, so a real run would hang until it timed out.</p>
+<p>It&#x27;s been rebuilt to match reality: a <strong>&quot;Archive idle skills&quot;</strong> action in the Curator menu with a 30/60/90/180-day threshold, a preview of which idle skills would be archived (and how long they&#x27;ve been idle), and a confirm sheet that&#x27;s correctly framed as reversible — not a red &quot;permanent delete&quot; gate. The CLI invocation and output parsing now match the real verb.</p>
+<h2>New gateway platforms: WhatsApp Cloud + SimpleX</h2>
+<ul>
+  <li><strong>WhatsApp Business Cloud API</strong> (Meta&#x27;s hosted webhook path — no bridge process) joins the platform list with a full setup form: phone number ID, access token, webhook verify token + app secret, and a direct-message allowlist. It&#x27;s distinct from the existing QR-paired WhatsApp web bridge.</li>
+  <li><strong>SimpleX Chat</strong> finally has a setup form (it had been in the platform list since v0.14 with no way to configure it): daemon WebSocket URL, contact/group allowlists, auto-accept, and the home channel.</li>
+</ul>
+<h2>More v0.17 surfaces</h2>
+<ul>
+  <li><strong>Telegram rich messages</strong> (Bot API 10.1, on by default) and an <strong>online/offline status indicator</strong> (opt-in) are exposed as toggles.</li>
+  <li><strong>Curator consolidation is now opt-in.</strong> v0.17 turned the curator&#x27;s LLM skill-merge pass off by default; Settings → Advanced now has a toggle (with a note) so anyone who relied on the automatic pass can turn it back on. Deterministic pruning is unaffected.</li>
+  <li><strong>Max concurrent sessions</strong> — the new optional cap on simultaneously-active chat sessions is exposed as a stepper (0 = unlimited).</li>
+</ul>
+<h2>Under the hood</h2>
+<ul>
+  <li><strong>Verified against the live v0.17 source.</strong> The headline finding of the audit: v0.17 required <strong>zero</strong> mandatory compatibility changes — the <code>state.db</code> schema, ACP wire protocol, CLI verbs, config keys, and model catalog are all stable — so this release is a focused feature catch-up plus the pre-existing-bug fixes above, not a forced migration.</li>
+  <li><strong>New capability flags</strong> (<code>hasCuratorConsolidate</code>, <code>hasMaxConcurrentSessions</code>, <code>hasTelegramRichMessages</code>, <code>hasPhotonPlatform</code>, <code>hasWhatsAppCloudPlatform</code>) plus the <code>isV017OrLater</code> predicate gate every new surface; an adversarial fresh-eyes audit of the whole branch caught a real bug before release (WhatsApp Cloud is a built-in platform, so it needed an explicit <code>enabled</code> write to actually start).</li>
+  <li><strong>642 ScarfCore tests</strong> pass, including a full v0.17 capability cluster (flags-on / pre-v0.17-degradation / patch-still-on) and the v0.16 cluster that the prior cycle had shipped without.</li>
+  <li><strong>Deferred</strong> (tracked for later): iMessage via Photon (the underlying protocol is still changing upstream), the per-MCP-server keepalive knob, and a pre-existing Google Chat allowlist fix.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>Sparkle will offer this update automatically on next launch (or <strong>Scarf → Check for Updates</strong>).</li>
+  <li>macOS 14.6+ (Sonoma) deployment target unchanged.</li>
+  <li><strong>Fully backward compatible.</strong> Every v0.17 surface is capability-gated; on Hermes v0.16.x or earlier, Scarf renders exactly as v2.11.0 did. There are no data migrations.</li>
+  <li><strong>iOS testers:</strong> the shared-core changes (the curator/config/platform model updates and the off-main read fixes) ride in ScarfCore; a ScarfGo TestFlight build carrying them is queued separately on the iOS track.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.12.0/Scarf-v2.12.0-Universal.zip"
+                 sparkle:edSignature="A7OUDT0p2XysB4Iaaxd0EAMN/xPCjxHn3OkyHj8wwuJO4mLr4Y1hoTWihKrZHuRs0ZdeaPDXVPuRPZ/xxDrUAg=="
+                 length="20673715"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.11.0</title>
       <sparkle:version>43</sparkle:version>
       <sparkle:shortVersionString>2.11.0</sparkle:shortVersionString>
