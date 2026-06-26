@@ -6,6 +6,100 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.13.0</title>
+      <sparkle:version>46</sparkle:version>
+      <sparkle:shortVersionString>2.13.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Fri, 26 Jun 2026 06:03:50 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.13.0</p>
+<p>ScarfGo — the iOS companion — gets its headline feature this release: <strong>switch between your Hermes profiles right from your phone</strong>, without disturbing the profile your Mac, terminal, or running gateway is using on that host. It ships alongside a <strong>reliability fix for remote chat and Settings on iOS</strong> that anyone running ScarfGo against an SSH host will feel immediately — connections no longer churn under load. These are iOS-track changes; the shared-core pieces ride into the Mac app too.</p>
+<h2>Switch Hermes profiles from ScarfGo</h2>
+<p>If you run more than one Hermes profile on a host — say an <code>admin</code> profile and a locked-down <code>gateway</code> profile — ScarfGo could <em>list</em> them but not operate against them; switching was Mac-only. Now the Profiles tab is a <strong>switcher</strong>: pick a profile and ScarfGo points its chat, memory, cron, sessions, gateway, and every <code>hermes</code> call at that profile&#x27;s <code>HERMES_HOME</code> for the selected server.</p>
+<p>Crucially, this uses <strong>per-connection scoping (Design B)</strong>: ScarfGo scopes <em>its own</em> view via <code>HERMES_HOME</code> / <code>remoteHome</code> and <strong>never runs <code>hermes profile use</code></strong>, so it does <strong>not</strong> touch the host&#x27;s <code>active_profile</code>. Your Mac app, terminal, cron daemon, and the running gateway on that host keep using whatever profile they were on — switching on the phone is invisible to them. (Verified on a live host: a profile switch leaves <code>~/.hermes/active_profile</code> unchanged.) Profile create / rename / delete / import / export remain Mac-only by design.</p>
+<h2>Reliable remote chat &amp; Settings on iOS</h2>
+<p>Some ScarfGo users hit <strong>&quot;Couldn&#x27;t save model.provider to config.yaml via hermes config set — Transport refused the command,&quot;</strong> with Settings showing the model and config source empty even though the config was valid and the same command worked over plain <code>ssh</code>. It reproduced across unrelated hosts — which pointed at ScarfGo, not the host.</p>
+<p>Root cause: ScarfGo opened a <strong>brand-new SSH connection for every file read and CLI call</strong>. A Settings load or chat pre-flight fans out a burst of those, and under the churn the SSH handshake itself starts failing — surfaced as &quot;Transport refused&quot; on writes and silently swallowed to &quot;empty&quot; on reads. A single manual <code>ssh</code> never reproduced it because it&#x27;s one connection.</p>
+<p>ScarfGo now <strong>pools one SSH connection per server and coalesces concurrent opens</strong>, so reads and writes reuse one warm connection — the iOS equivalent of the Mac app&#x27;s SSH ControlMaster. Verified against a real sshd: a 24-way concurrent burst went from 20-of-24 connection failures to <strong>zero</strong>. The chat pre-flight also now surfaces the real connection error instead of a generic line. (This is separate from the Docker <code>~/.hermes</code>-in-container read path, which is still tracked.)</p>
+<h2>Under the hood</h2>
+<ul>
+  <li><strong>Skills &quot;What&#x27;s New&quot; now tracks each profile independently.</strong> After per-connection switching landed, the Skills pill could show bogus &quot;new / changed&quot; counts by diffing one profile&#x27;s skills against another profile&#x27;s baseline (on iOS it bled across servers too). The last-seen snapshot is now keyed per (server, profile); the skills list itself was always correct — only the diff indicator was wrong.</li>
+  <li>The ScarfIOS package is now unit-testable on macOS (<code>swift test</code>), and a gated live integration test drives the real Citadel SSH transport through the pool against an ephemeral sshd to guard the churn fix against regressions.</li>
+  <li>iOS direct-file reads now honor the selected profile (previously they ignored profiles and always read the host default), closing a latent half-switch.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li><strong>iOS / ScarfGo:</strong> these are iOS-track features — a ScarfGo TestFlight build carrying them is queued on the iOS track (independent of the Mac update path).</li>
+  <li><strong>Mac:</strong> the shared-core changes (profile scoping in ScarfCore) ride into the Mac app; Sparkle will offer the update automatically (or <strong>Scarf → Check for Updates</strong>). macOS 14.6+ deployment target unchanged. No data migrations.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.13.0/Scarf-v2.13.0-Universal.zip"
+                 sparkle:edSignature="bMSrZZ7f74399lMYc11c18j+T9AQB441bcEuFmFFwjjWnk6XsgbpM2wwO71TxucztKgYelO1bzPqoQi3bPOHCQ=="
+                 length="20679293"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.12.0</title>
       <sparkle:version>44</sparkle:version>
       <sparkle:shortVersionString>2.12.0</sparkle:shortVersionString>
