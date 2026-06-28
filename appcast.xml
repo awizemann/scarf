@@ -6,6 +6,121 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.15.0</title>
+      <sparkle:version>47</sparkle:version>
+      <sparkle:shortVersionString>2.15.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Sun, 28 Jun 2026 18:40:11 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.15.0</p>
+<p><strong>Projects grow up.</strong> This release turns a Scarf project from &quot;a folder your chats happen to point at&quot; into a first-class object with its own mission control — and gives it three big new powers: <strong>mini-apps</strong> (sandboxed web panels that can drive your agent), a <strong>fleet/portfolio</strong> view that groups the same project across every machine you run it on, and <strong>one-click Upgrade Project</strong> that brings an existing repo up to the full experience. Project chats also now load your <code>AGENTS.md</code>, so the agent finally knows the project it&#x27;s working in. It&#x27;s the largest Projects update since v2.3.</p>
+<h2>Mini-apps — sandboxed panels that drive your agent</h2>
+<p>A <strong>mini-app</strong> is a small web UI (plain HTML/CSS/JS) that lives inside a project and renders in a slide-in panel in the project cockpit. It&#x27;s the answer to &quot;I wish this project had a custom dashboard / approval queue / task board / chart that could actually <em>talk to the agent</em>.&quot; Mini-apps can read project data and send the agent prompts — through a tiny, versioned <code>window.scarf</code> bridge — without ever leaving the sandbox.</p>
+<p>Two things make this safe enough to ship:</p>
+<ul>
+  <li><strong>Everything runs in a locked-down <code>WKWebView.</code></strong> Non-persistent storage (no cross-app cookie or <code>localStorage</code> bleed), assets served only through a project-scoped <code>scarf-miniapp://</code> handler, navigation pinned to that scheme, and a strict Content-Security-Policy (<code>default-src &#x27;none&#x27;; connect-src &#x27;none&#x27;</code>) that blocks all network access. A mini-app is self-contained by construction — no external scripts, no CDNs, no <code>fetch()</code> to the internet. File reads resolve through symlink-containment so a planted link can&#x27;t escape the project directory.</li>
+  <li><strong>Default-deny permissions, reviewed on first open.</strong> Every sensitive capability a mini-app declares — sending the agent prompts, reading files, querying data — is <strong>off until you approve it</strong>. The first time you open a mini-app, Scarf shows a permission sheet listing exactly what it wants; sensitive permissions are pre-unchecked for <strong>agent-generated</strong> mini-apps and unknown permissions are refused outright. Your decision is saved per <code>(project, mini-app)</code>, and changing it later live-revokes access.</li>
+</ul>
+<p>When a mini-app calls <code>scarf.prompt(...)</code>, it gets its <strong>own dedicated <code>hermes acp</code> session</strong> (spawned lazily, torn down when the panel closes), isolated from your chats — web content can&#x27;t reach into other conversations. That session is rate-limited (8 prompts/60s) to cap runaways, and because no human is watching it turn-by-turn, any tool-permission request the agent raises mid-turn is auto-denied.</p>
+<p><strong>Building one:</strong> ask the agent — the bundled <strong><code>scarf-miniapp-author</code></strong> skill scaffolds the manifest, directory, and a working starter. Or run <strong>Upgrade Project</strong> (below), which has the agent build a starter mini-app for you. Installed mini-apps show up in the cockpit&#x27;s <strong>Mini-apps</strong> panel, with agent-generated ones clearly flagged.</p>
+<p>&gt; <strong>v1 scope.</strong> This release wires the read + prompt surfaces: <code>scarf.prompt</code>, <code>scarf.onEvent</code> (streamed agent output), <code>scarf.store</code> (per-app key-value), <code>scarf.file.read</code>, and <code>scarf.query(&quot;kanban.tasks&quot;)</code>. Writing surfaces (<code>kanban:write</code>, <code>file:write</code>) and outbound network (<code>net</code>) are declared in the permission model but not yet enabled — they&#x27;re coming, and the sandbox already accounts for them.</p>
+<h2>Fleet &amp; Portfolio — your project across every machine</h2>
+<p>If you run the same repo on more than one host — your laptop and a server, say — Scarf now understands those as <strong>one logical project</strong>. Because a project&#x27;s identity is a stable id minted once and carried in its <code>project.json</code>, cloning the repo to another machine and registering it there groups both copies under a single <strong>Fleet</strong> view in the cockpit.</p>
+<p>The Fleet panel shows each host&#x27;s copy side by side and flags <strong>drift</strong> — places where the same project disagrees across machines (a different bound model preset, a renamed board, a different cron-job count, mismatched mini-apps). When you&#x27;ve got one host configured the way you want, <strong>Apply to Fleet…</strong> pushes that config out to the others: the model preset, the Kanban board, and the project&#x27;s cron jobs are recreated on the targets you select.</p>
+<p>Apply-to-fleet is deliberately conservative. Every host is handled independently — one unreachable machine or one failed field never aborts the rest, and you get a per-host, per-field report of what was applied, skipped, or failed. Copying cron jobs <strong>probes the target host&#x27;s Hermes version first</strong> and drops flags that an older Hermes wouldn&#x27;t understand (e.g. <code>--deliver all</code> on pre-0.14) rather than failing the copy. The same version-gating now protects template-install cron jobs.</p>
+<h2>One-click Upgrade Project</h2>
+<p>Got a project from before all this — or one you scaffolded by hand? <strong>Upgrade Project</strong> brings it up to the full first-class experience. A cockpit banner offers it; one click runs a fast, idempotent structural pass (mints a stable id and <code>project.json</code>, creates a Kanban board, refreshes the Scarf-managed <code>AGENTS.md</code> block, seeds a placeholder dashboard) and then hands off to chat, where the agent tailors a real dashboard, slash commands, cron jobs, and a starter mini-app to <em>your</em> project. Re-running it is a no-op, so it&#x27;s safe to click.</p>
+<h2>The cockpit — one pane for the whole project</h2>
+<p>Selecting a project now opens a single <strong>cockpit</strong> — mission control for everything about that project, instead of the old narrow Dashboard/Site/Slash tab bar. A unified header (name, path, bound model preset, the hosts it lives on) sits above a flat row of panels: <strong>Dashboard, Sessions, Board, Site, Context, Cron, Memory, Secrets, Templates, Slash, Mini-apps,</strong> and <strong>Fleet</strong>. Panels that don&#x27;t apply to a given project hide themselves, so even a bare project gets a clean, complete control center. (Secrets shows field <em>names</em> only — values stay in the Keychain.)</p>
+<h2>Project chats now load your AGENTS.md</h2>
+<p>Opening a chat <strong>inside a project</strong> finally gives the agent that project&#x27;s context. Scarf now spawns <code>hermes acp</code> with the project as its working directory, so Hermes loads the project&#x27;s <code>AGENTS.md</code> / <code>CLAUDE.md</code> / <code>.cursorrules</code> into the agent automatically — for new chats and for resumed, reconnected, and auto-started ones alike. No more re-explaining the repo every time.</p>
+<p>&gt; <strong>A note on trust.</strong> Opening a chat in a project now loads that project&#x27;s <code>AGENTS.md</code> / <code>CLAUDE.md</code> / <code>.cursorrules</code> into the agent (so it has project context). Treat a project&#x27;s context files like its code — only open chats in projects you trust. (Mini-apps deliberately do <strong>not</strong> load these files into their agent sessions, since they run less-trusted web content.)</p>
+<h2>Smaller fixes</h2>
+<ul>
+  <li><strong>Remote SSH paths are hardened against command injection</strong> — <code>$</code> and backticks in a remote project path are now escaped before they reach the shell.</li>
+  <li><strong>Window size and position persist again.</strong> SwiftUI was saving the frame but never restoring it; Scarf now restores it manually on launch.</li>
+  <li><strong>Mini-app streamed events keep their order</strong> — agent output is delivered FIFO on the main thread instead of racing per-event tasks.</li>
+</ul>
+<h2>Under the hood</h2>
+<ul>
+  <li>The whole release sits on a new <strong>first-class <code>ScarfProject</code> object</strong> — a portable <code>project.json</code> plus a per-host registry — that replaces project identity previously smeared across sessions, AGENTS.md blocks, template locks, and cron tags.</li>
+  <li>New <code>scripts/build-detached.sh</code> launches an isolated, visually-distinct dev copy you can dogfood while you keep building.</li>
+  <li>Test-suite isolation fixes (per-instance temp homes, de-flaked remote-SQLite tilde-home test) and a sweep making off-main helpers <code>nonisolated</code> for the app&#x27;s MainActor-default isolation.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li><strong>Sparkle</strong> will offer the update automatically, or use <strong>Scarf → Check for Updates</strong>. macOS 14.6+ deployment target unchanged. <strong>No data migrations</strong> — existing projects keep working; click <strong>Upgrade Project</strong> when you want the new structure.</li>
+  <li><strong>Mini-apps</strong> are new this release; nothing you have changes until you add or generate one. The writing/network mini-app surfaces noted above arrive in a later release.</li>
+  <li><strong>iOS / ScarfGo:</strong> this is a Mac-track release. The shared-core pieces (first-class project model) ride along, but the Projects UI is Mac-only for now.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.15.0/Scarf-v2.15.0-Universal.zip"
+                 sparkle:edSignature="bzMifgFX7RfFqzWU6I3lfloEUmZze7g055mA8Y45w93iJv/SWIO3F/D1uiUdwawZmPcFVFCr3HlRSDanvsqBDw=="
+                 length="21363809"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.13.0</title>
       <sparkle:version>46</sparkle:version>
       <sparkle:shortVersionString>2.13.0</sparkle:shortVersionString>
