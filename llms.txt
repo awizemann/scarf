@@ -34,7 +34,7 @@ Mac (sidebar sections):
 - **Interact:** Live Chat (ACP streaming + Terminal mode), Memory Viewer/Editor, Skills Browser
 - **Configure:** Platforms, Personalities, Quick Commands, Credential Pools, Plugins, Webhooks, Profiles
 - **Manage:** Tools, MCP Servers, Gateway Control, Cron Manager, Health, Log Viewer, Settings
-- **Project Dashboards:** custom JSON-defined dashboards rendered by Scarf, populated by the agent
+- **Projects:** a per-project cockpit (dashboard, sessions, board, cron, memory, secrets, slash commands), agent-authored JSON dashboards, sandboxed mini-apps that drive the agent, one-click Upgrade Project, and a multi-host Fleet view with drift detection and config sync
 - **System:** Hermes process control, menu bar status
 
 iOS (ScarfGo, tabs):
@@ -53,10 +53,11 @@ iOS (ScarfGo, tabs):
 - Native SwiftUI, not Electron — single Mach-O binary, kilobytes of memory, full system integration
 - Read-only access to `state.db` — Scarf cannot corrupt Hermes data because it never writes
 - Multi-server: one window per Hermes host on Mac, multi-server on iOS, all over standard SSH
-- Project-scoped chat with Scarf-managed `AGENTS.md` block injected before session boot
+- Project-scoped chat that boots Hermes with the project as its working directory, so `AGENTS.md` / `CLAUDE.md` / `.cursorrules` load into the agent automatically
+- Sandboxed mini-apps — agent-authored web panels that drive the agent through a permissioned `window.scarf` bridge — plus a Fleet view that groups the same project across machines and syncs config drift
 - Portable `.scarftemplate` bundles for sharing project setups (dashboards, skills, cron jobs, slash commands)
 - Live ACP streaming with rich tool-call rendering, permission dialogs, voice control
-- 13 messaging platforms managed in one native UI (Telegram, Discord, Slack, WhatsApp, Signal, iMessage, Email, Matrix, Mattermost, Feishu, Home Assistant, Webhook, CLI)
+- 20+ messaging platforms managed in one native UI (Telegram, Discord, Slack, WhatsApp, Matrix, Microsoft Teams, Google Chat, LINE, and more)
 - Open and inspectable — pure Swift, MIT, no external runtime dependencies
 
 ## Optional

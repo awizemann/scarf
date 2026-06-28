@@ -159,11 +159,17 @@
         <div class="feature-text">
           <h3>Project workspaces</h3>
           <p>
-            Per-project chat with the agent's working directory pinned, custom dashboards rendered
-            from a JSON spec the agent itself can author, project-scoped slash commands defined as
-            Markdown files, and a Scarf-managed <code>AGENTS.md</code> block that gives Hermes
-            project context before every session boots. Templates package these into a single
-            <code>.scarftemplate</code> bundle you can share or install with one click.
+            Every project gets a <strong>cockpit</strong> — one pane for its dashboard, chat
+            sessions, Kanban board, cron, memory, secrets, slash commands, and more. Opening a
+            chat in a project boots Hermes with that directory as its working directory, so the
+            project's <code>AGENTS.md</code> / <code>CLAUDE.md</code> / <code>.cursorrules</code>
+            load into the agent automatically. <strong>Mini-apps</strong> — sandboxed web panels,
+            agent-authored or hand-written — drive the agent through a permissioned
+            <code>window.scarf</code> bridge, and <strong>Fleet</strong> groups the same repo
+            across every machine you run it on, flagging config drift and pushing it back into
+            sync. One-click <strong>Upgrade Project</strong> brings an older repo up to the full
+            setup; a <code>.scarftemplate</code> bundle packages any of it to share or install in
+            one click.
           </p>
         </div>
         <div class="feature-visual">
@@ -225,9 +231,9 @@
           <p>
             Create, edit, pause, resume, run-now, and delete cron jobs without touching the CLI —
             with human-readable schedules ("Every weekday at 9:00 AM") and the underlying
-            expression a tap away. Native GUI for thirteen messaging platforms (Telegram, Discord,
-            Slack, WhatsApp, Signal, iMessage, Email, Matrix, Mattermost, Feishu, Home Assistant,
-            Webhook, CLI) with per-platform credential forms and connectivity dots.
+            expression a tap away. Native GUI for more than twenty messaging platforms (Telegram,
+            Discord, Slack, WhatsApp, Matrix, Signal, iMessage, Microsoft Teams, Google Chat,
+            LINE, and more) with per-platform credential forms and connectivity dots.
           </p>
         </div>
         <div class="feature-visual">
@@ -402,6 +408,20 @@
           <summary>What is Scarf?</summary>
           <div>
             <p>Scarf is a native macOS and iOS GUI for the <a href="https://github.com/hermes-ai/hermes-agent" rel="noopener">Hermes AI agent</a>. It surfaces Hermes's sessions, projects, memory, skills, MCP servers, cron jobs, messaging gateways, logs, and configuration through a sidebar-driven Mac app and a tab-based iPhone companion called ScarfGo.</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>What can I do with a project in Scarf?</summary>
+          <div>
+            <p>Point Scarf at any directory and it becomes a project with a <strong>cockpit</strong> — one pane for its dashboard, chat sessions, Kanban board, cron jobs, memory, secrets, slash commands, and more. Opening a chat in a project boots Hermes with that directory as its working directory, so the project's <code>AGENTS.md</code> / <code>CLAUDE.md</code> / <code>.cursorrules</code> load into the agent automatically. <strong>Mini-apps</strong> — sandboxed web panels, agent-authored or hand-written — can drive the agent through a permissioned <code>window.scarf</code> bridge (default-deny, reviewed on first open), and one-click <strong>Upgrade Project</strong> brings an older repo up to the full setup.</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>Can I run the same project on more than one machine?</summary>
+          <div>
+            <p>Yes. A project carries a stable id in its <code>.scarf/project.json</code>, so registering the same repo on a second Hermes host groups both copies under one <strong>Fleet</strong> view. Scarf flags configuration that has drifted between hosts — model preset, board, cron jobs — and lets you <strong>Apply to Fleet</strong> to push one host's setup to the others, each host handled independently and never destructively.</p>
           </div>
         </details>
 
