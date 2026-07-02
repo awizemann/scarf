@@ -19,6 +19,16 @@
   <a href="https://www.buymeacoffee.com/awizemann"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="28"></a>
 </p>
 
+## Companion X/Twitter Review
+
+If a Hermes project uses [Hermes Tweet](https://github.com/Xquik-dev/hermes-tweet)
+to collect X/Twitter account, post, or trend context, Scarf can keep the related
+sessions, memory, cron jobs, skills, MCP servers, and ScarfGo reviews visible
+from the same macOS and iOS surfaces.
+
+Hermes Tweet is a third-party Hermes plugin maintained by Xquik-dev, not by this
+repository.
+
 ## What's New in 2.15.0
 
 **Projects grow up** — the biggest Projects update since v2.3. A project becomes a first-class object with its own mission-control pane, and gains three new powers. (Skips 2.14; this is a feature release, not a Hermes-compat one.)
