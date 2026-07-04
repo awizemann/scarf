@@ -6,6 +6,103 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.15.1</title>
+      <sparkle:version>48</sparkle:version>
+      <sparkle:shortVersionString>2.15.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Sat, 04 Jul 2026 06:53:00 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.15.1</p>
+<p><strong>The model/provider mismatch banner learned how OpenRouter works.</strong> If your Hermes is configured with an aggregator provider — OpenRouter, OpenCode, KiloCode, Hugging Face, NovitaAI — Scarf&#x27;s chat preflight could flag a perfectly valid config as a &quot;Model/provider mismatch&quot; and offer two one-click fixes that would each have <strong>broken</strong> it (<a href="https://github.com/awizemann/scarf/issues/121">#121</a>). That false alarm is gone, and the banner&#x27;s fix buttons are now validated so they can never write a provider Hermes doesn&#x27;t have. Thanks to <strong>@rmichelena</strong> for the sharp report.</p>
+<h2>The mismatch banner and aggregator providers</h2>
+<p>The banner exists for a real failure: switching providers via Credential Pools could leave the old provider&#x27;s prefixed model stranded in <code>model.default</code> (say <code>anthropic/claude-…</code> with <code>model.provider: nous</code>), and chats would die at first prompt with an opaque <code>-32603</code> error. The check caught that by treating anything before a <code>/</code> in <code>model.default</code> as a provider prefix.</p>
+<p>But for <strong>aggregator</strong> providers, the slash is part of the model&#x27;s own name — OpenRouter&#x27;s <code>xiaomi/mimo-v2.5</code> is <code>org/model</code>, not <code>provider/model</code>. Hermes models this distinction explicitly (<code>is_aggregator</code> in its provider table); Scarf&#x27;s check didn&#x27;t, so a working OpenRouter config raised the banner, and both offered fixes (&quot;use <code>xiaomi</code>&quot; / &quot;strip the prefix&quot;) would have corrupted <code>config.yaml</code>. The preflight now skips the mismatch check entirely when <code>model.provider</code> resolves to an aggregator — including Hermes&#x27;s bare-<code>openai</code> → OpenRouter alias.</p>
+<p>The original protection is untouched: a genuinely stale prefix under a direct provider still raises the banner with the same one-click fixes.</p>
+<h2>The fix buttons can no longer write a broken provider</h2>
+<p>Two more hardening passes on the same banner:</p>
+<ul>
+  <li><strong>Alias-aware comparison.</strong> Hermes accepts many provider spellings (<code>claude</code> ↔ <code>anthropic</code>, <code>x-ai</code> ↔ <code>xai</code>, <code>zhipu</code> ↔ <code>zai</code>, …). Scarf now mirrors Hermes&#x27;s full alias table and canonicalizes both sides before comparing, so an alias-equivalent prefix no longer reads as a mismatch.</li>
+  <li><strong>Unknown prefixes are contained.</strong> If <code>model.default</code> carries a prefix that isn&#x27;t any provider Hermes knows, the banner still warns (that config really will fail) — but the &quot;Use <em>prefix</em>&quot; button is hidden rather than offering to write a nonexistent provider into <code>config.yaml</code>, and the banner explains the likely aggregator intent. The provider roster comes from the models.dev catalog and is only consulted on the rare mismatch path, so remote (SSH) servers pay nothing on normal refreshes.</li>
+</ul>
+<h2>Under the hood</h2>
+<ul>
+  <li>Scarf hand-mirrors three provider tables out of Hermes&#x27;s source; a new <code>scripts/check-hermes-tables.py</code> now diffs all three against <code>hermes_cli/providers.py</code> mechanically and fails loudly on drift, replacing the eyeball reconciliation on every Hermes bump. All tables verified against the exact Hermes v0.16.0 (<code>v2026.6.5</code>) tag Scarf targets.</li>
+  <li>Dormant provider-overlay entries (<code>lmstudio</code>, <code>tencent-tokenhub</code> — since absorbed by models.dev) are annotated as deliberate stale-cache fallback so the checker&#x27;s warnings read as policy, not drift.</li>
+  <li>11 new <code>ModelPreflight</code> tests pin the aggregator skip, alias equivalence, unknown-prefix containment, and the original stale-prefix regression guard.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li><strong>Sparkle</strong> will offer the update automatically, or use <strong>Scarf → Check for Updates</strong>. macOS 14.6+ deployment target unchanged. No data migrations, and no config changes — if you saw the false banner on an aggregator config, it simply disappears; nothing to reconcile.</li>
+  <li><strong>iOS / ScarfGo:</strong> this is a Mac-track release. Also on main since v2.15.0: ScarfGo project chats now load the full project context (AGENTS.md, cron, config, template) — that fix rides the next TestFlight build.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.15.1/Scarf-v2.15.1-Universal.zip"
+                 sparkle:edSignature="IYHOZqZ+jJA9N80d/vFdrcU6Mw+swKvkel4yIqbybLwYylj2676ifd54uCV4ffUbwYomUzVT16Cdw7COrUWNCQ=="
+                 length="21179573"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.15.0</title>
       <sparkle:version>47</sparkle:version>
       <sparkle:shortVersionString>2.15.0</sparkle:shortVersionString>
