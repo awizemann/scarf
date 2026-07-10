@@ -6,6 +6,112 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.16.0</title>
+      <sparkle:version>49</sparkle:version>
+      <sparkle:shortVersionString>2.16.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Fri, 10 Jul 2026 22:38:15 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.16.0</p>
+<p><strong>Scarf now targets the Hermes v0.18 line — audited against v0.18.0 (v2026.7.1) and re-audited against the v0.18.1/v0.18.2 patches (v2026.7.7.2).</strong> The headline is invisible when it works: Hermes v0.18 introduced <strong>in-place session compaction</strong>, which soft-archives the messages it summarizes away — and Scarf&#x27;s message search now stays in perfect lockstep with Hermes on those sessions instead of silently hiding the archived rows. The two release audits also surfaced long-standing Scarf bugs, now fixed: the <strong>Web Tools settings tab had never actually worked</strong> (it wrote config keys Hermes doesn&#x27;t read), and <strong>editing a cron job from ScarfGo could silently strip scheduler state from jobs.json</strong> — including repeat counts and tool restrictions. Every v0.18 surface degrades gracefully — older Hermes hosts render exactly as before.</p>
+<h2>Search keeps up with Hermes v0.18 compaction</h2>
+<p>Hermes v0.18 can compact a long session <strong>in place</strong>: the old messages are summarized, marked <code>compacted</code>, and replaced by a fresh active set — but they remain discoverable through Hermes&#x27;s own search. Scarf&#x27;s search filtered strictly to active messages, so on a compacted session Scarf and <code>hermes</code> would return <strong>different results for the same query on the same database</strong>.</p>
+<p>Scarf now detects the new <code>messages.compacted</code> column (the first <code>state.db</code> schema change since v0.16) and widens search to include compacted rows, exactly matching Hermes&#x27;s semantics. The distinction that matters: rows you deliberately removed with <code>/undo</code> stay hidden everywhere, compacted rows stay findable in search — and neither ever resurfaces in the chat transcript, which shows only the live conversation, same as Hermes. On pre-v0.18 databases the column doesn&#x27;t exist and nothing changes.</p>
+<h2>The Web Tools tab works now (it never did)</h2>
+<p>An embarrassing one, caught by the v0.18 source audit: Scarf&#x27;s Web Tools settings wrote <code>web_tools.backend</code>-style keys into <code>config.yaml</code>, but Hermes reads the <code>web:</code> block (<code>web.backend</code>, <code>web.search_backend</code>, <code>web.extract_backend</code>) — and has since at least v0.9. Because <code>hermes config set</code> accepts any key without complaint, every save &quot;succeeded,&quot; wrote a block nothing reads, and the tab read that same dead block back — a perfectly self-consistent illusion. If you ever picked a search or extract backend in Scarf and wondered why nothing changed: that&#x27;s why.</p>
+<p>Both sides now use the real keys. An empty selection means what it means in Hermes: fall back to the shared backend, then auto-detect from your API keys. Any stale <code>web_tools:</code> block left in your <code>config.yaml</code> is inert and safe to delete or ignore — Scarf deliberately does <strong>not</strong> auto-migrate its values, since they were never in effect and silently activating an old choice could change a working setup.</p>
+<h2>Cron jobs round-trip losslessly — the whole bug class is gone</h2>
+<p>Toggling a cron job&#x27;s enabled switch in ScarfGo — or saving any edit in the cron editor — rebuilt the job from Scarf&#x27;s model and dropped everything the model didn&#x27;t know about. The v0.18.0 audit caught three such fields (<code>workdir</code>, <code>context_from</code>, <code>no_agent</code>); the v0.18.2 re-audit went deeper and found the model was missing <strong>over a dozen more</strong> that Hermes persists: <code>repeat</code> counts (a &quot;run 5 times&quot; job silently became &quot;run forever&quot;), <code>enabled_toolsets</code> (a per-job tool restriction), per-job <code>provider</code>/<code>base_url</code> routing, creation metadata, and the v0.18.2 scheduler&#x27;s new <code>run_claim</code> double-execution guard.</p>
+<p>Rather than add fields forever, Scarf now preserves <strong>every key it doesn&#x27;t model</strong> through the decode → edit → encode cycle, so a future Hermes can add job fields and ScarfGo edits will never strip them again. The audit also found two keys that had <em>never</em> matched Hermes&#x27;s spelling — the pre-run script is stored as <code>script</code> (not <code>pre_run_script</code>) and cron expressions as <code>expr</code> with interval <code>minutes</code> — so those now read and write the real keys. Verified against a live jobs.json: byte-equivalent round-trip through the toggle path.</p>
+<h2>No more false &quot;model/provider mismatch&quot; on custom endpoints</h2>
+<p>v2.15.1 stopped the mismatch banner from misfiring on aggregator providers like OpenRouter (GH #121). The same courtesy now extends to <strong>custom endpoints</strong>: if your provider is <code>custom</code> or <code>custom:&lt;name&gt;</code> (a self-hosted vLLM, a LAN gateway), a slash in the model ID is your server&#x27;s namespace, not a stale provider prefix — Hermes itself treats <code>custom:*</code> as an aggregator and never second-guesses those configs, and now neither does Scarf.</p>
+<h2>Providers: Mixture of Agents in, Vertex AI replaces Gemini CLI</h2>
+<ul>
+  <li><strong>MoA (Mixture of Agents)</strong> — Hermes v0.18&#x27;s virtual provider that fans a prompt out to multiple advisor models and aggregates their answers — now appears in Scarf&#x27;s model picker. It needs no credentials; its &quot;models&quot; are preset names.</li>
+  <li><strong>Google Vertex AI</strong> (<code>vertex</code>) replaces the removed <code>google-gemini-cli</code> OAuth provider upstream — Gemini via GCP with service-account or ADC auth. It&#x27;s catalog-backed, so it surfaces in the picker automatically; the retired Gemini CLI entry and its aliases are gone.</li>
+</ul>
+<h2>Under the hood</h2>
+<ul>
+  <li>The full v0.18 audit ran across eight integration surfaces against the tagged Hermes source: the ACP wire protocol, all 42+ CLI invocations Scarf makes, the config keys Scarf writes, and the gateway platform roster are verified byte-stable — zero changes needed. The provider tables pass the mechanical <code>check-hermes-tables.py</code> gate against the exact <code>v2026.7.1</code> tag.</li>
+  <li>The v0.18.1/v0.18.2 patches (a ~712-commit rollup) were re-audited surface-by-surface against <code>v2026.7.7.2</code>: the ACP wire, CLI argparse, provider tables, gateway platforms, MCP/skills/curator, and every state.db column Scarf queries are unchanged — the cron <code>run_claim</code> field above was the only integration-facing addition. Hermes&#x27;s new <code>sessions.display_name</code> and <code>hermes curator usage</code> are noted as future Scarf surfaces.</li>
+  <li>New capability flags (<code>hasCronAttachToSession</code>, <code>hasMCPReauth</code>, <code>isV018OrLater</code>) with the standard degradation test cluster; the compacted-column handling is schema-detected, not version-gated, so it follows the database you&#x27;re actually connected to.</li>
+  <li>New Hermes v0.18 verbs noted for future Scarf surfaces: <code>hermes serve</code> (headless backend), <code>hermes journey</code> (learning timeline), <code>hermes mcp reauth</code> (refresh expired MCP OAuth tokens).</li>
+  <li>18 new tests: search widening + transcript narrowing on compacted DBs, cron field round-trips (including a full v0.18.2-shaped job and legacy-key migration), v0.18 capability degradation, MoA credential-gate routing, and custom-endpoint preflight skips. 799/799 ScarfCore tests green.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li><strong>Sparkle</strong> will offer the update automatically, or use <strong>Scarf → Check for Updates</strong>. macOS 14.6+ deployment target unchanged. No action needed on upgrade: the compacted-search behavior activates only against v0.18 databases, and your first Web Tools save writes the correct keys.</li>
+  <li>If you had configured Web Tools backends in Scarf before, re-pick them once — the old values never reached Hermes, so Scarf now shows the true (likely unset) state.</li>
+  <li><strong>iOS / ScarfGo:</strong> the cron field-loss fix applies to the iOS cron editor and ships with the next TestFlight build, alongside the v2.15.0 project-context fix.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.16.0/Scarf-v2.16.0-Universal.zip"
+                 sparkle:edSignature="k97KZnWc4hlMHACxbOJTxKgCjTETeFXwtUTiPBHEvkbvwL/4/BBBq3OYUFfs9zqBY/3Z/1Nx8/4Jau4qvtkBBw=="
+                 length="21200724"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.15.1</title>
       <sparkle:version>48</sparkle:version>
       <sparkle:shortVersionString>2.15.1</sparkle:shortVersionString>
