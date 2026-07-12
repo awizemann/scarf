@@ -54,8 +54,8 @@
 - [ ] Photon / iMessage gateway platform support (v0.17) — decide support level (id: t-5ab57e6f) (added: 2026-06-21) (priority: low)
 - [ ] Gateway allowlist: google-chat is a no-op + wrong platform id (v0.17 = google_chat) (id: t-2d6888ea) (added: 2026-06-21)
 - [ ] Mismatch banner: offer "Choose model…" picker when prefix is unknown (id: t-79569a15) (added: 2026-07-04)
-- [ ] Cut Scarf v2.16.0 (Hermes v0.18 parity release) (id: t-b86288c6) (added: 2026-07-04)
 - [ ] Hermes 0.18.x roadmap candidates: sessions.display_name gateway-session titles (schema-detect), curator usage telemetry (needs own gate — verb absent at 0.18.0), 1Password read-only Secrets display, compression Codex knobs (id: t-49826b5f) (added: 2026-07-10) (priority: low)
+- [ ] Awaiting TestFlight/reporter confirmations: gh#112 (scriptures4life, Docker read-path, pinged 2026-07-12), gh#123 (JonLaliberte, v2.16.1 ControlMaster self-healing, pinged 2026-07-12), gh#124 (AnandChowdhary — his own fix b808632 from PR#125 landed on main with his authorship + regression test 7e20662; ships NEXT TestFlight build, ping + close then). Close each on confirmation; if no reply in ~2 weeks, close with reopen invitation. (id: t-503483b7) (added: 2026-07-12)
 
 ## Doing
 
@@ -64,6 +64,7 @@
 
 ## Done
 
+- [x] Cut Scarf v2.16.0 (Hermes v0.18 parity release) (id: t-b86288c6) (added: 2026-07-04)
 - [x] Performance and reliability issues on large state.db (lag, crashes, missing sessions) (id: t-b8a6c3) (source: gh#61) (added: 2026-06-13)
 - [x] iOS Settings: route config reads through the Hermes CLI wrapper for Docker hosts (config dir is in-container) (id: t-ios-cfg-get) (source: gh#112 failure 2) (added: 2026-06-06)
 - [x] gh#123: macOS remote dies until remove/re-add — stale ControlMaster recovery (wake observer + reactive -O exit on ACP connect failure) (id: t-8c8fef22) (added: 2026-07-12)
