@@ -6,6 +6,105 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.16.1</title>
+      <sparkle:version>50</sparkle:version>
+      <sparkle:shortVersionString>2.16.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Sun, 12 Jul 2026 14:35:57 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.16.1</p>
+<p>A focused connection-reliability patch, driven by two GitHub reports. The headline: <strong>a remote server that &quot;stops working after a while&quot; now heals itself</strong> — no more removing and re-adding the server to get it back (<a href="https://github.com/awizemann/scarf/issues/123">#123</a>). Alongside it, the shared core learns to read Hermes configs that live <strong>inside a Docker container</strong> (<a href="https://github.com/awizemann/scarf/issues/112">#112</a>), which lands in ScarfGo with the next TestFlight build.</p>
+<h2>Remotes recover from dead SSH connections instead of hanging on them</h2>
+<p>Scarf multiplexes all of its ssh traffic to a server through one OpenSSH <strong>ControlMaster</strong> connection — that&#x27;s what makes the bursty status and file reads cheap. But when the TCP session behind that master died (sleep/wake and network changes are the classic triggers), the master could linger holding its socket, and every subsequent ssh — the chat connect, the automatic reconnect attempts, the pollers — was routed through the corpse, each hanging for its full timeout until the chat sat permanently at the loading screen.</p>
+<p>The kicker: the only code path that ever told a stale master to exit was <strong>removing the server</strong>, which is exactly why remove-and-re-add was the one reliable fix users found (and why quitting and relaunching usually didn&#x27;t help — the socket lives outside the app).</p>
+<p>Now:</p>
+<ul>
+  <li><strong>Failure paths reset the transport.</strong> A remote chat-start failure or a died stream probes the master and resets it if it&#x27;s provably dead — so a plain retry, and the automatic reconnect loop, now do what remove-and-re-add did.</li>
+  <li><strong>Wake recovery.</strong> On wake from sleep, Scarf probes every registered server&#x27;s master (after a short network-settle delay) and resets only the dead ones.</li>
+</ul>
+<p>The probe is deliberately two-step — &quot;does a master own the socket?&quot; then a trivial multiplexed command — so a <strong>healthy</strong> connection is never dropped: an active chat shares the master&#x27;s TCP session, and blindly resetting on wake would have killed it.</p>
+<h2>Hermes in Docker: config reads fall back to the CLI</h2>
+<p>If Hermes runs inside a container, <code>~/.hermes/config.yaml</code> doesn&#x27;t exist on the SSH host — it lives inside the container, visible only to the <code>hermes</code> wrapper. Writes always worked (they go through <code>hermes config set</code>, which the wrapper runs in-container), but every direct file read failed: Settings claimed <em>&quot;config.yaml not found&quot;</em>, and the chat preflight demanded a model choice on every start even though the config was fully set.</p>
+<p>Config reads in the shared core now fall back through the Hermes CLI itself: first <code>cat &quot;$(hermes config path)&quot;</code> in the same wrapper shell the writes use (covers <code>HERMES_HOME</code> overrides and bind-mounted container homes), then a <code>hermes config show</code> probe — the one read that runs <em>inside</em> the container — which recovers your configured model and provider. The chat preflight passes, and Settings populates its model section and, instead of the misleading &quot;not found&quot;, explains the container topology and teaches the actual fix: bind-mount the container&#x27;s Hermes home to <code>~/.hermes</code> on the host, which unlocks everything else (full Settings, memory files, and the Dashboard&#x27;s <code>state.db</code> reads).</p>
+<p>These surfaces are ScarfGo&#x27;s, so this fix ships to devices with the <strong>next TestFlight build</strong> — the Mac app benefits automatically anywhere the shared reader is adopted next.</p>
+<h2>Under the hood</h2>
+<ul>
+  <li>New <code>HermesConfigReader</code> (ScarfCore) with unit tests against the real Hermes v0.17 <code>config show</code> output; the fallback chain is remote-only by design, so a local &quot;file missing&quot; stays missing.</li>
+  <li>Test contexts that fake a remote Hermes are now hermetic — the CLI fallbacks can no longer accidentally find the development machine&#x27;s real Hermes install. 805/805 ScarfCore tests green.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li><strong>Sparkle</strong> will offer the update automatically, or use <strong>Scarf → Check for Updates</strong>. macOS 14.6+ deployment target unchanged.</li>
+  <li><strong>iOS / ScarfGo:</strong> the Docker config-read fallback ships with the next TestFlight build; <a href="https://github.com/awizemann/scarf/issues/112">#112</a> stays open as its tracker until then. The #123 self-healing applies to the Mac app&#x27;s ssh transport (ScarfGo&#x27;s Citadel transport pools connections since v2.12 and is unaffected).</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.16.1/Scarf-v2.16.1-Universal.zip"
+                 sparkle:edSignature="oEhIYo6U8SEsUMXjCKWeNPe+4pH14Wh9BzsjI1jokqqo4isc92OBhCDMyE/q3i5IT5r/nAzsGuesset9xkafDQ=="
+                 length="21226464"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.16.0</title>
       <sparkle:version>49</sparkle:version>
       <sparkle:shortVersionString>2.16.0</sparkle:shortVersionString>
