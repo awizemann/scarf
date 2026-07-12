@@ -1700,7 +1700,19 @@ final class ChatController {
         // literally. v2.5.
         let wireText = expandIfProjectScoped(text)
         do {
-            _ = try await client.sendPrompt(sessionId: sessionId, text: wireText, images: images)
+            let result = try await client.sendPrompt(
+                sessionId: sessionId,
+                text: wireText,
+                images: images
+            )
+            // `promptComplete` is a Scarf-local lifecycle event, not a
+            // `session/update` notification emitted by ACP. Mirror the
+            // macOS controller by synthesizing it from the resolved
+            // `session/prompt` result so the shared VM finalizes the
+            // streaming message and clears its working state.
+            vm.handleACPEvent(
+                .promptComplete(sessionId: sessionId, response: result)
+            )
         } catch {
             // gh#108: a send in flight when the user switches apps
             // gets cancelled by pauseInBackground tearing down the
@@ -1728,6 +1740,15 @@ final class ChatController {
             if case .ready = state {
                 state = .failed("Prompt failed: \(error.localizedDescription)")
             }
+            vm.handleACPEvent(
+                .promptComplete(sessionId: sessionId, response: ACPPromptResult(
+                    stopReason: "error",
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    thoughtTokens: 0,
+                    cachedReadTokens: 0
+                ))
+            )
         }
     }
 
