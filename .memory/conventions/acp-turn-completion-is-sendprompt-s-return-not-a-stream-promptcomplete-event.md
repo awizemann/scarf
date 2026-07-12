@@ -11,7 +11,7 @@ tags:
 - concurrency
 - security
 created: 2026-06-16
-updated: 2026-06-16
+updated: 2026-07-12
 ---
 
 Every ACP consumer must derive turn-completion from `sendPrompt`'s return; the event stream does not carry it. Missing this shipped a hung happy-path in the M2 mini-app agent channel. Branch `feat/projects`.
@@ -27,3 +27,11 @@ Every ACP consumer must derive turn-completion from `sendPrompt`'s return; the e
 ## Relations
 - relates_to [[Phase-1 Milestone 2: Mini-apps — implementation decisions]]
 - relates_to [[Fast test-iteration commands (swift test vs xcodebuild)]]
+
+
+
+## Third occurrence: iOS chat controller (gh#124, fixed 2026-07-12, a6be036)
+
+- [gotcha] The iOS `ChatController._sendImpl` ALSO discarded `sendPrompt`'s result (`_ = try await client.sendPrompt(...)`) — the pre-existing third consumer, reported externally with a near-perfect diagnosis. Symptom: streaming bubble never finalized, `isAgentWorking`/`isPostProcessing` stuck, transcript sits in "Finishing up…" after the reply lands. Fix mirrors Mac exactly: synthesize `.promptComplete` on success AND an error-stopReason completion in the general catch; the `.reconnecting` early-return skips it because `pauseInBackground` already ran `finalizeOnDisconnect()`. #bug #fix
+- [convention] When adding ANY new `sendPrompt` caller, wire the completion synthesis in the same change — grep for `_ = try await client.sendPrompt` in review; that pattern is always wrong.
+- [testing] Controller-level regression: `Scarf iOSTests/ChatControllerPromptCompleteTests` drives the real `start()`/`send()` over an in-memory `AutoReplyChannel` (chunk → prompt result), asserts finalization + working-state exit. Teeth-verified (reverting the fix fails 3 assertions). Enablement: `ChatController.clientFactory` test seam (mirrors MiniAppAgentSession); the "Scarf iOSTests" target is RUNNABLE for the first time — shared "scarf mobile" scheme now lists it, stale TEST_HOST (pre-rename "Scarf iOS.app") corrected, `@testable import scarf_mobile` (module name after the target rename). Run: `xcodebuild test -scheme "scarf mobile" -destination "platform=iOS Simulator,name=iPhone 17 Pro" -only-testing:"Scarf iOSTests"`. #testing
