@@ -85,8 +85,12 @@ struct ModelPickerSheet: View {
     @State private var localManualEntry: Bool = false
     /// Base URL debounced for probing — `LocalModelEnumerator.listModels`
     /// is not cancellable (detached curl, ~10 s worst case), so we must
-    /// not fire a probe per keystroke.
-    @State private var debouncedLocalBaseURL: String = ""
+    /// not fire a probe per keystroke. Seeded to the same value as
+    /// `localBaseURL` (and re-seeded on every programmatic URL change —
+    /// provider switch, round-trip restore) so the first probe after any
+    /// non-typing change targets the RIGHT URL immediately instead of
+    /// probing the previous URL for a 400 ms debounce window (T4 audit).
+    @State private var debouncedLocalBaseURL: String = LocalModelProvider.all.first?.defaultBaseURL ?? ""
     @State private var localListing: LocalModelListing?
     @State private var localIsProbing: Bool = false
     /// Bumped by the Retry/Refresh buttons to force a re-probe with an
@@ -172,6 +176,10 @@ struct ModelPickerSheet: View {
                 localBaseURL = initialBaseURL.isEmpty
                     ? (descriptor.defaultBaseURL ?? "")
                     : initialBaseURL
+                // Programmatic URL change — skip the typing debounce so
+                // the restore probes the SAVED URL immediately, not the
+                // descriptor default for a 400 ms window.
+                debouncedLocalBaseURL = localBaseURL
                 localAPIKey = initialAPIKey
                 // Normalize like the runtime (_parse_api_mode strips +
                 // lowercases); values outside the picker's four modes
@@ -315,6 +323,9 @@ struct ModelPickerSheet: View {
         selectedLocalProviderID = id
         let descriptor = LocalModelProvider.descriptor(for: id)
         localBaseURL = descriptor?.defaultBaseURL ?? ""
+        // Programmatic URL change — skip the typing debounce so the
+        // probe key never pairs the new provider with the old URL.
+        debouncedLocalBaseURL = localBaseURL
         localAPIKey = ""
         localAPIMode = ""
         localModelID = ""
@@ -977,12 +988,14 @@ struct ModelPickerSheet: View {
         }
     }
 
-    /// Loopback gate for the custom endpoint's empty-model auto-detect —
-    /// mirrors the runtime's own restriction (runtime_provider.py:206-213
-    /// only auto-detects against loopback hosts).
+    /// Loopback gate for the custom endpoint's empty-model auto-detect.
+    /// Delegates to the descriptor table's reader-verified check — the
+    /// runtime only auto-detects when the base URL contains
+    /// `localhost`/`127.0.0.1` literally (runtime_provider.py:209), so
+    /// `::1` or `127.0.0.2` must NOT unlock the empty-model save (T4
+    /// audit: they'd produce a config Hermes runs with no model at all).
     private func isLoopbackURL(_ raw: String) -> Bool {
-        guard let host = URLComponents(string: raw)?.host?.lowercased() else { return false }
-        return host == "localhost" || host == "::1" || host.hasPrefix("127.")
+        LocalModelProvider.hermesAutoDetectsEmptyModel(baseURL: raw)
     }
 
     private var customEntry: some View {

@@ -8,6 +8,14 @@ import Foundation
 /// base_url redirecting a new provider, GH #27132 class; bare ollama
 /// falling through to OpenRouter; a blanked API-key field leaving the
 /// old secret in config.yaml).
+///
+/// Ordering is deliberate and crash/abort-safe (T4 audit): the executor
+/// runs one `hermes config set` process per operation and aborts on the
+/// first failure, so every PREFIX of a plan is a config some chat may
+/// run against. Local plans commit `model.provider` LAST (base_url et
+/// al. are in place before the provider flips); remote plans clear the
+/// stale local keys LAST (never `provider: ollama` with a cleared
+/// base_url — the silent-OpenRouter state).
 @Suite struct LocalModelConfigPlanTests {
 
     private typealias Op = LocalModelConfigPlan.Operation
@@ -17,16 +25,18 @@ import Foundation
     @Test func ollamaAlwaysWritesItsBaseURLAndClearsTheRest() {
         // Cloud → ollama. base_url MUST be written even though the user
         // never touched the field (nil baseURL → descriptor default) —
-        // omitting it silently routes chats to OpenRouter.
+        // omitting it silently routes chats to OpenRouter. base_url
+        // lands BEFORE model.provider: no abort prefix ever reads as
+        // provider=ollama without its endpoint.
         let ops = LocalModelConfigPlan.operations(selecting: LocalModelSelection(
             providerID: "ollama", modelID: "llama3:8b"
         ))
         #expect(ops == [
             .clear(key: "model.api_key"),
             .clear(key: "model.api_mode"),
-            .set(key: "model.provider", value: "ollama"),
-            .set(key: "model.default", value: "llama3:8b"),
             .set(key: "model.base_url", value: "http://127.0.0.1:11434/v1"),
+            .set(key: "model.default", value: "llama3:8b"),
+            .set(key: "model.provider", value: "ollama"),
         ])
     }
 
@@ -49,9 +59,9 @@ import Foundation
         #expect(ops == [
             .clear(key: "model.api_key"),
             .clear(key: "model.api_mode"),
-            .set(key: "model.provider", value: "lmstudio"),
-            .set(key: "model.default", value: "qwen2.5-coder-14b"),
             .set(key: "model.base_url", value: "http://127.0.0.1:1234/v1"),
+            .set(key: "model.default", value: "qwen2.5-coder-14b"),
+            .set(key: "model.provider", value: "lmstudio"),
         ])
     }
 
@@ -66,8 +76,8 @@ import Foundation
             .clear(key: "model.base_url"),
             .clear(key: "model.api_key"),
             .clear(key: "model.api_mode"),
-            .set(key: "model.provider", value: "vllm"),
             .set(key: "model.default", value: "meta-llama/Llama-3-8B"),
+            .set(key: "model.provider", value: "vllm"),
         ])
     }
 
@@ -80,11 +90,11 @@ import Foundation
             apiMode: "anthropic_messages"
         ))
         #expect(ops == [
-            .set(key: "model.provider", value: "custom"),
-            .set(key: "model.default", value: "my-model"),
             .set(key: "model.base_url", value: "http://10.0.0.5:8000/v1"),
             .set(key: "model.api_key", value: "sk-local-123"),
             .set(key: "model.api_mode", value: "anthropic_messages"),
+            .set(key: "model.default", value: "my-model"),
+            .set(key: "model.provider", value: "custom"),
         ])
     }
 
@@ -101,9 +111,9 @@ import Foundation
         #expect(ops == [
             .clear(key: "model.api_key"),
             .clear(key: "model.api_mode"),
-            .set(key: "model.provider", value: "custom"),
-            .set(key: "model.default", value: "my-model"),
             .set(key: "model.base_url", value: "http://127.0.0.1:8000/v1"),
+            .set(key: "model.default", value: "my-model"),
+            .set(key: "model.provider", value: "custom"),
         ])
     }
 
@@ -115,6 +125,23 @@ import Foundation
         ))
         #expect(ops.contains(.clear(key: "model.default")))
         #expect(!ops.contains { if case .set(key: "model.default", value: _) = $0 { return true } else { return false } })
+    }
+
+    @Test func everyLocalPlanCommitsTheProviderLast() {
+        // Crash-safety invariant (T4): for ANY local selection, the
+        // `model.provider` write is the final operation — a crash or
+        // per-op failure abort can never leave the new local provider
+        // active without the keys it needs (no base_url → the runtime
+        // silently falls through to OpenRouter).
+        for descriptor in LocalModelProvider.all {
+            let ops = LocalModelConfigPlan.operations(selecting: LocalModelSelection(
+                providerID: descriptor.providerID,
+                modelID: "m",
+                baseURL: descriptor.defaultBaseURL ?? "http://127.0.0.1:9999/v1"
+            ))
+            #expect(ops.last == .set(key: "model.provider", value: descriptor.providerID),
+                    "provider write must be last for \(descriptor.providerID)")
+        }
     }
 
     @Test func invalidAPIModeIsNeverWritten() {
@@ -169,17 +196,20 @@ import Foundation
     // MARK: - Remote selections (clear-on-switch)
 
     @Test func localToCloudSwitchClearsAllLocalManagedKeys() {
+        // Clears TRAIL the provider/model writes: clearing base_url
+        // while model.provider is still `ollama` would be the
+        // silent-OpenRouter state if the sequence aborts in between.
         let ops = LocalModelConfigPlan.operations(
             selectingRemoteModel: "claude-opus-4-6",
             provider: "anthropic",
             currentProvider: "ollama"
         )
         #expect(ops == [
+            .set(key: "model.provider", value: "anthropic"),
+            .set(key: "model.default", value: "claude-opus-4-6"),
             .clear(key: "model.base_url"),
             .clear(key: "model.api_key"),
             .clear(key: "model.api_mode"),
-            .set(key: "model.provider", value: "anthropic"),
-            .set(key: "model.default", value: "claude-opus-4-6"),
         ])
     }
 
@@ -191,11 +221,61 @@ import Foundation
             provider: "openai",
             currentProvider: "anthropic"
         )
-        #expect(Array(ops.prefix(3)) == [
+        #expect(Array(ops.suffix(3)) == [
             .clear(key: "model.base_url"),
             .clear(key: "model.api_key"),
             .clear(key: "model.api_mode"),
         ])
+    }
+
+    @Test func knownAbsentLocalKeysAreNotReCleared() {
+        // A user who never touched a local provider (all three current
+        // values known-empty) gets exactly the classic two-op write —
+        // no junk empty keys in config.yaml, no extra SSH round-trips.
+        let ops = LocalModelConfigPlan.operations(
+            selectingRemoteModel: "gpt-5",
+            provider: "openai",
+            currentProvider: "anthropic",
+            currentBaseURL: "",
+            currentAPIKey: "",
+            currentAPIMode: ""
+        )
+        #expect(ops == [
+            .set(key: "model.provider", value: "openai"),
+            .set(key: "model.default", value: "gpt-5"),
+        ])
+    }
+
+    @Test func onlyThePresentLocalKeysAreCleared() {
+        // ollama → anthropic with a real base_url but no key/mode:
+        // clear exactly what exists.
+        let ops = LocalModelConfigPlan.operations(
+            selectingRemoteModel: "claude-opus-4-6",
+            provider: "anthropic",
+            currentProvider: "ollama",
+            currentBaseURL: "http://127.0.0.1:11434/v1",
+            currentAPIKey: "",
+            currentAPIMode: ""
+        )
+        #expect(ops == [
+            .set(key: "model.provider", value: "anthropic"),
+            .set(key: "model.default", value: "claude-opus-4-6"),
+            .clear(key: "model.base_url"),
+        ])
+    }
+
+    @Test func unknownCurrentValuesClearConservatively() {
+        // nil (caller doesn't know the config) must behave like the
+        // pre-parameter API: clear everything on a switch.
+        let ops = LocalModelConfigPlan.operations(
+            selectingRemoteModel: "gpt-5",
+            provider: "openai",
+            currentProvider: "anthropic",
+            currentBaseURL: nil,
+            currentAPIKey: nil,
+            currentAPIMode: nil
+        )
+        #expect(ops.filter { if case .clear = $0 { return true } else { return false } }.count == 3)
     }
 
     @Test func sameProviderModelChangeDoesNotClear() {
@@ -236,16 +316,28 @@ import Foundation
         #expect(ops == [.set(key: "model.default", value: "some/model")])
     }
 
-    @Test func emptyModelSkipsTheModelDefaultWrite() {
-        // Subscription providers (Nous) submit with an empty model —
-        // Hermes picks its own default. Mirrors setModelAndProvider.
+    @Test func emptyModelClearsModelDefault() {
+        // Subscription providers (Nous) submit with an empty model and
+        // the UI promises "leave blank for the provider's default" —
+        // the previous provider's model.default must be CLEARED, not
+        // left pinned (skipping the write was the T3 behavior; it kept
+        // e.g. a stale claude-* model.default under provider=nous).
         let ops = LocalModelConfigPlan.operations(
             selectingRemoteModel: "",
             provider: "nous",
-            currentProvider: "ollama"
+            currentProvider: "ollama",
+            currentBaseURL: "", currentAPIKey: "", currentAPIMode: ""
         )
-        #expect(ops.last == .set(key: "model.provider", value: "nous"))
-        #expect(!ops.contains { if case .set(key: "model.default", value: _) = $0 { return true } else { return false } })
+        #expect(ops == [
+            .set(key: "model.provider", value: "nous"),
+            .clear(key: "model.default"),
+        ])
+    }
+
+    @Test func emptyModelAndProviderIsANoOpPlan() {
+        #expect(LocalModelConfigPlan.operations(
+            selectingRemoteModel: "", provider: "", currentProvider: "anthropic"
+        ).isEmpty)
     }
 
     // MARK: - Wire format

@@ -177,6 +177,30 @@ public struct LocalModelProvider: Sendable, Identifiable, Hashable {
         return validAPIModes.contains(normalized)
     }
 
+    // MARK: - Auto-detect loopback gate
+
+    /// True when Hermes's empty-`model.default` auto-detect will actually
+    /// fire for this base URL. Deliberately NARROWER than "any loopback
+    /// address": the reader's gate is a literal substring check —
+    /// `"localhost" in base_url or "127.0.0.1" in base_url`
+    /// (runtime_provider.py:209, `_get_model_config`) — so `::1`,
+    /// `0.0.0.0`, and non-.1 127.x addresses do NOT auto-detect even
+    /// though `_loopback_hostname` (the base_url TRUST gate) accepts
+    /// them. A UI that allowed saving an empty model against `::1`
+    /// would produce a config Hermes runs with no model at all.
+    /// The check is a strict SUBSET of the reader's: the reader's
+    /// substring test must pass verbatim (it is case-sensitive — an
+    /// uppercase `LOCALHOST` does NOT auto-detect), and the substring
+    /// must actually be the URL's host (so `http://evil.com/localhost`
+    /// doesn't sneak through). Anything we allow, the reader
+    /// auto-detects.
+    public static func hermesAutoDetectsEmptyModel(baseURL raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.contains("localhost") || trimmed.contains("127.0.0.1") else { return false }
+        guard let host = URLComponents(string: trimmed)?.host else { return false }
+        return host == "localhost" || host == "127.0.0.1"
+    }
+
     // MARK: - Lookup
 
     /// The runtime's spelling aliases for the local IDs (the auth.py

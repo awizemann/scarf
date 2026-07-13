@@ -1856,11 +1856,13 @@ struct HermesFileService: Sendable {
     }
 
     /// Execute a `LocalModelConfigPlan` — the ordered `hermes config set`
-    /// operations for a model-picker save (clears first, then writes;
-    /// see the plan type for the clear-on-switch rationale). Stops at
-    /// the first failing operation and returns `false`; a partial write
-    /// is no worse than the pre-save state and the next picker open /
-    /// chat preflight re-prompts.
+    /// operations for a model-picker save. Stops at the first failing
+    /// operation and returns `false`. The plan's ordering is
+    /// crash/abort-safe (see the plan type): local saves commit
+    /// `model.provider` last and remote saves clear stale local keys
+    /// last, so no abort prefix ever leaves `provider: <local alias>`
+    /// without its `model.base_url` — the state where Hermes silently
+    /// reroutes the chat to OpenRouter.
     @discardableResult
     nonisolated func applyModelConfigPlan(_ operations: [LocalModelConfigPlan.Operation]) -> Bool {
         for operation in operations {

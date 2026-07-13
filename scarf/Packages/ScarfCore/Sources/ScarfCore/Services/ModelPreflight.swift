@@ -41,6 +41,20 @@ public enum ModelPreflight: Sendable {
     public static func check(_ config: HermesConfig) -> Result {
         let modelMissing = isUnset(config.model)
         let providerMissing = isUnset(config.provider)
+        // Local custom-endpoint auto-detect (T4 audit): the model picker's
+        // Local tab legitimately saves `provider: custom` with an EMPTY
+        // `model.default` when the base URL is loopback — Hermes then
+        // auto-detects the single loaded model at request time
+        // (runtime_provider.py:206-213). That config is CONFIGURED, not
+        // missing; without this gate the preflight sheet re-prompts on
+        // every chat start, including immediately after saving the
+        // auto-detect setup from the preflight sheet itself.
+        if modelMissing, !providerMissing,
+           let descriptor = LocalModelProvider.descriptor(for: config.provider),
+           descriptor.allowsEmptyModelWhenLoopback,
+           LocalModelProvider.hermesAutoDetectsEmptyModel(baseURL: config.modelBaseURL) {
+            return .configured
+        }
         switch (modelMissing, providerMissing) {
         case (true, true):   return .missingBoth
         case (true, false):  return .missingModel

@@ -142,7 +142,13 @@ final class SettingsViewModel {
             ops = LocalModelConfigPlan.operations(
                 selectingRemoteModel: model,
                 provider: provider,
-                currentProvider: config.provider
+                currentProvider: config.provider,
+                // Current local-key values: a key that's already
+                // empty/absent is skipped rather than re-cleared, so a
+                // never-local user keeps the classic two-op write.
+                currentBaseURL: config.modelBaseURL,
+                currentAPIKey: config.modelAPIKey,
+                currentAPIMode: config.modelAPIMode
             )
         }
         guard !ops.isEmpty else { return }

@@ -1587,15 +1587,35 @@ final class ChatViewModel {
 
         let svc = fileService
         Task.detached { [weak self] in
-            // Local-tab picks carry keys `setModelAndProvider` can't
-            // write (base_url et al.) — route them through the shared
-            // write plan; the classic remote path is unchanged.
+            // Both branches route through the shared write plan (T4
+            // audit): local picks carry keys `setModelAndProvider` can't
+            // write (base_url et al.), and remote picks must scrub any
+            // stale local-managed keys when the provider changes — a
+            // provider=ollama config reached via preflight (e.g. its
+            // model.default got emptied) would otherwise keep its
+            // base_url into the new cloud provider. For a config with no
+            // local keys the remote ops are exactly the classic
+            // [set provider, set model] pair.
             let ok: Bool
             if let local {
                 let ops = LocalModelConfigPlan.operations(selecting: local)
                 ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
+            } else if provider.trimmingCharacters(in: .whitespaces).isEmpty {
+                // Parity with setModelAndProvider's guard: the preflight
+                // must persist BOTH keys, so an empty provider is a
+                // failed save, not a model-only write.
+                ok = false
             } else {
-                ok = svc.setModelAndProvider(model: model, provider: provider)
+                let current = svc.loadConfig()
+                let ops = LocalModelConfigPlan.operations(
+                    selectingRemoteModel: model,
+                    provider: provider,
+                    currentProvider: current.provider,
+                    currentBaseURL: current.modelBaseURL,
+                    currentAPIKey: current.modelAPIKey,
+                    currentAPIMode: current.modelAPIMode
+                )
+                ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }

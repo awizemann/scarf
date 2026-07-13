@@ -255,4 +255,26 @@ import Foundation
                     "\(p.providerID) must not enter the synced overlay table")
         }
     }
+
+    // MARK: - Auto-detect loopback gate (T4)
+
+    @Test func autoDetectGateMirrorsTheReadersSubstringCheck() {
+        // The reader only auto-detects an empty model.default when the
+        // base_url contains "localhost" or "127.0.0.1" literally
+        // (runtime_provider.py:209). Our gate must be a SUBSET of that:
+        // never allow a URL the reader won't auto-detect against.
+        #expect(LocalModelProvider.hermesAutoDetectsEmptyModel(baseURL: "http://127.0.0.1:8000/v1"))
+        #expect(LocalModelProvider.hermesAutoDetectsEmptyModel(baseURL: " http://localhost:1234/v1 "))
+        // Loopback-ish but NOT auto-detected by the reader — must reject.
+        // (The reader's substring check is case-sensitive: LOCALHOST
+        // never matches; a path-only "localhost" isn't the host.)
+        #expect(!LocalModelProvider.hermesAutoDetectsEmptyModel(baseURL: "https://LOCALHOST:8443/v1"))
+        #expect(!LocalModelProvider.hermesAutoDetectsEmptyModel(baseURL: "http://evil.example/localhost"))
+        #expect(!LocalModelProvider.hermesAutoDetectsEmptyModel(baseURL: "http://[::1]:8000/v1"))
+        #expect(!LocalModelProvider.hermesAutoDetectsEmptyModel(baseURL: "http://127.0.0.2:8000/v1"))
+        #expect(!LocalModelProvider.hermesAutoDetectsEmptyModel(baseURL: "http://0.0.0.0:8000/v1"))
+        // Plainly remote / malformed.
+        #expect(!LocalModelProvider.hermesAutoDetectsEmptyModel(baseURL: "http://192.168.1.20:8000/v1"))
+        #expect(!LocalModelProvider.hermesAutoDetectsEmptyModel(baseURL: ""))
+    }
 }

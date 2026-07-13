@@ -54,6 +54,47 @@ import Foundation
         #expect(ModelPreflight.check(cfg) == .missingBoth)
     }
 
+    // MARK: - check(_:) — custom-endpoint empty-model auto-detect (T4)
+
+    @Test func customProviderWithEmptyModelOnLoopbackIsConfigured() {
+        // The Local tab's auto-detect save: provider=custom, empty
+        // model.default, loopback base_url. Hermes resolves the model
+        // at request time (runtime_provider.py:206-213) — the preflight
+        // must NOT re-prompt on every chat start (it would even loop:
+        // save auto-detect from the preflight sheet → sheet reopens).
+        var cfg = HermesConfig.empty
+        cfg.model = ""
+        cfg.provider = "custom"
+        cfg.modelBaseURL = "http://127.0.0.1:8000/v1"
+        #expect(ModelPreflight.check(cfg) == .configured)
+        cfg.modelBaseURL = "http://localhost:1234/v1"
+        #expect(ModelPreflight.check(cfg) == .configured)
+    }
+
+    @Test func customEmptyModelOnNonAutoDetectURLStillReportsMissingModel() {
+        // The reader's auto-detect gate is literally
+        // `"localhost" in base_url or "127.0.0.1" in base_url` — a LAN
+        // URL, `::1`, or a non-.1 127.x address never auto-detects, so
+        // an empty model there IS a broken config worth prompting for.
+        var cfg = HermesConfig.empty
+        cfg.model = ""
+        cfg.provider = "custom"
+        for url in ["http://192.168.1.20:8000/v1", "http://[::1]:8000/v1", "http://127.0.0.2:8000/v1", ""] {
+            cfg.modelBaseURL = url
+            #expect(ModelPreflight.check(cfg) == .missingModel, "url: \(url)")
+        }
+    }
+
+    @Test func nonCustomLocalProviderWithEmptyModelStillReportsMissingModel() {
+        // Only the custom descriptor advertises empty-model auto-detect
+        // (allowsEmptyModelWhenLoopback); ollama et al. require a model.
+        var cfg = HermesConfig.empty
+        cfg.model = ""
+        cfg.provider = "ollama"
+        cfg.modelBaseURL = "http://127.0.0.1:11434/v1"
+        #expect(ModelPreflight.check(cfg) == .missingModel)
+    }
+
     @Test func resultIsConfiguredOnlyForConfiguredCase() {
         #expect(ModelPreflight.Result.configured.isConfigured)
         #expect(!ModelPreflight.Result.missingBoth.isConfigured)

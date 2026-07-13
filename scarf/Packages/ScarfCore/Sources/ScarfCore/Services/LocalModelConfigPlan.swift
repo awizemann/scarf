@@ -65,6 +65,27 @@ public struct LocalModelSelection: Sendable, Equatable {
 /// - `model.api_mode`: `_parse_api_mode` returns None for anything not in
 ///   `_VALID_API_MODES` after strip().lower() — `""` → None → URL
 ///   auto-detect → `chat_completions` (runtime_provider.py:269-276).
+///
+/// **Crash-safe ordering** (T4 audit). Each operation is its own
+/// `hermes config set` process, and the executor aborts on the first
+/// failure — so every PREFIX of the plan is a config state some chat
+/// may actually run against. The one state that must never exist is
+/// `model.provider = <local alias>` with no/empty `model.base_url`:
+/// the runtime then falls through to OpenRouter SILENTLY
+/// (runtime_provider.py:970-976), sending a local-intent prompt to a
+/// cloud endpoint. Hence:
+/// - Local saves write `model.provider` LAST — base_url/key/mode and
+///   model.default are all in place before the provider commits. The
+///   pre-commit writes are inert under the old provider (every reader
+///   path gates `model.base_url`/`model.api_mode` on the configured
+///   provider matching the one being resolved — the anthropic branch,
+///   the api-key branch at :1799-1803, and
+///   `_config_base_url_trustworthy_for_bare_custom`).
+/// - Remote saves write `model.provider` + `model.default` FIRST and
+///   clear the stale local keys after. The worst mid-sequence state is
+///   the new cloud provider briefly honoring a stale local base_url —
+///   a loud connection failure against the user's own old endpoint,
+///   never a silent reroute.
 public enum LocalModelConfigPlan {
     /// One `hermes config set` invocation. `clear` is `set <key> ""` —
     /// see the type comment for why empty-string is the unset mechanism.
@@ -135,12 +156,16 @@ public enum LocalModelConfigPlan {
             }
         }
 
-        // Clears FIRST (per the audit rule), then provider/model, then
-        // the managed-key sets.
+        // Clears first (the T1 audit rule: a switch must scrub every
+        // unwritten managed key), then the managed-key sets and
+        // model.default, and `model.provider` LAST as the commit point —
+        // see the type comment's crash-safe-ordering rationale. No
+        // prefix of this plan ever reads as `provider: <local alias>`
+        // without its base_url (the silent-OpenRouter state).
         var ops: [Operation] = localManagedKeys
             .filter { !writtenKeys.contains($0) }
             .map { .clear(key: $0) }
-        ops.append(.set(key: "model.provider", value: descriptor.providerID))
+        ops += sets
         let model = trimmed(selection.modelID)
         if model.isEmpty {
             // Custom endpoint on loopback: an EMPTY model.default is what
@@ -150,7 +175,7 @@ public enum LocalModelConfigPlan {
         } else {
             ops.append(.set(key: "model.default", value: model))
         }
-        ops += sets
+        ops.append(.set(key: "model.provider", value: descriptor.providerID))
         return ops
     }
 
@@ -162,28 +187,63 @@ public enum LocalModelConfigPlan {
     /// hand-maintained `model.base_url` (e.g. a MiniMax China endpoint,
     /// honored when `model.provider` matches — issue #6039 class).
     ///
-    /// Mirrors the empty-value semantics of
-    /// `HermesFileService.setModelAndProvider`: an empty provider keeps
-    /// the current one (custom entry without a prefix), an empty model
-    /// skips the `model.default` write (subscription providers let
-    /// Hermes pick its own default).
+    /// The clears trail the provider/model writes (crash-safe ordering,
+    /// see the type comment): clearing `model.base_url` while
+    /// `model.provider` is still a local alias would leave the
+    /// silent-OpenRouter-fallthrough state if the sequence aborts
+    /// between the two.
+    ///
+    /// Empty-value semantics: an empty provider keeps the current one
+    /// (custom catalog entry without a prefix) and never clears — no
+    /// switch happened. An empty model CLEARS `model.default`
+    /// (subscription providers — Nous — advertise "leave blank for the
+    /// provider default"; skipping the write would leave the previous
+    /// provider's model pinned, exactly the staleness this plan exists
+    /// to prevent). Empty is reader-verified unset:
+    /// `(cfg.get("default") or "").strip()` (runtime_provider.py:206).
+    ///
+    /// `currentBaseURL` / `currentAPIKey` / `currentAPIMode` are the
+    /// config's current values of the local-managed keys, when the
+    /// caller knows them: a key that is already empty/absent is skipped
+    /// rather than re-cleared, so a user who never touched a local
+    /// provider gets exactly the classic two-op
+    /// `[set provider, set default]` write — no junk empty keys, no
+    /// extra SSH round-trips. Pass nil when unknown → conservative
+    /// unconditional clears.
     public static func operations(
         selectingRemoteModel model: String,
         provider: String,
-        currentProvider: String
+        currentProvider: String,
+        currentBaseURL: String? = nil,
+        currentAPIKey: String? = nil,
+        currentAPIMode: String? = nil
     ) -> [Operation] {
         let newProvider = trimmed(provider)
         let newModel = trimmed(model)
+        guard !newProvider.isEmpty || !newModel.isEmpty else { return [] }
         var ops: [Operation] = []
-        if !newProvider.isEmpty,
-           normalizedProvider(newProvider) != normalizedProvider(currentProvider) {
-            ops += localManagedKeys.map { .clear(key: $0) }
-        }
         if !newProvider.isEmpty {
             ops.append(.set(key: "model.provider", value: newProvider))
         }
         if !newModel.isEmpty {
             ops.append(.set(key: "model.default", value: newModel))
+        } else if !newProvider.isEmpty {
+            ops.append(.clear(key: "model.default"))
+        }
+        if !newProvider.isEmpty,
+           normalizedProvider(newProvider) != normalizedProvider(currentProvider) {
+            let current: [String: String?] = [
+                "model.base_url": currentBaseURL,
+                "model.api_key": currentAPIKey,
+                "model.api_mode": currentAPIMode,
+            ]
+            ops += localManagedKeys
+                .filter { key in
+                    // nil = unknown → clear; "" = known-absent → skip.
+                    guard let value = current[key] ?? nil else { return true }
+                    return !trimmed(value).isEmpty
+                }
+                .map { .clear(key: $0) }
         }
         return ops
     }
