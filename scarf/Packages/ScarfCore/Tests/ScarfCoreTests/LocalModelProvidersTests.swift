@@ -42,6 +42,19 @@ import Foundation
         #expect(LocalModelProvider.descriptor(for: "not-a-local-provider") == nil)
     }
 
+    @Test func descriptorLookupHonorsTheRuntimeSpellingAliases() {
+        // auth.py:1560-1564 accepts these spellings in config.yaml — a
+        // CLI-written `model.provider: llama.cpp` is a working local setup
+        // and the UI must classify it as one, not as an unknown provider.
+        #expect(LocalModelProvider.descriptor(for: "lm-studio")?.providerID == "lmstudio")
+        #expect(LocalModelProvider.descriptor(for: "lm_studio")?.providerID == "lmstudio")
+        #expect(LocalModelProvider.descriptor(for: "llama.cpp")?.providerID == "llamacpp")
+        #expect(LocalModelProvider.descriptor(for: "llama-cpp")?.providerID == "llamacpp")
+        // But not the runtime's non-local aliases sharing the prefix.
+        #expect(LocalModelProvider.descriptor(for: "ollama_cloud") == nil)
+        #expect(LocalModelProvider.descriptor(for: "ollama-cloud") == nil)
+    }
+
     // MARK: - base_url contract
 
     @Test func ollamaAlwaysWritesBaseURLWithTheV1Default() {
@@ -115,26 +128,47 @@ import Foundation
     }
 
     @Test func validAPIModesMatchTheRuntimeSetVerbatim() {
-        // _VALID_API_MODES (runtime_provider.py:255-264). Hermes silently
-        // ignores anything else, so this list is the UI's only gate.
+        // _VALID_API_MODES (runtime_provider.py:255-268), including the
+        // codex_app_server runtime opt-in added 2026-05 — the runtime
+        // HONORS that one, so the validator must not reject it. Hermes
+        // silently ignores anything else, so this list is the UI's only
+        // gate.
         #expect(LocalModelProvider.validAPIModes == [
             "chat_completions",
             "codex_responses",
             "anthropic_messages",
             "bedrock_converse",
+            "codex_app_server",
         ])
     }
 
-    @Test func apiModeValidationAcceptsExactlyTheRuntimeModes() {
+    @Test func pickerAPIModesAreTheTransportSubset() {
+        // The picker hides codex_app_server (an openai/openai-codex
+        // runtime opt-in, meaningless for a local endpoint) but every
+        // offered mode must be valid.
+        #expect(LocalModelProvider.pickerAPIModes == [
+            "chat_completions",
+            "codex_responses",
+            "anthropic_messages",
+            "bedrock_converse",
+        ])
+        for mode in LocalModelProvider.pickerAPIModes {
+            #expect(LocalModelProvider.isValidAPIMode(mode))
+        }
+    }
+
+    @Test func apiModeValidationMirrorsTheRuntimeNormalization() {
         for mode in LocalModelProvider.validAPIModes {
             #expect(LocalModelProvider.isValidAPIMode(mode))
         }
-        // Trims whitespace…
+        // _parse_api_mode does raw.strip().lower() — whitespace and case
+        // are both normalized before the set lookup, so these are honored
+        // at runtime and must pass.
         #expect(LocalModelProvider.isValidAPIMode("  chat_completions  "))
-        // …but does NOT case-normalize or fuzzy-match: the runtime
-        // matches exact strings, and a near-miss saved to config.yaml is
-        // silently ignored — the trap this validator exists to close.
-        #expect(!LocalModelProvider.isValidAPIMode("Chat_Completions"))
+        #expect(LocalModelProvider.isValidAPIMode("Chat_Completions"))
+        #expect(LocalModelProvider.isValidAPIMode("ANTHROPIC_MESSAGES"))
+        // No fuzzy-matching beyond that: a near-miss saved to config.yaml
+        // is silently ignored — the trap this validator exists to close.
         #expect(!LocalModelProvider.isValidAPIMode("chat-completions"))
         #expect(!LocalModelProvider.isValidAPIMode("responses"))
         #expect(!LocalModelProvider.isValidAPIMode("openai"))

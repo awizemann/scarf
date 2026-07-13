@@ -114,35 +114,68 @@ public struct LocalModelProvider: Sendable, Identifiable, Hashable {
 
     // MARK: - api_mode validation
 
-    /// The runtime's `_VALID_API_MODES` (runtime_provider.py:255-264),
+    /// The runtime's `_VALID_API_MODES` (runtime_provider.py:255-268),
     /// verbatim. Anything else is *silently ignored* by Hermes
     /// (`_parse_api_mode`) — the config saves fine and the request quietly
     /// runs with URL auto-detect instead — so the UI must reject invalid
     /// values at save time.
+    ///
+    /// `codex_app_server` is runtime-valid but esoteric: Hermes only
+    /// *auto-applies* it (via `model.openai_runtime`) for openai /
+    /// openai-codex, and as an explicit `model.api_mode` it hands the turn
+    /// to a `codex app-server` subprocess. The validator must accept it —
+    /// the runtime honors it, so the silently-ignored trap doesn't apply —
+    /// but T3's picker should surface only the four transport modes in
+    /// `pickerAPIModes`.
     public static let validAPIModes: [String] = [
+        "chat_completions",
+        "codex_responses",
+        "anthropic_messages",
+        "bedrock_converse",
+        "codex_app_server",
+    ]
+
+    /// The subset of `validAPIModes` T3 offers as picker choices — the
+    /// plain transport modes, without the codex_app_server runtime opt-in
+    /// (meaningless for a local endpoint; still accepted if hand-typed).
+    public static let pickerAPIModes: [String] = [
         "chat_completions",
         "codex_responses",
         "anthropic_messages",
         "bedrock_converse",
     ]
 
-    /// Strict membership check for a user-entered `model.api_mode`.
-    /// Whitespace is trimmed; case is NOT normalized (the runtime
-    /// matches exact strings). An empty/blank value means "unset" and
-    /// is valid — the runtime then falls back to URL auto-detect, then
-    /// `chat_completions`.
+    /// Membership check for a user-entered `model.api_mode`, mirroring the
+    /// runtime's own normalization: `_parse_api_mode` does
+    /// `raw.strip().lower()` before the set lookup, so whitespace is
+    /// trimmed and case IS folded ("Chat_Completions" is honored).
+    /// An empty/blank value means "unset" and is valid — the runtime then
+    /// falls back to URL auto-detect, then `chat_completions`.
     public static func isValidAPIMode(_ raw: String) -> Bool {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return true }
-        return validAPIModes.contains(trimmed)
+        let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized.isEmpty { return true }
+        return validAPIModes.contains(normalized)
     }
 
     // MARK: - Lookup
 
+    /// The runtime's spelling aliases for the local IDs (the auth.py
+    /// :1560-1564 alias table, local subset) — a config.yaml written by
+    /// the Hermes CLI can legitimately carry any of these, and the UI must
+    /// recognize them as the same local provider. Maps alias → table ID.
+    private static let runtimeSpellingAliases: [String: String] = [
+        "lm-studio": "lmstudio",
+        "lm_studio": "lmstudio",
+        "llama.cpp": "llamacpp",
+        "llama-cpp": "llamacpp",
+    ]
+
     /// Descriptor for a stored `model.provider`, or nil when the value
-    /// isn't one of the local table's IDs.
+    /// isn't one of the local table's IDs or a runtime spelling alias of
+    /// one (`lm-studio`, `lm_studio`, `llama.cpp`, `llama-cpp`).
     public static func descriptor(for providerID: String) -> LocalModelProvider? {
-        let key = providerID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var key = providerID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        key = runtimeSpellingAliases[key] ?? key
         return all.first { $0.providerID == key }
     }
 
