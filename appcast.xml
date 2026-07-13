@@ -6,6 +6,105 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.16.2</title>
+      <sparkle:version>52</sparkle:version>
+      <sparkle:shortVersionString>2.16.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Mon, 13 Jul 2026 20:46:05 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.16.2</p>
+<p>A point release that brings iOS&#x27;s per-profile scoping to the Mac&#x27;s remote windows — and it&#x27;s a community milestone: the headline fix is Scarf&#x27;s <strong>first merged external contribution</strong>, from <a href="https://github.com/JonLaliberte">@JonLaliberte</a> (<a href="https://github.com/awizemann/scarf/issues/126">#126</a>, <a href="https://github.com/awizemann/scarf/pull/127">PR #127</a>). A remote server window can now <strong>view any Hermes profile</strong> — Sessions, Memory, Cron, and Chat all scoped to it — without touching the profile the server&#x27;s agent, cron, and terminal are actually running on.</p>
+<h2>Remote windows: view any Hermes profile (#126)</h2>
+<p>If your remote host runs multiple Hermes profiles (say a day-to-day <code>admin</code> and a locked-down <code>gateway</code>), the Mac app previously had no good way to look at the non-active ones: the Sessions list was pinned to the root/default profile&#x27;s <code>state.db</code> no matter what you switched to, and the only real &quot;switch&quot; was the host-mutating <code>hermes profile use</code> — which changes the profile for everything running on that server, not just your window.</p>
+<p>v2.16.2 ports ScarfGo&#x27;s per-connection profile scoping (&quot;Design B&quot;, introduced for iOS in v2.13) to the Mac&#x27;s remote windows:</p>
+<ul>
+  <li><strong>&quot;View this profile&quot;</strong> (Profiles tab, or click the sidebar chip) re-points the window at that profile&#x27;s <code>~/.hermes/profiles/&lt;name&gt;/</code> data. Sessions, Memory, Cron, and Chat all reload against it — no relaunch, and the server&#x27;s <code>active_profile</code> is untouched.</li>
+  <li>The sidebar shows a <strong><code>viewing:</code> chip</strong> on remote windows so you always know which profile a window is scoped to; the Profiles list badges the viewed profile (<code>viewing</code>) separately from the server&#x27;s own (<code>active</code>).</li>
+  <li>The host-mutating action is still there, relabeled <strong>&quot;Set as server&#x27;s active profile&quot;</strong> so the two operations can&#x27;t be confused. Local windows are unchanged.</li>
+</ul>
+<p>The selection persists per server across launches. Credit where it&#x27;s due: the scoping seam, persistence, and the viewing/active UI language are all @JonLaliberte&#x27;s work.</p>
+<h2>…including everything the window <em>does</em>, not just what it shows</h2>
+<p>Profile scoping has two layers, and our review of the PR caught that only the first had made it to the Mac. The <strong>file layer</strong> (re-pointing reads at <code>profiles/&lt;name&gt;/</code>) covered the lists — but every action that shells out to the remote <code>hermes</code> CLI (chat itself, Cron&#x27;s &quot;Run now&quot;, config edits, plugins, backups) still resolved the server&#x27;s <code>active_profile</code>. The failure that made it concrete: chat from a window viewing <code>work</code> wrote the conversation into the <em>active</em> profile&#x27;s <code>state.db</code> — a session the window&#x27;s own Sessions list would never show.</p>
+<p>The Mac&#x27;s SSH transport now scopes the <strong>process layer</strong> too, prepending <code>HERMES_HOME=&lt;profile home&gt;</code> to every remote command exactly the way ScarfGo&#x27;s transport has since v2.13. The assignment is empty for a root/default home, so if you never touch viewing profiles, every remote command is byte-identical to v2.16.1.</p>
+<h2>Under the hood</h2>
+<ul>
+  <li><code>ServerContext.scoped(toProfile:)</code> (ScarfCore) is root-normalized — re-selecting profiles never nests <code>profiles/a/profiles/b</code>, with a dedicated test suite covering tilde, custom, and Docker-style roots.</li>
+  <li>The profile-selection store is now shared ScarfCore code (each app keeps its own <code>UserDefaults</code> key), and the Mac transport&#x27;s three remote-command builders were deduplicated into one composed path with exact-string tests. ScarfCore suite: 813/813 green.</li>
+  <li>The Scarf iOSTests target is enabled in CI-facing test plans, with a controller-level regression for #124.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li><strong>Sparkle</strong> will offer the update automatically, or use <strong>Scarf → Check for Updates</strong>. macOS 14.6+ deployment target unchanged.</li>
+  <li><strong>iOS / ScarfGo: no new build needed for this release.</strong> The changes compile in shared ScarfCore but don&#x27;t alter iOS behavior — ScarfGo&#x27;s Citadel transport has injected <code>HERMES_HOME</code> since v2.13, and the relocated selection store is behavior- and key-identical. (Separately, the #124 chat-completion fix is merged and queued for the next TestFlight build; <a href="https://github.com/awizemann/scarf/issues/124">#124</a> stays open as its tracker.)</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.16.2/Scarf-v2.16.2-Universal.zip"
+                 sparkle:edSignature="1DOF4pOmvhmQbBcZs/1z/gDlMjHTy/gtxsK3ivek/duqGmb4BIgmeCAVib9ZX7vM8kZh84Xo8EfuKHTToxOTAg=="
+                 length="21247594"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.16.1</title>
       <sparkle:version>50</sparkle:version>
       <sparkle:shortVersionString>2.16.1</sparkle:shortVersionString>
