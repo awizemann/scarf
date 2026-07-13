@@ -233,6 +233,37 @@ public struct ServerContext: Sendable, Hashable, Identifiable {
     }
 }
 
+// MARK: - Per-window profile scoping (#126)
+
+public extension ServerContext {
+    /// Return a copy of this context re-pointed at a selected Hermes
+    /// profile's `HERMES_HOME`, so every derived `paths.*` (state.db,
+    /// sessions, memories, cron, …) follows the profile. This is the Mac
+    /// app's per-window "viewing profile" seam (#126) — the direct analogue
+    /// of iOS Design B (#120), which re-points `IOSServerConfig.remoteHome`.
+    ///
+    /// - `.local` contexts are returned unchanged: the local profile is
+    ///   resolved from `~/.hermes/active_profile` by `HermesProfileResolver`,
+    ///   not from a `remoteHome` override.
+    /// - `profile` `nil`/`"default"`/invalid → the root/default home (a no-op
+    ///   copy, so the default selection matches the pre-#126 behavior exactly).
+    ///
+    /// The base home is normalized to its root first, so re-selecting never
+    /// nests `profiles/<a>/profiles/<b>` even if the stored `remoteHome`
+    /// already pointed at a named profile.
+    nonisolated func scoped(toProfile profile: String?) -> ServerContext {
+        guard case .ssh(var config) = kind else { return self }
+        let base = config.remoteHome ?? HermesPathSet.defaultRemoteHome
+        let root = HermesProfileScope.rootHome(forHome: base)
+        let scopedHome = HermesProfileScope.resolveHome(baseHome: root, profile: profile)
+        guard scopedHome != base else { return self }
+        config.remoteHome = scopedHome
+        var copy = self
+        copy.kind = .ssh(config)
+        return copy
+    }
+}
+
 // MARK: - Remote user-home resolution
 
 /// Process-wide cache of each server's resolved user `$HOME`. Probed once per
