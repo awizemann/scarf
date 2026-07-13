@@ -19,6 +19,15 @@
   <a href="https://www.buymeacoffee.com/awizemann"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="28"></a>
 </p>
 
+## What's New in 2.16.2
+
+Remote windows can now view any Hermes profile — and it's Scarf's first merged community contribution, from [@JonLaliberte](https://github.com/JonLaliberte). 🎉
+
+- **View any profile on a remote server** — "View this profile" re-points a remote window at that profile's data (Sessions, Memory, Cron, and Chat all reload) *without* changing the server's `active_profile` — what the agent, cron, and terminal keep using. A `viewing:` sidebar chip shows the window's scope, and the host-mutating switch is relabeled "Set as server's active profile" so the two can't be confused. ([#126](https://github.com/awizemann/scarf/issues/126), [PR #127](https://github.com/awizemann/scarf/pull/127))
+- **Actions follow the viewing profile too** — every remote `hermes` invocation (chat, cron runs, config edits, backups) now carries the viewed profile's `HERMES_HOME`, matching what the window shows; with no viewing profile selected, commands are byte-identical to 2.16.1.
+
+See the full [v2.16.2 release notes](https://github.com/awizemann/scarf/releases/tag/v2.16.2). No new ScarfGo build needed — iOS behavior is unchanged.
+
 ## What's New in 2.16.1
 
 A focused connection-reliability patch.
