@@ -216,6 +216,48 @@ import Foundation
         #expect(!hcmd.contains("/srv/p$(touch x)"))     // never present un-escaped
     }
 
+    /// `HERMES_HOME=` profile scoping in the composed remote command (#126):
+    /// a profile-scoped `remoteHome` must scope every remote hermes
+    /// invocation (CLI and ACP spawn), a root home must add nothing, and the
+    /// assignment must directly prefix the executable (after any `cd`).
+    /// The Mac counterpart of `CitadelServerTransport`'s #120 injection.
+    @Test func sshComposedCommandScopesHermesHomeToProfile() {
+        func transport(remoteHome: String?) -> SSHTransport {
+            SSHTransport(
+                contextID: UUID(),
+                config: SSHConfig(host: "box.local", remoteHome: remoteHome),
+                displayName: "Home"
+            )
+        }
+
+        // Profile-scoped tilde home → `$HOME`-expanded assignment before the
+        // exe (each token double-quoted by `remotePathArg`, as before).
+        let scoped = transport(remoteHome: "~/.hermes/profiles/work")
+        #expect(scoped.composedRemoteCommand(executable: "hermes", args: ["profile", "list"])
+            == "HERMES_HOME=\"$HOME/.hermes/profiles/work\" \"hermes\" \"profile\" \"list\"")
+
+        // Profile-scoped absolute home → single-quoted, inert.
+        let docker = transport(remoteHome: "/opt/data/profiles/work")
+        #expect(docker.composedRemoteCommand(executable: "hermes", args: ["acp"])
+            == "HERMES_HOME='/opt/data/profiles/work' \"hermes\" \"acp\"")
+
+        // Root/default homes → no assignment (legacy active_profile behavior).
+        #expect(transport(remoteHome: "~/.hermes")
+            .composedRemoteCommand(executable: "hermes", args: ["acp"]) == "\"hermes\" \"acp\"")
+        #expect(transport(remoteHome: nil)
+            .composedRemoteCommand(executable: "hermes", args: ["acp"]) == "\"hermes\" \"acp\"")
+
+        // A project cwd prefixes the SCOPED command — env assignment stays
+        // attached to the executable, not swallowed by the `cd`.
+        let withCwd = scoped.composedRemoteCommand(
+            executable: "hermes", args: ["acp"], cwd: "/srv/Projects/news")
+        #expect(withCwd == "cd \"/srv/Projects/news\"; HERMES_HOME=\"$HOME/.hermes/profiles/work\" \"hermes\" \"acp\"")
+
+        // End-to-end: the ACP spawn path (`makeProcess`) carries the scope.
+        let proc = scoped.makeProcess(executable: "hermes", args: ["acp"], cwd: nil)
+        #expect(proc.arguments?.last?.contains("HERMES_HOME=") == true)
+    }
+
     @Test func localMakeProcessSetsProjectCwdWhenPresent() {
         let t = ServerContext.local.makeTransport()
         let dir = NSTemporaryDirectory()
