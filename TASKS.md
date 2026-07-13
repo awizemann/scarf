@@ -55,7 +55,7 @@
 - [ ] Gateway allowlist: google-chat is a no-op + wrong platform id (v0.17 = google_chat) (id: t-2d6888ea) (added: 2026-06-21)
 - [ ] Mismatch banner: offer "Choose model…" picker when prefix is unknown (id: t-79569a15) (added: 2026-07-04)
 - [ ] Hermes 0.18.x roadmap candidates: sessions.display_name gateway-session titles (schema-detect), curator usage telemetry (needs own gate — verb absent at 0.18.0), 1Password read-only Secrets display, compression Codex knobs (id: t-49826b5f) (added: 2026-07-10) (priority: low)
-- [ ] Awaiting TestFlight/reporter confirmations: gh#112 (scriptures4life, Docker read-path, pinged 2026-07-12), gh#123 (JonLaliberte, v2.16.1 ControlMaster self-healing, pinged 2026-07-12), gh#124 (AnandChowdhary — his own fix b808632 from PR#125 landed on main with his authorship + regression test 7e20662; ships NEXT TestFlight build, ping + close then). Close each on confirmation; if no reply in ~2 weeks, close with reopen invitation. (id: t-503483b7) (added: 2026-07-12)
+- [ ] Awaiting reporter confirmations, all pinged: gh#112 (scriptures4life, Docker read-path, TestFlight build ~50, pinged 2026-07-12), gh#123 (JonLaliberte, v2.16.1 ControlMaster self-healing, pinged 2026-07-12), gh#124 (AnandChowdhary, his fix b808632 in TestFlight build 51, pinged 2026-07-12). Close each on confirmation; if no reply in ~2 weeks, close with reopen invitation. (id: t-503483b7) (added: 2026-07-12)
 
 ## Doing
 
