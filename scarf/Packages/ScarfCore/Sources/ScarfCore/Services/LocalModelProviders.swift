@@ -112,6 +112,26 @@ public struct LocalModelProvider: Sendable, Identifiable, Hashable {
         self.allowsEmptyModelWhenLoopback = allowsEmptyModelWhenLoopback
     }
 
+    // MARK: - Managed config keys
+
+    /// The exact set of `config.yaml` keys a picker Save of this provider
+    /// may write — the explicit write contract T3's picker (and its
+    /// clear-on-switch rule) builds on. `model.default` + `model.provider`
+    /// always; `model.base_url` whenever the runtime either requires the
+    /// key or ships a default the UI pre-fills (today: every descriptor);
+    /// `model.api_key` / `model.api_mode` only where the descriptor
+    /// supports them (custom endpoint). Any local-managed key NOT written
+    /// by a given save must be cleared on provider switch — stale
+    /// base_url/api_mode in config.yaml causes real Hermes bugs (the
+    /// GH #27132 class). See `LocalModelConfigPlan`.
+    public var configKeysWritten: Set<String> {
+        var keys: Set<String> = ["model.default", "model.provider"]
+        if baseURLRequired || defaultBaseURL != nil { keys.insert("model.base_url") }
+        if supportsAPIKey { keys.insert("model.api_key") }
+        if supportsAPIMode { keys.insert("model.api_mode") }
+        return keys
+    }
+
     // MARK: - api_mode validation
 
     /// The runtime's `_VALID_API_MODES` (runtime_provider.py:255-268),

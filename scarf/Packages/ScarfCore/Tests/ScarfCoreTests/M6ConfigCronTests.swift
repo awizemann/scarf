@@ -191,6 +191,28 @@ import Foundation
         #expect(c.maxTurns == 50)
     }
 
+    @Test func parsesLocalEndpointModelKeys() {
+        // model.base_url / api_key / api_mode — the local/custom trio the
+        // model picker's Local tab round-trips. Absent keys must decode
+        // to "" (same as an explicitly cleared empty string).
+        let yaml = """
+        model:
+          default: llama3:8b
+          provider: ollama
+          base_url: http://127.0.0.1:11434/v1
+          api_key: sk-local
+          api_mode: chat_completions
+        """
+        let c = HermesConfig(yaml: yaml)
+        #expect(c.modelBaseURL == "http://127.0.0.1:11434/v1")
+        #expect(c.modelAPIKey == "sk-local")
+        #expect(c.modelAPIMode == "chat_completions")
+        let absent = HermesConfig(yaml: "model:\n  default: m\n")
+        #expect(absent.modelBaseURL == "")
+        #expect(absent.modelAPIKey == "")
+        #expect(absent.modelAPIMode == "")
+    }
+
     @Test func parsesDisplaySection() {
         let yaml = """
         display:

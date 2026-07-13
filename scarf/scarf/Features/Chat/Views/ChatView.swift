@@ -586,6 +586,13 @@ struct ChatView: View {
                 onSelect: { model, provider in
                     viewModel.confirmModelPreflight(model: model, provider: provider)
                 },
+                onSelectLocal: { selection in
+                    viewModel.confirmModelPreflight(
+                        model: selection.modelID,
+                        provider: selection.providerID,
+                        local: selection
+                    )
+                },
                 onCancel: {
                     viewModel.cancelModelPreflight()
                 }

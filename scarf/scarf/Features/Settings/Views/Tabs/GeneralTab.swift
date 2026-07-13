@@ -14,16 +14,27 @@ struct GeneralTab: View {
             ModelPickerRow(
                 label: "Model",
                 currentModel: viewModel.config.model,
-                currentProvider: viewModel.config.provider
-            ) { modelID, providerID in
-                // Selecting a model auto-syncs the provider so the two stay in
-                // lockstep. If the picker returns an empty provider (custom
-                // entry without a prefix), keep the current one.
-                viewModel.setModel(modelID)
-                if !providerID.isEmpty {
-                    viewModel.setProvider(providerID)
+                currentProvider: viewModel.config.provider,
+                currentBaseURL: viewModel.config.modelBaseURL,
+                currentAPIKey: viewModel.config.modelAPIKey,
+                currentAPIMode: viewModel.config.modelAPIMode,
+                onChange: { modelID, providerID in
+                    // Selecting a model auto-syncs the provider so the two
+                    // stay in lockstep (an empty provider — custom entry
+                    // without a prefix — keeps the current one). Routed
+                    // through LocalModelConfigPlan so a switch away from a
+                    // local provider also scrubs its stale
+                    // base_url/api_key/api_mode keys.
+                    viewModel.applyModelPickerSelection(model: modelID, provider: providerID, local: nil)
+                },
+                onLocalChange: { selection in
+                    viewModel.applyModelPickerSelection(
+                        model: selection.modelID,
+                        provider: selection.providerID,
+                        local: selection
+                    )
                 }
-            }
+            )
             // Provider is shown read-only for clarity; users change it via the
             // Model picker, which presents providers and models together.
             ReadOnlyRow(label: "Provider", value: viewModel.config.provider)

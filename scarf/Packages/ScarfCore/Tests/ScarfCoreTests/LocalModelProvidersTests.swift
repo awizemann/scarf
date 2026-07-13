@@ -181,6 +181,47 @@ import Foundation
         #expect(LocalModelProvider.isValidAPIMode("   \n"))
     }
 
+    // MARK: - Managed config keys (the explicit write contract)
+
+    @Test func everyDescriptorAlwaysManagesModelDefaultAndProvider() {
+        for p in LocalModelProvider.all {
+            #expect(p.configKeysWritten.contains("model.default"),
+                    "model.default missing for \(p.providerID)")
+            #expect(p.configKeysWritten.contains("model.provider"),
+                    "model.provider missing for \(p.providerID)")
+        }
+    }
+
+    @Test func configKeysWrittenPinsTheExactPerProviderSets() {
+        // base_url iff (required || default exists) — today that's every
+        // descriptor; api_key/api_mode only for the custom endpoint.
+        // A drift here silently breaks the picker's clear-on-switch rule
+        // (LocalModelConfigPlan derives its writes from these sets).
+        #expect(LocalModelProvider.descriptor(for: "ollama")?.configKeysWritten
+                == ["model.default", "model.provider", "model.base_url"])
+        #expect(LocalModelProvider.descriptor(for: "lmstudio")?.configKeysWritten
+                == ["model.default", "model.provider", "model.base_url"])
+        #expect(LocalModelProvider.descriptor(for: "vllm")?.configKeysWritten
+                == ["model.default", "model.provider", "model.base_url"])
+        #expect(LocalModelProvider.descriptor(for: "llamacpp")?.configKeysWritten
+                == ["model.default", "model.provider", "model.base_url"])
+        #expect(LocalModelProvider.descriptor(for: "custom")?.configKeysWritten
+                == ["model.default", "model.provider", "model.base_url",
+                    "model.api_key", "model.api_mode"])
+    }
+
+    @Test func configKeysWrittenFollowsTheDescriptorFlags() {
+        for p in LocalModelProvider.all {
+            #expect(p.configKeysWritten.contains("model.base_url")
+                    == (p.baseURLRequired || p.defaultBaseURL != nil),
+                    "base_url rule wrong for \(p.providerID)")
+            #expect(p.configKeysWritten.contains("model.api_key") == p.supportsAPIKey,
+                    "api_key rule wrong for \(p.providerID)")
+            #expect(p.configKeysWritten.contains("model.api_mode") == p.supportsAPIMode,
+                    "api_mode rule wrong for \(p.providerID)")
+        }
+    }
+
     // MARK: - Model auto-detect and enumeration
 
     @Test func onlyCustomAllowsAnEmptyModelOnLoopback() {

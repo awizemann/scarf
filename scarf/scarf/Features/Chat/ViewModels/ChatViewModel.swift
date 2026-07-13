@@ -1580,14 +1580,23 @@ final class ChatViewModel {
     /// too) and replays the pending `startACPSession` call so the chat
     /// the user originally tried to open finally lands.
     @MainActor
-    func confirmModelPreflight(model: String, provider: String) {
+    func confirmModelPreflight(model: String, provider: String, local: LocalModelSelection? = nil) {
         let pending = pendingStartArgs
         modelPreflightReason = nil
         pendingStartArgs = nil
 
         let svc = fileService
         Task.detached { [weak self] in
-            let ok = svc.setModelAndProvider(model: model, provider: provider)
+            // Local-tab picks carry keys `setModelAndProvider` can't
+            // write (base_url et al.) — route them through the shared
+            // write plan; the classic remote path is unchanged.
+            let ok: Bool
+            if let local {
+                let ops = LocalModelConfigPlan.operations(selecting: local)
+                ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
+            } else {
+                ok = svc.setModelAndProvider(model: model, provider: provider)
+            }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 if ok {

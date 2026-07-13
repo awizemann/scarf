@@ -942,6 +942,16 @@ public struct HermesConfig: Sendable {
     // `prompt_caching.openrouter.enabled`.
     public var openrouterResponseCacheEnabled: Bool
 
+    /// `model.base_url` / `model.api_key` / `model.api_mode` — the
+    /// local/custom-endpoint trio the model picker's Local tab manages
+    /// (Ollama, LM Studio, vLLM, llama.cpp, custom). Read back so the
+    /// picker round-trips an existing local setup into its fields.
+    /// Empty string == key absent or explicitly cleared — the Hermes
+    /// v0.17 reader treats both identically (see `LocalModelConfigPlan`).
+    public var modelBaseURL: String
+    public var modelAPIKey: String
+    public var modelAPIMode: String
+
     // Grouped blocks
     public var display: DisplaySettings
     public var terminal: TerminalSettings
@@ -1043,7 +1053,10 @@ public struct HermesConfig: Sendable {
         ntfy: NtfySettings = .empty,
         whatsappCloud: WhatsAppCloudSettings = .empty,
         signal: SignalSettings = .empty,
-        bitwarden: BitwardenSettings = .empty
+        bitwarden: BitwardenSettings = .empty,
+        modelBaseURL: String = "",
+        modelAPIKey: String = "",
+        modelAPIMode: String = ""
     ) {
         self.cacheTTL = cacheTTL
         self.redactionEnabled = redactionEnabled
@@ -1116,6 +1129,9 @@ public struct HermesConfig: Sendable {
         self.whatsappCloud = whatsappCloud
         self.signal = signal
         self.bitwarden = bitwarden
+        self.modelBaseURL = modelBaseURL
+        self.modelAPIKey = modelAPIKey
+        self.modelAPIMode = modelAPIMode
     }
     public nonisolated static let empty = HermesConfig(
         model: "unknown",

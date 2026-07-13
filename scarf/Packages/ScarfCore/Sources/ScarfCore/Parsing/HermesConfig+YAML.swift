@@ -417,7 +417,12 @@ public extension HermesConfig {
             ntfy: ntfy,
             whatsappCloud: whatsappCloud,
             signal: signal,
-            bitwarden: bitwarden
+            bitwarden: bitwarden,
+            // Local/custom-endpoint trio — read back so the model
+            // picker's Local tab round-trips an existing local setup.
+            modelBaseURL: str("model.base_url"),
+            modelAPIKey: str("model.api_key"),
+            modelAPIMode: str("model.api_mode")
         )
     }
 }

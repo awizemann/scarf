@@ -123,6 +123,43 @@ final class SettingsViewModel {
 
     func setModel(_ value: String) { setSetting("model.default", value: value) }
     func setProvider(_ value: String) { setSetting("model.provider", value: value) }
+
+    /// Persist a model-picker selection through `LocalModelConfigPlan` —
+    /// the one place that owns the write contract (which keys a local
+    /// provider writes, and the clear-on-switch rule that scrubs stale
+    /// `model.base_url`/`model.api_key`/`model.api_mode` on any provider
+    /// change). `local` is non-nil when the user picked from the Local
+    /// tab; nil is the classic remote/catalog path.
+    ///
+    /// Runs detached: the plan is up to six sequential `hermes config
+    /// set` calls — blocking SSH round-trips on remote contexts that
+    /// would beach-ball the MainActor (same rationale as `load`).
+    func applyModelPickerSelection(model: String, provider: String, local: LocalModelSelection?) {
+        let ops: [LocalModelConfigPlan.Operation]
+        if let local {
+            ops = LocalModelConfigPlan.operations(selecting: local)
+        } else {
+            ops = LocalModelConfigPlan.operations(
+                selectingRemoteModel: model,
+                provider: provider,
+                currentProvider: config.provider
+            )
+        }
+        guard !ops.isEmpty else { return }
+        let svc = fileService
+        Task.detached { [weak self] in
+            let ok = svc.applyModelConfigPlan(ops)
+            let cfg = svc.loadConfig()
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.config = cfg
+                self.saveMessage = ok ? "Saved model settings" : "Failed to save model settings"
+                DispatchQueue.main.asyncAfter(deadline: .now() + (ok ? 2 : 5)) { [weak self] in
+                    self?.saveMessage = nil
+                }
+            }
+        }
+    }
     func setTimezone(_ value: String) { setSetting("timezone", value: value) }
 
     // MARK: - Display

@@ -17,6 +17,9 @@ struct ChatModelPreflightSheet: View {
     let reason: String
     let serverDisplayName: String
     let onSelect: (_ model: String, _ provider: String) -> Void
+    /// Local-tab selection (Ollama, LM Studio, …) — carries the base
+    /// URL / key / mode payload the plain (model, provider) pair can't.
+    var onSelectLocal: ((LocalModelSelection) -> Void)? = nil
     let onCancel: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -31,6 +34,12 @@ struct ChatModelPreflightSheet: View {
                 onSelect: { modelID, providerID in
                     onSelect(modelID, providerID)
                     dismiss()
+                },
+                onSelectLocal: onSelectLocal.map { handler in
+                    { selection in
+                        handler(selection)
+                        dismiss()
+                    }
                 },
                 onCancel: {
                     onCancel()

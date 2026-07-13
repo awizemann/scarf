@@ -400,7 +400,13 @@ struct HermesFileService: Sendable {
             gatewayPlatforms: gatewayPlatforms,
             ntfy: ntfy,
             signal: signal,
-            bitwarden: bitwarden
+            bitwarden: bitwarden,
+            // Local/custom-endpoint trio — read back so the model
+            // picker's Local tab round-trips an existing local setup.
+            // Keep in lockstep with `HermesConfig+YAML.swift`.
+            modelBaseURL: str("model.base_url"),
+            modelAPIKey: str("model.api_key"),
+            modelAPIMode: str("model.api_mode")
         )
     }
 
@@ -1845,6 +1851,26 @@ struct HermesFileService: Sendable {
         guard modelResult.exitCode == 0 else {
             Self.logger.warning("hermes config set model.default failed: \(modelResult.output, privacy: .public)")
             return false
+        }
+        return true
+    }
+
+    /// Execute a `LocalModelConfigPlan` — the ordered `hermes config set`
+    /// operations for a model-picker save (clears first, then writes;
+    /// see the plan type for the clear-on-switch rationale). Stops at
+    /// the first failing operation and returns `false`; a partial write
+    /// is no worse than the pre-save state and the next picker open /
+    /// chat preflight re-prompts.
+    @discardableResult
+    nonisolated func applyModelConfigPlan(_ operations: [LocalModelConfigPlan.Operation]) -> Bool {
+        for operation in operations {
+            let result = runHermesCLI(args: operation.cliArguments, timeout: 30)
+            guard result.exitCode == 0 else {
+                // Log key only — a .set(model.api_key, …) value is a secret.
+                let key = operation.cliArguments.count > 2 ? operation.cliArguments[2] : "?"
+                Self.logger.warning("hermes config set \(key, privacy: .public) failed (exit \(result.exitCode)): \(result.output, privacy: .public)")
+                return false
+            }
         }
         return true
     }
