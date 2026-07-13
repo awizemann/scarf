@@ -217,6 +217,11 @@ import Foundation
         #expect(call.args.last == "http://127.0.0.1:11434/api/tags")
         #expect(!call.executable.contains("sh"))
         #expect(!call.args.contains("-c"))
+        // `-f` is load-bearing: without it an HTTP >= 400 (daemon up, wrong
+        // path) returns exit 0 with an error body and gets misread as a parse
+        // failure instead of unreachable. Pin the whole flag bundle so a
+        // regression that drops `-f`/`-S` can't slip through silently.
+        #expect(call.args.contains("-sSf"))
     }
 
     // MARK: - Outcome mapping via the transport seam
