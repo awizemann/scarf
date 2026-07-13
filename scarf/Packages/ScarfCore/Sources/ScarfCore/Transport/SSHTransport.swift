@@ -449,11 +449,42 @@ public struct SSHTransport: ServerTransport {
 
     // MARK: - Processes
 
+    /// Compose the remote command shared by `runProcess`, `makeProcess`,
+    /// and `streamLines`: an optional `cd <cwd>;` prefix, the profile
+    /// `HERMES_HOME=` scope, then the `~`-rewritten executable + args.
+    ///
+    /// The `HERMES_HOME=` assignment scopes the invocation to the selected
+    /// profile when `config.remoteHome` points at one (#126, the Mac
+    /// counterpart of `CitadelServerTransport`'s #120 injection). Set
+    /// unconditionally (not just when the executable is hermes) because it
+    /// is `""` for a default/root home — legacy `active_profile` resolution
+    /// and pre-profile hosts are untouched — and harmless for non-hermes
+    /// executables, which ignore it. Without it, every CLI-backed action
+    /// (chat, cron run, config set, …) would resolve the server's
+    /// `active_profile` while the window's file reads show the viewing
+    /// profile — a silent cross-profile split.
+    func composedRemoteCommand(executable: String, args: [String], cwd: String? = nil) -> String {
+        let hermesHome = HermesProfileScope.hermesHomeShellAssignment(
+            forHome: config.remoteHome ?? HermesPathSet.defaultRemoteHome)
+        // `~/`-rewritten paths so home-relative args expand on the remote.
+        // The executable might be `~/.local/bin/hermes` or just `hermes`;
+        // either survives.
+        var cmd = hermesHome + ([executable] + args).map { Self.remotePathArg($0) }.joined(separator: " ")
+        // Run FROM the project dir so Hermes loads its AGENTS.md (Hermes
+        // reads project context files from the process cwd, not the ACP
+        // session cwd). `;` (not `&&`) is deliberate: a stale/missing dir
+        // degrades to the login dir rather than failing the session;
+        // `remotePathArg` rewrites `~/`→`$HOME/` and double-quotes so
+        // spaces/metacharacters survive.
+        if let cwd, !cwd.isEmpty {
+            cmd = "cd \(Self.remotePathArg(cwd)); " + cmd
+        }
+        return cmd
+    }
+
     public func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
-        // Wrap in `sh -c '<exe> <arg> <arg>'` with `~/`-rewritten paths so
-        // home-relative args expand on the remote. The executable might be
-        // `~/.local/bin/hermes` or just `hermes`; either survives.
-        let cmd = ([executable] + args).map { Self.remotePathArg($0) }.joined(separator: " ")
+        // Wrap in `sh -c '<exe> <arg> <arg>'`.
+        let cmd = composedRemoteCommand(executable: executable, args: args)
         var sshArgv = sshArgs()
         sshArgv.append(hostSpec)
         sshArgv.append("sh")
@@ -476,15 +507,7 @@ public struct SSHTransport: ServerTransport {
         // pipx-installed `hermes` isn't on PATH unless `hermesBinaryHint` was
         // set explicitly — exactly the failure that surfaces as a
         // "command not found" / opaque init timeout against fresh droplets.
-        var cmd = ([executable] + args).map { Self.remotePathArg($0) }.joined(separator: " ")
-        // Run FROM the project dir so Hermes loads its AGENTS.md (Hermes reads
-        // project context files from the process cwd, not the ACP session cwd).
-        // `;` (not `&&`) is deliberate: a stale/missing dir degrades to the
-        // login dir rather than failing the session; `remotePathArg` rewrites
-        // `~/`→`$HOME/` and double-quotes so spaces/metacharacters survive.
-        if let cwd, !cwd.isEmpty {
-            cmd = "cd \(Self.remotePathArg(cwd)); " + cmd
-        }
+        let cmd = composedRemoteCommand(executable: executable, args: args, cwd: cwd)
         var sshArgv = sshArgs()
         sshArgv.insert("-T", at: 0)
         sshArgv.append(hostSpec)
@@ -515,7 +538,7 @@ public struct SSHTransport: ServerTransport {
                 // `makeProcess` above. Streaming consumers (log tails)
                 // don't tolerate a missing-binary failure any better than
                 // ACP does.
-                let cmd = ([executable] + args).map { Self.remotePathArg($0) }.joined(separator: " ")
+                let cmd = composedRemoteCommand(executable: executable, args: args)
                 var sshArgv = sshArgs()
                 sshArgv.insert("-T", at: 0)
                 sshArgv.append(hostSpec)
