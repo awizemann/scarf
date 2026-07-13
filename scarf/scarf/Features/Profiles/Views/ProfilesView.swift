@@ -17,9 +17,21 @@ struct ProfilesView: View {
     @State private var createNoSkills = false
     @State private var showRename = false
     @Environment(\.hermesCapabilities) private var capabilitiesStore
+    /// This window's client-side "viewing profile" (#126). Present for every
+    /// window; only meaningful on remote windows, where selecting a profile
+    /// re-points the window's `HERMES_HOME` without touching the server's
+    /// `active_profile`. Optional so previews/tests without the environment
+    /// don't trap.
+    @Environment(WindowProfileScope.self) private var profileScope: WindowProfileScope?
 
     init(context: ServerContext) {
         _viewModel = State(initialValue: ProfilesViewModel(context: context))
+    }
+
+    /// Whether this window is currently *viewing* `profile` (remote only —
+    /// distinct from `profile.isActive`, which is the server's active profile).
+    private func isViewing(_ profile: HermesProfile) -> Bool {
+        viewModel.context.isRemote && (profileScope?.isViewing(profile.name) ?? false)
     }
 
     @State private var renameTarget: HermesProfile?
@@ -169,13 +181,22 @@ struct ProfilesView: View {
                 }
             )) {
                 ForEach(viewModel.profiles) { profile in
+                    let viewing = isViewing(profile)
                     HStack {
-                        Image(systemName: profile.isActive ? "checkmark.circle.fill" : "person.crop.square")
-                            .foregroundStyle(profile.isActive ? .green : .secondary)
+                        Image(systemName: viewing ? "eye.fill" : (profile.isActive ? "checkmark.circle.fill" : "person.crop.square"))
+                            .foregroundStyle(viewing ? Color.accentColor : (profile.isActive ? .green : .secondary))
                         Text(profile.name)
                             .font(.system(.body, design: .monospaced))
                         Spacer()
-                        if profile.isActive {
+                        // On remote windows "viewing" (this window's scope) is
+                        // the primary badge; "active" (the server's own active
+                        // profile) is shown when it differs. Local windows only
+                        // have the "active" concept.
+                        if viewing {
+                            Text("viewing")
+                                .font(.caption2.bold())
+                                .foregroundStyle(Color.accentColor)
+                        } else if profile.isActive {
                             Text("active")
                                 .font(.caption2.bold())
                                 .foregroundStyle(.green)
@@ -183,10 +204,18 @@ struct ProfilesView: View {
                     }
                     .tag(profile.id)
                     .contextMenu {
-                        Button("Switch & Relaunch") { pendingSwitch = profile }
-                            .disabled(profile.isActive)
-                        Button("Set Active (no relaunch)") { viewModel.switchTo(profile) }
-                            .disabled(profile.isActive)
+                        if viewModel.context.isRemote {
+                            Button("View this profile") { profileScope?.select(profile.name) }
+                                .disabled(viewing)
+                            Button("Set as server's active profile") { viewModel.switchTo(profile) }
+                                .disabled(profile.isActive)
+                        } else {
+                            Button("Switch & Relaunch") { pendingSwitch = profile }
+                                .disabled(profile.isActive)
+                            Button("Set Active (no relaunch)") { viewModel.switchTo(profile) }
+                                .disabled(profile.isActive)
+                        }
+                        Divider()
                         Button("Rename") {
                             renameTarget = profile
                             renameNewName = profile.name
@@ -233,25 +262,14 @@ struct ProfilesView: View {
                             .font(.title)
                         VStack(alignment: .leading) {
                             Text(profile.name).font(.title2.bold())
-                            (profile.isActive ? Text("Active profile") : Text("Inactive"))
+                            detailSubtitle(profile)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        if !profile.isActive {
-                            Button {
-                                pendingSwitch = profile
-                            } label: {
-                                Label("Switch & Relaunch", systemImage: "arrow.triangle.2.circlepath")
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                            .help("Set as active profile and relaunch Scarf so every tab loads from \(profile.name)")
-                        }
+                        detailPrimaryAction(profile)
                     }
-                    if !profile.isActive {
-                        profileSwitchInfo
-                    }
+                    detailInfoBanner(profile)
                     SettingsSection(title: "Details", icon: "info.circle") {
                         if !profile.path.isEmpty {
                             ReadOnlyRow(label: "Path", value: profile.path)
@@ -279,6 +297,72 @@ struct ProfilesView: View {
             ContentUnavailableView("Select a Profile", systemImage: "person.2.crop.square.stack", description: Text("Choose a profile to inspect."))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    @ViewBuilder
+    private func detailSubtitle(_ profile: HermesProfile) -> some View {
+        if viewModel.context.isRemote {
+            if isViewing(profile) {
+                Text("Viewing in this window")
+            } else if profile.isActive {
+                Text("Server's active profile")
+            } else {
+                Text("Not viewing")
+            }
+        } else {
+            Text(profile.isActive ? "Active profile" : "Inactive")
+        }
+    }
+
+    @ViewBuilder
+    private func detailPrimaryAction(_ profile: HermesProfile) -> some View {
+        if viewModel.context.isRemote {
+            if isViewing(profile) {
+                Label("Viewing", systemImage: "eye.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color.accentColor)
+            } else {
+                Button {
+                    profileScope?.select(profile.name)
+                } label: {
+                    Label("View this profile", systemImage: "eye")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .help("Show this profile's sessions, memory, cron, and chat in this window — without changing the server's active profile.")
+            }
+        } else if !profile.isActive {
+            Button {
+                pendingSwitch = profile
+            } label: {
+                Label("Switch & Relaunch", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .help("Set as active profile and relaunch Scarf so every tab loads from \(profile.name)")
+        }
+    }
+
+    @ViewBuilder
+    private func detailInfoBanner(_ profile: HermesProfile) -> some View {
+        if viewModel.context.isRemote {
+            if !isViewing(profile) { profileViewInfo }
+        } else if !profile.isActive {
+            profileSwitchInfo
+        }
+    }
+
+    private var profileViewInfo: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "info.circle")
+                .foregroundStyle(.secondary)
+            Text("**View this profile** re-points this window at the profile's `~/.hermes/profiles/<name>/` data — Sessions, Memory, Cron, and Chat all reload — without changing the server's active profile (what the agent, cron, and terminal use). To change the server's active profile instead, use **Set as server's active profile** from the list's context menu.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(ScarfColor.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     private var profileSwitchInfo: some View {

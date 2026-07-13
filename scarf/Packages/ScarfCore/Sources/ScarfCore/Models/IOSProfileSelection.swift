@@ -10,10 +10,12 @@ import Foundation
 ///
 /// Sync (not async) on purpose: reads happen while building the view tree,
 /// the payload is a tiny string map, and there is no migration to perform —
-/// the same low-ceremony shape as SwiftUI's `@AppStorage`. The protocol and
-/// the in-memory implementation live in ScarfCore (Linux-testable, mirroring
-/// `IOSServerConfigStore`); the `UserDefaults` concrete implementation lives
-/// in ScarfIOS.
+/// the same low-ceremony shape as SwiftUI's `@AppStorage`. The protocol, the
+/// in-memory implementation, and the `UserDefaults` implementation all live
+/// in ScarfCore so BOTH platforms share them: iOS (ScarfGo, #120) and the Mac
+/// app's per-window "viewing profile" scoping (#126). Each app has its own
+/// `UserDefaults` suite, so a per-platform `key:` keeps the two selections
+/// independent.
 public protocol IOSProfileSelectionStore: Sendable {
     /// Selected profile name for a server, or `nil` for the default
     /// (root) profile. Always returns a normalized value.
@@ -43,6 +45,73 @@ public final class InMemoryProfileSelectionStore: IOSProfileSelectionStore, @unc
             } else {
                 storage.removeValue(forKey: id)
             }
+        }
+    }
+}
+
+/// `UserDefaults`-backed `IOSProfileSelectionStore` shared by both apps
+/// (iOS Design B #120, Mac per-window viewing profile #126).
+///
+/// The selection is not sensitive (SSH keys live in the Keychain), so
+/// `UserDefaults` is the right home — same low-ceremony call as
+/// `UserDefaultsIOSServerConfigStore`.
+///
+/// Data shape: JSON `[ServerID.uuidString: String]` under `key`. An absent
+/// key, an absent entry, or an entry that fails normalization all read back
+/// as `nil` (default profile). Writing `nil`/`"default"`/an invalid name
+/// removes the entry. The iOS app and the Mac app each pass their own `key`
+/// (and run in separate `UserDefaults` suites), so their selections never
+/// collide.
+///
+/// **Threading.** `setSelectedProfile` is a read-modify-write over a single
+/// JSON blob, which is NOT atomic across concurrent writers. Production drives
+/// this only through `@MainActor` owners (`ScarfGoCoordinator` on iOS,
+/// `WindowProfileScope` on Mac), so writes are serialized; if a future caller
+/// writes off the main actor, add synchronization here.
+public struct UserDefaultsProfileSelectionStore: IOSProfileSelectionStore {
+    /// Default key for the iOS app (kept stable for backward compatibility —
+    /// the Mac app passes its own key).
+    public static let defaultDefaultsKey = "com.scarf.ios.profile-selections.v1"
+
+    private let defaults: UserDefaults
+    private let key: String
+
+    public init(
+        defaults: UserDefaults = .standard,
+        key: String = defaultDefaultsKey
+    ) {
+        self.defaults = defaults
+        self.key = key
+    }
+
+    public func selectedProfile(for id: ServerID) -> String? {
+        HermesProfileScope.normalize(read()[id.uuidString])
+    }
+
+    public func setSelectedProfile(_ name: String?, for id: ServerID) {
+        var all = read()
+        if let normalized = HermesProfileScope.normalize(name) {
+            all[id.uuidString] = normalized
+        } else {
+            all.removeValue(forKey: id.uuidString)
+        }
+        write(all)
+    }
+
+    private func read() -> [String: String] {
+        guard let data = defaults.data(forKey: key),
+              let raw = try? JSONDecoder().decode([String: String].self, from: data)
+        else { return [:] }
+        return raw
+    }
+
+    private func write(_ all: [String: String]) {
+        guard !all.isEmpty else {
+            defaults.removeObject(forKey: key)
+            return
+        }
+        if let data = try? JSONEncoder().encode(all) {
+            defaults.set(data, forKey: key)
         }
     }
 }

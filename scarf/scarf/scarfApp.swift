@@ -153,10 +153,14 @@ struct ScarfApp: App {
             // silently falling back to local — falling back would mislead
             // the user into thinking they're looking at the right server.
             if let ctx = registry.context(for: serverID) {
-                ContextBoundRoot(context: ctx)
+                // ProfileScopedRoot owns this window's "viewing profile" (#126)
+                // and injects the profile-scoped `\.serverContext`. The
+                // registry/liveRegistry/updater environments and the
+                // onAppear/onOpenURL handlers stay OUT here, above the profile
+                // rebuild boundary, so they don't re-fire on a profile switch.
+                ProfileScopedRoot(baseContext: ctx)
                     .environment(registry)
                     .environment(liveRegistry)
-                    .environment(\.serverContext, ctx)
                     .environment(updater)
                     // Sync the live-status set whenever a window appears —
                     // covers the case where the user added a server in
@@ -322,6 +326,39 @@ private struct OpenSettingsCommand: View {
         }
         .keyboardShortcut(",", modifiers: .command)
         .disabled(coordinator == nil)
+    }
+}
+
+/// Owns this window's "viewing profile" selection (#126) and re-points the
+/// bound `ServerContext` at the selected profile's `HERMES_HOME` via
+/// `ServerContext.scoped(toProfile:)`. Sits ABOVE `ContextBoundRoot` so that
+/// switching the viewing profile changes the `.id` below, which tears down
+/// and rebuilds every per-window service (chat, file watcher, capabilities,
+/// Sessions) against the new home — the client-side, no-relaunch analogue of
+/// "Switch & Relaunch", and the Mac counterpart to iOS Design B (#120).
+///
+/// The `WindowProfileScope` is published into the environment so the Profiles
+/// UI can change the selection. For local windows `scoped(toProfile:)` is a
+/// no-op, so this wrapper is transparent there.
+private struct ProfileScopedRoot: View {
+    let baseContext: ServerContext
+    @State private var scope: WindowProfileScope
+
+    init(baseContext: ServerContext) {
+        self.baseContext = baseContext
+        _scope = State(initialValue: WindowProfileScope(serverID: baseContext.id))
+    }
+
+    var body: some View {
+        let ctx = baseContext.scoped(toProfile: scope.selectedProfile)
+        ContextBoundRoot(context: ctx)
+            .environment(\.serverContext, ctx)
+            .environment(scope)
+            // A viewing-profile switch changes this id, reinitializing
+            // ContextBoundRoot's @State services against the new HERMES_HOME.
+            // Default profile (nil) maps to a stable sentinel so it has its
+            // own identity distinct from every named profile.
+            .id(scope.selectedProfile ?? HermesProfileScope.defaultProfileName)
     }
 }
 

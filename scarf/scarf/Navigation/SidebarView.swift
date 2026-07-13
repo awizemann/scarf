@@ -15,6 +15,10 @@ struct SidebarView: View {
     @Environment(ServerLiveStatusRegistry.self) private var liveRegistry
     @Environment(\.serverContext) private var serverContext
     @Environment(\.hermesCapabilities) private var capabilitiesStore
+    /// This window's client-side "viewing profile" (#126) — populated on
+    /// remote windows so the header chip can show which profile the window is
+    /// scoped to (the remote analogue of `activeProfileName` below).
+    @Environment(WindowProfileScope.self) private var profileScope: WindowProfileScope?
 
     /// Currently-active Hermes profile name, surfaced as a header
     /// chip on local contexts so users always see which profile
@@ -106,6 +110,20 @@ struct SidebarView: View {
 
     // MARK: - Header
 
+    /// Chip label prefix: remote windows show the per-window *viewing*
+    /// profile (#126); local windows show the machine's *active* profile.
+    private var profileChipPrefix: String {
+        serverContext.isRemote ? "viewing" : "profile"
+    }
+
+    /// Chip profile name — the remote window's selected profile (default when
+    /// none) or the local active profile.
+    private var profileChipName: String {
+        serverContext.isRemote
+            ? (profileScope?.selectedProfile ?? HermesProfileScope.defaultProfileName)
+            : activeProfileName
+    }
+
     private var header: some View {
         VStack(alignment: .leading, spacing: ScarfSpace.s1) {
             HStack(spacing: ScarfSpace.s2) {
@@ -122,24 +140,24 @@ struct SidebarView: View {
                     .font(ScarfFont.caption2)
                     .foregroundStyle(ScarfColor.foregroundFaint)
             }
-            // Active-profile chip — local contexts only. Remote
-            // ServerContexts don't read this Mac's active_profile
-            // file, so the chip would be misleading there. Anchored
-            // to the trailing edge so it sits visually under the
-            // server name in the row above; saves horizontal space
-            // in the top row when the server name + chip would
-            // otherwise compete.
-            if !serverContext.isRemote {
-                HStack(spacing: 0) {
-                    Spacer()
-                    Button {
-                        coordinator.selectedSection = .profiles
-                    } label: {
-                        ScarfBadge("profile: \(activeProfileName)", kind: .brand)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Active Hermes profile — click to manage")
+            // Profile chip. Local: the Mac's active Hermes profile
+            // (`active_profile`). Remote: this window's client-side "viewing
+            // profile" (#126) — remote ServerContexts don't read this Mac's
+            // active_profile, so we surface the per-window scope instead.
+            // Anchored to the trailing edge so it sits visually under the
+            // server name in the row above; saves horizontal space in the top
+            // row when the server name + chip would otherwise compete.
+            HStack(spacing: 0) {
+                Spacer()
+                Button {
+                    coordinator.selectedSection = .profiles
+                } label: {
+                    ScarfBadge("\(profileChipPrefix): \(profileChipName)", kind: .brand)
                 }
+                .buttonStyle(.plain)
+                .help(serverContext.isRemote
+                      ? "Profile this window is viewing — click to switch"
+                      : "Active Hermes profile — click to manage")
             }
         }
         .padding(.horizontal, ScarfSpace.s4)
