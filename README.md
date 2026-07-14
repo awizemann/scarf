@@ -19,6 +19,17 @@
   <a href="https://www.buymeacoffee.com/awizemann"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="28"></a>
 </p>
 
+## What's New in 2.17.0
+
+**Local models.** Scarf now runs against Ollama, LM Studio, vLLM, llama.cpp, or any OpenAI-compatible endpoint — plus a chat-reliability overhaul and a settings fix. Fully compatible with your current Hermes; no version bump required.
+
+- **Run a model on your own hardware** — a new **Remote | Local** filter in the model picker. Scarf discovers what's actually installed on the daemon (local *or* a remote server's, over SSH), shows each model's size and quantization, and **blocks models under Hermes's 64K context minimum** in the picker with a plain explanation — so you find out before you pick, not via a cryptic chat-time error. Attach an image to a model that can't see images and Scarf warns you in the composer.
+- **Chats that don't silently stall** — four long-standing session bugs fixed: phantom sessions that swallowed your next message, a "deaf transcript" that ran a reply invisibly, a spinner that could wedge the UI restart-only, and mid-turn cleanup that orphaned the process on session switch/delete.
+- **Dropdowns that remember your choice** — Web Tools backends and some Advanced controls saved but reloaded blank; a drifted duplicate config parser was the cause. Deleted it (one parser everywhere) and added a CI gate so it can't recur.
+- **"Choose model…" on the mismatch banner** — a one-click path to the full picker whenever your model and provider don't line up.
+
+Local-model note: on Hermes before 0.18, auxiliary features (auto titles, compression, vision routing) don't yet recognize local providers and degrade — your main chat works; the upstream fix is filed. See the full [v2.17.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.17.0). No new ScarfGo build needed.
+
 ## What's New in 2.16.2
 
 Remote windows can now view any Hermes profile — and it's Scarf's first merged community contribution, from [@JonLaliberte](https://github.com/JonLaliberte). 🎉
