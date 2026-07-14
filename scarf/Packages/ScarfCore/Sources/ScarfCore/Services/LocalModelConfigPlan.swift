@@ -215,6 +215,13 @@ public enum LocalModelConfigPlan {
     /// hand-maintained `model.base_url` (e.g. a MiniMax China endpoint,
     /// honored when `model.provider` matches — issue #6039 class).
     ///
+    /// A SWITCH to a provider that is itself a local descriptor (or
+    /// spelling alias) — reachable via the mismatch banner's "Use
+    /// <prefix>" for an `ollama/...`-style model.default — delegates to
+    /// `operations(selecting:)` with the current base_url preserved, or
+    /// returns `[]` when no base URL can be sourced; see the inline
+    /// comment. Callers already treat an empty plan as a failed save.
+    ///
     /// The clears trail the provider/model writes (crash-safe ordering,
     /// see the type comment): clearing `model.base_url` while
     /// `model.provider` is still a local alias would leave the
@@ -253,6 +260,38 @@ public enum LocalModelConfigPlan {
         let newProvider = trimmed(provider)
         let newModel = trimmed(model)
         guard !newProvider.isEmpty || !newModel.isEmpty else { return [] }
+        // Switching TO a local provider through the remote path — the
+        // mismatch banner aligning to an `ollama/...` or `lm-studio/...`
+        // prefix in model.default is the live caller (t-9657430b
+        // audit). Remote ordering would be exactly wrong here: it
+        // commits `model.provider = <local alias>` FIRST and clears
+        // `model.base_url` LAST, so both the mid-sequence and the FINAL
+        // state are the silent-OpenRouter fallthrough this type's
+        // comment forbids outright. Delegate to the local plan
+        // (provider last, base_url in place), preserving the config's
+        // current base_url — a custom port survives — with the
+        // descriptor default as fallback. When neither exists
+        // (vllm/llamacpp/custom with nothing saved) no plan from here
+        // can produce a runnable config: return [] so hosts surface
+        // their existing "open Settings" failure path instead of
+        // writing a config that silently reroutes local-intent prompts
+        // to a cloud endpoint. Same-provider re-picks (the banner's
+        // strip-prefix action under a live local provider) don't enter
+        // this branch — no switch, no clears, classic two-op write.
+        if !newProvider.isEmpty,
+           normalizedProvider(newProvider) != normalizedProvider(currentProvider),
+           let descriptor = LocalModelProvider.descriptor(for: newProvider) {
+            if trimmed(currentBaseURL).isEmpty, descriptor.defaultBaseURL == nil {
+                return []
+            }
+            return operations(selecting: LocalModelSelection(
+                providerID: newProvider,
+                modelID: newModel,
+                baseURL: currentBaseURL,
+                apiKey: currentAPIKey,
+                apiMode: currentAPIMode
+            ))
+        }
         var ops: [Operation] = []
         if !newProvider.isEmpty {
             ops.append(.set(key: "model.provider", value: newProvider))

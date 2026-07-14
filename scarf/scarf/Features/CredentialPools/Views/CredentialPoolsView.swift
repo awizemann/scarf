@@ -1007,7 +1007,13 @@ private struct AddCredentialSheet: View {
                 }
             }
             if !swap.currentModelDefault.isEmpty {
-                Text("Current `model.default`: `\(swap.currentModelDefault)` — Hermes will pick a default for `\(swap.newProvider)` if you switch.")
+                // Honest promise (t-9657430b audit): the switch CLEARS
+                // model.default, and the chat preflight then asks the
+                // user to pick a model for the new provider — Hermes
+                // itself only self-defaults for subscription overlays,
+                // and Scarf's ModelPreflight gates chat start first
+                // either way.
+                Text("Current `model.default`: `\(swap.currentModelDefault)` — switching clears it, and you'll pick a model for `\(swap.newProvider)` when you next start a chat.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)

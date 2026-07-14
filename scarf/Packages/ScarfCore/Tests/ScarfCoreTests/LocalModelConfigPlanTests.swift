@@ -535,6 +535,78 @@ import Foundation
         #expect(viaOverload == viaParameters)
     }
 
+    // MARK: - Switch TO a local provider through the remote path
+    // (mismatch banner "Use <prefix>" on an `ollama/...` model.default)
+
+    @Test func remotePathSwitchToLocalTargetDelegatesToTheLocalPlan() {
+        // provider=anthropic, model.default="ollama/llama3.1:8b", and a
+        // leftover custom-port base_url from the user's real Ollama.
+        // The banner's align action must yield a WORKING local config:
+        // base_url preserved, provider committed LAST — never
+        // `[set provider=ollama, …, clear base_url]`, whose final state
+        // is the silent-OpenRouter fallthrough.
+        var config = HermesConfig.empty
+        config.provider = "anthropic"
+        config.model = "ollama/llama3.1:8b"
+        config.modelBaseURL = "http://192.168.1.5:11434/v1"
+        let ops = LocalModelConfigPlan.operations(
+            selectingRemoteModel: "llama3.1:8b",
+            provider: "ollama",
+            current: config
+        )
+        #expect(ops == [
+            .clear(key: "model.api_key"),
+            .clear(key: "model.api_mode"),
+            .clear(key: "model.context_length"),
+            .set(key: "model.base_url", value: "http://192.168.1.5:11434/v1"),
+            .set(key: "model.default", value: "llama3.1:8b"),
+            .set(key: "model.provider", value: "ollama"),
+        ])
+    }
+
+    @Test func remotePathSwitchToOllamaWithoutBaseURLWritesTheDescriptorDefault() {
+        // No saved base_url at all → the descriptor default fills in,
+        // exactly as a Local-tab save would. Omitting the key is the
+        // silent-OpenRouter failure mode.
+        var config = HermesConfig.empty
+        config.provider = "anthropic"
+        let ops = LocalModelConfigPlan.operations(
+            selectingRemoteModel: "llama3.1:8b",
+            provider: "ollama",
+            current: config
+        )
+        #expect(ops.contains(.set(key: "model.base_url", value: "http://127.0.0.1:11434/v1")))
+        #expect(ops.last == .set(key: "model.provider", value: "ollama"))
+    }
+
+    @Test func remotePathSwitchToLocalSpellingAliasCanonicalizesTheProviderWrite() {
+        // "lm-studio" (the runtime spelling a CLI-written config or a
+        // model.default prefix can carry) must land as the table ID.
+        var config = HermesConfig.empty
+        config.provider = "anthropic"
+        let ops = LocalModelConfigPlan.operations(
+            selectingRemoteModel: "qwen2.5-coder-14b",
+            provider: "lm-studio",
+            current: config
+        )
+        #expect(ops.last == .set(key: "model.provider", value: "lmstudio"))
+    }
+
+    @Test func remotePathSwitchToBaseURLLessLocalTargetRefusesToPlan() {
+        // vllm has no runtime default and nothing is saved: no plan from
+        // here can produce a runnable config, so the plan returns empty
+        // and the host shows its existing "open Settings" failure path
+        // instead of writing the silent-OpenRouter state.
+        var config = HermesConfig.empty
+        config.provider = "anthropic"
+        let ops = LocalModelConfigPlan.operations(
+            selectingRemoteModel: "mistral-7b",
+            provider: "vllm",
+            current: config
+        )
+        #expect(ops.isEmpty)
+    }
+
     @Test func configOverloadTreatsClearedContextLengthAsUnset() {
         // A config whose model.context_length was already scrubbed to
         // "0" (this plan's own unset value) must not be re-cleared on
