@@ -349,10 +349,13 @@ import Foundation
 
     @Test @MainActor func loadSessionSucceedsOnMinimalNonEmptyDictResult() async throws {
         // Pin the exact guard boundary: any NON-empty dict counts as a
-        // load, even one missing `models` (pre-0.15 Hermes built the
-        // response with only a `models` field, which `exclude_none`
-        // could drop — the guard must not demand any specific key, only
-        // non-emptiness).
+        // load — the guard must not demand any specific key, only
+        // non-emptiness. The fixture is the pre-0.15 success shape
+        // (v2026.5.16 built `LoadSessionResponse(models=…)` with no
+        // `modes` at all), so this test deliberately carries NO `modes`
+        // key: a "tightened" guard that keys on `modes` — the marker the
+        // 0.15+ reasoning leans on — must fail here, because pre-0.15
+        // hosts never send it.
         let (client, mock, startTask) = await buildClientWithMock()
         try await waitFor { await mock.sent.count >= 1 }
         let initId = await mock.lastSentRequestId() ?? 1
@@ -364,7 +367,7 @@ import Foundation
         }
         try await waitFor { await mock.sent.count >= 2 }
         let loadId = await mock.lastSentRequestId() ?? 2
-        await mock.reply(with: #"{"jsonrpc":"2.0","id":\#(loadId),"result":{"modes":{"currentModeId":"default","availableModes":[]}}}"#)
+        await mock.reply(with: #"{"jsonrpc":"2.0","id":\#(loadId),"result":{"models":{"currentModelId":"anthropic:claude"}}}"#)
 
         let resolved = try await loadTask.value
         #expect(resolved == "abc-123")
