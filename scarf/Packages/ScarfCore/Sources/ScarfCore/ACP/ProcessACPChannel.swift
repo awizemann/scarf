@@ -33,8 +33,8 @@ public actor ProcessACPChannel: ACPChannel {
     public nonisolated let stderr: AsyncThrowingStream<String, Error>
 
     private var isClosed = false
-    private var readerTask: Task<Void, Never>?
-    private var stderrTask: Task<Void, Never>?
+    private let stdoutReader: PipeLineReader
+    private let stderrReader: PipeLineReader
 
     /// Read by `ACPClient` to fill in `processTerminated(exitCode:…)`
     /// so the error names the actual exit code rather than reporting a
@@ -86,7 +86,18 @@ public actor ProcessACPChannel: ACPChannel {
         self.stderr = errStream
         self.stderrContinuation = errContinuation
 
-        startReaders()
+        self.stdoutReader = PipeLineReader(
+            handle: stdoutPipe.fileHandleForReading,
+            label: "com.scarf.acp.stdout",
+            continuation: inContinuation,
+            failOnInvalidUTF8: true
+        )
+        self.stderrReader = PipeLineReader(
+            handle: stderrPipe.fileHandleForReading,
+            label: "com.scarf.acp.stderr",
+            continuation: errContinuation,
+            failOnInvalidUTF8: false
+        )
         installTerminationHandler()
     }
 
@@ -111,7 +122,18 @@ public actor ProcessACPChannel: ACPChannel {
         self.stderr = errStream
         self.stderrContinuation = errContinuation
 
-        startReaders()
+        self.stdoutReader = PipeLineReader(
+            handle: stdoutPipe.fileHandleForReading,
+            label: "com.scarf.acp.stdout",
+            continuation: inContinuation,
+            failOnInvalidUTF8: true
+        )
+        self.stderrReader = PipeLineReader(
+            handle: stderrPipe.fileHandleForReading,
+            label: "com.scarf.acp.stderr",
+            continuation: errContinuation,
+            failOnInvalidUTF8: false
+        )
         installTerminationHandler()
     }
 
@@ -128,19 +150,29 @@ public actor ProcessACPChannel: ACPChannel {
         }
     }
 
-    /// Install a `terminationHandler` that closes the stdout read end
-    /// the moment the OS reaps the child. Without this, the reader
-    /// loop's `availableData` keeps blocking until the kernel tears
-    /// the pipe down on its own schedule — visible to the user as a
-    /// 30s ACP `initialize` timeout where a fast SSH-side failure
-    /// (Connection refused, exit 127) should surface in under a
-    /// second. The exit code itself is read on demand from
-    /// `Process.terminationStatus` (see `lastExitCode`), so this
-    /// callback doesn't need to touch actor state.
+    /// Install a `terminationHandler` that tears down the stdout reader
+    /// the moment the OS reaps the child. Without this, a grandchild
+    /// that inherited the pipe's write end (ssh ControlMaster is the
+    /// classic case) keeps the pipe open past the child's exit and EOF
+    /// never arrives — visible to the user as a 30s ACP `initialize`
+    /// timeout where a fast SSH-side failure (Connection refused,
+    /// exit 127) should surface in under a second.
+    ///
+    /// The pre-2026-07 implementation closed the read `FileHandle`
+    /// directly from this callback to unblock the `availableData`
+    /// reader thread. The dispatch-source reader must not have its fd
+    /// closed out from under it (read-after-close race), so we tear it
+    /// down via `cancelAfterDrainingPipe()` instead: a non-blocking
+    /// final drain (the child's last writes are already in the pipe;
+    /// dropping them was a live race even pre-rework) followed by a
+    /// cancel whose handler closes the fd on the reader's own queue,
+    /// strictly after any in-flight read. The exit code itself is read
+    /// on demand from `Process.terminationStatus` (see `lastExitCode`),
+    /// so this callback doesn't need to touch actor state.
     private func installTerminationHandler() {
-        let stdoutFh = stdoutPipe.fileHandleForReading
+        let reader = stdoutReader
         process.terminationHandler = { _ in
-            try? stdoutFh.close()
+            reader.cancelAfterDrainingPipe()
         }
     }
 
@@ -197,8 +229,8 @@ public actor ProcessACPChannel: ACPChannel {
         guard !isClosed else { return }
         isClosed = true
 
-        // Close stdin so the child sees EOF and can flush. readerTask
-        // will see the pipe close and finish naturally.
+        // Close stdin so the child sees EOF and can flush. The stdout
+        // reader will see the pipe close and finish naturally.
         stdinPipe.fileHandleForWriting.closeFile()
 
         if process.isRunning {
@@ -215,65 +247,203 @@ public actor ProcessACPChannel: ACPChannel {
         }
 
         stdinPipe.fileHandleForReading.closeFile()
-        stdoutPipe.fileHandleForReading.closeFile()
-        stderrPipe.fileHandleForReading.closeFile()
+        // Our copies of the child-side write ends — closing them lets
+        // the pipes EOF once the child is gone.
         stdoutPipe.fileHandleForWriting.closeFile()
         stderrPipe.fileHandleForWriting.closeFile()
 
-        readerTask?.cancel()
-        stderrTask?.cancel()
+        // Cancel the readers. Each reader's cancel handler closes its
+        // read fd and finishes its stream from the reader's own serial
+        // queue — strictly after any in-flight readability event — so
+        // no read ever races a closed descriptor.
+        stdoutReader.cancel()
+        stderrReader.cancel()
+
+        // Belt-and-braces immediate finish (matches the pre-2026-07
+        // behavior of finishing synchronously inside close()); finishing
+        // an already-finished stream is a no-op.
         incomingContinuation.finish()
         stderrContinuation.finish()
     }
+}
 
-    // MARK: - Reader loops
+// MARK: - Pipe line reader
 
-    private func startReaders() {
-        let outHandle = stdoutPipe.fileHandleForReading
-        let errHandle = stderrPipe.fileHandleForReading
-        let inCont = incomingContinuation
-        let errCont = stderrContinuation
+/// Event-driven, non-blocking line reader for one pipe read end,
+/// bridging readability events into an `AsyncThrowingStream` of
+/// newline-delimited frames.
+///
+/// **Why not `Task.detached { availableData }`?** The previous
+/// implementation parked a cooperative-pool thread inside a blocking
+/// `read(2)` for the channel's entire lifetime — two threads per live
+/// channel (stdout + stderr). The pool is sized at one thread per core;
+/// a handful of live/wedged channels (leaked by start-failure paths)
+/// starves it and stalls unrelated Swift-concurrency work — a confirmed
+/// contributor to the S3 self-locking "Loading session…" wedge
+/// (2026-07-13 diagnosis). A `DispatchSourceRead` parks zero threads
+/// between events, and EOF (all write ends closed) is delivered
+/// immediately instead of whenever a blocked read happens to return.
+///
+/// **Threading.** The event handler and cancel handler both run on the
+/// private serial `queue`, so `buffer` needs no lock. libdispatch
+/// guarantees the cancel handler runs strictly after any in-flight
+/// event handler, and the fd is closed ONLY in the cancel handler — a
+/// read can therefore never race a closed (or recycled) descriptor.
+///
+/// **Semantics preserved from the loop implementation:**
+/// - frames split on `\n` (0x0A); the terminator is not included;
+/// - empty lines are skipped;
+/// - a trailing unterminated partial line at EOF is dropped;
+/// - EOF (or a read error) finishes the stream cleanly;
+/// - invalid UTF-8: stdout finishes the stream with
+///   `ACPChannelError.invalidEncoding` and stops reading; stderr drops
+///   the offending line silently and keeps going.
+///
+/// **Backpressure: none** — identical to the previous implementation.
+/// Readability events drain the pipe as fast as the child writes and
+/// buffer complete lines into the unbounded `AsyncThrowingStream`;
+/// memory is bounded by the consumer keeping up. Acceptable here
+/// because the only producer is `hermes acp`, whose frames are small
+/// JSON-RPC lines consumed promptly by `ACPClient`'s read loop.
+///
+/// `@unchecked Sendable`: all mutable state (`buffer`) is confined to
+/// the serial `queue`.
+final class PipeLineReader: @unchecked Sendable {
+    private let queue: DispatchQueue
+    private let source: DispatchSourceRead
+    /// Retained so the fd stays valid until the cancel handler closes
+    /// it; the handle itself holds no reference back to this reader,
+    /// so there is no retain cycle.
+    private let handle: FileHandle
+    private let fd: Int32
+    private let continuation: AsyncThrowingStream<String, Error>.Continuation
+    private let failOnInvalidUTF8: Bool
+    /// Partial-line accumulation. Touched only on `queue`.
+    private var buffer = Data()
 
-        readerTask = Task.detached {
-            var buffer = Data()
-            while !Task.isCancelled {
-                let chunk = outHandle.availableData
-                if chunk.isEmpty { break } // EOF
-                buffer.append(chunk)
-                while let nl = buffer.firstIndex(of: 0x0A) {
-                    let lineData = Data(buffer[buffer.startIndex..<nl])
-                    buffer = Data(buffer[buffer.index(after: nl)...])
-                    guard !lineData.isEmpty else { continue }
-                    if let text = String(data: lineData, encoding: .utf8) {
-                        inCont.yield(text)
-                    } else {
-                        inCont.finish(throwing: ACPChannelError.invalidEncoding)
-                        return
-                    }
-                }
+    init(
+        handle: FileHandle,
+        label: String,
+        continuation: AsyncThrowingStream<String, Error>.Continuation,
+        failOnInvalidUTF8: Bool
+    ) {
+        self.handle = handle
+        self.continuation = continuation
+        self.failOnInvalidUTF8 = failOnInvalidUTF8
+        let queue = DispatchQueue(label: label)
+        self.queue = queue
+        let fd = handle.fileDescriptor
+        self.fd = fd
+        let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
+        self.source = source
+
+        // `[weak self]` — the source retains its handlers and we retain
+        // the source; a strong `self` capture would cycle
+        // reader → source → handler → reader.
+        source.setEventHandler { [weak self] in
+            guard let self else { return }
+            var chunk = [UInt8](repeating: 0, count: 65536)
+            let n = chunk.withUnsafeMutableBytes { buf -> Int in
+                #if canImport(Darwin)
+                Darwin.read(fd, buf.baseAddress, buf.count)
+                #elseif canImport(Glibc)
+                Glibc.read(fd, buf.baseAddress, buf.count)
+                #else
+                -1
+                #endif
             }
-            inCont.finish()
+            guard n > 0 else {
+                // 0 → EOF; < 0 → read error. Either way the pipe is
+                // done: finish cleanly (matching the loop reader's
+                // EOF path) and cancel so the fd gets closed.
+                continuation.finish()
+                self.source.cancel()
+                return
+            }
+            self.buffer.append(contentsOf: chunk[0..<n])
+            self.drainLines(continuation: continuation, failOnInvalidUTF8: failOnInvalidUTF8)
         }
 
-        stderrTask = Task.detached {
-            var buffer = Data()
-            while !Task.isCancelled {
-                let chunk = errHandle.availableData
-                if chunk.isEmpty { break }
-                buffer.append(chunk)
-                while let nl = buffer.firstIndex(of: 0x0A) {
-                    let lineData = Data(buffer[buffer.startIndex..<nl])
-                    buffer = Data(buffer[buffer.index(after: nl)...])
-                    guard !lineData.isEmpty else { continue }
-                    if let text = String(data: lineData, encoding: .utf8) {
-                        errCont.yield(text)
-                    }
-                    // Non-UTF-8 stderr lines are dropped silently;
-                    // we're not going to crash the channel over a
-                    // weird byte in a log line.
+        source.setCancelHandler { [handle] in
+            // The ONLY place the fd is closed — runs after any
+            // in-flight event handler. Finishing twice is a no-op, so
+            // this is safe after an EOF-driven finish too.
+            continuation.finish()
+            try? handle.close()
+        }
+
+        source.resume()
+    }
+
+    /// Stop reading: closes the fd and finishes the stream via the
+    /// cancel handler (asynchronously, on the reader queue). Idempotent.
+    func cancel() {
+        source.cancel()
+    }
+
+    /// Drain whatever is already sitting in the pipe, then stop. Used
+    /// by the process termination handler: the child is dead, so
+    /// everything it wrote is in the pipe RIGHT NOW — but EOF may never
+    /// arrive (a grandchild like ssh's ControlMaster can inherit the
+    /// write end and keep it open), so we must not wait for it either.
+    /// A non-blocking read loop on the reader queue picks up the final
+    /// output (the old blocked-`availableData` reader usually won this
+    /// race by being parked in the kernel already; a dispatch-source
+    /// block under load can lose it, observed as dropped final lines in
+    /// the channel test suite), then the source is cancelled as before.
+    func cancelAfterDrainingPipe() {
+        queue.async { [self] in
+            if source.isCancelled { return }
+            let flags = fcntl(fd, F_GETFL)
+            if flags >= 0 { _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK) }
+            while true {
+                var chunk = [UInt8](repeating: 0, count: 65536)
+                let n = chunk.withUnsafeMutableBytes { buf -> Int in
+                    #if canImport(Darwin)
+                    Darwin.read(fd, buf.baseAddress, buf.count)
+                    #elseif canImport(Glibc)
+                    Glibc.read(fd, buf.baseAddress, buf.count)
+                    #else
+                    -1
+                    #endif
                 }
+                // 0 = EOF, -1 = EAGAIN (pipe empty) or error — done
+                // either way; the child can't write anything more.
+                guard n > 0 else { break }
+                buffer.append(contentsOf: chunk[0..<n])
+                drainLines(continuation: continuation, failOnInvalidUTF8: failOnInvalidUTF8)
             }
-            errCont.finish()
+            source.cancel()
+        }
+    }
+
+    deinit {
+        // A resumed, uncancelled source must be cancelled before its
+        // last reference goes away; idempotent if close()/EOF already
+        // cancelled it.
+        source.cancel()
+    }
+
+    /// Split complete `\n`-terminated frames out of `buffer` and yield
+    /// them. Runs on `queue` only.
+    private func drainLines(
+        continuation: AsyncThrowingStream<String, Error>.Continuation,
+        failOnInvalidUTF8: Bool
+    ) {
+        while let nl = buffer.firstIndex(of: 0x0A) {
+            let lineData = Data(buffer[buffer.startIndex..<nl])
+            buffer = Data(buffer[buffer.index(after: nl)...])
+            guard !lineData.isEmpty else { continue }
+            if let text = String(data: lineData, encoding: .utf8) {
+                continuation.yield(text)
+            } else if failOnInvalidUTF8 {
+                continuation.finish(throwing: ACPChannelError.invalidEncoding)
+                source.cancel()
+                return
+            }
+            // else: non-UTF-8 stderr lines are dropped silently — we're
+            // not going to crash the channel over a weird byte in a log
+            // line (unchanged from the loop reader).
         }
     }
 }

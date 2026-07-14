@@ -65,15 +65,17 @@ struct ChatSessionListPane: View {
                 .padding(.horizontal, 6)
                 .padding(.bottom, ScarfSpace.s2)
             }
-            // While a session is mid-boot the SSH tunnel is bottlenecked
-            // on the in-flight start/load — letting the user queue up a
-            // second session-switch ends with both fights racing for
-            // the same backend (we've seen the small fast chat lose to
-            // a 30s timeout from the prior big chat). Disable the
-            // entire pane (taps + visual) during prep, plus a
-            // ProgressView so the cause is obvious. v2.8.
-            .disabled(chatViewModel.isPreparingSession)
-            .opacity(chatViewModel.isPreparingSession ? 0.55 : 1.0)
+            // Rows stay CLICKABLE while a session is mid-boot
+            // (t-5451bd1b). The v2.8 behavior disabled the whole pane
+            // during prep to stop two starts racing over one SSH
+            // backend — but a wedged start then left the pane locked
+            // forever (S3's self-locking spinner: no watchdog bounded
+            // the pipeline, so restart was the only way out). Racing is
+            // now prevented at the source instead: a new row click
+            // bumps `sessionStartGeneration`, and the superseded
+            // start's pipeline abandons itself at its next await and
+            // stops its client (see ChatViewModel.startStillCurrent).
+            // The ProgressView capsule below still shows boot progress.
             .overlay {
                 if chatViewModel.isPreparingSession {
                     HStack(spacing: 6) {

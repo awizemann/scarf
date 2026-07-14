@@ -242,7 +242,7 @@ final class ChatViewModel {
     /// User-facing status strings that all map to "the session is in
     /// the middle of being established." Centralized so the toolbar
     /// status pill, the chat-pane loader, and `ChatSessionListPane`'s
-    /// click-gating stay in sync. v2.8 added `loadingHistory` after
+    /// progress capsule stay in sync. v2.8 added `loadingHistory` after
     /// the user reported the chat looked engageable while the
     /// 30-second `fetchMessages` was still in flight on a slow remote.
     static let preparingPhases: Set<String> = [
@@ -282,9 +282,9 @@ final class ChatViewModel {
     /// True while a session is being established or restored — from the user
     /// kicking off "start chat" or "resume session" until the ACP session is
     /// ready for messages. The chat pane uses this to show a loader in place
-    /// of the empty-state placeholder; `ChatSessionListPane` uses it to
-    /// disable session-row taps so the user can't queue up a second
-    /// switch while the first is still mid-boot (v2.8).
+    /// of the empty-state placeholder; `ChatSessionListPane` shows a
+    /// progress capsule (rows stay clickable — a new click supersedes
+    /// the in-flight start via `sessionStartGeneration`, t-5451bd1b).
     var isPreparingSession: Bool {
         if isStartingSession { return true }
         guard hasActiveProcess else { return false }
@@ -347,13 +347,52 @@ final class ChatViewModel {
 
     /// Monotonic "latest session-start intent" token. Every user-initiated
     /// session start (new / resume / continue-last / auto-start) bumps it
-    /// synchronously on entry. The deferred starts now resolve the project
-    /// cwd off the MainActor (an SSH attribution read on remote) before
-    /// spawning ACP; each captures the token and bails if a newer intent
-    /// superseded it across that `await`. Without this, two rapid resumes
-    /// of DIFFERENT sessions could resolve out of order on a remote and
-    /// load the wrong chat. t-24594c4a.
+    /// synchronously on entry, and `startACPSession` bumps again when the
+    /// spawn stage begins (so a preflight-sheet replay counts as a fresh
+    /// intent). Every await in the start pipelines captures the token and
+    /// bails on resume if a newer intent superseded it — see
+    /// `startStillCurrent(_:client:)`, which also stops the abandoned
+    /// attempt's client so a superseded spawn never leaks. Without this,
+    /// two rapid resumes of DIFFERENT sessions could resolve out of order
+    /// on a remote and load the wrong chat (t-24594c4a), and a wedged
+    /// start would block every later click (S3, t-5451bd1b).
     private var sessionStartGeneration = 0
+
+    /// Watchdog bounding the session-start pipeline (t-5451bd1b / S3).
+    /// Armed at every start entry point (covering the pre-spawn
+    /// attribution/DB awaits, which are log-proven wedge sites) and
+    /// re-armed by `startACPSession` / `autoStartACPAndSend` when the
+    /// spawn stage begins. On expiry — if the same intent is still the
+    /// latest and the UI still reads as preparing — it tears the wedged
+    /// start down (`stopACP`), self-supersedes the generation so the
+    /// abandoned pipeline exits silently if its awaits ever resume, and
+    /// paints a retryable error banner. Disarmed on ready / failure /
+    /// preflight-bail / any `stopACP`.
+    @ObservationIgnored
+    private var startWatchdogTask: Task<Void, Never>?
+
+    /// Session-start watchdog budget. 90s: the slowest single legitimate
+    /// step is a control RPC under ACPClient's own 60s watchdog
+    /// (`initialize` / `session/new` / `session/load` stalling on a
+    /// state.db lock), and a remote start prepends an SSH spawn +
+    /// attribution reads that need slack on a cold ControlMaster. A
+    /// healthy boot is seconds; 90s of a *single* preparing phase means
+    /// the pipeline is wedged, not slow. (The pre-spawn stage and the
+    /// spawn stage each get their own 90s arm, so the theoretical
+    /// worst-case detection latency is 2×90s; each stage is bounded.)
+    /// `var` (not `let`) so tests can shrink it; internal for @testable
+    /// access.
+    @ObservationIgnored
+    var sessionStartWatchdogNanos: UInt64 = 90_000_000_000
+
+    /// Factory for the per-session `ACPClient`. Production default wires
+    /// `ACPClient.forMacApp` (a `ProcessACPChannel` spawning
+    /// `hermes acp`); tests inject scripted/hanging clients to exercise
+    /// the watchdog, supersede, and teardown paths without a subprocess.
+    @ObservationIgnored
+    var acpClientFactory: (ServerContext, String?) -> ACPClient = { ctx, projectCwd in
+        ACPClient.forMacApp(context: ctx, projectCwd: projectCwd)
+    }
 
     private static let maxReconnectAttempts = 5
     private static let reconnectBaseDelay: UInt64 = 1_000_000_000 // 1 second
@@ -545,6 +584,66 @@ final class ChatViewModel {
         }.value
     }
 
+    // MARK: - Start watchdog + supersede (t-5451bd1b)
+
+    /// Bump the start-intent generation and return the new token. Call
+    /// synchronously at the top of every start stage.
+    @discardableResult
+    private func beginStartIntent() -> Int {
+        sessionStartGeneration &+= 1
+        return sessionStartGeneration
+    }
+
+    /// True while `intent` is still the newest start intent. When a
+    /// newer start (or the watchdog) superseded it, stops `client`
+    /// fire-and-forget (idempotent — the superseding path usually
+    /// already stopped it via `stopACP`) and returns false so the
+    /// caller abandons silently WITHOUT touching shared state: a
+    /// superseded pipeline resuming late must never clobber the newer
+    /// start's `acpClient` / `acpStatus` / flags. Call immediately
+    /// after every await in a start pipeline, before any state write.
+    private func startStillCurrent(_ intent: Int, client: ACPClient?) -> Bool {
+        if intent == sessionStartGeneration { return true }
+        if let client {
+            Task { await client.stop() }
+        }
+        return false
+    }
+
+    /// Arm (or re-arm) the session-start watchdog for `intent`.
+    /// Cancels any previous arm — there is at most one live watchdog.
+    private func armStartWatchdog(intent: Int) {
+        startWatchdogTask?.cancel()
+        let budget = sessionStartWatchdogNanos
+        startWatchdogTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: budget)
+            guard !Task.isCancelled, let self else { return }
+            // Only fire when the wedged start is still the latest
+            // intent AND the UI still reads as preparing — a start
+            // that reached ready (or failed, or was superseded)
+            // already cleaned up after itself.
+            guard intent == self.sessionStartGeneration, self.isPreparingSession else { return }
+            let seconds = Int(budget / 1_000_000_000)
+            self.logger.error("session-start watchdog fired after \(seconds)s — tearing down the wedged start")
+            // Self-supersede so the wedged pipeline's generation checks
+            // abandon silently if its awaits ever resume, instead of
+            // stomping the error state painted below.
+            self.beginStartIntent()
+            self.stopACP()
+            self.acpStatus = ACPPhase.failed
+            self.clearACPErrorState()
+            self.acpError = "Session start timed out after \(seconds) seconds."
+            self.acpErrorHint = "The agent never finished starting — the process may be wedged. Click the chat again (or start a new one) to retry."
+        }
+    }
+
+    /// Cancel the start watchdog. Call once a start pipeline settles
+    /// (ready, failure, or preflight bail) and from `stopACP` teardown.
+    private func disarmStartWatchdog() {
+        startWatchdogTask?.cancel()
+        startWatchdogTask = nil
+    }
+
     // MARK: - Session Lifecycle
 
     func startNewSession(projectPath: String? = nil) {
@@ -565,7 +664,7 @@ final class ChatViewModel {
         // until the Task body runs, which on remote contexts is
         // multiple seconds after the click. v2.8.
         isStartingSession = true
-        sessionStartGeneration &+= 1
+        beginStartIntent()
         voiceEnabled = false
         ttsEnabled = false
         isRecording = false
@@ -597,13 +696,17 @@ final class ChatViewModel {
 
     func resumeSession(_ sessionId: String) {
         isStartingSession = true
-        sessionStartGeneration &+= 1
+        beginStartIntent()
         voiceEnabled = false
         ttsEnabled = false
         isRecording = false
         richChatViewModel.reset()
 
         if displayMode == .richChat {
+            // Bound the pre-spawn stage (the attribution read below is a
+            // log-proven wedge site on remote) — startACPSession re-arms
+            // for the spawn stage.
+            armStartWatchdog(intent: sessionStartGeneration)
             // Recover the project this session was started under so the
             // respawned `hermes acp` runs with cwd = the project dir
             // (Hermes loads AGENTS.md from the PROCESS cwd) and tool calls
@@ -620,7 +723,7 @@ final class ChatViewModel {
                 }.value
                 // Bail if a newer session-start superseded us while the
                 // (possibly remote) attribution read was in flight.
-                guard intent == sessionStartGeneration else { return }
+                guard startStillCurrent(intent, client: nil) else { return }
                 startACPSession(resume: sessionId, projectPath: projectPath)
             }
         } else {
@@ -631,18 +734,22 @@ final class ChatViewModel {
 
     func continueLastSession() {
         isStartingSession = true
-        sessionStartGeneration &+= 1
-        let intent = sessionStartGeneration
+        let intent = beginStartIntent()
         voiceEnabled = false
         ttsEnabled = false
         isRecording = false
         richChatViewModel.reset()
 
         if displayMode == .richChat {
+            // Bound the pre-spawn stage (DB open + attribution reads
+            // below) — startACPSession re-arms for the spawn stage.
+            armStartWatchdog(intent: intent)
             // Find most recent session and resume via ACP
             Task { @MainActor in
                 let opened = await dataService.open()
+                guard startStillCurrent(intent, client: nil) else { return }
                 if !opened {
+                    disarmStartWatchdog()
                     isStartingSession = false
                     acpError = context.isRemote
                         ? "Couldn't reach \(context.displayName). Check the SSH connection and try again."
@@ -664,10 +771,10 @@ final class ChatViewModel {
                     }.value
                     // Bail if a newer session-start superseded us across the
                     // DB + attribution reads above.
-                    guard intent == sessionStartGeneration else { return }
+                    guard startStillCurrent(intent, client: nil) else { return }
                     startACPSession(resume: sessionId, projectPath: projectPath)
                 } else {
-                    guard intent == sessionStartGeneration else { return }
+                    guard startStillCurrent(intent, client: nil) else { return }
                     startACPSession(resume: nil)
                 }
             }
@@ -719,8 +826,10 @@ final class ChatViewModel {
     /// failure with no UI feedback.
     private func autoStartACPAndSend(text: String, images: [ChatImageAttachment] = []) {
         isStartingSession = true
-        sessionStartGeneration &+= 1
-        let intent = sessionStartGeneration
+        let intent = beginStartIntent()
+        // Bound the whole auto-start pipeline (pre-spawn attribution
+        // read included) — S3, t-5451bd1b.
+        armStartWatchdog(intent: intent)
         // Show the user message immediately
         richChatViewModel.addUserMessage(text: text)
 
@@ -746,14 +855,15 @@ final class ChatViewModel {
             }.value
             // Bail if a newer session-start superseded us while the (possibly
             // remote) attribution read was in flight.
-            guard intent == sessionStartGeneration else { return }
+            guard startStillCurrent(intent, client: nil) else { return }
 
-            let client = ACPClient.forMacApp(context: context, projectCwd: projectPath)
+            let client = acpClientFactory(context, projectPath)
             self.acpClient = client
 
             do {
                 acpStatus = ACPPhase.spawning
                 try await client.start()
+                guard startStillCurrent(intent, client: client) else { return }
                 acpStatus = ACPPhase.authenticating
                 startACPEventLoop(client: client)
                 startHealthMonitor(client: client)
@@ -763,6 +873,7 @@ final class ChatViewModel {
                     cwd = projectPath
                 } else {
                     cwd = await context.resolvedUserHome()
+                    guard startStillCurrent(intent, client: client) else { return }
                 }
 
                 hasActiveProcess = true
@@ -773,6 +884,7 @@ final class ChatViewModel {
                     do {
                         resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: existing)
                     } catch {
+                        guard startStillCurrent(intent, client: client) else { return }
                         logger.info("Session \(existing) not found in ACP, creating new session")
                         acpStatus = ACPPhase.creatingNewSession
                         resolvedSessionId = try await client.newSession(cwd: cwd)
@@ -781,10 +893,12 @@ final class ChatViewModel {
                     acpStatus = ACPPhase.creatingSession
                     resolvedSessionId = try await client.newSession(cwd: cwd)
                 }
+                guard startStillCurrent(intent, client: client) else { return }
 
                 richChatViewModel.setSessionId(resolvedSessionId)
                 acpStatus = ACPPhase.ready
                 isStartingSession = false
+                disarmStartWatchdog()
 
                 // Surface the freshly-created session in the chat
                 // sidebar immediately. We can't lean on the file
@@ -793,17 +907,31 @@ final class ChatViewModel {
                 // 500 ms debounce. An explicit call here keeps the
                 // "type → see new chat in the list" feedback prompt.
                 await loadRecentSessions()
+                guard startStillCurrent(intent, client: client) else { return }
 
                 // Now send the queued prompt. The optimistic echo was
                 // appended above (before session setup), so suppress
                 // the second one explicitly.
                 sendViaACP(client: client, text: text, images: images, localEchoAlreadyAdded: true)
             } catch {
+                // Superseded start (a newer click, or the watchdog):
+                // the newer path owns the shared state — just make
+                // sure this attempt's spawn doesn't leak.
+                guard startStillCurrent(intent, client: client) else { return }
                 acpStatus = ACPPhase.failed
                 isStartingSession = false
+                disarmStartWatchdog()
                 await recordACPFailure(error, client: client, context: "Auto-start ACP failed")
-                hasActiveProcess = false
-                acpClient = nil
+                // Stop the client even though start failed — a spawn
+                // that got as far as opening the channel would
+                // otherwise leak the `hermes acp` process (S3's leak
+                // contributor: pre-fix, each failure stranded the
+                // subprocess plus its pipe readers).
+                await client.stop()
+                if startStillCurrent(intent, client: nil) {
+                    hasActiveProcess = false
+                    acpClient = nil
+                }
                 await recoverRemoteTransportAfterFailure()
             }
         }
@@ -1170,6 +1298,11 @@ final class ChatViewModel {
         // helper used by disconnect paths too). Re-arm it here so the
         // session-list overlay stays up through the entire boot.
         isStartingSession = true
+        // The spawn stage is a fresh start intent: entry points bumped
+        // before their pre-spawn awaits, and bumping again here makes a
+        // preflight-sheet replay (confirmModelPreflight → this method,
+        // no entry-point bump) supersede whatever came before it.
+        let intent = beginStartIntent()
 
         // Pre-flight: bail before opening any ACP plumbing if the
         // active server's `config.yaml` has no primary model or
@@ -1185,15 +1318,19 @@ final class ChatViewModel {
             acpStatus = ""
             hasActiveProcess = false
             isStartingSession = false
+            disarmStartWatchdog()
             return
         }
 
         acpStatus = ACPPhase.spawning
+        // Re-arm for the spawn stage (replaces any entry-point arm the
+        // stopACP() above disarmed).
+        armStartWatchdog(intent: intent)
 
         // Project-scoped chats spawn `hermes acp` with the project as the
         // process cwd so Hermes loads the project's AGENTS.md context files
         // (it reads them from the process cwd, not the ACP session cwd).
-        let client = ACPClient.forMacApp(context: context, projectCwd: projectPath)
+        let client = acpClientFactory(context, projectPath)
         self.acpClient = client
         let attribution = SessionAttributionService(context: context)
 
@@ -1225,11 +1362,17 @@ final class ChatViewModel {
                         prepLogger.warning("couldn't refresh project context block for \(project.name): \(error.localizedDescription)")
                     }
                 }.value
+                // Pre-spawn await — a newer start may have superseded
+                // us while the registry/AGENTS.md I/O ran. Abandon
+                // BEFORE spawning so the superseded attempt never
+                // launches a process at all.
+                guard startStillCurrent(intent, client: client) else { return }
             }
 
             do {
                 // Start ACP process and event loop FIRST
                 try await client.start()
+                guard startStillCurrent(intent, client: client) else { return }
                 acpStatus = ACPPhase.authenticating
                 startACPEventLoop(client: client)
                 startHealthMonitor(client: client)
@@ -1246,6 +1389,7 @@ final class ChatViewModel {
                     cwd = projectPath
                 } else {
                     cwd = await context.resolvedUserHome()
+                    guard startStillCurrent(intent, client: client) else { return }
                 }
 
                 // Mark active BEFORE setting session ID so .task(id:) sees isACPMode=true
@@ -1258,10 +1402,12 @@ final class ChatViewModel {
                     do {
                         resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: sessionId)
                     } catch {
+                        guard startStillCurrent(intent, client: client) else { return }
                         logger.info("Session \(sessionId) not found in ACP, creating new session with history")
                         acpStatus = ACPPhase.creatingNewSession
                         resolvedSessionId = try await client.newSession(cwd: cwd)
                     }
+                    guard startStillCurrent(intent, client: client) else { return }
                     // Surface "Loading history…" before the (potentially
                     // 30s) message-history fetch fires. Pre-fix the user
                     // saw "Loading session…" through start(), then jump
@@ -1274,9 +1420,11 @@ final class ChatViewModel {
                         sessionId: sessionId,
                         acpSessionId: resolvedSessionId
                     )
+                    guard startStillCurrent(intent, client: client) else { return }
                 } else {
                     acpStatus = ACPPhase.creatingSession
                     resolvedSessionId = try await client.newSession(cwd: cwd)
+                    guard startStillCurrent(intent, client: client) else { return }
                 }
 
                 // Apply the project's bound model preset before unlocking
@@ -1291,11 +1439,13 @@ final class ChatViewModel {
                         sessionId: resolvedSessionId,
                         projectPath: projectPath
                     )
+                    guard startStillCurrent(intent, client: client) else { return }
                 }
 
                 richChatViewModel.setSessionId(resolvedSessionId)
                 acpStatus = ACPPhase.ready
                 isStartingSession = false
+                disarmStartWatchdog()
 
                 // Attribute this session to the project it was started
                 // under, so the per-project Sessions tab can surface it
@@ -1368,6 +1518,7 @@ final class ChatViewModel {
 
                 // Refresh session list so the new ACP session appears in the Resume menu
                 await loadRecentSessions()
+                guard startStillCurrent(intent, client: client) else { return }
 
                 logger.info("ACP session ready: \(resolvedSessionId)")
 
@@ -1383,11 +1534,23 @@ final class ChatViewModel {
                     sendViaACP(client: client, text: prompt, images: [], localEchoAlreadyAdded: true)
                 }
             } catch {
+                // Superseded start (a newer click, or the watchdog):
+                // the newer path owns the shared state — just make
+                // sure this attempt's spawn doesn't leak.
+                guard startStillCurrent(intent, client: client) else { return }
                 acpStatus = ACPPhase.failed
                 isStartingSession = false
+                disarmStartWatchdog()
                 await recordACPFailure(error, client: client, context: "Failed to start ACP session")
-                hasActiveProcess = false
-                acpClient = nil
+                // Stop the client even though start failed — pre-fix
+                // this path leaked the spawned `hermes acp` process
+                // (plus its two pipe readers) on EVERY start failure,
+                // a confirmed S3 pool-starvation contributor.
+                await client.stop()
+                if startStillCurrent(intent, client: nil) {
+                    hasActiveProcess = false
+                    acpClient = nil
+                }
                 await recoverRemoteTransportAfterFailure()
             }
         }
@@ -1519,7 +1682,7 @@ final class ChatViewModel {
                     guard !Task.isCancelled else { return }
                 }
 
-                let client = ACPClient.forMacApp(context: context, projectCwd: projectPath)
+                let client = acpClientFactory(context, projectPath)
                 do {
                     try await client.start()
 
@@ -1579,8 +1742,16 @@ final class ChatViewModel {
     }
 
     func stopACP() {
+        disarmStartWatchdog()
         reconnectTask?.cancel()
         reconnectTask = nil
+        // Capture BEFORE cancelling the prompt task: a live prompt task
+        // + a working agent means we're killing a mid-turn process. In
+        // the session-switch paths `richChatViewModel.reset()` has
+        // already run (sessionId nil, isAgentWorking false), so the
+        // mid-turn handling below keys off state captured here.
+        let turnWasInFlight = acpPromptTask != nil && richChatViewModel.isAgentWorking
+        let inFlightSessionId = richChatViewModel.sessionId
         acpPromptTask?.cancel()
         acpPromptTask = nil
         acpEventTask?.cancel()
@@ -1588,12 +1759,78 @@ final class ChatViewModel {
         healthMonitorTask?.cancel()
         healthMonitorTask = nil
         if let client = acpClient {
-            Task { await client.stop() }
+            Task {
+                // S4 (t-5451bd1b): killing a mid-turn process without
+                // `session/cancel` left Hermes with an unfinalized turn
+                // — the same prompt re-sent later then got merged into
+                // one duplicated DB row by Hermes's alternation repair.
+                // Best-effort and bounded to 2s: teardown must never
+                // hang on a wedged process, and `client.stop()` below
+                // resumes a still-pending cancel RPC either way.
+                if turnWasInFlight, let sid = inFlightSessionId {
+                    await Self.boundedSessionCancel(client: client, sessionId: sid, seconds: 2)
+                }
+                await client.stop()
+            }
+            if turnWasInFlight {
+                if let sid = inFlightSessionId {
+                    // Transcript still attached to the killed session
+                    // (e.g. switching to terminal mode mid-turn) —
+                    // finalize the partial stream and surface the
+                    // cancellation through the existing synthesized
+                    // promptComplete mechanism (same one the send
+                    // path's error branch uses).
+                    richChatViewModel.handleACPEvent(
+                        .promptComplete(sessionId: sid, response: ACPPromptResult(
+                            stopReason: "cancelled",
+                            inputTokens: 0, outputTokens: 0,
+                            thoughtTokens: 0, cachedReadTokens: 0
+                        ))
+                    )
+                }
+                // Composer-level feedback that survives the transcript
+                // swap when the user switched sessions mid-turn (reset()
+                // already wiped the old transcript by the time we run).
+                richChatViewModel.transientHint = "Turn cancelled — switched sessions."
+                scheduleHintClear()
+            }
         }
         acpClient = nil
         hasActiveProcess = false
         isHandlingDisconnect = false
         isStartingSession = false
+    }
+
+    /// Best-effort `session/cancel` bounded to `seconds`. Returns when
+    /// Hermes acknowledges the cancel OR the deadline passes, whichever
+    /// comes first — a wedged process must not be able to stall
+    /// teardown. The losing branch is harmless: an unanswered cancel
+    /// RPC is resumed with `CancellationError` by the `client.stop()`
+    /// that always follows.
+    nonisolated private static func boundedSessionCancel(
+        client: ACPClient,
+        sessionId: String,
+        seconds: Double
+    ) async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            let resumed = OSAllocatedUnfairLock(initialState: false)
+            @Sendable func resumeOnce() {
+                let isFirst = resumed.withLock { done -> Bool in
+                    if done { return false }
+                    done = true
+                    return true
+                }
+                if isFirst { cont.resume() }
+            }
+            Task {
+                try? await client.cancel(sessionId: sessionId)
+                resumeOnce()
+            }
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                resumeOnce()
+            }
+        }
     }
 
     // MARK: - Model preflight
