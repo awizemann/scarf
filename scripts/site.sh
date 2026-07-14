@@ -50,7 +50,7 @@ OWNED_ROOT_FILES=(
   apple-touch-icon.png
 )
 
-# ---------- helpers (same shape as scripts/catalog.sh / wiki.sh) ----------
+# ---------- helpers (same shape as scripts/catalog.sh) ----------
 log()  { printf '\033[1;34m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m[WARN] %s\033[0m\n' "$*" >&2; }
 die()  { printf '\033[1;31m[ERR] %s\033[0m\n' "$*" >&2; exit 1; }
@@ -138,7 +138,7 @@ with open(dest_path, "w", encoding="utf-8") as fh:
 '
 }
 
-# ---------- secret-scan (mirrors scripts/wiki.sh + catalog.sh) ----------
+# ---------- secret-scan (mirrors catalog.sh) ----------
 hard_regex='(sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|ghs_[A-Za-z0-9]{30,}|ghu_[A-Za-z0-9]{30,}|gho_[A-Za-z0-9]{30,}|ghr_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|-----BEGIN [A-Z ]*PRIVATE KEY-----|BEGIN OPENSSH PRIVATE KEY)'
 
 scan_hard_source() {

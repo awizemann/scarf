@@ -1,7 +1,6 @@
 # Xcode
 build/
 .gh-pages-worktree/
-.wiki-worktree/
 DerivedData/
 *.pbxuser
 !default.pbxuser
@@ -60,7 +59,6 @@ releases/v*/*.zip
 releases/v*/appcast-entry.xml
 
 # Wiki helper: personal patterns (hostnames, IPs) blocked from the wiki push.
-scripts/wiki-blocklist.txt
 
 # TestFlight feedback / crash JSONs downloaded for triage. PII (emails,
 # carriers, locales) and never meant for the public repo — kept local
