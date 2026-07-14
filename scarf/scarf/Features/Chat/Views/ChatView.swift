@@ -279,6 +279,8 @@ struct ChatView: View {
             // directions: align provider to the model's prefix
             // (likely the user just authed against `prefixProvider`),
             // or strip the prefix to keep the active provider intact.
+            // t-79569a15 adds the third path: open the full model
+            // picker and replace both keys with a valid pair.
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
@@ -314,6 +316,23 @@ struct ChatView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                         .help("Strip the prefix from model.default, leaving model.provider = \(mismatch.activeProvider).")
+                        // The honest escape hatch, offered on EVERY
+                        // mismatch (t-79569a15): open the full model
+                        // picker and replace both keys with a valid
+                        // pair. For an unknown prefix it's the only
+                        // constructive action (the align button is
+                        // hidden), so it takes the prominent style
+                        // there.
+                        let choose = Button("Choose model…") {
+                            viewModel.chooseModelForMismatch(mismatch)
+                        }
+                        .controlSize(.small)
+                        .help("Pick a model and provider from the full catalog — Scarf saves both to config.yaml.")
+                        if mismatch.prefixIsKnownProvider {
+                            choose.buttonStyle(.bordered)
+                        } else {
+                            choose.buttonStyle(.borderedProminent)
+                        }
                     }
                     .padding(.top, 2)
                 }

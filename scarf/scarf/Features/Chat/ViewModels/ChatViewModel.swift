@@ -447,6 +447,18 @@ final class ChatViewModel {
         ACPClient.forMacApp(context: ctx, projectCwd: projectCwd)
     }
 
+    /// Test seam for the model-config write shared by the preflight
+    /// sheet and the mismatch banner's "Choose model…" flow
+    /// (t-79569a15). Nil in production — `confirmModelPreflight`
+    /// executes the plan via `fileService.applyModelConfigPlan` (real
+    /// `hermes config set` subprocesses against the context's home).
+    /// Tests inject a recorder so a simulated pick exercises the
+    /// plan-routed path without shelling out to a hermes binary (which
+    /// would ignore the temp-home override and write the developer's
+    /// real ~/.hermes).
+    @ObservationIgnored
+    var modelConfigPlanApplier: (@Sendable ([LocalModelConfigPlan.Operation]) -> Bool)?
+
     /// Runs the `hermes sessions delete --yes <id>` CLI for
     /// `deleteSession(_:)` and returns its exit code. Production default
     /// shells out through the context's transport (same command path the
@@ -508,7 +520,9 @@ final class ChatViewModel {
     /// banner never offers to write a provider Hermes doesn't have.
     /// Nil until first load; empty set means the load failed (treated
     /// as "no roster" — the banner trusts the prefix as before).
-    private var knownProviderIDs: Set<String>?
+    /// Internal (not private) so tests can seed a roster without a
+    /// models.dev catalog fixture on disk.
+    var knownProviderIDs: Set<String>?
 
     /// Re-reads config.yaml and refreshes the
     /// `model.default` / `model.provider` mismatch state. Off-MainActor
@@ -626,6 +640,25 @@ final class ChatViewModel {
                 }
             }
         }
+    }
+
+    /// Banner-initiated "Choose model…" (t-79569a15) — the mismatch
+    /// banner's honest escape hatch when neither one-click fix is right
+    /// (and, for an unknown prefix, the only constructive path: the
+    /// align button is hidden and stripping the prefix may still leave
+    /// a model the active provider doesn't serve). Opens the same
+    /// `ChatModelPreflightSheet` (full `ModelPickerSheet`, Local tab
+    /// included) the missing-config preflight uses — `ChatView`'s
+    /// sheet presents whenever `modelPreflightReason` is non-nil. The
+    /// pick then applies through `confirmModelPreflight`'s plan-routed
+    /// write path, whose success branch refreshes the config
+    /// diagnostics so this banner re-evaluates (and clears). No start
+    /// args are stashed: unlike the preflight bail there's no
+    /// interrupted chat-start to replay.
+    @MainActor
+    func chooseModelForMismatch(_ mismatch: ModelPreflight.Mismatch) {
+        pendingStartArgs = nil
+        modelPreflightReason = "The configured model (\(mismatch.modelDefault)) and provider (\(mismatch.activeProvider)) don't match."
     }
 
     /// Forwarders to the ScarfCore implementation so the error-banner
@@ -1976,6 +2009,8 @@ final class ChatViewModel {
         pendingStartArgs = nil
 
         let svc = fileService
+        let apply: @Sendable ([LocalModelConfigPlan.Operation]) -> Bool =
+            modelConfigPlanApplier ?? { svc.applyModelConfigPlan($0) }
         Task.detached { [weak self] in
             // Both branches route through the shared write plan (T4
             // audit): local picks carry keys `setModelAndProvider` can't
@@ -1986,10 +2021,16 @@ final class ChatViewModel {
             // base_url into the new cloud provider. For a config with no
             // local keys the remote ops are exactly the classic
             // [set provider, set model] pair.
+            //
+            // Either overload may REFUSE with an empty plan (a switch
+            // to a local provider with no sourceable base_url —
+            // shouldn't be reachable through the picker, which
+            // requires the base URL, but belt-and-braces): that's a
+            // failed save, surfaced below.
             let ok: Bool
             if let local {
                 let ops = LocalModelConfigPlan.operations(selecting: local)
-                ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
+                ok = !ops.isEmpty && apply(ops)
             } else if provider.trimmingCharacters(in: .whitespaces).isEmpty {
                 // Parity with setModelAndProvider's guard: the preflight
                 // must persist BOTH keys, so an empty provider is a
@@ -2001,11 +2042,18 @@ final class ChatViewModel {
                     provider: provider,
                     current: svc.loadConfig()
                 )
-                ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
+                ok = !ops.isEmpty && apply(ops)
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 if ok {
+                    // The plan wrote a coherent model+provider pair —
+                    // when the pick came from the mismatch banner's
+                    // "Choose model…" the banner must re-evaluate.
+                    // Clear eagerly, then re-read config.yaml for
+                    // truth (t-79569a15).
+                    self.modelProviderMismatch = nil
+                    self.refreshConfigDiagnostics()
                     if let pending {
                         self.startACPSession(
                             resume: pending.sessionId,
