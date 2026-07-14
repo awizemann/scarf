@@ -794,8 +794,10 @@ final class ChatViewModel {
                 // "type → see new chat in the list" feedback prompt.
                 await loadRecentSessions()
 
-                // Now send the queued prompt
-                sendViaACP(client: client, text: text, images: images)
+                // Now send the queued prompt. The optimistic echo was
+                // appended above (before session setup), so suppress
+                // the second one explicitly.
+                sendViaACP(client: client, text: text, images: images, localEchoAlreadyAdded: true)
             } catch {
                 acpStatus = ACPPhase.failed
                 isStartingSession = false
@@ -807,7 +809,17 @@ final class ChatViewModel {
         }
     }
 
-    private func sendViaACP(client: ACPClient, text: String, images: [ChatImageAttachment] = []) {
+    /// Send a prompt over ACP. `localEchoAlreadyAdded` is true only on
+    /// the paths that optimistically appended the user's bubble via
+    /// `addUserMessage` BEFORE calling here (`autoStartACPAndSend`, the
+    /// project-wizard kickoff) — it suppresses the second echo without
+    /// any content matching. Internal (not private) for test access.
+    func sendViaACP(
+        client: ACPClient,
+        text: String,
+        images: [ChatImageAttachment] = [],
+        localEchoAlreadyAdded: Bool = false
+    ) {
         ScarfMon.event(.chatStream, "mac.sendViaACP", count: 1, bytes: text.utf8.count)
 
         // Client-side slash intercept. Hermes ACP doesn't intercept
@@ -837,11 +849,23 @@ final class ChatViewModel {
             return
         }
 
-        // Don't duplicate user message if autoStartACPAndSend already added it
-        if richChatViewModel.messages.last?.isUser != true
-            || richChatViewModel.messages.last?.content != text {
+        // Append the user's bubble unless the caller already echoed it
+        // optimistically. The old guard here string-matched
+        // `messages.last` against the new text, which over-matched
+        // DB-hydrated history: deliberately re-sending the same text
+        // as an earlier message produced no bubble and (via the
+        // engagement gate) a completely invisible turn (S2,
+        // 2026-07-13). The echo/no-echo decision is now an explicit
+        // caller flag, never content-based.
+        if !localEchoAlreadyAdded {
             richChatViewModel.addUserMessage(text: text)
         }
+        // Open the replay-suppression gate at the actual send point.
+        // The pre-echoed paths opened it inside `addUserMessage`, but
+        // autoStart's `setSessionId(resolvedSessionId)` resets the
+        // gate AFTER that echo — without this, the turn's chunks and
+        // tool events would be dropped as session/load replay.
+        richChatViewModel.markPromptSent()
 
         // Project-scoped slash commands expand client-side: the user
         // sees the literal `/<name> args` they typed (already in the
@@ -1356,7 +1380,7 @@ final class ChatViewModel {
                 if let prompt = initialPrompt,
                    !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     richChatViewModel.addUserMessage(text: prompt)
-                    sendViaACP(client: client, text: prompt, images: [])
+                    sendViaACP(client: client, text: prompt, images: [], localEchoAlreadyAdded: true)
                 }
             } catch {
                 acpStatus = ACPPhase.failed

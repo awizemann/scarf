@@ -1100,18 +1100,28 @@ public final class RichChatViewModel {
     private var resetTimestamp: Date?
     private var userSendPending = false
     private var activePollingTimer: Timer?
-    /// True once the user has sent at least one prompt in the
-    /// currently-attached session. Set by `addUserMessage`, cleared
-    /// by `setSessionId` / `reset`. Until set, content-creating ACP
-    /// events (`messageChunk`, `thoughtChunk`, `toolCallStart`,
-    /// `toolCallUpdate`, `promptComplete`) are dropped — Hermes' ACP
-    /// adapter sometimes streams the recent session state as a
-    /// sequence of agent events after `session/load`, OR auto-resumes
-    /// in-flight work for sessions with persistent goals / queued
-    /// prompts. Either way the user perceives bubbles materializing
-    /// one-by-one when they open an old chat. The DB-fetched history
-    /// is authoritative for the existing transcript; live agent work
-    /// resumes once the user actually engages by sending a prompt.
+    /// Replay-suppression gate: true once a prompt has actually been
+    /// sent in the currently-attached session. Set by `addUserMessage`
+    /// AND by `markPromptSent()` (which every send site must call at
+    /// the point the prompt goes over the wire), cleared by
+    /// `setSessionId` / `reset`. Until set, streamed content events
+    /// (`messageChunk`, `thoughtChunk`, `toolCallStart`,
+    /// `toolCallUpdate`) are dropped — Hermes' ACP adapter sometimes
+    /// streams the recent session state as a sequence of agent events
+    /// after `session/load`, OR auto-resumes in-flight work for
+    /// sessions with persistent goals / queued prompts. Either way the
+    /// user perceives bubbles materializing one-by-one when they open
+    /// an old chat. The DB-fetched history is authoritative for the
+    /// existing transcript; live agent work resumes once a prompt is
+    /// actually sent.
+    ///
+    /// `promptComplete` is intentionally NOT gated (2026-07-13, S2):
+    /// it never comes from the session/load replay — ACPEventParser
+    /// never yields it; each send path synthesizes it from
+    /// `sendPrompt`'s return — and it carries turn accounting, the
+    /// `isAgentWorking` clear, and the no-output failure bubble.
+    /// Gate-dropping it turned any turn whose echo/gate bookkeeping
+    /// slipped into a silent, never-finishing spinner.
     private var hasUserSentPromptThisSession = false
 
     public struct PendingPermission {
@@ -1235,6 +1245,18 @@ public final class RichChatViewModel {
 
     // MARK: - ACP Event Handling
 
+    /// Open the replay-suppression gate: call at the point a prompt is
+    /// actually handed to the agent (e.g. `ChatViewModel.sendViaACP`),
+    /// independent of whether a local echo bubble was appended.
+    /// `addUserMessage` also opens the gate, but send paths that echo
+    /// the message BEFORE session setup completes lose that open when
+    /// `setSessionId` resets the gate (autoStart), and paths that skip
+    /// the echo never opened it at all — either way the turn's streamed
+    /// chunks would be dropped as replay. Idempotent.
+    public func markPromptSent() {
+        hasUserSentPromptThisSession = true
+    }
+
     /// Add a user message immediately (before DB write) for instant UI feedback.
     public func addUserMessage(text: String) {
         // Fresh prompt → clear any stale error banner from a prior
@@ -1307,27 +1329,34 @@ public final class RichChatViewModel {
            theirs != mine {
             return
         }
-        // Drop content-creating events until the user has sent a
-        // prompt in the currently-attached session. Hermes' ACP
-        // adapter sometimes emits a stream of agent events after
-        // `session/load` (replaying the recent transcript or
-        // auto-resuming work for sessions with persistent goals /
-        // queued prompts), which the user perceives as bubbles
-        // materializing one-by-one when they open an old chat. The
-        // DB-fetched history is authoritative for what's already
-        // there; once the user actually engages by sending a prompt,
-        // live agent activity flows through normally.
+        // Drop streamed content events until a prompt has been sent in
+        // the currently-attached session. Hermes' ACP adapter sometimes
+        // emits a stream of agent events after `session/load`
+        // (replaying the recent transcript or auto-resuming work for
+        // sessions with persistent goals / queued prompts), which the
+        // user perceives as bubbles materializing one-by-one when they
+        // open an old chat. The DB-fetched history is authoritative for
+        // what's already there; once a prompt is actually sent, live
+        // agent activity flows through normally.
         //
         // Non-content events (`availableCommands`, `permissionRequest`,
         // `connectionLost`) are always processed — they carry session
         // chrome the user needs regardless of who initiated.
+        //
+        // `promptComplete` is ALSO never gated (S2, 2026-07-13): it is
+        // not part of the replay — the parser never emits it; the send
+        // path synthesizes it from `sendPrompt`'s return — and it
+        // carries the turn's accounting, the `isAgentWorking` clear,
+        // and the no-output failure bubble. Dropping it left a turn
+        // whose gate bookkeeping slipped stuck on "Agent working…"
+        // forever with no failure feedback.
         if !hasUserSentPromptThisSession {
             switch event {
             case .messageChunk, .thoughtChunk, .toolCallStart,
-                 .toolCallUpdate, .promptComplete:
+                 .toolCallUpdate:
                 ScarfMon.event(.chatStream, "mac.handleACPEvent.preEngagementDropped", count: 1)
                 return
-            case .permissionRequest, .connectionLost,
+            case .promptComplete, .permissionRequest, .connectionLost,
                  .availableCommands, .sessionInfoUpdate, .unknown:
                 break
             }
