@@ -1759,16 +1759,18 @@ final class ChatViewModel {
                     } else {
                         cwd = await context.resolvedUserHome()
                     }
-                    let resolvedSessionId: String
-
-                    // Try resumeSession first (designed for reconnection), then loadSession.
-                    // NEVER fall back to newSession — that loses all conversation context.
-                    do {
-                        resolvedSessionId = try await client.resumeSession(cwd: cwd, sessionId: sessionId)
-                    } catch {
-                        logger.info("session/resume failed, trying session/load: \(error.localizedDescription)")
-                        resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: sessionId)
-                    }
+                    // session/load ONLY (t-217da62b). NEVER session/resume:
+                    // Hermes's resume_session restores through the exact same
+                    // path as load_session but silently CREATES a fresh
+                    // server-side session when the id isn't restorable —
+                    // the old resume-then-load ladder orphaned one session
+                    // per attempt (and always fell through to load anyway,
+                    // because it required a top-level sessionId the resume
+                    // response never carries). And NEVER session/new — that
+                    // loses all conversation context. Keep in sync with the
+                    // iOS ladder (Scarf iOS/Chat/ChatView.swift,
+                    // attemptReconnect).
+                    let resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: sessionId)
 
                     // Success — wire up the new client
                     self.acpClient = client

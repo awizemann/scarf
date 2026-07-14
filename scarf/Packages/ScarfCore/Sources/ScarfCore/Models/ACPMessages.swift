@@ -63,13 +63,42 @@ public struct ACPRawMessage: Decodable, Sendable {
 public struct ACPError: Decodable, Sendable {
     public nonisolated let code: Int
     public nonisolated let message: String
+    /// The JSON-RPC error's optional `data` member — per spec a
+    /// "primitive or structured value that contains additional
+    /// information about the error". Hermes's acp lib wraps unexpected
+    /// server-side exceptions into `-32603 Internal error` with the
+    /// REAL failure text under `data.details` (acp/connection.py:232,
+    /// verified against the lib Hermes 0.17/0.18 ships) — without
+    /// decoding it, Scarf's banner showed only "Internal error" while
+    /// the actionable message (e.g. the context-floor explanation)
+    /// rode invisibly in this field.
+    public nonisolated let data: AnyCodable?
 
-    public enum CodingKeys: String, CodingKey { case code, message }
+    public enum CodingKeys: String, CodingKey { case code, message, data }
 
     public nonisolated init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.code = try c.decode(Int.self, forKey: .code)
         self.message = try c.decode(String.self, forKey: .message)
+        self.data = try c.decodeIfPresent(AnyCodable.self, forKey: .data)
+    }
+
+    /// Server-side failure text extracted from `data`, when present:
+    /// either `data.details` (the shape Hermes's acp lib emits for
+    /// wrapped internal errors) or `data` itself when it's a plain
+    /// string (the spec allows primitive values). Trimmed; nil when
+    /// empty or when `data` is some other structure.
+    public nonisolated var details: String? {
+        let candidate: String?
+        if let dict = data?.dictValue {
+            candidate = dict["details"] as? String
+        } else {
+            candidate = data?.stringValue
+        }
+        guard let text = candidate?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty
+        else { return nil }
+        return text
     }
 }
 

@@ -233,14 +233,134 @@ import Foundation
             try await startTask.value
             Issue.record("expected start() to throw")
         } catch let error as ACPClientError {
-            if case .rpcError(let code, let msg) = error {
+            if case .rpcError(let code, let msg, let details) = error {
                 #expect(code == -32601)
                 #expect(msg.contains("method not found"))
+                #expect(details == nil)
             } else {
                 Issue.record("expected .rpcError, got \(error)")
             }
         }
         await client.stop()
+    }
+
+    // MARK: - ACP error `data.details` surfacing (t-217da62b)
+    //
+    // Hermes's acp lib wraps unexpected server-side exceptions into
+    // `-32603 Internal error` with the REAL failure text under
+    // `error.data.details` (acp/connection.py:232 in the lib Hermes
+    // 0.17/0.18 ships). Scarf used to show only "ACP error -32603:
+    // Internal error" while the actionable message (e.g. the
+    // context-floor explanation) rode invisibly in `data.details`.
+    // These pin: details lead the user copy when present, generic
+    // copy otherwise, defensive truncation for long payloads.
+
+    @Test @MainActor func rpcErrorDetailsLeadTheUserCopy() async throws {
+        let (client, mock, startTask) = await buildClientWithMock()
+        try await waitFor { await mock.sent.count >= 1 }
+        let id = await mock.lastSentRequestId() ?? 1
+        await mock.reply(with: #"{"jsonrpc":"2.0","id":\#(id),"error":{"code":-32603,"message":"Internal error","data":{"details":"Model context floor exceeded: the configured model has a 4096-token context window."}}}"#)
+
+        do {
+            try await startTask.value
+            Issue.record("expected start() to throw")
+        } catch let error as ACPClientError {
+            guard case .rpcError(let code, let msg, let details) = error else {
+                Issue.record("expected .rpcError, got \(error)")
+                await client.stop()
+                return
+            }
+            // Programmatic identity preserved.
+            #expect(code == -32603)
+            #expect(msg == "Internal error")
+            #expect(details?.contains("context floor") == true)
+            // User copy LEADS with the details, not the generic message.
+            let desc = error.errorDescription ?? ""
+            #expect(desc.hasPrefix("Model context floor exceeded"))
+            #expect(desc.contains("-32603"))
+            #expect(!desc.hasPrefix("ACP error"))
+        }
+        await client.stop()
+    }
+
+    @Test @MainActor func rpcErrorWithoutDetailsKeepsGenericCopy() async throws {
+        let (client, mock, startTask) = await buildClientWithMock()
+        try await waitFor { await mock.sent.count >= 1 }
+        let id = await mock.lastSentRequestId() ?? 1
+        await mock.reply(with: #"{"jsonrpc":"2.0","id":\#(id),"error":{"code":-32603,"message":"Internal error"}}"#)
+
+        do {
+            try await startTask.value
+            Issue.record("expected start() to throw")
+        } catch let error as ACPClientError {
+            #expect(error.errorDescription == "ACP error -32603: Internal error")
+        }
+        await client.stop()
+    }
+
+    @Test func acpErrorDecodesDetailsFromDataDict() throws {
+        let json = #"{"jsonrpc":"2.0","id":7,"error":{"code":-32603,"message":"Internal error","data":{"details":"boom happened"}}}"#
+        let msg = try JSONDecoder().decode(ACPRawMessage.self, from: Data(json.utf8))
+        #expect(msg.error?.details == "boom happened")
+    }
+
+    @Test func acpErrorDecodesDetailsFromPlainStringData() throws {
+        // JSON-RPC allows a primitive `data` value.
+        let json = #"{"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"Auth required","data":"token expired"}}"#
+        let msg = try JSONDecoder().decode(ACPRawMessage.self, from: Data(json.utf8))
+        #expect(msg.error?.details == "token expired")
+    }
+
+    @Test func acpErrorDetailsNilForOtherDataShapes() throws {
+        // `invalid_params` carries {"errors": [...]} — no details field.
+        let json = #"{"jsonrpc":"2.0","id":7,"error":{"code":-32602,"message":"Invalid params","data":{"errors":[{"loc":"cwd"}]}}}"#
+        let msg = try JSONDecoder().decode(ACPRawMessage.self, from: Data(json.utf8))
+        #expect(msg.error?.details == nil)
+
+        // Whitespace-only details → nil (don't lead with blank copy).
+        let blank = #"{"jsonrpc":"2.0","id":8,"error":{"code":-32603,"message":"Internal error","data":{"details":"   \n "}}}"#
+        let blankMsg = try JSONDecoder().decode(ACPRawMessage.self, from: Data(blank.utf8))
+        #expect(blankMsg.error?.details == nil)
+    }
+
+    @Test func detailsLeadCutsAtFirstSentence() {
+        let details = "The provider rejected the request. Full payload: {lots of json}. Retry later."
+        let lead = ACPClientError.detailsLead(fromDetails: details)
+        #expect(lead == "The provider rejected the request.")
+    }
+
+    @Test func detailsLeadSurvivesDecimalsAndVersions() {
+        // ". " requires the space — "0.17" and "1.5x" must not cut.
+        let details = "hermes-agent 0.17 needs 1.5x more context for this model"
+        #expect(ACPClientError.detailsLead(fromDetails: details) == details)
+    }
+
+    @Test func detailsLeadTruncatesLongSingleSentence() {
+        let details = String(repeating: "a", count: 500)
+        let lead = ACPClientError.detailsLead(fromDetails: details) ?? ""
+        #expect(lead.count <= 200)
+        #expect(lead.hasSuffix("…"))
+    }
+
+    @Test func detailsLeadUsesFirstNonEmptyLine() {
+        let details = "\n\nTraceback headline here\n  File \"x.py\", line 1\nValueError: nope"
+        #expect(ACPClientError.detailsLead(fromDetails: details) == "Traceback headline here")
+    }
+
+    @Test func detailsLeadNilForEmptyInput() {
+        #expect(ACPClientError.detailsLead(fromDetails: "") == nil)
+        #expect(ACPClientError.detailsLead(fromDetails: " \n \n") == nil)
+    }
+
+    @Test func rpcErrorLongDetailsTruncatedInUserCopy() {
+        let longDetails = "Context floor exceeded for this model " + String(repeating: "x", count: 400)
+        let err = ACPClientError.rpcError(code: -32603, message: "Internal error", details: longDetails)
+        let desc = err.errorDescription ?? ""
+        #expect(desc.hasPrefix("Context floor exceeded"))
+        #expect(desc.contains("…"))
+        #expect(desc.contains("-32603"))
+        // Lead (≤200) + suffix — nowhere near the raw 400+ chars.
+        #expect(desc.count < 240)
     }
 
     // MARK: - session/load not-restorable detection (issue #99 + t-891c321a)

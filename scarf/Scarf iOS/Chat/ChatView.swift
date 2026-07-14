@@ -2073,12 +2073,17 @@ final class ChatController {
     }
 
     /// 5-attempt exponential-backoff reconnect targeting the same
-    /// session id. Tries `session/resume` first (correct semantics
-    /// for live recovery), falls back to `session/load` for older
-    /// remotes. NEVER `session/new` — that would lose the agent's
-    /// in-context conversation. After a successful reattach, calls
-    /// `vm.reconcileWithDB` so messages the agent wrote during the
-    /// outage become visible.
+    /// session id. Uses `session/load` ONLY (t-217da62b): Hermes's
+    /// `resume_session` restores through the exact same path as
+    /// `load_session` but silently CREATES a fresh server-side session
+    /// when the id isn't restorable — the old resume-then-load ladder
+    /// orphaned one session per attempt (and always fell through to
+    /// load anyway, since it required a top-level `sessionId` the
+    /// resume response never carries). NEVER `session/new` — that
+    /// would lose the agent's in-context conversation. Keep in sync
+    /// with the Mac ladder (ChatViewModel.attemptReconnect). After a
+    /// successful reattach, calls `vm.reconcileWithDB` so messages the
+    /// agent wrote during the outage become visible.
     private func attemptReconnect(sessionId: String) {
         reconnectTask?.cancel()
         reconnectTask = Task { @MainActor [weak self] in
@@ -2115,15 +2120,9 @@ final class ChatController {
                         cwd = await context.resolvedUserHome()
                     }
 
-                    let resolvedSessionId: String
-                    do {
-                        resolvedSessionId = try await client.resumeSession(cwd: cwd, sessionId: sessionId)
-                    } catch {
-                        Self.logger.info(
-                            "session/resume failed, trying session/load: \(error.localizedDescription, privacy: .public)"
-                        )
-                        resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: sessionId)
-                    }
+                    // load-only — see the doc comment above for why
+                    // resume must never come back here.
+                    let resolvedSessionId = try await client.loadSession(cwd: cwd, sessionId: sessionId)
 
                     // Wire up the new client BEFORE merging messages
                     // so any streaming chunks that arrive during the
@@ -2443,15 +2442,12 @@ final class ChatController {
             } else {
                 cwd = await context.resolvedUserHome()
             }
-            // Prefer `session/resume` for true resume semantics
-            // (same session id preserved in state.db); fall back to
-            // `session/load` if the remote doesn't know resume.
-            let resolvedID: String
-            do {
-                resolvedID = try await client.resumeSession(cwd: cwd, sessionId: sessionID)
-            } catch {
-                resolvedID = try await client.loadSession(cwd: cwd, sessionId: sessionID)
-            }
+            // `session/load` only — `session/resume` restores through
+            // the same server path but CREATES an orphan session when
+            // the id isn't restorable (t-217da62b; see
+            // attemptReconnect's doc comment). Load fails detectably
+            // instead, which surfaces the real "session gone" state.
+            let resolvedID = try await client.loadSession(cwd: cwd, sessionId: sessionID)
             vm.setSessionId(resolvedID)
             loadDraft()
             // Pull the transcript out of state.db so the user sees

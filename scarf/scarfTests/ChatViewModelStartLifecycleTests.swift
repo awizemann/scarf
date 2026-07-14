@@ -42,6 +42,14 @@ import ScarfCore
             /// Reject `initialize` with a JSON-RPC error so
             /// `client.start()` throws (the catch-path trigger).
             case failInitialize
+            /// Like `happy`, but `session/load` answers with an EMPTY
+            /// result dict — the wire shape Hermes emits for a
+            /// not-restorable id — so `loadSession` throws. Everything
+            /// else stays happy: a regressed ladder that fell back to
+            /// `session/new` (or re-grew `session/resume`) would
+            /// SUCCEED here and be caught by the sentMethods
+            /// assertions, not masked by a transport error.
+            case loadNotRestorable(sessionId: String)
         }
 
         nonisolated let incoming: AsyncThrowingStream<String, Error>
@@ -89,6 +97,21 @@ import ScarfCore
                 case "session/cancel" where holdCancel:
                     break // hold — a wedged process never acks the cancel
                 default: // initialize, session/cancel, session/set_model, …
+                    reply(["jsonrpc": "2.0", "id": id, "result": [String: Any]()])
+                }
+            case .loadNotRestorable(let sessionId):
+                switch method {
+                case "session/load":
+                    // Hermes 0.17/0.18 wire shape for "session not
+                    // restorable": result is an empty dict.
+                    reply(["jsonrpc": "2.0", "id": id, "result": [String: Any]()])
+                case "session/new", "session/resume":
+                    reply(["jsonrpc": "2.0", "id": id,
+                           "result": ["sessionId": sessionId,
+                                      "modes": ["currentModeId": "default"]]])
+                case "session/prompt":
+                    break
+                default:
                     reply(["jsonrpc": "2.0", "id": id, "result": [String: Any]()])
                 }
             }
@@ -676,5 +699,135 @@ import ScarfCore
             }
         }
         #expect(echoed, "interactive send produced no user bubble — localEchoAlreadyAdded flag regressed")
+    }
+
+    // MARK: - Reconnect ladder is load-only (t-217da62b)
+    //
+    // Hermes's `resume_session` restores through the exact same server
+    // path as `load_session` (SessionManager.update_cwd → get_session,
+    // memory-then-DB; verified in the 0.17 tree and the v2026.7.7.2 /
+    // 0.18.2 tag) but silently CREATES a fresh server-side session when
+    // the id isn't restorable. The old resume-then-load ladder therefore
+    // orphaned one server session per reconnect attempt — while the
+    // resume call itself ALWAYS threw client-side (it required a
+    // top-level `sessionId` the resume response never carries) and fell
+    // through to load. These tests pin the fix: the ladder speaks
+    // `session/load` only, and never emits `session/resume` or
+    // `session/new` — the two RPCs that can create sessions — even when
+    // the target id is dead.
+
+    /// Thread-safe recorder for channels minted by the reconnect
+    /// factory (the factory closure isn't isolated).
+    final class ChannelRecorder: @unchecked Sendable {
+        private var channels: [ScriptedACPChannel] = []
+        private let lock = NSLock()
+        func record(_ ch: ScriptedACPChannel) {
+            lock.lock(); defer { lock.unlock() }
+            channels.append(ch)
+        }
+        var all: [ScriptedACPChannel] {
+            lock.lock(); defer { lock.unlock() }
+            return channels
+        }
+    }
+
+    /// Happy path: connection dies, reconnect reattaches via
+    /// `session/load` alone.
+    @Test @MainActor func reconnectLadderUsesLoadOnly() async throws {
+        let home = try Self.configuredHome()
+        defer { home.cleanup() }
+        let vm = ChatViewModel(context: home.context)
+        let chA = ScriptedACPChannel(behavior: .happy(sessionId: "sess-A"))
+        let reconnects = ChannelRecorder()
+        let calls = CallCounter()
+        vm.acpClientFactory = { ctx, _ in
+            if calls.next() == 1 {
+                return ACPClient(context: ctx) { _ in chA }
+            }
+            let ch = ScriptedACPChannel(behavior: .happy(sessionId: "sess-A"))
+            reconnects.record(ch)
+            return ACPClient(context: ctx) { _ in ch }
+        }
+
+        vm.startNewSession()
+        let ready = await Self.waitUntil {
+            vm.acpStatus == ChatViewModel.ACPPhase.ready
+                && vm.richChatViewModel.sessionId == "sess-A"
+        }
+        #expect(ready)
+
+        // Kill the transport: the event stream ends → handleConnectionDied
+        // → attemptReconnect.
+        await chA.close()
+
+        let reconnected = await Self.waitUntil(timeoutSeconds: 10) {
+            vm.acpStatus == ChatViewModel.ACPPhase.ready
+                && !reconnects.all.isEmpty
+        }
+        #expect(reconnected, "reconnect never completed")
+        #expect(vm.richChatViewModel.sessionId == "sess-A")
+
+        for ch in reconnects.all {
+            let methods = await ch.sentMethods
+            #expect(methods.contains("session/load"),
+                    "reconnect ladder didn't use session/load")
+            #expect(!methods.contains("session/resume"),
+                    "reconnect ladder emitted session/resume — orphan-creating RPC is back")
+            #expect(!methods.contains("session/new"),
+                    "reconnect ladder emitted session/new — conversation context would be lost")
+        }
+    }
+
+    /// The orphan pin: reconnecting against a DEAD session id (Hermes
+    /// answers `session/load` with the not-restorable empty dict) must
+    /// keep retrying load — never `session/resume` (which would CREATE
+    /// one server-side orphan per attempt) and never `session/new`.
+    @Test @MainActor func reconnectAgainstDeadIdNeverCreatesSessions() async throws {
+        let home = try Self.configuredHome()
+        defer { home.cleanup() }
+        let vm = ChatViewModel(context: home.context)
+        let chA = ScriptedACPChannel(behavior: .happy(sessionId: "sess-dead"))
+        let reconnects = ChannelRecorder()
+        let calls = CallCounter()
+        vm.acpClientFactory = { ctx, _ in
+            if calls.next() == 1 {
+                return ACPClient(context: ctx) { _ in chA }
+            }
+            let ch = ScriptedACPChannel(behavior: .loadNotRestorable(sessionId: "sess-orphan"))
+            reconnects.record(ch)
+            return ACPClient(context: ctx) { _ in ch }
+        }
+
+        vm.startNewSession()
+        let ready = await Self.waitUntil {
+            vm.acpStatus == ChatViewModel.ACPPhase.ready
+                && vm.richChatViewModel.sessionId == "sess-dead"
+        }
+        #expect(ready)
+
+        await chA.close()
+
+        // Wait for at least two failed attempts so the assertion also
+        // covers the retry iterations (attempt 2 lands after a ~2s
+        // backoff), then stop the ladder — 5 full attempts with
+        // exponential backoff would make the test needlessly slow.
+        let twoAttempts = await Self.waitUntil(timeoutSeconds: 15) {
+            var loads = 0
+            for ch in reconnects.all {
+                if await ch.sentMethods.contains("session/load") { loads += 1 }
+            }
+            return loads >= 2
+        }
+        #expect(twoAttempts, "expected at least two reconnect attempts against the dead id")
+
+        vm.stopACP()
+
+        for ch in reconnects.all {
+            let methods = await ch.sentMethods
+            #expect(!methods.contains("session/resume"),
+                    "dead-id reconnect emitted session/resume — each such call orphans a server-side session")
+            #expect(!methods.contains("session/new"),
+                    "dead-id reconnect emitted session/new — ladder must never mint sessions")
+        }
     }
 }

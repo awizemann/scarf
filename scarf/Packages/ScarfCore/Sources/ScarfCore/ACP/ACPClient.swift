@@ -348,26 +348,23 @@ public actor ACPClient {
         return loadedId
     }
 
-    public func resumeSession(cwd: String, sessionId: String) async throws -> String {
-        statusMessage = "Resuming session..."
-        let params: [String: AnyCodable] = [
-            "cwd": AnyCodable(cwd),
-            "sessionId": AnyCodable(sessionId),
-            "mcpServers": AnyCodable([Any]()),
-        ]
-        let result = try await sendRequest(method: "session/resume", params: params)
-        guard let dict = result?.dictValue,
-              let resumedId = dict["sessionId"] as? String
-        else {
-            throw ACPClientError.invalidResponse("Missing sessionId in session/resume response")
-        }
-        currentSessionId = resumedId
-        statusMessage = "Session resumed"
-        #if canImport(os)
-        logger.info("Resumed ACP session: \(resumedId)")
-        #endif
-        return resumedId
-    }
+    // NOTE: There is deliberately NO `session/resume` wrapper here
+    // (t-217da62b). Hermes's `resume_session` shares the exact same
+    // restore path as `load_session` (`SessionManager.update_cwd` →
+    // `get_session`, memory-then-DB — verified in the 0.17 working
+    // tree and the v2026.7.7.2 / 0.18.2 tag of acp_adapter/server.py),
+    // so resume adds no capability over load. Its ONLY behavioral
+    // difference is harmful: on an unknown id it silently CREATES a
+    // fresh server-side session (orphan) and returns a response whose
+    // top level is indistinguishable from success — the real id hides
+    // in best-effort `_meta.hermes.sessionProvenance`, which can be
+    // absent. `session/load` instead fails detectably (`{}` result,
+    // caught above), which is the semantics a reconnect ladder needs.
+    // The old `resumeSession` was also dead code in practice: it
+    // required a top-level `sessionId` the ACP schema's
+    // `ResumeSessionResponse` never carries, so it always threw and
+    // fell through to `loadSession` — orphaning one server session per
+    // attempt along the way. Don't re-add it.
 
     // MARK: - Messaging
 
@@ -713,10 +710,21 @@ public actor ACPClient {
                let continuation = pendingRequests.removeValue(forKey: requestId) {
                 if let error = message.error {
                     #if canImport(os)
-                    logger.error("ACP RPC error (id: \(requestId)): \(error.message)")
+                    // Log the FULL details payload — the user-facing
+                    // string truncates it defensively, so the Logger
+                    // line is where the whole story lives.
+                    if let details = error.details {
+                        logger.error("ACP RPC error (id: \(requestId)): \(error.message) — details: \(details, privacy: .public)")
+                    } else {
+                        logger.error("ACP RPC error (id: \(requestId)): \(error.message)")
+                    }
                     #endif
                     statusMessage = "Error: \(error.message)"
-                    continuation.resume(throwing: ACPClientError.rpcError(code: error.code, message: error.message))
+                    continuation.resume(throwing: ACPClientError.rpcError(
+                        code: error.code,
+                        message: error.message,
+                        details: error.details
+                    ))
                 } else {
                     #if canImport(os)
                     logger.debug("ACP response (id: \(requestId))")
@@ -795,7 +803,13 @@ public enum ACPClientError: Error, LocalizedError {
     case notConnected
     case encodingFailed
     case invalidResponse(String)
-    case rpcError(code: Int, message: String)
+    /// `details` is the server's real failure text when the JSON-RPC
+    /// error carried one (Hermes's acp lib wraps unexpected exceptions
+    /// into `-32603 Internal error` with the actual exception string in
+    /// `error.data.details` — the generic `message` alone is useless to
+    /// the user). Lead copy when present; `code`/`message` stay for
+    /// programmatic paths.
+    case rpcError(code: Int, message: String, details: String? = nil)
     case processTerminated(exitCode: Int32?, stderrTail: String)
     case requestTimeout(method: String)
 
@@ -804,7 +818,17 @@ public enum ACPClientError: Error, LocalizedError {
         case .notConnected: return "ACP client is not connected"
         case .encodingFailed: return "Failed to encode JSON-RPC request"
         case .invalidResponse(let msg): return "Invalid ACP response: \(msg)"
-        case .rpcError(let code, let msg): return "ACP error \(code): \(msg)"
+        case .rpcError(let code, let msg, let details):
+            // The wrapped server-side details are the real story
+            // ("Model context floor exceeded …"), the generic message
+            // ("Internal error") is noise — lead with the details and
+            // demote the code to a suffix. Details can be arbitrarily
+            // long (tracebacks); truncate defensively — the full text
+            // was already logged by ACPClient at throw time.
+            if let details, let lead = Self.detailsLead(fromDetails: details) {
+                return "\(lead) (ACP error \(code))"
+            }
+            return "ACP error \(code): \(msg)"
         case .processTerminated(let exit, let tail):
             let exitPart = exit.map { "exit \($0)" } ?? "no exit code"
             let tailPart = Self.summaryLine(fromStderrTail: tail).map { " — \($0)" } ?? ""
@@ -848,6 +872,39 @@ public enum ACPClientError: Error, LocalizedError {
                 && !lower.contains("[notice]")
         }
         return signal.last
+    }
+
+    /// Compress a server-side `error.data.details` payload into a lead
+    /// line short enough for the chat banner / toast: first line, cut
+    /// at the first sentence boundary, hard-capped at ~200 chars with
+    /// an ellipsis. Returns `nil` for empty/whitespace details so the
+    /// caller falls back to the generic `code: message` copy. The FULL
+    /// details were already written to the os Logger by `ACPClient`
+    /// when the error frame arrived.
+    ///
+    /// `internal` so the test suite can pin the truncation behavior
+    /// directly.
+    static func detailsLead(fromDetails details: String, maxLength: Int = 200) -> String? {
+        // First non-empty line — multi-line details are usually a
+        // traceback or a wrapped JSON blob; the first line carries the
+        // headline.
+        guard let firstLine = details
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map({ $0.trimmingCharacters(in: .whitespaces) })
+            .first(where: { !$0.isEmpty })
+        else { return nil }
+
+        // Cut at the first sentence boundary (". " requires the space,
+        // so decimals and version strings like "0.17" survive).
+        var lead = firstLine
+        if let dot = firstLine.range(of: ". ") {
+            lead = String(firstLine[..<dot.upperBound]).trimmingCharacters(in: .whitespaces)
+        }
+
+        if lead.count > maxLength {
+            lead = String(lead.prefix(maxLength - 1)).trimmingCharacters(in: .whitespaces) + "…"
+        }
+        return lead
     }
 }
 
