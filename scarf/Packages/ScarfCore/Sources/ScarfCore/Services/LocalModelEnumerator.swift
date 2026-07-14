@@ -349,7 +349,15 @@ public enum LocalModelEnumerator {
     /// never mirrors. The picker's batched enumeration is the wrong seam:
     /// the heads-up fires whenever an image is attached, with no picker
     /// open, so this issues a SINGLE `POST /api/show` for just the active
-    /// model and memoizes the answer per (show-endpoint, model).
+    /// model and memoizes the answer per (server, show-endpoint, model).
+    ///
+    /// The cache key includes `transport.contextID`: every remote host
+    /// probes its OWN loopback, so the show-endpoint string
+    /// (`http://127.0.0.1:11434/api/show`) is IDENTICAL across servers —
+    /// keying on the endpoint alone would let host A's verdict for a tag
+    /// leak onto host B's same-named-but-different tag. `contextID` is
+    /// stable per `ServerContext` (so the memoization still holds for one
+    /// server) and distinct across hosts (so verdicts never cross-pollute).
     ///
     /// Only confident verdicts (`.yes`/`.no`) are cached: a `.unknown` from
     /// a momentarily-down daemon must re-probe once the daemon is back,
@@ -374,7 +382,7 @@ public enum LocalModelEnumerator {
         ), tagsEndpoint.hasSuffix("/api/tags") else { return .unknown }
         let showEndpoint = String(tagsEndpoint.dropLast("/api/tags".count)) + "/api/show"
 
-        let cacheKey = "\(showEndpoint)|\(model)"
+        let cacheKey = "\(transport.contextID.uuidString)|\(showEndpoint)|\(model)"
         visionCacheLock.lock()
         let cached = visionCache[cacheKey]
         visionCacheLock.unlock()
@@ -413,7 +421,7 @@ public enum LocalModelEnumerator {
         return capability
     }
 
-    /// Memoized single-model vision verdicts, keyed (show-endpoint, model).
+    /// Memoized single-model vision verdicts, keyed (contextID, show-endpoint, model).
     /// `nonisolated(unsafe)` + lock matches the `ModelCatalogService`
     /// vision-cache pattern under the package's Swift 5 language mode.
     private static let visionCacheLock = NSLock()

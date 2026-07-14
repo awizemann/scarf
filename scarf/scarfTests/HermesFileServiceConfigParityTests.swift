@@ -389,6 +389,46 @@ struct SettingsWriteReadParityTests {
             """)
     }
 
+    /// Guards the SCAN itself against a silent evasion: every `setSetting(`
+    /// call site in the source must be a string-literal first argument the
+    /// regex actually captured. A writer added as `setSetting(\n  "key", …)`
+    /// (newline after the paren) or `setSetting(someConstant, …)` (non-literal
+    /// key) would otherwise slip past `setSetting\("` entirely — no static and
+    /// no interpolated match — leaving its key unchecked while the ≥100 sanity
+    /// count still passes. Counting call sites and matched literals closes that
+    /// hole: any unmatched call site fails here.
+    @Test func everySetSettingCallSiteIsAScannedLiteral() throws {
+        // Strip `//`-comment tails so prose mentioning `setSetting(` (like
+        // this very method's doc comment) never inflates the call-site count
+        // — only real code occurrences count.
+        let source = try Self.readSource()
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { line -> String in
+                guard let r = line.range(of: "//") else { return String(line) }
+                return String(line[line.startIndex..<r.lowerBound])
+            }
+            .joined(separator: "\n")
+        let ns = source as NSString
+        // All `setSetting(` textual occurrences, minus the func declaration
+        // (`func setSetting(`). What remains are call sites.
+        let allCalls = try NSRegularExpression(pattern: #"setSetting\("#)
+            .numberOfMatches(in: source, range: NSRange(location: 0, length: ns.length))
+        let declarations = try NSRegularExpression(pattern: #"func\s+setSetting\("#)
+            .numberOfMatches(in: source, range: NSRange(location: 0, length: ns.length))
+        let callSites = allCalls - declarations
+
+        let (staticKeys, interpolated) = try Self.setSettingLiterals(in: source)
+        let matched = staticKeys.count + interpolated.count
+
+        #expect(callSites == matched, """
+            \(callSites - matched) setSetting call site(s) were NOT captured as a \
+            string literal by the parity scan (call sites: \(callSites), matched \
+            literals: \(matched)). A key written via a non-literal first argument \
+            or a newline after `setSetting(` evades the write/read gate. Make the \
+            first argument a same-line string literal, or extend the scan.
+            """)
+    }
+
     /// Proves the detector actually fails a written-but-unread key: a
     /// fabricated key Hermes/ScarfCore never reads must be reported unread.
     /// This is the negative control for `everyWrittenSettingKeyIsReadable…`.

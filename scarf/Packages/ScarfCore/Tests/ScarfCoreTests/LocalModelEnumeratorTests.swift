@@ -702,11 +702,15 @@ import Foundation
     }
 
     @Test func singleVisionProbeReturnsConfidentVerdictHitsShowAndCaches() throws {
+        // One server, probed twice: both transports carry the SAME
+        // contextID so the second call models a re-probe of the same host
+        // (the cache key is per-server — see the cross-host test below).
+        let sameServer = ServerID()
         let transport = RecordingTransport(result: ProcessResult(
             exitCode: 0,
             stdout: Data(#"{"capabilities":["completion","vision"]}"#.utf8),
             stderr: Data()
-        ))
+        ), contextID: sameServer)
         let cap = LocalModelEnumerator.ollamaVisionCapability(
             modelID: "vprobe-yes:1b",
             baseURL: "http://127.0.0.1:11434/v1",  // /v1 must be stripped for /api/show
@@ -721,8 +725,12 @@ import Foundation
         // Single probe: no batching, no -f (an HTTP error must parse to a body).
         #expect(!call.args.contains("--next"))
         #expect(!call.args.contains("-f"))
-        // Confident answers memoize — a second call must NOT touch transport.
-        let poisoned = RecordingTransport(error: TransportError.other(message: "must not be called"))
+        // Confident answers memoize — a second call to the SAME server must
+        // NOT touch transport.
+        let poisoned = RecordingTransport(
+            error: TransportError.other(message: "must not be called"),
+            contextID: sameServer
+        )
         let cached = LocalModelEnumerator.ollamaVisionCapability(
             modelID: "vprobe-yes:1b",
             baseURL: "http://127.0.0.1:11434/v1",
@@ -731,6 +739,39 @@ import Foundation
         )
         #expect(cached == .yes)
         #expect(poisoned.calls.isEmpty)
+    }
+
+    @Test func singleVisionProbeCacheIsPerServerNotSharedAcrossHosts() throws {
+        // Multi-server correctness: two DIFFERENT Hermes hosts each probe
+        // their OWN loopback, so the show-endpoint string is byte-identical
+        // (`http://127.0.0.1:11434/api/show`). A user may serve a same-named
+        // tag with different capabilities on each host, so host A's verdict
+        // must NEVER be served from cache for host B. The cache key includes
+        // the transport's contextID to guarantee that.
+        let hostA = ServerID()
+        let hostB = ServerID()
+        let visionOnA = RecordingTransport(result: ProcessResult(
+            exitCode: 0,
+            stdout: Data(#"{"capabilities":["completion","vision"]}"#.utf8),
+            stderr: Data()
+        ), contextID: hostA)
+        let a = LocalModelEnumerator.ollamaVisionCapability(
+            modelID: "shared-tag:latest", baseURL: "http://127.0.0.1:11434/v1",
+            descriptorDefault: nil, transport: visionOnA
+        )
+        #expect(a == .yes)
+        // Same loopback endpoint + same model tag, DIFFERENT host, text-only.
+        let textOnB = RecordingTransport(result: ProcessResult(
+            exitCode: 0,
+            stdout: Data(#"{"capabilities":["completion","tools"]}"#.utf8),
+            stderr: Data()
+        ), contextID: hostB)
+        let b = LocalModelEnumerator.ollamaVisionCapability(
+            modelID: "shared-tag:latest", baseURL: "http://127.0.0.1:11434/v1",
+            descriptorDefault: nil, transport: textOnB
+        )
+        #expect(b == .no)                  // NOT hostA's cached .yes
+        #expect(textOnB.calls.count == 1)  // hostB was actually probed, not served from cache
     }
 
     @Test func singleVisionProbeConfidentNoForTextOnlyLocalModel() {
@@ -854,23 +895,24 @@ private final class RecordingTransport: ServerTransport, @unchecked Sendable {
         let timeout: TimeInterval?
     }
 
-    let contextID: ServerID = UUID()
+    let contextID: ServerID
     let isRemote: Bool
     private let script: [Result<ProcessResult, Error>]
     private(set) var calls: [Call] = []
 
-    init(results: [Result<ProcessResult, Error>], isRemote: Bool = true) {
+    init(results: [Result<ProcessResult, Error>], isRemote: Bool = true, contextID: ServerID = UUID()) {
         precondition(!results.isEmpty)
         self.script = results
         self.isRemote = isRemote
+        self.contextID = contextID
     }
 
-    convenience init(result: ProcessResult, isRemote: Bool = true) {
-        self.init(results: [.success(result)], isRemote: isRemote)
+    convenience init(result: ProcessResult, isRemote: Bool = true, contextID: ServerID = UUID()) {
+        self.init(results: [.success(result)], isRemote: isRemote, contextID: contextID)
     }
 
-    convenience init(error: Error, isRemote: Bool = true) {
-        self.init(results: [.failure(error)], isRemote: isRemote)
+    convenience init(error: Error, isRemote: Bool = true, contextID: ServerID = UUID()) {
+        self.init(results: [.failure(error)], isRemote: isRemote, contextID: contextID)
     }
 
     func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
