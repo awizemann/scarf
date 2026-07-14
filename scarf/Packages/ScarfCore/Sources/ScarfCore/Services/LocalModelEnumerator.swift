@@ -18,11 +18,64 @@ public struct LocalModelInfo: Sendable, Identifiable, Hashable {
     /// them ("8B · Q4_K_M · 4.6 GB"). Nil when the endpoint has nothing
     /// beyond the id (the OpenAI `/v1/models` shape).
     public let detail: String?
+    /// Model's context window in tokens, where the server reports one.
+    /// Ollama: the `<arch>.context_length` GGUF metadata from
+    /// `POST /api/show` (the model's REAL serving ceiling — Ollama loads
+    /// at this value, and Hermes's runtime check measures it). OpenAI
+    /// `/v1/models` carries no context metadata → nil, never a fake
+    /// number. Nil means UNKNOWN, not unlimited — the picker renders
+    /// "context unknown" and stays permissive.
+    public let contextLength: Int?
 
-    public init(modelID: String, name: String, detail: String? = nil) {
+    public init(modelID: String, name: String, detail: String? = nil, contextLength: Int? = nil) {
         self.modelID = modelID
         self.name = name
         self.detail = detail
+        self.contextLength = contextLength
+    }
+}
+
+/// Pure Hermes context-window floor gate for the picker's Local section.
+///
+/// Hermes hard-requires `MINIMUM_CONTEXT_LENGTH = 64_000` tokens
+/// (agent/model_metadata.py:185, v0.17.0) — enforced at session/new AND
+/// session/set_model (both reject with ACP -32603), and AGAIN at runtime
+/// against what the server actually loaded (`ollama_runtime_context_too_
+/// small`, agent/conversation_loop.py:927-933). Dogfood round 2 proved
+/// the `model.context_length` override is a TRAP for models whose real
+/// GGUF ceiling is below the floor: preflight passes, the runtime check
+/// halts the turn instead of answering. So a model with a KNOWN context
+/// below the floor is effectively unusable — the picker must block it,
+/// not warn.
+public enum LocalModelContextGate {
+    /// Hermes's hard minimum (model_metadata.py MINIMUM_CONTEXT_LENGTH).
+    public static let hermesMinimumContextTokens = 64_000
+
+    /// Picker verdict for one model's (possibly unknown) context window.
+    public enum Verdict: Sendable, Equatable {
+        /// Known context at or above the floor — selectable.
+        case allowed
+        /// Known context below the floor — blocked (the override path is
+        /// a runtime trap, see the type comment).
+        case blocked
+        /// No context metadata — selectable; Hermes's own preflight is
+        /// the backstop. Blocking on ignorance would strand every
+        /// OpenAI-compatible endpoint (their listing has no context).
+        case unknown
+    }
+
+    public static func verdict(contextLength: Int?) -> Verdict {
+        guard let ctx = contextLength, ctx > 0 else { return .unknown }
+        return ctx >= hermesMinimumContextTokens ? .allowed : .blocked
+    }
+
+    /// Compact token count for row subtitles — same convention as the
+    /// remote catalog's `HermesModelInfo.contextDisplay` (decimal
+    /// thousands: 32768 → "32K", 131072 → "131K", 1_000_000 → "1M").
+    public static func compactTokens(_ tokens: Int) -> String {
+        if tokens >= 1_000_000 { return "\(tokens / 1_000_000)M" }
+        if tokens >= 1_000 { return "\(tokens / 1_000)K" }
+        return "\(tokens)"
     }
 }
 
@@ -163,14 +216,194 @@ public enum LocalModelEnumerator {
         case .openAIModels: parsed = parseOpenAIModels(result.stdout)
         case .none: return .notEnumerable // unreachable; guarded above
         }
-        guard let models = parsed else {
+        guard var models = parsed else {
             let head = String(result.stdoutString.prefix(200))
             #if canImport(os)
             logger.info("probe parse failure for \(descriptor.providerID, privacy: .public)")
             #endif
             return .parseFailure(detail: head)
         }
+        // Ollama can report each model's REAL context window (its GGUF
+        // metadata ceiling) via /api/show — one extra batched probe so
+        // the picker can gate the Hermes 64K floor before selection.
+        // OpenAI-compatible listings carry no context metadata: those
+        // models keep contextLength nil (unknown), never a fake number.
+        if descriptor.enumerationHint == .ollamaTags, !models.isEmpty {
+            let contexts = fetchOllamaContexts(
+                modelNames: models.map(\.modelID),
+                probedTagsEndpoint: endpoint,
+                transport: transport
+            )
+            if !contexts.isEmpty {
+                models = models.map {
+                    LocalModelInfo(
+                        modelID: $0.modelID,
+                        name: $0.name,
+                        detail: $0.detail,
+                        contextLength: contexts[$0.modelID]
+                    )
+                }
+            }
+        }
         return models.isEmpty ? .reachableEmpty : .models(models)
+    }
+
+    // MARK: - Ollama context windows (batched /api/show)
+
+    /// One `POST /api/show {"model":"<name>"}` per model, but batched
+    /// into a SINGLE curl process (curl's `--next` per-URL option
+    /// segments) → a single transport invocation. **Why batch, why this
+    /// shape:** each transport call is a full round-trip (SSH connection
+    /// reuse notwithstanding), so per-row lazy fetches would make the
+    /// picker's gate verdicts pop in one by one; and unlike an `sh -c`
+    /// loop, `--next` keeps every model name a plain argv element — no
+    /// shell command string is ever built from daemon-supplied data, the
+    /// exact same discipline the tags probe pins (`urlTravelsAsItsOwn
+    /// ArgvElement`). Defense in depth on top: names that fail
+    /// `validatedOllamaModelName`'s character allowlist are simply not
+    /// probed (context stays nil → "context unknown", still listed).
+    ///
+    /// Response correlation uses an ASCII Record Separator (0x1E) written
+    /// after EVERY transfer (`-w`, emitted for failed transfers too —
+    /// verified live, and `-f` is deliberately absent so an HTTP error
+    /// yields a JSON error body + separator instead of aborting): 0x1E
+    /// cannot appear in valid JSON output (control chars must be escaped)
+    /// nor in an allowlisted model name echoed back in an error message,
+    /// so segment count == probe count or the whole batch is discarded —
+    /// contexts degrade to unknown, never misattribute.
+    ///
+    /// Best-effort by design: ANY failure (transport error, segment
+    /// mismatch, malformed JSON) returns partial/empty contexts and the
+    /// listing itself is untouched.
+    static func fetchOllamaContexts(
+        modelNames: [String],
+        probedTagsEndpoint: String,
+        transport: any ServerTransport
+    ) -> [String: Int] {
+        // /api/tags → /api/show on the same validated base.
+        guard probedTagsEndpoint.hasSuffix("/api/tags") else { return [:] }
+        let showEndpoint = String(probedTagsEndpoint.dropLast("/api/tags".count)) + "/api/show"
+        guard let batch = showBatchArguments(showEndpoint: showEndpoint, modelNames: modelNames) else {
+            return [:]
+        }
+        let result: ProcessResult
+        do {
+            result = try transport.runProcess(
+                executable: curlExecutable(isRemote: transport.isRemote),
+                args: batch.args,
+                stdin: nil,
+                // The batch is N sequential same-host transfers, each
+                // under curl's own --max-time; pad the transport budget
+                // accordingly (a hung daemon still can't exceed it).
+                timeout: min(30, transportTimeoutSeconds + TimeInterval(batch.probedNames.count))
+            )
+        } catch {
+            #if canImport(os)
+            logger.info("context batch transport error: \(String(describing: error), privacy: .public)")
+            #endif
+            return [:]
+        }
+        // Exit code deliberately ignored: without -f a mid-batch network
+        // death still leaves N' well-formed segments — the count guard
+        // in parseShowBatch decides whether they're trustworthy.
+        return parseShowBatch(result.stdout, probedNames: batch.probedNames)
+    }
+
+    /// ASCII Record Separator — the per-transfer `-w` marker. Cannot
+    /// occur in valid JSON output (control characters must be escaped in
+    /// JSON strings) or in an allowlisted model name, so splitting on it
+    /// is injection-proof.
+    static let showRecordSeparator: UInt8 = 0x1E
+
+    /// Pure argv builder for the batched /api/show probe. Returns nil
+    /// when no model name survives the allowlist. `probedNames` is the
+    /// allowlist-surviving subset IN ORDER — the correlation key for
+    /// `parseShowBatch`.
+    ///
+    /// Every flag is repeated per `--next` segment: curl resets
+    /// non-global options at each --next boundary, and repeating the
+    /// global ones (`-s`) is harmless.
+    static func showBatchArguments(
+        showEndpoint: String,
+        modelNames: [String]
+    ) -> (args: [String], probedNames: [String])? {
+        let names = modelNames.filter(validatedOllamaModelName)
+        guard !names.isEmpty else { return nil }
+        var args: [String] = []
+        for (i, name) in names.enumerated() {
+            if i > 0 { args.append("--next") }
+            args += [
+                "-sS",
+                "--max-time", "\(curlMaxTimeSeconds)",
+                // The allowlist guarantees the name needs no JSON
+                // escaping (no quotes/backslashes/control chars), so the
+                // interpolation below is exact.
+                "-d", "{\"model\":\"\(name)\"}",
+                "-w", String(UnicodeScalar(showRecordSeparator)),
+                showEndpoint,
+            ]
+        }
+        return (args, names)
+    }
+
+    /// Character allowlist for an Ollama model name that will travel
+    /// toward a transport (same discipline as `validatedBaseURL`).
+    /// Covers every legal Ollama reference shape — `llama3.1:8b`,
+    /// `hf.co/user/repo:Q4_K_M`, digest pins (`name@sha256:…`) — and
+    /// nothing any shell or JSON encoder treats as active. Names come
+    /// from the daemon's own /api/tags response but are treated as
+    /// untrusted anyway; a failing name is skipped, not sanitized.
+    static func validatedOllamaModelName(_ name: String) -> Bool {
+        guard !name.isEmpty, name.count <= 256 else { return false }
+        let allowed = CharacterSet(charactersIn:
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-_:/@")
+        return name.unicodeScalars.allSatisfy { allowed.contains($0) }
+    }
+
+    /// Split the batch output on the record separator and pair segments
+    /// with `probedNames` positionally. A count mismatch (mid-batch
+    /// abort, or a hostile injection attempt inflating the count)
+    /// discards the WHOLE batch — degrading to unknown is always safe,
+    /// misattributing a context to the wrong model never is.
+    static func parseShowBatch(_ data: Data, probedNames: [String]) -> [String: Int] {
+        var segments = data.split(separator: showRecordSeparator, omittingEmptySubsequences: false)
+        // The final separator leaves one trailing empty segment.
+        if segments.last?.isEmpty == true { segments.removeLast() }
+        guard segments.count == probedNames.count else { return [:] }
+        var contexts: [String: Int] = [:]
+        for (segment, name) in zip(segments, probedNames) {
+            if let ctx = parseOllamaShowContext(Data(segment)) {
+                contexts[name] = ctx
+            }
+        }
+        return contexts
+    }
+
+    /// Extract the context window from one `POST /api/show` response:
+    /// `model_info` carries a `<arch>.context_length` key
+    /// (`{"general.architecture":"qwen2", "qwen2.context_length":32768}`
+    /// — verified live against Ollama). Prefer the key named by
+    /// `general.architecture`; fall back to the first (sorted) key with
+    /// the `.context_length` suffix so unknown/future architectures
+    /// still resolve. Nil for anything else — error bodies
+    /// (`{"error":"model not found"}`), missing model_info, non-numeric
+    /// or non-positive values.
+    static func parseOllamaShowContext(_ data: Data) -> Int? {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let info = root["model_info"] as? [String: Any] else { return nil }
+        func positiveInt(_ value: Any?) -> Int? {
+            guard let n = value as? NSNumber, !(n is Bool) else { return nil }
+            let ctx = n.intValue
+            return ctx > 0 ? ctx : nil
+        }
+        if let arch = info["general.architecture"] as? String,
+           let ctx = positiveInt(info["\(arch).context_length"]) {
+            return ctx
+        }
+        for key in info.keys.sorted() where key.hasSuffix(".context_length") {
+            if let ctx = positiveInt(info[key]) { return ctx }
+        }
+        return nil
     }
 
     // MARK: - URL resolution (pure)

@@ -34,6 +34,7 @@ import Foundation
         #expect(ops == [
             .clear(key: "model.api_key"),
             .clear(key: "model.api_mode"),
+            .clear(key: "model.context_length"),
             .set(key: "model.base_url", value: "http://127.0.0.1:11434/v1"),
             .set(key: "model.default", value: "llama3:8b"),
             .set(key: "model.provider", value: "ollama"),
@@ -59,6 +60,7 @@ import Foundation
         #expect(ops == [
             .clear(key: "model.api_key"),
             .clear(key: "model.api_mode"),
+            .clear(key: "model.context_length"),
             .set(key: "model.base_url", value: "http://127.0.0.1:1234/v1"),
             .set(key: "model.default", value: "qwen2.5-coder-14b"),
             .set(key: "model.provider", value: "lmstudio"),
@@ -76,6 +78,7 @@ import Foundation
             .clear(key: "model.base_url"),
             .clear(key: "model.api_key"),
             .clear(key: "model.api_mode"),
+            .clear(key: "model.context_length"),
             .set(key: "model.default", value: "meta-llama/Llama-3-8B"),
             .set(key: "model.provider", value: "vllm"),
         ])
@@ -89,7 +92,11 @@ import Foundation
             apiKey: "sk-local-123",
             apiMode: "anthropic_messages"
         ))
+        // model.context_length is clear-ONLY: no selection ever writes
+        // it (the picker offers no override — it's a runtime trap), so
+        // even the everything-supplied custom save scrubs it.
         #expect(ops == [
+            .clear(key: "model.context_length"),
             .set(key: "model.base_url", value: "http://10.0.0.5:8000/v1"),
             .set(key: "model.api_key", value: "sk-local-123"),
             .set(key: "model.api_mode", value: "anthropic_messages"),
@@ -111,6 +118,7 @@ import Foundation
         #expect(ops == [
             .clear(key: "model.api_key"),
             .clear(key: "model.api_mode"),
+            .clear(key: "model.context_length"),
             .set(key: "model.base_url", value: "http://127.0.0.1:8000/v1"),
             .set(key: "model.default", value: "my-model"),
             .set(key: "model.provider", value: "custom"),
@@ -210,6 +218,7 @@ import Foundation
             .clear(key: "model.base_url"),
             .clear(key: "model.api_key"),
             .clear(key: "model.api_mode"),
+            .clear(key: "model.context_length"),
         ])
     }
 
@@ -221,10 +230,11 @@ import Foundation
             provider: "openai",
             currentProvider: "anthropic"
         )
-        #expect(Array(ops.suffix(3)) == [
+        #expect(Array(ops.suffix(4)) == [
             .clear(key: "model.base_url"),
             .clear(key: "model.api_key"),
             .clear(key: "model.api_mode"),
+            .clear(key: "model.context_length"),
         ])
     }
 
@@ -238,7 +248,8 @@ import Foundation
             currentProvider: "anthropic",
             currentBaseURL: "",
             currentAPIKey: "",
-            currentAPIMode: ""
+            currentAPIMode: "",
+            currentContextLength: ""
         )
         #expect(ops == [
             .set(key: "model.provider", value: "openai"),
@@ -255,7 +266,8 @@ import Foundation
             currentProvider: "ollama",
             currentBaseURL: "http://127.0.0.1:11434/v1",
             currentAPIKey: "",
-            currentAPIMode: ""
+            currentAPIMode: "",
+            currentContextLength: ""
         )
         #expect(ops == [
             .set(key: "model.provider", value: "anthropic"),
@@ -273,9 +285,76 @@ import Foundation
             currentProvider: "anthropic",
             currentBaseURL: nil,
             currentAPIKey: nil,
-            currentAPIMode: nil
+            currentAPIMode: nil,
+            currentContextLength: nil
         )
-        #expect(ops.filter { if case .clear = $0 { return true } else { return false } }.count == 3)
+        #expect(ops.filter { if case .clear = $0 { return true } else { return false } }.count == 4)
+    }
+
+    // MARK: - model.context_length (the clear-only fourth key)
+
+    @Test func staleContextLengthOverrideIsClearedOnSwitch() {
+        // Dogfood round 2's trap: a CLI-set model.context_length
+        // surviving a provider switch masks Hermes's context preflight
+        // for the next model (which then halts mid-turn instead).
+        let ops = LocalModelConfigPlan.operations(
+            selectingRemoteModel: "claude-opus-4-6",
+            provider: "anthropic",
+            currentProvider: "ollama",
+            currentBaseURL: "", currentAPIKey: "", currentAPIMode: "",
+            currentContextLength: "131072"
+        )
+        #expect(ops == [
+            .set(key: "model.provider", value: "anthropic"),
+            .set(key: "model.default", value: "claude-opus-4-6"),
+            .clear(key: "model.context_length"),
+        ])
+    }
+
+    @Test func nonPositiveContextLengthReadsAsAlreadyUnset() {
+        // "0" is this plan's own unset value and the reader ignores any
+        // non-positive int (model_metadata.py `> 0` gate) — re-clearing
+        // would churn one op per switch forever.
+        for known in ["0", "-1", " 0 "] {
+            let ops = LocalModelConfigPlan.operations(
+                selectingRemoteModel: "gpt-5",
+                provider: "openai",
+                currentProvider: "anthropic",
+                currentBaseURL: "", currentAPIKey: "", currentAPIMode: "",
+                currentContextLength: known
+            )
+            #expect(!ops.contains(.clear(key: "model.context_length")),
+                    "re-cleared an already-unset context_length: \(known)")
+        }
+    }
+
+    @Test func garbageContextLengthIsClearedToSilenceTheStartupWarning() {
+        // A non-integer value ("256K") is ignored by the reader but
+        // WARNS on every Hermes startup — the switch scrubs it to the
+        // silent 0.
+        let ops = LocalModelConfigPlan.operations(
+            selectingRemoteModel: "gpt-5",
+            provider: "openai",
+            currentProvider: "anthropic",
+            currentBaseURL: "", currentAPIKey: "", currentAPIMode: "",
+            currentContextLength: "256K"
+        )
+        #expect(ops.contains(.clear(key: "model.context_length")))
+    }
+
+    @Test func everyLocalPlanClearsAndNeverWritesContextLength() {
+        for descriptor in LocalModelProvider.all {
+            let ops = LocalModelConfigPlan.operations(selecting: LocalModelSelection(
+                providerID: descriptor.providerID,
+                modelID: "m",
+                baseURL: descriptor.defaultBaseURL ?? "http://127.0.0.1:9999/v1",
+                apiKey: "k", apiMode: "chat_completions"
+            ))
+            #expect(ops.contains(.clear(key: "model.context_length")),
+                    "\(descriptor.providerID) plan must scrub model.context_length")
+            #expect(!ops.contains { if case .set(key: "model.context_length", value: _) = $0 { return true } else { return false } },
+                    "\(descriptor.providerID) plan must never WRITE model.context_length")
+        }
     }
 
     @Test func sameProviderModelChangeDoesNotClear() {
@@ -326,7 +405,8 @@ import Foundation
             selectingRemoteModel: "",
             provider: "nous",
             currentProvider: "ollama",
-            currentBaseURL: "", currentAPIKey: "", currentAPIMode: ""
+            currentBaseURL: "", currentAPIKey: "", currentAPIMode: "",
+            currentContextLength: ""
         )
         #expect(ops == [
             .set(key: "model.provider", value: "nous"),
@@ -346,9 +426,29 @@ import Foundation
         #expect(Op.set(key: "model.provider", value: "ollama").cliArguments
                 == ["config", "set", "model.provider", "ollama"])
         // Clear IS `set <key> ""` — Hermes v0.17 has no `config unset`;
-        // the runtime reader treats empty strings as unset for all three
-        // local-managed keys (see LocalModelConfigPlan doc).
+        // the runtime reader treats empty strings as unset for the three
+        // string keys (see LocalModelConfigPlan doc).
         #expect(Op.clear(key: "model.base_url").cliArguments
                 == ["config", "set", "model.base_url", ""])
+        #expect(Op.clear(key: "model.api_key").cliArguments
+                == ["config", "set", "model.api_key", ""])
+        #expect(Op.clear(key: "model.api_mode").cliArguments
+                == ["config", "set", "model.api_mode", ""])
+        // model.context_length is the exception: `""` fails the reader's
+        // int() and WARNS on every startup, while a non-positive int is
+        // silently ignored by every consumer (agent_init.py:1469-1490 +
+        // model_metadata.py's `> 0` gate, pinned upstream by
+        // test_config_context_length_zero_is_ignored). Its unset value
+        // is "0".
+        #expect(Op.clear(key: "model.context_length").cliArguments
+                == ["config", "set", "model.context_length", "0"])
+    }
+
+    @Test func localManagedKeysPinTheClearOnSwitchUnion() {
+        // Ordered union — plans derive their clear blocks from this
+        // list, so both membership AND order are contract.
+        #expect(LocalModelConfigPlan.localManagedKeys == [
+            "model.base_url", "model.api_key", "model.api_mode", "model.context_length",
+        ])
     }
 }

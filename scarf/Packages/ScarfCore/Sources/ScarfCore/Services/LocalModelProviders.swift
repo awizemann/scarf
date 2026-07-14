@@ -124,6 +124,13 @@ public struct LocalModelProvider: Sendable, Identifiable, Hashable {
     /// by a given save must be cleared on provider switch — stale
     /// base_url/api_mode in config.yaml causes real Hermes bugs (the
     /// GH #27132 class). See `LocalModelConfigPlan`.
+    ///
+    /// `model.context_length` is deliberately in NO descriptor's written
+    /// set: the picker offers no context override (for sub-64K models
+    /// it's a runtime trap — preflight passes, the turn halts), so the
+    /// key is clear-only. It still sits in
+    /// `LocalModelConfigPlan.localManagedKeys` so a CLI-set stale
+    /// override is scrubbed on every switch.
     public var configKeysWritten: Set<String> {
         var keys: Set<String> = ["model.default", "model.provider"]
         if baseURLRequired || defaultBaseURL != nil { keys.insert("model.base_url") }

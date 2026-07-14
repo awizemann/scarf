@@ -34,6 +34,23 @@ import Foundation
     ]}
     """.utf8)
 
+    /// Verbatim-shaped subset of Ollama's `POST /api/show` response
+    /// (captured live from qwen2.5:14b — model_info keys are
+    /// `<arch>.`-prefixed, the context ceiling under
+    /// `<general.architecture>.context_length`).
+    static let ollamaShowQwenJSON = Data("""
+    {"details":{"family":"qwen2","parameter_size":"14.8B","quantization_level":"Q4_K_M"},
+     "model_info":{"general.architecture":"qwen2","general.parameter_count":14770033664,
+                   "qwen2.attention.head_count":40,"qwen2.context_length":32768,
+                   "qwen2.embedding_length":5120},
+     "capabilities":["completion","tools"]}
+    """.utf8)
+
+    static let ollamaShowLlamaJSON = Data("""
+    {"model_info":{"general.architecture":"llama","llama.context_length":131072,
+                   "llama.rope.dimension_count":128}}
+    """.utf8)
+
     static func descriptor(_ id: String) -> LocalModelProvider {
         LocalModelProvider.descriptor(for: id)!
     }
@@ -358,12 +375,280 @@ import Foundation
         #expect(LocalModelEnumerator.formatBytes(522_653_767) == "498 MB")
         #expect(LocalModelEnumerator.formatBytes(900) == "900 B")
     }
+
+    // MARK: - parseOllamaShowContext (/api/show shapes)
+
+    @Test func showContextResolvesViaGeneralArchitecture() {
+        #expect(LocalModelEnumerator.parseOllamaShowContext(Self.ollamaShowQwenJSON) == 32768)
+        #expect(LocalModelEnumerator.parseOllamaShowContext(Self.ollamaShowLlamaJSON) == 131072)
+    }
+
+    @Test func showContextFallsBackToSuffixMatchForUnknownArchKeys() {
+        // A future/unknown architecture that doesn't advertise
+        // general.architecture (or names it differently) must still
+        // resolve via the `.context_length` suffix.
+        let noArch = Data(#"{"model_info":{"newarch.context_length":65536,"newarch.embedding_length":4096}}"#.utf8)
+        #expect(LocalModelEnumerator.parseOllamaShowContext(noArch) == 65536)
+        // general.architecture present but its keyed entry missing —
+        // suffix fallback still finds the real key.
+        let mismatch = Data(#"{"model_info":{"general.architecture":"gemma3","other.context_length":8192}}"#.utf8)
+        #expect(LocalModelEnumerator.parseOllamaShowContext(mismatch) == 8192)
+    }
+
+    @Test func showContextRejectsOffShapeAndNonPositiveValues() {
+        // Ollama's 404 error body (model deleted between tags and show).
+        #expect(LocalModelEnumerator.parseOllamaShowContext(Data(#"{"error":"model 'x' not found"}"#.utf8)) == nil)
+        // No model_info at all.
+        #expect(LocalModelEnumerator.parseOllamaShowContext(Data(#"{"details":{"family":"llama"}}"#.utf8)) == nil)
+        // model_info present, no context key.
+        #expect(LocalModelEnumerator.parseOllamaShowContext(Data(#"{"model_info":{"general.architecture":"llama"}}"#.utf8)) == nil)
+        // Malformed / empty.
+        #expect(LocalModelEnumerator.parseOllamaShowContext(Data("not json".utf8)) == nil)
+        #expect(LocalModelEnumerator.parseOllamaShowContext(Data()) == nil)
+        // Wrong value types / non-positive numbers never become a gate input.
+        #expect(LocalModelEnumerator.parseOllamaShowContext(Data(#"{"model_info":{"llama.context_length":"131072"}}"#.utf8)) == nil)
+        #expect(LocalModelEnumerator.parseOllamaShowContext(Data(#"{"model_info":{"llama.context_length":true}}"#.utf8)) == nil)
+        #expect(LocalModelEnumerator.parseOllamaShowContext(Data(#"{"model_info":{"llama.context_length":0}}"#.utf8)) == nil)
+        #expect(LocalModelEnumerator.parseOllamaShowContext(Data(#"{"model_info":{"llama.context_length":-1}}"#.utf8)) == nil)
+    }
+
+    // MARK: - Model-name allowlist (the show-batch injection gate)
+
+    @Test func modelNameAllowlistAcceptsEveryLegalOllamaShape() {
+        for name in [
+            "llama3.1:8b", "qwen2.5:14b", "llama3:latest",
+            "hf.co/user/repo:Q4_K_M",
+            "model@sha256:24a0a8c65a4f0a9e4b8e7f3a",
+            "registry.example.com/team/model:tag",
+        ] {
+            #expect(LocalModelEnumerator.validatedOllamaModelName(name), "rejected legal name: \(name)")
+        }
+    }
+
+    @Test func modelNameAllowlistRejectsShellAndJSONActiveNames() {
+        for name in [
+            "", "a b", "a\tb",
+            "evil$(reboot):latest", "`id`:8b", "a;rm -rf ~", "a|cat", "a&b",
+            "a'b", "a\"b", "a\\b",
+            "a\u{1E}b", // the record separator itself
+            String(repeating: "x", count: 257),
+        ] {
+            #expect(!LocalModelEnumerator.validatedOllamaModelName(name), "accepted hostile name: \(name)")
+        }
+    }
+
+    // MARK: - Show batch argv (the batching/quoting pin)
+
+    @Test func showBatchArgumentsPinTheExactArgvShape() throws {
+        let batch = try #require(LocalModelEnumerator.showBatchArguments(
+            showEndpoint: "http://127.0.0.1:11434/api/show",
+            modelNames: ["llama3.1:8b", "qwen2.5:14b"]
+        ))
+        let rs = String(UnicodeScalar(LocalModelEnumerator.showRecordSeparator))
+        #expect(batch.probedNames == ["llama3.1:8b", "qwen2.5:14b"])
+        #expect(batch.args == [
+            "-sS", "--max-time", "3",
+            "-d", #"{"model":"llama3.1:8b"}"#,
+            "-w", rs,
+            "http://127.0.0.1:11434/api/show",
+            "--next",
+            "-sS", "--max-time", "3",
+            "-d", #"{"model":"qwen2.5:14b"}"#,
+            "-w", rs,
+            "http://127.0.0.1:11434/api/show",
+        ])
+        // The batch is plain argv — never an `sh -c` command string, and
+        // deliberately no `-f` (an HTTP error must yield its JSON error
+        // body + separator so response↔name correlation survives).
+        #expect(!batch.args.contains("-c"))
+        #expect(!batch.args.contains("sh"))
+        #expect(!batch.args.contains("-f"))
+        #expect(!batch.args.contains("-sSf"))
+    }
+
+    @Test func hostileModelNameNeverReachesTheTransportBatch() throws {
+        // The load-bearing pin: a daemon-supplied hostile name is
+        // dropped from the batch entirely — no argv element carries it.
+        let batch = try #require(LocalModelEnumerator.showBatchArguments(
+            showEndpoint: "http://127.0.0.1:11434/api/show",
+            modelNames: ["good:8b", "evil$(touch /tmp/pwned):latest", "bad`id`:1b"]
+        ))
+        #expect(batch.probedNames == ["good:8b"])
+        #expect(!batch.args.contains { $0.contains("pwned") || $0.contains("`") || $0.contains("$(") })
+        // All-hostile input → no batch at all.
+        #expect(LocalModelEnumerator.showBatchArguments(
+            showEndpoint: "http://127.0.0.1:11434/api/show",
+            modelNames: ["evil$(reboot)"]
+        ) == nil)
+    }
+
+    // MARK: - Show batch response correlation
+
+    private static func rsJoined(_ segments: [Data]) -> Data {
+        var out = Data()
+        for s in segments {
+            out.append(s)
+            out.append(LocalModelEnumerator.showRecordSeparator)
+        }
+        return out
+    }
+
+    @Test func showBatchSegmentsPairPositionallyWithProbedNames() {
+        let data = Self.rsJoined([Self.ollamaShowLlamaJSON, Self.ollamaShowQwenJSON])
+        let contexts = LocalModelEnumerator.parseShowBatch(data, probedNames: ["llama3.1:8b", "qwen2.5:14b"])
+        #expect(contexts == ["llama3.1:8b": 131072, "qwen2.5:14b": 32768])
+    }
+
+    @Test func failedTransferYieldsNoContextForThatModelOnly() {
+        // Mid-batch 404 (model deleted between /api/tags and /api/show):
+        // no -f, so the error body + separator keep the count intact.
+        let data = Self.rsJoined([
+            Self.ollamaShowLlamaJSON,
+            Data(#"{"error":"model 'gone:1b' not found"}"#.utf8),
+            Self.ollamaShowQwenJSON,
+        ])
+        let contexts = LocalModelEnumerator.parseShowBatch(
+            data, probedNames: ["llama3.1:8b", "gone:1b", "qwen2.5:14b"])
+        #expect(contexts == ["llama3.1:8b": 131072, "qwen2.5:14b": 32768])
+    }
+
+    @Test func segmentCountMismatchDiscardsTheWholeBatch() {
+        // Misattribution safety: an aborted batch (or an injection
+        // attempt inflating the separator count) must degrade to
+        // "unknown" for EVERY model — never shift contexts onto the
+        // wrong names.
+        let short = Self.rsJoined([Self.ollamaShowLlamaJSON])
+        #expect(LocalModelEnumerator.parseShowBatch(short, probedNames: ["a", "b"]).isEmpty)
+        var inflated = Self.rsJoined([Self.ollamaShowLlamaJSON, Self.ollamaShowQwenJSON])
+        inflated.append(LocalModelEnumerator.showRecordSeparator) // stray extra RS
+        #expect(LocalModelEnumerator.parseShowBatch(inflated, probedNames: ["a", "b"]).isEmpty)
+        #expect(LocalModelEnumerator.parseShowBatch(Data(), probedNames: ["a"]).isEmpty)
+    }
+
+    // MARK: - Context enumeration end-to-end (transport seam)
+
+    /// Tags listing for the context tests — one model above the Hermes
+    /// floor, one below.
+    static let ollamaTwoModelTagsJSON = Data("""
+    {"models":[{"name":"llama3.1:8b","size":4920753328},
+               {"name":"qwen2.5:14b","size":8988124069}]}
+    """.utf8)
+
+    @Test func ollamaListingCarriesContextsFromOneBatchedShowCall() throws {
+        let showBatch = Self.rsJoined([Self.ollamaShowLlamaJSON, Self.ollamaShowQwenJSON])
+        let transport = RecordingTransport(results: [
+            .success(ProcessResult(exitCode: 0, stdout: Self.ollamaTwoModelTagsJSON, stderr: Data())),
+            .success(ProcessResult(exitCode: 0, stdout: showBatch, stderr: Data())),
+        ])
+        let outcome = LocalModelEnumerator.listModels(
+            for: Self.descriptor("ollama"), baseURL: nil, transport: transport
+        )
+        guard case .models(let models) = outcome else {
+            Issue.record("expected .models, got \(outcome)")
+            return
+        }
+        #expect(models.map(\.contextLength) == [131072, 32768])
+        // Exactly TWO transport round-trips: /api/tags, then ONE batched
+        // /api/show — never one call per model.
+        #expect(transport.calls.count == 2)
+        let batchCall = try #require(transport.calls.last)
+        #expect(batchCall.args.last == "http://127.0.0.1:11434/api/show")
+        #expect(batchCall.args.contains("--next"))
+        #expect(batchCall.args.contains(#"{"model":"llama3.1:8b"}"#))
+        #expect(batchCall.args.contains(#"{"model":"qwen2.5:14b"}"#))
+    }
+
+    @Test func hostileTagFromTheDaemonIsListedButNeverProbed() throws {
+        // Even the daemon's own /api/tags payload is untrusted: a
+        // hostile name is still LISTED (the user may need to see it)
+        // but excluded from the show batch, context unknown.
+        let tags = Data(#"{"models":[{"name":"evil$(touch /tmp/pwned):latest"},{"name":"good:8b"}]}"#.utf8)
+        let show = Self.rsJoined([Self.ollamaShowLlamaJSON])
+        let transport = RecordingTransport(results: [
+            .success(ProcessResult(exitCode: 0, stdout: tags, stderr: Data())),
+            .success(ProcessResult(exitCode: 0, stdout: show, stderr: Data())),
+        ])
+        let outcome = LocalModelEnumerator.listModels(
+            for: Self.descriptor("ollama"), baseURL: nil, transport: transport
+        )
+        guard case .models(let models) = outcome else {
+            Issue.record("expected .models, got \(outcome)")
+            return
+        }
+        #expect(models.map(\.modelID) == ["evil$(touch /tmp/pwned):latest", "good:8b"])
+        #expect(models.map(\.contextLength) == [nil, 131072])
+        let batchCall = try #require(transport.calls.last)
+        #expect(!batchCall.args.contains { $0.contains("pwned") })
+    }
+
+    @Test func showBatchFailureDegradesToUnknownContextsNotAnError() {
+        // A dead second call must never break the listing itself.
+        let transport = RecordingTransport(results: [
+            .success(ProcessResult(exitCode: 0, stdout: Self.ollamaTwoModelTagsJSON, stderr: Data())),
+            .failure(TransportError.other(message: "connection reset")),
+        ])
+        let outcome = LocalModelEnumerator.listModels(
+            for: Self.descriptor("ollama"), baseURL: nil, transport: transport
+        )
+        guard case .models(let models) = outcome else {
+            Issue.record("expected .models, got \(outcome)")
+            return
+        }
+        #expect(models.map(\.modelID) == ["llama3.1:8b", "qwen2.5:14b"])
+        #expect(models.allSatisfy { $0.contextLength == nil })
+    }
+
+    @Test func openAICompatibleListingsNeverFakeAContext() {
+        // /v1/models carries no context metadata — exactly ONE transport
+        // call, every context nil (unknown), no invented numbers.
+        let transport = RecordingTransport(result: ProcessResult(
+            exitCode: 0, stdout: Self.openAIModelsJSON, stderr: Data()
+        ))
+        let outcome = LocalModelEnumerator.listModels(
+            for: Self.descriptor("lmstudio"), baseURL: nil, transport: transport
+        )
+        guard case .models(let models) = outcome else {
+            Issue.record("expected .models, got \(outcome)")
+            return
+        }
+        #expect(models.allSatisfy { $0.contextLength == nil })
+        #expect(transport.calls.count == 1)
+    }
+
+    // MARK: - Context floor gate (pure)
+
+    @Test func verdictGatesOnTheHermesMinimum() {
+        #expect(LocalModelContextGate.hermesMinimumContextTokens == 64_000)
+        #expect(LocalModelContextGate.verdict(contextLength: 131_072) == .allowed)
+        #expect(LocalModelContextGate.verdict(contextLength: 64_000) == .allowed)
+        #expect(LocalModelContextGate.verdict(contextLength: 63_999) == .blocked)
+        #expect(LocalModelContextGate.verdict(contextLength: 32_768) == .blocked)
+        #expect(LocalModelContextGate.verdict(contextLength: 8_192) == .blocked)
+        // Unknown is permissive — Hermes's own preflight is the
+        // backstop; blocking on ignorance would strand every
+        // OpenAI-compatible endpoint.
+        #expect(LocalModelContextGate.verdict(contextLength: nil) == .unknown)
+        #expect(LocalModelContextGate.verdict(contextLength: 0) == .unknown)
+        #expect(LocalModelContextGate.verdict(contextLength: -1) == .unknown)
+    }
+
+    @Test func compactTokensMatchesTheCatalogConvention() {
+        // Same convention as HermesModelInfo.contextDisplay (decimal K/M).
+        #expect(LocalModelContextGate.compactTokens(32_768) == "32K")
+        #expect(LocalModelContextGate.compactTokens(131_072) == "131K")
+        #expect(LocalModelContextGate.compactTokens(8_192) == "8K")
+        #expect(LocalModelContextGate.compactTokens(64_000) == "64K")
+        #expect(LocalModelContextGate.compactTokens(1_048_576) == "1M")
+        #expect(LocalModelContextGate.compactTokens(500) == "500")
+    }
 }
 
 // MARK: - Recording fake transport
 
 /// Minimal `ServerTransport` double for the runProcess seam — records
-/// every call and replays a canned `ProcessResult` (or throws). Same
+/// every call and replays canned `ProcessResult`s (or throws). The
+/// scripted form replays results in call order (tags probe, then the
+/// batched /api/show), sticking on the last entry if over-called. Same
 /// pattern as M5's `ScriptedTransport`; file I/O is deliberately N/A.
 private final class RecordingTransport: ServerTransport, @unchecked Sendable {
     struct Call {
@@ -374,26 +659,26 @@ private final class RecordingTransport: ServerTransport, @unchecked Sendable {
 
     let contextID: ServerID = UUID()
     let isRemote: Bool
-    private let result: ProcessResult?
-    private let error: Error?
+    private let script: [Result<ProcessResult, Error>]
     private(set) var calls: [Call] = []
 
-    init(result: ProcessResult, isRemote: Bool = true) {
-        self.result = result
-        self.error = nil
+    init(results: [Result<ProcessResult, Error>], isRemote: Bool = true) {
+        precondition(!results.isEmpty)
+        self.script = results
         self.isRemote = isRemote
     }
 
-    init(error: Error, isRemote: Bool = true) {
-        self.result = nil
-        self.error = error
-        self.isRemote = isRemote
+    convenience init(result: ProcessResult, isRemote: Bool = true) {
+        self.init(results: [.success(result)], isRemote: isRemote)
+    }
+
+    convenience init(error: Error, isRemote: Bool = true) {
+        self.init(results: [.failure(error)], isRemote: isRemote)
     }
 
     func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
         calls.append(Call(executable: executable, args: args, timeout: timeout))
-        if let error { throw error }
-        return result!
+        return try script[min(calls.count - 1, script.count - 1)].get()
     }
 
     func readFile(_ path: String) throws -> Data { throw TransportError.other(message: "N/A") }

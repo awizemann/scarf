@@ -879,17 +879,7 @@ struct ModelPickerSheet: View {
     private func localModelList(_ descriptor: LocalModelProvider) -> some View {
         List(selection: $localModelID) {
             ForEach(filteredLocalModels) { model in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(model.name)
-                        .font(.system(.body, design: .monospaced))
-                    if let detail = model.detail {
-                        Text(detail)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .padding(.vertical, 1)
-                .tag(model.modelID)
+                localModelRow(model)
             }
         }
         .listStyle(.inset)
@@ -902,6 +892,78 @@ struct ModelPickerSheet: View {
                 localEmptyState(descriptor)
             }
         }
+        if filteredLocalModels.contains(where: { LocalModelContextGate.verdict(contextLength: $0.contextLength) == .blocked }) {
+            // Explains WHY rows are locked, and points at a family that
+            // passes the floor natively (llama3.1+ ships 128K-131K GGUF
+            // metadata). The override path is deliberately not offered:
+            // dogfood proved Hermes's runtime re-measures what the
+            // server actually loads, so an override on a sub-64K GGUF
+            // ceiling passes preflight and then halts every turn.
+            Label(
+                "Locked models fall below Hermes's 64K-token minimum context — a hard ceiling baked into the model file. Pick a 64K+ model instead (the llama3.1 family and newer ship 131K).",
+                systemImage: "lock"
+            )
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    /// One row of the enumerated local-model list, floor-gated:
+    /// - context ≥ 64K → normal row, context in the subtitle.
+    /// - context < 64K → de-emphasized, selection disabled, subtitle +
+    ///   tooltip explain the block (Hermes's runtime re-measures the
+    ///   served window, so these models can never complete a turn).
+    /// - context unknown → selectable, subtitle says so; Hermes's own
+    ///   preflight stays the backstop. Manual entry is never gated.
+    @ViewBuilder
+    private func localModelRow(_ model: LocalModelInfo) -> some View {
+        let verdict = LocalModelContextGate.verdict(contextLength: model.contextLength)
+        let blocked = verdict == .blocked
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(model.name)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(blocked ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                if blocked {
+                    Image(systemName: "lock")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
+            Text(localModelSubtitle(model, verdict: verdict))
+                .font(.caption2)
+                .foregroundStyle(blocked ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+        }
+        .padding(.vertical, 1)
+        .tag(model.modelID)
+        .selectionDisabled(blocked)
+        .help(blocked ? blockedModelExplanation(model) : "")
+    }
+
+    /// Row subtitle: the server-reported detail (params · quant · size)
+    /// plus the context verdict.
+    private func localModelSubtitle(_ model: LocalModelInfo, verdict: LocalModelContextGate.Verdict) -> String {
+        var parts: [String] = []
+        if let detail = model.detail { parts.append(detail) }
+        switch verdict {
+        case .allowed:
+            if let ctx = model.contextLength {
+                parts.append("\(LocalModelContextGate.compactTokens(ctx)) context")
+            }
+        case .blocked:
+            let ctx = LocalModelContextGate.compactTokens(model.contextLength ?? 0)
+            parts.append("\(ctx) context — below Hermes's 64K minimum")
+        case .unknown:
+            parts.append("context unknown")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func blockedModelExplanation(_ model: LocalModelInfo) -> String {
+        // Blocked verdicts only exist for KNOWN contexts, so the
+        // fallback is unreachable belt-and-braces.
+        let ctx = model.contextLength.map { LocalModelContextGate.compactTokens($0) } ?? "under 64K"
+        return "Hermes needs a 64,000-token context window; this model's file caps out at \(ctx) tokens, so every session would be rejected (and the context_length override just moves the failure to mid-turn). Try a 64K+ model such as llama3.1 or newer."
     }
 
     /// Outcome-specific empty states — a down daemon, an empty library,
@@ -975,9 +1037,27 @@ struct ModelPickerSheet: View {
 
     private var filteredLocalModels: [LocalModelInfo] {
         guard case .models(let models) = localListing else { return [] }
-        guard !searchText.isEmpty else { return models }
-        let q = searchText.lowercased()
-        return models.filter { $0.modelID.lowercased().contains(q) }
+        let matching: [LocalModelInfo]
+        if searchText.isEmpty {
+            matching = models
+        } else {
+            let q = searchText.lowercased()
+            matching = models.filter { $0.modelID.lowercased().contains(q) }
+        }
+        // Floor-gated sort: usable (allowed/unknown) models first,
+        // blocked ones sink to the bottom — server order preserved
+        // within each half (stable partition).
+        let blocked = matching.filter { LocalModelContextGate.verdict(contextLength: $0.contextLength) == .blocked }
+        guard !blocked.isEmpty else { return matching }
+        return matching.filter { LocalModelContextGate.verdict(contextLength: $0.contextLength) != .blocked } + blocked
+    }
+
+    /// The enumerated listing's entry for a model ID, if the probe
+    /// returned one — the floor gate only applies to models whose
+    /// context the server actually reported.
+    private func listedLocalModel(_ modelID: String) -> LocalModelInfo? {
+        guard case .models(let models) = localListing else { return nil }
+        return models.first { $0.modelID == modelID }
     }
 
     private var filteredLocalProviders: [LocalModelProvider] {
@@ -1097,6 +1177,16 @@ struct ModelPickerSheet: View {
                 // Only the custom endpoint on a loopback URL may save an
                 // empty model (Hermes single-model auto-detect).
                 return descriptor.allowsEmptyModelWhenLoopback && isLoopbackURL(base)
+            }
+            // Floor gate, list path only: a model the probe reported as
+            // below Hermes's 64K minimum can never complete a session
+            // (`selectionDisabled` already blocks picking it; this also
+            // covers a round-trip-restored blocked selection). The
+            // manual-entry escape hatch is deliberately NOT gated.
+            if !localManualEntry,
+               let listed = listedLocalModel(model),
+               LocalModelContextGate.verdict(contextLength: listed.contextLength) == .blocked {
+                return false
             }
             return true
         }

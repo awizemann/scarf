@@ -148,7 +148,8 @@ final class SettingsViewModel {
                 // never-local user keeps the classic two-op write.
                 currentBaseURL: config.modelBaseURL,
                 currentAPIKey: config.modelAPIKey,
-                currentAPIMode: config.modelAPIMode
+                currentAPIMode: config.modelAPIMode,
+                currentContextLength: config.modelContextLength
             )
         }
         guard !ops.isEmpty else { return }

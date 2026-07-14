@@ -210,6 +210,19 @@ import Foundation
                     "model.api_key", "model.api_mode"])
     }
 
+    @Test func noDescriptorEverWritesContextLength() {
+        // model.context_length is the clear-ONLY managed key: the picker
+        // offers no context override (for sub-64K models it's a runtime
+        // trap — preflight passes, the turn halts), so it must never
+        // enter any descriptor's written set while staying in
+        // LocalModelConfigPlan's clear-on-switch union.
+        for p in LocalModelProvider.all {
+            #expect(!p.configKeysWritten.contains("model.context_length"),
+                    "\(p.providerID) must not write model.context_length")
+        }
+        #expect(LocalModelConfigPlan.localManagedKeys.contains("model.context_length"))
+    }
+
     @Test func configKeysWrittenFollowsTheDescriptorFlags() {
         for p in LocalModelProvider.all {
             #expect(p.configKeysWritten.contains("model.base_url")

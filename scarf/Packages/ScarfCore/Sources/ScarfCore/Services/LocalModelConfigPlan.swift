@@ -65,6 +65,18 @@ public struct LocalModelSelection: Sendable, Equatable {
 /// - `model.api_mode`: `_parse_api_mode` returns None for anything not in
 ///   `_VALID_API_MODES` after strip().lower() — `""` → None → URL
 ///   auto-detect → `chat_completions` (runtime_provider.py:269-276).
+/// - `model.context_length` (the fourth managed key — dogfood round 2's
+///   stale-override trap; the picker never WRITES it, only clears it) is
+///   the one key whose unset value is `"0"`, not `""`: the reader does
+///   `int(value)` on any present value (agent_init.py:1469-1490), so a
+///   cleared-to-`""` key WARNS on every startup ("Invalid
+///   model.context_length: ''"), while `0` parses silently and every
+///   consumer treats non-positive as unset — `config_context_length > 0`
+///   gates the override in `get_model_context_length` (model_metadata.py
+///   step 0, pinned upstream by test_config_context_length_zero_is_
+///   ignored) and the LM Studio preloader does `max(value or 0,
+///   MINIMUM_CONTEXT_LENGTH)` (run_agent.py:682). Verified against
+///   `~/.hermes/hermes-agent` @ v0.17.0.
 ///
 /// **Crash-safe ordering** (T4 audit). Each operation is its own
 /// `hermes config set` process, and the executor aborts on the first
@@ -87,8 +99,10 @@ public struct LocalModelSelection: Sendable, Equatable {
 ///   a loud connection failure against the user's own old endpoint,
 ///   never a silent reroute.
 public enum LocalModelConfigPlan {
-    /// One `hermes config set` invocation. `clear` is `set <key> ""` —
-    /// see the type comment for why empty-string is the unset mechanism.
+    /// One `hermes config set` invocation. `clear` is `set <key>
+    /// <unset-value>` — `""` for the string keys, `"0"` for
+    /// `model.context_length` (see the type comment for the reader
+    /// verification of both).
     public enum Operation: Equatable, Sendable {
         case set(key: String, value: String)
         case clear(key: String)
@@ -97,16 +111,30 @@ public enum LocalModelConfigPlan {
         public var cliArguments: [String] {
             switch self {
             case .set(let key, let value): return ["config", "set", key, value]
-            case .clear(let key):          return ["config", "set", key, ""]
+            case .clear(let key):          return ["config", "set", key, LocalModelConfigPlan.unsetValue(for: key)]
             }
         }
+    }
+
+    /// The value that reads as "unset" for a managed key. `""` for the
+    /// string keys (reader-verified silent); `"0"` for
+    /// model.context_length, where `""` would warn on every Hermes
+    /// startup but a non-positive int is silently ignored by every
+    /// consumer (type comment has the line-level receipts).
+    static func unsetValue(for key: String) -> String {
+        key == "model.context_length" ? "0" : ""
     }
 
     /// Union of the keys any local descriptor may manage beyond
     /// model.default/model.provider — the clear-on-switch set. Ordered
     /// (not a Set) so plans are deterministic and testable.
+    /// `model.context_length` is the clear-ONLY member: no descriptor
+    /// ever writes it (the picker has no context-override UI — the
+    /// override is a runtime trap for sub-64K models anyway), but a
+    /// CLI-set stale value must not survive a provider switch, where it
+    /// would mask Hermes's context preflight for the next model.
     public static let localManagedKeys: [String] = [
-        "model.base_url", "model.api_key", "model.api_mode",
+        "model.base_url", "model.api_key", "model.api_mode", "model.context_length",
     ]
 
     // MARK: - Local selection
@@ -202,21 +230,25 @@ public enum LocalModelConfigPlan {
     /// to prevent). Empty is reader-verified unset:
     /// `(cfg.get("default") or "").strip()` (runtime_provider.py:206).
     ///
-    /// `currentBaseURL` / `currentAPIKey` / `currentAPIMode` are the
-    /// config's current values of the local-managed keys, when the
-    /// caller knows them: a key that is already empty/absent is skipped
-    /// rather than re-cleared, so a user who never touched a local
-    /// provider gets exactly the classic two-op
-    /// `[set provider, set default]` write — no junk empty keys, no
-    /// extra SSH round-trips. Pass nil when unknown → conservative
-    /// unconditional clears.
+    /// `currentBaseURL` / `currentAPIKey` / `currentAPIMode` /
+    /// `currentContextLength` are the config's current values of the
+    /// local-managed keys, when the caller knows them: a key that is
+    /// already empty/absent is skipped rather than re-cleared, so a user
+    /// who never touched a local provider gets exactly the classic
+    /// two-op `[set provider, set default]` write — no junk empty keys,
+    /// no extra SSH round-trips. Pass nil when unknown → conservative
+    /// unconditional clears. For `model.context_length`, "already unset"
+    /// additionally means any non-positive integer — `"0"` is this
+    /// plan's own unset value and the reader ignores it, so re-clearing
+    /// would churn forever.
     public static func operations(
         selectingRemoteModel model: String,
         provider: String,
         currentProvider: String,
         currentBaseURL: String? = nil,
         currentAPIKey: String? = nil,
-        currentAPIMode: String? = nil
+        currentAPIMode: String? = nil,
+        currentContextLength: String? = nil
     ) -> [Operation] {
         let newProvider = trimmed(provider)
         let newModel = trimmed(model)
@@ -236,16 +268,30 @@ public enum LocalModelConfigPlan {
                 "model.base_url": currentBaseURL,
                 "model.api_key": currentAPIKey,
                 "model.api_mode": currentAPIMode,
+                "model.context_length": currentContextLength,
             ]
             ops += localManagedKeys
                 .filter { key in
-                    // nil = unknown → clear; "" = known-absent → skip.
+                    // nil = unknown → clear; known-unset → skip.
                     guard let value = current[key] ?? nil else { return true }
-                    return !trimmed(value).isEmpty
+                    return !readsAsUnset(trimmed(value), for: key)
                 }
                 .map { .clear(key: $0) }
         }
         return ops
+    }
+
+    /// Whether a KNOWN current value already reads as unset to the
+    /// Hermes runtime, so re-clearing it is pure churn. Empty string for
+    /// every key; for model.context_length also any integer <= 0 (the
+    /// reader's own `> 0` gate — and `"0"` is what our clear writes).
+    /// Note the asymmetry with garbage: a non-integer like `"256K"` is
+    /// NOT unset here even though the reader ignores it, because it
+    /// warns on every startup — clearing it to `0` silences that.
+    private static func readsAsUnset(_ value: String, for key: String) -> Bool {
+        if value.isEmpty { return true }
+        if key == "model.context_length", let n = Int(value), n <= 0 { return true }
+        return false
     }
 
     // MARK: - Helpers

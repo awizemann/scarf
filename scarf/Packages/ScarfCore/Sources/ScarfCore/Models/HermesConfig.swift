@@ -951,6 +951,12 @@ public struct HermesConfig: Sendable {
     public var modelBaseURL: String
     public var modelAPIKey: String
     public var modelAPIMode: String
+    /// `model.context_length` — the fourth local-managed key. The picker
+    /// never writes it (clear-only; see `LocalModelConfigPlan`), but the
+    /// current value is read back so a provider switch knows whether a
+    /// stale CLI-set override exists to scrub. Kept as the raw scalar
+    /// string ("" = absent; "0" = cleared; Hermes ignores non-positive).
+    public var modelContextLength: String
 
     // Grouped blocks
     public var display: DisplaySettings
@@ -1056,7 +1062,8 @@ public struct HermesConfig: Sendable {
         bitwarden: BitwardenSettings = .empty,
         modelBaseURL: String = "",
         modelAPIKey: String = "",
-        modelAPIMode: String = ""
+        modelAPIMode: String = "",
+        modelContextLength: String = ""
     ) {
         self.cacheTTL = cacheTTL
         self.redactionEnabled = redactionEnabled
@@ -1132,6 +1139,7 @@ public struct HermesConfig: Sendable {
         self.modelBaseURL = modelBaseURL
         self.modelAPIKey = modelAPIKey
         self.modelAPIMode = modelAPIMode
+        self.modelContextLength = modelContextLength
     }
     public nonisolated static let empty = HermesConfig(
         model: "unknown",

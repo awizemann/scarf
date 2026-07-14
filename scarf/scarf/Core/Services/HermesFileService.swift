@@ -406,7 +406,8 @@ struct HermesFileService: Sendable {
             // Keep in lockstep with `HermesConfig+YAML.swift`.
             modelBaseURL: str("model.base_url"),
             modelAPIKey: str("model.api_key"),
-            modelAPIMode: str("model.api_mode")
+            modelAPIMode: str("model.api_mode"),
+            modelContextLength: str("model.context_length")
         )
     }
 

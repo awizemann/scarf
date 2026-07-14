@@ -422,7 +422,8 @@ public extension HermesConfig {
             // picker's Local tab round-trips an existing local setup.
             modelBaseURL: str("model.base_url"),
             modelAPIKey: str("model.api_key"),
-            modelAPIMode: str("model.api_mode")
+            modelAPIMode: str("model.api_mode"),
+            modelContextLength: str("model.context_length")
         )
     }
 }
