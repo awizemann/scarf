@@ -10,6 +10,33 @@ struct SessionStoreStats {
     let platformCounts: [(platform: String, count: Int)]
 }
 
+/// Cross-feature signal (t-5f1d9008): posted on
+/// `NotificationCenter.default` after the Sessions tab successfully
+/// deletes a session server-side (`hermes sessions delete` exit 0).
+/// The Sessions feature and the chat pane live in the same window but
+/// hold no references to each other, and there is one ChatViewModel per
+/// window (multi-server) — a broadcast each ChatViewModel filters by
+/// identity is the minimal seam, matching the app's existing
+/// block-observer NotificationCenter idiom (ServerLiveStatusRegistry,
+/// t-aud05). NEVER posted for a failed delete.
+///
+/// userInfo payload:
+/// - `sessionIdKey` → `String`: the full deleted session id.
+/// - `contextKey` → `ServerContext`: the posting feature's context.
+///   Receivers must compare the FULL context, not just `id` — profile
+///   scoping (#126) re-points `remoteHome` while keeping the same
+///   `ServerID`, and distinct servers/profiles can each hold a session
+///   with the same id.
+///
+/// `nonisolated` so the constants are readable from the non-MainActor
+/// observer block before it hops isolation (they're immutable Sendable
+/// values; the app target defaults declarations to MainActor).
+enum SessionDeletedSignal {
+    nonisolated static let name = Notification.Name("Scarf.sessionDeletedElsewhere")
+    nonisolated static let sessionIdKey = "sessionId"
+    nonisolated static let contextKey = "context"
+}
+
 @Observable
 final class SessionsViewModel {
     let context: ServerContext
@@ -18,6 +45,18 @@ final class SessionsViewModel {
     init(context: ServerContext = .local) {
         self.context = context
         self.dataService = HermesDataService(context: context)
+    }
+
+    /// Runs the `hermes sessions delete --yes <id>` CLI for
+    /// `confirmDelete()` and returns its exit code. Production default
+    /// shells out through the context's transport (unchanged
+    /// semantics); tests inject a stub so pinning the
+    /// success-posts / failure-does-NOT-post `SessionDeletedSignal`
+    /// contract (t-5f1d9008) doesn't spawn a real CLI process. Same
+    /// seam shape as `ChatViewModel.sessionDeleteRunner` (t-01bd55ec).
+    @ObservationIgnored
+    var sessionDeleteRunner: (ServerContext, String) -> Int32 = { ctx, sessionId in
+        ctx.runHermes(["sessions", "delete", "--yes", sessionId]).exitCode
     }
 
 
@@ -190,16 +229,32 @@ final class SessionsViewModel {
         showDeleteConfirmation = true
     }
 
+    /// Server-side delete via `hermes sessions delete --yes`. On success,
+    /// ALSO broadcasts `SessionDeletedSignal` (t-5f1d9008): this surface
+    /// has no reference to the window's ChatViewModel, and pre-fix,
+    /// deleting the chat-ATTACHED session here left the `hermes acp`
+    /// client running against the deleted session — orphaned in-flight
+    /// turn plus a leaked process (the leak shape t-01bd55ec fixed for
+    /// the chat sidebar's own delete). The signal lets the one
+    /// ChatViewModel attached to this exact session/context run that
+    /// same teardown. A failed CLI delete posts nothing.
     func confirmDelete() {
         guard let sessionId = deleteSessionId else { return }
-        let result = runHermes(["sessions", "delete", "--yes", sessionId])
-        if result.exitCode == 0 {
+        if sessionDeleteRunner(context, sessionId) == 0 {
             sessions.removeAll { $0.id == sessionId }
             if selectedSession?.id == sessionId {
                 selectedSession = nil
                 messages = []
             }
             computeStats()
+            NotificationCenter.default.post(
+                name: SessionDeletedSignal.name,
+                object: nil,
+                userInfo: [
+                    SessionDeletedSignal.sessionIdKey: sessionId,
+                    SessionDeletedSignal.contextKey: context,
+                ]
+            )
         }
         showDeleteConfirmation = false
         deleteSessionId = nil

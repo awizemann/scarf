@@ -35,6 +35,37 @@ final class ChatViewModel {
                 self?.hermesBinaryExists = exists
             }
         }
+        // Cross-feature seam (t-5f1d9008): react when the Sessions tab
+        // deletes the session this window's chat is attached to. Same
+        // block-observer idiom as ServerLiveStatusRegistry (t-aud05):
+        // queue .main → the block runs on the main thread, so
+        // MainActor.assumeIsolated is safe and avoids a Task hop. The
+        // payload is extracted OUTSIDE assumeIsolated (both values are
+        // Sendable) so the non-Sendable Notification never crosses in.
+        sessionDeletedObserver = NotificationCenter.default.addObserver(
+            forName: SessionDeletedSignal.name, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let sessionId = note.userInfo?[SessionDeletedSignal.sessionIdKey] as? String,
+                  let deletedContext = note.userInfo?[SessionDeletedSignal.contextKey] as? ServerContext
+            else { return }
+            MainActor.assumeIsolated {
+                self?.handleSessionDeletedElsewhere(sessionId: sessionId, context: deletedContext)
+            }
+        }
+    }
+
+    /// Token for the `SessionDeletedSignal` observer. Block observers
+    /// are retained by NotificationCenter for the process lifetime
+    /// unless removed, and ChatViewModel is per-window (unlike the
+    /// app-lifetime ServerLiveStatusRegistry), so unregister when the
+    /// window's VM goes away.
+    @ObservationIgnored
+    private var sessionDeletedObserver: (any NSObjectProtocol)?
+
+    deinit {
+        if let sessionDeletedObserver {
+            NotificationCenter.default.removeObserver(sessionDeletedObserver)
+        }
     }
 
 
@@ -2166,10 +2197,17 @@ final class ChatViewModel {
         sessionPreviews.removeValue(forKey: sessionId)
         sessionProjectNames.removeValue(forKey: sessionId)
         guard richChatViewModel.sessionId == sessionId else { return }
+        tearDownDeletedActiveSession()
+    }
 
-        // Active session deleted — mirror startACPSession's entry
-        // teardown (minus the respawn):
-        //
+    /// Shared teardown for "the ACTIVE (attached) session was just
+    /// deleted server-side" — mirrors startACPSession's entry teardown
+    /// (minus the respawn). Called by `deleteSession(_:)` (the chat
+    /// sidebar's own delete, t-01bd55ec) and by
+    /// `handleSessionDeletedElsewhere` (the Sessions tab's independent
+    /// delete surface, t-5f1d9008). Callers must have verified the
+    /// deleted id is the attached one.
+    private func tearDownDeletedActiveSession() {
         // Capture the in-flight turn BEFORE reset/stopACP so the
         // delete-specific hint below can replace stopACP's generic
         // "switched sessions" wording.
@@ -2196,6 +2234,33 @@ final class ChatViewModel {
             richChatViewModel.transientHint = "Turn cancelled — session deleted."
             scheduleHintClear()
         }
+    }
+
+    /// Cross-feature seam (t-5f1d9008): the Sessions tab
+    /// (`SessionsViewModel.confirmDelete`) is an independent delete
+    /// surface that runs the same `hermes sessions delete` CLI but has
+    /// no reference to this window's chat — pre-fix, deleting the
+    /// chat-ATTACHED session there left the `hermes acp` client running
+    /// against the deleted session (the exact leak/orphan shape
+    /// t-01bd55ec fixed for the sidebar path). It posts
+    /// `SessionDeletedSignal` after a successful CLI delete; every
+    /// window's ChatViewModel observes, and only the one whose chat is
+    /// attached to that session reacts. Identity is the FULL
+    /// `ServerContext` (not just the session id — different servers, or
+    /// different profile homes on one server, can each hold a session
+    /// with the same id) plus the full session id. A non-matching
+    /// session/context is a strict no-op for chat: the sidebar list
+    /// refreshes through the state.db file watcher as usual.
+    private func handleSessionDeletedElsewhere(
+        sessionId: String, context deletedContext: ServerContext
+    ) {
+        guard deletedContext == context,
+              richChatViewModel.sessionId == sessionId else { return }
+        // Same cache purge deleteSession does for the row it removed.
+        recentSessions.removeAll { $0.id == sessionId }
+        sessionPreviews.removeValue(forKey: sessionId)
+        sessionProjectNames.removeValue(forKey: sessionId)
+        tearDownDeletedActiveSession()
     }
 
     func previewFor(_ session: HermesSession) -> String {
