@@ -935,6 +935,16 @@ struct ModelPickerSheet: View {
                         .font(.caption2)
                         .foregroundStyle(.orange)
                 }
+                // Ollama /api/show reported native multimodal support
+                // (`capabilities` includes "vision"). Only a confident
+                // .yes badges — .no/.unknown stay bare so an old daemon
+                // that can't report capabilities never looks text-only.
+                if model.visionCapability == .yes {
+                    Image(systemName: "eye")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .help("Sees images natively")
+                }
             }
             Text(localModelSubtitle(model, verdict: verdict))
                 .font(.caption2)

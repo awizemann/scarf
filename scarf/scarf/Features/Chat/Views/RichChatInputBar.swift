@@ -341,9 +341,30 @@ struct RichChatInputBar: View {
                 configProvider: configProvider,
                 configModel: configModel
             ) else { return (.unknown, "") }
+            let displayName = preset?.name ?? active.modelID
             let capability = ModelCatalogService(context: context)
                 .visionCapability(providerID: active.providerID, modelID: active.modelID)
-            return (capability, preset?.name ?? active.modelID)
+            // Local Ollama models never appear in models.dev, so the
+            // catalog lookup is always `.unknown` and the heads-up stays
+            // silent for exactly the audience most likely to attach an
+            // image to a text-only model. Ollama's /api/show reports a
+            // per-model `capabilities` array — probe the ONE active model
+            // (cached) to recover a confident verdict. `.no` warns; a
+            // pre-0.29 daemon that omits capabilities stays `.unknown`
+            // (no false warning). Cloud providers keep the catalog verdict.
+            if capability == .unknown,
+               let descriptor = LocalModelProvider.descriptor(for: active.providerID),
+               descriptor.enumerationHint == .ollamaTags {
+                let baseURL = yaml.map { HermesConfig(yaml: $0).modelBaseURL } ?? ""
+                let local = LocalModelEnumerator.ollamaVisionCapability(
+                    modelID: active.modelID,
+                    baseURL: baseURL.isEmpty ? nil : baseURL,
+                    descriptorDefault: descriptor.defaultBaseURL,
+                    transport: context.makeTransport()
+                )
+                return (local, displayName)
+            }
+            return (capability, displayName)
         }.value
         // `.task(id:)` cancelled us because the key changed — a newer
         // lookup owns the state now; don't clobber it with stale results.

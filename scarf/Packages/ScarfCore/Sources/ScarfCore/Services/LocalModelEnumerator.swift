@@ -26,12 +26,43 @@ public struct LocalModelInfo: Sendable, Identifiable, Hashable {
     /// number. Nil means UNKNOWN, not unlimited — the picker renders
     /// "context unknown" and stays permissive.
     public let contextLength: Int?
+    /// Whether this model can natively see images, from the `capabilities`
+    /// array in Ollama's `POST /api/show` response (`["completion",
+    /// "tools","vision"]` on Ollama ≥ 0.29 — verified live against 0.31.2).
+    /// `.yes` when the array lists `"vision"`, `.no` when the array is
+    /// present and omits it, `.unknown` when the daemon is too old to
+    /// report `capabilities` at all (or on any parse/transport failure).
+    /// Same three-state contract as `ModelCatalogService.VisionCapability`
+    /// so the composer heads-up (t-31img) can fall back to this signal for
+    /// local models that models.dev never mirrors. OpenAI-compatible
+    /// listings carry no capability metadata → always `.unknown`.
+    public let visionCapability: ModelCatalogService.VisionCapability
 
-    public init(modelID: String, name: String, detail: String? = nil, contextLength: Int? = nil) {
+    public init(
+        modelID: String,
+        name: String,
+        detail: String? = nil,
+        contextLength: Int? = nil,
+        visionCapability: ModelCatalogService.VisionCapability = .unknown
+    ) {
         self.modelID = modelID
         self.name = name
         self.detail = detail
         self.contextLength = contextLength
+        self.visionCapability = visionCapability
+    }
+}
+
+/// The two per-model signals one `POST /api/show` response carries that the
+/// picker and composer consume: the GGUF context ceiling and native vision
+/// support. Bundled so the batched probe parses each segment once.
+public struct OllamaShowMetadata: Sendable, Equatable {
+    public let contextLength: Int?
+    public let visionCapability: ModelCatalogService.VisionCapability
+
+    public init(contextLength: Int?, visionCapability: ModelCatalogService.VisionCapability) {
+        self.contextLength = contextLength
+        self.visionCapability = visionCapability
     }
 }
 
@@ -224,23 +255,25 @@ public enum LocalModelEnumerator {
             return .parseFailure(detail: head)
         }
         // Ollama can report each model's REAL context window (its GGUF
-        // metadata ceiling) via /api/show — one extra batched probe so
-        // the picker can gate the Hermes 64K floor before selection.
-        // OpenAI-compatible listings carry no context metadata: those
-        // models keep contextLength nil (unknown), never a fake number.
+        // metadata ceiling) AND its native vision support via /api/show —
+        // one extra batched probe so the picker can gate the Hermes 64K
+        // floor before selection and badge vision-capable models. OpenAI-
+        // compatible listings carry neither: those models keep
+        // contextLength nil and visionCapability .unknown, never faked.
         if descriptor.enumerationHint == .ollamaTags, !models.isEmpty {
-            let contexts = fetchOllamaContexts(
+            let metadata = fetchOllamaShowMetadata(
                 modelNames: models.map(\.modelID),
                 probedTagsEndpoint: endpoint,
                 transport: transport
             )
-            if !contexts.isEmpty {
+            if !metadata.isEmpty {
                 models = models.map {
                     LocalModelInfo(
                         modelID: $0.modelID,
                         name: $0.name,
                         detail: $0.detail,
-                        contextLength: contexts[$0.modelID]
+                        contextLength: metadata[$0.modelID]?.contextLength,
+                        visionCapability: metadata[$0.modelID]?.visionCapability ?? .unknown
                     )
                 }
             }
@@ -273,13 +306,13 @@ public enum LocalModelEnumerator {
     /// contexts degrade to unknown, never misattribute.
     ///
     /// Best-effort by design: ANY failure (transport error, segment
-    /// mismatch, malformed JSON) returns partial/empty contexts and the
+    /// mismatch, malformed JSON) returns partial/empty metadata and the
     /// listing itself is untouched.
-    static func fetchOllamaContexts(
+    static func fetchOllamaShowMetadata(
         modelNames: [String],
         probedTagsEndpoint: String,
         transport: any ServerTransport
-    ) -> [String: Int] {
+    ) -> [String: OllamaShowMetadata] {
         // /api/tags → /api/show on the same validated base.
         guard probedTagsEndpoint.hasSuffix("/api/tags") else { return [:] }
         let showEndpoint = String(probedTagsEndpoint.dropLast("/api/tags".count)) + "/api/show"
@@ -299,7 +332,7 @@ public enum LocalModelEnumerator {
             )
         } catch {
             #if canImport(os)
-            logger.info("context batch transport error: \(String(describing: error), privacy: .public)")
+            logger.info("show batch transport error: \(String(describing: error), privacy: .public)")
             #endif
             return [:]
         }
@@ -308,6 +341,83 @@ public enum LocalModelEnumerator {
         // in parseShowBatch decides whether they're trustworthy.
         return parseShowBatch(result.stdout, probedNames: batch.probedNames)
     }
+
+    // MARK: - Single active-model vision probe (composer heads-up)
+
+    /// Native vision support for ONE Ollama model — the cheap path the
+    /// composer heads-up (t-31img) takes for a local model that models.dev
+    /// never mirrors. The picker's batched enumeration is the wrong seam:
+    /// the heads-up fires whenever an image is attached, with no picker
+    /// open, so this issues a SINGLE `POST /api/show` for just the active
+    /// model and memoizes the answer per (show-endpoint, model).
+    ///
+    /// Only confident verdicts (`.yes`/`.no`) are cached: a `.unknown` from
+    /// a momentarily-down daemon must re-probe once the daemon is back,
+    /// whereas capability for a fixed model never flips within a run. The
+    /// refresh only runs when an attachment appears (not per keystroke), so
+    /// the re-probe cost on `.unknown` is a single call, not a hot loop.
+    ///
+    /// `baseURL` is the configured `model.base_url` (with its `/v1` suffix);
+    /// `descriptorDefault` is Ollama's default endpoint, used when the
+    /// config carries no explicit base. Returns `.unknown` on any failure
+    /// — the invariant the composer relies on to stay silent.
+    public static func ollamaVisionCapability(
+        modelID: String,
+        baseURL: String?,
+        descriptorDefault: String?,
+        transport: any ServerTransport
+    ) -> ModelCatalogService.VisionCapability {
+        let model = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard validatedOllamaModelName(model) else { return .unknown }
+        guard let tagsEndpoint = endpointURL(
+            for: .ollamaTags, baseURL: baseURL, descriptorDefault: descriptorDefault
+        ), tagsEndpoint.hasSuffix("/api/tags") else { return .unknown }
+        let showEndpoint = String(tagsEndpoint.dropLast("/api/tags".count)) + "/api/show"
+
+        let cacheKey = "\(showEndpoint)|\(model)"
+        visionCacheLock.lock()
+        let cached = visionCache[cacheKey]
+        visionCacheLock.unlock()
+        if let cached { return cached }
+
+        let result: ProcessResult
+        do {
+            result = try transport.runProcess(
+                executable: curlExecutable(isRemote: transport.isRemote),
+                // Same discipline as the batch: model name is a plain argv
+                // element inside a `-d` body, the allowlist above guarantees
+                // it needs no JSON escaping, and no `-f` so an HTTP error
+                // still returns a parseable body (→ .unknown, never a warn).
+                args: [
+                    "-sS", "--max-time", "\(curlMaxTimeSeconds)",
+                    "-d", "{\"model\":\"\(model)\"}",
+                    showEndpoint,
+                ],
+                stdin: nil,
+                timeout: transportTimeoutSeconds
+            )
+        } catch {
+            #if canImport(os)
+            logger.info("vision probe transport error: \(String(describing: error), privacy: .public)")
+            #endif
+            return .unknown
+        }
+        guard result.exitCode == 0 else { return .unknown }
+        let capability = parseOllamaShowVision(result.stdout)
+        // Cache only confident answers (see the doc comment).
+        if capability != .unknown {
+            visionCacheLock.lock()
+            visionCache[cacheKey] = capability
+            visionCacheLock.unlock()
+        }
+        return capability
+    }
+
+    /// Memoized single-model vision verdicts, keyed (show-endpoint, model).
+    /// `nonisolated(unsafe)` + lock matches the `ModelCatalogService`
+    /// vision-cache pattern under the package's Swift 5 language mode.
+    private static let visionCacheLock = NSLock()
+    nonisolated(unsafe) private static var visionCache: [String: ModelCatalogService.VisionCapability] = [:]
 
     /// ASCII Record Separator — the per-transfer `-w` marker. Cannot
     /// occur in valid JSON output (control characters must be escaped in
@@ -365,18 +475,37 @@ public enum LocalModelEnumerator {
     /// abort, or a hostile injection attempt inflating the count)
     /// discards the WHOLE batch — degrading to unknown is always safe,
     /// misattributing a context to the wrong model never is.
-    static func parseShowBatch(_ data: Data, probedNames: [String]) -> [String: Int] {
+    static func parseShowBatch(_ data: Data, probedNames: [String]) -> [String: OllamaShowMetadata] {
         var segments = data.split(separator: showRecordSeparator, omittingEmptySubsequences: false)
         // The final separator leaves one trailing empty segment.
         if segments.last?.isEmpty == true { segments.removeLast() }
         guard segments.count == probedNames.count else { return [:] }
-        var contexts: [String: Int] = [:]
+        var metadata: [String: OllamaShowMetadata] = [:]
         for (segment, name) in zip(segments, probedNames) {
-            if let ctx = parseOllamaShowContext(Data(segment)) {
-                contexts[name] = ctx
-            }
+            let bytes = Data(segment)
+            metadata[name] = OllamaShowMetadata(
+                contextLength: parseOllamaShowContext(bytes),
+                visionCapability: parseOllamaShowVision(bytes)
+            )
         }
-        return contexts
+        return metadata
+    }
+
+    /// Native vision support from one `POST /api/show` response's top-level
+    /// `capabilities` array (Ollama ≥ 0.29: `["completion","tools","vision"]`
+    /// — verified live against 0.31.2, which lists `vision` only for
+    /// multimodal models like `llama3.2-vision`/`llava`). Three-state:
+    /// `.yes` when the array is present and contains `"vision"`, `.no` when
+    /// present and omits it, `.unknown` when the key is absent (daemon too
+    /// old to report capabilities), non-array, or the body doesn't parse
+    /// (error bodies, empty data). `.unknown` NEVER warns downstream — that
+    /// preserves the no-false-warning invariant for pre-0.29 Ollama, LM
+    /// Studio, and custom endpoints.
+    static func parseOllamaShowVision(_ data: Data) -> ModelCatalogService.VisionCapability {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let caps = root["capabilities"] as? [Any] else { return .unknown }
+        let strings = caps.compactMap { $0 as? String }
+        return strings.contains("vision") ? .yes : .no
     }
 
     /// Extract the context window from one `POST /api/show` response:

@@ -412,6 +412,45 @@ import Foundation
         #expect(LocalModelEnumerator.parseOllamaShowContext(Data(#"{"model_info":{"llama.context_length":-1}}"#.utf8)) == nil)
     }
 
+    // MARK: - parseOllamaShowVision (/api/show capabilities shapes)
+
+    @Test func showVisionIsYesWhenCapabilitiesListVision() {
+        // Ollama ≥ 0.29 shape for a multimodal model (llama3.2-vision /
+        // llava): top-level `capabilities` includes "vision".
+        let vision = Data(#"{"capabilities":["completion","vision"]}"#.utf8)
+        #expect(LocalModelEnumerator.parseOllamaShowVision(vision) == .yes)
+        // Order-independent, extra caps ignored.
+        let visionTools = Data(#"{"capabilities":["completion","tools","vision","insert"]}"#.utf8)
+        #expect(LocalModelEnumerator.parseOllamaShowVision(visionTools) == .yes)
+    }
+
+    @Test func showVisionIsNoWhenCapabilitiesPresentButOmitVision() {
+        // The exact live shape for llama3.1:8b / qwen2.5:14b on 0.31.2 —
+        // capabilities present, no "vision". A CONFIDENT non-vision verdict
+        // (this is what makes the composer heads-up finally fire locally).
+        let textOnly = Data(#"{"capabilities":["completion","tools"]}"#.utf8)
+        #expect(LocalModelEnumerator.parseOllamaShowVision(textOnly) == .no)
+        #expect(LocalModelEnumerator.parseOllamaShowVision(Data(#"{"capabilities":["completion"]}"#.utf8)) == .no)
+        // Empty array is still a present-but-no-vision statement.
+        #expect(LocalModelEnumerator.parseOllamaShowVision(Data(#"{"capabilities":[]}"#.utf8)) == .no)
+        // The qwen fixture carries capabilities without vision.
+        #expect(LocalModelEnumerator.parseOllamaShowVision(Self.ollamaShowQwenJSON) == .no)
+    }
+
+    @Test func showVisionIsUnknownWhenCapabilitiesKeyAbsentOrUnreadable() {
+        // Pre-0.29 Ollama omits `capabilities` entirely — MUST degrade to
+        // .unknown (never a false .no), preserving the no-false-warning
+        // invariant for old daemons, LM Studio, and custom endpoints.
+        #expect(LocalModelEnumerator.parseOllamaShowVision(Self.ollamaShowLlamaJSON) == .unknown)
+        #expect(LocalModelEnumerator.parseOllamaShowVision(Data(#"{"model_info":{"general.architecture":"llama"}}"#.utf8)) == .unknown)
+        // Error body (model deleted between tags and show).
+        #expect(LocalModelEnumerator.parseOllamaShowVision(Data(#"{"error":"model 'x' not found"}"#.utf8)) == .unknown)
+        // Wrong type for capabilities, malformed, empty.
+        #expect(LocalModelEnumerator.parseOllamaShowVision(Data(#"{"capabilities":"vision"}"#.utf8)) == .unknown)
+        #expect(LocalModelEnumerator.parseOllamaShowVision(Data("not json".utf8)) == .unknown)
+        #expect(LocalModelEnumerator.parseOllamaShowVision(Data()) == .unknown)
+    }
+
     // MARK: - Model-name allowlist (the show-batch injection gate)
 
     @Test func modelNameAllowlistAcceptsEveryLegalOllamaShape() {
@@ -495,8 +534,13 @@ import Foundation
 
     @Test func showBatchSegmentsPairPositionallyWithProbedNames() {
         let data = Self.rsJoined([Self.ollamaShowLlamaJSON, Self.ollamaShowQwenJSON])
-        let contexts = LocalModelEnumerator.parseShowBatch(data, probedNames: ["llama3.1:8b", "qwen2.5:14b"])
-        #expect(contexts == ["llama3.1:8b": 131072, "qwen2.5:14b": 32768])
+        let meta = LocalModelEnumerator.parseShowBatch(data, probedNames: ["llama3.1:8b", "qwen2.5:14b"])
+        #expect(meta.mapValues(\.contextLength) == ["llama3.1:8b": 131072, "qwen2.5:14b": 32768])
+        // Vision rides the same segments: llama's fixture has no
+        // `capabilities` key (→ .unknown), qwen's lists ["completion",
+        // "tools"] without "vision" (→ .no).
+        #expect(meta["llama3.1:8b"]?.visionCapability == .unknown)
+        #expect(meta["qwen2.5:14b"]?.visionCapability == .no)
     }
 
     @Test func failedTransferYieldsNoContextForThatModelOnly() {
@@ -507,9 +551,14 @@ import Foundation
             Data(#"{"error":"model 'gone:1b' not found"}"#.utf8),
             Self.ollamaShowQwenJSON,
         ])
-        let contexts = LocalModelEnumerator.parseShowBatch(
+        let meta = LocalModelEnumerator.parseShowBatch(
             data, probedNames: ["llama3.1:8b", "gone:1b", "qwen2.5:14b"])
-        #expect(contexts == ["llama3.1:8b": 131072, "qwen2.5:14b": 32768])
+        #expect(meta["llama3.1:8b"]?.contextLength == 131072)
+        #expect(meta["qwen2.5:14b"]?.contextLength == 32768)
+        // The error body correlates to gone:1b positionally: no context,
+        // no vision signal — never misattributed to a neighbor.
+        #expect(meta["gone:1b"]?.contextLength == nil)
+        #expect(meta["gone:1b"]?.visionCapability == .unknown)
     }
 
     @Test func segmentCountMismatchDiscardsTheWholeBatch() {
@@ -612,7 +661,155 @@ import Foundation
             return
         }
         #expect(models.allSatisfy { $0.contextLength == nil })
+        // No capability metadata on the OpenAI-compat shape → all unknown.
+        #expect(models.allSatisfy { $0.visionCapability == .unknown })
         #expect(transport.calls.count == 1)
+    }
+
+    // MARK: - Vision capability end-to-end + single-model probe
+
+    /// A show batch mixing all three vision states: a vision model, a
+    /// text-only model (capabilities without "vision"), and a pre-0.29
+    /// model whose response omits `capabilities` entirely.
+    static let ollamaShowVisionJSON = Data("""
+    {"model_info":{"general.architecture":"mllama","mllama.context_length":131072},
+     "capabilities":["completion","vision"]}
+    """.utf8)
+
+    @Test func ollamaListingCarriesVisionCapabilityFromTheSameShowCall() {
+        let tags = Data("""
+        {"models":[{"name":"llama3.2-vision:11b"},{"name":"qwen2.5:14b"},{"name":"llama3.1:8b"}]}
+        """.utf8)
+        let showBatch = Self.rsJoined([
+            Self.ollamaShowVisionJSON,  // vision → .yes
+            Self.ollamaShowQwenJSON,    // capabilities, no vision → .no
+            Self.ollamaShowLlamaJSON,   // no capabilities key → .unknown
+        ])
+        let transport = RecordingTransport(results: [
+            .success(ProcessResult(exitCode: 0, stdout: tags, stderr: Data())),
+            .success(ProcessResult(exitCode: 0, stdout: showBatch, stderr: Data())),
+        ])
+        let outcome = LocalModelEnumerator.listModels(
+            for: Self.descriptor("ollama"), baseURL: nil, transport: transport
+        )
+        guard case .models(let models) = outcome else {
+            Issue.record("expected .models, got \(outcome)")
+            return
+        }
+        #expect(models.map(\.visionCapability) == [.yes, .no, .unknown])
+        // Still exactly TWO round-trips — vision rides the existing batch.
+        #expect(transport.calls.count == 2)
+    }
+
+    @Test func singleVisionProbeReturnsConfidentVerdictHitsShowAndCaches() throws {
+        let transport = RecordingTransport(result: ProcessResult(
+            exitCode: 0,
+            stdout: Data(#"{"capabilities":["completion","vision"]}"#.utf8),
+            stderr: Data()
+        ))
+        let cap = LocalModelEnumerator.ollamaVisionCapability(
+            modelID: "vprobe-yes:1b",
+            baseURL: "http://127.0.0.1:11434/v1",  // /v1 must be stripped for /api/show
+            descriptorDefault: nil,
+            transport: transport
+        )
+        #expect(cap == .yes)
+        #expect(transport.calls.count == 1)
+        let call = try #require(transport.calls.first)
+        #expect(call.args.last == "http://127.0.0.1:11434/api/show")
+        #expect(call.args.contains(#"{"model":"vprobe-yes:1b"}"#))
+        // Single probe: no batching, no -f (an HTTP error must parse to a body).
+        #expect(!call.args.contains("--next"))
+        #expect(!call.args.contains("-f"))
+        // Confident answers memoize — a second call must NOT touch transport.
+        let poisoned = RecordingTransport(error: TransportError.other(message: "must not be called"))
+        let cached = LocalModelEnumerator.ollamaVisionCapability(
+            modelID: "vprobe-yes:1b",
+            baseURL: "http://127.0.0.1:11434/v1",
+            descriptorDefault: nil,
+            transport: poisoned
+        )
+        #expect(cached == .yes)
+        #expect(poisoned.calls.isEmpty)
+    }
+
+    @Test func singleVisionProbeConfidentNoForTextOnlyLocalModel() {
+        // The bug this task fixes: llama3.1:8b-shape response, confident .no.
+        let transport = RecordingTransport(result: ProcessResult(
+            exitCode: 0,
+            stdout: Data(#"{"capabilities":["completion","tools"]}"#.utf8),
+            stderr: Data()
+        ))
+        let cap = LocalModelEnumerator.ollamaVisionCapability(
+            modelID: "vprobe-no:8b", baseURL: nil,
+            descriptorDefault: "http://127.0.0.1:11434/v1", transport: transport
+        )
+        #expect(cap == .no)
+    }
+
+    @Test func singleVisionProbeStaysUnknownForOldDaemonAndIsNotCached() {
+        // Pre-0.29 daemon: no `capabilities` → .unknown (no false warning).
+        // Unknown is NOT cached, so a later daemon upgrade re-probes: the
+        // second call (now reporting vision) must be honored, not stuck.
+        let stale = RecordingTransport(result: ProcessResult(
+            exitCode: 0, stdout: Data(#"{"model_info":{"general.architecture":"llama"}}"#.utf8), stderr: Data()
+        ))
+        let first = LocalModelEnumerator.ollamaVisionCapability(
+            modelID: "vprobe-upgrade:8b", baseURL: "http://127.0.0.1:11434/v1",
+            descriptorDefault: nil, transport: stale
+        )
+        #expect(first == .unknown)
+        let upgraded = RecordingTransport(result: ProcessResult(
+            exitCode: 0, stdout: Data(#"{"capabilities":["completion","vision"]}"#.utf8), stderr: Data()
+        ))
+        let second = LocalModelEnumerator.ollamaVisionCapability(
+            modelID: "vprobe-upgrade:8b", baseURL: "http://127.0.0.1:11434/v1",
+            descriptorDefault: nil, transport: upgraded
+        )
+        #expect(second == .yes)
+        #expect(upgraded.calls.count == 1)  // re-probed, not served from cache
+    }
+
+    @Test func singleVisionProbeIsUnknownOnTransportFailureOrBadName() {
+        // Daemon down → .unknown, never a warn.
+        let dead = RecordingTransport(error: TransportError.other(message: "connection refused"))
+        #expect(LocalModelEnumerator.ollamaVisionCapability(
+            modelID: "whatever:8b", baseURL: "http://127.0.0.1:11434/v1",
+            descriptorDefault: nil, transport: dead
+        ) == .unknown)
+        // Hostile/invalid model name is never probed (injection gate).
+        let unused = RecordingTransport(result: ProcessResult(exitCode: 0, stdout: Data(), stderr: Data()))
+        #expect(LocalModelEnumerator.ollamaVisionCapability(
+            modelID: "evil$(reboot):latest", baseURL: "http://127.0.0.1:11434/v1",
+            descriptorDefault: nil, transport: unused
+        ) == .unknown)
+        #expect(unused.calls.isEmpty)
+    }
+
+    /// The end-to-end intent of t-d25e68cc: the enumerator's local vision
+    /// verdict, fed into the composer's pure hint decision, warns exactly
+    /// when a local model is CONFIRMED non-vision — and stays silent for an
+    /// old daemon that can't report capabilities (the no-false-warning
+    /// invariant that kept t-31img silent for local models before this).
+    @Test func localVisionVerdictDrivesTheComposerHint() {
+        // Confirmed text-only Ollama model (llama3.1:8b shape) → warn.
+        let textOnly = LocalModelEnumerator.ollamaVisionCapability(
+            modelID: "vprobe-compose-no:8b", baseURL: "http://127.0.0.1:11434/v1",
+            descriptorDefault: nil,
+            transport: RecordingTransport(result: ProcessResult(
+                exitCode: 0, stdout: Data(#"{"capabilities":["completion","tools"]}"#.utf8), stderr: Data()))
+        )
+        #expect(textOnly == .no)
+        #expect(RichChatViewModel.shouldShowNonVisionImageHint(attachmentCount: 1, capability: textOnly))
+        // Pre-0.29 daemon → unknown → NO warn (no false positive).
+        let oldDaemon = LocalModelEnumerator.ollamaVisionCapability(
+            modelID: "vprobe-compose-unknown:8b", baseURL: "http://127.0.0.1:11434/v1",
+            descriptorDefault: nil,
+            transport: RecordingTransport(result: ProcessResult(
+                exitCode: 0, stdout: Data(#"{"model_info":{}}"#.utf8), stderr: Data()))
+        )
+        #expect(oldDaemon == .unknown)
+        #expect(!RichChatViewModel.shouldShowNonVisionImageHint(attachmentCount: 1, capability: oldDaemon))
     }
 
     // MARK: - Context floor gate (pure)
