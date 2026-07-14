@@ -416,6 +416,17 @@ final class ChatViewModel {
         ACPClient.forMacApp(context: ctx, projectCwd: projectCwd)
     }
 
+    /// Runs the `hermes sessions delete --yes <id>` CLI for
+    /// `deleteSession(_:)` and returns its exit code. Production default
+    /// shells out through the context's transport (same command path the
+    /// Sessions feature uses); tests inject a stub so exercising the
+    /// delete-active-session teardown (t-01bd55ec) doesn't spawn a real
+    /// CLI process.
+    @ObservationIgnored
+    var sessionDeleteRunner: (ServerContext, String) -> Int32 = { ctx, sessionId in
+        ctx.runHermes(["sessions", "delete", "--yes", sessionId]).exitCode
+    }
+
     private static let maxReconnectAttempts = 5
     private static let reconnectBaseDelay: UInt64 = 1_000_000_000 // 1 second
     private static let maxReconnectDelay: UInt64 = 16_000_000_000 // 16 seconds
@@ -2120,19 +2131,50 @@ final class ChatViewModel {
         sessionPreviews[sessionId] = trimmed
     }
 
-    /// Delete a session via `hermes sessions delete --yes`. Removes the
-    /// row from local caches on success and resets the live chat
-    /// transcript when the deleted session was the active one (so the
-    /// user isn't left looking at orphaned content).
+    /// Delete a session via `hermes sessions delete --yes` (server-side
+    /// delete — Hermes removes it from state.db). Removes the row from
+    /// local caches on success. When the deleted session is the ACTIVE
+    /// one, ALSO routes through the same teardown machinery a session
+    /// switch uses (t-01bd55ec): pre-fix this branch only reset the
+    /// transcript, so the `hermes acp` process (+ its dispatch sources)
+    /// stayed alive until app quit and a mid-flight turn kept running
+    /// server-side against the just-deleted session. Deleting a
+    /// non-active session never disturbs the live client.
     func deleteSession(_ sessionId: String) {
-        let result = context.runHermes(["sessions", "delete", "--yes", sessionId])
-        guard result.exitCode == 0 else { return }
+        guard sessionDeleteRunner(context, sessionId) == 0 else { return }
         recentSessions.removeAll { $0.id == sessionId }
         sessionPreviews.removeValue(forKey: sessionId)
         sessionProjectNames.removeValue(forKey: sessionId)
-        if richChatViewModel.sessionId == sessionId {
-            richChatViewModel.reset()
-            setInspectorFocus(.none)
+        guard richChatViewModel.sessionId == sessionId else { return }
+
+        // Active session deleted — mirror startACPSession's entry
+        // teardown (minus the respawn):
+        //
+        // Capture the in-flight turn BEFORE reset/stopACP so the
+        // delete-specific hint below can replace stopACP's generic
+        // "switched sessions" wording.
+        let turnWasInFlight = acpPromptTask != nil && inFlightPromptSessionId != nil
+        // Supersede any in-flight start pipeline: a stale await
+        // resuming later must abandon at its `startStillCurrent` check
+        // instead of re-attaching plumbing for the deleted session.
+        beginStartIntent()
+        // Detach the transcript first (same order as the switch entry
+        // points) — stopACP's attachment-gated "cancelled" bubble then
+        // can't paint into the freshly-blanked transcript.
+        richChatViewModel.reset()
+        setInspectorFocus(.none)
+        // Full teardown: bounded best-effort `session/cancel` if a turn
+        // is in flight (lets Hermes finalize the orphaned turn before
+        // the kill), then `client.stop()`. Also disarms the start
+        // watchdog, cancels reconnects, and clears `isStartingSession`.
+        stopACP()
+        // stopACP leaves `acpStatus` at its last painted phase; the
+        // pane is now an idle blank chat, so park the pill at idle the
+        // same way the preflight bail does.
+        acpStatus = ""
+        if turnWasInFlight {
+            richChatViewModel.transientHint = "Turn cancelled — session deleted."
+            scheduleHintClear()
         }
     }
 

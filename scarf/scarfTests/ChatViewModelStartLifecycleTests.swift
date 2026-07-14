@@ -485,6 +485,169 @@ import ScarfCore
         #expect(Date().timeIntervalSince(start) < 5.5)
     }
 
+    // MARK: - deleteSession teardown (t-01bd55ec)
+
+    /// Thread-safe recorder for the injected `sessionDeleteRunner` —
+    /// captures which session ids the CLI stub was asked to delete.
+    final class DeleteRecorder: @unchecked Sendable {
+        private var ids: [String] = []
+        private let lock = NSLock()
+        func record(_ id: String) {
+            lock.lock(); defer { lock.unlock() }
+            ids.append(id)
+        }
+        var recorded: [String] {
+            lock.lock(); defer { lock.unlock() }
+            return ids
+        }
+    }
+
+    /// Deleting the ACTIVE session while a turn is in flight must route
+    /// through the full teardown machinery: best-effort `session/cancel`
+    /// BEFORE the process is killed, `client.stop()` (channel closed —
+    /// pre-fix the `hermes acp` process + dispatch sources leaked until
+    /// app quit while the orphaned turn kept running server-side),
+    /// transcript detached, and no stuck preparing state.
+    @Test @MainActor func deleteActiveSessionMidTurnCancelsAndStopsClient() async throws {
+        let home = try Self.configuredHome()
+        defer { home.cleanup() }
+        let vm = ChatViewModel(context: home.context)
+        let ch = ScriptedACPChannel(behavior: .happy(sessionId: "sess-A"))
+        vm.acpClientFactory = { ctx, _ in
+            ACPClient(context: ctx) { _ in ch }
+        }
+        let deletes = DeleteRecorder()
+        vm.sessionDeleteRunner = { _, sid in
+            deletes.record(sid)
+            return 0
+        }
+
+        vm.startNewSession()
+        let ready = await Self.waitUntil {
+            vm.acpStatus == ChatViewModel.ACPPhase.ready
+                && vm.richChatViewModel.sessionId == "sess-A"
+        }
+        #expect(ready)
+
+        vm.sendText("long-running turn") // held open by the scripted channel
+        let promptInFlight = await Self.waitUntil {
+            await ch.sentMethods.contains("session/prompt")
+        }
+        #expect(promptInFlight)
+        #expect(vm.richChatViewModel.isAgentWorking)
+
+        vm.deleteSession("sess-A")
+        #expect(deletes.recorded == ["sess-A"])
+
+        // The orphaned turn gets a bounded best-effort cancel…
+        let cancelSent = await Self.waitUntil {
+            await ch.sentMethods.contains("session/cancel")
+        }
+        #expect(cancelSent, "deleting the active session mid-turn killed no turn: session/cancel never sent (pre-fix leak)")
+        // …and the client is actually stopped (channel closed), not
+        // left running until app quit.
+        let closed = await Self.waitUntil { await ch.closed }
+        #expect(closed, "deleting the active session leaked the ACP client (channel never closed)")
+
+        // Transcript + preparing state sane: blank idle chat.
+        #expect(vm.richChatViewModel.sessionId == nil)
+        #expect(vm.richChatViewModel.messages.isEmpty)
+        #expect(vm.richChatViewModel.isAgentWorking == false)
+        #expect(vm.isPreparingSession == false)
+        #expect(vm.isStartingSession == false)
+        #expect(vm.hasActiveProcess == false)
+        #expect(vm.acpStatus.isEmpty)
+        // Composer-level feedback names the delete, not a session switch.
+        #expect(vm.richChatViewModel.transientHint == "Turn cancelled — session deleted.")
+    }
+
+    /// Deleting the ACTIVE session while IDLE (no turn in flight) must
+    /// stop the client without issuing a `session/cancel` — there is no
+    /// turn to finalize, and a spurious cancel RPC against an idle
+    /// session is wire noise.
+    @Test @MainActor func deleteActiveSessionIdleStopsClientWithoutCancel() async throws {
+        let home = try Self.configuredHome()
+        defer { home.cleanup() }
+        let vm = ChatViewModel(context: home.context)
+        let ch = ScriptedACPChannel(behavior: .happy(sessionId: "sess-A"))
+        vm.acpClientFactory = { ctx, _ in
+            ACPClient(context: ctx) { _ in ch }
+        }
+        let deletes = DeleteRecorder()
+        vm.sessionDeleteRunner = { _, sid in
+            deletes.record(sid)
+            return 0
+        }
+
+        vm.startNewSession()
+        let ready = await Self.waitUntil {
+            vm.acpStatus == ChatViewModel.ACPPhase.ready
+                && vm.richChatViewModel.sessionId == "sess-A"
+        }
+        #expect(ready)
+
+        vm.deleteSession("sess-A")
+        #expect(deletes.recorded == ["sess-A"])
+
+        let closed = await Self.waitUntil { await ch.closed }
+        #expect(closed, "deleting the active idle session leaked the ACP client (channel never closed)")
+        let methods = await ch.sentMethods
+        #expect(!methods.contains("session/cancel"),
+                "idle delete issued a spurious session/cancel")
+        #expect(vm.richChatViewModel.sessionId == nil)
+        #expect(vm.isPreparingSession == false)
+        #expect(vm.hasActiveProcess == false)
+        #expect(vm.acpStatus.isEmpty)
+        // No turn was cancelled — no cancellation toast.
+        #expect(vm.richChatViewModel.transientHint == nil)
+    }
+
+    /// Deleting a NON-active session must not disturb the live one:
+    /// client stays up, the in-flight turn keeps running, no cancel RPC,
+    /// transcript untouched. Only the sidebar caches drop the row.
+    @Test @MainActor func deleteInactiveSessionLeavesActiveClientUntouched() async throws {
+        let home = try Self.configuredHome()
+        defer { home.cleanup() }
+        let vm = ChatViewModel(context: home.context)
+        let ch = ScriptedACPChannel(behavior: .happy(sessionId: "sess-A"))
+        vm.acpClientFactory = { ctx, _ in
+            ACPClient(context: ctx) { _ in ch }
+        }
+        let deletes = DeleteRecorder()
+        vm.sessionDeleteRunner = { _, sid in
+            deletes.record(sid)
+            return 0
+        }
+
+        vm.startNewSession()
+        let ready = await Self.waitUntil {
+            vm.acpStatus == ChatViewModel.ACPPhase.ready
+                && vm.richChatViewModel.sessionId == "sess-A"
+        }
+        #expect(ready)
+
+        vm.sendText("keep me running") // held open by the scripted channel
+        let promptInFlight = await Self.waitUntil {
+            await ch.sentMethods.contains("session/prompt")
+        }
+        #expect(promptInFlight)
+
+        vm.deleteSession("sess-other")
+        #expect(deletes.recorded == ["sess-other"])
+
+        // Give any erroneous teardown time to surface before asserting
+        // the live session is untouched.
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        let stillOpen = await ch.closed
+        #expect(stillOpen == false, "deleting a non-active session stopped the live client")
+        let methods = await ch.sentMethods
+        #expect(!methods.contains("session/cancel"),
+                "deleting a non-active session cancelled the live turn")
+        #expect(vm.richChatViewModel.sessionId == "sess-A")
+        #expect(vm.richChatViewModel.isAgentWorking)
+        #expect(vm.hasActiveProcess)
+    }
+
     // MARK: - Interactive send echo (Fix-2 audit pin)
 
     /// A typed message must ALWAYS produce a user bubble: the
