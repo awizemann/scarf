@@ -13,23 +13,9 @@
 
 ## Todo
 
-- [ ] Hermes 0.16.0 - Final Release Pass (id: t-614783) (added: 2026-06-14) (priority: urgent)
-- [ ] **[release · HIGH]** Cut **v2.10.3** — ships three fixes that are on `main` but missed the v2.10.2 cut (tagged 2026-06-05, before they landed): gh#102 100% CPU `720c805`, gh#112 Failure-1 stderr-surfacing `3401cc7`, gh#105 10s menu-bar flash `c7f42a6`. **Publicly promised on gh#102/#112/#105 (2026-06-13)** — users were told "fixed/next build" but no release contains these yet (this was gh#102 reporter aseelye's exact complaint). Until v2.10.3 ships, gh#102/#112(F1)/#105(flash) can't be closed. (id: t-rel-2103) (added: 2026-06-13, source: gh issue triage)
 - [ ] Edit existing remote server connections (id: t-edit-srv) (source: gh#105 part 2) (added: 2026-06-02)
 - [ ] Images attached to messages ignored. (id: t-77ec00) (source: gh#113) (added: 2026-06-13) — **ROOT-CAUSED against the real Hermes v0.16.0 source (`~/.hermes/hermes-agent/`, build 2026.6.5); gh#113 updated 2026-06-13.** Scarf's wire path is CORRECT (earlier "schema mismatch" guess was WRONG): `ImageEncoder` emits raw base64 (no `data:` prefix), `ACPClient.sendPrompt` sends `{"type":"image","data":<b64>,"mimeType":...}`, which Hermes parses to `ImageContentBlock` and converts via `_content_blocks_to_openai_user_content` → OpenAI `image_url` (verified by Hermes's own passing test `tests/acp_adapter/test_acp_images.py`). **Real cause = Hermes image-input ROUTING** (`agent/image_routing.py::decide_image_input_mode`): default `agent.image_input_mode: auto` → if the active model isn't `supports_vision` (models.dev), the image is routed to the TEXT pipeline (`vision_analyze` → lossy summary; model never sees pixels) and drops without a vision backend. NOT a Scarf bug. User fixes: vision model / `agent.image_input_mode: native` / configure `auxiliary.vision.provider`. **Scarf-side follow-up → t-31img.** Awaiting reporter's model+provider to confirm.
-- [ ] **[enhancement/gh#113]** Composer heads-up when an image is attached to a session whose active model isn't vision-capable (so users aren't left guessing why it didn't land — see t-77ec00 root cause: Hermes routes non-vision-model images to a lossy text pipeline). Needs a per-model vision-capability signal on the Scarf side (models.dev lookup or heuristic; `HermesCapabilities` is version-scoped, not per-model) — design + source TBD. Risk: LOW (additive UX). (id: t-31img) (added: 2026-06-13, source: gh#113 root cause)
 - [ ] iOS - Chat connection Failed - Couldn’t save model+provider to config.yaml (id: t-2c5982) (source: gh#112) (added: 2026-06-13) — **gh#112 commented 2026-06-13** (F1 fix unreleased → v2.10.3); kept open as the tracker for F2 ([[t-ios-cfg-get]]).
-- [ ] Remove `$PATH` Dependency for Hermes Binary (id: t-83d2fe) (source: gh#105) (added: 2026-06-13) — **gh#105 commented 2026-06-13**: binary-hint field shipped v2.10.1; 10s-flash fix → v2.10.3; kept open for edit-server ([[t-edit-srv]]).
-- [ ] Scarf v2.9.1 - 100% CPU usage on single core when connected to Hermes (id: t-161674) (source: gh#102) (added: 2026-06-13) — **gh#102 commented 2026-06-13** (replied to aseelye: fix now on `main`, ships v2.10.3); keep open until released + reporter retests on real 285 MB DB.
-- [ ] Scarf spawns a new Hermes session on every chat, losing all previous context (id: t-b19e3d) (source: gh#99) — **CLOSED on GitHub 2026-06-13** (fixed `a9fe143`, shipped v2.9.2; reopen-if-recurs note left).
-- [ ] Informational: /model change in Scarf not working properly - Bugs reported to Hermes (id: t-287bba) (source: gh#97) — **CLOSED on GitHub 2026-06-13** (Scarf-side `e741ab8` shipped v2.9.1; remainder is upstream hermes-agent).
-- [ ] Update our app to support the latest Herme (https://github.com/NousResearch/hermes-agent/releases/tag/v2026.6.5) (added: 2026-06-13)
-- [ ] “Chat connection failed” when app switcher used (id: t-e9257e) (source: gh#108) — **CLOSED on GitHub 2026-06-13** (fixed `8023097`, shipped v2.10.1, reporter confirmed).
-- [ ] Send message button not working (id: t-e2b3bc) (source: gh#107) — **CLOSED on GitHub 2026-06-13** (fixed `8023097`, shipped v2.10.1, reporter confirmed).
-- [ ] Remove `$PATH` Dependency for Hermes Binary (id: t-83d2fe) (source: gh#105) (added: 2026-06-13) — **gh#105 commented 2026-06-13**: binary-hint field shipped v2.10.1; 10s-flash fix → v2.10.3; kept open for edit-server ([[t-edit-srv]]).
-- [ ] Scarf v2.9.1 - 100% CPU usage on single core when connected to Hermes (id: t-161674) (source: gh#102) — **CLOSED on GitHub 2026-06-21**: original Dashboard-CPU fix shipped v2.10.3, confirmed by aseelye. The distinct typing-lag aseelye raised later was root-caused + fixed ([[t-7b47ba93]]) and split to gh#119 for the next release.
-- [ ] Scarf spawns a new Hermes session on every chat, losing all previous context (id: t-b19e3d) (source: gh#99) — **CLOSED on GitHub 2026-06-13** (fixed `a9fe143`, shipped v2.9.2; reopen-if-recurs note left).
-- [ ] Informational: /model change in Scarf not working properly - Bugs reported to Hermes (id: t-287bba) (source: gh#97) — **CLOSED on GitHub 2026-06-13** (Scarf-side `e741ab8` shipped v2.9.1; remainder is upstream hermes-agent).
 - [ ] Performance and reliability issues on large state.db (lag, crashes, missing sessions) (id: t-b8a6c3) (source: gh#61) (added: 2026-06-13)
 - [ ] **[deferred]** Accessibility audit cycle — DEFERRED by request 2026-06-13. Run the swift-app-audit a11y dimension: VoiceOver labels/traits/rotor, Dynamic Type vs `.font(.system(size:))`, WCAG contrast on `ScarfColor` tier/semantic tokens (light + dark), Reduce Motion / Reduce Transparency gating. (id: t-aud20) (added: 2026-06-13, source: documents/audits/2026-06-13-cycle3-hig-coldstart.md)
 - [ ] **[followup/t-aud01]** Lazy-load `reasoning_content` (v0.11 rich chain-of-thought) on REASONING disclosure open. `fetchReasoningContent(for:)` exists but has zero callers; the bulk fetch excludes reasoning_content (perf, issue #74) so it's never shown on ANY historical load. Wire a per-message lazy fetch from `RichMessageBubble` (macOS) + `Scarf iOS/Chat/ChatView.swift:2464`. Gotchas to resolve: (1) `RichMessageBubble` `==` short-circuit (issue #46) doesn't compare reasoning for settled bubbles, so a spliced result won't redraw — use a view-local `@State` cache instead; (2) need a cheap "reasoning_content available" probe so the disclosure shows even when content isn't loaded; (3) confirm whether v0.11 models populate `reasoning` too or only `reasoning_content`. (id: t-aud21) (added: 2026-06-13, source: t-aud01)
@@ -53,17 +39,47 @@
 - [ ] MCP per-server keepalive_interval editor field (v0.17) (id: t-07a9baa4) (added: 2026-06-21) (priority: low)
 - [ ] Photon / iMessage gateway platform support (v0.17) — decide support level (id: t-5ab57e6f) (added: 2026-06-21) (priority: low)
 - [ ] Gateway allowlist: google-chat is a no-op + wrong platform id (v0.17 = google_chat) (id: t-2d6888ea) (added: 2026-06-21)
-- [ ] Mismatch banner: offer "Choose model…" picker when prefix is unknown (id: t-79569a15) (added: 2026-07-04)
 - [ ] Hermes 0.18.x roadmap candidates: sessions.display_name gateway-session titles (schema-detect), curator usage telemetry (needs own gate — verb absent at 0.18.0), 1Password read-only Secrets display, compression Codex knobs (id: t-49826b5f) (added: 2026-07-10) (priority: low)
 - [ ] Awaiting reporter confirmations, all pinged: gh#112 (scriptures4life, Docker read-path, TestFlight build ~50, pinged 2026-07-12), gh#123 (JonLaliberte, v2.16.1 ControlMaster self-healing, pinged 2026-07-12), gh#124 (AnandChowdhary, his fix b808632 in TestFlight build 51, pinged 2026-07-12). Close each on confirmation; if no reply in ~2 weeks, close with reopen invitation. (id: t-503483b7) (added: 2026-07-12)
+- [ ] Decide 0.18 update-nudge + prep v2.17 release (local models + session-layer) (id: t-c1ed7f7c) (added: 2026-07-14)
+- [ ] iOS: route confirmModelPreflight through LocalModelConfigPlan (live stale-key bug, same class as Mac) (id: t-52f4564b) (added: 2026-07-14)
+- [ ] Low-risk consolidation: 3× semverCompare and 7× shell-quoting copies → shared utils (id: t-a21accf0) (added: 2026-07-14)
+- [ ] Reliable connect-time Hermes version read (persist + single cached probe) — enabler for any floor/nudge (id: t-bfd15aef) (added: 2026-07-14)
 
 ## Doing
 
-- [ ] Hermes v0.17 — Tier 2: capability gates + tests + new platforms + config surfaces, bump target to v0.17 (id: t-8f0f7ac0) (added: 2026-06-21)
 - [ ] Refresh marketing site + README FAQ for v2.15 Projects (supersede PR #109) (id: t-83c4c692) (added: 2026-06-28)
 
 ## Done
 
+- [x] Config parity: derived test over setSetting keys (convert the convention into a build gate) (id: t-2d258871) (added: 2026-07-14)
+- [x] Vision heads-up: detect Ollama model vision capability via /api/show (close the local-model blind spot) (id: t-d25e68cc) (added: 2026-07-14)
+- [x] Mismatch banner: offer "Choose model…" picker when prefix is unknown (id: t-79569a15) (added: 2026-07-04)
+- [x] **[enhancement/gh#113]** Composer heads-up when an image is attached to a session whose active model isn't vision-capable (so users aren't left guessing why it didn't land — see t-77ec00 root cause: Hermes routes non-vision-model images to a lossy text pipeline). Needs a per-model vision-capability signal on the Scarf side (models.dev lookup or heuristic; `HermesCapabilities` is version-scoped, not per-model) — design + source TBD. Risk: LOW (additive UX). (id: t-31img) (added: 2026-06-13, source: gh#113 root cause)
+- [x] Sessions feature — confirmDelete of the chat-active session leaks the client (id: t-5f1d9008) (added: 2026-07-13)
+- [x] Wiki — update Chat/ScarfGo/ACP pages for the load-only reconnect ladder (id: t-76edf0e0) (added: 2026-07-13)
+- [x] Remove `$PATH` Dependency for Hermes Binary (id: t-83d2fe) (source: gh#105) (added: 2026-06-13) — **gh#105 commented 2026-06-13**: binary-hint field shipped v2.10.1; 10s-flash fix → v2.10.3; kept open for edit-server ([[t-edit-srv]]). — tracked by t-edit-srv (edit-server remainder); other halves shipped v2.10.1/v2.10.3 — swept 2026-07-14
+- [x] Scarf v2.9.1 - 100% CPU usage on single core when connected to Hermes (id: t-161674) (source: gh#102) (added: 2026-06-13) — **gh#102 commented 2026-06-13** (replied to aseelye: fix now on `main`, ships v2.10.3); keep open until released + reporter retests on real 285 MB DB. — CLOSED on GitHub 2026-06-21, fix shipped v2.10.3 + typing-lag split to gh#119 — swept 2026-07-14
+- [x] Scarf spawns a new Hermes session on every chat, losing all previous context (id: t-b19e3d) (source: gh#99) — **CLOSED on GitHub 2026-06-13** (fixed `a9fe143`, shipped v2.9.2; reopen-if-recurs note left). — CLOSED on GitHub 2026-06-13, shipped v2.9.2 — swept 2026-07-14
+- [x] Informational: /model change in Scarf not working properly - Bugs reported to Hermes (id: t-287bba) (source: gh#97) — **CLOSED on GitHub 2026-06-13** (Scarf-side `e741ab8` shipped v2.9.1; remainder is upstream hermes-agent). — CLOSED on GitHub 2026-06-13, shipped v2.9.1 — swept 2026-07-14
+- [x] “Chat connection failed” when app switcher used (id: t-e9257e) (source: gh#108) — **CLOSED on GitHub 2026-06-13** (fixed `8023097`, shipped v2.10.1, reporter confirmed). — CLOSED on GitHub 2026-06-13, shipped v2.10.1, reporter confirmed — swept 2026-07-14
+- [x] Send message button not working (id: t-e2b3bc) (source: gh#107) — **CLOSED on GitHub 2026-06-13** (fixed `8023097`, shipped v2.10.1, reporter confirmed). — CLOSED on GitHub 2026-06-13, shipped v2.10.1, reporter confirmed — swept 2026-07-14
+- [x] Hermes v0.17 — Tier 2: capability gates + tests + new platforms + config surfaces, bump target to v0.17 (id: t-8f0f7ac0) (added: 2026-06-21)
+- [x] Hermes 0.16.0 - Final Release Pass (id: t-614783) (added: 2026-06-14) (priority: urgent)
+- [x] **[release · HIGH]** Cut **v2.10.3** — ships three fixes that are on `main` but missed the v2.10.2 cut (tagged 2026-06-05, before they landed): gh#102 100% CPU `720c805`, gh#112 Failure-1 stderr-surfacing `3401cc7`, gh#105 10s menu-bar flash `c7f42a6`. **Publicly promised on gh#102/#112/#105 (2026-06-13)** — users were told "fixed/next build" but no release contains these yet (this was gh#102 reporter aseelye's exact complaint). Until v2.10.3 ships, gh#102/#112(F1)/#105(flash) can't be closed. (id: t-rel-2103) (added: 2026-06-13, source: gh issue triage)
+- [x] Local models — surface context-window floor in the Local picker (id: t-fd61272d) (added: 2026-07-13)
+- [x] Hermes upstream — auxiliary resolver missing local provider aliases (id: t-dd608ef1) (added: 2026-07-13)
+- [x] Local models follow-up — route residual provider writers through LocalModelConfigPlan (id: t-9657430b) (added: 2026-07-13)
+- [x] Chat — resumeSession is dead code and orphans server-side sessions (id: t-217da62b) (added: 2026-07-13)
+- [x] Chat — deleteSession on an active mid-turn session never stops the client (id: t-01bd55ec) (added: 2026-07-13)
+- [x] Chat fix 3 — start-path watchdog, teardown hygiene, non-blocking pipe readers (id: t-5451bd1b) (added: 2026-07-13)
+- [x] Chat fix 1 — phantom session/load: treat empty-dict result as not-restorable (id: t-891c321a) (added: 2026-07-13)
+- [x] Chat fix 2 — engagement gate + dedup guard (deaf transcript, merged duplicate sends) (id: t-60f2f152) (added: 2026-07-13)
+- [x] Local models T4 — E2E audit, docs, dogfood build (id: t-7e4b4f86) (added: 2026-07-13)
+- [x] Local models T2 — live model enumeration via server transport (id: t-eef64af3) (added: 2026-07-13)
+- [x] Local models T1 — LocalModelProvider descriptor table in ScarfCore (id: t-476df553) (added: 2026-07-13)
+- [x] Local models T3 — Local/Remote source control in ModelPickerSheet (id: t-8eeb9242) (added: 2026-07-13)
+- [x] Local models T0 — source-verify Hermes resolution of local providers (id: t-15c5d10f) (added: 2026-07-13)
 - [x] Cut Scarf v2.16.0 (Hermes v0.18 parity release) (id: t-b86288c6) (added: 2026-07-04)
 - [x] Performance and reliability issues on large state.db (lag, crashes, missing sessions) (id: t-b8a6c3) (source: gh#61) (added: 2026-06-13)
 - [x] iOS Settings: route config reads through the Hermes CLI wrapper for Docker hosts (config dir is in-container) (id: t-ios-cfg-get) (source: gh#112 failure 2) (added: 2026-06-06)

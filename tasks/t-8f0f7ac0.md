@@ -1,7 +1,7 @@
 ---
 id: t-8f0f7ac0
 title: Hermes v0.17 — Tier 2: capability gates + tests + new platforms + config surfaces, bump target to v0.17
-status: doing
+status: done
 added: 2026-06-21
 ---
 
@@ -18,6 +18,8 @@ Phase 3 — config surfaces: `curator.consolidate` toggle (consolidation now def
 Phase 4 — verify + adversarial audit + hand to scarf-release-prep (coordinated v2.12.0 minor; or Tier 1 as v2.11.1 patch first then Tier 2 v2.12.0 — Alan wants them together → one v2.12.0). Manual capability check needs the local Hermes updated to v0.17.0 (Alan offered).
 
 OPEN DECISIONS: (a) WhatsApp allowlist proper allow_from vs drop-from-editor; (b) include or defer `raft`; (c) include or defer write_approval/low-value config; (d) update local Hermes to 0.17 for manual verification; (e) release version (recommend v2.12.0).
+
+Closed 2026-07-14: superseded by the v0.18 target (memory: decisions/hermes-v0-17-compatibility-decisions + hermes-v0-18-compatibility-decisions). Tier 2 SHIPPED in v2.12.0 (commits ea8566d/44b0ee7/f7a819f): gates+tests, whatsapp_cloud, SimpleX form, Telegram rich_messages/status_indicator, curator.consolidate, max_concurrent_sessions. Every remaining sub-item is tracked in its own open task: photon/iMessage → t-5ab57e6f, MCP keepalive_interval → t-07a9baa4, google-chat allowlist no-op → t-2d6888ea. raft was deferred by decision; nothing untracked remains open.
 
 ## Plan
 
