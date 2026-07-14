@@ -243,15 +243,22 @@ import Foundation
         await client.stop()
     }
 
-    // MARK: - session/load null-result detection (issue #99)
+    // MARK: - session/load not-restorable detection (issue #99 + t-891c321a)
     //
     // Hermes's `load_session` returns a `LoadSessionResponse` dict on a
-    // successful restore, but a JSON-RPC `result: null` (NOT an error)
-    // when the session can't be restored into the ACP runtime. The old
-    // loadSession treated any non-throwing response as success and
-    // silently returned the requested id — so the chat ran against a
-    // phantom session and the user lost context. loadSession must now
-    // throw on a null result so the caller falls back to a fresh session.
+    // successful restore, but `None` (NOT an error) when the session
+    // can't be restored into the ACP runtime. Depending on the framework
+    // path that `None` reaches the wire either as `result: null` or —
+    // on the acp lib Hermes 0.17/0.18 actually ships, via
+    // `normalize_result` — as an EMPTY dict `result: {}` (live-probed
+    // against hermes-agent 0.17.0, 2026-07-13). The old code treated any
+    // non-throwing response as success and silently returned the
+    // requested id — so the chat ran against a phantom session and every
+    // prompt came back stopReason=refusal. loadSession must throw on
+    // BOTH the null and the empty-dict shape so the caller falls back to
+    // a fresh session; a real success always carries `modes` (and
+    // usually `models` + `_meta`), so a non-empty dict is the success
+    // marker.
 
     @Test @MainActor func loadSessionThrowsOnNullResult() async throws {
         let (client, mock, startTask) = await buildClientWithMock()
@@ -281,6 +288,38 @@ import Foundation
         await client.stop()
     }
 
+    @Test @MainActor func loadSessionThrowsOnEmptyDictResult() async throws {
+        let (client, mock, startTask) = await buildClientWithMock()
+        try await waitFor { await mock.sent.count >= 1 }
+        let initId = await mock.lastSentRequestId() ?? 1
+        await mock.reply(with: #"{"jsonrpc":"2.0","id":\#(initId),"result":{}}"#)
+        try await startTask.value
+
+        let loadTask = Task {
+            try await client.loadSession(cwd: "/tmp", sessionId: "abc-123")
+        }
+        try await waitFor { await mock.sent.count >= 2 }
+        let loadId = await mock.lastSentRequestId() ?? 2
+        // The shape Hermes 0.17/0.18 actually emits for a not-restorable
+        // session: `normalize_result` turns the handler's None into an
+        // empty dict. Verbatim wire frame from the 2026-07-13 live probe:
+        //   {"jsonrpc":"2.0","id":2,"result":{}}
+        await mock.reply(with: #"{"jsonrpc":"2.0","id":\#(loadId),"result":{}}"#)
+
+        do {
+            _ = try await loadTask.value
+            Issue.record("expected loadSession to throw on empty-dict result")
+        } catch let error as ACPClientError {
+            if case .invalidResponse(let msg) = error {
+                #expect(msg.contains("abc-123"))
+                #expect(msg.contains("not restorable"))
+            } else {
+                Issue.record("expected .invalidResponse, got \(error)")
+            }
+        }
+        await client.stop()
+    }
+
     @Test @MainActor func loadSessionSucceedsOnDictResult() async throws {
         let (client, mock, startTask) = await buildClientWithMock()
         try await waitFor { await mock.sent.count >= 1 }
@@ -293,10 +332,39 @@ import Foundation
         }
         try await waitFor { await mock.sent.count >= 2 }
         let loadId = await mock.lastSentRequestId() ?? 2
-        // A restorable session returns a LoadSessionResponse dict (the
-        // models selector). loadSession returns the requested id since
-        // Hermes doesn't echo sessionId in the load response.
-        await mock.reply(with: #"{"jsonrpc":"2.0","id":\#(loadId),"result":{"models":{"current":"anthropic:claude"}}}"#)
+        // A restorable session returns a LoadSessionResponse dict with
+        // `_meta` + `models` + `modes` — condensed from the verbatim
+        // success frame captured in the 2026-07-13 live probe against
+        // hermes-agent 0.17.0 (the 0.18.2 source builds the identical
+        // shape). loadSession returns the requested id since Hermes
+        // doesn't echo sessionId in the load response.
+        await mock.reply(with: #"""
+            {"jsonrpc":"2.0","id":\#(loadId),"result":{"_meta":{"hermes":{"sessionProvenance":{"acpSessionId":"abc-123","sessionKind":"root"}}},"models":{"availableModels":[{"modelId":"custom:llama3.1:8b","name":"llama3.1:8b","description":"Provider: Custom endpoint • current"}],"currentModelId":"custom:llama3.1:8b"},"modes":{"availableModes":[{"id":"default","name":"Default","description":"Ask before edits."}],"currentModeId":"default"}}}
+            """#)
+
+        let resolved = try await loadTask.value
+        #expect(resolved == "abc-123")
+        await client.stop()
+    }
+
+    @Test @MainActor func loadSessionSucceedsOnMinimalNonEmptyDictResult() async throws {
+        // Pin the exact guard boundary: any NON-empty dict counts as a
+        // load, even one missing `models` (pre-0.15 Hermes built the
+        // response with only a `models` field, which `exclude_none`
+        // could drop — the guard must not demand any specific key, only
+        // non-emptiness).
+        let (client, mock, startTask) = await buildClientWithMock()
+        try await waitFor { await mock.sent.count >= 1 }
+        let initId = await mock.lastSentRequestId() ?? 1
+        await mock.reply(with: #"{"jsonrpc":"2.0","id":\#(initId),"result":{}}"#)
+        try await startTask.value
+
+        let loadTask = Task {
+            try await client.loadSession(cwd: "/tmp", sessionId: "abc-123")
+        }
+        try await waitFor { await mock.sent.count >= 2 }
+        let loadId = await mock.lastSentRequestId() ?? 2
+        await mock.reply(with: #"{"jsonrpc":"2.0","id":\#(loadId),"result":{"modes":{"currentModeId":"default","availableModes":[]}}}"#)
 
         let resolved = try await loadTask.value
         #expect(resolved == "abc-123")

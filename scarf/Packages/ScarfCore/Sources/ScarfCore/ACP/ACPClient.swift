@@ -305,27 +305,41 @@ public actor ACPClient {
             "mcpServers": AnyCodable([Any]()),
         ]
         let result = try await sendRequest(method: "session/load", params: params)
-        // #99 — Hermes's `load_session` returns a `LoadSessionResponse`
-        // dict (e.g. `{"models": …}`) on success, but a JSON-RPC
-        // `result: null` — NOT an error — when the session can't be
-        // restored into the ACP runtime (`update_cwd` → `get_session` →
-        // `_restore` returned None, e.g. a session that isn't an
-        // ACP-persisted session). The old code treated any non-throwing
-        // response as success and fell through to `?? sessionId`,
-        // silently returning the requested id as if loaded — so the chat
-        // then ran against a phantom session and the user lost their
-        // context with no signal. Detect the null/non-dict result and
-        // throw so the caller's fallback (create a fresh session + replay
-        // the DB transcript) runs cleanly instead. A successful empty
-        // `{}` (older Hermes) is a non-nil dict, so it still counts as a
-        // load.
-        guard result?.dictValue != nil else {
+        // #99 / t-891c321a — Hermes's `load_session` returns a
+        // `LoadSessionResponse` dict on success, but `None` — NOT a
+        // JSON-RPC error — when the session can't be restored into the
+        // ACP runtime (`update_cwd` returned None, e.g. a session that
+        // isn't ACP-persisted). How that `None` reaches the wire depends
+        // on the framework: some paths surface `result: null`, but the
+        // acp lib Hermes ships (0.17 AND 0.18.2) routes `session/load`
+        // through `normalize_result` (acp/utils.py:59-65), which turns
+        // `None` into an EMPTY DICT — the wire frame is `"result": {}`
+        // (live-probed against hermes-agent 0.17.0, 2026-07-13). The old
+        // nil-only guard passed `{}` through and fell through to
+        // `?? sessionId`, silently returning the requested id as if
+        // loaded — the chat then ran against a phantom session and every
+        // prompt came back `stopReason=refusal`.
+        //
+        // A real success is provably a NON-empty dict on every Hermes
+        // that emits `{}` for failure: `load_session` builds
+        // `LoadSessionResponse(models=…, modes=…, field_meta=…)` and
+        // `_session_modes` unconditionally constructs a mode state
+        // (v2026.5.28 / Hermes 0.15 onward, verified in 0.17 working
+        // tree and the v2026.7.7.2 / 0.18.2 tag), so `modes` survives
+        // the `exclude_none`/`exclude_defaults` dump. (Pre-0.15 hosts
+        // could in theory return a success `{}` when the session had no
+        // model name; for them the fallback — fresh session + DB
+        // transcript replay — is still strictly better than attaching
+        // to a session with no restorable model state.) Treat null AND
+        // empty-dict results as not-restorable so the caller's fallback
+        // runs cleanly.
+        guard let dict = result?.dictValue, !dict.isEmpty else {
             #if canImport(os)
-            logger.warning("session/load returned null for \(sessionId) — not restorable; caller should fall back to a new session")
+            logger.warning("session/load returned null/empty for \(sessionId) — not restorable; caller should fall back to a new session")
             #endif
-            throw ACPClientError.invalidResponse("session/load returned null — session \(sessionId) is not restorable")
+            throw ACPClientError.invalidResponse("session/load returned null/empty — session \(sessionId) is not restorable")
         }
-        let loadedId = (result?.dictValue?["sessionId"] as? String) ?? sessionId
+        let loadedId = (dict["sessionId"] as? String) ?? sessionId
         currentSessionId = loadedId
         statusMessage = "Session loaded"
         #if canImport(os)
