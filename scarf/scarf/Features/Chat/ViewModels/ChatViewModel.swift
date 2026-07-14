@@ -2196,8 +2196,28 @@ final class ChatViewModel {
         recentSessions.removeAll { $0.id == sessionId }
         sessionPreviews.removeValue(forKey: sessionId)
         sessionProjectNames.removeValue(forKey: sessionId)
-        guard richChatViewModel.sessionId == sessionId else { return }
-        tearDownDeletedActiveSession()
+        if richChatViewModel.sessionId == sessionId {
+            tearDownDeletedActiveSession()
+        }
+        // Audit fix (t-5f1d9008 wave 1): this sidebar is ALSO an
+        // independent delete surface for every OTHER window on the same
+        // server/profile — two windows can be attached to the same
+        // session, and pre-fix a sidebar delete here orphaned the other
+        // window's `hermes acp` client exactly the way the Sessions tab
+        // did. Broadcast the same signal `SessionsViewModel.confirmDelete`
+        // posts (success only — the runner guard above already returned
+        // on failure). Posted AFTER the local teardown so this window's
+        // own observer no-ops on its `richChatViewModel.sessionId` guard
+        // regardless of whether NotificationCenter delivers the block
+        // synchronously or via a queue hop.
+        NotificationCenter.default.post(
+            name: SessionDeletedSignal.name,
+            object: nil,
+            userInfo: [
+                SessionDeletedSignal.sessionIdKey: sessionId,
+                SessionDeletedSignal.contextKey: context,
+            ]
+        )
     }
 
     /// Shared teardown for "the ACTIVE (attached) session was just
@@ -2243,18 +2263,29 @@ final class ChatViewModel {
     /// chat-ATTACHED session there left the `hermes acp` client running
     /// against the deleted session (the exact leak/orphan shape
     /// t-01bd55ec fixed for the sidebar path). It posts
-    /// `SessionDeletedSignal` after a successful CLI delete; every
-    /// window's ChatViewModel observes, and only the one whose chat is
-    /// attached to that session reacts. Identity is the FULL
-    /// `ServerContext` (not just the session id — different servers, or
-    /// different profile homes on one server, can each hold a session
-    /// with the same id) plus the full session id. A non-matching
-    /// session/context is a strict no-op for chat: the sidebar list
+    /// `SessionDeletedSignal` after a successful CLI delete (as does
+    /// `deleteSession(_:)` for other windows); every window's
+    /// ChatViewModel observes, and only the ones whose chat is attached
+    /// to that session react. Identity is the SESSION STORE the id
+    /// lives in — `ServerContext.id` plus `paths.home` — not just the
+    /// session id (different servers, or different profile homes on one
+    /// server (#126), can each hold a session with the same id), and
+    /// deliberately NOT full-struct `ServerContext` equality: the
+    /// context also carries fields that don't move the session store
+    /// (`displayName`, `SSHConfig.hermesBinaryHint`, `identityFile`,
+    /// `projectsRoot`), and if any of those ever drifts between the
+    /// poster's captured context and this VM's (registry edit /
+    /// probe write-back while the window is open), full equality would
+    /// silently SKIP the teardown — reintroducing the leaked-client
+    /// orphan this seam exists to fix. (id, home) matches exactly when
+    /// the two contexts read the same state.db. A non-matching
+    /// session/store is a strict no-op for chat: the sidebar list
     /// refreshes through the state.db file watcher as usual.
     private func handleSessionDeletedElsewhere(
         sessionId: String, context deletedContext: ServerContext
     ) {
-        guard deletedContext == context,
+        guard deletedContext.id == context.id,
+              deletedContext.paths.home == context.paths.home,
               richChatViewModel.sessionId == sessionId else { return }
         // Same cache purge deleteSession does for the row it removed.
         recentSessions.removeAll { $0.id == sessionId }

@@ -23,10 +23,13 @@ struct SessionStoreStats {
 /// userInfo payload:
 /// - `sessionIdKey` → `String`: the full deleted session id.
 /// - `contextKey` → `ServerContext`: the posting feature's context.
-///   Receivers must compare the FULL context, not just `id` — profile
-///   scoping (#126) re-points `remoteHome` while keeping the same
-///   `ServerID`, and distinct servers/profiles can each hold a session
-///   with the same id.
+///   Receivers must compare the session-STORE identity — `id` AND
+///   `paths.home` — not just `id`: profile scoping (#126) re-points
+///   the home while keeping the same `ServerID`, and distinct
+///   servers/profiles can each hold a session with the same id. (Not
+///   full-struct equality either: cosmetic/cache fields like
+///   `displayName` or `hermesBinaryHint` don't move the store, and a
+///   drift there must not skip a teardown.)
 ///
 /// `nonisolated` so the constants are readable from the non-MainActor
 /// observer block before it hops isolation (they're immutable Sendable
