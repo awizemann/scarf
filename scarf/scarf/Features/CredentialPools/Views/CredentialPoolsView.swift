@@ -1027,7 +1027,23 @@ private struct AddCredentialSheet: View {
                         // Empty model lets Hermes pick its own default
                         // for the new provider — matches the Nous Portal
                         // path and avoids re-introducing a stale prefix.
-                        _ = svc.setModelAndProvider(model: "", provider: target)
+                        //
+                        // Routed through the write plan (t-9657430b):
+                        // this IS a provider switch (the sheet only
+                        // shows on a mismatch), so stale local-managed
+                        // keys (model.base_url/api_key/api_mode/
+                        // context_length) are scrubbed — skipped when
+                        // the just-read config shows them already unset
+                        // — and the old model.default is CLEARED, which
+                        // is what the sheet's "Hermes will pick a
+                        // default" copy promises (setModelAndProvider
+                        // left it pinned).
+                        let ops = LocalModelConfigPlan.operations(
+                            selectingRemoteModel: "",
+                            provider: target,
+                            current: svc.loadConfig()
+                        )
+                        _ = !ops.isEmpty && svc.applyModelConfigPlan(ops)
                         await MainActor.run {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { onDismiss() }
                         }

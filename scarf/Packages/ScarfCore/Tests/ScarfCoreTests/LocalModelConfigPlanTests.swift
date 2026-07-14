@@ -420,6 +420,134 @@ import Foundation
         ).isEmpty)
     }
 
+    // MARK: - HermesConfig overload (the hosts' shared seam, t-9657430b)
+
+    /// A parsed config that looks like a live local-provider setup —
+    /// what the mismatch banner or the credential-pools swap would
+    /// read right before switching away.
+    private func liveOllamaConfig() -> HermesConfig {
+        var config = HermesConfig.empty
+        config.provider = "ollama"
+        config.model = "ollama/llama3.1:8b"
+        config.modelBaseURL = "http://127.0.0.1:11434/v1"
+        config.modelAPIKey = "sk-local-123"
+        config.modelAPIMode = "chat_completions"
+        config.modelContextLength = "131072"
+        return config
+    }
+
+    @Test func bannerAlignActionClearsStaleLocalKeysOnTheProviderSwitch() {
+        // The chat mismatch banner's "align provider to prefix" action
+        // (ChatViewModel.alignProviderToModelPrefix) is a provider
+        // SWITCH — before t-9657430b it went through
+        // `setModelAndProvider`, stranding every local-managed key.
+        // Routed through the plan it must scrub all four, trailing the
+        // provider/model writes (crash-safe ordering).
+        let ops = LocalModelConfigPlan.operations(
+            selectingRemoteModel: "claude-opus-4-6",
+            provider: "anthropic",
+            current: liveOllamaConfig()
+        )
+        #expect(ops == [
+            .set(key: "model.provider", value: "anthropic"),
+            .set(key: "model.default", value: "claude-opus-4-6"),
+            .clear(key: "model.base_url"),
+            .clear(key: "model.api_key"),
+            .clear(key: "model.api_mode"),
+            .clear(key: "model.context_length"),
+        ])
+    }
+
+    @Test func bannerStripPrefixKeepsProviderAndNeverClears() {
+        // The banner's second action
+        // (ChatViewModel.stripPrefixFromModelDefault) rewrites
+        // model.default but KEEPS the active provider — no switch, so
+        // the plan must not clear anything: a live local setup (or a
+        // hand-maintained base_url) survives, matching the old
+        // `setModelAndProvider` semantics exactly.
+        let ops = LocalModelConfigPlan.operations(
+            selectingRemoteModel: "llama3.1:8b",
+            provider: "ollama",
+            current: liveOllamaConfig()
+        )
+        #expect(ops == [
+            .set(key: "model.provider", value: "ollama"),
+            .set(key: "model.default", value: "llama3.1:8b"),
+        ])
+    }
+
+    @Test func credentialPoolsSwapClearsLocalKeysAndTheStaleModelDefault() {
+        // The post-OAuth "switch active provider?" sheet submits with
+        // an EMPTY model ("Hermes will pick a default"): the plan must
+        // clear model.default (setModelAndProvider left it pinned —
+        // e.g. an ollama tag under provider=anthropic) AND scrub the
+        // stale local keys, since the sheet only shows on a mismatch.
+        let ops = LocalModelConfigPlan.operations(
+            selectingRemoteModel: "",
+            provider: "anthropic",
+            current: liveOllamaConfig()
+        )
+        #expect(ops == [
+            .set(key: "model.provider", value: "anthropic"),
+            .clear(key: "model.default"),
+            .clear(key: "model.base_url"),
+            .clear(key: "model.api_key"),
+            .clear(key: "model.api_mode"),
+            .clear(key: "model.context_length"),
+        ])
+    }
+
+    @Test func configOverloadKeepsTheTwoOpWriteForNeverLocalConfigs() {
+        // T4 parity via the overload: an all-empty HermesConfig (the
+        // never-local user) must produce exactly the classic pair even
+        // on a provider switch — no junk empty keys, no extra SSH
+        // round-trips.
+        var config = HermesConfig.empty
+        config.provider = "anthropic"
+        let ops = LocalModelConfigPlan.operations(
+            selectingRemoteModel: "gpt-5",
+            provider: "openai",
+            current: config
+        )
+        #expect(ops == [
+            .set(key: "model.provider", value: "openai"),
+            .set(key: "model.default", value: "gpt-5"),
+        ])
+    }
+
+    @Test func configOverloadMatchesTheParameterListForm() {
+        // The overload is a pure field mapping — for the same inputs it
+        // must be byte-for-byte the long form (config fields →
+        // current-value parameters, nothing added or dropped).
+        let config = liveOllamaConfig()
+        let viaOverload = LocalModelConfigPlan.operations(
+            selectingRemoteModel: "gpt-5", provider: "openai", current: config
+        )
+        let viaParameters = LocalModelConfigPlan.operations(
+            selectingRemoteModel: "gpt-5",
+            provider: "openai",
+            currentProvider: config.provider,
+            currentBaseURL: config.modelBaseURL,
+            currentAPIKey: config.modelAPIKey,
+            currentAPIMode: config.modelAPIMode,
+            currentContextLength: config.modelContextLength
+        )
+        #expect(viaOverload == viaParameters)
+    }
+
+    @Test func configOverloadTreatsClearedContextLengthAsUnset() {
+        // A config whose model.context_length was already scrubbed to
+        // "0" (this plan's own unset value) must not be re-cleared on
+        // every subsequent switch — churn guard, via the overload.
+        var config = HermesConfig.empty
+        config.provider = "anthropic"
+        config.modelContextLength = "0"
+        let ops = LocalModelConfigPlan.operations(
+            selectingRemoteModel: "gpt-5", provider: "openai", current: config
+        )
+        #expect(!ops.contains(.clear(key: "model.context_length")))
+    }
+
     // MARK: - Wire format
 
     @Test func operationsMapToHermesConfigSetArgv() {

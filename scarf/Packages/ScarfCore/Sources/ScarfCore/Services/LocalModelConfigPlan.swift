@@ -281,6 +281,31 @@ public enum LocalModelConfigPlan {
         return ops
     }
 
+    /// Convenience over the parameter-list form for callers holding a
+    /// loaded `HermesConfig` — the ONE mapping from the parsed config
+    /// fields onto the plan's current-value parameters. Every host that
+    /// can read config before writing (SettingsViewModel, the chat
+    /// preflight, the mismatch banner's fix actions, the
+    /// credential-pools post-auth swap) should route through this, so
+    /// clears are skipped for keys the config already reads as unset —
+    /// a never-local user keeps the classic two-op
+    /// `[set provider, set default]` write (T4 parity rule).
+    public static func operations(
+        selectingRemoteModel model: String,
+        provider: String,
+        current config: HermesConfig
+    ) -> [Operation] {
+        operations(
+            selectingRemoteModel: model,
+            provider: provider,
+            currentProvider: config.provider,
+            currentBaseURL: config.modelBaseURL,
+            currentAPIKey: config.modelAPIKey,
+            currentAPIMode: config.modelAPIMode,
+            currentContextLength: config.modelContextLength
+        )
+    }
+
     /// Whether a KNOWN current value already reads as unset to the
     /// Hermes runtime, so re-clearing it is pure churn. Empty string for
     /// every key; for model.context_length also any integer <= 0 (the

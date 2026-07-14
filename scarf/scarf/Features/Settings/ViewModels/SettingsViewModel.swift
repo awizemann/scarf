@@ -139,17 +139,14 @@ final class SettingsViewModel {
         if let local {
             ops = LocalModelConfigPlan.operations(selecting: local)
         } else {
+            // The HermesConfig overload maps the current local-key
+            // values: a key that's already empty/absent is skipped
+            // rather than re-cleared, so a never-local user keeps the
+            // classic two-op write.
             ops = LocalModelConfigPlan.operations(
                 selectingRemoteModel: model,
                 provider: provider,
-                currentProvider: config.provider,
-                // Current local-key values: a key that's already
-                // empty/absent is skipped rather than re-cleared, so a
-                // never-local user keeps the classic two-op write.
-                currentBaseURL: config.modelBaseURL,
-                currentAPIKey: config.modelAPIKey,
-                currentAPIMode: config.modelAPIMode,
-                currentContextLength: config.modelContextLength
+                current: config
             )
         }
         guard !ops.isEmpty else { return }

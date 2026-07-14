@@ -334,7 +334,7 @@ final class ChatViewModel {
     /// Set when chat-start is blocked because the active server's
     /// `config.yaml` has no `model.default` / `model.provider`. The chat
     /// view observes this and presents `ChatModelPreflightSheet`; on
-    /// successful pick we persist via `setModelAndProvider` and re-attempt
+    /// successful pick we persist via `LocalModelConfigPlan` and re-attempt
     /// the original `startACPSession` call from `pendingStartArgs`.
     /// Nil when no preflight is pending.
     var modelPreflightReason: String?
@@ -538,10 +538,22 @@ final class ChatViewModel {
             // clean (provider-prefix-free) model name alongside the
             // matching provider — matches what `confirmModelPreflight`
             // writes for a fresh setup.
-            let ok = svc.setModelAndProvider(
-                model: mismatch.bareModel,
-                provider: mismatch.prefixProvider
+            //
+            // Routed through the write plan, NOT `setModelAndProvider`
+            // (t-9657430b): aligning is a provider SWITCH, so the
+            // clear-on-switch rule applies — switching away from e.g.
+            // provider=ollama must scrub the stale local-managed keys
+            // (model.base_url/api_key/api_mode/context_length) that
+            // would otherwise redirect the new provider (GH #27132
+            // class). Config is re-read so already-unset keys are
+            // skipped: a never-local user keeps the classic two-op
+            // write (T4 parity).
+            let ops = LocalModelConfigPlan.operations(
+                selectingRemoteModel: mismatch.bareModel,
+                provider: mismatch.prefixProvider,
+                current: svc.loadConfig()
             )
+            let ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 if ok {
@@ -560,10 +572,20 @@ final class ChatViewModel {
     func stripPrefixFromModelDefault(_ mismatch: ModelPreflight.Mismatch) {
         let svc = fileService
         Task.detached { [weak self] in
-            let ok = svc.setModelAndProvider(
-                model: mismatch.bareModel,
-                provider: mismatch.activeProvider
+            // Same plan seam as `alignProviderToModelPrefix`, but this
+            // action KEEPS the active provider — the plan sees
+            // provider == currentProvider and emits no clears, so a
+            // hand-maintained model.base_url (or a live local setup)
+            // survives, exactly the old `setModelAndProvider`
+            // semantics. Pinned by
+            // `bannerStripPrefixKeepsProviderAndNeverClears` in
+            // LocalModelConfigPlanTests.
+            let ops = LocalModelConfigPlan.operations(
+                selectingRemoteModel: mismatch.bareModel,
+                provider: mismatch.activeProvider,
+                current: svc.loadConfig()
             )
+            let ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 if ok {
@@ -1943,14 +1965,10 @@ final class ChatViewModel {
                 // failed save, not a model-only write.
                 ok = false
             } else {
-                let current = svc.loadConfig()
                 let ops = LocalModelConfigPlan.operations(
                     selectingRemoteModel: model,
                     provider: provider,
-                    currentProvider: current.provider,
-                    currentBaseURL: current.modelBaseURL,
-                    currentAPIKey: current.modelAPIKey,
-                    currentAPIMode: current.modelAPIMode
+                    current: svc.loadConfig()
                 )
                 ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
             }

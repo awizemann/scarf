@@ -1821,10 +1821,16 @@ struct HermesFileService: Sendable {
     }
 
     /// Persist the primary model + provider to `config.yaml` in one call.
-    /// Used by the chat-start preflight when the user picks a model from
-    /// the picker sheet — we need to write both keys before re-attempting
-    /// `client.start()`. Wraps two `hermes config set` invocations because
-    /// Hermes doesn't expose a combined "set model" command.
+    /// Wraps two `hermes config set` invocations because Hermes doesn't
+    /// expose a combined "set model" command.
+    ///
+    /// LEGACY — iOS `ChatView`'s preflight is the only remaining caller
+    /// (t-9657430b). Every Mac writer routes through
+    /// `LocalModelConfigPlan` + `applyModelConfigPlan(_:)` instead: this
+    /// method never clears the local-managed keys, so switching away
+    /// from a local provider through it strands a stale
+    /// `model.base_url`/`api_key`/`api_mode`/`context_length`. Don't
+    /// add new call sites.
     ///
     /// Returns `true` only if both writes succeed. If the second write
     /// fails the first is left in place — `model.default` without a

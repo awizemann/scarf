@@ -797,7 +797,13 @@ struct ModelPickerSheet: View {
         if descriptor.supportsAPIKey {
             VStack(alignment: .leading, spacing: 4) {
                 Text("API key (optional)").font(.caption).foregroundStyle(.secondary)
-                TextField("Leave blank for local servers", text: $localAPIKey)
+                // SecureField, not TextField: the field round-trips the
+                // saved `model.api_key` from config.yaml, so a plain
+                // field would display the stored secret to anyone
+                // looking at the Settings window (t-9657430b). Matches
+                // the app's secret-field idiom (CredentialPoolsView,
+                // MCPServerEditorView — no reveal affordance anywhere).
+                SecureField("Leave blank for local servers", text: $localAPIKey)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.caption, design: .monospaced))
             }
