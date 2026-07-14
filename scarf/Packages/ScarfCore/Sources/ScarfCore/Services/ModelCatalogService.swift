@@ -338,6 +338,136 @@ public struct ModelCatalogService: Sendable {
         )
     }
 
+    // MARK: - Vision capability (t-31img)
+
+    /// Whether a model can natively see image content. Three-state on
+    /// purpose: local models (Ollama tags, custom endpoints) and
+    /// overlay-only providers never appear in `models_dev_cache.json`,
+    /// and "we don't know" must NOT render as "can't see images" —
+    /// `llama3.2-vision` exists. The composer heads-up only fires on a
+    /// confident `.no`.
+    public enum VisionCapability: String, Sendable, Equatable {
+        case yes
+        case no
+        case unknown
+    }
+
+    /// Answer "can (provider, model) see images natively?" from the
+    /// models.dev cache.
+    ///
+    /// Semantics pin Hermes's own `agent/models_dev.py` parse (which
+    /// `agent/image_routing.py::decide_image_input_mode` consumes):
+    /// prefer `modalities.input` containing `"image"` when the array is
+    /// present; fall back to the older `attachment` bool only when
+    /// modalities are absent. A cache entry with neither field is a
+    /// confident `.no` — Hermes coerces the missing `attachment` to
+    /// False and routes to the lossy text pipeline. A model or provider
+    /// absent from the cache entirely is `.unknown`.
+    ///
+    /// Results are memoized per (path, provider, model) so composer
+    /// state changes never re-parse the multi-megabyte catalog. The
+    /// memo intentionally ignores later rewrites of the cache file —
+    /// vision capability for a fixed (provider, model) doesn't flip
+    /// within an app run.
+    public func visionCapability(providerID: String, modelID: String) -> VisionCapability {
+        let canonical = Self.modelsDevProviderKey(for: providerID)
+        let trimmedModel = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !canonical.isEmpty, !trimmedModel.isEmpty else { return .unknown }
+
+        let cacheKey = "\(path)|\(canonical)|\(trimmedModel)"
+        Self.visionCacheLock.lock()
+        let cached = Self.visionCache[cacheKey]
+        Self.visionCacheLock.unlock()
+        if let cached { return cached }
+
+        let result = ScarfMon.measure(.diskIO, "modelCatalog.visionCapability") {
+            uncachedVisionCapability(canonicalProviderID: canonical, modelID: trimmedModel)
+        }
+        Self.visionCacheLock.lock()
+        Self.visionCache[cacheKey] = result
+        Self.visionCacheLock.unlock()
+        return result
+    }
+
+    private func uncachedVisionCapability(
+        canonicalProviderID canonical: String, modelID: String
+    ) -> VisionCapability {
+        guard let catalog = loadCatalog(), let provider = catalog[canonical] else {
+            // Provider not mirrored to models.dev (local endpoints,
+            // overlay-only providers, missing cache file) — no signal.
+            return .unknown
+        }
+        let resolved = resolveModelAlias(providerID: canonical, modelID: modelID)
+        if let entry = provider.models?[resolved] {
+            return Self.visionCapability(of: entry)
+        }
+        // Stored model IDs sometimes carry a redundant provider prefix
+        // (`anthropic/claude-…` under provider `anthropic`, or a preset's
+        // `openrouter/anthropic/claude-…`). If the prefix canonicalizes
+        // to this same provider, retry with it stripped.
+        if let slash = resolved.firstIndex(of: "/") {
+            let prefix = String(resolved[..<slash])
+            let bare = String(resolved[resolved.index(after: slash)...])
+            if !bare.isEmpty, Self.modelsDevProviderKey(for: prefix) == canonical,
+               let entry = provider.models?[resolveModelAlias(providerID: canonical, modelID: bare)] {
+                return Self.visionCapability(of: entry)
+            }
+        }
+        // In the catalog's provider list but not its model list — a
+        // free-typed or newer-than-cache model. Not confident either way.
+        return .unknown
+    }
+
+    private static func visionCapability(of entry: ModelEntry) -> VisionCapability {
+        if let input = entry.modalities?.input {
+            return input.contains("image") ? .yes : .no
+        }
+        if let attachment = entry.attachment {
+            return attachment ? .yes : .no
+        }
+        // Neither field: Hermes's parser coerces this to
+        // supports_vision=False, so the text pipeline WILL fire.
+        return .no
+    }
+
+    /// Memoized lookups. `nonisolated(unsafe)` + lock matches the
+    /// `ScarfMon` static-state pattern under the package's Swift 5
+    /// language mode.
+    private static let visionCacheLock = NSLock()
+    nonisolated(unsafe) private static var visionCache: [String: VisionCapability] = [:]
+
+    /// Map a Hermes provider ID onto its models.dev cache key for
+    /// capability lookups — a Scarf mirror of the entries in Hermes's
+    /// `agent/models_dev.py` `PROVIDER_TO_MODELS_DEV` that diverge from
+    /// `canonicalProviderID(_:)`. Two divergences matter:
+    ///
+    /// - Bare `openai` aliases to `openrouter` for *inference routing*
+    ///   (providers.py ALIASES), but Hermes resolves its *capability
+    ///   metadata* against the models.dev `openai` entry — where
+    ///   `gpt-4o` etc. actually live.
+    /// - OAuth/transport variants (`xai-oauth`, `qwen-oauth`,
+    ///   `minimax-oauth`, `openai-codex`, `openai-api`) serve the same
+    ///   catalogs as their base providers.
+    ///
+    /// Providers absent from both this map and the catalog resolve to
+    /// `.unknown` downstream, which is the safe default. Reconcile on
+    /// Hermes bumps alongside the other provider tables here.
+    static func modelsDevProviderKey(for providerID: String) -> String {
+        let key = providerID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let mapped = capabilityProviderOverrides[key] { return mapped }
+        return canonicalProviderID(key)
+    }
+
+    private static let capabilityProviderOverrides: [String: String] = [
+        "openai": "openai",
+        "openai-api": "openai",
+        "openai-codex": "openai",
+        "xai-oauth": "xai",
+        "qwen-oauth": "alibaba",
+        "minimax-oauth": "minimax",
+        "gemini": "google",
+    ]
+
     /// Result of validating a user-entered model ID against the
     /// selected provider. See `validateModel(_:for:)`.
     public enum ModelValidation: Equatable, Sendable {
@@ -446,6 +576,16 @@ public struct ModelCatalogService: Sendable {
         let release_date: String?
         let cost: CostEntry?
         let limit: LimitEntry?
+        /// Legacy vision flag ("supports image/file attachments"). The
+        /// 2026-07 cache carries `modalities` on every entry, but Hermes
+        /// still honors this as the fallback — mirror that.
+        let attachment: Bool?
+        let modalities: ModalitiesEntry?
+    }
+
+    private struct ModalitiesEntry: Decodable {
+        let input: [String]?
+        let output: [String]?
     }
 
     private struct CostEntry: Decodable {

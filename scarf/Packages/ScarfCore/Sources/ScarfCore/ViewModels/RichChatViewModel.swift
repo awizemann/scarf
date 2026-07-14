@@ -918,6 +918,58 @@ public final class RichChatViewModel {
         }
     }
 
+    // MARK: - Non-vision image heads-up (t-31img / gh#113)
+
+    /// The session's effective model — the same resolution the
+    /// `ChatModelBadge` displays: the per-session preset override when
+    /// one is set, else the global `config.yaml` default
+    /// (`model.provider` + `model.default`). Nil when neither yields a
+    /// usable (provider, model) pair — e.g. fresh installs, or the
+    /// Local tab's legal empty-`model.default` auto-detect config —
+    /// which callers must treat as capability-unknown, never as
+    /// "not vision-capable".
+    ///
+    /// `""` and the YAML parser's `"unknown"` fallback both mean unset,
+    /// matching `ModelPreflight`.
+    public static func resolveActiveModel(
+        preset: ModelPreset?,
+        configProvider: String,
+        configModel: String
+    ) -> (providerID: String, modelID: String)? {
+        if let preset {
+            return (preset.providerID, preset.modelID)
+        }
+        func unset(_ value: String) -> Bool {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return trimmed.isEmpty || trimmed == "unknown"
+        }
+        guard !unset(configProvider), !unset(configModel) else { return nil }
+        return (
+            configProvider.trimmingCharacters(in: .whitespacesAndNewlines),
+            configModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
+    /// Whether the composer should render the "this model can't see
+    /// images" heads-up. Only a confident `.no` warns — `.unknown`
+    /// covers local models and custom endpoints that models.dev doesn't
+    /// mirror (`llama3.2-vision` exists; don't false-positive), and
+    /// `.yes` obviously doesn't. Never blocks sending: Hermes may still
+    /// handle the image via its auxiliary vision fallback.
+    public static func shouldShowNonVisionImageHint(
+        attachmentCount: Int,
+        capability: ModelCatalogService.VisionCapability
+    ) -> Bool {
+        attachmentCount > 0 && capability == .no
+    }
+
+    /// Copy for the heads-up row. Kept here (not inline in the View) so
+    /// the wording is pinned by ScarfCore tests alongside the decision
+    /// logic.
+    public static func nonVisionImageHint(modelDisplayName: String) -> String {
+        "\(modelDisplayName) can't see images natively — Hermes will describe them via its vision fallback; results may be lossy. Pick a vision model to send pixels."
+    }
+
     /// Slash menu visibility predicate: show only while the user is
     /// typing the command token (text starts with `/` and contains no
     /// whitespace). Once a space or newline appears the user is typing

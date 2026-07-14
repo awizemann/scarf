@@ -28,8 +28,14 @@ struct RichChatInputBar: View {
     /// commands (`/clear`, `/compact`, `/cost`, etc.) only do anything
     /// after `session/new` returns. Source: `richChat.sessionId != nil`.
     var hasActiveSession: Bool = false
+    /// The session's per-session model override, if any — same source
+    /// as `ChatModelBadge` (`chatViewModel.currentModelPreset`). Nil
+    /// means the global `config.yaml` default is active. Feeds the
+    /// non-vision image heads-up (t-31img / gh#113).
+    var activeModelPreset: ModelPreset? = nil
 
     @Environment(\.hermesCapabilities) private var capabilitiesStore
+    @Environment(\.serverContext) private var serverContext
 
     @State private var text = ""
     @State private var showCompressSheet = false
@@ -43,6 +49,14 @@ struct RichChatInputBar: View {
     @State private var isEncodingAttachment = false
     /// User-visible failure (decode failed, format unsupported). Auto-clears.
     @State private var attachmentError: String?
+    /// Vision capability of the session's effective model, resolved
+    /// lazily the first time an image attachment appears (and again on
+    /// model switches). `.unknown` until then — the heads-up only
+    /// renders on a confident `.no`, so the default is silent.
+    @State private var visionCapability: ModelCatalogService.VisionCapability = .unknown
+    /// Display name paired with `visionCapability` for the heads-up copy
+    /// (preset name, or the resolved model ID for the global default).
+    @State private var visionHintModelName: String = ""
     @FocusState private var isFocused: Bool
 
     /// Hard cap matches what Hermes' vision aux model swallows comfortably
@@ -83,6 +97,17 @@ struct RichChatInputBar: View {
 
             if !attachments.isEmpty || isEncodingAttachment || attachmentError != nil {
                 attachmentStrip
+            }
+
+            // Heads-up when the active model can't see images natively
+            // (t-31img / gh#113). Advisory only — sending stays enabled
+            // because Hermes may still describe the image via its
+            // auxiliary vision fallback.
+            if RichChatViewModel.shouldShowNonVisionImageHint(
+                attachmentCount: attachments.count,
+                capability: visionCapability
+            ) {
+                nonVisionHintRow
             }
 
             HStack(alignment: .bottom, spacing: ScarfSpace.s2) {
@@ -253,9 +278,83 @@ struct RichChatInputBar: View {
         .onChange(of: commands.count) { _, _ in
             updateMenuState()
         }
+        // Vision-capability lookup, keyed so it fires only when an
+        // attachment first appears or the effective model changes —
+        // never per keystroke. The catalog parse itself is additionally
+        // memoized per (provider, model) inside ModelCatalogService.
+        .task(id: visionLookupKey) {
+            await refreshVisionCapability()
+        }
         .sheet(isPresented: $showCompressSheet) {
             compressSheet
         }
+    }
+
+    /// Identity for the capability lookup: flips when attachments go
+    /// empty↔non-empty or the session's preset changes. Attachment
+    /// count beyond "any" is irrelevant — capability is per-model.
+    private var visionLookupKey: String {
+        let modelKey = activeModelPreset.map { $0.id.uuidString } ?? "global-default"
+        return "\(attachments.isEmpty ? "0" : "1")|\(modelKey)"
+    }
+
+    /// Resolve the effective model (preset override, else config.yaml
+    /// global default — the `ChatModelBadge` resolution) and ask the
+    /// models.dev catalog whether it can see images. Config read +
+    /// catalog parse run off-main; only fires while attachments exist.
+    private func refreshVisionCapability() async {
+        // Hide the hint while (re)resolving — a preset switch must never
+        // leave the previous model's warning on screen.
+        visionCapability = .unknown
+        guard !attachments.isEmpty else { return }
+        let preset = activeModelPreset
+        let context = serverContext
+        let (capability, name) = await Task.detached(
+            priority: .utility
+        ) { () -> (ModelCatalogService.VisionCapability, String) in
+            let configProvider: String
+            let configModel: String
+            if preset == nil, let yaml = HermesConfigReader.readRawConfig(context: context) {
+                let config = HermesConfig(yaml: yaml)
+                configProvider = config.provider
+                configModel = config.model
+            } else {
+                configProvider = ""
+                configModel = ""
+            }
+            guard let active = RichChatViewModel.resolveActiveModel(
+                preset: preset,
+                configProvider: configProvider,
+                configModel: configModel
+            ) else { return (.unknown, "") }
+            let capability = ModelCatalogService(context: context)
+                .visionCapability(providerID: active.providerID, modelID: active.modelID)
+            return (capability, preset?.name ?? active.modelID)
+        }.value
+        // `.task(id:)` cancelled us because the key changed — a newer
+        // lookup owns the state now; don't clobber it with stale results.
+        guard !Task.isCancelled else { return }
+        visionCapability = capability
+        visionHintModelName = name
+    }
+
+    /// Compact advisory row under the attachment strip — matches the
+    /// strip's caption idiom; `.warning` (advisory), never `.danger`
+    /// (nothing is blocked).
+    private var nonVisionHintRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: ScarfSpace.s1) {
+            Image(systemName: "eye.slash")
+                .font(.system(size: 10))
+            Text(RichChatViewModel.nonVisionImageHint(
+                modelDisplayName: visionHintModelName.isEmpty ? "This model" : visionHintModelName
+            ))
+            .scarfStyle(.caption)
+            .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(ScarfColor.warning)
+        .padding(.horizontal, ScarfSpace.s3)
+        .padding(.top, ScarfSpace.s1)
     }
 
     /// Horizontal preview strip for attached images. Each chip shows the
