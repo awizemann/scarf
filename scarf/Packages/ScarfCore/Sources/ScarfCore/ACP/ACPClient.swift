@@ -712,9 +712,15 @@ public actor ACPClient {
                     #if canImport(os)
                     // Log the FULL details payload — the user-facing
                     // string truncates it defensively, so the Logger
-                    // line is where the whole story lives.
+                    // line is where the whole story lives. Default
+                    // (private) redaction, NOT `privacy: .public`:
+                    // details is arbitrary server-side exception text
+                    // (same trust class as the stderr mirror below,
+                    // also default-private) and can echo config values
+                    // or provider credentials; the actionable headline
+                    // already reaches the user via detailsLead.
                     if let details = error.details {
-                        logger.error("ACP RPC error (id: \(requestId)): \(error.message) — details: \(details, privacy: .public)")
+                        logger.error("ACP RPC error (id: \(requestId)): \(error.message) — details: \(details)")
                     } else {
                         logger.error("ACP RPC error (id: \(requestId)): \(error.message)")
                     }
@@ -887,9 +893,14 @@ public enum ACPClientError: Error, LocalizedError {
     static func detailsLead(fromDetails details: String, maxLength: Int = 200) -> String? {
         // First non-empty line — multi-line details are usually a
         // traceback or a wrapped JSON blob; the first line carries the
-        // headline.
+        // headline. Split on the `.newlines` character set, NOT on the
+        // Character "\n": Swift treats "\r\n" as a single grapheme
+        // cluster that does not match "\n", so a Character-based split
+        // would pass CRLF payloads through whole and the "first line"
+        // would be the entire traceback, embedded newlines and all
+        // (audit t-217da62b).
         guard let firstLine = details
-            .split(separator: "\n", omittingEmptySubsequences: true)
+            .components(separatedBy: .newlines)
             .map({ $0.trimmingCharacters(in: .whitespaces) })
             .first(where: { !$0.isEmpty })
         else { return nil }

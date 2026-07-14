@@ -1139,7 +1139,9 @@ final class ChatController {
         case ready
         /// Mid-recovery: the SSH exec channel died but the agent on
         /// the remote may still be running. We're trying to reattach
-        /// via `session/resume` (or `session/load` as a fallback).
+        /// via `session/load` (load-only, t-217da62b — never
+        /// `session/resume`, which orphans a server session on an
+        /// unknown id).
         case reconnecting(attempt: Int, of: Int)
         /// Network reachability is unsatisfied. Distinct from
         /// `.failed` so the banner can stay tinted yellow ("we'll
@@ -1958,8 +1960,8 @@ final class ChatController {
             // populated so `.active`'s `verifyAndResume` sees
             // `client == nil` and routes through
             // `handleConnectionDied` → `attemptReconnect`, which
-            // resumes the same session id via `session/resume` (or
-            // `session/load` as a fallback). VM state (messages,
+            // reattaches to the same session id via `session/load`
+            // (load-only, t-217da62b). VM state (messages,
             // streaming text, capabilities) is preserved.
             //
             // Side-benefit: the stall-detection clock (`ACPClient.
@@ -2349,9 +2351,9 @@ final class ChatController {
     /// Resume an existing ACP session. Called from ChatView when the
     /// coordinator carries a `pendingResumeSessionID` (Dashboard row
     /// tap). If we're currently on a different session, stop first
-    /// so there's no phantom ACP process hanging around. Falls back
-    /// to `session/load` if the remote doesn't support `session/resume`
-    /// (Hermes < 0.9.x).
+    /// so there's no phantom ACP process hanging around. Reattaches
+    /// via `session/load` only (t-217da62b) — `session/resume` is
+    /// banned; it orphans a server-side session on an unknown id.
     func startResuming(sessionID: String) async {
         await ScarfMon.measureAsync(.sessionLoad, "ios.startResuming") {
             await _startResumingImpl(sessionID: sessionID)

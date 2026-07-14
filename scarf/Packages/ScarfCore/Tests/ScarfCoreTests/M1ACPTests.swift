@@ -321,6 +321,18 @@ import Foundation
         let blank = #"{"jsonrpc":"2.0","id":8,"error":{"code":-32603,"message":"Internal error","data":{"details":"   \n "}}}"#
         let blankMsg = try JSONDecoder().decode(ACPRawMessage.self, from: Data(blank.utf8))
         #expect(blankMsg.error?.details == nil)
+
+        // JSON-RPC allows ANY structured value — an array `data` must
+        // decode gracefully (details nil), never throw.
+        let arr = #"{"jsonrpc":"2.0","id":9,"error":{"code":-32602,"message":"Invalid params","data":["cwd","sessionId"]}}"#
+        let arrMsg = try JSONDecoder().decode(ACPRawMessage.self, from: Data(arr.utf8))
+        #expect(arrMsg.error?.code == -32602)
+        #expect(arrMsg.error?.details == nil)
+
+        // `data.details` present but non-string (nested dict) → nil.
+        let nested = #"{"jsonrpc":"2.0","id":10,"error":{"code":-32603,"message":"Internal error","data":{"details":{"inner":"boom"}}}}"#
+        let nestedMsg = try JSONDecoder().decode(ACPRawMessage.self, from: Data(nested.utf8))
+        #expect(nestedMsg.error?.details == nil)
     }
 
     @Test func detailsLeadCutsAtFirstSentence() {
@@ -345,6 +357,15 @@ import Foundation
     @Test func detailsLeadUsesFirstNonEmptyLine() {
         let details = "\n\nTraceback headline here\n  File \"x.py\", line 1\nValueError: nope"
         #expect(ACPClientError.detailsLead(fromDetails: details) == "Traceback headline here")
+    }
+
+    @Test func detailsLeadHandlesCRLFLineEndings() {
+        // Swift treats "\r\n" as ONE grapheme cluster, so a
+        // Character-based split on "\n" never fires and the whole
+        // CRLF traceback used to sail into the banner as the "first
+        // line" (audit t-217da62b). Pin the `.newlines`-set split.
+        let details = "Headline error text\r\n  File \"x.py\", line 1\r\nValueError: nope"
+        #expect(ACPClientError.detailsLead(fromDetails: details) == "Headline error text")
     }
 
     @Test func detailsLeadNilForEmptyInput() {
