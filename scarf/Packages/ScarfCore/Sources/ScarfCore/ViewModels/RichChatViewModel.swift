@@ -970,6 +970,38 @@ public final class RichChatViewModel {
         "\(modelDisplayName) can't see images natively — Hermes will describe them via its vision fallback; results may be lossy. Pick a vision model to send pixels."
     }
 
+    /// True when config.yaml overrides Hermes's models.dev-based image
+    /// routing in a way that makes a confident catalog `.no` verdict
+    /// unreliable — the composer heads-up must stay quiet then, because
+    /// its copy ("Hermes will describe them via its vision fallback")
+    /// would be false:
+    ///
+    /// - `agent.image_input_mode: native` — `decide_image_input_mode`
+    ///   returns `"native"` before any capability lookup; Hermes
+    ///   attaches pixels unconditionally.
+    /// - `model.supports_vision: <true token>` — the user declared the
+    ///   active model vision-capable; `_lookup_supports_vision` honors
+    ///   the override before models.dev, so auto mode routes native.
+    ///
+    /// Token handling mirrors Hermes (`image_routing.py`): the mode
+    /// must equal `native` exactly (`_coerce_mode` treats anything else
+    /// as no override for our purposes), and the vision override
+    /// accepts `_TRUE_TOKENS` = true/yes/on/1. A false-token or absent
+    /// value keeps the catalog verdict. Per-provider per-model
+    /// overrides (`providers.<p>.models.<m>.supports_vision`) are NOT
+    /// mirrored — those describe custom/local models, which already
+    /// resolve `.unknown` and never warn.
+    public static func nonVisionHintSuppressedByConfig(configYAML: String) -> Bool {
+        let values = HermesYAML.parseNestedYAML(configYAML).values
+        func scalar(_ key: String) -> String {
+            HermesYAML.stripYAMLQuotes(values[key] ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+        }
+        if scalar("agent.image_input_mode") == "native" { return true }
+        return ["true", "yes", "on", "1"].contains(scalar("model.supports_vision"))
+    }
+
     /// Slash menu visibility predicate: show only while the user is
     /// typing the command token (text starts with `/` and contains no
     /// whitespace). Once a space or newline appears the user is typing

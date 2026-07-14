@@ -291,10 +291,13 @@ struct RichChatInputBar: View {
     }
 
     /// Identity for the capability lookup: flips when attachments go
-    /// empty↔non-empty or the session's preset changes. Attachment
-    /// count beyond "any" is irrelevant — capability is per-model.
+    /// empty↔non-empty or the session's effective model changes.
+    /// Attachment count beyond "any" is irrelevant — capability is
+    /// per-model. Keyed on the preset's (provider, model) CONTENT, not
+    /// its UUID: editing a preset in place (same id, new model) must
+    /// re-probe, and a rename alone must not.
     private var visionLookupKey: String {
-        let modelKey = activeModelPreset.map { $0.id.uuidString } ?? "global-default"
+        let modelKey = activeModelPreset.map { "\($0.providerID)|\($0.modelID)" } ?? "global-default"
         return "\(attachments.isEmpty ? "0" : "1")|\(modelKey)"
     }
 
@@ -312,9 +315,20 @@ struct RichChatInputBar: View {
         let (capability, name) = await Task.detached(
             priority: .utility
         ) { () -> (ModelCatalogService.VisionCapability, String) in
+            // Config is read on BOTH paths (preset or global default):
+            // Hermes checks the routing overrides — `agent.
+            // image_input_mode: native`, `model.supports_vision` —
+            // BEFORE any models.dev lookup, so a catalog `.no` under
+            // either override would be a false warning. Suppress by
+            // resolving `.unknown` (t-31img audit).
+            let yaml = HermesConfigReader.readRawConfig(context: context)
+            if let yaml,
+               RichChatViewModel.nonVisionHintSuppressedByConfig(configYAML: yaml) {
+                return (.unknown, "")
+            }
             let configProvider: String
             let configModel: String
-            if preset == nil, let yaml = HermesConfigReader.readRawConfig(context: context) {
+            if preset == nil, let yaml {
                 let config = HermesConfig(yaml: yaml)
                 configProvider = config.provider
                 configModel = config.model

@@ -439,15 +439,27 @@ public struct ModelCatalogService: Sendable {
     /// Map a Hermes provider ID onto its models.dev cache key for
     /// capability lookups — a Scarf mirror of the entries in Hermes's
     /// `agent/models_dev.py` `PROVIDER_TO_MODELS_DEV` that diverge from
-    /// `canonicalProviderID(_:)`. Two divergences matter:
+    /// `canonicalProviderID(_:)`. Three divergence classes matter:
     ///
     /// - Bare `openai` aliases to `openrouter` for *inference routing*
     ///   (providers.py ALIASES), but Hermes resolves its *capability
     ///   metadata* against the models.dev `openai` entry — where
     ///   `gpt-4o` etc. actually live.
     /// - OAuth/transport variants (`xai-oauth`, `qwen-oauth`,
-    ///   `minimax-oauth`, `openai-codex`, `openai-api`) serve the same
-    ///   catalogs as their base providers.
+    ///   `minimax-oauth`, `openai-codex`) serve the same catalogs as
+    ///   their base providers.
+    /// - Providers whose models.dev cache key differs from the Hermes
+    ///   wire ID: `novita` → `novita-ai`, `fireworks` → `fireworks-ai`
+    ///   (both verified against the live cache, 2026-07).
+    ///
+    /// `openai-api` is a deliberate Scarf EXTENSION, not a mirror:
+    /// Hermes's map has no `openai-api` entry, so on that provider
+    /// Hermes resolves no capability metadata at all and auto-mode
+    /// always routes images through the text pipeline. Resolving it
+    /// against the models.dev `openai` catalog keeps the composer
+    /// heads-up truthful for text-only models (the image WILL go
+    /// through the lossy fallback); the cost is a suppressed heads-up
+    /// for vision models, never a false one.
     ///
     /// Providers absent from both this map and the catalog resolve to
     /// `.unknown` downstream, which is the safe default. Reconcile on
@@ -455,17 +467,28 @@ public struct ModelCatalogService: Sendable {
     static func modelsDevProviderKey(for providerID: String) -> String {
         let key = providerID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if let mapped = capabilityProviderOverrides[key] { return mapped }
-        return canonicalProviderID(key)
+        // Hermes normalizes aliases (providers.py ALIASES) BEFORE its
+        // PROVIDER_TO_MODELS_DEV lookup, so alias spellings must land
+        // on the same models.dev key their canonical form does — e.g.
+        // `grok-oauth` → `xai-oauth` → `xai`, and `novita-ai` →
+        // `novita` → `novita-ai`.
+        let canonical = canonicalProviderID(key)
+        return capabilityProviderOverrides[canonical] ?? canonical
     }
 
     private static let capabilityProviderOverrides: [String: String] = [
         "openai": "openai",
-        "openai-api": "openai",
+        "openai-api": "openai",  // Scarf extension — see doc comment above.
         "openai-codex": "openai",
         "xai-oauth": "xai",
         "qwen-oauth": "alibaba",
         "minimax-oauth": "minimax",
         "gemini": "google",
+        // models.dev cache keys that differ from the Hermes wire ID
+        // (PROVIDER_TO_MODELS_DEV: novita → novita-ai, fireworks →
+        // fireworks-ai).
+        "novita": "novita-ai",
+        "fireworks": "fireworks-ai",
     ]
 
     /// Result of validating a user-entered model ID against the

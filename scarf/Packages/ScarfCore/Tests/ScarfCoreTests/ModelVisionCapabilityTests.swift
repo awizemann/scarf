@@ -176,14 +176,84 @@ import Testing
     @Test func openAIVariantsResolveToOpenAICacheKey() throws {
         // Bare `openai` aliases to `openrouter` for inference routing,
         // but Hermes's capability lookup (PROVIDER_TO_MODELS_DEV)
-        // resolves it — and the openai-api / openai-codex variants —
-        // against the models.dev `openai` entry.
+        // resolves it — and the openai-codex variant — against the
+        // models.dev `openai` entry. `openai-api` is a deliberate
+        // Scarf EXTENSION (Hermes's map has no such key and resolves
+        // no metadata there): mapping it to the same catalog keeps the
+        // heads-up truthful for text-only models and merely suppressed
+        // for vision models — never falsely shown.
         let tmp = try makeCatalog(realShapeJSON)
         defer { try? FileManager.default.removeItem(at: tmp) }
         let svc = ModelCatalogService(path: tmp.path)
         #expect(svc.visionCapability(providerID: "openai", modelID: "gpt-4o") == .yes)
         #expect(svc.visionCapability(providerID: "openai-api", modelID: "gpt-4o") == .yes)
         #expect(svc.visionCapability(providerID: "openai-codex", modelID: "gpt-4o") == .yes)
+    }
+
+    /// The two PROVIDER_TO_MODELS_DEV entries whose models.dev cache
+    /// key differs from the Hermes wire ID (`novita` → `novita-ai`,
+    /// `fireworks` → `fireworks-ai`). Before the audit fix Scarf looked
+    /// up the bare wire ID, found nothing, and resolved `.unknown` —
+    /// silently disabling the heads-up for two real providers (the
+    /// live cache carries 105 novita-ai models).
+    @Test func novitaAndFireworksResolveToTheirModelsDevKeys() throws {
+        let json = """
+        {
+          "novita-ai": {
+            "id": "novita-ai", "name": "NovitaAI",
+            "models": {
+              "deepseek/deepseek-v3": {
+                "name": "DeepSeek V3", "attachment": false,
+                "modalities": { "input": ["text"], "output": ["text"] }
+              }
+            }
+          },
+          "fireworks-ai": {
+            "id": "fireworks-ai", "name": "Fireworks",
+            "models": {
+              "qwen-vl": {
+                "name": "Qwen VL", "attachment": true,
+                "modalities": { "input": ["text", "image"], "output": ["text"] }
+              }
+            }
+          }
+        }
+        """
+        let tmp = try makeCatalog(json)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let svc = ModelCatalogService(path: tmp.path)
+        #expect(svc.visionCapability(providerID: "novita", modelID: "deepseek/deepseek-v3") == .no)
+        // The models.dev-key spelling (a providers.py alias for
+        // `novita`) must land on the same entry.
+        #expect(svc.visionCapability(providerID: "novita-ai", modelID: "deepseek/deepseek-v3") == .no)
+        #expect(svc.visionCapability(providerID: "fireworks", modelID: "qwen-vl") == .yes)
+        #expect(svc.visionCapability(providerID: "fireworks-ai", modelID: "qwen-vl") == .yes)
+    }
+
+    @Test func aliasSpellingsReachCapabilityOverrides() throws {
+        // Hermes normalizes provider aliases BEFORE its
+        // PROVIDER_TO_MODELS_DEV lookup: `grok-oauth` → `xai-oauth` →
+        // models.dev `xai`. Scarf must chain the same way (alias
+        // resolution, then the capability override for the canonical
+        // ID).
+        let json = """
+        {
+          "xai": {
+            "id": "xai", "name": "xAI",
+            "models": {
+              "grok-4.3": {
+                "name": "Grok 4.3", "attachment": true,
+                "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+              }
+            }
+          }
+        }
+        """
+        let tmp = try makeCatalog(json)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let svc = ModelCatalogService(path: tmp.path)
+        #expect(svc.visionCapability(providerID: "grok-oauth", modelID: "grok-4.3") == .yes)
+        #expect(svc.visionCapability(providerID: "x-ai-oauth", modelID: "grok-4.3") == .yes)
     }
 
     @Test func redundantProviderPrefixOnModelIDIsStripped() throws {
@@ -274,5 +344,43 @@ import Testing
         #expect(hint.hasPrefix("deepseek-v4-flash "))
         #expect(hint.contains("vision fallback"))
         #expect(hint.contains("Pick a vision model"))
+    }
+
+    // MARK: - Config-override suppression (audit fix)
+
+    /// `agent.image_input_mode: native` and a true-token
+    /// `model.supports_vision` both flip Hermes to native pixel
+    /// routing BEFORE any models.dev lookup — a catalog `.no` under
+    /// either would be exactly the false warning t-31img forbids.
+    /// Token sets mirror `image_routing.py` (`_coerce_mode`,
+    /// `_TRUE_TOKENS`).
+    @Test func configOverridesSuppressTheHint() {
+        #expect(RichChatViewModel.nonVisionHintSuppressedByConfig(
+            configYAML: "agent:\n  image_input_mode: native\n"))
+        #expect(RichChatViewModel.nonVisionHintSuppressedByConfig(
+            configYAML: "agent:\n  image_input_mode: \"native\"\n"))
+        #expect(RichChatViewModel.nonVisionHintSuppressedByConfig(
+            configYAML: "model:\n  supports_vision: true\n"))
+        #expect(RichChatViewModel.nonVisionHintSuppressedByConfig(
+            configYAML: "model:\n  supports_vision: \"yes\"\n"))
+        #expect(RichChatViewModel.nonVisionHintSuppressedByConfig(
+            configYAML: "model:\n  supports_vision: 1\n"))
+    }
+
+    @Test func nonOverridingConfigsDoNotSuppress() {
+        // auto/text modes leave the capability verdict authoritative
+        // (text mode makes the fallback copy TRUE, not false), and a
+        // false-token supports_vision matches the catalog's own .no.
+        #expect(!RichChatViewModel.nonVisionHintSuppressedByConfig(configYAML: ""))
+        #expect(!RichChatViewModel.nonVisionHintSuppressedByConfig(
+            configYAML: "agent:\n  image_input_mode: auto\n"))
+        #expect(!RichChatViewModel.nonVisionHintSuppressedByConfig(
+            configYAML: "agent:\n  image_input_mode: text\n"))
+        #expect(!RichChatViewModel.nonVisionHintSuppressedByConfig(
+            configYAML: "model:\n  supports_vision: false\n"))
+        #expect(!RichChatViewModel.nonVisionHintSuppressedByConfig(
+            configYAML: "model:\n  supports_vision: banana\n"))
+        #expect(!RichChatViewModel.nonVisionHintSuppressedByConfig(
+            configYAML: "model:\n  default: claude-sonnet-4-5\n  provider: anthropic\n"))
     }
 }
