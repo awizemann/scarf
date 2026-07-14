@@ -184,12 +184,13 @@ import Foundation
 
     @Test @MainActor func richChatTracksCompressionCountFromPromptResults() {
         let vm = RichChatViewModel(context: .local)
-        // The pre-engagement guard (added per TestFlight feedback
-        // AFI4q5) drops `.promptComplete` events until the user has
-        // sent a prompt in the current session — otherwise stale ACP
-        // events from `session/load` would paint phantom bubbles when
-        // the user opens an old chat. Engage the session here so the
-        // event is actually processed and the counter advances.
+        // The pre-engagement replay guard (TestFlight AFI4q5) only
+        // drops streamed CONTENT events (chunks / tool calls) —
+        // `.promptComplete` deliberately bypasses it (S2, 2026-07-13,
+        // t-60f2f152) because it carries turn accounting and the
+        // `isAgentWorking` clear. Attach + engage the session anyway
+        // so this test mirrors the realistic send flow (session set →
+        // user echo → completion) rather than leaning on the bypass.
         vm.setSessionId("s")
         vm.addUserMessage(text: "kick off")
         let response = ACPPromptResult(

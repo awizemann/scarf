@@ -353,9 +353,18 @@ final class PipeLineReader: @unchecked Sendable {
                 #endif
             }
             guard n > 0 else {
-                // 0 → EOF; < 0 → read error. Either way the pipe is
-                // done: finish cleanly (matching the loop reader's
-                // EOF path) and cancel so the fd gets closed.
+                // Retriable results are NOT stream-enders: EINTR (a
+                // signal landed mid-read) and EAGAIN (spurious wake,
+                // or `cancelAfterDrainingPipe` flipped the fd to
+                // O_NONBLOCK while a final readability event was
+                // already enqueued) leave the pipe alive — return and
+                // let the level-triggered source fire again. Treating
+                // them as EOF finished the stream early, which upstream
+                // reads as "connection died".
+                if n < 0 && (errno == EINTR || errno == EAGAIN) { return }
+                // 0 → EOF; any other error → the pipe is done: finish
+                // cleanly (matching the loop reader's EOF path) and
+                // cancel so the fd gets closed.
                 continuation.finish()
                 self.source.cancel()
                 return
@@ -407,6 +416,9 @@ final class PipeLineReader: @unchecked Sendable {
                     -1
                     #endif
                 }
+                // EINTR: a signal interrupted the read — the pipe may
+                // still hold final output, so retry rather than drop it.
+                if n < 0 && errno == EINTR { continue }
                 // 0 = EOF, -1 = EAGAIN (pipe empty) or error — done
                 // either way; the child can't write anything more.
                 guard n > 0 else { break }

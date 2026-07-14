@@ -385,6 +385,28 @@ final class ChatViewModel {
     @ObservationIgnored
     var sessionStartWatchdogNanos: UInt64 = 90_000_000_000
 
+    /// Session id of the interruptive prompt currently in flight on
+    /// `acpClient` — owned HERE (not read from `richChatViewModel`)
+    /// because the mid-turn teardown in `stopACP` must key off state
+    /// that survives `richChatViewModel.reset()`: every session-switch
+    /// entry point (`startNewSession` / `resumeSession` /
+    /// `continueLastSession`) resets the transcript VM at click time,
+    /// long before `startACPSession` reaches `stopACP()`. Keying off
+    /// `richChatViewModel.isAgentWorking`/`sessionId` there made the
+    /// S4 `session/cancel` unreachable on exactly the path it was
+    /// built for (switching sessions mid-turn). Set by `sendViaACP`
+    /// when an interruptive prompt goes over the wire; cleared when
+    /// that turn's task settles and by teardown
+    /// (`stopACP` / `handleConnectionDied`).
+    @ObservationIgnored
+    private var inFlightPromptSessionId: String?
+
+    /// Monotonic token for interruptive turns so a stale turn's
+    /// completion (resuming after a newer turn started) can't clear
+    /// the newer turn's `inFlightPromptSessionId`.
+    @ObservationIgnored
+    private var inFlightPromptGeneration = 0
+
     /// Factory for the per-session `ACPClient`. Production default wires
     /// `ACPClient.forMacApp` (a `ProcessACPChannel` spawning
     /// `hermes acp`); tests inject scripted/hanging clients to exercise
@@ -1076,11 +1098,35 @@ final class ChatViewModel {
             // legacy contract).
             if !isNonInterruptive { acpStatus = ACPPhase.agentWorking }
         }
+        // Record the in-flight interruptive turn (ChatViewModel-owned;
+        // see `inFlightPromptSessionId`) so `stopACP` can cancel it
+        // even after a session-switch already reset the transcript VM.
+        let turnGeneration: Int?
+        if isNonInterruptive {
+            turnGeneration = nil
+        } else {
+            inFlightPromptGeneration &+= 1
+            inFlightPromptSessionId = sessionId
+            turnGeneration = inFlightPromptGeneration
+        }
         acpPromptTask = Task { @MainActor in
+            defer {
+                // This turn is over (completed, failed, or cancelled) —
+                // clear the in-flight marker unless a newer turn
+                // already replaced it.
+                if let turnGeneration, turnGeneration == inFlightPromptGeneration {
+                    inFlightPromptSessionId = nil
+                }
+            }
             do {
                 let result = try await ScarfMon.measureAsync(.chatStream, "mac.sendPrompt") {
                     try await client.sendPrompt(sessionId: sessionId, text: wireText, images: images)
                 }
+                // A turn resuming after its client was superseded
+                // (session switch / watchdog teardown mid-turn) must
+                // not touch shared state: the newer session owns
+                // `acpStatus`, the transcript, and notifications.
+                guard acpClient === client else { return }
                 acpStatus = ACPPhase.ready
                 richChatViewModel.handleACPEvent(
                     .promptComplete(sessionId: sessionId, response: result)
@@ -1103,8 +1149,15 @@ final class ChatViewModel {
                     )
                 }
             } catch is CancellationError {
+                // Routine when `stopACP` tears down a superseded
+                // client mid-turn (its `client.stop()` resumes the
+                // held `session/prompt` with `CancellationError`).
+                // Pre-guard, this stale resume stomped "Cancelled"
+                // over the SUPERSEDING session's status pill.
+                guard acpClient === client else { return }
                 acpStatus = ACPPhase.cancelled
             } catch {
+                guard acpClient === client else { return }
                 acpStatus = ACPPhase.error
                 await recordACPFailure(error, client: client, context: "ACP prompt failed")
                 richChatViewModel.handleACPEvent(
@@ -1613,7 +1666,10 @@ final class ChatViewModel {
         // Save session ID for reconnection before cleaning up
         let savedSessionId = richChatViewModel.sessionId
 
-        // Clean up the dead client
+        // Clean up the dead client. No `session/cancel` here — the
+        // process is already gone; just drop the in-flight-turn marker
+        // so a later `stopACP` doesn't cancel a turn that died with it.
+        inFlightPromptSessionId = nil
         acpPromptTask?.cancel()
         acpPromptTask = nil
         acpEventTask?.cancel()
@@ -1745,13 +1801,15 @@ final class ChatViewModel {
         disarmStartWatchdog()
         reconnectTask?.cancel()
         reconnectTask = nil
-        // Capture BEFORE cancelling the prompt task: a live prompt task
-        // + a working agent means we're killing a mid-turn process. In
-        // the session-switch paths `richChatViewModel.reset()` has
-        // already run (sessionId nil, isAgentWorking false), so the
-        // mid-turn handling below keys off state captured here.
-        let turnWasInFlight = acpPromptTask != nil && richChatViewModel.isAgentWorking
-        let inFlightSessionId = richChatViewModel.sessionId
+        // Capture BEFORE cancelling the prompt task. Keyed off
+        // ChatViewModel-owned turn state — NOT `richChatViewModel` —
+        // because in the session-switch paths `reset()` already wiped
+        // `isAgentWorking`/`sessionId` at click time, which made the
+        // S4 cancel unreachable on exactly its flagship path (audit,
+        // t-5451bd1b).
+        let inFlightSessionId = inFlightPromptSessionId
+        let turnWasInFlight = acpPromptTask != nil && inFlightSessionId != nil
+        inFlightPromptSessionId = nil
         acpPromptTask?.cancel()
         acpPromptTask = nil
         acpEventTask?.cancel()
@@ -1773,13 +1831,18 @@ final class ChatViewModel {
                 await client.stop()
             }
             if turnWasInFlight {
-                if let sid = inFlightSessionId {
+                if let sid = inFlightSessionId, richChatViewModel.sessionId == sid {
                     // Transcript still attached to the killed session
                     // (e.g. switching to terminal mode mid-turn) —
                     // finalize the partial stream and surface the
                     // cancellation through the existing synthesized
                     // promptComplete mechanism (same one the send
-                    // path's error branch uses).
+                    // path's error branch uses). Attachment-gated: in
+                    // the session-switch paths `reset()` already
+                    // detached (sessionId nil), and emitting there
+                    // would paint the dead turn's "cancelled" bubble
+                    // into the NEXT session's fresh transcript via the
+                    // nil-sessionId hole in the cross-session guard.
                     richChatViewModel.handleACPEvent(
                         .promptComplete(sessionId: sid, response: ACPPromptResult(
                             stopReason: "cancelled",
