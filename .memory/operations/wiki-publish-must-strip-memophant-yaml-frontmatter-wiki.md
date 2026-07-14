@@ -3,7 +3,7 @@ title: Wiki publish must strip Memophant YAML frontmatter (.wiki-worktree)
 type: note
 permalink: scarf/operations/wiki-publish-must-strip-memophant-yaml-frontmatter-wiki
 created: 2026-06-28
-updated: 2026-06-28
+updated: 2026-07-14
 source_sha: 2b9ef15cdddcb1fde12a88556bf755a623ae7758
 source_paths: scripts/wiki.sh
 tags:
@@ -30,3 +30,7 @@ source_paths_inferred: false
 ## Relations
 - relates_to [[Build and Release Workflow]]
 - part_of [[Wiki Maintenance Workflow]]
+
+
+## Superseded 2026-07-14
+- [decision] The `scripts/wiki.sh` sync/awk mechanism this note documents is RETIRED (removed in chore commit e5944eb). The frontmatter-strip LEARNING still holds — but it's now done natively by Memophant's **GitHubWikiPublisher**, which strips the leading `---…---` block at publish time before pushing to `repo.wiki.git`. No manual awk, no `.wiki-worktree/`. This note is kept as the historical root-cause record for why publish must strip frontmatter (the stray setext-H2 artifact seen v2.15.0). See [[Wiki Maintenance Workflow]]. #superseded
