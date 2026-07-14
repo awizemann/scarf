@@ -2,6 +2,7 @@
 title: Hermes-Version-Compatibility
 type: note
 permalink: scarf-wiki/hermes-version-compatibility
+updated: 2026-07-14
 ---
 
 # Hermes Version Compatibility
@@ -47,7 +48,7 @@ The v0.13.0 baseline still applies: Persistent Goals (`/goal`), ACP `/queue`, Ka
 
 **Log line format.** Hermes log lines may carry an optional `[session_id]` tag between the level and the logger name. [`HermesLogService.parseLine`](Core-Services) treats the tag as an optional capture group, so older untagged lines still parse.
 
-**ACP capability gates.** Rich Chat checks for `session/list` and `session/resume` support; if Hermes doesn't advertise them, the resume / picker UI degrades gracefully (you can still chat, just with reduced session navigation).
+**ACP capability gates.** Rich Chat checks for `session/list` and `session/load` support; if Hermes doesn't advertise them, the session picker / reconnect UI degrades gracefully (you can still chat, just with reduced session navigation). Note that Scarf no longer sends `session/resume` at all — reconnects are load-only, because Hermes's resume silently creates an orphan server-side session when given an unknown id while a failed load is detectable and falls back to `session/new`.
 
 **CLI output parsing.** Where Scarf parses `hermes` CLI output (Health, Tools, Pairing), the parsers tolerate field reordering and unknown lines.
 
@@ -87,4 +88,4 @@ If a new Hermes release breaks something in Scarf, please file an issue includin
 - The relevant log snippet from `~/.hermes/logs/errors.log` (filter sensitive content first).
 
 ---
-_Last updated: 2026-07-04 — Scarf main + Hermes v0.18.0 (compacted-search schema gate, MoA/Vertex provider tables, cron attach_to_session, web.* config-key + cron field-drop bug fixes; v0.17 and earlier baselines still fully apply)_
+_Last updated: 2026-07-14 — Scarf main + Hermes v0.18.2 (ACP capability-gates section updated: reconnect is load-only, `session/resume` no longer sent. Previously 2026-07-04: compacted-search schema gate, MoA/Vertex provider tables, cron attach_to_session, web.* config-key + cron field-drop bug fixes; v0.17 and earlier baselines still fully apply)_

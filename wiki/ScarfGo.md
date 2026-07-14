@@ -2,6 +2,7 @@
 title: ScarfGo
 type: note
 permalink: scarf-wiki/scarf-go
+updated: 2026-07-14
 ---
 
 # ScarfGo — iOS companion for Hermes
@@ -49,7 +50,7 @@ Onboarding details:
 | **Skills** | Browse the skills tree from `~/.hermes/skills/`. Read-only. |
 | **Settings** | Read view of full `config.yaml` plus a **Quick Edits** section that flips 7 commonly-changed keys (`model.default`, `model.provider`, `agent.approval_mode`, `agent.max_turns`, `display.show_cost`, `display.show_reasoning`, `display.streaming`) via `hermes config set` on the remote. Other keys remain read-only — edit from the Mac app or a remote shell. |
 | **Slash commands** _(v2.5)_ | Read-only browser of project-scoped slash commands shipped via `<project>/.scarf/slash-commands/`. Tap a row to see the expanded prompt with a sample-argument field. Authoring is Mac-only in v1. See [Slash Commands](Slash-Commands). |
-| **Auto-reconnect** _(v2.5.2)_ | Lock the phone, switch from WiFi to cellular, or just lose signal mid-prompt — when the SSH socket dies, ScarfGo reattaches via `session/resume` (with `session/load` fallback) on a 5-attempt 1→2→4→8→16 s exponential backoff. Hermes keeps writing to `state.db` on the remote during the outage; on success a "Resynced N new messages" toast surfaces what the agent did while you were offline. A yellow **Reconnecting (n/5)…** banner shows the recovery in progress; a red **No network** banner shows when reachability is unsatisfied. See [Chat](Chat) for the full resilience model. |
+| **Auto-reconnect** _(v2.5.2)_ | Lock the phone, switch from WiFi to cellular, or just lose signal mid-prompt — when the SSH socket dies, ScarfGo reattaches via `session/load` on a 5-attempt 1→2→4→8→16 s exponential backoff (load-only — `session/resume` was removed because resuming an unknown id silently created orphan server-side sessions). Hermes keeps writing to `state.db` on the remote during the outage; on success ScarfGo reconciles the transcript from `state.db` and a "Resynced N new messages" toast surfaces what the agent did while you were offline. A yellow **Reconnecting (n/5)…** banner shows the recovery in progress; a red **No network** banner shows when reachability is unsatisfied. See [Chat](Chat) for the full resilience model. |
 | **Draft persistence** _(v2.5.2)_ | A half-typed message survives force-quit — drafts are persisted to `UserDefaults` keyed by `(serverID, sessionID)` and restored when the session resumes. A 7-day janitor at app launch prunes stale slots. |
 | **Load earlier messages** _(v2.5.2)_ | Long sessions (200+ messages) page chronologically — the initial fetch loads the most recent 200, with a "Load earlier messages" button at the top of the transcript for the rest. Pagination is keyed by message id (monotonic) so streaming-chunk timestamps that collide on the same millisecond never split a page. |
 
@@ -122,4 +123,4 @@ A: [ScarfGo Roadmap](ScarfGo-Roadmap) tracks shipped milestones (M6 / M7 / M8 / 
 
 ---
 
-_Last updated: 2026-04-29 — Scarf v2.5.2 (Auto-reconnect + Draft persistence + Load earlier messages rows added to features matrix)._
+_Last updated: 2026-07-14 — Scarf main (Auto-reconnect row updated: ladder is load-only, `session/resume` removed; reattach reconciles from `state.db`)._

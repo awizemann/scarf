@@ -2,6 +2,7 @@
 title: ACP-Subprocess
 type: note
 permalink: scarf-wiki/acp-subprocess
+updated: 2026-07-14
 ---
 
 # ACP Subprocess
@@ -39,7 +40,7 @@ Because iOS's PATH is stripped on non-interactive SSH (Citadel doesn't source rc
 | Phase | What happens |
 |---|---|
 | `start()` | Creates the event stream first, builds and configures the Process, attaches pipes, installs the termination handler, calls `proc.run()`, starts read loops for stdout/stderr, sends `initialize`, starts a 30-second keepalive ping (`{"jsonrpc":"2.0","method":"$/ping"}`). |
-| `newSession(cwd:)` / `loadSession(cwd:sessionId:)` / `resumeSession(cwd:sessionId:)` | Three modes: fresh, load existing, resume after disconnect. Each sends a `session/new`/`session/load`/`session/resume` RPC; updates `currentSessionId`. |
+| `newSession(cwd:)` / `loadSession(cwd:sessionId:)` | Two modes: fresh (`session/new`) or load an existing session (`session/load`) — the latter is also the reconnect path. Each updates `currentSessionId`. A `loadSession` that comes back empty means the session isn't restorable; callers fall back to `newSession`. There is no `resumeSession` — it was removed because Hermes's `session/resume` silently creates an orphan server-side session when given an unknown id, while a failed load is detectable (background: repo memory note *chat-session-layer mechanism map and 2026-07-13 diagnosis*). |
 | `sendPrompt(sessionId:text:)` | Sends `session/prompt` with the user text; returns `ACPPromptResult` with token usage and stop reason. **No timeout** — streaming may run for minutes. Tokens, thoughts, tool calls, and permission requests arrive as events on the stream while this awaits. |
 | `cancel(sessionId:)` | Sends `session/cancel` to interrupt an in-flight prompt. |
 | `respondToPermission(requestId:optionId:)` | Sends a JSON-RPC response to an incoming `session/request_permission` request. |
@@ -117,4 +118,4 @@ Raw error messages are noisy. `ACPErrorHint` (in the same file) pattern-matches 
 | "Rate limit" / 429 | "AI provider rate-limited; try again later" |
 
 ---
-_Last updated: 2026-04-25 — Scarf v2.5.0 (ScarfCore extraction + ACPChannel abstraction + iOS SSHExecACPChannel section)_
+_Last updated: 2026-07-14 — Scarf main (`resumeSession` removed from ACPClient; session attach is `session/new` / `session/load` only. Previously 2026-04-25 / v2.5.0: ScarfCore extraction + ACPChannel abstraction + iOS SSHExecACPChannel section)_

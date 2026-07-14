@@ -2,6 +2,7 @@
 title: Chat
 type: note
 permalink: scarf-wiki/chat
+updated: 2026-07-14
 ---
 
 # Chat
@@ -28,10 +29,10 @@ Streams tokens, thoughts, and tool calls live via the [ACP subprocess](ACP-Subpr
 **Session lifecycle:**
 
 - Each new conversation creates a session via `session/new` (cwd = your local working directory if you set one).
-- Resume an old conversation: pick from the session picker; Scarf calls `session/load` or `session/resume` depending on the state.
-- Auto-reconnect — if the subprocess dies, Scarf attempts a `session/resume` to pick up where it left off.
+- Resume an old conversation: pick from the session picker; Scarf calls `session/load` to replay it. If Hermes reports the session isn't restorable (an empty load result), Scarf falls back to a fresh `session/new` instead of attaching to a dead id.
+- Auto-reconnect — if the subprocess dies, Scarf reattaches via `session/load` to pick up where it left off.
 
-**Resilience** _(v2.5.2+, iOS-at-parity)_. Both Mac and iOS recover automatically when the SSH socket drops, the phone sleeps, or the network changes — Hermes keeps writing to `state.db` on the remote during the outage, and Scarf reattaches via `session/resume` (with `session/load` fallback) on a 5-attempt 1→2→4→8→16 s exponential backoff. After a successful reconnect, `reconcileWithDB` merges any messages the agent persisted while you were offline and a "Resynced N new messages" toast surfaces what changed.
+**Resilience** _(v2.5.2+, iOS-at-parity)_. Both Mac and iOS recover automatically when the SSH socket drops, the phone sleeps, or the network changes — Hermes keeps writing to `state.db` on the remote during the outage, and Scarf reattaches via `session/load` on a 5-attempt 1→2→4→8→16 s exponential backoff. The ladder is **load-only** — `session/resume` was removed because asking Hermes to resume an id it doesn't know silently creates an orphan server-side session, while a failed load is detectable and falls back to a fresh session (the deeper story is in the repo memory note *chat-session-layer mechanism map and 2026-07-13 diagnosis*). After a successful reconnect, both platforms reconcile from `state.db`: `reconcileWithDB` merges any messages the agent persisted while you were offline, and a "Resynced N new messages" toast surfaces what changed.
 
 - iOS specifically gains a yellow **Reconnecting (n/5)…** banner during recovery and a red **No network** banner while reachability is unsatisfied (driven by `NWPathMonitor`).
 - iOS observes scene-phase transitions through `ScarfGoCoordinator` so a chat tab that was unmounted while you were on Dashboard still picks up the background → active edge and verifies channel health on resume.
@@ -107,7 +108,7 @@ When chat-start hits a server whose `config.yaml` has no `model.default` / `mode
 
 ScarfGo now survives phone-sleep, network handoffs, and SSH socket drops without losing the agent's work. Hermes already persists messages to `state.db` in real-time; iOS just had no resync path pre-2.5.2.
 
-- **5-attempt exponential reconnect** (1 → 2 → 4 → 8 → 16s) via `session/resume` with `session/load` fallback. On success, `reconcileWithDB` merges any messages the agent emitted while disconnected, and a *"Resynced N new messages"* toast surfaces above the composer.
+- **5-attempt exponential reconnect** (1 → 2 → 4 → 8 → 16s) via `session/load` — load-only, no `session/resume` (see **Resilience** above for why). On success, `reconcileWithDB` merges any messages the agent emitted while disconnected, and a *"Resynced N new messages"* toast surfaces above the composer.
 - **`NetworkReachabilityService`** (NWPathMonitor singleton) suspends reconnect attempts while offline; kicks a fresh cycle on link-up. Two banner states render slim ScarfDesign-tinted strips above the message list — `.reconnecting` (yellow) and `.offline` (grey) — so the user always knows what the chat is doing.
 - **Scene-phase aware** — returning the app to foreground triggers a channel-health check; if dead, reconnect starts immediately rather than waiting for the next interaction.
 - **Draft persistence** per (server, session) survives force-quit; UserDefaults-backed with a 7-day janitor at app launch.
@@ -176,7 +177,7 @@ Each Mac window is bound to one server, so chat in window A talks to local Herme
 ## Troubleshooting
 
 - **"Spinning forever, no response"** — check the [Logs](Gateway-Cron-Health-Logs) view for ACP errors. Common causes: missing `ANTHROPIC_API_KEY` (Scarf attaches a hint), rate limit, or `hermes` binary not on `$PATH`.
-- **Connection lost** — Rich Chat surfaces this banner; click Reconnect to call `session/resume`.
+- **Connection lost** — Rich Chat surfaces this banner; click Reconnect to reattach via `session/load`.
 - **Permission sheet doesn't appear** — make sure Hermes's `approval_mode` in `config.yaml` is set so it asks (not auto-approve).
 
 ## Related pages
@@ -186,4 +187,4 @@ Each Mac window is bound to one server, so chat in window A talks to local Herme
 - [Settings — Voice tab](Gateway-Cron-Health-Logs) for TTS/STT configuration (Settings is documented there).
 
 ---
-_Last updated: 2026-06-28 — Scarf v2.15.0 (project chats spawn hermes acp with cwd=project so the project's AGENTS.md / CLAUDE.md / .cursorrules load automatically — new, resumed, reconnected, and auto-started; trust note added)_
+_Last updated: 2026-07-14 — Scarf main (reconnect is load-only: `session/resume` dropped from the ladder, reattach reconciles from `state.db`, non-restorable loads fall back to a fresh session. Previously 2026-06-28 / v2.15.0: project chats spawn hermes acp with cwd=project so AGENTS.md / CLAUDE.md / .cursorrules load automatically; trust note added)_
