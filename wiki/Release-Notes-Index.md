@@ -101,8 +101,8 @@ Every Scarf release in chronological order. The notes themselves live in `releas
 When `scripts/release.sh <version>` completes a full (non-draft) release, this page should be updated:
 
 1. Add a row at the top of the table.
-2. Bump the **Latest release** line on [Home](Home).
-3. Run `./scripts/wiki.sh commit "docs: index v<version> release"` then `push`.
+2. Bump the **Latest release** narrative block on [Home](Home) (Latest → new version, roll the rest down, refresh the footer).
+3. Commit the `wiki/` tier in Memophant — its **GitHubWikiPublisher** auto-publishes to the GitHub wiki (secret-scanned, frontmatter stripped). No manual publish script.
 
 This is one of the [wiki update triggers](Wiki-Maintenance) that future Claude Code sessions will follow automatically.
 

@@ -2,6 +2,7 @@
 title: Build-and-Run
 type: note
 permalink: scarf-wiki/build-and-run
+updated: 2026-07-14
 ---
 
 # Build and Run
@@ -80,7 +81,6 @@ scarf/                       repo root
   tools/                     build-catalog.py + tests
   scripts/
     release.sh               Mac release pipeline (archive + notarize + appcast + tag)
-    wiki.sh                  GitHub wiki helper
     catalog.sh               .scarftemplate catalog publishing
   scarf/                     Xcode project root
     scarf.xcodeproj          Two targets: scarf, scarf mobile
