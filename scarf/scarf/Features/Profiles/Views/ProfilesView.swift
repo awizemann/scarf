@@ -44,13 +44,13 @@ struct ProfilesView: View {
     /// agreement.
     @State private var pendingSwitch: HermesProfile?
     /// Remote-import sheet visibility. Local imports use `NSOpenPanel`
-    /// inline; remote imports route through `RemoteProfilePathSheet`
+    /// inline; remote imports route through `RemotePathSheet`
     /// because the zip the user wants to import lives on the remote
     /// host (that's where `hermes profile export` produced it), and
     /// `NSOpenPanel` can only browse the local Mac.
     @State private var showRemoteImportSheet = false
     /// When non-nil, the export button on the named profile presents
-    /// `RemoteProfilePathSheet` to ask for an output path on the
+    /// `RemotePathSheet` to ask for an output path on the
     /// remote host. Local exports continue to use `NSSavePanel`.
     @State private var pendingRemoteExport: HermesProfile?
 
@@ -99,13 +99,15 @@ struct ProfilesView: View {
             Text("All Scarf windows will close and reopen. Unsaved chat input may be lost.")
         }
         .sheet(isPresented: $showRemoteImportSheet) {
-            RemoteProfilePathSheet(
+            RemotePathSheet(
                 context: viewModel.context,
                 title: "Import profile",
                 prompt: "Enter the path to a profile `.zip` on \(viewModel.context.displayName).",
                 placeholder: "e.g. ~/profiles/my-profile.zip",
                 confirmLabel: "Import",
                 mode: .existingFile,
+                expectedExtension: "zip",
+                extensionNote: "Profile import expects a zip archive.",
                 onCancel: { showRemoteImportSheet = false },
                 onConfirm: { path in
                     showRemoteImportSheet = false
@@ -114,13 +116,15 @@ struct ProfilesView: View {
             )
         }
         .sheet(item: $pendingRemoteExport) { profile in
-            RemoteProfilePathSheet(
+            RemotePathSheet(
                 context: viewModel.context,
                 title: "Export profile '\(profile.name)'",
                 prompt: "Enter the destination path on \(viewModel.context.displayName) where the `.zip` should be written.",
                 placeholder: "e.g. ~/\(profile.name)-profile.zip",
                 confirmLabel: "Export",
                 mode: .writableFile(initialName: "\(profile.name)-profile.zip"),
+                expectedExtension: "zip",
+                extensionNote: "The export command writes a zip archive.",
                 onCancel: { pendingRemoteExport = nil },
                 onConfirm: { path in
                     pendingRemoteExport = nil
@@ -443,149 +447,5 @@ struct ProfilesView: View {
         }
         .padding()
         .frame(minWidth: 440, minHeight: 180)
-    }
-}
-
-/// Remote-path picker for profile import + export. Used when the active
-/// `ServerContext` is `.ssh` — `NSOpenPanel` / `NSSavePanel` would
-/// browse the user's Mac, which is the wrong host. The sheet takes a
-/// remote path string and verifies it via the active transport before
-/// handing it back. The `mode` distinguishes "must already exist" from
-/// "we're about to write here," each with appropriate validation.
-private struct RemoteProfilePathSheet: View {
-    enum Mode {
-        /// Import flow: zip must already exist on the remote.
-        case existingFile
-        /// Export flow: we'll be writing to the path. Permissive on
-        /// non-existence (that's expected); warn on existing dir or
-        /// non-zip extension.
-        case writableFile(initialName: String)
-    }
-
-    let context: ServerContext
-    let title: String
-    let prompt: String
-    let placeholder: String
-    let confirmLabel: String
-    let mode: Mode
-    let onCancel: () -> Void
-    let onConfirm: (String) -> Void
-
-    @State private var path: String = ""
-    @State private var verification: Verification = .idle
-
-    private enum Verification: Equatable {
-        case idle
-        case verifying
-        case ok(String)
-        case warn(String)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(title).font(.headline)
-            Text(prompt)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                TextField(placeholder, text: $path)
-                    .textFieldStyle(.roundedBorder)
-                    .autocorrectionDisabled()
-                    .onChange(of: path) { _, _ in
-                        if verification != .idle { verification = .idle }
-                    }
-                Button("Verify") { Task { await verify() } }
-                    .disabled(path.trimmingCharacters(in: .whitespaces).isEmpty
-                              || verification == .verifying)
-            }
-            verificationBadge
-            HStack {
-                Button("Cancel") { onCancel() }
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                Button(confirmLabel) {
-                    let trimmed = path.trimmingCharacters(in: .whitespaces)
-                    guard !trimmed.isEmpty else { return }
-                    onConfirm(trimmed)
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(path.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-        }
-        .padding(20)
-        .frame(width: 520)
-        .onAppear {
-            if case .writableFile(let initialName) = mode, path.isEmpty {
-                path = "~/" + initialName
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var verificationBadge: some View {
-        switch verification {
-        case .idle:
-            EmptyView()
-        case .verifying:
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
-                Text("Checking on \(context.displayName)…")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        case .ok(let detail):
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                Text(detail).font(.caption)
-            }
-        case .warn(let detail):
-            HStack(spacing: 6) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                Text(detail).font(.caption)
-            }
-        }
-    }
-
-    private func verify() async {
-        let trimmed = path.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-        verification = .verifying
-        let snapshot = context
-        let snapshotMode = mode
-        let result: Verification = await Task.detached {
-            let transport = snapshot.makeTransport()
-            let exists = transport.fileExists(trimmed)
-            switch snapshotMode {
-            case .existingFile:
-                guard exists else {
-                    return .warn("Path doesn't exist on \(snapshot.displayName).")
-                }
-                guard let stat = transport.stat(trimmed) else {
-                    return .warn("Found, but couldn't stat — check permissions.")
-                }
-                if stat.isDirectory {
-                    return .warn("Path is a directory, not a file.")
-                }
-                if !trimmed.lowercased().hasSuffix(".zip") {
-                    return .warn("File found, but extension isn't `.zip`. Profile import expects a zip archive.")
-                }
-                return .ok("File found on \(snapshot.displayName).")
-            case .writableFile:
-                if exists {
-                    if let stat = transport.stat(trimmed), stat.isDirectory {
-                        return .warn("Path is a directory. Choose a file path that doesn't yet exist.")
-                    }
-                    return .warn("File already exists on \(snapshot.displayName) — export will overwrite it.")
-                }
-                if !trimmed.lowercased().hasSuffix(".zip") {
-                    return .warn("Extension isn't `.zip`. The export command writes a zip archive.")
-                }
-                return .ok("Path is available on \(snapshot.displayName).")
-            }
-        }.value
-        verification = result
     }
 }

@@ -62,6 +62,16 @@ final class SessionsViewModel {
         ctx.runHermes(["sessions", "delete", "--yes", sessionId]).exitCode
     }
 
+    /// Runs `hermes sessions export …` and hands back output + exit code.
+    /// Production default shells out through the context's transport;
+    /// tests inject a stub so the local-vs-remote destination contract
+    /// can be pinned without an NSSavePanel or a real SSH round-trip.
+    /// Same seam shape as `sessionDeleteRunner`.
+    @ObservationIgnored
+    var sessionExportRunner: @Sendable (ServerContext, [String]) -> (output: String, exitCode: Int32) = { ctx, args in
+        ctx.runHermes(args)
+    }
+
 
     /// True while `load()` runs so the view can show a `.loadingOverlay`
     /// instead of a blank table on first open / refresh. (t-aud07)
@@ -81,6 +91,14 @@ final class SessionsViewModel {
     var showRenameSheet = false
     var showDeleteConfirmation = false
     var deleteSessionId: String?
+
+    /// Non-nil while a remote export is waiting on a destination path;
+    /// the view presents `RemotePathSheet` for it.
+    var pendingRemoteExport: RemoteExportRequest?
+    /// Result banner for the last export. Successes clear themselves;
+    /// failures stay until the next attempt, because an export that
+    /// reports nothing at all is the bug this replaced.
+    var exportMessage: String?
 
     // MARK: - Project attribution (v2.5)
     //
@@ -263,22 +281,75 @@ final class SessionsViewModel {
         deleteSessionId = nil
     }
 
+    // MARK: - Export
+
+    /// A remote export awaiting a destination path *on the remote host*.
+    /// `sessionId == nil` means "every session" (the page-header Export
+    /// button); non-nil is the single-row export.
+    struct RemoteExportRequest: Identifiable {
+        let id = UUID()
+        let sessionId: String?
+        let suggestedName: String
+    }
+
     func exportSession(_ session: HermesSession) {
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = "\(session.id).jsonl"
-        panel.allowedContentTypes = [.json]
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        runHermes(["sessions", "export", url.path, "--session-id", session.id])
+        beginExport(sessionId: session.id, suggestedName: "\(session.id).jsonl")
     }
 
     func exportAll() {
+        beginExport(sessionId: nil, suggestedName: "hermes-sessions.jsonl")
+    }
+
+    /// A remote export must land on a path on the *remote* host: the CLI
+    /// runs there over SSH, so an `NSSavePanel` path — which is a path on
+    /// this Mac — either fails against a directory the host doesn't have
+    /// or writes the file to a Mac-shaped path on the far box where the
+    /// user will never find it. With the CLI's non-zero exit discarded,
+    /// that presented as export doing nothing at all. `ProfilesView`
+    /// already dodges this trap for profile zips; sessions never did.
+    private func beginExport(sessionId: String?, suggestedName: String) {
+        guard !context.isRemote else {
+            pendingRemoteExport = RemoteExportRequest(sessionId: sessionId, suggestedName: suggestedName)
+            return
+        }
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "hermes-sessions.jsonl"
-        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = suggestedName
+        // `jsonl` has no system-declared UTType. Minting a dynamic one
+        // stops the panel rewriting the name to `.json`, which the old
+        // `[.json]` list did to every export.
+        panel.allowedContentTypes = [UTType(filenameExtension: "jsonl") ?? .json]
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        runHermes(["sessions", "export", url.path])
+        performExport(to: url.path, sessionId: sessionId)
+    }
+
+    /// Runs the export CLI and reports the outcome. Detached because a
+    /// remote export is an SSH round-trip on a 60s timeout — running it
+    /// inline would block the main actor for its whole duration.
+    func performExport(to path: String, sessionId: String?) {
+        var args = ["sessions", "export", path]
+        if let sessionId { args += ["--session-id", sessionId] }
+        let destination = context.isRemote ? "\(path) on \(context.displayName)" : path
+        Task.detached { [sessionExportRunner, context, args, destination, self] in
+            let result = sessionExportRunner(context, args)
+            await MainActor.run {
+                guard result.exitCode == 0 else {
+                    let detail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                    self.exportMessage = detail.isEmpty
+                        ? "Export failed (exit \(result.exitCode))."
+                        : "Export failed: \(detail.prefix(160))"
+                    return
+                }
+                let banner = "Exported to \(destination)"
+                self.exportMessage = banner
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(4))
+                    // Only clear our own banner — a newer export may
+                    // have replaced it while we slept.
+                    if self?.exportMessage == banner { self?.exportMessage = nil }
+                }
+            }
+        }
     }
 
     // MARK: - Stats
