@@ -90,24 +90,6 @@ struct SessionsView: View {
         } message: {
             Text("This will permanently delete the session and all its messages.")
         }
-        .sheet(item: $viewModel.pendingRemoteExport) { request in
-            RemotePathSheet(
-                context: viewModel.context,
-                title: request.sessionId == nil ? "Export all sessions" : "Export session",
-                prompt: "Enter the destination path on \(viewModel.context.displayName) where the `.jsonl` should be written. Hermes runs there, so the export is written on that host — not on this Mac.",
-                placeholder: "e.g. ~/\(request.suggestedName)",
-                confirmLabel: "Export",
-                mode: .writableFile(initialName: request.suggestedName),
-                expectedExtension: "jsonl",
-                extensionNote: "The export command writes JSON Lines.",
-                onCancel: { viewModel.pendingRemoteExport = nil },
-                onConfirm: { path in
-                    let sessionId = request.sessionId
-                    viewModel.pendingRemoteExport = nil
-                    viewModel.performExport(to: path, sessionId: sessionId)
-                }
-            )
-        }
     }
 
     // MARK: - Page header

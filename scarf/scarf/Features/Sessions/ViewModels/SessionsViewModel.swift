@@ -62,14 +62,17 @@ final class SessionsViewModel {
         ctx.runHermes(["sessions", "delete", "--yes", sessionId]).exitCode
     }
 
-    /// Runs `hermes sessions export …` and hands back output + exit code.
-    /// Production default shells out through the context's transport;
-    /// tests inject a stub so the local-vs-remote destination contract
-    /// can be pinned without an NSSavePanel or a real SSH round-trip.
-    /// Same seam shape as `sessionDeleteRunner`.
+    /// Runs `hermes sessions export …` and hands back stdout bytes, stderr,
+    /// and the exit code. Production default shells out through the
+    /// context's transport; tests inject a stub so the export contract can
+    /// be pinned without an NSSavePanel or a real SSH round-trip. Same seam
+    /// shape as `sessionDeleteRunner`.
+    ///
+    /// Five minutes, not the 60s default: this streams a whole session (or
+    /// the entire store, for "export all") back over SSH.
     @ObservationIgnored
-    var sessionExportRunner: @Sendable (ServerContext, [String]) -> (output: String, exitCode: Int32) = { ctx, args in
-        ctx.runHermes(args)
+    var sessionExportRunner: @Sendable (ServerContext, [String]) -> (stdout: Data, stderr: String, exitCode: Int32) = { ctx, args in
+        ctx.runHermesCapturingStdout(args, timeout: 300)
     }
 
 
@@ -92,9 +95,6 @@ final class SessionsViewModel {
     var showDeleteConfirmation = false
     var deleteSessionId: String?
 
-    /// Non-nil while a remote export is waiting on a destination path;
-    /// the view presents `RemotePathSheet` for it.
-    var pendingRemoteExport: RemoteExportRequest?
     /// Result banner for the last export. Successes clear themselves;
     /// failures stay until the next attempt, because an export that
     /// reports nothing at all is the bug this replaced.
@@ -283,15 +283,6 @@ final class SessionsViewModel {
 
     // MARK: - Export
 
-    /// A remote export awaiting a destination path *on the remote host*.
-    /// `sessionId == nil` means "every session" (the page-header Export
-    /// button); non-nil is the single-row export.
-    struct RemoteExportRequest: Identifiable {
-        let id = UUID()
-        let sessionId: String?
-        let suggestedName: String
-    }
-
     func exportSession(_ session: HermesSession) {
         beginExport(sessionId: session.id, suggestedName: "\(session.id).jsonl")
     }
@@ -300,18 +291,17 @@ final class SessionsViewModel {
         beginExport(sessionId: nil, suggestedName: "hermes-sessions.jsonl")
     }
 
-    /// A remote export must land on a path on the *remote* host: the CLI
-    /// runs there over SSH, so an `NSSavePanel` path — which is a path on
-    /// this Mac — either fails against a directory the host doesn't have
-    /// or writes the file to a Mac-shaped path on the far box where the
-    /// user will never find it. With the CLI's non-zero exit discarded,
-    /// that presented as export doing nothing at all. `ProfilesView`
-    /// already dodges this trap for profile zips; sessions never did.
+    /// The export always lands on **this Mac**, whichever host Hermes runs
+    /// on — that's what someone driving a Mac GUI is asking for.
+    ///
+    /// Passing the panel's path to the CLI can't do that: on a remote
+    /// context `hermes` executes on the far host over SSH, so a path from
+    /// `NSSavePanel` (a path on this Mac) either fails against a directory
+    /// the host doesn't have or dumps the file on the remote box where the
+    /// user will never find it. Instead we ask the CLI for the payload on
+    /// **stdout** (`sessions export -`, jsonl) and write those bytes here.
+    /// Same code path for local and remote — nothing to branch on.
     private func beginExport(sessionId: String?, suggestedName: String) {
-        guard !context.isRemote else {
-            pendingRemoteExport = RemoteExportRequest(sessionId: sessionId, suggestedName: suggestedName)
-            return
-        }
         let panel = NSSavePanel()
         panel.nameFieldStringValue = suggestedName
         // `jsonl` has no system-declared UTType. Minting a dynamic one
@@ -320,36 +310,69 @@ final class SessionsViewModel {
         panel.allowedContentTypes = [UTType(filenameExtension: "jsonl") ?? .json]
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        performExport(to: url.path, sessionId: sessionId)
+        performExport(to: url, sessionId: sessionId)
     }
 
-    /// Runs the export CLI and reports the outcome. Detached because a
-    /// remote export is an SSH round-trip on a 60s timeout — running it
-    /// inline would block the main actor for its whole duration.
-    func performExport(to path: String, sessionId: String?) {
-        var args = ["sessions", "export", path]
+    /// Pipes the export out of the CLI and writes it to `url` on this Mac.
+    /// Detached because a remote export is an SSH round-trip streaming the
+    /// whole payload — running it inline would block the main actor for its
+    /// full duration.
+    func performExport(to url: URL, sessionId: String?) {
+        // `-` is the CLI's "write jsonl to stdout" sentinel.
+        var args = ["sessions", "export", "-"]
         if let sessionId { args += ["--session-id", sessionId] }
-        let destination = context.isRemote ? "\(path) on \(context.displayName)" : path
-        Task.detached { [sessionExportRunner, context, args, destination, self] in
+        Task.detached { [sessionExportRunner, context, args, url, self] in
             let result = sessionExportRunner(context, args)
+            let outcome = Self.writeExport(result: result, to: url)
             await MainActor.run {
-                guard result.exitCode == 0 else {
-                    let detail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                    self.exportMessage = detail.isEmpty
-                        ? "Export failed (exit \(result.exitCode))."
-                        : "Export failed: \(detail.prefix(160))"
-                    return
-                }
-                let banner = "Exported to \(destination)"
-                self.exportMessage = banner
+                self.exportMessage = outcome.message
+                guard outcome.succeeded else { return }
+                let banner = outcome.message
                 Task { @MainActor [weak self] in
-                    try? await Task.sleep(for: .seconds(4))
+                    try? await Task.sleep(for: .seconds(5))
                     // Only clear our own banner — a newer export may
                     // have replaced it while we slept.
                     if self?.exportMessage == banner { self?.exportMessage = nil }
                 }
             }
         }
+    }
+
+    /// Turns a CLI result into a written file + a user-facing banner.
+    /// `nonisolated` so `performExport`'s detached task can do the disk
+    /// write off the main actor.
+    nonisolated private static func writeExport(
+        result: (stdout: Data, stderr: String, exitCode: Int32),
+        to url: URL
+    ) -> (succeeded: Bool, message: String) {
+        guard result.exitCode == 0 else {
+            let detail = Self.errorSummary(from: result.stderr)
+            return (false, detail.isEmpty
+                ? "Export failed (exit \(result.exitCode))."
+                : "Export failed: \(detail)")
+        }
+        do {
+            try result.stdout.write(to: url, options: .atomic)
+        } catch {
+            return (false, "Export failed writing \(url.lastPathComponent): \(error.localizedDescription)")
+        }
+        // Naming the size confirms the file isn't the empty one a silently
+        // broken pipe would leave behind.
+        let size = Int64(result.stdout.count).formatted(.byteCount(style: .file))
+        return (true, "Exported \(size) to \(url.path)")
+    }
+
+    /// The one useful line out of a CLI failure. Hermes is Python, so a
+    /// crash arrives as a traceback whose *last* line is the actual error —
+    /// the first 160 characters are just "Traceback (most recent call
+    /// last):" and stack frames, which tell the user nothing.
+    nonisolated private static func errorSummary(from stderr: String) -> String {
+        let lines = stderr
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard let last = lines.last else { return "" }
+        return String(last.prefix(200))
     }
 
     // MARK: - Stats

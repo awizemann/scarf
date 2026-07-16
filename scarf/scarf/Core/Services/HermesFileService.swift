@@ -1504,6 +1504,42 @@ struct HermesFileService: Sendable {
         }
     }
 
+    /// Raw-bytes variant of `runHermesCLISplit`. Use this when stdout is a
+    /// *payload* to be written to disk rather than text to be parsed —
+    /// session export pipes JSONL out of `hermes sessions export -` and
+    /// writes it to a file on the user's Mac, so it must not round-trip
+    /// through `String` (lossy on any non-UTF8 byte) and must never have
+    /// stderr merged into it (that would corrupt the JSONL outright).
+    /// Transport failures land in `stderr` with empty `stdout`.
+    @discardableResult
+    nonisolated func runHermesCLIData(args: [String], timeout: TimeInterval = 60, stdinInput: String? = nil) -> (exitCode: Int32, stdout: Data, stderr: String) {
+        let binary: String
+        if context.isRemote {
+            binary = context.paths.hermesBinary
+        } else {
+            guard let local = hermesBinaryPath() else { return (-1, Data(), "hermes binary not found") }
+            binary = local
+        }
+
+        let stdinData = stdinInput?.data(using: .utf8)
+        do {
+            let result = try transport.runProcess(
+                executable: binary,
+                args: args,
+                stdin: stdinData,
+                timeout: timeout
+            )
+            return (result.exitCode, result.stdout, result.stderrString)
+        } catch let error as TransportError {
+            let message = error.diagnosticStderr.isEmpty
+                ? (error.errorDescription ?? "transport error")
+                : error.diagnosticStderr
+            return (-1, Data(), message)
+        } catch {
+            return (-1, Data(), error.localizedDescription)
+        }
+    }
+
     // MARK: - File I/O
 
     /// Read a UTF-8 text file through the transport. Missing files and any

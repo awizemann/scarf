@@ -3,24 +3,23 @@ import Foundation
 import ScarfCore
 @testable import scarf
 
-/// Coverage for the remote session-export destination contract.
+/// Coverage for session export writing to the user's Mac.
 ///
-/// Pre-fix, `exportSession`/`exportAll` opened an `NSSavePanel`
-/// unconditionally and fed the chosen path straight to `hermes sessions
-/// export`. On a remote context that CLI runs on the far host over SSH,
-/// so the panel — which browses *this Mac* — handed it a path that host
-/// doesn't have. The export failed (or wrote to a Mac-shaped path on the
-/// remote box), and because `runHermes` is `@discardableResult` and the
-/// result was dropped, the user saw nothing at all: no file, no error.
+/// Pre-fix, `exportSession`/`exportAll` passed the `NSSavePanel` path
+/// straight to `hermes sessions export`. On a remote context that CLI runs
+/// on the far host over SSH, so it received a path that host doesn't have:
+/// the export failed, or landed on the remote box where the user would
+/// never find it. `runHermes` is `@discardableResult` and the result was
+/// dropped, so the user saw nothing at all — no file, no error.
 ///
-/// Post-fix, a remote context routes through `pendingRemoteExport` so the
-/// view can ask for a path *on the remote host*, and every export reports
-/// its outcome through `exportMessage`.
+/// Post-fix the CLI is asked for the payload on **stdout** (`sessions
+/// export -`) and Scarf writes those bytes to the chosen path on this Mac.
+/// One code path for local and remote, and every failure is reported.
 ///
 /// The CLI is scripted through the `sessionExportRunner` seam — no
-/// subprocess, no SSH round-trip. Local exports still gate on an
-/// `NSSavePanel`, so they're covered at the `performExport` level (the
-/// panel's only job is producing the path it takes).
+/// subprocess, no SSH round-trip. `beginExport` gates on a real
+/// `NSSavePanel`, so these drive `performExport`, which is everything after
+/// the panel hands over a URL.
 @MainActor
 @Suite struct SessionExportRemoteDestinationTests {
 
@@ -46,138 +45,134 @@ import ScarfCore
         )
     }
 
-    /// Only `id` matters here — it's what the export argv and the
-    /// suggested filename are built from.
-    private static func session(id: String) -> HermesSession {
-        HermesSession(
-            id: id,
-            source: "claude",
-            userId: nil,
-            model: nil,
-            title: "A session",
-            parentSessionId: nil,
-            startedAt: nil,
-            endedAt: nil,
-            endReason: nil,
-            messageCount: 3,
-            toolCallCount: 0,
-            inputTokens: 0,
-            outputTokens: 0,
-            cacheReadTokens: 0,
-            cacheWriteTokens: 0,
-            estimatedCostUSD: nil,
-            reasoningTokens: 0,
-            actualCostUSD: nil,
-            costStatus: nil,
-            billingProvider: nil
-        )
-    }
-
-    @Test("Remote single-session export defers to a remote-path sheet instead of running the CLI")
-    func remoteExportDefersToSheet() {
-        let recorder = ArgvRecorder()
-        let vm = SessionsViewModel(context: Self.remoteContext())
-        vm.sessionExportRunner = { _, args in
-            recorder.record(args)
-            return ("", 0)
-        }
-
-        vm.exportSession(Self.session(id: "abc123"))
-
-        // The whole bug: nothing may reach the CLI until we know a path
-        // on the REMOTE host. No NSSavePanel is opened either — this test
-        // would hang on a modal if one were.
-        #expect(recorder.recorded.isEmpty)
-        #expect(vm.pendingRemoteExport?.sessionId == "abc123")
-        #expect(vm.pendingRemoteExport?.suggestedName == "abc123.jsonl")
-    }
-
-    @Test("Remote export-all defers with a nil session id (meaning: every session)")
-    func remoteExportAllDefersToSheet() {
-        let recorder = ArgvRecorder()
-        let vm = SessionsViewModel(context: Self.remoteContext())
-        vm.sessionExportRunner = { _, args in
-            recorder.record(args)
-            return ("", 0)
-        }
-
-        vm.exportAll()
-
-        #expect(recorder.recorded.isEmpty)
-        #expect(vm.pendingRemoteExport != nil)
-        #expect(vm.pendingRemoteExport?.sessionId == nil)
-        #expect(vm.pendingRemoteExport?.suggestedName == "hermes-sessions.jsonl")
-    }
-
-    @Test("Confirming a remote path runs the export against that path, on the remote host")
-    func confirmedRemotePathReachesCLI() async {
-        let recorder = ArgvRecorder()
-        let vm = SessionsViewModel(context: Self.remoteContext())
-        vm.sessionExportRunner = { _, args in
-            recorder.record(args)
-            return ("", 0)
-        }
-
-        vm.performExport(to: "~/exports/abc123.jsonl", sessionId: "abc123")
-        await Self.settle(until: { !recorder.recorded.isEmpty })
-
-        #expect(recorder.recorded == [[
-            "sessions", "export", "~/exports/abc123.jsonl",
-            "--session-id", "abc123",
-        ]])
-        // The banner must name the host, so a file written on the remote
-        // box isn't mistaken for one on the user's Mac.
-        #expect(vm.exportMessage == "Exported to ~/exports/abc123.jsonl on build-box")
-    }
-
-    @Test("Export-all omits --session-id so the CLI dumps every session")
-    func exportAllOmitsSessionFilter() async {
-        let recorder = ArgvRecorder()
-        let vm = SessionsViewModel(context: Self.remoteContext())
-        vm.sessionExportRunner = { _, args in
-            recorder.record(args)
-            return ("", 0)
-        }
-
-        vm.performExport(to: "~/all.jsonl", sessionId: nil)
-        await Self.settle(until: { !recorder.recorded.isEmpty })
-
-        #expect(recorder.recorded == [["sessions", "export", "~/all.jsonl"]])
-    }
-
-    @Test("A failing export surfaces the CLI's stderr instead of failing silently")
-    func failedExportSurfacesError() async {
-        let vm = SessionsViewModel(context: Self.remoteContext())
-        vm.sessionExportRunner = { _, _ in
-            ("No such file or directory: /Users/jon/Desktop\n", 1)
-        }
-
-        vm.performExport(to: "/Users/jon/Desktop/abc.jsonl", sessionId: "abc123")
-        await Self.settle(until: { vm.exportMessage != nil })
-
-        #expect(vm.exportMessage == "Export failed: No such file or directory: /Users/jon/Desktop")
-    }
-
-    /// A transport failure (or a missing local binary) returns exit -1 with
-    /// no output at all — the exact shape that made this bug invisible.
-    /// It must still produce a banner.
-    @Test("A silent transport failure still reports the exit code")
-    func silentFailureStillReports() async {
-        let vm = SessionsViewModel(context: Self.remoteContext())
-        vm.sessionExportRunner = { _, _ in ("", -1) }
-
-        vm.performExport(to: "~/abc.jsonl", sessionId: "abc123")
-        await Self.settle(until: { vm.exportMessage != nil })
-
-        #expect(vm.exportMessage == "Export failed (exit -1).")
+    private static func tempURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-export-test-\(UUID().uuidString).jsonl")
     }
 
     /// `performExport` hands the CLI call to a detached task, so poll the
     /// main-actor state rather than assuming it has landed.
     private static func settle(until condition: @MainActor () -> Bool) async {
-        for _ in 0..<200 {
+        for _ in 0..<300 {
             if condition() { return }
             try? await Task.sleep(for: .milliseconds(10))
         }
+    }
+
+    @Test("Export asks the CLI for stdout rather than handing it a local path")
+    func exportRequestsStdout() async {
+        let recorder = ArgvRecorder()
+        let url = Self.tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let vm = SessionsViewModel(context: Self.remoteContext())
+        vm.sessionExportRunner = { _, args in
+            recorder.record(args)
+            return (Data(#"{"id":"abc123"}"#.utf8), "", 0)
+        }
+
+        vm.performExport(to: url, sessionId: "abc123")
+        await Self.settle(until: { vm.exportMessage != nil })
+
+        // The whole bug: the CLI must never be handed a path that only
+        // exists on this Mac. `-` means "write jsonl to stdout".
+        #expect(recorder.recorded == [[
+            "sessions", "export", "-", "--session-id", "abc123",
+        ]])
+    }
+
+    @Test("The piped bytes are written verbatim to the chosen file on this Mac")
+    func pipedBytesLandOnDisk() async {
+        let url = Self.tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let payload = "{\"id\":\"a\"}\n{\"id\":\"b\"}\n"
+
+        let vm = SessionsViewModel(context: Self.remoteContext())
+        vm.sessionExportRunner = { _, _ in (Data(payload.utf8), "", 0) }
+
+        vm.performExport(to: url, sessionId: "abc123")
+        await Self.settle(until: { vm.exportMessage != nil })
+
+        #expect(FileManager.default.fileExists(atPath: url.path))
+        let written = try? String(contentsOf: url, encoding: .utf8)
+        #expect(written == payload)
+        // Naming the size proves the file isn't the empty one a broken
+        // pipe would leave behind.
+        #expect(vm.exportMessage?.contains("Exported") == true)
+        #expect(vm.exportMessage?.contains(url.path) == true)
+    }
+
+    @Test("Export-all omits --session-id so the CLI dumps every session")
+    func exportAllOmitsSessionFilter() async {
+        let recorder = ArgvRecorder()
+        let url = Self.tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let vm = SessionsViewModel(context: Self.remoteContext())
+        vm.sessionExportRunner = { _, args in
+            recorder.record(args)
+            return (Data("{}".utf8), "", 0)
+        }
+
+        vm.performExport(to: url, sessionId: nil)
+        await Self.settle(until: { vm.exportMessage != nil })
+
+        #expect(recorder.recorded == [["sessions", "export", "-"]])
+    }
+
+    /// Hermes is Python: a crash arrives as a traceback whose *last* line
+    /// is the actual error. Reporting the first line just shows the user
+    /// "Traceback (most recent call last):" and stack frames.
+    @Test("A Python traceback is reduced to its final, meaningful line")
+    func tracebackReportsLastLine() async {
+        let url = Self.tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let traceback = """
+        Traceback (most recent call last):
+          File "/home/hermes/.hermes/hermes-agent/venv/bin/hermes", line 10, in <module>
+            sys.exit(main())
+                     ^^^^^^
+        FileNotFoundError: [Errno 2] No such file or directory: '/home/hermes/exports/a.jsonl'
+        """
+
+        let vm = SessionsViewModel(context: Self.remoteContext())
+        vm.sessionExportRunner = { _, _ in (Data(), traceback, 1) }
+
+        vm.performExport(to: url, sessionId: "abc123")
+        await Self.settle(until: { vm.exportMessage != nil })
+
+        #expect(vm.exportMessage == "Export failed: FileNotFoundError: [Errno 2] No such file or directory: '/home/hermes/exports/a.jsonl'")
+        // A failed export must not leave a truncated/empty file behind.
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    /// A transport failure (or a missing local binary) returns exit -1 with
+    /// no output at all — the exact shape that made this bug invisible.
+    @Test("A silent transport failure still reports the exit code")
+    func silentFailureStillReports() async {
+        let url = Self.tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let vm = SessionsViewModel(context: Self.remoteContext())
+        vm.sessionExportRunner = { _, _ in (Data(), "", -1) }
+
+        vm.performExport(to: url, sessionId: "abc123")
+        await Self.settle(until: { vm.exportMessage != nil })
+
+        #expect(vm.exportMessage == "Export failed (exit -1).")
+    }
+
+    @Test("An unwritable destination is reported rather than swallowed")
+    func unwritableDestinationReports() async {
+        let url = URL(fileURLWithPath: "/nonexistent-dir-\(UUID().uuidString)/a.jsonl")
+
+        let vm = SessionsViewModel(context: Self.remoteContext())
+        vm.sessionExportRunner = { _, _ in (Data("{}".utf8), "", 0) }
+
+        vm.performExport(to: url, sessionId: "abc123")
+        await Self.settle(until: { vm.exportMessage != nil })
+
+        #expect(vm.exportMessage?.hasPrefix("Export failed writing a.jsonl:") == true)
     }
 }

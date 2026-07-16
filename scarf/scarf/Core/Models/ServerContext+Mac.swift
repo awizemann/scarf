@@ -23,6 +23,17 @@ extension ServerContext {
         return (result.output, result.exitCode)
     }
 
+    /// Invoke the `hermes` CLI and capture stdout as raw bytes, with stderr
+    /// kept separate. For piping a CLI *payload* back to this Mac — see
+    /// `HermesFileService.runHermesCLIData`. Same transport rule as
+    /// `runHermes`: never spawn `hermes` via `Process()` directly, or the
+    /// remote path silently becomes a local one.
+    @discardableResult
+    nonisolated func runHermesCapturingStdout(_ args: [String], timeout: TimeInterval = 60) -> (stdout: Data, stderr: String, exitCode: Int32) {
+        let result = HermesFileService(context: self).runHermesCLIData(args: args, timeout: timeout)
+        return (result.stdout, result.stderr, result.exitCode)
+    }
+
     /// Reveal the file at `path` in the user's local editor (via
     /// `NSWorkspace.open`). For remote contexts this is a no-op — the
     /// file doesn't exist on this Mac, so opening it would fail silently
