@@ -52,6 +52,9 @@
 
 ## Done
 
+- [x] gh#112: diagnose+surface why the Hermes CLI fallback chain fails (Docker host, no host-side wrapper) (id: t-db90633f) (added: 2026-07-17)
+- [x] gh#131: fix false-green Verify (parent dir) + last-line error surfacing in Profiles (id: t-7857b868) (added: 2026-07-17)
+- [x] gh#129/PR#130: run the previously-blocked test suite, review, ready-to-merge verdict (id: t-925a4310) (added: 2026-07-17)
 - [x] Config parity: derived test over setSetting keys (convert the convention into a build gate) (id: t-2d258871) (added: 2026-07-14)
 - [x] Vision heads-up: detect Ollama model vision capability via /api/show (close the local-model blind spot) (id: t-d25e68cc) (added: 2026-07-14)
 - [x] Mismatch banner: offer "Choose model…" picker when prefix is unknown (id: t-79569a15) (added: 2026-07-04)
