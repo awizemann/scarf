@@ -45,6 +45,7 @@
 - [ ] iOS: route confirmModelPreflight through LocalModelConfigPlan (live stale-key bug, same class as Mac) (id: t-52f4564b) (added: 2026-07-14)
 - [ ] Low-risk consolidation: 3× semverCompare and 7× shell-quoting copies → shared utils (id: t-a21accf0) (added: 2026-07-14)
 - [ ] Reliable connect-time Hermes version read (persist + single cached probe) — enabler for any floor/nudge (id: t-bfd15aef) (added: 2026-07-14)
+- [ ] Cut v2.17.1 Mac release + post-cut follow-ups (id: t-97648513) (added: 2026-07-17)
 
 ## Doing
 
