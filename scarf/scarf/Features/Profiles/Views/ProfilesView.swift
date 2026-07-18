@@ -49,10 +49,6 @@ struct ProfilesView: View {
     /// host (that's where `hermes profile export` produced it), and
     /// `NSOpenPanel` can only browse the local Mac.
     @State private var showRemoteImportSheet = false
-    /// When non-nil, the export button on the named profile presents
-    /// `RemoteProfilePathSheet` to ask for an output path on the
-    /// remote host. Local exports continue to use `NSSavePanel`.
-    @State private var pendingRemoteExport: HermesProfile?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -105,26 +101,10 @@ struct ProfilesView: View {
                 prompt: "Enter the path to a profile `.zip` on \(viewModel.context.displayName).",
                 placeholder: "e.g. ~/profiles/my-profile.zip",
                 confirmLabel: "Import",
-                mode: .existingFile,
                 onCancel: { showRemoteImportSheet = false },
                 onConfirm: { path in
                     showRemoteImportSheet = false
                     viewModel.import(from: path)
-                }
-            )
-        }
-        .sheet(item: $pendingRemoteExport) { profile in
-            RemoteProfilePathSheet(
-                context: viewModel.context,
-                title: "Export profile '\(profile.name)'",
-                prompt: "Enter the destination path on \(viewModel.context.displayName) where the `.zip` should be written.",
-                placeholder: "e.g. ~/\(profile.name)-profile.zip",
-                confirmLabel: "Export",
-                mode: .writableFile(initialName: "\(profile.name)-profile.zip"),
-                onCancel: { pendingRemoteExport = nil },
-                onConfirm: { path in
-                    pendingRemoteExport = nil
-                    viewModel.export(profile, to: path)
                 }
             )
         }
@@ -221,20 +201,15 @@ struct ProfilesView: View {
                             renameNewName = profile.name
                         }
                         Button("Export…") {
-                            if viewModel.context.isRemote {
-                                // Exporting a remote profile must write to a
-                                // remote path — NSSavePanel would write to
-                                // the user's Mac, leaving the remote
-                                // profile zip nowhere on the host where
-                                // anyone can use it.
-                                pendingRemoteExport = profile
-                            } else {
-                                let panel = NSSavePanel()
-                                panel.allowedContentTypes = [.zip]
-                                panel.nameFieldStringValue = "\(profile.name)-profile.zip"
-                                if panel.runModal() == .OK, let url = panel.url {
-                                    viewModel.export(profile, to: url.path)
-                                }
+                            // The export lands on this Mac whichever host
+                            // Hermes runs on (gh#132) — remote contexts
+                            // stream the zip down from a host-side scratch
+                            // path. See RemoteProfileExport.
+                            let panel = NSSavePanel()
+                            panel.allowedContentTypes = [.zip]
+                            panel.nameFieldStringValue = "\(profile.name)-profile.zip"
+                            if panel.runModal() == .OK, let url = panel.url {
+                                viewModel.export(profile, to: url)
                             }
                         }
                         Divider()
@@ -446,28 +421,20 @@ struct ProfilesView: View {
     }
 }
 
-/// Remote-path picker for profile import + export. Used when the active
-/// `ServerContext` is `.ssh` — `NSOpenPanel` / `NSSavePanel` would
-/// browse the user's Mac, which is the wrong host. The sheet takes a
-/// remote path string and verifies it via the active transport before
-/// handing it back. The `mode` distinguishes "must already exist" from
-/// "we're about to write here," each with appropriate validation.
+/// Remote-path picker for profile **import**. Used when the active
+/// `ServerContext` is `.ssh` — the zip the user wants to import lives on
+/// the remote host, and `NSOpenPanel` can only browse the user's Mac. The
+/// sheet takes a remote path string and verifies it (exists, is a file,
+/// looks like a zip) via the active transport before handing it back.
+/// Export stopped using this sheet in gh#132 — exports now stream down to
+/// a local `NSSavePanel` destination (see `RemoteProfileExport`), which
+/// also retired the write-path Verify and its gh#131 bug class.
 private struct RemoteProfilePathSheet: View {
-    enum Mode {
-        /// Import flow: zip must already exist on the remote.
-        case existingFile
-        /// Export flow: we'll be writing to the path. Permissive on
-        /// non-existence (that's expected); warn on existing dir or
-        /// non-zip extension.
-        case writableFile(initialName: String)
-    }
-
     let context: ServerContext
     let title: String
     let prompt: String
     let placeholder: String
     let confirmLabel: String
-    let mode: Mode
     let onCancel: () -> Void
     let onConfirm: (String) -> Void
 
@@ -515,11 +482,6 @@ private struct RemoteProfilePathSheet: View {
         }
         .padding(20)
         .frame(width: 520)
-        .onAppear {
-            if case .writableFile(let initialName) = mode, path.isEmpty {
-                path = "~/" + initialName
-            }
-        }
     }
 
     @ViewBuilder
@@ -554,79 +516,22 @@ private struct RemoteProfilePathSheet: View {
         guard !trimmed.isEmpty else { return }
         verification = .verifying
         let snapshot = context
-        let snapshotMode = mode
         let result: Verification = await Task.detached {
             let transport = snapshot.makeTransport()
-            switch snapshotMode {
-            case .existingFile:
-                guard transport.fileExists(trimmed) else {
-                    return .warn("Path doesn't exist on \(snapshot.displayName).")
-                }
-                guard let stat = transport.stat(trimmed) else {
-                    return .warn("Found, but couldn't stat — check permissions.")
-                }
-                if stat.isDirectory {
-                    return .warn("Path is a directory, not a file.")
-                }
-                if !trimmed.lowercased().hasSuffix(".zip") {
-                    return .warn("File found, but extension isn't `.zip`. Profile import expects a zip archive.")
-                }
-                return .ok("File found on \(snapshot.displayName).")
-            case .writableFile:
-                switch RemoteWritablePathVerifier.verdict(
-                    path: trimmed,
-                    host: snapshot.displayName,
-                    exists: { transport.fileExists($0) },
-                    isDirectory: { transport.stat($0)?.isDirectory }
-                ) {
-                case .ok(let detail): return .ok(detail)
-                case .warn(let detail): return .warn(detail)
-                }
+            guard transport.fileExists(trimmed) else {
+                return .warn("Path doesn't exist on \(snapshot.displayName).")
             }
+            guard let stat = transport.stat(trimmed) else {
+                return .warn("Found, but couldn't stat — check permissions.")
+            }
+            if stat.isDirectory {
+                return .warn("Path is a directory, not a file.")
+            }
+            if !trimmed.lowercased().hasSuffix(".zip") {
+                return .warn("File found, but extension isn't `.zip`. Profile import expects a zip archive.")
+            }
+            return .ok("File found on \(snapshot.displayName).")
         }.value
         verification = result
-    }
-}
-
-/// Decision logic for `RemoteProfilePathSheet`'s Verify in `.writableFile`
-/// mode, extracted as a pure function so the parent-directory rule is
-/// testable without a transport (gh#131: Verify green-lit `~/exports/x.zip`
-/// when `~/exports/` didn't exist, then the export failed with a traceback).
-enum RemoteWritablePathVerifier {
-    enum Verdict: Equatable {
-        case ok(String)
-        case warn(String)
-    }
-
-    /// `isDirectory(path)` is nil when the path can't be stat'd.
-    static func verdict(
-        path: String,
-        host: String,
-        exists: (String) -> Bool,
-        isDirectory: (String) -> Bool?
-    ) -> Verdict {
-        if exists(path) {
-            if isDirectory(path) == true {
-                return .warn("Path is a directory. Choose a file path that doesn't yet exist.")
-            }
-            return .warn("File already exists on \(host) — export will overwrite it.")
-        }
-        // `hermes profile export --output` doesn't create intermediate
-        // directories, so a missing parent guarantees the export fails.
-        let parent = (path as NSString).deletingLastPathComponent
-        if !["", "/", "~", "."].contains(parent) {
-            guard exists(parent) else {
-                return .warn("\(parent)/ doesn't exist on \(host) — create it first, or choose another path.")
-            }
-            switch isDirectory(parent) {
-            case .some(true): break
-            case .some(false): return .warn("\(parent) isn't a directory on \(host).")
-            case .none: return .warn("Found \(parent), but couldn't stat — check permissions.")
-            }
-        }
-        if !path.lowercased().hasSuffix(".zip") {
-            return .warn("Extension isn't `.zip`. The export command writes a zip archive.")
-        }
-        return .ok("Path is available on \(host).")
     }
 }

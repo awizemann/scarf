@@ -134,8 +134,48 @@ final class ProfilesViewModel {
         runAndReload(["profile", "delete", profile.name], success: "Deleted \(profile.name)")
     }
 
-    func export(_ profile: HermesProfile, to path: String) {
-        runAndReload(["profile", "export", profile.name, "--output", path], success: "Exported")
+    /// Export always lands on **this Mac**, whichever host Hermes runs on
+    /// (gh#132) — matching Sessions export. Local contexts hand the panel
+    /// path straight to the CLI (it runs here). Remote contexts export to
+    /// a host-side scratch path, stream the zip down, and clean up.
+    func export(_ profile: HermesProfile, to url: URL) {
+        guard context.isRemote else {
+            runAndReload(["profile", "export", profile.name, "--output", url.path], success: "Exported")
+            return
+        }
+        message = "Exporting \(profile.name)…"
+        let name = profile.name
+        Task.detached { [fileService, context, self] in
+            let transport = context.makeTransport()
+            let result = await RemoteProfileExport.run(
+                profileName: name,
+                destination: url,
+                runCLI: { args, timeout in fileService.runHermesCLI(args: args, timeout: timeout) },
+                streamFile: { path in
+                    // Login shell for PATH parity with the rest of the
+                    // remote CLI surface; the path is generated, not
+                    // user input, so it needs no quoting.
+                    transport.streamRawBytes(executable: "/bin/bash", args: ["-lc", "cat \(path)"])
+                },
+                removeRemote: { path in
+                    _ = try? transport.runProcess(
+                        executable: "/bin/sh", args: ["-c", "rm -f \(path)"], stdin: nil, timeout: 15)
+                },
+                onProgress: { written in
+                    let progress = "Exporting \(name) — \(written.formatted(.byteCount(style: .file)))…"
+                    Task { @MainActor [weak self] in self?.message = progress }
+                }
+            )
+            await MainActor.run {
+                self.message = result.message
+                guard result.succeeded else { return }
+                // Success clears itself; a failure stays until the next
+                // action so it can't be missed.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                    if self?.message == result.message { self?.message = nil }
+                }
+            }
+        }
     }
 
     func `import`(from path: String) {
