@@ -9,9 +9,9 @@ tags:
 - audit-2026-06-13
 created: 2026-06-13
 updated: 2026-06-13
-source_sha: 2b9ef15cdddcb1fde12a88556bf755a623ae7758
-reviewed: 2026-07-12
-reviewed_by: audit:claude-code (audit)
+source_sha: 741b7a0dff0adf0779bace4eea4ebf0a6b929d9d
+reviewed: 2026-07-17
+reviewed_by: audit:claude-code (background)
 source_paths: scarf/scarf/Core/Services/HermesFileService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesProfileResolver.swift, scarf/scarf/Features/Projects/Views/Widgets/WebviewWidgetView.swift
 source_paths_inferred: false
 ---

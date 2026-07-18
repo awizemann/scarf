@@ -4,15 +4,15 @@ type: note
 permalink: scarf/architecture/mac-config-reads-go-through-hermesconfig-yaml-never-re
 created: 2026-07-14
 updated: 2026-07-14
-source_sha: 1d075b7d4c3e8904c9eeaed03de35d70db6b0d72
+source_sha: 741b7a0dff0adf0779bace4eea4ebf0a6b929d9d
 source_paths: scarf/scarf/Core/Services/HermesFileService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift
 source_paths_inferred: false
 tags:
 - settings
 - config-parsing
 - drift
-reviewed: 2026-07-14
-reviewed_by: claude-opus-4-8
+reviewed: 2026-07-17
+reviewed_by: audit:claude-code (background)
 ---
 
 Alan's 2026-07-14 bug report ("settings drop downs are saving but not showing selected") was parser drift, not a save failure: SettingsViewModel.setSetting reloads config after every `hermes config set`, but the Mac app read config through a 360-line duplicate of ScarfCore's parser that had missed every v0.17/v0.18 key addition, so the reloaded struct snapped those fields back to defaults and PickerRow rendered a blank selection. Most visible surface: Web Tools tab search/extract backend dropdowns.
