@@ -6,6 +6,108 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.17.1</title>
+      <sparkle:version>54</sparkle:version>
+      <sparkle:shortVersionString>2.17.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Sat, 18 Jul 2026 02:12:50 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.17.1</p>
+<p>A focused fix release with one theme: <strong>&quot;Export…&quot; now always means &quot;save to my Mac.&quot;</strong> Exporting a session against a remote (SSH) Hermes used to silently do nothing — no file, no error — and exporting a profile asked you to type a destination path on the far host and know its filesystem by heart. Both now behave the way a Mac app should: pick a spot in the save panel, get a file you can see in Finder, whichever machine Hermes runs on. Every fix in this release came out of community-filed issues — thank you, <a href="https://github.com/JonLaliberte">@JonLaliberte</a> and <a href="https://github.com/scriptures4life">@scriptures4life</a>.</p>
+<h2>Session export lands on your Mac — and never fails silently again</h2>
+<p>Community-reported and community-fixed: <a href="https://github.com/awizemann/scarf/issues/129">#129</a>, fixed by <a href="https://github.com/JonLaliberte">@JonLaliberte</a> in <a href="https://github.com/awizemann/scarf/pull/130">PR #130</a> — their second merged contribution. 🎉</p>
+<p>The root cause: Scarf handed the save panel&#x27;s path (a path on <em>your Mac</em>) straight to the <code>hermes</code> CLI — which, on a remote server, runs on the <em>far host over SSH</em>. The CLI either failed against a directory the host doesn&#x27;t have or wrote the export onto the remote box where you&#x27;d never find it, and the failure was dropped on the floor either way.</p>
+<p>The fix is a better design, not a patch: Scarf now asks the CLI to write the export to <strong>stdout</strong> (<code>hermes sessions export -</code>) and saves those bytes to the path you chose — one code path for local and remote, and the CLI never sees a path at all. Along the way:</p>
+<ul>
+  <li><strong>Export from the session detail sheet works now</strong> (it previously did nothing at all — a sheet-over-sheet SwiftUI limitation the new design sidesteps).</li>
+  <li><strong>Every failure is reported</strong>, and Hermes&#x27;s Python tracebacks are reduced to their <em>last</em> line — the one with the actual error — instead of showing you &quot;Traceback (most recent call last):&quot;.</li>
+  <li><strong>Success names the byte count</strong>, so a broken pipe can&#x27;t masquerade as a good export.</li>
+  <li>The save panel <strong>stops rewriting <code>.jsonl</code> to <code>.json</code></strong>, and exports run off the main thread so a large session over SSH doesn&#x27;t freeze the UI.</li>
+</ul>
+<h2>Profile export follows — no more remote-path guessing game</h2>
+<p>Exporting a profile from a remote server used to open a text field asking for a destination path <em>on the host</em> — which meant knowing which directories exist over there and pre-creating them by hand. Its &quot;Verify&quot; button made things worse: it green-lit paths whose parent directory didn&#x27;t exist, then the export failed with a traceback (<a href="https://github.com/awizemann/scarf/issues/131">#131</a>).</p>
+<p>Per the decision in <a href="https://github.com/awizemann/scarf/issues/132">#132</a>, profile export now matches sessions: <strong>the zip lands on your Mac.</strong> <code>hermes profile export</code> has no stdout mode, so Scarf exports to a scratch path on the host, streams the zip down chunk-by-chunk (the same streaming machinery backups use — a ~300 MB profile never passes through memory), moves it atomically into your chosen destination, and cleans up the host scratch. You get progress updates during big pulls, and a mid-transfer failure leaves no half-written file where you chose to save.</p>
+<p>The remote-path sheet — and its mis-verifying &quot;Verify&quot; — is gone from export entirely. Profile <strong>import</strong> keeps it (the zip you&#x27;re importing genuinely lives on the host), where Verify checks a file that already exists and was never affected.</p>
+<h2>Under the hood</h2>
+<ul>
+  <li>New raw-bytes CLI plumbing (<code>runHermesCLIData</code> / <code>runHermesCapturingStdout</code>) keeps stdout as <code>Data</code> with stderr separate, so binary payloads survive intact; <code>RemoteProfileExport</code> carries the scratch-and-stream pipeline.</li>
+  <li>The stdout export sentinel was verified live against Hermes <strong>v0.17.0</strong> and <strong>v0.18.2</strong>; both new flows are pinned by seam-based test suites (no SSH needed to run them). Test counts this release: <strong>986</strong> ScarfCore, <strong>277</strong> Mac app bundle.</li>
+  <li>Shared ScarfCore also gains the gh#112 config-probe diagnosis for ScarfGo (see the iOS note below); the Mac app&#x27;s behavior is unchanged by it.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li><strong>Sparkle</strong> will offer the update automatically, or use <strong>Scarf → Check for Updates</strong>. macOS 14.6+ deployment target unchanged.</li>
+  <li><strong>No Hermes version floor.</strong> Session export-to-Mac is verified on Hermes v0.17.0 and v0.18.2; profile export uses only <code>--output</code>, which is stable across supported versions.</li>
+  <li><strong>iOS / ScarfGo: a TestFlight build follows this release.</strong> It carries the <a href="https://github.com/awizemann/scarf/issues/112">#112</a> work: when a Docker-hosted Hermes is unreachable over SSH (the config lives inside the container and no host-side wrapper exists), Settings now diagnoses <em>which</em> failure you have and shows the exact wrapper-script fix in-app, instead of the misleading &quot;config.yaml not found.&quot;</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.17.1/Scarf-v2.17.1-Universal.zip"
+                 sparkle:edSignature="WHzayEufy/1VU9Rri7pUDaUeqbzugYp0yljfaAM27vDydQ8lSqADvzq218KH3h4KY3LGDZf9o0F4LvLfHV4DDw=="
+                 length="21671823"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.17.0</title>
       <sparkle:version>53</sparkle:version>
       <sparkle:shortVersionString>2.17.0</sparkle:shortVersionString>
