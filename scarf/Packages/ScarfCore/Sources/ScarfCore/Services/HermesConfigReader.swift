@@ -78,6 +78,73 @@ public enum HermesConfigReader {
         return HermesConfig(yaml: yaml)
     }
 
+    /// Why the fallback chain came up empty, for hosts where even the
+    /// `config show` probe fails (gh#112 follow-up: reporter's v2.16.1
+    /// still showed the generic "not found" because *no* step could run).
+    /// Callers use this to teach the actual fix — usually a host-side
+    /// wrapper for a Docker-only `hermes` — instead of the misleading
+    /// "not found".
+    public enum CLIProbeDiagnosis: Equatable, Sendable {
+        /// No `hermes` on the host's non-interactive PATH at all — the
+        /// signature of a Docker install with no host-side wrapper (a
+        /// `.bashrc` alias doesn't exist for SSH exec channels).
+        case cliNotFound
+        /// The CLI exists but `config show` exited non-zero. `detail` is
+        /// the last non-empty output line (Python tracebacks put the real
+        /// error last).
+        case commandFailed(exitCode: Int32, detail: String)
+        /// `config show` exited 0 yet no Model line parsed — a Hermes
+        /// version whose output format we don't recognize.
+        case outputUnparsed
+        /// The SSH command itself failed before the CLI could answer.
+        case transportFailed(String)
+    }
+
+    /// Run after `readRawConfig` and `probeModelConfig` both returned nil,
+    /// to name the reason. One extra remote shell; remote-only like the
+    /// probes it explains.
+    public static func diagnoseProbeFailure(context: ServerContext) -> CLIProbeDiagnosis? {
+        guard context.isRemote else { return nil }
+        let hermes = context.paths.hermesBinary
+        let script = "\(pathPrelude); command -v \(hermes) >/dev/null 2>&1 || exit 127; \(hermes) config show"
+        do {
+            let result = try context.makeTransport().runProcess(
+                executable: "/bin/sh",
+                args: ["-c", script],
+                stdin: nil,
+                timeout: 15
+            )
+            return classifyProbe(exitCode: result.exitCode,
+                                 stdout: result.stdoutString,
+                                 stderr: result.stderrString)
+        } catch {
+            let detail = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            return .transportFailed(detail)
+        }
+    }
+
+    /// Pure classification of the diagnostic shell's outcome, split out for
+    /// tests. Exit 127 is both our `command -v` sentinel and the shell's
+    /// own "command not found" — either way the CLI isn't runnable here.
+    static func classifyProbe(exitCode: Int32, stdout: String, stderr: String) -> CLIProbeDiagnosis {
+        if exitCode == 127 { return .cliNotFound }
+        guard exitCode == 0 else {
+            let detail = lastNonEmptyLine(stderr) ?? lastNonEmptyLine(stdout) ?? ""
+            return .commandFailed(exitCode: exitCode, detail: detail)
+        }
+        // Exit 0: the CLI answered. This diagnosis only runs when
+        // `probeModelConfig` already failed to parse that answer.
+        return .outputUnparsed
+    }
+
+    private static func lastNonEmptyLine(_ text: String) -> String? {
+        let last = text.split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty }
+        guard let last, !last.isEmpty else { return nil }
+        return String(last.prefix(200))
+    }
+
     /// Extract `default` / `provider` from `hermes config show`'s Model
     /// line, a Python-dict repr on v0.16–v0.18:
     ///

@@ -59,9 +59,20 @@ public final class IOSSettingsViewModel {
             }.value
             config = probed ?? .empty
             rawYAML = ""
-            lastError = probed != nil
-                ? "Hermes answers on \(ctx.displayName), but its config.yaml isn't visible over the file transport — it likely lives inside a container. Model settings above were read via the Hermes CLI. To unlock full Settings, bind-mount the container's Hermes home to `~/.hermes` on this host (or add the server again with Advanced → Remote home pointed at the mounted path)."
-                : "`\(path)` not found on \(ctx.displayName). Once Hermes is configured on this host, Settings will light up."
+            if probed != nil {
+                lastError = "Hermes answers on \(ctx.displayName), but its config.yaml isn't visible over the file transport — it likely lives inside a container. Model settings above were read via the Hermes CLI. To unlock full Settings, bind-mount the container's Hermes home to `~/.hermes` on this host (or add the server again with Advanced → Remote home pointed at the mounted path)."
+            } else {
+                // Even the CLI probe failed. Name the reason instead of
+                // the misleading "not found" — for the gh#112 topology
+                // (Docker-only hermes, no host-side wrapper) the message
+                // must teach the wrapper fix, not shrug (see the v2.16.1
+                // report: fallbacks shipped, user saw zero change).
+                let diagnosis: HermesConfigReader.CLIProbeDiagnosis? = await Task.detached {
+                    HermesConfigReader.diagnoseProbeFailure(context: ctx)
+                }.value
+                lastError = Self.unreachableConfigMessage(
+                    path: path, host: ctx.displayName, diagnosis: diagnosis)
+            }
             isLoading = false
             return
         }
@@ -69,6 +80,29 @@ public final class IOSSettingsViewModel {
         rawYAML = text
         config = HermesConfig(yaml: text)
         isLoading = false
+    }
+
+    /// The Settings banner when neither the file transport nor the Hermes
+    /// CLI could produce a config. Static + pure so tests can pin each
+    /// topology's guidance (gh#112).
+    static func unreachableConfigMessage(
+        path: String,
+        host: String,
+        diagnosis: HermesConfigReader.CLIProbeDiagnosis?
+    ) -> String {
+        switch diagnosis {
+        case .cliNotFound:
+            return "`\(path)` not found on \(host), and no `hermes` command is reachable over SSH. If Hermes runs inside a container (Docker), SSH can't see it: create a host-side wrapper — e.g. `/usr/local/bin/hermes` containing `#!/bin/sh` and `exec docker compose exec -T hermes hermes \"$@\"` — or set Advanced → Hermes binary to your wrapper's path when editing this server. (Shell aliases from `.bashrc` don't apply to SSH commands.)"
+        case .commandFailed(let exitCode, let detail):
+            let suffix = detail.isEmpty ? "." : ": \(detail)"
+            return "`hermes` exists on \(host), but `hermes config show` failed (exit \(exitCode))\(suffix)"
+        case .outputUnparsed:
+            return "`hermes config show` answered on \(host), but Scarf couldn't find a model line in its output — this Hermes version may format it differently. Please open a GitHub issue with the output of `hermes config show`."
+        case .transportFailed(let detail):
+            return "Couldn't reach \(host) to read the config: \(detail)"
+        case nil:
+            return "`\(path)` not found on \(host). Once Hermes is configured on this host, Settings will light up."
+        }
     }
 
     /// Set a dotted config key on the remote via `hermes config set`.
