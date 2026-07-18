@@ -19,6 +19,16 @@
   <a href="https://www.buymeacoffee.com/awizemann"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="28"></a>
 </p>
 
+## What's New in 2.17.1
+
+**"Export…" now always means "save to my Mac."** Session and profile exports land on your Mac whichever host Hermes runs on — no more silent no-ops or typing remote paths by hand. Every fix in this release came from community-filed issues.
+
+- **Session export works against remote servers** — it used to do nothing at all (no file, no error): the save panel's Mac path was handed to a CLI running on the far host. Scarf now pipes the export back over stdout and writes it where you chose. Fixed by [@JonLaliberte](https://github.com/JonLaliberte) ([#129](https://github.com/awizemann/scarf/issues/129), [PR #130](https://github.com/awizemann/scarf/pull/130)) — their second merged contribution. 🎉 Also fixes the detail-sheet export button and the panel rewriting `.jsonl` to `.json`.
+- **Profile export streams down to your Mac** ([#132](https://github.com/awizemann/scarf/issues/132)) — no more remote-path text field, no more knowing the host's directories by heart; a ~300 MB profile streams down without passing through memory, with progress. That also retires the "Verify" that green-lit paths whose parent directory didn't exist ([#131](https://github.com/awizemann/scarf/issues/131)).
+- **Failures are readable** — CLI errors now surface the traceback's last line (the actual error), and successful exports name the byte count.
+
+See the full [v2.17.1 release notes](https://github.com/awizemann/scarf/releases/tag/v2.17.1). A ScarfGo TestFlight build follows, carrying the Docker config-diagnosis work from [#112](https://github.com/awizemann/scarf/issues/112).
+
 ## What's New in 2.17.0
 
 **Local models.** Scarf now runs against Ollama, LM Studio, vLLM, llama.cpp, or any OpenAI-compatible endpoint — plus a chat-reliability overhaul and a settings fix. Fully compatible with your current Hermes; no version bump required.
