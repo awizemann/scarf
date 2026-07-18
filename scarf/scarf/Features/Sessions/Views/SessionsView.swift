@@ -111,6 +111,15 @@ struct SessionsView: View {
                 }
             }
             Spacer()
+            if let message = viewModel.exportMessage {
+                Label(message, systemImage: "info.circle")
+                    .scarfStyle(.footnote)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 320, alignment: .trailing)
+                    .textSelection(.enabled)
+            }
             Button {
                 viewModel.exportAll()
             } label: {
