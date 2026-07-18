@@ -27,7 +27,7 @@ for any read or write you can express as a tool call** (search, read, write, edi
 context-build), and treat ad-hoc file reads, `grep`, and hand-edits as a LAST RESORT — only
 when no tool covers the need or the server is down. Hand-editing a managed-tier file when a
 tool exists is a mistake: you bypass slug generation, automatic reindexing, and the
-write-time secret/dedup guards, and your change can be silently overwritten on the next
+write-time secret scan and slug-dedup, and your change can be silently overwritten on the next
 regen. If the MCP tools aren't present in this session, fall back to grep over `.memory/`
 and `wiki/`.
 
@@ -69,8 +69,9 @@ decisions and learnings.
   `architecture/` — How major systems fit together; long-lived structural truth.; `conventions/` — Coding / naming / workflow conventions the team agreed on.; `decisions/` — Discrete choices with rationale (architecture decision records).; `operations/` — Runbooks, recurring tasks, infrastructure ops, build/deploy notes.; `project/` — Project-level facts (name, owner, scope, contact, repo URL).; `roadmap/` — Forward-looking plans, milestones, follow-up queues.
 - Reindex happens automatically after every write_memory / edit_memory; for direct file edits,
   use the Memophant app's "Reindex" action or restart the MCP server.
-- Editing an existing note: use `edit_memory` (append/prepend/replace/find_replace/insert_*
-  for the body; **`set_tags` for the frontmatter `tags:` list**) — it reindexes that note. Don't
+- Editing an existing note: **search first and edit the existing note rather than forking a
+  near-duplicate** — use `edit_memory` (append/prepend/replace/find_replace/insert_*
+  for the body; **`set_tags` for the frontmatter `tags:` list**), which reindexes that note. Don't
   hand-edit frontmatter on disk: search reads the index as-is, so the change stays invisible to
   search until a reindex.
 - Frontmatter Memophant manages automatically: `created`/`updated` (set on write, bumped on
