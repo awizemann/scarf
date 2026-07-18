@@ -66,7 +66,7 @@ final class ProfilesViewModel {
                     HermesProfileResolver.invalidateCache()
                     self.message = "Active profile set to \(profile.name) — restart Scarf to refresh."
                 } else {
-                    self.message = "Failed: \(result.output.prefix(120))"
+                    self.message = Self.failureMessage(result.output)
                 }
                 self.load()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
@@ -88,7 +88,7 @@ final class ProfilesViewModel {
             let result = fileService.runHermesCLI(args: ["profile", "use", profile.name], timeout: 30)
             await MainActor.run {
                 guard result.exitCode == 0 else {
-                    self.message = "Failed: \(result.output.prefix(120))"
+                    self.message = Self.failureMessage(result.output)
                     self.load()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                         self?.message = nil
@@ -142,11 +142,24 @@ final class ProfilesViewModel {
         runAndReload(["profile", "import", path], success: "Imported")
     }
 
+    /// The one useful line out of a CLI failure. Hermes is Python, so a
+    /// crash arrives as a traceback whose *last* line is the actual error —
+    /// the first 120 characters are just "Traceback (most recent call
+    /// last):" and stack frames (gh#131). Same reduction as Sessions export.
+    static func failureMessage(_ output: String) -> String {
+        let last = output
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty }
+        guard let last, !last.isEmpty else { return "Failed (no output)." }
+        return "Failed: \(last.prefix(200))"
+    }
+
     private func runAndReload(_ args: [String], success: String) {
         Task.detached { [fileService, self] in
             let result = fileService.runHermesCLI(args: args, timeout: 60)
             await MainActor.run {
-                self.message = result.exitCode == 0 ? success : "Failed: \(result.output.prefix(120))"
+                self.message = result.exitCode == 0 ? success : Self.failureMessage(result.output)
                 self.load()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                     self?.message = nil

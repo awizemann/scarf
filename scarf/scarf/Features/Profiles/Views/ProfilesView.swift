@@ -557,10 +557,9 @@ private struct RemoteProfilePathSheet: View {
         let snapshotMode = mode
         let result: Verification = await Task.detached {
             let transport = snapshot.makeTransport()
-            let exists = transport.fileExists(trimmed)
             switch snapshotMode {
             case .existingFile:
-                guard exists else {
+                guard transport.fileExists(trimmed) else {
                     return .warn("Path doesn't exist on \(snapshot.displayName).")
                 }
                 guard let stat = transport.stat(trimmed) else {
@@ -574,18 +573,60 @@ private struct RemoteProfilePathSheet: View {
                 }
                 return .ok("File found on \(snapshot.displayName).")
             case .writableFile:
-                if exists {
-                    if let stat = transport.stat(trimmed), stat.isDirectory {
-                        return .warn("Path is a directory. Choose a file path that doesn't yet exist.")
-                    }
-                    return .warn("File already exists on \(snapshot.displayName) — export will overwrite it.")
+                switch RemoteWritablePathVerifier.verdict(
+                    path: trimmed,
+                    host: snapshot.displayName,
+                    exists: { transport.fileExists($0) },
+                    isDirectory: { transport.stat($0)?.isDirectory }
+                ) {
+                case .ok(let detail): return .ok(detail)
+                case .warn(let detail): return .warn(detail)
                 }
-                if !trimmed.lowercased().hasSuffix(".zip") {
-                    return .warn("Extension isn't `.zip`. The export command writes a zip archive.")
-                }
-                return .ok("Path is available on \(snapshot.displayName).")
             }
         }.value
         verification = result
+    }
+}
+
+/// Decision logic for `RemoteProfilePathSheet`'s Verify in `.writableFile`
+/// mode, extracted as a pure function so the parent-directory rule is
+/// testable without a transport (gh#131: Verify green-lit `~/exports/x.zip`
+/// when `~/exports/` didn't exist, then the export failed with a traceback).
+enum RemoteWritablePathVerifier {
+    enum Verdict: Equatable {
+        case ok(String)
+        case warn(String)
+    }
+
+    /// `isDirectory(path)` is nil when the path can't be stat'd.
+    static func verdict(
+        path: String,
+        host: String,
+        exists: (String) -> Bool,
+        isDirectory: (String) -> Bool?
+    ) -> Verdict {
+        if exists(path) {
+            if isDirectory(path) == true {
+                return .warn("Path is a directory. Choose a file path that doesn't yet exist.")
+            }
+            return .warn("File already exists on \(host) — export will overwrite it.")
+        }
+        // `hermes profile export --output` doesn't create intermediate
+        // directories, so a missing parent guarantees the export fails.
+        let parent = (path as NSString).deletingLastPathComponent
+        if !["", "/", "~", "."].contains(parent) {
+            guard exists(parent) else {
+                return .warn("\(parent)/ doesn't exist on \(host) — create it first, or choose another path.")
+            }
+            switch isDirectory(parent) {
+            case .some(true): break
+            case .some(false): return .warn("\(parent) isn't a directory on \(host).")
+            case .none: return .warn("Found \(parent), but couldn't stat — check permissions.")
+            }
+        }
+        if !path.lowercased().hasSuffix(".zip") {
+            return .warn("Extension isn't `.zip`. The export command writes a zip archive.")
+        }
+        return .ok("Path is available on \(host).")
     }
 }
