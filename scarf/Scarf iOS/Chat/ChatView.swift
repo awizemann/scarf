@@ -1509,19 +1509,14 @@ final class ChatController {
 
     private func makeClient(projectCwd: String? = nil) -> ACPClient {
         if let clientFactory { return clientFactory(projectCwd) }
+        // Default (nil) keyProvider = per-server-entry key resolution via
+        // SSHKeyResolver. The singleton KeychainSSHKeyStore().load() this
+        // used to pass picks the first-sorted key across ALL entries —
+        // the wrong key on any device with more than one stored key
+        // (gh#133).
         return ACPClient.forIOSApp(
             context: context,
-            projectCwd: projectCwd,
-            keyProvider: {
-                let store = KeychainSSHKeyStore()
-                guard let key = try await store.load() else {
-                    throw SSHKeyStoreError.backendFailure(
-                        message: "No SSH key in Keychain — re-run onboarding.",
-                        osStatus: nil
-                    )
-                }
-                return key
-            }
+            projectCwd: projectCwd
         )
     }
 

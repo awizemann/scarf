@@ -84,11 +84,15 @@ public struct CitadelSSHService: SSHConnectionTester {
         key: SSHKeyBundle,
         command: String
     ) async throws -> ProbeResult {
-        let settings = try buildClientSettings(config: config, key: key)
-
         let client: SSHClient
         do {
-            client = try await SSHClient.connect(to: settings)
+            client = try await SSHConnectPolicy.connect {
+                // Settings (and their one-shot SSHAuthenticationMethod,
+                // whose offer list is consumed on use) are rebuilt per
+                // attempt — see SSHConnectPolicy.
+                let settings = try self.buildClientSettings(config: config, key: key)
+                return try await SSHClient.connect(to: settings)
+            }
         } catch {
             throw Self.classifyConnectError(error, host: config.host)
         }

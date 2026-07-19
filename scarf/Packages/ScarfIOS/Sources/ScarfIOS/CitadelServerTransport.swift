@@ -742,16 +742,31 @@ private actor ConnectionHolder {
             throw TransportError.other(message: "Stored private key is malformed")
         }
         let username = config.user ?? "root"
-        let auth: SSHAuthenticationMethod = .ed25519(username: username, privateKey: ck)
-        var settings = SSHClientSettings(
-            host: config.host,
-            authenticationMethod: { auth },
-            hostKeyValidator: .acceptAnything()
-        )
-        if let port = config.port {
-            settings.port = port
+        let host = config.host
+        let port = config.port
+        do {
+            return try await SSHConnectPolicy.connect {
+                // Fresh SSHAuthenticationMethod per attempt — Citadel's
+                // auth delegate consumes its offer list on use, so a
+                // reused instance would fail the retry with
+                // `allAuthenticationOptionsFailed` instead of re-offering
+                // the key.
+                let auth: SSHAuthenticationMethod = .ed25519(username: username, privateKey: ck)
+                var settings = SSHClientSettings(
+                    host: host,
+                    authenticationMethod: { auth },
+                    hostKeyValidator: .acceptAnything()
+                )
+                if let port {
+                    settings.port = port
+                }
+                return try await SSHClient.connect(to: settings)
+            }
+        } catch {
+            throw TransportError.other(
+                message: SSHConnectPolicy.describeConnectFailure(error, host: config.host)
+            )
         }
-        return try await SSHClient.connect(to: settings)
     }
 }
 

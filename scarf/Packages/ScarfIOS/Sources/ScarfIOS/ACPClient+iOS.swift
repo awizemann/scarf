@@ -35,12 +35,17 @@ public extension ACPClient {
     ///     files. Hermes reads them from the PROCESS cwd, not the ACP
     ///     session cwd — this is the iOS counterpart to Mac's
     ///     `ACPClient.forMacApp(projectCwd:)`. Nil for non-project chats.
-    ///   - keyProvider: How to load the SSH private key for the
-    ///     connection. Typically `{ try await KeychainSSHKeyStore().load() }`.
+    ///   - keyProvider: Override for how the SSH private key is loaded.
+    ///     Tests inject a fixed bundle here. `nil` (the default, and
+    ///     what the app uses) resolves the key for THIS connection's
+    ///     server entry via `SSHKeyResolver` — the singleton
+    ///     `KeychainSSHKeyStore().load()` the app used to pass picks
+    ///     the first-sorted key across ALL entries, which is the wrong
+    ///     key on any device with more than one stored key (gh#133).
     static func forIOSApp(
         context: ServerContext,
         projectCwd: String? = nil,
-        keyProvider: @escaping @Sendable () async throws -> SSHKeyBundle
+        keyProvider: (@Sendable () async throws -> SSHKeyBundle)? = nil
     ) -> ACPClient {
         ACPClient(context: context) { ctx in
             try await makeSSHExecChannel(for: ctx, projectCwd: projectCwd, keyProvider: keyProvider)
@@ -54,12 +59,17 @@ public extension ACPClient {
     nonisolated private static func makeSSHExecChannel(
         for context: ServerContext,
         projectCwd: String?,
-        keyProvider: @Sendable () async throws -> SSHKeyBundle
+        keyProvider: (@Sendable () async throws -> SSHKeyBundle)?
     ) async throws -> any ACPChannel {
         guard case .ssh(let sshConfig) = context.kind else {
             throw ACPChannelError.other("iOS ACPClient requires a remote .ssh context — got \(context.kind)")
         }
-        let key = try await keyProvider()
+        let key: SSHKeyBundle
+        if let keyProvider {
+            key = try await keyProvider()
+        } else {
+            key = try await SSHKeyResolver.key(for: sshConfig)
+        }
         let client = try await openSSHClient(config: sshConfig, key: key)
 
         let command = buildACPCommand(
@@ -135,17 +145,28 @@ public extension ACPClient {
             throw ACPChannelError.launchFailed("Stored private key is malformed")
         }
         let username = config.user ?? "root"
-        let auth: SSHAuthenticationMethod = .ed25519(username: username, privateKey: ck)
-        var settings = SSHClientSettings(
-            host: config.host,
-            authenticationMethod: { auth },
-            hostKeyValidator: .acceptAnything()
-        )
-        if let port = config.port { settings.port = port }
+        let host = config.host
+        let port = config.port
         do {
-            return try await SSHClient.connect(to: settings)
+            return try await SSHConnectPolicy.connect {
+                // Fresh SSHAuthenticationMethod per attempt — Citadel's
+                // auth delegate consumes its offer list on use, so a
+                // reused instance would fail the retry with
+                // `allAuthenticationOptionsFailed` instead of re-offering
+                // the key.
+                let auth: SSHAuthenticationMethod = .ed25519(username: username, privateKey: ck)
+                var settings = SSHClientSettings(
+                    host: host,
+                    authenticationMethod: { auth },
+                    hostKeyValidator: .acceptAnything()
+                )
+                if let port { settings.port = port }
+                return try await SSHClient.connect(to: settings)
+            }
         } catch {
-            throw ACPChannelError.launchFailed("SSH connect to \(config.host) failed: \(error.localizedDescription)")
+            throw ACPChannelError.launchFailed(
+                "SSH connect to \(config.host) failed: \(SSHConnectPolicy.describeConnectFailure(error, host: config.host))"
+            )
         }
     }
 }

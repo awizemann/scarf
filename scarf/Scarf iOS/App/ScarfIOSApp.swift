@@ -52,15 +52,13 @@ struct ScarfIOSApp: App {
                         // (re)opens an SSH session. We re-read from the
                         // Keychain each time rather than caching in memory
                         // so Keychain-level access controls (After First
-                        // Unlock) are honoured.
-                        let store = KeychainSSHKeyStore()
-                        guard let key = try await store.load() else {
-                            throw SSHKeyStoreError.backendFailure(
-                                message: "No SSH key in Keychain — re-run onboarding.",
-                                osStatus: nil
-                            )
-                        }
-                        return key
+                        // Unlock) are honoured. Resolution is PER SERVER
+                        // ENTRY (matched from `config`) — the singleton
+                        // `load()` this closure used to call picks the
+                        // first-sorted key across ALL Keychain items,
+                        // which is the wrong key on any device with more
+                        // than one stored key (gh#133).
+                        try await SSHKeyResolver.key(for: config)
                     }
                 )
             }
