@@ -45,7 +45,6 @@
 - [ ] iOS: route confirmModelPreflight through LocalModelConfigPlan (live stale-key bug, same class as Mac) (id: t-52f4564b) (added: 2026-07-14)
 - [ ] Low-risk consolidation: 3× semverCompare and 7× shell-quoting copies → shared utils (id: t-a21accf0) (added: 2026-07-14)
 - [ ] Reliable connect-time Hermes version read (persist + single cached probe) — enabler for any floor/nudge (id: t-bfd15aef) (added: 2026-07-14)
-- [ ] Cut v2.17.1 Mac release + post-cut follow-ups (id: t-97648513) (added: 2026-07-17)
 
 ## Doing
 
@@ -53,6 +52,9 @@
 
 ## Done
 
+- [x] TestFlight: NIOCore.ChannelError error 0 on cellular/Tailscale — SSH login timeout retry (id: t-9fdcbfa4) (added: 2026-07-18)
+- [x] gh#133: ScarfGo runtime SSH uses wrong Keychain key — per-server key resolution (id: t-ff08242c) (added: 2026-07-18)
+- [x] Cut v2.17.1 Mac release + post-cut follow-ups (id: t-97648513) (added: 2026-07-17)
 - [x] gh#112: diagnose+surface why the Hermes CLI fallback chain fails (Docker host, no host-side wrapper) (id: t-db90633f) (added: 2026-07-17)
 - [x] gh#131: fix false-green Verify (parent dir) + last-line error surfacing in Profiles (id: t-7857b868) (added: 2026-07-17)
 - [x] gh#129/PR#130: run the previously-blocked test suite, review, ready-to-merge verdict (id: t-925a4310) (added: 2026-07-17)
