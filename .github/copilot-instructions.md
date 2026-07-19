@@ -5,5 +5,6 @@
 2. **Prefer the `memophant` MCP tools** for every read/write (search/read/write/edit/move) — read each tool's description (they document their args). Hand-edits/`grep` are a last resort (they bypass slug-gen, reindex, and the write-time secret scan + slug-dedup). Tools absent → grep `.memory/` + `wiki/`.
 3. **Don't `git add`/`commit` the managed tiers** (`.memory/`, `wiki/`, `design/`, `code/`, `sessions/`, `documents/`, `vendors/`, `templates/`, `TASKS.md`, `tasks/`) — the user commits each via Memophant's per-tier secret-scanned bar; leave them dirty. Everything else is yours.
 4. **Secrets → Keychain, never chat or files.** Found or made a credential? Store it with `set_vendor_credential` (fetch later with `get_vendor_credential`); never leave it loose in chat.
+5. **Agent artifacts (plans/reports/briefs) → `documents/` (exact lowercase), via `write_tier_file(tier: "documents", path: …)`** — never a repo's `docs/` folder (that's the project's own documentation) and never a case-variant like `Documents/`.
 File memory notes under one of six folders (architecture/conventions/decisions/operations/project/roadmap), never the root. When a note is grounded in code, pass `source_paths` (the repo files it depends on) so Memory Health can drift-check it — an unanchored code note can't be kept current.
 <!-- memophant:end -->

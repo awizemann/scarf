@@ -124,6 +124,17 @@ to `grep` only when the index is stale/missing or the language isn't indexed (Ph
 **5. Documents (`documents/`) — per-project file store.** Arbitrary files alongside the codebase
 (PDFs, reports, briefs) — project context that isn't memory/wiki/design/code. Schema-less;
 committed with the repo. Browse/add via the Memophant app's Documents tier.
+- **The tier is exactly `documents/` (lowercase) at the repo root.** A repo's `docs/`, `doc/`,
+  or `documentation/` folder is the project's OWN hand-authored documentation — it is NOT this
+  tier: never save agent-generated artifacts there, and never relocate the user's docs into
+  `documents/`. Don't create case-variants (`Documents/`, `Docs/`) either — the macOS
+  filesystem resolves them to the same folder but git tracks whichever case it first saw,
+  silently forking the tier.
+- **Write through `write_tier_file(tier: "documents", path: "plans/….md", content: …)`**
+  rather than raw file writes — it resolves against the repo root (immune to your working
+  directory) and containment-checks the path. Browse with `list_tier_files(tier:
+  "documents")`, read with `read_tier_file(tier: "documents", path: …)`. Raw file writes are
+  the fallback only when the MCP server is down.
 
 **Plans AND generated documents go in `documents/`.** Whenever you produce a file-shaped
 artifact for this project — a plan, design proposal, audit report, comparison matrix,
