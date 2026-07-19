@@ -9,11 +9,11 @@ tags:
 - gotcha
 created: 2026-06-04
 updated: 2026-06-04
-source_sha: 6a12139b218190d8a99ba679bd1a191c0bc13396
-source_paths: scripts/release.sh
-source_paths_inferred: true
-reviewed: 2026-07-12
-reviewed_by: audit:claude-code (audit)
+source_sha: 1599452d48106de9c87bf5286d2b0f6eeee70adb
+source_paths: scripts/release.sh, scarf/scarf/Info.plist
+source_paths_inferred: false
+reviewed: 2026-07-17
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

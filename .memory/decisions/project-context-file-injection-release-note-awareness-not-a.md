@@ -4,15 +4,15 @@ type: note
 permalink: scarf/decisions/project-context-file-injection-release-note-awareness-not-a
 created: 2026-06-28
 updated: 2026-06-28
-source_sha: 2b9ef15cdddcb1fde12a88556bf755a623ae7758
+source_sha: 1599452d48106de9c87bf5286d2b0f6eeee70adb
 source_paths: scarf/scarf/Features/Projects/MiniApp/MiniAppAgentSession.swift, wiki/Release-Notes-Index.md
 tags:
 - security
 - projects
 - design-decision
 - hermes-context-files
-reviewed: 2026-07-12
-reviewed_by: audit:claude-code (audit)
+reviewed: 2026-07-17
+reviewed_by: audit:claude-code (background)
 source_paths_inferred: false
 ---
 
