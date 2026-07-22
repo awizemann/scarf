@@ -1,4 +1,5 @@
 import SwiftUI
+import Marker
 
 struct MarkdownContentView: View {
     let content: String
@@ -9,9 +10,10 @@ struct MarkdownContentView: View {
     /// per-token render cost (cross-reference with the bubble-level
     /// `parseContentBlocks` skip in `RichMessageBubble.contentView`).
     /// Inline bold/italic/code/links still render via
-    /// `MarkdownRenderer.inlineAttributedString`; tables, code fences,
-    /// headings, lists materialize on finalize when the caller flips
-    /// this back to the full pipeline.
+    /// `MarkdownRenderer.inlineAttributedString`; tables (gh#134), code
+    /// fences, headings, lists materialize on finalize when the caller
+    /// flips this back to the full pipeline (block grammar now comes
+    /// from the Marker engine — see `parseBlocks(from:)`).
     var streaming: Bool = false
 
     /// Chat font scale plumbed from `RichChatView` (issue #68). Defaults
@@ -91,6 +93,10 @@ struct MarkdownContentView: View {
             numberedView(number: number, text: text)
         case .blockquote(let text):
             blockquoteView(text: text)
+        case .taskItem(let text, let checked, let indent):
+            taskItemView(text: text, checked: checked, indent: indent)
+        case .table(let table):
+            tableView(table)
         case .horizontalRule:
             Divider().padding(.vertical, 4)
         case .blank:
@@ -159,6 +165,57 @@ struct MarkdownContentView: View {
         }
     }
 
+    private func taskItemView(text: String, checked: Bool, indent: Int) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: checked ? "checkmark.square" : "square")
+                .foregroundStyle(.secondary)
+            Text(MarkdownRenderer.inlineAttributedString(text))
+                .textSelection(.enabled)
+        }
+        .padding(.leading, CGFloat(indent) * 16)
+    }
+
+    /// GFM grid table (gh#134) — header row, hairline, data rows. Column
+    /// alignment comes from the separator row (`:--`, `:-:`, `--:`); cell
+    /// text goes through the same inline renderer as paragraphs so bold /
+    /// code / links inside cells work. Chrome matches `codeBlockView`.
+    private func tableView(_ table: MarkdownTableModel) -> some View {
+        Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 6) {
+            GridRow {
+                ForEach(Array(table.header.enumerated()), id: \.offset) { column, cell in
+                    Text(MarkdownRenderer.inlineAttributedString(cell))
+                        .fontWeight(.semibold)
+                        .textSelection(.enabled)
+                        .gridColumnAlignment(Self.columnAlignment(table.alignments[column]))
+                }
+            }
+            Divider()
+            ForEach(Array(table.rows.enumerated()), id: \.offset) { _, row in
+                GridRow {
+                    ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                        Text(MarkdownRenderer.inlineAttributedString(cell))
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(Color(.textBackgroundColor).opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(.quaternary, lineWidth: 1)
+        )
+    }
+
+    private static func columnAlignment(_ alignment: MarkdownTableModel.ColumnAlignment) -> HorizontalAlignment {
+        switch alignment {
+        case .leading: .leading
+        case .center: .center
+        case .trailing: .trailing
+        }
+    }
+
     private func blockquoteView(text: String) -> some View {
         HStack(spacing: 0) {
             RoundedRectangle(cornerRadius: 1)
@@ -172,146 +229,77 @@ struct MarkdownContentView: View {
         .padding(.vertical, 2)
     }
 
-    // MARK: - Parser
+    // MARK: - Parser (Marker engine)
 
     private func parseBlocks() -> [MarkdownBlock] {
+        Self.parseBlocks(from: content)
+    }
+
+    /// Classify `content` with the Marker engine's block parser and map
+    /// the result onto Scarf's renderable block model. Marker owns block
+    /// grammar — including GFM tables, the gap behind gh#134 — while the
+    /// mapping preserves this view's established semantics: each source
+    /// line of a paragraph stays its own `.paragraph` (line breaks render
+    /// as visual breaks), blockquote lines join with a space, consecutive
+    /// blanks collapse, and bullet indent is 2-spaces-per-level.
+    ///
+    /// `internal` so scarfTests can pin the mapping without a view.
+    static func parseBlocks(from content: String) -> [MarkdownBlock] {
         var blocks: [MarkdownBlock] = []
-        let lines = content.components(separatedBy: "\n")
-        var i = 0
 
-        // Skip YAML frontmatter (--- delimited block at start of file)
-        if i < lines.count && lines[i].trimmingCharacters(in: .whitespaces) == "---" {
-            i += 1
-            while i < lines.count {
-                if lines[i].trimmingCharacters(in: .whitespaces) == "---" {
-                    i += 1
-                    break
-                }
-                i += 1
+        func appendBlank() {
+            if blocks.last != .blank { blocks.append(.blank) }
+        }
+        // Old-parser paragraph semantics, also the fallback for a pipe
+        // fragment that isn't a real grid table.
+        func appendParagraphLines(_ text: String) {
+            for line in text.components(separatedBy: "\n") {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                trimmed.isEmpty ? appendBlank() : blocks.append(.paragraph(trimmed))
             }
         }
 
-        while i < lines.count {
-            let line = lines[i]
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            // Blank line
-            if trimmed.isEmpty {
-                if blocks.last != .blank {
-                    blocks.append(.blank)
-                }
-                i += 1
-                continue
-            }
-
-            // Code block (fenced)
-            if trimmed.hasPrefix("```") {
-                let language = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
-                var codeLines: [String] = []
-                i += 1
-                while i < lines.count {
-                    if lines[i].trimmingCharacters(in: .whitespaces).hasPrefix("```") {
-                        i += 1
-                        break
-                    }
-                    codeLines.append(lines[i])
-                    i += 1
-                }
-                blocks.append(.codeBlock(codeLines.joined(separator: "\n"), language: language.isEmpty ? nil : language))
-                continue
-            }
-
-            // Heading
-            if let heading = parseHeading(trimmed) {
-                blocks.append(heading)
-                i += 1
-                continue
-            }
-
-            // Horizontal rule
-            if isHorizontalRule(trimmed) {
+        for block in MarkdownParser.parse(strippingFrontmatter(content)).blocks {
+            switch block.kind {
+            case .blank:
+                appendBlank()
+            case .heading(let level):
+                blocks.append(.heading(level, block.contentText))
+            case .paragraph:
+                appendParagraphLines(block.contentText)
+            case .blockquote:
+                blocks.append(.blockquote(block.contentText.replacingOccurrences(of: "\n", with: " ")))
+            case .bulletItem:
+                blocks.append(.bulletItem(block.contentText, indent: block.indent / 2))
+            case .taskItem(let checked):
+                blocks.append(.taskItem(block.contentText, checked: checked, indent: block.indent / 2))
+            case .orderedItem(let number):
+                blocks.append(.numberedItem(number, block.contentText))
+            case .codeBlock(let language):
+                blocks.append(.codeBlock(block.contentText, language: language))
+            case .thematicBreak:
                 blocks.append(.horizontalRule)
-                i += 1
-                continue
-            }
-
-            // Blockquote
-            if trimmed.hasPrefix("> ") {
-                var quoteLines: [String] = []
-                while i < lines.count {
-                    let l = lines[i].trimmingCharacters(in: .whitespaces)
-                    if l.hasPrefix("> ") {
-                        quoteLines.append(String(l.dropFirst(2)))
-                    } else if l.hasPrefix(">") {
-                        quoteLines.append(String(l.dropFirst(1)))
-                    } else {
-                        break
-                    }
-                    i += 1
+            case .table:
+                if let table = Marker.MarkdownTable.parse(block.text) {
+                    blocks.append(.table(MarkdownTableModel(table)))
+                } else {
+                    appendParagraphLines(block.contentText)
                 }
-                blocks.append(.blockquote(quoteLines.joined(separator: " ")))
-                continue
             }
-
-            // Bullet list
-            if let bullet = parseBullet(line) {
-                blocks.append(bullet)
-                i += 1
-                continue
-            }
-
-            // Numbered list
-            if let numbered = parseNumbered(trimmed) {
-                blocks.append(numbered)
-                i += 1
-                continue
-            }
-
-            // Paragraph — each line is its own paragraph to preserve line breaks
-            blocks.append(.paragraph(trimmed))
-            i += 1
         }
-
         return blocks
     }
 
-    private func parseHeading(_ line: String) -> MarkdownBlock? {
-        let levels: [(prefix: String, level: Int)] = [
-            ("##### ", 5), ("#### ", 4), ("### ", 3), ("## ", 2), ("# ", 1)
-        ]
-        for (prefix, level) in levels {
-            if line.hasPrefix(prefix) {
-                return .heading(level, String(line.dropFirst(prefix.count)))
-            }
+    /// Skip a `---`-delimited YAML frontmatter block at the start of the
+    /// file (SKILL.md, memory notes). Unterminated frontmatter consumes
+    /// the rest of the document — same behavior as the previous parser.
+    private static func strippingFrontmatter(_ content: String) -> String {
+        let lines = content.components(separatedBy: "\n")
+        guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return content }
+        for i in 1..<lines.count where lines[i].trimmingCharacters(in: .whitespaces) == "---" {
+            return lines[(i + 1)...].joined(separator: "\n")
         }
-        return nil
-    }
-
-    private func parseBullet(_ line: String) -> MarkdownBlock? {
-        let indent = line.prefix(while: { $0 == " " }).count / 2
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        if trimmed.hasPrefix("- ") {
-            return .bulletItem(String(trimmed.dropFirst(2)), indent: indent)
-        }
-        if trimmed.hasPrefix("* ") {
-            return .bulletItem(String(trimmed.dropFirst(2)), indent: indent)
-        }
-        return nil
-    }
-
-    private func parseNumbered(_ line: String) -> MarkdownBlock? {
-        guard let dotIdx = line.firstIndex(of: ".") else { return nil }
-        let numStr = String(line[line.startIndex..<dotIdx])
-        guard let num = Int(numStr), line[line.index(after: dotIdx)...].hasPrefix(" ") else { return nil }
-        let text = String(line[line.index(dotIdx, offsetBy: 2)...])
-        return .numberedItem(num, text)
-    }
-
-    private func isHorizontalRule(_ line: String) -> Bool {
-        let stripped = line.replacingOccurrences(of: " ", with: "")
-        return (stripped.allSatisfy({ $0 == "-" }) && stripped.count >= 3) ||
-               (stripped.allSatisfy({ $0 == "*" }) && stripped.count >= 3) ||
-               (stripped.allSatisfy({ $0 == "_" }) && stripped.count >= 3)
+        return ""
     }
 
     /// Walk the parsed block list and collapse runs of `.paragraph`
@@ -392,9 +380,44 @@ enum MarkdownBlock: Equatable {
     case codeBlock(String, language: String?)
     case bulletItem(String, indent: Int)
     case numberedItem(Int, String)
+    case taskItem(String, checked: Bool, indent: Int)
     case blockquote(String)
+    case table(MarkdownTableModel)
     case horizontalRule
     case blank
+}
+
+/// A parsed GFM grid table, decoupled from the Marker engine's own
+/// `MarkdownTable` (which carries byte-range bookkeeping Scarf's
+/// display-only rendering doesn't need) so `MarkdownBlock` and the
+/// tests that pin it stay free of vendor types. Cell strings are
+/// display text — `\|` unescaped, padding trimmed, rows normalized
+/// to the header's column count by Marker.
+struct MarkdownTableModel: Equatable {
+    enum ColumnAlignment: Equatable {
+        case leading, center, trailing
+    }
+
+    let header: [String]
+    /// Always `header.count` entries.
+    let alignments: [ColumnAlignment]
+    let rows: [[String]]
+}
+
+extension MarkdownTableModel {
+    init(_ table: Marker.MarkdownTable) {
+        self.init(
+            header: table.header.map(\.text),
+            alignments: table.alignments.map { alignment in
+                switch alignment {
+                case .left: .leading
+                case .center: .center
+                case .right: .trailing
+                }
+            },
+            rows: table.rows.map { $0.map(\.text) }
+        )
+    }
 }
 
 /// Output of `MarkdownContentView.coalesceParagraphs(_:)`. Either a

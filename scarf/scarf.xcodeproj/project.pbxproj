@@ -14,6 +14,7 @@
 		53SCARFDESIGN0011 /* ScarfDesign in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFDESIGN0002 /* ScarfDesign */; };
 		53SCARFIOS0010 /* ScarfIOS in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFIOS0001 /* ScarfIOS */; };
 		53SPARKLE00010 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 53SPARKLE00011 /* Sparkle */; };
+		53MARKER00010 /* Marker in Frameworks */ = {isa = PBXBuildFile; productRef = 53MARKER00001 /* Marker */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -142,6 +143,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				53495AB62F7B992C00BD31AD /* SwiftTerm in Frameworks */,
+				53MARKER00010 /* Marker in Frameworks */,
 				53SCARFCORE0010 /* ScarfCore in Frameworks */,
 				53SCARFDESIGN0010 /* ScarfDesign in Frameworks */,
 				53SPARKLE00010 /* Sparkle in Frameworks */,
@@ -283,6 +285,7 @@
 			name = scarf;
 			packageProductDependencies = (
 				53SWIFTTERM0001 /* SwiftTerm */,
+				53MARKER00001 /* Marker */,
 				53SCARFCORE0001 /* ScarfCore */,
 				53SCARFDESIGN0001 /* ScarfDesign */,
 				53SPARKLE00011 /* Sparkle */,
@@ -388,6 +391,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				53SWIFTTERM0002 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+				53MARKER00020 /* XCLocalSwiftPackageReference "../../Marker" */,
 				53SCARFCORE0020 /* XCLocalSwiftPackageReference "Packages/ScarfCore" */,
 				53SCARFDESIGN0020 /* XCLocalSwiftPackageReference "Packages/ScarfDesign" */,
 				53SCARFIOS0020 /* XCLocalSwiftPackageReference "Packages/ScarfIOS" */,
@@ -1050,6 +1054,10 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
+		53MARKER00020 /* XCLocalSwiftPackageReference "../../Marker" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../../Marker";
+		};
 		53SCARFCORE0020 /* XCLocalSwiftPackageReference "Packages/ScarfCore" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ScarfCore;
@@ -1084,6 +1092,10 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		53MARKER00001 /* Marker */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Marker;
+		};
 		53SCARFCORE0001 /* ScarfCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ScarfCore;
