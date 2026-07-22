@@ -391,7 +391,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				53SWIFTTERM0002 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
-				53MARKER00020 /* XCLocalSwiftPackageReference "../../Marker" */,
+				53MARKER00020 /* XCRemoteSwiftPackageReference "Marker" */,
 				53SCARFCORE0020 /* XCLocalSwiftPackageReference "Packages/ScarfCore" */,
 				53SCARFDESIGN0020 /* XCLocalSwiftPackageReference "Packages/ScarfDesign" */,
 				53SCARFIOS0020 /* XCLocalSwiftPackageReference "Packages/ScarfIOS" */,
@@ -1054,10 +1054,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		53MARKER00020 /* XCLocalSwiftPackageReference "../../Marker" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = "../../Marker";
-		};
 		53SCARFCORE0020 /* XCLocalSwiftPackageReference "Packages/ScarfCore" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ScarfCore;
@@ -1073,6 +1069,14 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		53MARKER00020 /* XCRemoteSwiftPackageReference "Marker" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/awizemann/Marker";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.8.1;
+			};
+		};
 		53SPARKLE00012 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
@@ -1094,6 +1098,7 @@
 /* Begin XCSwiftPackageProductDependency section */
 		53MARKER00001 /* Marker */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = 53MARKER00020 /* XCRemoteSwiftPackageReference "Marker" */;
 			productName = Marker;
 		};
 		53SCARFCORE0001 /* ScarfCore */ = {
