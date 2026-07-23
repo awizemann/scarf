@@ -6,6 +6,110 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.17.2</title>
+      <sparkle:version>55</sparkle:version>
+      <sparkle:shortVersionString>2.17.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Thu, 23 Jul 2026 00:11:53 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.17.2</p>
+<p>A point release with one visible theme: <strong>markdown finally renders everything your agents write.</strong> Tables — the one block type Scarf&#x27;s renderer couldn&#x27;t draw — now render as real grids everywhere markdown appears, from the Skill editor to chat itself. Both fixes in this release came out of community-filed issues — thank you, <a href="https://github.com/steveisakson">@steveisakson</a> and <a href="https://github.com/turnkeysitedesign">@turnkeysitedesign</a>.</p>
+<h2>Markdown tables render — in the Skill editor and everywhere else</h2>
+<p>Community-reported: <a href="https://github.com/awizemann/scarf/issues/134">#134</a> — a SKILL.md with a perfectly ordinary markdown table showed the raw <code>| pipe | text |</code> in both the editor and its preview pane.</p>
+<p>The root cause was simple: Scarf&#x27;s hand-rolled markdown block parser had no concept of a table, so pipe rows fell through to plain-paragraph rendering. And because one renderer serves every markdown surface, the gap wasn&#x27;t just the Skill editor — agent replies in chat, memory notes, and project widgets all showed raw pipes too.</p>
+<p>The fix replaces the hand-rolled parser with <strong><a href="https://github.com/awizemann/Marker">Marker</a></strong>, the reusable Markdown engine extracted from TrapperKeeper, pinned at 0.8.1. What you get:</p>
+<ul>
+  <li><strong>GFM tables render as proper grids</strong> — bold header row, per-column alignment from the <code>:--</code> / <code>:-:</code> / <code>--:</code> separator, escaped <code>\|</code> inside cells, ragged rows normalized, and inline bold/code/links <em>within</em> cells rendered. Cell text is selectable.</li>
+  <li><strong>Task-list checkboxes</strong> — <code>- [ ]</code> / <code>- [x]</code> items draw a real checkbox glyph instead of literal bracket text. SKILL.md checklists finally look like checklists.</li>
+  <li><strong>Everything else renders exactly as before.</strong> The swap preserves the established semantics line-for-line (paragraph line breaks, quote joining, list indent, frontmatter skipping), pinned by a new test suite so the chat surface didn&#x27;t shift under anyone&#x27;s feet.</li>
+</ul>
+<p>Streaming chat is untouched: mid-stream rendering stays inline-only for speed, and tables materialize the moment the reply finalizes.</p>
+<h2>ScarfGo: two root-caused connection failures (TestFlight build to follow)</h2>
+<p>Community-reported: <a href="https://github.com/awizemann/scarf/issues/133">#133</a> — &quot;Couldn&#x27;t open an SSH session (error 4)&quot; against a macOS host <em>after</em> Test Connection passed.</p>
+<ul>
+  <li><strong>SSH keys now resolve per server entry.</strong> Both runtime key providers fetched via a singleton that returned the key of the lexicographically-first server ID across <strong>all</strong> keychain items — and keychain items survive reinstalls and iCloud sync. Any second stored key could shadow the right one, so every connect offered the wrong key and the server rejected it, while onboarding&#x27;s in-memory Test Connection passed. A new resolver maps each connection back to its own server entry (host / port / user) and loads <em>that</em> entry&#x27;s key.</li>
+  <li><strong>The 10-second SSH login window gets retries on cellular.</strong> Citadel hard-codes a 10s login timeout; a cold cellular Tailscale path (DERP-relayed) can exceed it — wifi never does, which is why this only bit TestFlight users on the go. Connects now retry up to 3× on that specific timeout, and the raw bridged &quot;error N&quot; strings are replaced with actionable failure text in all three funnels (transport, chat, onboarding probe).</li>
+</ul>
+<p>These fixes live in the shared iOS package and ship with the next ScarfGo TestFlight build; the Mac app is unaffected by them.</p>
+<h2>Under the hood</h2>
+<ul>
+  <li><strong>New dependency: <a href="https://github.com/awizemann/Marker">Marker</a> 0.8.1</strong> (pinned, up-to-next-major) — only the pure Foundation-only core links into Scarf; no editor or syntax-highlighting payload. Integrating it also hardened Marker itself: Scarf&#x27;s off-main test runner exposed five namespaces that were silently MainActor-isolated (a crash for any background caller), fixed upstream in 0.8.1 alongside the new marker-stripped <code>contentText</code> API this integration uses.</li>
+  <li>The block-mapping layer is pinned by 10 new parser tests in the Mac suite; Marker&#x27;s own suite runs 189.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li><strong>Sparkle</strong> will offer the update automatically, or use <strong>Scarf → Check for Updates</strong>. macOS 14.6+ deployment target unchanged.</li>
+  <li><strong>No Hermes version floor change.</strong> This release touches only Scarf-side rendering and iOS connection plumbing — no Hermes surface is involved.</li>
+  <li><strong>iOS / ScarfGo:</strong> the <a href="https://github.com/awizemann/scarf/issues/133">#133</a> fixes ride the next TestFlight build, not this Mac release.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.17.2/Scarf-v2.17.2-Universal.zip"
+                 sparkle:edSignature="7JIuJVPvgYs2fjwBdhxnwnb+Nh+89ToD4nz4RGi59AMrq0FocTdsHKw6qwt+rfSqeIaRkNIdxo/8xUTqTybACQ=="
+                 length="21848535"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.17.1</title>
       <sparkle:version>54</sparkle:version>
       <sparkle:shortVersionString>2.17.1</sparkle:shortVersionString>
