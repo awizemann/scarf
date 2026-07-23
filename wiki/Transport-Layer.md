@@ -2,6 +2,8 @@
 title: Transport-Layer
 type: note
 permalink: scarf-wiki/transport-layer
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Transport Layer

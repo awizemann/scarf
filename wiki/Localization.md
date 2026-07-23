@@ -2,6 +2,8 @@
 title: Localization
 type: note
 permalink: scarf-wiki/localization
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Localization

@@ -2,6 +2,8 @@
 title: Platforms-Personalities-QuickCommands
 type: note
 permalink: scarf-wiki/platforms-personalities-quick-commands
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Platforms / Personalities / Quick Commands

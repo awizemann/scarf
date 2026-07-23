@@ -2,6 +2,8 @@
 title: Testing
 type: note
 permalink: scarf-wiki/testing
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Testing

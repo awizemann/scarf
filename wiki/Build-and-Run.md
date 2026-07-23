@@ -3,6 +3,7 @@ title: Build-and-Run
 type: note
 permalink: scarf-wiki/build-and-run
 updated: 2026-07-14
+created: 2026-05-29
 ---
 
 # Build and Run

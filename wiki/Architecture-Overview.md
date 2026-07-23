@@ -2,6 +2,8 @@
 title: Architecture-Overview
 type: note
 permalink: scarf-wiki/architecture-overview
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Architecture Overview

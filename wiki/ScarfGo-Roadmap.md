@@ -2,6 +2,8 @@
 title: ScarfGo-Roadmap
 type: note
 permalink: scarf-wiki/scarf-go-roadmap
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # ScarfGo — Roadmap & development reference

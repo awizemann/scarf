@@ -3,6 +3,7 @@ title: Hermes-Version-Compatibility
 type: note
 permalink: scarf-wiki/hermes-version-compatibility
 updated: 2026-07-14
+created: 2026-05-29
 ---
 
 # Hermes Version Compatibility

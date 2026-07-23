@@ -2,6 +2,8 @@
 title: Sidebar-and-Navigation
 type: note
 permalink: scarf-wiki/sidebar-and-navigation
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Sidebar and Navigation

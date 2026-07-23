@@ -2,6 +2,8 @@
 title: Adding-a-Service
 type: note
 permalink: scarf-wiki/adding-a-service
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Adding a Service

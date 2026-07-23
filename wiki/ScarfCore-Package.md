@@ -2,6 +2,8 @@
 title: ScarfCore-Package
 type: note
 permalink: scarf-wiki/scarf-core-package
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # ScarfCore Package

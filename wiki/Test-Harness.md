@@ -2,6 +2,8 @@
 title: Test-Harness
 type: note
 permalink: scarf-wiki/test-harness
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Test Harness

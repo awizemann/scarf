@@ -2,6 +2,8 @@
 title: Fleet-and-Portfolio
 type: note
 permalink: scarf-wiki/fleet-and-portfolio
+created: 2026-06-28
+updated: 2026-06-28
 ---
 
 # Fleet & Portfolio

@@ -2,6 +2,8 @@
 title: Troubleshooting-Slow-Chat-Startup
 type: note
 permalink: scarf-wiki/troubleshooting-slow-chat-startup
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Troubleshooting: Slow Chat Startup

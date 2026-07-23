@@ -2,6 +2,8 @@
 title: Performance-Monitoring
 type: note
 permalink: scarf-wiki/performance-monitoring
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Performance Monitoring (ScarfMon)

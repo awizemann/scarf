@@ -2,6 +2,8 @@
 title: Hermes-Paths
 type: note
 permalink: scarf-wiki/hermes-paths
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Hermes Paths

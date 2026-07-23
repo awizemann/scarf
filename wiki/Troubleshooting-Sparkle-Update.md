@@ -2,6 +2,8 @@
 title: Troubleshooting-Sparkle-Update
 type: note
 permalink: scarf-wiki/troubleshooting-sparkle-update
+created: 2026-06-06
+updated: 2026-06-06
 ---
 
 # Troubleshooting: "Update is improperly signed"

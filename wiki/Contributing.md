@@ -2,6 +2,8 @@
 title: Contributing
 type: note
 permalink: scarf-wiki/contributing
+created: 2026-05-29
+updated: 2026-06-02
 ---
 
 # Contributing

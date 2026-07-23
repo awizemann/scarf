@@ -2,6 +2,8 @@
 title: Projects-and-Profiles
 type: note
 permalink: scarf-wiki/projects-and-profiles
+created: 2026-05-29
+updated: 2026-06-28
 ---
 
 # Projects & Profiles

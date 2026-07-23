@@ -2,6 +2,8 @@
 title: Memory-and-Skills
 type: note
 permalink: scarf-wiki/memory-and-skills
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Memory & Skills

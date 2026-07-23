@@ -2,6 +2,8 @@
 title: Servers-and-Remote
 type: note
 permalink: scarf-wiki/servers-and-remote
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Servers & Remote

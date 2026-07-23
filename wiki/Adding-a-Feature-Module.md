@@ -2,6 +2,8 @@
 title: Adding-a-Feature-Module
 type: note
 permalink: scarf-wiki/adding-a-feature-module
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Adding a Feature Module

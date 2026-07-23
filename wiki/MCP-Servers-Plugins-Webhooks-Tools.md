@@ -2,6 +2,8 @@
 title: MCP-Servers-Plugins-Webhooks-Tools
 type: note
 permalink: scarf-wiki/mcp-servers-plugins-webhooks-tools
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # MCP Servers / Plugins / Webhooks / Tools

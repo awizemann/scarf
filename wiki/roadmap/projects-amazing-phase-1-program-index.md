@@ -8,6 +8,8 @@ tags:
 - phase-1
 - mini-apps
 - index
+created: 2026-06-14
+updated: 2026-06-14
 ---
 
 Wiki index for the Phase-1 "make projects amazing" program — positioning Scarf as the native control plane for an agent fleet **by project** (project-lead management + Cowork-style mini-apps), on top of Hermes. Authored 2026-06-14, after the Hermes v0.16 compatibility pass.

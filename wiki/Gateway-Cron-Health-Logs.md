@@ -2,6 +2,8 @@
 title: Gateway-Cron-Health-Logs
 type: note
 permalink: scarf-wiki/gateway-cron-health-logs
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Gateway / Cron / Health / Logs / Settings

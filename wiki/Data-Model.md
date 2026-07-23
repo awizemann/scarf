@@ -2,6 +2,8 @@
 title: Data-Model
 type: note
 permalink: scarf-wiki/data-model
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Data Model

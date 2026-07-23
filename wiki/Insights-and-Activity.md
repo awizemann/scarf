@@ -2,6 +2,8 @@
 title: Insights-and-Activity
 type: note
 permalink: scarf-wiki/insights-and-activity
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Insights & Activity

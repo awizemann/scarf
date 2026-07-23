@@ -2,6 +2,8 @@
 title: Privacy-Policy
 type: note
 permalink: scarf-wiki/privacy-policy
+created: 2026-04-25
+updated: 2026-05-29
 ---
 
 # Privacy Policy
