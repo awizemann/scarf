@@ -52,6 +52,7 @@
 
 ## Done
 
+- [x] Fix gh#134: render markdown tables via Marker engine (id: t-2ece52eb) (added: 2026-07-22)
 - [x] TestFlight: NIOCore.ChannelError error 0 on cellular/Tailscale — SSH login timeout retry (id: t-9fdcbfa4) (added: 2026-07-18)
 - [x] gh#133: ScarfGo runtime SSH uses wrong Keychain key — per-server key resolution (id: t-ff08242c) (added: 2026-07-18)
 - [x] Cut v2.17.1 Mac release + post-cut follow-ups (id: t-97648513) (added: 2026-07-17)
