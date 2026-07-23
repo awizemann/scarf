@@ -6,11 +6,11 @@ tags:
 - architecture
 - transport
 - ssh
-source_sha: 741b7a0dff0adf0779bace4eea4ebf0a6b929d9d
+source_sha: c76d37fdd58cef8b1a3b1c24c036f29ab57919f3
 source_paths: scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHTransport.swift, scarf/scarf/Features/Servers/Views/RemoteDiagnostics.swift, README.md
 created: 2026-05-29
 updated: 2026-05-29
-reviewed: 2026-07-17
+reviewed: 2026-07-18
 reviewed_by: audit:claude-code (background)
 ---
 

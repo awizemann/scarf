@@ -6,12 +6,12 @@ tags:
 - architecture
 - capabilities
 - versioning
-source_sha: 2b9ef15cdddcb1fde12a88556bf755a623ae7758
+source_sha: c76d37fdd58cef8b1a3b1c24c036f29ab57919f3
 source_paths: scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, CLAUDE.md
 created: 2026-05-29
 updated: 2026-05-29
-reviewed: 2026-07-12
-reviewed_by: audit:claude-code (audit)
+reviewed: 2026-07-18
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

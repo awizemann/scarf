@@ -2,19 +2,14 @@
 title: macOS must mirror iOS scene-phase pause and resume for background work
 type: note
 permalink: scarf/architecture/macos-must-mirror-ios-scene-phase-pause-and-resume-for-background-work
-tags:
-- lifecycle
-- performance
-- macos
-- architecture
-- audit-2026-06-13
+tags: [lifecycle, performance, macos, architecture, audit-2026-06-13]
+source_paths: [scarf/Scarf iOS/App/ScarfIOSApp.swift, scarf/scarf/scarfApp.swift]
+source_paths_inferred: true
+source_sha: 6a12139b218190d8a99ba679bd1a191c0bc13396
 created: 2026-06-13
 updated: 2026-06-13
-source_sha: 6a12139b218190d8a99ba679bd1a191c0bc13396
-source_paths: scarf/Scarf iOS/App/ScarfIOSApp.swift, scarf/scarf/scarfApp.swift
-source_paths_inferred: true
-reviewed: 2026-07-12
-reviewed_by: audit:claude-code (audit)
+reviewed: 2026-07-20
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations
