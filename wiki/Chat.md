@@ -3,6 +3,7 @@ title: Chat
 type: note
 permalink: scarf-wiki/chat
 updated: 2026-07-14
+created: 2026-05-29
 ---
 
 # Chat

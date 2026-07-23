@@ -3,6 +3,7 @@ title: ScarfGo
 type: note
 permalink: scarf-wiki/scarf-go
 updated: 2026-07-14
+created: 2026-05-29
 ---
 
 # ScarfGo — iOS companion for Hermes

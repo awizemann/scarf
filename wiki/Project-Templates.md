@@ -2,6 +2,8 @@
 title: Project-Templates
 type: note
 permalink: scarf-wiki/project-templates
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Project Templates

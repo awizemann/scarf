@@ -2,6 +2,8 @@
 title: Platform-Differences
 type: note
 permalink: scarf-wiki/platform-differences
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Platform differences — Scarf (Mac) vs ScarfGo (iOS)

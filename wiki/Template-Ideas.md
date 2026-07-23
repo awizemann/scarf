@@ -2,6 +2,8 @@
 title: Template-Ideas
 type: note
 permalink: scarf-wiki/template-ideas
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Template Ideas

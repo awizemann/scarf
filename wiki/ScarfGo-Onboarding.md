@@ -2,6 +2,8 @@
 title: ScarfGo-Onboarding
 type: note
 permalink: scarf-wiki/scarf-go-onboarding
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # ScarfGo Onboarding & SSH Keys

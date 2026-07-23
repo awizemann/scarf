@@ -2,6 +2,8 @@
 title: First-Run
 type: note
 permalink: scarf-wiki/first-run
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # First Run

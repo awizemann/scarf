@@ -2,6 +2,8 @@
 title: Design-System
 type: note
 permalink: scarf-wiki/design-system
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Design System (ScarfDesign)

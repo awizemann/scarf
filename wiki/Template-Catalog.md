@@ -2,6 +2,8 @@
 title: Template-Catalog
 type: note
 permalink: scarf-wiki/template-catalog
+created: 2026-05-29
+updated: 2026-05-29
 ---
 
 # Template Catalog (v2.8+)

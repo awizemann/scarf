@@ -2,6 +2,8 @@
 title: Slash-Commands
 type: note
 permalink: scarf-wiki/slash-commands
+created: 2026-05-29
+updated: 2026-06-02
 ---
 
 # Slash Commands (project-scoped + global)

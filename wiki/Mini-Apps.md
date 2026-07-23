@@ -2,6 +2,8 @@
 title: Mini-Apps
 type: note
 permalink: scarf-wiki/mini-apps
+created: 2026-06-28
+updated: 2026-06-28
 ---
 
 # Mini-Apps
