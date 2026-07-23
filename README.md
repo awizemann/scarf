@@ -19,6 +19,16 @@
   <a href="https://www.buymeacoffee.com/awizemann"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="28"></a>
 </p>
 
+## What's New in 2.17.2
+
+**Markdown tables render.** The one block type Scarf couldn't draw now renders as real grids — in the Skill editor, chat replies, memory notes, and widgets alike ([#134](https://github.com/awizemann/scarf/issues/134)).
+
+- **GFM tables** get a bold header row, per-column alignment, escaped `\|` handling, and inline formatting inside cells — powered by [Marker](https://github.com/awizemann/Marker), the Markdown engine now behind Scarf's block rendering. Task-list `- [ ]` items draw real checkboxes too.
+- **Nothing else moved** — the swap is pinned by a parity test suite, and streaming chat stays as fast as before (tables materialize when the reply finalizes).
+- **ScarfGo groundwork** ([#133](https://github.com/awizemann/scarf/issues/133)): SSH keys resolve per server entry (a second stored key could shadow the right one) and cold-cellular connects retry Citadel's 10s login window — shipping with the next TestFlight build.
+
+See the full [v2.17.2 release notes](https://github.com/awizemann/scarf/releases/tag/v2.17.2).
+
 ## What's New in 2.17.1
 
 **"Export…" now always means "save to my Mac."** Session and profile exports land on your Mac whichever host Hermes runs on — no more silent no-ops or typing remote paths by hand. Every fix in this release came from community-filed issues.
