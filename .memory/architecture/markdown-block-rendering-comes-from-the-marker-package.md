@@ -4,9 +4,11 @@ type: note
 permalink: scarf/architecture/markdown-block-rendering-comes-from-the-marker-package
 source_paths: [scarf/scarf/Core/Utilities/MarkdownContentView.swift, scarf/scarf.xcodeproj/project.pbxproj, scarf/scarfTests/MarkdownContentViewParseTests.swift]
 source_paths_inferred: false
-source_sha: 99fad45e86e91a3e877e2b48641294278e9c1dd4
+source_sha: 1fa4987d01980b5010f17f6dbe1cb0f274ebb1f7
 created: 2026-07-22
 updated: 2026-07-22
+reviewed: 2026-07-22
+reviewed_by: audit:claude-code (background)
 ---
 
 Since gh#134 (v2.17.x), `MarkdownContentView` no longer hand-rolls block parsing. Block classification comes from the **Marker** package (github.com/awizemann/Marker — Alan's reusable Markdown engine, extracted from TrapperKeeper), consumed as a **pinned remote package (`from: 0.8.1`, upToNextMajor)** — no local checkout required to build; develop Marker changes in `~/Developer/Marker`, then push + tag and bump the pin. Only the pure `Marker` core product is linked (Foundation-only; no tree-sitter, no AppKit). Note: `Package.resolved` is gitignored in this repo by existing convention, so the pbxproj requirement is the only pin.
