@@ -632,6 +632,76 @@ import Foundation
         #expect(sql.contains("AND active = 1"))
         #expect(!sql.contains("compacted"))
     }
+
+    // MARK: - hydrateAssistantToolCalls batching (v2.18)
+
+    /// v2.18 perf: `hydrateAssistantToolCalls` must fold every 5-id
+    /// page into ONE `queryBatch` round-trip instead of N sequential
+    /// `query` calls (each an SSH exec on remote backends). The mock's
+    /// `batchLog` records the batch; `queryLog` must stay empty.
+    @Test func hydrateToolCallsUsesQueryBatch() async throws {
+        let mock = MockHermesQueryBackend()
+        let service = HermesDataService(context: context, backend: mock)
+        _ = await service.open()
+
+        // 12 ids -> 3 pages of 5, 5, 2. Seed via placeholder form
+        // (HermesDataService emits ?-bound SQL; the mock matches on
+        // the raw SQL prefix).
+        let ids = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        // Seed tool_calls JSON for ids 1 and 12 so we can assert the
+        // spliced map contents, not just the call shape.
+        let callsJSON = #"[{"id":"c1","type":"function","function":{"name":"search","arguments":"{}"}}]"#
+        await mock._seedRow(forSQLPrefix: "SELECT id, tool_calls FROM messages WHERE id IN (?,?,?,?,?)",
+                            columns: ["id": 0, "tool_calls": 1],
+                            values: [.integer(1), .text(callsJSON)])
+        await mock._seedRow(forSQLPrefix: "SELECT id, tool_calls FROM messages WHERE id IN (?,?)",
+                            columns: ["id": 0, "tool_calls": 1],
+                            values: [.integer(12), .text(callsJSON)])
+
+        let map = await service.hydrateAssistantToolCalls(messageIds: ids)
+
+        let batchLog = await mock.batchLog
+        #expect(batchLog.count == 1)
+        #expect(batchLog[0].count == 3)  // three pages in one batch
+        // Pages are iterated newest-first (reversed), so the 2-id page
+        // [11,12] is slot 0 and the 5-id page [1..5] is slot 2.
+        #expect(batchLog[0][0].sql.hasPrefix("SELECT id, tool_calls FROM messages WHERE id IN (?,?)"))
+        #expect(batchLog[0][2].sql.hasPrefix("SELECT id, tool_calls FROM messages WHERE id IN (?,?,?,?,?)"))
+        let queryLog = await mock.queryLog
+        #expect(queryLog.isEmpty)  // no per-page fallback queries
+
+        #expect(map.count == 2)
+        #expect(map[1]?.first?.functionName == "search")
+        #expect(map[12]?.first?.functionName == "search")
+    }
+
+    /// The batch path must degrade to the legacy per-page loop when the
+    /// backend rejects the batch (transport timeout on an oversized
+    /// tool_calls blob). Regression guard so the whale-isolation
+    /// behaviour isn't lost.
+    @Test func hydrateToolCallsFallsBackToPerPageOnBatchFailure() async throws {
+        let mock = MockHermesQueryBackend()
+        let service = HermesDataService(context: context, backend: mock)
+        _ = await service.open()
+
+        let ids = [1, 2, 3, 4, 5, 6]
+        await mock._seedFailure(forSQLPrefix: "SELECT id, tool_calls FROM messages WHERE id IN (?,?,?,?,?)",
+                                error: .transport("simulated timeout"))
+        let callsJSON = #"[{"id":"c1","type":"function","function":{"name":"search","arguments":"{}"}}]"#
+        await mock._seedRow(forSQLPrefix: "SELECT id, tool_calls FROM messages WHERE id IN (?)",
+                            columns: ["id": 0, "tool_calls": 1],
+                            values: [.integer(6), .text(callsJSON)])
+
+        let map = await service.hydrateAssistantToolCalls(messageIds: ids)
+
+        // Batch was attempted, failed, then per-page fallback ran.
+        let batchLog = await mock.batchLog
+        #expect(batchLog.count == 1)
+        let queryLog = await mock.queryLog
+        // page [6] query + failed page [1-5] query + 5 single-id retries.
+        #expect(queryLog.count == 7)
+        #expect(map[6]?.first?.functionName == "search")
+    }
 }
 
 #endif // canImport(SQLite3)

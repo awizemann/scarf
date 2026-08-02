@@ -399,8 +399,7 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         // order from the FIRST object's raw JSON bytes. Subsequent
         // rows reuse that key list to look up values by name from
         // their parsed dictionaries.
-        let firstObjectRaw = extractFirstJSONObject(from: json)
-        let orderedKeys = firstObjectRaw.flatMap(extractKeysInOrder) ?? Array(arr[0].keys)
+        let orderedKeys = extractFirstObjectKeys(from: json) ?? Array(arr[0].keys)
         var columnIndex: [String: Int] = [:]
         columnIndex.reserveCapacity(orderedKeys.count)
         for (i, k) in orderedKeys.enumerated() { columnIndex[k] = i }
@@ -418,100 +417,75 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         return rows
     }
 
-    /// Extract the substring of the first `{...}` object in a JSON
-    /// array string. Used so we can scan its keys in original order
-    /// before NSJSONSerialization's hash-table conversion strips the
-    /// ordering. Tolerates nested objects/arrays via depth tracking.
-    private func extractFirstJSONObject(from json: String) -> String? {
-        guard let openIdx = json.firstIndex(of: "{") else { return nil }
+    /// Walk the raw JSON bytes of the FIRST top-level object in a
+    /// `sqlite3 -json` result array and return its keys in literal
+    /// order. Single pass over the UTF-8 bytes — avoids the two-pass
+    /// String-index scan (issue #135): extracting the first object
+    /// substring and then re-scanning it for keys cost two full
+    /// traversals plus a substring copy per result set, which showed
+    /// up as parse latency on large `fetchMessages` result sets
+    /// (~50KB of JSON). Byte-scanning keeps the same semantics:
+    /// keys are collected at object depth 1 (the first object's own
+    /// level), nested objects/arrays are skipped via depth tracking,
+    /// and string/escape states are honoured so a `{`/`,`/`:` inside
+    /// a value can't corrupt the key list.
+    private func extractFirstObjectKeys(from json: String) -> [String]? {
+        let bytes = Array(json.utf8)
+        // Find the first '{' — the start of the first object.
+        guard let openIdx = bytes.firstIndex(of: 0x7B /* { */) else { return nil }
         var depth = 0
         var inString = false
         var escape = false
-        var i = openIdx
-        while i < json.endIndex {
-            let c = json[i]
-            if inString {
-                if escape { escape = false }
-                else if c == "\\" { escape = true }
-                else if c == "\"" { inString = false }
-                i = json.index(after: i)
-                continue
-            }
-            switch c {
-            case "\"":
-                inString = true
-            case "{":
-                depth += 1
-            case "}":
-                depth -= 1
-                if depth == 0 {
-                    let end = json.index(after: i)
-                    return String(json[openIdx..<end])
-                }
-            default:
-                break
-            }
-            i = json.index(after: i)
-        }
-        return nil
-    }
-
-    /// Walk an object literal `{"k1": v1, "k2": v2, ...}` and return
-    /// the keys in their literal order. Doesn't decode the values —
-    /// that's what NSJSONSerialization handles. Just extracts
-    /// `["k1", "k2", ...]` so we know the column ordering.
-    private func extractKeysInOrder(_ objectJSON: String) -> [String] {
-        var keys: [String] = []
-        var i = objectJSON.startIndex
-        // Skip past the leading `{`.
-        while i < objectJSON.endIndex, objectJSON[i] != "{" {
-            i = objectJSON.index(after: i)
-        }
-        if i < objectJSON.endIndex { i = objectJSON.index(after: i) }
-        var depth = 0
-        var inString = false
-        var escape = false
-        var keyStart: String.Index?
-        // We're at the start of object body. Looking for `"key":` patterns
-        // at depth 0. Toggle `expectingKey` after each `:`/`,`.
         var expectingKey = true
-        while i < objectJSON.endIndex {
-            let c = objectJSON[i]
+        var keyStart: Int?
+        var keys: [String] = []
+        var i = openIdx
+        while i < bytes.count {
+            let c = bytes[i]
             if inString {
                 if escape {
                     escape = false
-                } else if c == "\\" {
+                } else if c == 0x5C /* \ */ {
                     escape = true
-                } else if c == "\"" {
+                } else if c == 0x22 /* " */ {
                     inString = false
-                    if expectingKey && depth == 0, let start = keyStart {
-                        keys.append(String(objectJSON[start..<i]))
+                    if expectingKey && depth == 1, let start = keyStart {
+                        if let s = String(bytes: bytes[start..<i], encoding: .utf8) {
+                            keys.append(s)
+                        }
                         expectingKey = false
                         keyStart = nil
                     }
                 }
-                i = objectJSON.index(after: i)
+                i += 1
                 continue
             }
             switch c {
-            case "\"":
+            case 0x22 /* " */:
                 inString = true
-                if expectingKey && depth == 0 {
-                    keyStart = objectJSON.index(after: i)
+                if expectingKey && depth == 1 {
+                    keyStart = i + 1
                 }
-            case "{", "[":
+            case 0x7B /* { */:
                 depth += 1
-            case "}", "]":
-                if depth == 0 { return keys } // end of outer object
+            case 0x7D /* } */:
                 depth -= 1
-            case ",":
-                if depth == 0 { expectingKey = true }
-            case ":":
-                if depth == 0 { expectingKey = false }
+                if depth == 0 {
+                    // Closed the outer object — we have every key.
+                    return keys
+                }
+            case 0x5B /* [ */:
+                depth += 1
+            case 0x5D /* ] */:
+                depth -= 1
+            case 0x2C /* , */:
+                if depth == 1 { expectingKey = true }
+            case 0x3A /* : */:
+                if depth == 1 { expectingKey = false }
             default:
                 break
             }
-            i = objectJSON.index(after: i)
+            i += 1
         }
         return keys
     }

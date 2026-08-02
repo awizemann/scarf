@@ -401,6 +401,53 @@ public actor HermesDataService {
                 Array(messageIds[$0..<min($0 + pageSize, messageIds.count)])
             }.reversed()
             var out: [Int: [HermesToolCall]] = [:]
+
+            // v2.18 perf — batch all pages into ONE remote round-trip.
+            // Every page is a separate sqlite3 -json invocation today
+            // (one SSH exec per query), so a 30-assistant-message
+            // session pays 6 round-trips just to hydrate tool cards.
+            // queryBatch folds them into a single sqlite3 process with
+            // marker-split result sets (~50-100ms total on a warm
+            // ControlMaster vs 6 × cold-start). The existing per-page
+            // loop below stays as the fallback when the batch trips
+            // the transport timeout (oversized tool_calls blobs), so
+            // the whale-isolation behaviour is preserved.
+            let batchSQL: [(sql: String, params: [SQLValue])] = pages.map { page in
+                let placeholders = Array(repeating: "?", count: page.count).joined(separator: ",")
+                let sql = "SELECT id, tool_calls FROM messages WHERE id IN (\(placeholders)) AND tool_calls IS NOT NULL AND tool_calls != '' AND tool_calls != '[]'"
+                return (sql: sql, params: page.map { .integer(Int64($0)) })
+            }
+            if !batchSQL.isEmpty {
+                do {
+                    let results = try await backend.queryBatch(batchSQL)
+                    for (_, rows) in zip(pages, results) {
+                        if Task.isCancelled {
+                            ScarfMon.event(.sessionLoad, "mac.hydrateToolCalls.cancelled", count: 1)
+                            return out
+                        }
+                        for row in rows {
+                            let id = row.int(at: 0)
+                            let json = row.optionalString(at: 1)
+                            let parsed = parseToolCalls(json)
+                            if !parsed.isEmpty {
+                                out[id] = parsed
+                            }
+                        }
+                    }
+                    ScarfMon.event(.sessionLoad, "mac.hydrateToolCalls.batch", count: 1)
+                    ScarfMon.event(.sessionLoad, "mac.hydrateToolCalls.rows", count: out.count)
+                    return out
+                } catch is CancellationError {
+                    return out
+                } catch {
+                    // Transport timeout / sqlite failure on the whole
+                    // batch — fall through to the legacy per-page loop
+                    // below, which isolates whales with single-id
+                    // retries exactly as before.
+                    ScarfMon.event(.sessionLoad, "mac.hydrateToolCalls.batchFallback", count: 1)
+                    Self.logger.warning("hydrateToolCalls queryBatch failed, falling back to per-page loop: \(error.localizedDescription, privacy: .public)")
+                }
+            }
             for page in pages {
                 // Bail immediately if the parent task got cancelled
                 // (chat switch, view dismiss). v2.8 — without this

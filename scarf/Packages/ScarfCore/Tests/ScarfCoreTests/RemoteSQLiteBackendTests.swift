@@ -553,6 +553,114 @@ private struct LocalSQLite3Transport: ServerTransport {
         #expect(results[2].count == 1)
     }
 
+    // MARK: - Column-order preservation (v2.18 parser)
+
+    /// Insert a raw row directly via libsqlite3 (the backend opens the
+    /// DB read-only, so fixtures must be seeded outside it).
+    private func insertFixtureRow(_ sql: String, dbURL: URL) throws {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
+            throw TransportError.other(message: "sqlite3_open_v2 (seed) failed")
+        }
+        defer { sqlite3_close(db) }
+        var errMsg: UnsafeMutablePointer<CChar>?
+        let rc = sqlite3_exec(db, sql, nil, nil, &errMsg)
+        if rc != SQLITE_OK {
+            let msg = errMsg.flatMap { String(cString: $0) } ?? "unknown"
+            sqlite3_free(errMsg)
+            throw TransportError.other(message: "sqlite3_exec seed failed: \(msg)")
+        }
+    }
+
+    /// Regression for the v2.18 byte-scan parser: `extractFirstObjectKeys`
+    /// must preserve SELECT column order even when row values contain
+    /// JSON-ish punctuation (braces, brackets, commas, colons, quotes),
+    /// backslash escapes, and multi-byte UTF-8 — anything that could
+    /// fool a naive depth/string tracker. The fixture message content
+    /// is deliberately hostile to the parser.
+    @Test func preservesColumnOrderWithHostileValues() async throws {
+        try requireSqlite3()
+        let dbURL = try makeFixtureStateDB()
+        defer {
+            try? FileManager.default.removeItem(at: dbURL)
+            try? FileManager.default.removeItem(at: dbURL.deletingLastPathComponent().appendingPathComponent("state.db"))
+        }
+        // Insert a message whose content is hostile: nested braces,
+        // brackets, commas, colons, escaped quotes, backslashes, and
+        // multi-byte UTF-8 (Vietnamese).
+        let hostile = """
+        {"nested": {"a": [1,2,{"x":"y"}]}, "escaped": "quote:\\"comma,colon:brace{", "utf8": "Xin chào — Việt Nam 🇻🇳"}
+        """
+        let insert = """
+        INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp, token_count, finish_reason)
+        VALUES (99, 's1', 'assistant', '\(hostile)', NULL, NULL, NULL, 1700000099.0, NULL, NULL);
+        """
+        try insertFixtureRow(insert, dbURL: dbURL)
+
+        let ctx = makeFixtureContext(dbURL: dbURL)
+        let backend = RemoteSQLiteBackend(context: ctx, transport: LocalSQLite3Transport())
+        _ = await backend.open()
+
+        // SELECT with a column order the row parser depends on.
+        let rows = try await backend.query(
+            "SELECT id, role, content, tool_calls, token_count FROM messages WHERE id = 99",
+            params: []
+        )
+        #expect(rows.count == 1)
+        let row = rows[0]
+        // Positional access proves the key order survived parsing.
+        #expect(row.int(at: 0) == 99)
+        if case .text(let role) = row[1] {
+            #expect(role == "assistant")
+        } else {
+            Issue.record("Expected .text role at index 1")
+        }
+        if case .text(let content) = row[2] {
+            #expect(content == hostile)
+        } else {
+            Issue.record("Expected .text content at index 2")
+        }
+        #expect(row.isNull(at: 3))
+        #expect(row.isNull(at: 4))
+    }
+
+    /// v2.18 parser: keys must be extracted from the FIRST object only,
+    /// and a nested object inside a value must not leak its keys into
+    /// the column list. Uses the tool_calls column with a real nested
+    /// array-of-objects blob.
+    @Test func parserIgnoresNestedObjectKeys() async throws {
+        try requireSqlite3()
+        let dbURL = try makeFixtureStateDB()
+        defer {
+            try? FileManager.default.removeItem(at: dbURL)
+            try? FileManager.default.removeItem(at: dbURL.deletingLastPathComponent().appendingPathComponent("state.db"))
+        }
+        let toolCalls = """
+        [{"id":"call_1","name":"search","arguments":"{\\"q\\":\\"x\\"}"},{"id":"call_2","name":"read","arguments":"{}"}]
+        """
+        let insert = """
+        INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp, token_count, finish_reason)
+        VALUES (100, 's1', 'assistant', 'nested', NULL, '\(toolCalls)', NULL, 1700000100.0, NULL, NULL);
+        """
+        try insertFixtureRow(insert, dbURL: dbURL)
+
+        let ctx = makeFixtureContext(dbURL: dbURL)
+        let backend = RemoteSQLiteBackend(context: ctx, transport: LocalSQLite3Transport())
+        _ = await backend.open()
+
+        let rows = try await backend.query(
+            "SELECT id, tool_calls FROM messages WHERE id = 100",
+            params: []
+        )
+        #expect(rows.count == 1)
+        #expect(rows[0].int(at: 0) == 100)
+        if case .text(let tc) = rows[0][1] {
+            #expect(tc == toolCalls)
+        } else {
+            Issue.record("Expected .text tool_calls at index 1")
+        }
+    }
+
     // MARK: - Failure paths
 
     @Test func nonZeroExitThrowsSqliteError() async throws {
