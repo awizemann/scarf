@@ -176,3 +176,112 @@ import ScarfCore
         #expect(vm.exportMessage?.hasPrefix("Export failed writing a.jsonl:") == true)
     }
 }
+
+/// Wave C2 (Hermes v0.20, t-e04cf93d): `hermes sessions export` gained
+/// `--format {jsonl,md,qmd,html,trace}` + `--redact`, gated on
+/// `HermesCapabilities.hasSessionsExportFormats`. These pin the argv the
+/// CLI seam is handed for every format/redact combination, plus the
+/// pre-0.20 path (unchanged jsonl-only shape).
+@MainActor
+@Suite struct SessionExportFormatArgvTests {
+
+    @Test("Default argv shape (jsonl, no redact) is unchanged from pre-0.20")
+    func defaultShapeUnchanged() {
+        let args = SessionsViewModel.exportArguments(output: "-", sessionId: "abc123")
+        #expect(args == ["sessions", "export", "-", "--session-id", "abc123"])
+    }
+
+    @Test("Default argv shape omits --session-id for export-all")
+    func defaultShapeOmitsSessionIdForAll() {
+        let args = SessionsViewModel.exportArguments(output: "-", sessionId: nil)
+        #expect(args == ["sessions", "export", "-"])
+    }
+
+    @Test("jsonl explicitly selected still omits --format (matches CLI default)")
+    func explicitJSONLOmitsFormatFlag() {
+        let args = SessionsViewModel.exportArguments(output: "-", sessionId: "abc123", format: .jsonl, redact: false)
+        #expect(args == ["sessions", "export", "-", "--session-id", "abc123"])
+    }
+
+    @Test("markdown format threads --format md")
+    func markdownFormat() {
+        let args = SessionsViewModel.exportArguments(output: "/tmp/exports", sessionId: nil, format: .markdown, redact: false)
+        #expect(args == ["sessions", "export", "/tmp/exports", "--format", "md"])
+    }
+
+    @Test("quarto format threads --format qmd")
+    func quartoFormat() {
+        let args = SessionsViewModel.exportArguments(output: "/tmp/exports", sessionId: nil, format: .quarto, redact: false)
+        #expect(args == ["sessions", "export", "/tmp/exports", "--format", "qmd"])
+    }
+
+    @Test("html format threads --format html")
+    func htmlFormat() {
+        let args = SessionsViewModel.exportArguments(output: "/tmp/out.html", sessionId: "abc123", format: .html, redact: false)
+        #expect(args == ["sessions", "export", "/tmp/out.html", "--format", "html", "--session-id", "abc123"])
+    }
+
+    @Test("trace format threads --format trace and supports stdout")
+    func traceFormat() {
+        let args = SessionsViewModel.exportArguments(output: "-", sessionId: "abc123", format: .trace, redact: false)
+        #expect(args == ["sessions", "export", "-", "--format", "trace", "--session-id", "abc123"])
+    }
+
+    @Test("redact appends --redact after --format, before --session-id")
+    func redactFlagOrdering() {
+        let args = SessionsViewModel.exportArguments(output: "/tmp/out.html", sessionId: "abc123", format: .html, redact: true)
+        #expect(args == ["sessions", "export", "/tmp/out.html", "--format", "html", "--redact", "--session-id", "abc123"])
+    }
+
+    @Test("redact with jsonl still omits --format but keeps --redact")
+    func redactWithJSONL() {
+        let args = SessionsViewModel.exportArguments(output: "-", sessionId: nil, format: .jsonl, redact: true)
+        #expect(args == ["sessions", "export", "-", "--redact"])
+    }
+
+    @Test("redact with trace over stdout")
+    func redactWithTrace() {
+        let args = SessionsViewModel.exportArguments(output: "-", sessionId: nil, format: .trace, redact: true)
+        #expect(args == ["sessions", "export", "-", "--format", "trace", "--redact"])
+    }
+
+    @Test("redact with markdown directory output")
+    func redactWithMarkdown() {
+        let args = SessionsViewModel.exportArguments(output: "/tmp/exports", sessionId: "abc123", format: .markdown, redact: true)
+        #expect(args == ["sessions", "export", "/tmp/exports", "--format", "md", "--redact", "--session-id", "abc123"])
+    }
+
+    @Test("redact with quarto directory output")
+    func redactWithQuarto() {
+        let args = SessionsViewModel.exportArguments(output: "/tmp/exports", sessionId: "abc123", format: .quarto, redact: true)
+        #expect(args == ["sessions", "export", "/tmp/exports", "--format", "qmd", "--redact", "--session-id", "abc123"])
+    }
+
+    // MARK: - Format metadata
+
+    @Test("Only jsonl and trace are stdout-capable")
+    func stdoutCapableFormats() {
+        #expect(SessionExportFormat.jsonl.usesStdout)
+        #expect(SessionExportFormat.trace.usesStdout)
+        #expect(!SessionExportFormat.markdown.usesStdout)
+        #expect(!SessionExportFormat.quarto.usesStdout)
+        #expect(!SessionExportFormat.html.usesStdout)
+    }
+
+    @Test("Only markdown and quarto are directory outputs")
+    func directoryOutputFormats() {
+        #expect(SessionExportFormat.markdown.isDirectoryOutput)
+        #expect(SessionExportFormat.quarto.isDirectoryOutput)
+        #expect(!SessionExportFormat.jsonl.isDirectoryOutput)
+        #expect(!SessionExportFormat.html.isDirectoryOutput)
+        #expect(!SessionExportFormat.trace.isDirectoryOutput)
+    }
+
+    // NOTE: `exportSession`/`exportAll` themselves aren't exercised here —
+    // both branches of `beginExportFlow` end in a real `NSSavePanel`/
+    // `NSOpenPanel` `runModal()` call, which would block this test run
+    // waiting on a modal that never appears headlessly. The gating logic
+    // (`formatsAvailable` ? sheet : direct-to-panel) is a two-line `guard`
+    // read at the call site in `SessionsViewModel.swift`; the argv shape it
+    // ultimately produces is covered above via `exportArguments`.
+}

@@ -19,11 +19,19 @@ struct SessionsView: View {
     @State private var quickFilter: QuickFilter = .all
     @Environment(AppCoordinator.self) private var coordinator
     @Environment(HermesFileWatcher.self) private var fileWatcher
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
     /// Focus binding for the search field so ⌘F can focus it. (t-aud18)
     @FocusState private var searchFocused: Bool
 
     init(context: ServerContext) {
         _viewModel = State(initialValue: SessionsViewModel(context: context))
+    }
+
+    /// `hermes sessions export --format …` (v0.20+). Pre-0.20 hosts keep
+    /// the export flow exactly as it was: jsonl only, straight to the save
+    /// panel, no picker sheet.
+    private var hasExportFormats: Bool {
+        capabilitiesStore?.capabilities.hasSessionsExportFormats ?? false
     }
 
     /// Top-of-list filter pills. `today` filters by `startedAt` falling
@@ -84,6 +92,7 @@ struct SessionsView: View {
         .onDisappear { Task { await viewModel.cleanup() } }
         .sheet(isPresented: detailSheetBinding) { detailSheet }
         .sheet(isPresented: $viewModel.showRenameSheet) { renameSheet }
+        .sheet(isPresented: $viewModel.showExportOptionsSheet) { exportOptionsSheet }
         .confirmationDialog("Delete Session?", isPresented: $viewModel.showDeleteConfirmation) {
             Button("Delete", role: .destructive) { viewModel.confirmDelete() }
             Button("Cancel", role: .cancel) {}
@@ -121,7 +130,7 @@ struct SessionsView: View {
                     .textSelection(.enabled)
             }
             Button {
-                viewModel.exportAll()
+                viewModel.exportAll(formatsAvailable: hasExportFormats)
             } label: {
                 Label("Export", systemImage: "square.and.arrow.down")
             }
@@ -349,7 +358,7 @@ struct SessionsView: View {
                     )
                     .contextMenu {
                         Button("Rename…") { viewModel.beginRename(session) }
-                        Button("Export…") { viewModel.exportSession(session) }
+                        Button("Export…") { viewModel.exportSession(session, formatsAvailable: hasExportFormats) }
                         Divider()
                         Button("Delete…", role: .destructive) { viewModel.beginDelete(session) }
                     }
@@ -477,7 +486,7 @@ struct SessionsView: View {
                     subagentSessions: viewModel.subagentSessions,
                     preview: viewModel.previewFor(session),
                     onRename: { viewModel.beginRename(session) },
-                    onExport: { viewModel.exportSession(session) },
+                    onExport: { viewModel.exportSession(session, formatsAvailable: hasExportFormats) },
                     onDelete: { viewModel.beginDelete(session) },
                     onSelectSubagent: { sub in
                         Task { await viewModel.selectSession(sub) }
@@ -508,6 +517,47 @@ struct SessionsView: View {
         }
         .padding(ScarfSpace.s5)
         .frame(width: 420)
+    }
+
+    /// v0.20+ export format picker, shown instead of jumping straight to
+    /// the save panel. `md`/`qmd` write a whole directory of files and
+    /// `html` needs a real output path — `confirmExportOptions()` routes to
+    /// the right panel kind once the user picks.
+    private var exportOptionsSheet: some View {
+        VStack(alignment: .leading, spacing: ScarfSpace.s4) {
+            Text("Export Sessions")
+                .scarfStyle(.headline)
+                .foregroundStyle(ScarfColor.foregroundPrimary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Format")
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                Picker("Format", selection: $viewModel.exportFormat) {
+                    ForEach(SessionExportFormat.allCases) { format in
+                        Text(format.displayName).tag(format)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+            }
+
+            Toggle("Redact secrets", isOn: $viewModel.exportRedact)
+                .toggleStyle(.checkbox)
+                .help("Strip API keys, tokens, and credentials from the exported content.")
+
+            HStack {
+                Button("Cancel") { viewModel.cancelExportOptions() }
+                    .buttonStyle(ScarfGhostButton())
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Export…") { viewModel.confirmExportOptions() }
+                    .buttonStyle(ScarfPrimaryButton())
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(ScarfSpace.s5)
+        .frame(width: 360)
     }
 }
 
