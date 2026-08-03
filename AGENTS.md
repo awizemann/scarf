@@ -14,9 +14,11 @@ system, they don't BE it.
 
 **Default to the `memophant` MCP tools for every read and write** — search, read, write,
 edit, move, context — and read their descriptions: they document their arguments and
-behavior. The tools own slug generation, structure validation, and the write-time secret
-scan; the engine reconciles direct file edits automatically, but tool writes carry the
-guards. Server down → grep the tiers directly (`grep -rn "<query>" .memory/ wiki/`).
+behavior. The engine is the gate: every durable write goes through the tool (or app)
+entry points, which carry the guards — slug generation, structure validation, and the
+write-time secret scan. Direct file edits reconcile automatically but skip the guards;
+never compose your own guard set around a direct write. Server down → grep the tiers
+directly (`grep -rn "<query>" .memory/ wiki/`).
 
 **1. Memory (`.memory/`) — atomic facts.**
 - `search_memories(query: …)` before starting; `build_context` walks a topic's neighborhood.
