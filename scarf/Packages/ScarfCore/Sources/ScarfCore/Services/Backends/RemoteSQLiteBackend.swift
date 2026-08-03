@@ -39,6 +39,8 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
     private(set) public var hasMessagesActiveColumn = false
     private(set) public var hasCompactedColumn = false
     private(set) public var hasRewindCountColumn = false
+    private(set) public var hasSessionActivityColumns = false
+    private(set) public var hasSessionModelUsageTable = false
     private(set) public var lastOpenError: String?
     private var isOpen = false
     /// Captured `sqlite3 --version` line from the most recent preflight.
@@ -126,7 +128,7 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         let preflight = """
         set -e
         sqlite3 --version
-        sqlite3 -readonly -json \(quoteForRemoteShell(dbPath)) "PRAGMA table_info(sessions); PRAGMA table_info(messages);"
+        sqlite3 -readonly -json \(quoteForRemoteShell(dbPath)) "PRAGMA table_info(sessions); PRAGMA table_info(messages); SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'session_model_usage';"
         """
 
         do {
@@ -313,6 +315,24 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         hasCompactedColumn = messagesTable.contains("compacted")
         // v0.16: sessions has `rewind_count` column.
         hasRewindCountColumn = sessionsTable.contains("rewind_count")
+        // v0.20: session-activity columns — ALL three must be present
+        // (belt-and-braces against a partially-migrated DB).
+        hasSessionActivityColumns = sessionsTable.contains("pinned")
+            && sessionsTable.contains("last_activity_at")
+            && sessionsTable.contains("last_activity_description")
+        // v0.20: `session_model_usage` table. The preflight's third
+        // statement is a COUNT(*) over sqlite_master, so it always
+        // emits exactly one array — arrays[2] when present. Older
+        // preflight output shapes (tests / cached transports) may only
+        // carry two arrays; default to false in that case.
+        if arrays.count >= 3,
+           let data = arrays[2].data(using: .utf8),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+           let n = arr.first?["n"] as? Int {
+            hasSessionModelUsageTable = n > 0
+        } else {
+            hasSessionModelUsageTable = false
+        }
     }
 
     /// Extract column names from a `PRAGMA table_info(...)` result set.

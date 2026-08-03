@@ -60,6 +60,20 @@ public protocol HermesQueryBackend: Sendable {
     /// "no such column" errors.
     var hasRewindCountColumn: Bool { get async }
 
+    /// True iff the connected DB has the v0.20 session-activity columns
+    /// (`pinned`, `last_activity_at`, `last_activity_description` on
+    /// `sessions`). Belt-and-braces: ALL must be present — a partially
+    /// migrated DB stays on the old SELECT shape to avoid "no such
+    /// column" failures. Detected one-time at `open()`.
+    var hasSessionActivityColumns: Bool { get async }
+
+    /// True iff the connected DB has the v0.20 `session_model_usage`
+    /// table (per-model token/cost breakdown per session). Detected via
+    /// `sqlite_master` one-time at `open()` — absent on pre-v0.20 DBs,
+    /// in which case the Dashboard per-model breakdown is skipped
+    /// entirely.
+    var hasSessionModelUsageTable: Bool { get async }
+
     /// User-presentable error from the most recent `open()` (or the
     /// most recent failed query for the remote backend's
     /// connectivity-loss codepath). `nil` means everything is healthy.
