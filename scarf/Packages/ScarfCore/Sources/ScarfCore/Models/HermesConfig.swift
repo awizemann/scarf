@@ -438,18 +438,42 @@ public struct CompressionSettings: Sendable, Equatable {
     public var threshold: Double
     public var targetRatio: Double
     public var protectLastN: Int
+    // -- v0.20 tuning keys (config_defaults.py `compression` block) ------
+    /// `compression.threshold_tokens` — absolute token cap. Hermes default
+    /// is `None` (unset); Scarf uses 0 as the "absent" sentinel. When > 0,
+    /// compression triggers at the LOWER of the ratio `threshold` and this
+    /// count (Hermes clamps to the model context at apply-time and treats
+    /// `<= 0` as off — config.py's `_tt > 0` display guard).
+    public var thresholdTokens: Int
+    /// `compression.min_tail_user_messages` — real user messages guaranteed
+    /// to survive uncompressed in the tail. Hermes default 1.
+    public var minTailUserMessages: Int
+    /// `compression.idle_compact_after_seconds` — opt-in idle compaction.
+    /// 0 (Hermes default) = disabled.
+    public var idleCompactAfterSeconds: Int
+    /// `compression.progress_notices` — when true, routine compression
+    /// progress statuses reach chat gateway platforms. Hermes default false.
+    public var progressNotices: Bool
 
 
     public init(
         enabled: Bool,
         threshold: Double,
         targetRatio: Double,
-        protectLastN: Int
+        protectLastN: Int,
+        thresholdTokens: Int = 0,
+        minTailUserMessages: Int = 1,
+        idleCompactAfterSeconds: Int = 0,
+        progressNotices: Bool = false
     ) {
         self.enabled = enabled
         self.threshold = threshold
         self.targetRatio = targetRatio
         self.protectLastN = protectLastN
+        self.thresholdTokens = thresholdTokens
+        self.minTailUserMessages = minTailUserMessages
+        self.idleCompactAfterSeconds = idleCompactAfterSeconds
+        self.progressNotices = progressNotices
     }
     public nonisolated static let empty = CompressionSettings(enabled: true, threshold: 0.5, targetRatio: 0.2, protectLastN: 20)
 }
@@ -1003,6 +1027,19 @@ public struct HermesConfig: Sendable {
     /// Hermes v0.15 — Bitwarden Secrets Manager bootstrap. See `BitwardenSettings`.
     public var bitwarden: BitwardenSettings
 
+    // -- Hermes v0.20 additions ----------------------------------------
+    /// `agent.reasoning_overrides` (v0.20+) — dict mapping a model-name
+    /// spelling to a reasoning-effort level; takes precedence over the
+    /// global `agent.reasoning_effort` when the active model matches
+    /// (spelling-tolerant variant matching, hermes_constants.py
+    /// `resolve_per_model_reasoning_effort`). `hermes config set` cannot
+    /// write dicts, so writes go through `PowerSettingsWriter` direct-YAML.
+    public var reasoningOverrides: [String: String]
+    /// `model_catalog.excluded_providers` (v0.20+) — provider IDs hidden
+    /// from model pickers and built-in resolution (inventory.py:100,
+    /// case-insensitive on the Hermes side). List — direct-YAML writes.
+    public var excludedProviders: [String]
+
 
     public init(
         model: String,
@@ -1080,7 +1117,9 @@ public struct HermesConfig: Sendable {
         modelBaseURL: String = "",
         modelAPIKey: String = "",
         modelAPIMode: String = "",
-        modelContextLength: String = ""
+        modelContextLength: String = "",
+        reasoningOverrides: [String: String] = [:],
+        excludedProviders: [String] = []
     ) {
         self.cacheTTL = cacheTTL
         self.redactionEnabled = redactionEnabled
@@ -1158,6 +1197,8 @@ public struct HermesConfig: Sendable {
         self.modelAPIKey = modelAPIKey
         self.modelAPIMode = modelAPIMode
         self.modelContextLength = modelContextLength
+        self.reasoningOverrides = reasoningOverrides
+        self.excludedProviders = excludedProviders
     }
     public nonisolated static let empty = HermesConfig(
         model: "unknown",

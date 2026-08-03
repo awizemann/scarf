@@ -108,6 +108,71 @@ public enum GatewayConfigWriter {
         }
     }
 
+    /// Insert or replace a nested `key: value` MAP block under a top-level
+    /// section — same surgical contract as `setList` (byte-for-byte outside
+    /// the block, key removed entirely when `pairs` is empty), but the block
+    /// body is `    <mapKey>: <value>` rows instead of bullets. Used by the
+    /// v0.20 `agent.reasoning_overrides` editor (`hermes config set` cannot
+    /// write dicts). Map keys containing YAML structure characters (`:`,
+    /// `#`, leading specials) are single-quoted; pair order is preserved as
+    /// given.
+    public static func setMap(
+        in yaml: String,
+        section: String,
+        key: String,
+        pairs: [(key: String, value: String)]
+    ) -> String {
+        let keyIndent = 2
+        let entryIndent = 4
+
+        let lines = yaml.components(separatedBy: "\n")
+        let trimmedPairs = pairs.filter {
+            !$0.key.trimmingCharacters(in: .whitespaces).isEmpty
+                && !$0.value.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+
+        func entryRows() -> [String] {
+            trimmedPairs.map {
+                "\(spaces(entryIndent))\(yamlQuoteIfNeeded($0.key)): \(yamlQuoteIfNeeded($0.value))"
+            }
+        }
+
+        switch locateBlock(in: lines, platform: section, key: key) {
+        case .found(let blockRange):
+            var newLines = Array(lines.prefix(blockRange.lowerBound))
+            if !trimmedPairs.isEmpty {
+                newLines.append("\(spaces(keyIndent))\(key):")
+                newLines.append(contentsOf: entryRows())
+            }
+            let tailStart = blockRange.upperBound + 1
+            if tailStart < lines.count {
+                newLines.append(contentsOf: lines.suffix(from: tailStart))
+            }
+            return newLines.joined(separator: "\n")
+        case .platformPresentKeyMissing(let insertAfter):
+            if trimmedPairs.isEmpty { return yaml }
+            var newLines = Array(lines.prefix(insertAfter + 1))
+            newLines.append("\(spaces(keyIndent))\(key):")
+            newLines.append(contentsOf: entryRows())
+            if insertAfter + 1 < lines.count {
+                newLines.append(contentsOf: lines.suffix(from: insertAfter + 1))
+            }
+            return newLines.joined(separator: "\n")
+        case .platformMissing:
+            if trimmedPairs.isEmpty { return yaml }
+            var trimmed = yaml
+            while trimmed.hasSuffix("\n\n") { trimmed.removeLast() }
+            if !trimmed.isEmpty && !trimmed.hasSuffix("\n") { trimmed.append("\n") }
+            var newLines: [String] = []
+            if !trimmed.isEmpty { newLines.append("") }
+            newLines.append("\(section):")
+            newLines.append("  \(key):")
+            newLines.append(contentsOf: entryRows())
+            newLines.append("")
+            return trimmed + newLines.joined(separator: "\n")
+        }
+    }
+
     /// Async wrapper that reads, mutates, writes via the given context.
     /// Returns `false` on read or write failure.
     ///
