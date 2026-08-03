@@ -6,6 +6,131 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.18.0</title>
+      <sparkle:version>56</sparkle:version>
+      <sparkle:shortVersionString>2.18.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Mon, 03 Aug 2026 22:33:07 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.18.0</p>
+<p>The Hermes v0.20 parity release. Hermes shipped its two biggest releases of the year back-to-back — v0.19 &quot;Quicksilver&quot; and v0.20 &quot;Herald,&quot; ~5,700 commits — and this release keeps Scarf fully compatible with both while adopting the best of what landed: pinned sessions and activity in the sidebar, per-model cost breakdowns, richer session exports, approval-allowlist suggestions, cron run history, and tidy compaction summaries in chat. It also fixes six long-standing bugs the compatibility audit flushed out — including one where uninstalling or updating a Skill from the UI had never actually worked — and ships a community-contributed performance win that makes remote chats load dramatically faster. Everything new is capability-gated: on a pre-0.20 Hermes host, Scarf behaves exactly as before.</p>
+<h2>Remote chats load dramatically faster</h2>
+<p>Community-contributed: <a href="https://github.com/awizemann/scarf/pull/136">#136</a> by <a href="https://github.com/LiamVan6868">@LiamVan6868</a> — thank you!</p>
+<p>Resuming a remote chat used to pay one SSH round-trip per 5-message page just to hydrate tool-call cards — six round-trips for a 30-message session, before the skeleton and tool-result fetches. Those pages now fold into <strong>a single batched round-trip</strong>, and the JSON row parser was rewritten as a single-pass byte scan (one traversal instead of two, no substring copies). The oversized-blob fallback that isolates &quot;whale&quot; tool calls is preserved intact. On top of that, the remote result parser now bounds-checks batch markers from the wire, so a misbehaving host can no longer crash the app with a malformed response.</p>
+<h2>Hermes v0.20 compatibility</h2>
+<p>Scarf now targets Hermes v0.20.0 (v2026.8.3), with v0.6.0+ still fully supported:</p>
+<ul>
+  <li><strong><code>/compress</code></strong> — Hermes renamed <code>/compact</code>; Scarf&#x27;s command menu follows suit on 0.20 hosts (and keeps <code>/compact</code> on older ones — never both).</li>
+  <li><strong>Curator keeps counting</strong> — Hermes reworded the curator status header; Scarf&#x27;s parser now reads both generations, plus the new agent-created/bundled split and unmanaged-skills count.</li>
+  <li><strong>Provider catalog refresh</strong> — Vercel AI Gateway is back (with aggregator handling), Fireworks AI and Google Vertex AI join the picker, Upstage Solar gets its alias, and retired DeepSeek models (<code>deepseek-chat</code>, <code>deepseek-reasoner</code>) resolve to their <code>deepseek-v4-flash</code> replacement instead of dangling.</li>
+  <li><strong>Buzz</strong> — Block&#x27;s Nostr-based messenger, new in Hermes 0.20, appears in the gateway platform roster.</li>
+  <li><strong>Max turns</strong> — Hermes raised the default agent turn limit 60 → 500; Scarf&#x27;s Settings display follows the connected host&#x27;s actual default.</li>
+</ul>
+<h2>New: session pins, activity, and per-model costs</h2>
+<p>On a 0.20 host (schema-detected, zero change on older databases):</p>
+<ul>
+  <li><strong>Pinned sessions float to the top</strong> of the chat sidebar with a pin badge, and each row shows Hermes&#x27;s last-activity description — what the agent actually did most recently, not just a timestamp.</li>
+  <li><strong>The Dashboard breaks cost down by model</strong> — tokens and spend per model across your sessions, from Hermes&#x27;s new per-model usage ledger.</li>
+</ul>
+<h2>New: richer session exports</h2>
+<p>The export flow gains a format picker on 0.20 hosts: <strong>Markdown, HTML, Quarto, and trace</strong> join JSONL, plus a <strong>&quot;Redact secrets&quot;</strong> toggle that runs Hermes&#x27;s scrubbing pass. On remote connections the picker offers the streaming formats (JSONL, trace) so exports always land on your Mac, never stranded on the server.</p>
+<h2>New: approval suggestions and cron run history</h2>
+<ul>
+  <li><strong>Allowlist suggestions</strong> — Hermes 0.20 can mine your approval history into allowlist proposals (<code>approvals suggest</code>). Scarf surfaces them in Settings → Security with a one-click Add per proposal — each application is explicit, no bulk auto-apply.</li>
+  <li><strong>Cron run history</strong> — each cron job&#x27;s detail pane gains a run-history disclosure: past executions with status, source, and error output, straight from Hermes&#x27;s new execution ledger.</li>
+</ul>
+<h2>Chat: compaction summaries, folded</h2>
+<p>When Hermes compacts a long session, the summary it writes into history now renders as a collapsed <strong>&quot;Conversation compacted&quot;</strong> disclosure row instead of a wall of bracketed text — expand it when you want it, ignore it when you don&#x27;t. Detection matches Hermes&#x27;s own summary markers, so it works on every session with persisted summaries.</p>
+<h2>Six bugs the audit caught (all pre-existing)</h2>
+<p>The compatibility audit re-verifies every CLI call, config key, and platform id Scarf uses against Hermes source — and this cycle that sweep found six things that were broken long before 0.20:</p>
+<ul>
+  <li><strong>Skill uninstall/update never worked.</strong> Both passed a <code>--yes</code> flag Hermes has never had, so the CLI exited with a usage error every time. Fixed (uninstall also answers Hermes&#x27;s confirmation prompt properly).</li>
+  <li><strong>The &quot;runtime metadata footer&quot; toggle wrote a key Hermes doesn&#x27;t read</strong> (<code>agent.runtime_metadata_footer</code>); it now writes the real <code>display.runtime_footer.enabled</code>.</li>
+  <li><strong>Google Chat and Microsoft Teams used the wrong platform ids</strong> (<code>google-chat</code>/<code>microsoft-teams</code> vs Hermes&#x27;s <code>google_chat</code>/<code>teams</code>), so platform detection and config edits missed. The Google Chat allowlist editor is also gone — Hermes gates that platform by user env, and the key Scarf wrote was never read.</li>
+  <li><strong>The per-platform &quot;busy acknowledgment&quot; toggle was a silent no-op</strong> — Hermes only reads the global <code>display.busy_ack_enabled</code>, which Scarf now writes.</li>
+  <li><strong>A &quot;slash command notice TTL&quot; setting wrote a key that doesn&#x27;t exist</strong> in any Hermes version; removed.</li>
+  <li><strong>iOS Google Chat status</strong> now detects configuration correctly (same mechanism as the Mac app).</li>
+</ul>
+<h2>Under the hood</h2>
+<ul>
+  <li>New v0.20 capability group in <code>HermesCapabilities</code> with a full degradation test cluster; every new surface in this release hides itself on pre-0.20 hosts.</li>
+  <li>Provider tables are verified mechanically against the Hermes checkout (<code>scripts/check-hermes-tables.py</code>, default path now <code>~/.hermes/hermes-agent</code>).</li>
+  <li>75 new tests across capabilities, parsers, schema detection, export argv, and compaction classification; the suite now runs 1,065 tests.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li><strong>Sparkle</strong> will offer the update automatically, or use <strong>Scarf → Check for Updates</strong>. macOS 14.6+ deployment target unchanged.</li>
+  <li><strong>Hermes target: v0.20.0 (v2026.8.3).</strong> Everything new is capability-gated or schema-detected — Hermes v0.6.0 through v0.19.x hosts keep working exactly as before, minus the new 0.20-only surfaces.</li>
+  <li><strong>iOS / ScarfGo:</strong> shares the platform-id and connection fixes via the common package; they ride the next TestFlight build.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.18.0/Scarf-v2.18.0-Universal.zip"
+                 sparkle:edSignature="uy8M6nzSxrmrLC5c+Z1aMpjrW8N56zfW/ah+mgc0g3N1gdM/fAZXLqOl89f330ZOH3exs0yDnHMYU1VysxXpDQ=="
+                 length="22028723"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.17.2</title>
       <sparkle:version>55</sparkle:version>
       <sparkle:shortVersionString>2.17.2</sparkle:shortVersionString>
