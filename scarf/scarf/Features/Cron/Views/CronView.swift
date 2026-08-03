@@ -17,6 +17,7 @@ struct CronView: View {
     @Bindable var viewModel: CronViewModel
     @State private var pendingDelete: HermesCronJob?
     @State private var showOutputPanel: Bool = false
+    @State private var showRunHistory: Bool = false
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     @Environment(AppCoordinator.self) private var coordinator
     @Environment(HermesFileWatcher.self) private var fileWatcher
@@ -37,6 +38,13 @@ struct CronView: View {
     /// the helper line under the field.
     private var hasCronDeliverAll: Bool {
         capabilitiesStore?.capabilities.hasCronDeliverAll ?? false
+    }
+
+    /// v0.20 — durable per-job execution history (`hermes cron runs`).
+    /// Pre-0.20 hosts render the detail pane byte-identically: no RUN
+    /// HISTORY disclosure and no CLI probe.
+    private var hasCronRuns: Bool {
+        capabilitiesStore?.capabilities.hasCronRuns ?? false
     }
 
     var body: some View {
@@ -479,6 +487,114 @@ struct CronView: View {
         }
 
         outputPanel(job: job)
+
+        if hasCronRuns {
+            runHistoryPanel(job: job)
+        }
+    }
+
+    /// Per-job durable run-history disclosure (v0.20+; gated on
+    /// `hasCronRuns`). Collapsed by default and lazy — `hermes cron runs
+    /// <id>` only fires when the user expands it, and re-fires when the
+    /// selection changes while expanded. Mirrors the LAST RUN OUTPUT
+    /// panel's collapsed-chevron chrome so the detail pane stays uniform.
+    @ViewBuilder
+    private func runHistoryPanel(job: HermesCronJob) -> some View {
+        VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+            Button {
+                showRunHistory.toggle()
+                if showRunHistory { viewModel.loadRunHistory(jobID: job.id) }
+            } label: {
+                HStack(spacing: ScarfSpace.s2) {
+                    Image(systemName: showRunHistory ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                    Text("RUN HISTORY")
+                        .scarfStyle(.captionUppercase)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showRunHistory {
+                Group {
+                    if viewModel.isLoadingRunHistory && viewModel.runHistory.isEmpty {
+                        Text("Loading run history…")
+                            .scarfStyle(.caption)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
+                            .padding(ScarfSpace.s3)
+                    } else if viewModel.runHistory.isEmpty {
+                        Text("No execution attempts recorded for this job yet.")
+                            .scarfStyle(.caption)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
+                            .padding(ScarfSpace.s3)
+                    } else {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(viewModel.runHistory) { run in
+                                runHistoryRow(run)
+                                if run.id != viewModel.runHistory.last?.id {
+                                    Rectangle().fill(ScarfColor.border).frame(height: 1)
+                                }
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                        .fill(ScarfColor.backgroundSecondary)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                        .strokeBorder(ScarfColor.border, lineWidth: 1)
+                )
+            }
+        }
+        // Selection changed while expanded → load the new job's history.
+        .onChange(of: job.id) { _, newID in
+            if showRunHistory { viewModel.loadRunHistory(jobID: newID) }
+        }
+    }
+
+    private func runHistoryRow(_ run: HermesCronRun) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(runStatusColor(run.status))
+                    .frame(width: 7, height: 7)
+                Text(run.status)
+                    .font(ScarfFont.monoSmall)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
+                Text(CronScheduleFormatter.formatNextRun(iso: run.claimedAt))
+                    .font(ScarfFont.monoSmall)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                Spacer(minLength: 4)
+                Text(run.source)
+                    .font(ScarfFont.monoSmall)
+                    .foregroundStyle(ScarfColor.foregroundFaint)
+            }
+            if let error = run.error {
+                Text(error)
+                    .font(ScarfFont.monoSmall)
+                    .foregroundStyle(ScarfColor.danger)
+                    .textSelection(.enabled)
+                    .lineLimit(3)
+                    .padding(.leading, 15)
+            }
+        }
+        .padding(.horizontal, ScarfSpace.s3)
+        .padding(.vertical, 7)
+    }
+
+    private func runStatusColor(_ status: String) -> Color {
+        switch status {
+        case "completed": return ScarfColor.success
+        case "failed": return ScarfColor.danger
+        case "running", "claimed": return ScarfColor.info
+        default: return ScarfColor.foregroundFaint  // "unknown" + future values
+        }
     }
 
     /// Last-error surface. When `ACPErrorHint` recognizes the message
