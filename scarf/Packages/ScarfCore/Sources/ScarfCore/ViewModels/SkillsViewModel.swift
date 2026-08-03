@@ -464,15 +464,32 @@ public final class SkillsViewModel {
         }
     }
 
+    /// `skills uninstall` has no `--yes` flag (argparse exits 2 if passed —
+    /// this action silently failed for every release that sent it). The
+    /// command confirms via an interactive `input("Confirm [y/N]: ")` prompt
+    /// that reads EOF as "n" when stdin is closed, so the caller must feed a
+    /// "y" line (`uninstallStdin`) to confirm non-interactively.
+    nonisolated static func uninstallArgs(_ identifier: String) -> [String] {
+        ["skills", "uninstall", identifier]
+    }
+    nonisolated static let uninstallStdin = "y\n"
+
+    /// `skills update` has no `--yes` flag (argparse exits 2 if passed) and
+    /// never prompts — `do_update` in hermes_cli/skills_hub.py runs straight
+    /// through. Omitting the optional `name` positional updates all outdated
+    /// skills.
+    nonisolated static let updateAllArgs = ["skills", "update"]
+
     public func uninstallHubSkill(_ identifier: String) {
         let bin = context.paths.hermesBinary
         let xport = transport
         Task.detached { [weak self] in
             let result = Self.runHermes(
                 executable: bin,
-                args: ["skills", "uninstall", identifier, "--yes"],
+                args: Self.uninstallArgs(identifier),
                 transport: xport,
-                timeout: 60
+                timeout: 60,
+                stdin: Self.uninstallStdin
             )
             await self?.finishUninstall(exitCode: result.exitCode)
         }
@@ -500,7 +517,7 @@ public final class SkillsViewModel {
         Task.detached { [weak self] in
             let result = Self.runHermes(
                 executable: bin,
-                args: ["skills", "update", "--yes"],
+                args: Self.updateAllArgs,
                 transport: xport,
                 timeout: 300
             )
@@ -617,13 +634,14 @@ public final class SkillsViewModel {
         executable: String,
         args: [String],
         transport: any ServerTransport,
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        stdin: String? = nil
     ) -> (exitCode: Int32, output: String) {
         do {
             let result = try transport.runProcess(
                 executable: executable,
                 args: args,
-                stdin: nil,
+                stdin: stdin.flatMap { $0.data(using: .utf8) },
                 timeout: timeout
             )
             return (result.exitCode, result.stdoutString + result.stderrString)

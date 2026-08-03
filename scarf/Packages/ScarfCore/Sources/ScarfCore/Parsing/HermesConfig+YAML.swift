@@ -290,8 +290,10 @@ public extension HermesConfig {
         // explicit block don't appear in the dictionary, so the editor's
         // `?? .empty` fallback hands the user the defaults without leaving
         // stale keys littered across the YAML.
+        // `google_chat` is intentionally absent: its adapter gates access
+        // via GOOGLE_CHAT_ALLOWED_USERS, never an allowed_channels list.
         let gatewayAllowlistPlatforms = [
-            "slack", "mattermost", "google-chat",
+            "slack", "mattermost",
             "telegram", "whatsapp",
             "matrix", "dingtalk",
         ]
@@ -331,7 +333,7 @@ public extension HermesConfig {
         self.init(
             model: str("model.default", default: "unknown"),
             provider: str("model.provider", default: "unknown"),
-            maxTurns: int("agent.max_turns", default: 0),
+            maxTurns: int("agent.max_turns", default: 500),
             personality: str("display.personality", default: "default"),
             terminalBackend: str("terminal.backend", default: "local"),
             memoryEnabled: bool("memory.memory_enabled", default: false),
@@ -389,7 +391,16 @@ public extension HermesConfig {
             homeAssistant: homeAssistant,
             cacheTTL: str("prompt_caching.cache_ttl", default: "5m"),
             redactionEnabled: bool("redaction.enabled", default: false),
-            runtimeMetadataFooter: bool("agent.runtime_metadata_footer", default: false),
+            // Real Hermes key is `display.runtime_footer.enabled` (nested
+            // block, config_defaults.py). `agent.runtime_metadata_footer`
+            // never existed in Hermes but older Scarf builds wrote it —
+            // read it as a fallback so those configs keep their setting;
+            // writes go only to the new key.
+            runtimeMetadataFooter: bool(
+                "display.runtime_footer.enabled",
+                default: bool("agent.runtime_metadata_footer", default: false)
+            ),
+            displayBusyAckEnabled: bool("display.busy_ack_enabled", default: true),
             gatewayPlatforms: gatewayPlatforms,
             // -- v0.13 additions -------------------------------------
             // Hermes v0.16: `openrouter.response_cache` is a SCALAR bool

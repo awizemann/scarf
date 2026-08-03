@@ -9,18 +9,19 @@ import Foundation
     @Test func mapsKnownPlatformsToCorrectKind() {
         #expect(GatewayAllowlistKind.kind(for: "slack")      == .channels)
         #expect(GatewayAllowlistKind.kind(for: "mattermost") == .channels)
-        #expect(GatewayAllowlistKind.kind(for: "google-chat") == .channels)
         #expect(GatewayAllowlistKind.kind(for: "telegram")   == .chats)
         #expect(GatewayAllowlistKind.kind(for: "matrix")     == .rooms)
         // v0.16: Hermes reads `dingtalk.allowed_chats`, not allowed_rooms.
         #expect(GatewayAllowlistKind.kind(for: "dingtalk")   == .chats)
     }
 
-    @Test func acceptsBothGoogleChatSpellings() {
-        // // TODO(WS-5-Q1) — both spellings round-trip until Hermes confirms
-        // the wire identifier.
-        #expect(GatewayAllowlistKind.kind(for: "google-chat") == .channels)
-        #expect(GatewayAllowlistKind.kind(for: "googlechat")  == .channels)
+    @Test func googleChatHasNoAllowlist() {
+        // The google_chat adapter never reads allowed_channels at any
+        // Hermes version — it gates via GOOGLE_CHAT_ALLOWED_USERS. All
+        // spellings (real id + legacy Scarf misspellings) must map to nil.
+        #expect(GatewayAllowlistKind.kind(for: "google_chat") == nil)
+        #expect(GatewayAllowlistKind.kind(for: "google-chat") == nil)
+        #expect(GatewayAllowlistKind.kind(for: "googlechat")  == nil)
     }
 
     @Test func returnsNilForPlatformsWithoutAllowlist() {
@@ -31,7 +32,9 @@ import Foundation
         // intentionally excluded from this chat-id allowlist editor.
         #expect(GatewayAllowlistKind.kind(for: "whatsapp")       == nil)
         #expect(GatewayAllowlistKind.kind(for: "yuanbao")        == nil)
-        #expect(GatewayAllowlistKind.kind(for: "microsoft-teams") == nil)
+        #expect(GatewayAllowlistKind.kind(for: "teams")          == nil)
+        // Buzz (v0.20) gates via allowed_users, not a channels allowlist.
+        #expect(GatewayAllowlistKind.kind(for: "buzz")           == nil)
         #expect(GatewayAllowlistKind.kind(for: "discord")        == nil)
         #expect(GatewayAllowlistKind.kind(for: "signal")         == nil)
         #expect(GatewayAllowlistKind.kind(for: "homeassistant")  == nil)
