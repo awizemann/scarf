@@ -41,6 +41,8 @@ public actor HermesDataService {
     private var hasMessagesActiveColumn = false
     private var hasCompactedColumn = false
     private var hasRewindCountColumn = false
+    private var hasSessionActivityColumns = false
+    private var hasSessionModelUsageTable = false
 
     /// Last error from `open()` / `refresh()`, user-presentable. `nil`
     /// means the last attempt succeeded. Views surface this when their
@@ -79,6 +81,8 @@ public actor HermesDataService {
         hasMessagesActiveColumn = await backend.hasMessagesActiveColumn
         hasCompactedColumn = await backend.hasCompactedColumn
         hasRewindCountColumn = await backend.hasRewindCountColumn
+        hasSessionActivityColumns = await backend.hasSessionActivityColumns
+        hasSessionModelUsageTable = await backend.hasSessionModelUsageTable
         lastOpenError = await backend.lastOpenError
         return ok
     }
@@ -91,6 +95,8 @@ public actor HermesDataService {
         hasMessagesActiveColumn = await backend.hasMessagesActiveColumn
         hasCompactedColumn = await backend.hasCompactedColumn
         hasRewindCountColumn = await backend.hasRewindCountColumn
+        hasSessionActivityColumns = await backend.hasSessionActivityColumns
+        hasSessionModelUsageTable = await backend.hasSessionModelUsageTable
         lastOpenError = await backend.lastOpenError
         return ok
     }
@@ -139,6 +145,13 @@ public actor HermesDataService {
         // hardcoded position, to stay correct across those combinations.
         if hasRewindCountColumn {
             cols += ", rewind_count"
+        }
+        // v0.20: appended last, read by column NAME in sessionFromRow
+        // (same pattern as rewind_count) so positions stay stable
+        // across every earlier schema combination. Absent columns
+        // (pre-0.20 DB) → identical SELECT shape to today.
+        if hasSessionActivityColumns {
+            cols += ", pinned, last_activity_at, last_activity_description"
         }
         return cols
     }
@@ -1013,11 +1026,76 @@ public actor HermesDataService {
     /// it's one SSH round-trip running one sqlite3 invocation, which
     /// turns Dashboard's "open" cost from ~280 ms (4 × 70 ms) into
     /// ~80–100 ms.
+    /// One row of the Dashboard's per-model usage breakdown (Hermes
+    /// v0.20+, aggregated across sessions from `session_model_usage`).
+    /// Empty on pre-0.20 DBs — the table doesn't exist there and the
+    /// snapshot batch never issues the query.
+    public struct ModelUsageStat: Sendable, Identifiable, Equatable {
+        public let model: String
+        public let inputTokens: Int
+        public let outputTokens: Int
+        public let reasoningTokens: Int
+        public let estimatedCostUSD: Double
+        public let actualCostUSD: Double
+        public let apiCallCount: Int
+
+        public var id: String { model }
+        public var totalTokens: Int { inputTokens + outputTokens + reasoningTokens }
+        /// Actual cost when Hermes recorded one, else the estimate —
+        /// same preference order as `HermesSession.displayCostUSD`.
+        public var displayCostUSD: Double { actualCostUSD > 0 ? actualCostUSD : estimatedCostUSD }
+
+        public init(
+            model: String,
+            inputTokens: Int,
+            outputTokens: Int,
+            reasoningTokens: Int,
+            estimatedCostUSD: Double,
+            actualCostUSD: Double,
+            apiCallCount: Int
+        ) {
+            self.model = model
+            self.inputTokens = inputTokens
+            self.outputTokens = outputTokens
+            self.reasoningTokens = reasoningTokens
+            self.estimatedCostUSD = estimatedCostUSD
+            self.actualCostUSD = actualCostUSD
+            self.apiCallCount = apiCallCount
+        }
+    }
+
+    /// Aggregate SQL for the per-model breakdown. One GROUP BY over
+    /// `session_model_usage` — rides inside the existing snapshot
+    /// batch, so it adds zero extra round-trips on remote backends.
+    private static let modelUsageSQL = """
+        SELECT model, COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+               COALESCE(SUM(reasoning_tokens),0), COALESCE(SUM(estimated_cost_usd),0),
+               COALESCE(SUM(actual_cost_usd),0), COALESCE(SUM(api_call_count),0)
+        FROM session_model_usage
+        GROUP BY model
+        ORDER BY MAX(COALESCE(SUM(actual_cost_usd),0), COALESCE(SUM(estimated_cost_usd),0)) DESC
+        """
+
+    private func modelUsageFromRow(_ row: Row) -> ModelUsageStat {
+        ModelUsageStat(
+            model: row.string(at: 0),
+            inputTokens: row.int(at: 1),
+            outputTokens: row.int(at: 2),
+            reasoningTokens: row.int(at: 3),
+            estimatedCostUSD: row.double(at: 4),
+            actualCostUSD: row.double(at: 5),
+            apiCallCount: row.int(at: 6)
+        )
+    }
+
     public struct DashboardSnapshot: Sendable {
         public let stats: SessionStats
         public let recentSessions: [HermesSession]
         public let sessionPreviews: [String: String]
         public let recentToolCalls: [HermesMessage]
+        /// Per-model token/cost breakdown (v0.20+). Empty when the
+        /// `session_model_usage` table is absent.
+        public let modelUsage: [ModelUsageStat]
     }
 
     public func dashboardSnapshot(
@@ -1025,7 +1103,7 @@ public actor HermesDataService {
         previewLimit: Int = 5,
         toolCallLimit: Int = 8
     ) async -> DashboardSnapshot {
-        let statements: [(sql: String, params: [SQLValue])] = [
+        var statements: [(sql: String, params: [SQLValue])] = [
             (statsSQL(), []),
             (
                 "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id IS NULL ORDER BY started_at DESC LIMIT ?",
@@ -1057,6 +1135,12 @@ public actor HermesDataService {
                 [.integer(Int64(toolCallLimit))]
             )
         ]
+        // v0.20: per-model usage rides in the SAME batch (index 4) when
+        // the table exists — no extra round-trip. Pre-0.20 DBs never
+        // see the query, so the batch shape is byte-identical to today.
+        if hasSessionModelUsageTable {
+            statements.append((Self.modelUsageSQL, []))
+        }
         do {
             let resultSets = try await backend.queryBatch(statements)
             let stats = resultSets.first?.first.map { statsFromRow($0) } ?? .empty
@@ -1066,11 +1150,13 @@ public actor HermesDataService {
                 previews[row.string(at: 0)] = row.string(at: 1)
             }
             let toolCalls = (resultSets.count > 3 ? resultSets[3] : []).map { messageFromRow($0) }
+            let modelUsage = (resultSets.count > 4 ? resultSets[4] : []).map { modelUsageFromRow($0) }
             return DashboardSnapshot(
                 stats: stats,
                 recentSessions: sessions,
                 sessionPreviews: previews,
-                recentToolCalls: toolCalls
+                recentToolCalls: toolCalls,
+                modelUsage: modelUsage
             )
         } catch {
             Self.logger.warning("dashboardSnapshot failed: \(error.localizedDescription, privacy: .public)")
@@ -1078,7 +1164,8 @@ public actor HermesDataService {
                 stats: .empty,
                 recentSessions: [],
                 sessionPreviews: [:],
-                recentToolCalls: []
+                recentToolCalls: [],
+                modelUsage: []
             )
         }
     }
@@ -1235,6 +1322,25 @@ public actor HermesDataService {
                   let idx = row.columnIndex["rewind_count"] else { return 0 }
             return row.int(at: idx)
         }()
+        // v0.20 session-activity columns — appended last in
+        // sessionColumns, resolved by column NAME (same rationale as
+        // rewind_count above). All read defensively: absent columns
+        // yield the pre-0.20 defaults.
+        let pinned: Bool = {
+            guard hasSessionActivityColumns,
+                  let idx = row.columnIndex["pinned"] else { return false }
+            return row.int(at: idx) != 0
+        }()
+        let lastActivityAt: Date? = {
+            guard hasSessionActivityColumns,
+                  let idx = row.columnIndex["last_activity_at"] else { return nil }
+            return row.date(at: idx)
+        }()
+        let lastActivityDescription: String? = {
+            guard hasSessionActivityColumns,
+                  let idx = row.columnIndex["last_activity_description"] else { return nil }
+            return row.optionalString(at: idx)
+        }()
         return HermesSession(
             id: row.string(at: 0),
             source: row.string(at: 1),
@@ -1257,7 +1363,10 @@ public actor HermesDataService {
             costStatus: hasV07Schema ? row.optionalString(at: 18) : nil,
             billingProvider: hasV07Schema ? row.optionalString(at: 19) : nil,
             apiCallCount: apiCallCount,
-            rewindCount: rewindCount
+            rewindCount: rewindCount,
+            pinned: pinned,
+            lastActivityAt: lastActivityAt,
+            lastActivityDescription: lastActivityDescription
         )
     }
 

@@ -32,6 +32,9 @@ struct DashboardView: View {
                     }
                     statusRow
                     statsSection
+                    if !viewModel.modelUsage.isEmpty {
+                        modelUsageSection
+                    }
                     recentTwoColumn
                 }
                 .padding(.horizontal, ScarfSpace.s6)
@@ -294,6 +297,57 @@ struct DashboardView: View {
                     )
                 }
             }
+        }
+    }
+
+    // MARK: - Per-model usage (Hermes v0.20+)
+
+    /// Compact per-model token/cost breakdown, aggregated across all
+    /// sessions from `session_model_usage`. Only rendered when the
+    /// host's state.db has the v0.20 table (`viewModel.modelUsage` is
+    /// empty otherwise, and the section hides entirely — pre-0.20
+    /// Dashboards render exactly as before).
+    private var modelUsageSection: some View {
+        VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+            Text("By model")
+                .scarfStyle(.bodyEmph)
+                .foregroundStyle(ScarfColor.foregroundPrimary)
+            VStack(spacing: 0) {
+                ForEach(viewModel.modelUsage) { usage in
+                    HStack(spacing: ScarfSpace.s3) {
+                        Text(usage.model)
+                            .scarfStyle(.caption)
+                            .foregroundStyle(ScarfColor.foregroundPrimary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: ScarfSpace.s3)
+                        Text("\(formatTokens(usage.inputTokens)) in · \(formatTokens(usage.outputTokens)) out")
+                            .font(ScarfFont.caption2)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
+                        if usage.displayCostUSD > 0 {
+                            Text(usage.displayCostUSD.formatted(.currency(code: "USD").precision(.fractionLength(2))))
+                                .scarfStyle(.caption)
+                                .foregroundStyle(ScarfColor.accentActive)
+                                .frame(minWidth: 56, alignment: .trailing)
+                        }
+                    }
+                    .padding(.horizontal, ScarfSpace.s3)
+                    .padding(.vertical, 6)
+                    if usage.id != viewModel.modelUsage.last?.id {
+                        Rectangle()
+                            .fill(ScarfColor.border)
+                            .frame(height: 1)
+                    }
+                }
+            }
+            .background(
+                RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
+                    .fill(ScarfColor.backgroundSecondary)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
+                    .strokeBorder(ScarfColor.border, lineWidth: 1)
+            )
         }
     }
 

@@ -340,10 +340,16 @@ struct ChatSessionListPane: View {
             }
         }
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !trimmed.isEmpty else { return base }
-        return base.filter { session in
-            chatViewModel.previewFor(session).lowercased().contains(trimmed)
+        if !trimmed.isEmpty {
+            base = base.filter { session in
+                chatViewModel.previewFor(session).lowercased().contains(trimmed)
+            }
         }
+        // v0.20: pinned sessions float to the top as their own section,
+        // each group keeping its existing recency order. On pre-0.20
+        // hosts `pinned` is always false (column absent) and this is
+        // an order-preserving no-op.
+        return base.filter(\.pinned) + base.filter { !$0.pinned }
     }
 
     // MARK: - Empty state + footer
@@ -427,14 +433,26 @@ private struct ChatSessionRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 7) {
                     statusDot
+                    // v0.20: pin indicator — only rendered for pinned
+                    // sessions, so pre-0.20 hosts (column absent,
+                    // `pinned` always false) see the exact same row.
+                    if session.pinned {
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 8))
+                            .foregroundStyle(ScarfColor.accentActive)
+                            .help("Pinned")
+                    }
                     Text(preview)
                         .scarfStyle(.bodyEmph)
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .foregroundStyle(isActive ? ScarfColor.accentActive : ScarfColor.foregroundPrimary)
                     Spacer(minLength: 0)
-                    if let started = session.startedAt {
-                        Text(started, style: .relative)
+                    // v0.20: prefer the activity heartbeat when present
+                    // — "what happened last" beats "when it started".
+                    // Pre-0.20 hosts fall back to startedAt as before.
+                    if let stamp = session.lastActivityAt ?? session.startedAt {
+                        Text(stamp, style: .relative)
                             .font(ScarfFont.caption2)
                             .foregroundStyle(ScarfColor.foregroundFaint)
                     }
@@ -471,6 +489,18 @@ private struct ChatSessionRow: View {
                 }
                 .foregroundStyle(ScarfColor.foregroundMuted)
                 .padding(.leading, 14)
+                // v0.20: last-activity line — dimmed secondary text
+                // describing what the agent last did. Absent on
+                // pre-0.20 hosts (columns missing → nil) so the row
+                // renders exactly as before.
+                if let activity = session.lastActivityDescription, !activity.isEmpty {
+                    Text(activity)
+                        .font(ScarfFont.caption2)
+                        .foregroundStyle(ScarfColor.foregroundFaint)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .padding(.leading, 14)
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, ScarfSpace.s2)

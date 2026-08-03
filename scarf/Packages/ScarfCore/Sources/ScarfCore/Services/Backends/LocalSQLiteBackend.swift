@@ -36,6 +36,8 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
     private(set) public var hasMessagesActiveColumn = false
     private(set) public var hasCompactedColumn = false
     private(set) public var hasRewindCountColumn = false
+    private(set) public var hasSessionActivityColumns = false
+    private(set) public var hasSessionModelUsageTable = false
     private(set) public var lastOpenError: String?
 
     private let context: ServerContext
@@ -119,6 +121,9 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
 
         // sessions schema
         var stmt: OpaquePointer?
+        var sawPinned = false
+        var sawLastActivityAt = false
+        var sawLastActivityDescription = false
         if sqlite3_prepare_v2(db, "PRAGMA table_info(sessions)", -1, &stmt, nil) == SQLITE_OK {
             defer { sqlite3_finalize(stmt) }
             while sqlite3_step(stmt) == SQLITE_ROW {
@@ -134,7 +139,30 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
                     if column == "rewind_count" {
                         hasRewindCountColumn = true
                     }
+                    // v0.20+ session-activity columns.
+                    switch column {
+                    case "pinned": sawPinned = true
+                    case "last_activity_at": sawLastActivityAt = true
+                    case "last_activity_description": sawLastActivityDescription = true
+                    default: break
+                    }
                 }
+            }
+        }
+        // v0.20: ALL three must be present (belt-and-braces against a
+        // partially-migrated DB) before the SELECT shape widens.
+        hasSessionActivityColumns = sawPinned && sawLastActivityAt && sawLastActivityDescription
+
+        // v0.20+ `session_model_usage` table — detect via sqlite_master.
+        var usageStmt: OpaquePointer?
+        if sqlite3_prepare_v2(
+            db,
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'session_model_usage'",
+            -1, &usageStmt, nil
+        ) == SQLITE_OK {
+            defer { sqlite3_finalize(usageStmt) }
+            if sqlite3_step(usageStmt) == SQLITE_ROW {
+                hasSessionModelUsageTable = sqlite3_column_int64(usageStmt, 0) > 0
             }
         }
 

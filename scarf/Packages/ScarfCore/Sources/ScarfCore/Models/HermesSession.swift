@@ -31,6 +31,17 @@ public struct HermesSession: Identifiable, Sendable {
     /// from `sessions.rewind_count`). `0` on older Hermes hosts that don't
     /// have the column.
     public let rewindCount: Int
+    /// Whether the user pinned this session (Hermes v0.20+; populated
+    /// from `sessions.pinned`). `false` on older hosts that don't have
+    /// the column. Pinned sessions sort first in the chat sidebar.
+    public let pinned: Bool
+    /// Timestamp of the most recent agent activity heartbeat (Hermes
+    /// v0.20+; `sessions.last_activity_at`). `nil` on older hosts.
+    public let lastActivityAt: Date?
+    /// Short human-readable description of the most recent agent
+    /// activity (Hermes v0.20+; `sessions.last_activity_description`).
+    /// `nil` on older hosts or when Hermes hasn't recorded one.
+    public let lastActivityDescription: String?
 
 
     public init(
@@ -55,7 +66,10 @@ public struct HermesSession: Identifiable, Sendable {
         costStatus: String?,
         billingProvider: String?,
         apiCallCount: Int = 0,
-        rewindCount: Int = 0
+        rewindCount: Int = 0,
+        pinned: Bool = false,
+        lastActivityAt: Date? = nil,
+        lastActivityDescription: String? = nil
     ) {
         self.id = id
         self.source = source
@@ -79,6 +93,9 @@ public struct HermesSession: Identifiable, Sendable {
         self.billingProvider = billingProvider
         self.apiCallCount = apiCallCount
         self.rewindCount = rewindCount
+        self.pinned = pinned
+        self.lastActivityAt = lastActivityAt
+        self.lastActivityDescription = lastActivityDescription
     }
     public var isSubagent: Bool { parentSessionId != nil }
 
@@ -112,7 +129,9 @@ public struct HermesSession: Identifiable, Sendable {
             estimatedCostUSD: estimatedCostUSD, reasoningTokens: reasoningTokens,
             actualCostUSD: actualCostUSD, costStatus: costStatus,
             billingProvider: billingProvider, apiCallCount: apiCallCount,
-            rewindCount: rewindCount
+            rewindCount: rewindCount, pinned: pinned,
+            lastActivityAt: lastActivityAt,
+            lastActivityDescription: lastActivityDescription
         )
     }
 }
