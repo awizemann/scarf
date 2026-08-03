@@ -2,17 +2,14 @@
 title: Hermes Version Targeting Strategy
 type: note
 permalink: scarf/integration/hermes-version-targeting-strategy
-tags:
-- hermes
-- versioning
-- capability-gating
-source_sha: 2b9ef15cdddcb1fde12a88556bf755a623ae7758
-source_paths: scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scripts/check-hermes-tables.py
-reviewed: 2026-07-12
+tags: [hermes, versioning, capability-gating]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scripts/check-hermes-tables.py]
+source_paths_inferred: false
+source_sha: 8da06bf74aa0b22581939e623f70e5dc0af37ff6
 created: 2026-05-29
 updated: 2026-07-04
-reviewed_by: audit:claude-code (audit)
-source_paths_inferred: false
+reviewed: 2026-07-23
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

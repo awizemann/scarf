@@ -2,18 +2,14 @@
 title: Project context-file injection: release-note awareness, not a trust gate (t-42db11e9)
 type: note
 permalink: scarf/decisions/project-context-file-injection-release-note-awareness-not-a
+tags: [security, projects, design-decision, hermes-context-files]
+source_paths: [scarf/scarf/Features/Projects/MiniApp/MiniAppAgentSession.swift, wiki/Release-Notes-Index.md]
+source_paths_inferred: false
+source_sha: 8da06bf74aa0b22581939e623f70e5dc0af37ff6
 created: 2026-06-28
 updated: 2026-06-28
-source_sha: 1599452d48106de9c87bf5286d2b0f6eeee70adb
-source_paths: scarf/scarf/Features/Projects/MiniApp/MiniAppAgentSession.swift, wiki/Release-Notes-Index.md
-tags:
-- security
-- projects
-- design-decision
-- hermes-context-files
-reviewed: 2026-07-17
+reviewed: 2026-07-23
 reviewed_by: audit:claude-code (background)
-source_paths_inferred: false
 ---
 
 ## Context

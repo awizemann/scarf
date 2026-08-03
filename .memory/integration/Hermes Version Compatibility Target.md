@@ -2,17 +2,14 @@
 title: Hermes Version Compatibility Target
 type: note
 permalink: scarf/integration/hermes-version-compatibility-target
-tags:
-- hermes
-- compatibility
-- versioning
-source_sha: 2b9ef15cdddcb1fde12a88556bf755a623ae7758
-source_paths: README.md, scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesLogService.swift
-reviewed: 2026-07-12
-created: 2026-05-29
-updated: 2026-07-10
-reviewed_by: audit:claude-code (audit)
+tags: [hermes, compatibility, versioning]
+source_paths: [README.md, scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesLogService.swift]
 source_paths_inferred: false
+source_sha: 8da06bf74aa0b22581939e623f70e5dc0af37ff6
+created: 2026-05-29
+updated: 2026-08-03
+reviewed: 2026-07-23
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations
@@ -27,3 +24,6 @@ source_paths_inferred: false
 - implements [[Hermes Capability Gating Pattern]]
 - supersedes [[Hermes v0.15 Capability Gating Decisions]]
 - relates_to [[Hermes v0.17 Compatibility Decisions]]
+
+
+- [v020-target] Hermes v0.20.0 (v2026.8.3) audited 2026-08-03 and parity implemented on branch feat/hermes-v020-parity (unmerged pending Alan's review; see [[Hermes v0.20.0 Audit Findings]] and documents/hermes-v0.20.0-audit-report.md). v0.20 capability group: isV020OrLater + hasCompressCommand/hasCuratorAdopt/hasApprovalsSuggest/hasCronRuns/hasSessionsExportFormats. Forced fixes shipped: /compact→/compress gating, curator-managed-skills header dual parse, provider tables (vercel/fireworks/vertex/upstage/deepseek), buzz platform, capability-aware max_turns display (500 at v0.20+, 60 before). Pre-existing bugs fixed same cycle: skills uninstall/update --yes (never existed; uninstall needs stdin "y"), agent.runtime_metadata_footer→display.runtime_footer.enabled, google_chat/teams platform ids, global display.busy_ack_enabled, slash_command_notice_ttl_seconds removed. Adopted features: pinned/last-activity sidebar + session_model_usage dashboard (schema-detected), export formats (md/html/qmd/trace + --redact; remote contexts stdout-only jsonl/trace), approvals suggest, cron runs history, compaction-summary styling (hydration-layer marker classification mirroring ContextCompressor.classify_summary_content — NOT the ACP _meta replay path, which the DB clobbers). state.db SCHEMA_VERSION 25: all additive, DDL now lives in hermes_state_common.py. check-hermes-tables.py default path now ~/.hermes/hermes-agent. #v020

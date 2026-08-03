@@ -2,15 +2,12 @@
 title: Hermes Capability Gating Pattern
 type: note
 permalink: scarf/architecture/hermes-capability-gating-pattern
-tags:
-- architecture
-- capabilities
-- versioning
-source_sha: c76d37fdd58cef8b1a3b1c24c036f29ab57919f3
-source_paths: scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, CLAUDE.md
+tags: [architecture, capabilities, versioning]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, CLAUDE.md]
+source_sha: 8da06bf74aa0b22581939e623f70e5dc0af37ff6
 created: 2026-05-29
 updated: 2026-05-29
-reviewed: 2026-07-18
+reviewed: 2026-07-23
 reviewed_by: audit:claude-code (background)
 ---
 
