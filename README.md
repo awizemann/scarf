@@ -19,6 +19,17 @@
   <a href="https://www.buymeacoffee.com/awizemann"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="28"></a>
 </p>
 
+## What's New in 2.18.0
+
+**Hermes v0.20 parity.** Full compatibility with Hermes v0.19 "Quicksilver" and v0.20 "Herald" (~5,700 upstream commits), plus the best of what landed — all capability-gated, so older Hermes hosts behave exactly as before.
+
+- **Remote chats load dramatically faster** — tool-call hydration batches into one SSH round-trip instead of one per page, with a faster JSON parser behind it. Community-contributed ([#136](https://github.com/awizemann/scarf/pull/136), thanks [@LiamVan6868](https://github.com/LiamVan6868)!).
+- **Pinned sessions + last activity** in the sidebar, **per-model cost breakdown** on the Dashboard, **Markdown/HTML/Quarto/trace exports** with secret redaction, **allowlist suggestions**, and **cron run history** — all new Hermes 0.20 surfaces.
+- **Compaction summaries fold up** in chat instead of dumping bracketed text; `/compress` replaces `/compact` on 0.20 hosts; new providers (Fireworks, Vertex, Vercel AI Gateway) and the Buzz platform join the catalogs.
+- **Six long-standing bugs fixed** — headlined by Skill uninstall/update, which had never worked from the UI, and four settings that silently wrote config keys Hermes never reads.
+
+See the full [v2.18.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.18.0).
+
 ## What's New in 2.17.2
 
 **Markdown tables render.** The one block type Scarf couldn't draw now renders as real grids — in the Skill editor, chat replies, memory notes, and widgets alike ([#134](https://github.com/awizemann/scarf/issues/134)).
