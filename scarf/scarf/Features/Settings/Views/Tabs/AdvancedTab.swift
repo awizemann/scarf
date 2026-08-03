@@ -38,6 +38,18 @@ struct AdvancedTab: View {
             DoubleStepperRow(label: "Threshold", value: viewModel.config.compression.threshold, range: 0.1...1.0, step: 0.05) { viewModel.setCompressionThreshold($0) }
             DoubleStepperRow(label: "Target Ratio", value: viewModel.config.compression.targetRatio, range: 0.05...0.9, step: 0.05) { viewModel.setCompressionTargetRatio($0) }
             StepperRow(label: "Protect Last N", value: viewModel.config.compression.protectLastN, range: 0...100) { viewModel.setCompressionProtectLastN($0) }
+            // v0.20 tuning keys — hidden on older hosts so the tab renders
+            // exactly as before and no ignored keys get written.
+            if capabilitiesStore?.capabilities.isV020OrLater ?? false {
+                StepperRow(label: "Token Threshold", value: viewModel.config.compression.thresholdTokens, range: 0...1_000_000, step: 25_000) { viewModel.setCompressionThresholdTokens($0) }
+                    .help("Absolute token cap: compression triggers at the LOWER of the ratio Threshold above and this token count. 0 = use the ratio threshold only.")
+                StepperRow(label: "Min Tail User Msgs", value: viewModel.config.compression.minTailUserMessages, range: 1...20) { viewModel.setCompressionMinTailUserMessages($0) }
+                    .help("Recent real user messages guaranteed to survive uncompressed, even when bulky tool output fills the tail budget. Hermes default: 1.")
+                StepperRow(label: "Idle Compact (s)", value: viewModel.config.compression.idleCompactAfterSeconds, range: 0...86_400, step: 300) { viewModel.setCompressionIdleCompactAfterSeconds($0) }
+                    .help("Compact a session's history up front when it resumes after this many seconds idle, before the first reply. 0 = off. Example: 1800 = 30 minutes.")
+                ToggleRow(label: "Progress Notices", isOn: viewModel.config.compression.progressNotices) { viewModel.setCompressionProgressNotices($0) }
+                    .help("Deliver routine compression progress statuses to chat gateway platforms. Off keeps routine compaction silent on chat surfaces; failures and manual /compress feedback always show.")
+            }
         }
 
         SettingsSection(title: "Checkpoints", icon: "clock.arrow.circlepath") {

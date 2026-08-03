@@ -372,6 +372,55 @@ final class SettingsViewModel {
     func setCompressionThreshold(_ value: Double) { setSetting("compression.threshold", value: String(value)) }
     func setCompressionTargetRatio(_ value: Double) { setSetting("compression.target_ratio", value: String(value)) }
     func setCompressionProtectLastN(_ value: Int) { setSetting("compression.protect_last_n", value: String(value)) }
+    // -- v0.20 compression tuning (UI gated on isV020OrLater). 0 is a
+    // valid "off" write for threshold_tokens/idle_compact (Hermes treats
+    // <= 0 as disabled), so plain scalar sets round-trip cleanly.
+    func setCompressionThresholdTokens(_ value: Int) { setSetting("compression.threshold_tokens", value: String(value)) }
+    func setCompressionMinTailUserMessages(_ value: Int) { setSetting("compression.min_tail_user_messages", value: String(value)) }
+    func setCompressionIdleCompactAfterSeconds(_ value: Int) { setSetting("compression.idle_compact_after_seconds", value: String(value)) }
+    func setCompressionProgressNotices(_ value: Bool) { setSetting("compression.progress_notices", value: value ? "true" : "false") }
+
+    // MARK: v0.20 direct-YAML power settings
+
+    /// Write `agent.reasoning_overrides` (dict — `hermes config set` can't).
+    /// Refused silently on pre-v0.20 hosts (the UI is hidden there too).
+    func saveReasoningOverrides(_ pairs: [(key: String, value: String)], capabilities: HermesCapabilities) {
+        saveDirectYAML(label: "agent.reasoning_overrides") { yaml in
+            PowerSettingsWriter.setReasoningOverrides(in: yaml, pairs: pairs, capabilities: capabilities)
+        }
+    }
+
+    /// Write `model_catalog.excluded_providers` (list — `hermes config set`
+    /// stringifies arrays). Refused silently on pre-v0.20 hosts.
+    func saveExcludedProviders(_ providers: [String], capabilities: HermesCapabilities) {
+        saveDirectYAML(label: "model_catalog.excluded_providers") { yaml in
+            PowerSettingsWriter.setExcludedProviders(in: yaml, providers: providers, capabilities: capabilities)
+        }
+    }
+
+    /// Shared read → transform → write → reload path for the direct-YAML
+    /// writers, mirroring `GatewayConfigWriter.saveList`'s no-op-on-equal
+    /// behavior and `setSetting`'s save toast.
+    private func saveDirectYAML(label: String, transform: (String) -> String?) {
+        let path = context.paths.configYAML
+        let existing = context.readText(path) ?? ""
+        guard let updated = transform(existing) else { return }
+        if updated != existing {
+            guard context.writeText(path, content: updated) else {
+                saveMessage = "Failed to save \(label)"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                    self?.saveMessage = nil
+                }
+                return
+            }
+        }
+        saveMessage = "Saved \(label)"
+        config = fileService.loadConfig()
+        rawConfigYAML = context.readText(path) ?? rawConfigYAML
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.saveMessage = nil
+        }
+    }
     func setCheckpointsEnabled(_ value: Bool) { setSetting("checkpoints.enabled", value: value ? "true" : "false") }
     func setCheckpointsMaxSnapshots(_ value: Int) { setSetting("checkpoints.max_snapshots", value: String(value)) }
     func setLoggingLevel(_ value: String) { setSetting("logging.level", value: value) }
