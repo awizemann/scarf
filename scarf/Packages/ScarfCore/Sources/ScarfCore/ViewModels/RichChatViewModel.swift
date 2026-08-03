@@ -1440,7 +1440,21 @@ public final class RichChatViewModel {
         // forever with no failure feedback.
         if !hasUserSentPromptThisSession {
             switch event {
-            case .messageChunk, .thoughtChunk, .toolCallStart,
+            // Hermes v0.20 stamps `_meta.hermes.compactionSummary` /
+            // `containsCompactionSummary` ONLY on session/load /
+            // session/resume replay chunks — i.e. exactly the
+            // pre-engagement window this gate otherwise closes. Those
+            // two are let through deliberately: they're the whole
+            // point of the feature (a collapsed "conversation
+            // compacted" row / badge the DB-hydrated history has no
+            // equivalent styling for). Everything else keeps the
+            // original suppression — the DB-hydrated history remains
+            // authoritative for ordinary replayed content.
+            case let .messageChunk(_, _, isSummary, containsSummary) where isSummary || containsSummary:
+                break
+            case let .userMessageChunk(_, _, isSummary, containsSummary) where isSummary || containsSummary:
+                break
+            case .messageChunk, .userMessageChunk, .thoughtChunk, .toolCallStart,
                  .toolCallUpdate:
                 ScarfMon.event(.chatStream, "mac.handleACPEvent.preEngagementDropped", count: 1)
                 return
@@ -1450,8 +1464,31 @@ public final class RichChatViewModel {
             }
         }
         switch event {
-        case .messageChunk(_, let text):
+        case .messageChunk(_, let text, let isSummary, let containsSummary) where isSummary || containsSummary:
+            // Compaction-summary replay chunks arrive as one complete
+            // message (Hermes' history replay sends the full persisted
+            // text in a single chunk, never token-streamed), and — per
+            // the gate above — only ever pre-engagement. Append as a
+            // standalone finalized bubble rather than routing through
+            // `streamingAssistantText`: accumulating would risk
+            // merging a second summary message (a long session can be
+            // compacted more than once) into the same bubble.
+            appendReplayedAssistantMessage(
+                text: text,
+                isCompactionSummary: isSummary,
+                containsCompactionSummary: containsSummary
+            )
+        case .messageChunk(_, let text, _, _):
             appendMessageChunk(text: text)
+        case .userMessageChunk(_, let text, let isSummary, let containsSummary):
+            // `user_message_chunk` only ever carries replayed history
+            // (Scarf never sends a live one), so always append as a
+            // standalone finalized bubble rather than a streaming one.
+            appendReplayedUserMessage(
+                text: text,
+                isCompactionSummary: isSummary,
+                containsCompactionSummary: containsSummary
+            )
         case .thoughtChunk(_, let text):
             appendThoughtChunk(text: text)
         case .toolCallStart(_, let call):
@@ -1608,6 +1645,65 @@ public final class RichChatViewModel {
         }
         streamingAssistantText += text
         upsertStreamingMessage()
+    }
+
+    /// Append a replayed `agent_message_chunk` carrying Hermes v0.20's
+    /// compaction-summary `_meta` as a standalone finalized bubble.
+    /// Bypasses `streamingAssistantText` on purpose — see the call
+    /// site's comment.
+    private func appendReplayedAssistantMessage(
+        text: String,
+        isCompactionSummary: Bool,
+        containsCompactionSummary: Bool
+    ) {
+        guard !text.isEmpty else { return }
+        let id = nextLocalId
+        nextLocalId -= 1
+        messages.append(HermesMessage(
+            id: id,
+            sessionId: sessionId ?? "",
+            role: "assistant",
+            content: text,
+            toolCallId: nil,
+            toolCalls: [],
+            toolName: nil,
+            timestamp: Date(),
+            tokenCount: nil,
+            finishReason: "stop",
+            reasoning: nil,
+            isCompactionSummary: isCompactionSummary,
+            containsCompactionSummary: containsCompactionSummary
+        ))
+        buildMessageGroups()
+    }
+
+    /// Append a replayed `user_message_chunk`. Only ever seen carrying
+    /// Hermes v0.20 compaction-summary `_meta` (Scarf never emits a
+    /// live one), so always a standalone finalized bubble.
+    private func appendReplayedUserMessage(
+        text: String,
+        isCompactionSummary: Bool,
+        containsCompactionSummary: Bool
+    ) {
+        guard !text.isEmpty else { return }
+        let id = nextLocalId
+        nextLocalId -= 1
+        messages.append(HermesMessage(
+            id: id,
+            sessionId: sessionId ?? "",
+            role: "user",
+            content: text,
+            toolCallId: nil,
+            toolCalls: [],
+            toolName: nil,
+            timestamp: Date(),
+            tokenCount: nil,
+            finishReason: nil,
+            reasoning: nil,
+            isCompactionSummary: isCompactionSummary,
+            containsCompactionSummary: containsCompactionSummary
+        ))
+        buildMessageGroups()
     }
 
     private func appendThoughtChunk(text: String) {

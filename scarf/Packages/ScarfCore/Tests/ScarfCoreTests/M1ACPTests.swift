@@ -635,7 +635,7 @@ import Foundation
         let event = try await withTimeout(seconds: 2) {
             await eventTask.value
         }
-        guard case .messageChunk(let sid, let text) = event else {
+        guard case .messageChunk(let sid, let text, _, _) = event else {
             Issue.record("expected .messageChunk, got \(String(describing: event))")
             return
         }

@@ -224,7 +224,7 @@ actor MiniAppAgentSession {
 
     private func handle(_ event: ACPEvent) {
         switch event {
-        case .messageChunk(_, let text):
+        case .messageChunk(_, let text, _, _):
             if pendingContinuation != nil { pendingBuffer += text }
             eventSink?(event)
         case .thoughtChunk, .toolCallStart, .toolCallUpdate:
