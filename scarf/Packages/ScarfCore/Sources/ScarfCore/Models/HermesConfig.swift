@@ -834,6 +834,15 @@ public struct HermesConfig: Sendable {
     public var provider: String
     public var maxTurns: Int
     public var personality: String
+
+    /// Capability-appropriate display value for `agent.max_turns`.
+    /// `maxTurns == 0` means the key is absent from config.yaml (parse
+    /// sentinel); the effective server default is then 500 on Hermes
+    /// v0.20+ and 60 on earlier hosts. Display-only — callers must never
+    /// write the resolved value back to config.yaml.
+    public func displayMaxTurns(capabilities: HermesCapabilities) -> Int {
+        maxTurns > 0 ? maxTurns : (capabilities.isV020OrLater ? 500 : 60)
+    }
     public var terminalBackend: String
     public var memoryEnabled: Bool
     public var memoryCharLimit: Int

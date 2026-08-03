@@ -345,10 +345,11 @@ struct ChatSessionListPane: View {
                 chatViewModel.previewFor(session).lowercased().contains(trimmed)
             }
         }
-        // v0.20: pinned sessions float to the top as their own section,
-        // each group keeping its existing recency order. On pre-0.20
-        // hosts `pinned` is always false (column absent) and this is
-        // an order-preserving no-op.
+        // v0.20: pinned sessions float to the top of the single flat list
+        // (no separate section header — just a stable reorder), each group
+        // keeping its existing recency order. On pre-0.20 hosts `pinned`
+        // is always false (column absent) and this is an order-preserving
+        // no-op.
         return base.filter(\.pinned) + base.filter { !$0.pinned }
     }
 

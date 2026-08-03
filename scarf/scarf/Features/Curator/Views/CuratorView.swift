@@ -20,6 +20,7 @@ import ScarfDesign
 struct CuratorView: View {
     @State private var viewModel: CuratorViewModel
     @State private var showRestoreSheet = false
+    @State private var showAdoptAllConfirmation = false
 
     @Environment(\.hermesCapabilities) private var capabilitiesStore
 
@@ -234,11 +235,24 @@ struct CuratorView: View {
                         if viewModel.isAdopting {
                             ProgressView().controlSize(.small)
                         }
+                        // CuratorService's adopt doc says the UI gates the
+                        // real (dryRun: false) call behind a confirm — this
+                        // alert is that gate for the bulk path. Per-skill
+                        // Adopt stays unconfirmed: one named skill is easy
+                        // to reason about and to re-orphan.
                         Button("Adopt All (\(count))") {
-                            Task { await viewModel.adoptAll() }
+                            showAdoptAllConfirmation = true
                         }
                         .disabled(viewModel.isAdopting)
                         .help("Hand every unmanaged skill to the curator (they become prunable/archivable)")
+                        .alert("Adopt all unmanaged skills?", isPresented: $showAdoptAllConfirmation) {
+                            Button("Adopt All (\(count))") {
+                                Task { await viewModel.adoptAll() }
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text("All \(count) unmanaged skills will be handed to the curator and become eligible for automatic staling, archiving, and pruning.")
+                        }
                     }
                     Text("Skills with no provenance marker are never auto-staled or archived. Adopting hands them to the curator.")
                         .scarfStyle(.caption)

@@ -36,8 +36,9 @@ struct SessionsView: View {
 
     /// Top-of-list filter pills. `today` filters by `startedAt` falling
     /// within the current calendar day; `starred` is a placeholder —
-    /// `HermesSession` has no starred/pinned field today, so the count
-    /// reads 0 and the filter is a no-op until upstream Hermes adds one.
+    /// `HermesSession.pinned` exists as of v0.20 (the Chat sidebar floats
+    /// pinned sessions with it), but this tab hasn't been wired to it yet,
+    /// so the count reads 0 and the filter is a no-op here.
     enum QuickFilter: String, CaseIterable, Identifiable {
         case all, today, starred
         var id: String { rawValue }
@@ -204,8 +205,10 @@ struct SessionsView: View {
     }
 
     /// Apply `quickFilter` on top of the project-filter slice the view
-    /// model owns. `starred` is a no-op until HermesSession gains a
-    /// pinned/starred field — counts read 0 in `quickFilterCount`.
+    /// model owns. `starred` remains a no-op even though
+    /// `HermesSession.pinned` exists (v0.20, used by the Chat sidebar) —
+    /// this tab isn't wired to it yet, so counts read 0 in
+    /// `quickFilterCount`.
     private var visibleSessions: [HermesSession] {
         let base = viewModel.filteredSessions
         switch quickFilter {
@@ -534,12 +537,17 @@ struct SessionsView: View {
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)
                 Picker("Format", selection: $viewModel.exportFormat) {
-                    ForEach(SessionExportFormat.allCases) { format in
+                    ForEach(viewModel.availableExportFormats) { format in
                         Text(format.displayName).tag(format)
                     }
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
+                if viewModel.availableExportFormats.count < SessionExportFormat.allCases.count {
+                    Text("Markdown, Quarto, and HTML exports write files on the remote host, so only stream-capable formats are offered here.")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                }
             }
 
             Toggle("Redact secrets", isOn: $viewModel.exportRedact)
