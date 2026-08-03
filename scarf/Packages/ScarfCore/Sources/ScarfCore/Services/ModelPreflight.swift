@@ -101,7 +101,7 @@ public enum ModelPreflight: Sendable {
     /// stale provider prefix. Reconcile on every Hermes bump alongside
     /// the ModelCatalogService provider tables (GH issue #121).
     static let aggregatorProviders: Set<String> = [
-        "openrouter", "opencode", "opencode-go", "kilo", "huggingface", "novita",
+        "openrouter", "opencode", "opencode-go", "kilo", "huggingface", "novita", "vercel",
     ]
 
     /// Detect a `model.default` / `model.provider` mismatch. Returns
