@@ -29,6 +29,18 @@ public struct HermesCuratorStatus: Sendable, Equatable {
     public let staleSkills: Int
     public let archivedSkills: Int
 
+    /// v0.20 provenance split from the header line
+    /// `curator-managed skills: N total  (agent-created=X  bundled=Y)`.
+    /// `nil` on pre-0.20 hosts that print `agent-created skills: N total`.
+    public let agentCreatedSkills: Int?
+    public let bundledSkills: Int?
+
+    /// v0.20 unmanaged summary block between `pinned` and the top-5 lists:
+    /// `unmanaged (no provenance marker): N total`. `nil` when absent
+    /// (pre-0.20 host, or 0.20 with no unmanaged skills — Hermes omits
+    /// the block entirely when the report is empty).
+    public let unmanagedCount: Int?
+
     public let pinnedNames: [String]
 
     /// Top-5 lists rendered in the curator output. Each row carries the
@@ -50,6 +62,9 @@ public struct HermesCuratorStatus: Sendable, Equatable {
         activeSkills: Int,
         staleSkills: Int,
         archivedSkills: Int,
+        agentCreatedSkills: Int? = nil,
+        bundledSkills: Int? = nil,
+        unmanagedCount: Int? = nil,
         pinnedNames: [String],
         leastRecentlyActive: [HermesCuratorSkillRow],
         mostActive: [HermesCuratorSkillRow],
@@ -67,6 +82,9 @@ public struct HermesCuratorStatus: Sendable, Equatable {
         self.activeSkills = activeSkills
         self.staleSkills = staleSkills
         self.archivedSkills = archivedSkills
+        self.agentCreatedSkills = agentCreatedSkills
+        self.bundledSkills = bundledSkills
+        self.unmanagedCount = unmanagedCount
         self.pinnedNames = pinnedNames
         self.leastRecentlyActive = leastRecentlyActive
         self.mostActive = mostActive
@@ -119,6 +137,27 @@ public struct HermesCuratorSkillRow: Sendable, Equatable, Identifiable {
     }
 }
 
+/// One row of `hermes curator list-unmanaged` (v0.20+) — a curation-
+/// eligible skill with no provenance marker. Rows print as:
+///
+///     <name>  activity=   N  last_activity=<label>  (<marker>)
+///
+/// where `<marker>` is `no marker` or `created_by:null`.
+public struct HermesCuratorUnmanagedSkill: Sendable, Equatable, Identifiable {
+    public var id: String { name }
+    public let name: String
+    public let activityCount: Int
+    public let lastActivityLabel: String
+    public let markerLabel: String    // raw parenthetical, e.g. "no marker"
+
+    public init(name: String, activityCount: Int, lastActivityLabel: String, markerLabel: String) {
+        self.name = name
+        self.activityCount = activityCount
+        self.lastActivityLabel = lastActivityLabel
+        self.markerLabel = markerLabel
+    }
+}
+
 /// Pure parser for `hermes curator status` stdout. Public for tests.
 ///
 /// Format is stable enough to text-parse; we never error on missing
@@ -147,6 +186,9 @@ public enum HermesCuratorStatusParser {
         var active = 0
         var staleCount = 0
         var archived = 0
+        var agentCreated: Int?
+        var bundled: Int?
+        var unmanaged: Int?
 
         var pinned: [String] = []
 
@@ -222,11 +264,41 @@ public enum HermesCuratorStatusParser {
                 continue
             }
 
-            // `agent-created skills: 18 total`
-            if line.hasPrefix("agent-created skills:") {
-                let after = line.dropFirst("agent-created skills:".count).trimmingCharacters(in: .whitespaces)
+            // Header line, version-agnostic (never capability-gate a parser):
+            //   pre-0.20: `agent-created skills: 18 total`
+            //   0.20+:    `curator-managed skills: 18 total  (agent-created=0  bundled=18)`
+            if line.hasPrefix("agent-created skills:") || line.hasPrefix("curator-managed skills:") {
+                let after = line
+                    .drop(while: { $0 != ":" })
+                    .dropFirst()
+                    .trimmingCharacters(in: .whitespaces)
                 if let n = Int(after.split(separator: " ").first ?? "") {
                     total = n
+                }
+                // Optional 0.20 provenance split: `(agent-created=X  bundled=Y)`.
+                if let n = intValue(after: "agent-created=", in: after) {
+                    agentCreated = n
+                }
+                if let n = intValue(after: "bundled=", in: after) {
+                    bundled = n
+                }
+                section = .header
+                continue
+            }
+            // 0.20 empty sentinel (pre-0.20 printed "no agent-created
+            // skills"); either way total stays 0 — consume the line so it
+            // can't be misread as a skill row.
+            if line == "no curator-managed skills" || line == "no agent-created skills" {
+                section = .header
+                continue
+            }
+            // 0.20 unmanaged summary: `unmanaged (no provenance marker): 50 total`
+            if line.hasPrefix("unmanaged (") {
+                if let colon = line.firstIndex(of: ":") {
+                    let after = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                    if let n = Int(after.split(separator: " ").first ?? "") {
+                        unmanaged = n
+                    }
                 }
                 section = .header
                 continue
@@ -291,12 +363,23 @@ public enum HermesCuratorStatusParser {
             activeSkills: active,
             staleSkills: staleCount,
             archivedSkills: archived,
+            agentCreatedSkills: agentCreated,
+            bundledSkills: bundled,
+            unmanagedCount: unmanaged,
             pinnedNames: pinned,
             leastRecentlyActive: leastRecent,
             mostActive: mostActiveRows,
             leastActive: leastActiveRows
         )
         return status
+    }
+
+    /// First integer immediately following `key` in `text`
+    /// (e.g. `intValue(after: "bundled=", in: "(agent-created=0  bundled=18)")` → 18).
+    private static func intValue(after key: String, in text: String) -> Int? {
+        guard let r = text.range(of: key) else { return nil }
+        let digits = text[r.upperBound...].prefix(while: { $0.isNumber })
+        return Int(digits)
     }
 
     /// `active     18` style row inside the skill-count block.

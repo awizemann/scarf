@@ -58,6 +58,145 @@ import Foundation
         #expect(firstRow?.name == "Scarf Dashboard Chart Widget Parse Error Fix")
         #expect(firstRow?.activityCount == 0)
         #expect(firstRow?.lastActivityLabel == "never")
+        // Pre-0.20 output carries no provenance split or unmanaged block.
+        #expect(s.agentCreatedSkills == nil)
+        #expect(s.bundledSkills == nil)
+        #expect(s.unmanagedCount == nil)
+    }
+
+    // MARK: - v0.20 status format (WS-B2)
+
+    /// Real `hermes curator status` output captured live from a v0.20.0
+    /// install (2026-08-03). The header renamed `agent-created skills:`
+    /// → `curator-managed skills: N total  (agent-created=X  bundled=Y)`
+    /// and a new `unmanaged (…)` summary block sits between `pinned` and
+    /// the top-5 lists.
+    private static let realV020Output = """
+    curator: ENABLED
+      runs:           8
+      last run:       6d ago
+      last summary:   auto: 11 marked stale; llm: skipped (consolidation off)
+      last report:    /Users/awizemann/.hermes/logs/curator/20260728-072206
+      interval:       every 7d
+      stale after:    30d unused
+      archive after:  90d unused
+      consolidate:    off (prune-only; LLM merge pass opt-in)
+
+    curator-managed skills: 18 total  (agent-created=0  bundled=18)
+      active     8
+      stale      10
+      archived   0
+
+    unmanaged (no provenance marker): 50 total
+      pre-dates marker    41
+      foreground-created  9
+      never auto-staled or archived — `hermes curator adopt <name>` hands one over
+
+    least recently active (top 5):
+      computer-use                              activity=  0  use=  0  view=  0  patches=  0  last_activity=never
+      docx                                      activity=  0  use=  0  view=  0  patches=  0  last_activity=never
+      evaluating-llms-harness                   activity=  0  use=  0  view=  0  patches=  0  last_activity=never
+      grounded-citations                        activity=  0  use=  0  view=  0  patches=  0  last_activity=never
+      inspecting-hermes-desktop-dom             activity=  0  use=  0  view=  0  patches=  0  last_activity=never
+
+    least active (top 5):
+      computer-use                              activity=  0  use=  0  view=  0  patches=  0  last_activity=never
+      docx                                      activity=  0  use=  0  view=  0  patches=  0  last_activity=never
+      evaluating-llms-harness                   activity=  0  use=  0  view=  0  patches=  0  last_activity=never
+      grounded-citations                        activity=  0  use=  0  view=  0  patches=  0  last_activity=never
+      inspecting-hermes-desktop-dom             activity=  0  use=  0  view=  0  patches=  0  last_activity=never
+    """
+
+    @Test func parseRealV020Output() {
+        let s = HermesCuratorStatusParser.parse(text: Self.realV020Output)
+        #expect(s.state == .enabled)
+        #expect(s.runCount == 8)
+        #expect(s.lastSummary == "auto: 11 marked stale; llm: skipped (consolidation off)")
+        #expect(s.lastReportPath == "/Users/awizemann/.hermes/logs/curator/20260728-072206")
+        #expect(s.totalSkills == 18)
+        #expect(s.activeSkills == 8)
+        #expect(s.staleSkills == 10)
+        #expect(s.archivedSkills == 0)
+        #expect(s.agentCreatedSkills == 0)
+        #expect(s.bundledSkills == 18)
+        #expect(s.unmanagedCount == 50)
+        #expect(s.pinnedNames.isEmpty)
+        #expect(s.leastRecentlyActive.count == 5)
+        #expect(s.leastActive.count == 5)
+        #expect(s.leastRecentlyActive.first?.name == "computer-use")
+    }
+
+    /// v0.20 empty sentinel: `no curator-managed skills` (pre-0.20 said
+    /// `no agent-created skills`), followed by the unmanaged block when
+    /// unmanaged skills exist.
+    @Test func parseV020EmptySentinel() {
+        let text = """
+        curator: ENABLED
+          runs:           0
+          last run:       never
+          last summary:   (none)
+          interval:       every 7d
+          stale after:    30d unused
+          archive after:  90d unused
+          consolidate:    off (prune-only; LLM merge pass opt-in)
+
+        no curator-managed skills
+
+        unmanaged (no provenance marker): 7 total
+          pre-dates marker    5
+          foreground-created  2
+          never auto-staled or archived — `hermes curator adopt <name>` hands one over
+        """
+        let s = HermesCuratorStatusParser.parse(text: text)
+        #expect(s.state == .enabled)
+        #expect(s.totalSkills == 0)
+        #expect(s.agentCreatedSkills == nil)
+        #expect(s.bundledSkills == nil)
+        #expect(s.unmanagedCount == 7)
+        #expect(s.leastRecentlyActive.isEmpty)
+    }
+
+    /// v0.20 nonzero provenance split parses both counters.
+    @Test func parseV020ProvenanceSplit() {
+        let text = "curator-managed skills: 25 total  (agent-created=7  bundled=18)"
+        let s = HermesCuratorStatusParser.parse(text: text)
+        #expect(s.totalSkills == 25)
+        #expect(s.agentCreatedSkills == 7)
+        #expect(s.bundledSkills == 18)
+    }
+
+    // MARK: - v0.20 list-unmanaged (WS-B2)
+
+    /// Rows verified against live `hermes curator list-unmanaged` output
+    /// on v0.20.0 — header line, indented rows with both marker
+    /// variants, multi-word names, and the trailing adopt hint.
+    @Test func listUnmanagedParsesRealShape() {
+        let out = """
+        unmanaged skills (4):
+          CDO Contact Research Automation              activity=   0  last_activity=never           (no marker)
+          godmode                                      activity=   0  last_activity=never           (created_by:null)
+          jupyter-live-kernel                          activity=   4  last_activity=41d ago         (created_by:null)
+          scarf-template-author                        activity=  22  last_activity=36d ago         (created_by:null)
+
+        adopt one with `hermes curator adopt <name>`, or all with `hermes curator adopt --all-unmanaged`
+        """
+        let rows = CuratorService.parseListUnmanaged(out)
+        #expect(rows.count == 4)
+        #expect(rows[0].name == "CDO Contact Research Automation")
+        #expect(rows[0].activityCount == 0)
+        #expect(rows[0].lastActivityLabel == "never")
+        #expect(rows[0].markerLabel == "no marker")
+        #expect(rows[1].name == "godmode")
+        #expect(rows[1].markerLabel == "created_by:null")
+        #expect(rows[2].activityCount == 4)
+        #expect(rows[2].lastActivityLabel == "41d ago")
+        #expect(rows[3].activityCount == 22)
+    }
+
+    /// Empty / sentinel stdout folds to `[]` without throwing.
+    @Test func listUnmanagedEmptyStaysSafe() {
+        #expect(CuratorService.parseListUnmanaged("").isEmpty)
+        #expect(CuratorService.parseListUnmanaged("no unmanaged skills\n").isEmpty)
     }
 
     @Test func parsedPausedState() {
