@@ -11,11 +11,24 @@ import Foundation
 /// Covers three layers:
 ///  1. `ACPEventParser.parse` — the two flags parse off `_meta`, tolerate
 ///     absence / malformed shapes, default `false`.
-///  2. `RichChatViewModel.handleACPEvent` — a summary-flagged chunk reaches
-///     the transcript (bypassing the pre-engagement replay-suppression
-///     gate) with the flag threaded onto the resulting `HermesMessage`,
-///     while a plain replay chunk is still dropped.
+///  2. `HermesMessage.classifyCompactionSummary` +
+///     `HermesDataService.messageFromRow` — hydration owns the styling:
+///     Hermes persists summaries as ORDINARY active rows in `state.db`
+///     (no schema flag), so DB hydration classifies rows by the handoff
+///     markers `ContextCompressor` embeds in the content, and the flags
+///     ride the hydrated `HermesMessage`.
+///  3. `RichChatViewModel.handleACPEvent` — replay chunks (summary-flagged
+///     or not) stay suppressed pre-engagement; the DB-hydrated history is
+///     authoritative, so no replay bypass exists.
 @Suite struct HermesV020CompactionSummaryTests {
+
+    /// Exact opener shared by Hermes' current `SUMMARY_PREFIX` and every
+    /// `_HISTORICAL_SUMMARY_PREFIXES` entry (agent/context_compressor.py).
+    private static let summaryOpener = "[CONTEXT COMPACTION — REFERENCE ONLY]"
+    /// `LEGACY_SUMMARY_PREFIX` (pre-v0.19 short form).
+    private static let legacyOpener = "[CONTEXT SUMMARY]:"
+    /// `_MERGED_SUMMARY_DELIMITER` for merge-into-tail summaries.
+    private static let mergedDelimiter = "[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]"
 
     // MARK: - Helpers
 
@@ -145,7 +158,162 @@ import Foundation
         #expect(containsSummary == false)
     }
 
-    // MARK: - RichChatViewModel: replayed summary gets collapsed treatment
+    // MARK: - classifyCompactionSummary: standalone
+
+    @Test func classifiesCurrentPrefixAsStandaloneSummary() {
+        let content = Self.summaryOpener + " Earlier turns were compacted "
+            + "into the summary below. ...\n## Summary\nWe discussed things."
+        let flags = HermesMessage.classifyCompactionSummary(content: content)
+        #expect(flags.isSummary == true)
+        #expect(flags.containsSummary == false)
+    }
+
+    @Test func classifiesLegacyPrefixAsStandaloneSummary() {
+        let flags = HermesMessage.classifyCompactionSummary(
+            content: Self.legacyOpener + " Older-format summary body."
+        )
+        #expect(flags.isSummary == true)
+        #expect(flags.containsSummary == false)
+    }
+
+    /// Hermes lstrips before matching (`classify_summary_content` does
+    /// `.lstrip()`), so leading whitespace must not defeat detection.
+    @Test func classifiesPrefixAfterLeadingWhitespace() {
+        let flags = HermesMessage.classifyCompactionSummary(
+            content: "\n  " + Self.summaryOpener + " summary body"
+        )
+        #expect(flags.isSummary == true)
+    }
+
+    // MARK: - classifyCompactionSummary: merged-tail
+
+    @Test func classifiesMergedTailAsContainsSummary() {
+        let content = "[PRIOR CONTEXT — for reference only; not a new message]\n"
+            + "the preserved real tail turn\n"
+            + Self.mergedDelimiter + "\n"
+            + Self.summaryOpener + " summary body"
+        let flags = HermesMessage.classifyCompactionSummary(content: content)
+        #expect(flags.isSummary == false)
+        #expect(flags.containsSummary == true)
+    }
+
+    /// The delimiter alone doesn't classify — the summary prefix must
+    /// follow it, mirroring Hermes exactly.
+    @Test func mergedDelimiterWithoutFollowingPrefixIsNotASummary() {
+        let flags = HermesMessage.classifyCompactionSummary(
+            content: "quoting the string " + Self.mergedDelimiter + " with no summary after"
+        )
+        #expect(flags.isSummary == false)
+        #expect(flags.containsSummary == false)
+    }
+
+    // MARK: - classifyCompactionSummary: non-matches
+
+    @Test func ordinaryContentIsNotASummary() {
+        let flags = HermesMessage.classifyCompactionSummary(content: "just a normal reply")
+        #expect(flags.isSummary == false)
+        #expect(flags.containsSummary == false)
+    }
+
+    /// The marker mid-content (e.g. a user quoting it in a code block)
+    /// must NOT match — only the documented start-of-content position.
+    @Test func markerMidContentDoesNotMatch() {
+        let flags = HermesMessage.classifyCompactionSummary(
+            content: "What does the string " + Self.summaryOpener + " mean in my transcript?"
+        )
+        #expect(flags.isSummary == false)
+        #expect(flags.containsSummary == false)
+    }
+
+    @Test func emptyContentIsNotASummary() {
+        let flags = HermesMessage.classifyCompactionSummary(content: "")
+        #expect(flags.isSummary == false)
+        #expect(flags.containsSummary == false)
+    }
+
+    #if canImport(SQLite3)
+    // MARK: - Hydration: messageFromRow sets the flags off persisted rows
+
+    private func makeMessageRow(id: Int, role: String, content: String) -> Row {
+        let pairs: [(String, SQLValue)] = [
+            ("id", .integer(Int64(id))),
+            ("session_id", .text("s1")),
+            ("role", .text(role)),
+            ("content", .text(content)),
+            ("tool_call_id", .null),
+            ("tool_calls", .null),
+            ("tool_name", .null),
+            ("timestamp", .real(1_700_000_000.0 + Double(id))),
+            ("token_count", .integer(10)),
+            ("finish_reason", .null),
+        ]
+        var values: [SQLValue] = []
+        var columnIndex: [String: Int] = [:]
+        for (i, pair) in pairs.enumerated() {
+            values.append(pair.1)
+            columnIndex[pair.0] = i
+        }
+        return Row(values: values, columnIndex: columnIndex)
+    }
+
+    /// End-to-end through the real hydration path: Hermes persists the
+    /// summary as an ordinary active row (hermes_state.py
+    /// `archive_and_compact`); `fetchMessages` → `messageFromRow` must
+    /// classify it and set the styling flags. This is the layer the old
+    /// replay-bypass tests missed — with a DB behind the VM,
+    /// `loadSessionHistory` wholesale-replaces `messages` with these rows.
+    @Test func hydratedStandaloneSummaryRowIsFlagged() async {
+        let mock = MockHermesQueryBackend()
+        let service = HermesDataService(context: .local, backend: mock)
+        _ = await service.open()
+        let rows = [
+            makeMessageRow(id: 3, role: "assistant", content: "real reply"),
+            makeMessageRow(
+                id: 2, role: "user",
+                content: Self.summaryOpener + " Earlier turns were compacted...\nsummary body"
+            ),
+            makeMessageRow(id: 1, role: "user", content: "hi"),
+        ]
+        await mock._seedRows(forSQLPrefix: "SELECT id, session_id", rows)
+
+        let messages = await service.fetchMessages(sessionId: "s1", limit: 10, before: nil)
+        #expect(messages.count == 3)
+        #expect(messages.map { $0.isCompactionSummary } == [false, true, false])
+        #expect(messages.allSatisfy { !$0.containsCompactionSummary })
+    }
+
+    @Test func hydratedMergedTailRowGetsContainsFlagOnly() async {
+        let mock = MockHermesQueryBackend()
+        let service = HermesDataService(context: .local, backend: mock)
+        _ = await service.open()
+        let merged = "preserved tail content\n" + Self.mergedDelimiter + "\n"
+            + Self.summaryOpener + " summary body"
+        await mock._seedRows(
+            forSQLPrefix: "SELECT id, session_id",
+            [makeMessageRow(id: 1, role: "user", content: merged)]
+        )
+
+        let messages = await service.fetchMessages(sessionId: "s1", limit: 10, before: nil)
+        #expect(messages.first?.isCompactionSummary == false)
+        #expect(messages.first?.containsCompactionSummary == true)
+    }
+
+    @Test func hydratedOrdinaryRowsHaveNoFlags() async {
+        let mock = MockHermesQueryBackend()
+        let service = HermesDataService(context: .local, backend: mock)
+        _ = await service.open()
+        await mock._seedRows(
+            forSQLPrefix: "SELECT id, session_id",
+            [makeMessageRow(id: 1, role: "user", content: "plain question about compaction")]
+        )
+
+        let messages = await service.fetchMessages(sessionId: "s1", limit: 10, before: nil)
+        #expect(messages.first?.isCompactionSummary == false)
+        #expect(messages.first?.containsCompactionSummary == false)
+    }
+    #endif
+
+    // MARK: - RichChatViewModel: replay stays fully suppressed pre-engagement
 
     /// A plain (non-summary) replay chunk stays gate-dropped —
     /// unchanged pre-existing behavior (`RichChatEngagementGateTests`
@@ -157,12 +325,11 @@ import Foundation
         #expect(vm.messages.isEmpty)
     }
 
-    /// The core Wave C4 behavior: a `compactionSummary`-flagged
-    /// `agent_message_chunk` reaches the transcript even before the user
-    /// has sent a prompt in this session (that's exactly when Hermes
-    /// replays it), and the resulting message is flagged for the
-    /// collapsed-by-default UI treatment.
-    @Test @MainActor func standaloneSummaryChunkBypassesGateAndIsFlaggedOnMessage() {
+    /// Summary-flagged replay chunks are ALSO gate-dropped now: the
+    /// DB-hydrated history (which classifies the persisted rows itself)
+    /// is authoritative, so letting the replay copies through would
+    /// double-render or be clobbered by `loadSessionHistory`.
+    @Test @MainActor func summaryFlaggedReplayChunksAreAlsoDroppedPreEngagement() {
         let vm = RichChatViewModel(context: .local)
         vm.setSessionId("s")
         vm.handleACPEvent(.messageChunk(
@@ -171,57 +338,28 @@ import Foundation
             isCompactionSummary: true,
             containsCompactionSummary: false
         ))
-        let msg = vm.messages.first
-        #expect(msg != nil)
-        #expect(msg?.content == "Summary of the conversation so far...")
-        #expect(msg?.isCompactionSummary == true)
-        #expect(msg?.containsCompactionSummary == false)
-    }
-
-    /// A `containsCompactionSummary`-flagged chunk (merged-tail replay:
-    /// real preserved content + summary) also bypasses the gate, but is
-    /// NOT marked `isCompactionSummary` — it must stay fully visible,
-    /// never collapsed.
-    @Test @MainActor func mergedTailChunkBypassesGateWithoutFullCollapseFlag() {
-        let vm = RichChatViewModel(context: .local)
-        vm.setSessionId("s")
         vm.handleACPEvent(.messageChunk(
             sessionId: "s",
-            text: "Real preserved reply. Summary of earlier turns...",
+            text: "Merged tail...",
             isCompactionSummary: false,
             containsCompactionSummary: true
         ))
-        let msg = vm.messages.first
-        #expect(msg != nil)
-        #expect(msg?.isCompactionSummary == false)
-        #expect(msg?.containsCompactionSummary == true)
-    }
-
-    /// Same bypass-the-gate behavior for a replayed `user_message_chunk`
-    /// summary (the compressor sometimes persists the handoff under
-    /// `role="user"` to preserve turn alternation).
-    @Test @MainActor func standaloneSummaryUserChunkBypassesGateAndIsFlaggedOnMessage() {
-        let vm = RichChatViewModel(context: .local)
-        vm.setSessionId("s")
         vm.handleACPEvent(.userMessageChunk(
             sessionId: "s",
             text: "Handoff summary under role=user",
             isCompactionSummary: true,
             containsCompactionSummary: false
         ))
-        let msg = vm.messages.first
-        #expect(msg != nil)
-        #expect(msg?.role == "user")
-        #expect(msg?.isCompactionSummary == true)
+        #expect(vm.messages.isEmpty)
     }
 
-    /// A non-summary `user_message_chunk` (shouldn't happen in practice —
-    /// Scarf never sends a live one, and replay only sends this update
-    /// type for summary messages — but tolerate it defensively) is still
-    /// gate-dropped like any other pre-engagement replay content.
-    @Test @MainActor func plainUserChunkStillDroppedPreEngagement() {
+    /// `user_message_chunk` is dropped even post-engagement — Scarf
+    /// never sends a live one; anything arriving is replayed history the
+    /// DB already owns.
+    @Test @MainActor func userChunkDroppedPostEngagementToo() {
         let vm = RichChatViewModel(context: .local)
         vm.setSessionId("s")
+        vm.markPromptSent()
         vm.handleACPEvent(.userMessageChunk(sessionId: "s", text: "not a summary"))
         #expect(vm.messages.isEmpty)
     }

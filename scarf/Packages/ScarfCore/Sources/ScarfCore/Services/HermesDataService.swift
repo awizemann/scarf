@@ -1386,11 +1386,21 @@ public actor HermesDataService {
             if case .integer(let n) = row["hasReasoningContent"] { return n != 0 }
             return reasoningContent?.isEmpty == false
         }()
+        let content = row.string(at: 3)
+        // Hermes persists compaction summaries as ORDINARY active message
+        // rows (hermes_state.py archive_and_compact) — no schema flag —
+        // so hydration classifies by the handoff markers the compressor
+        // embeds in the content itself. This is what drives the
+        // collapsed-summary / badge styling for DB-loaded history; the
+        // ACP replay path deliberately stays fully suppressed
+        // pre-engagement (DB history is authoritative). Rows written by
+        // hosts predating the markers simply never match.
+        let summaryFlags = HermesMessage.classifyCompactionSummary(content: content)
         return HermesMessage(
             id: row.int(at: 0),
             sessionId: row.string(at: 1),
             role: row.string(at: 2),
-            content: row.string(at: 3),
+            content: content,
             toolCallId: row.optionalString(at: 4),
             toolCalls: toolCalls,
             toolName: row.optionalString(at: 6),
@@ -1399,7 +1409,9 @@ public actor HermesDataService {
             finishReason: row.optionalString(at: 9),
             reasoning: hasV07Schema ? row.optionalString(at: 10) : nil,
             reasoningContent: reasoningContent,
-            reasoningContentAvailable: reasoningContentAvailable
+            reasoningContentAvailable: reasoningContentAvailable,
+            isCompactionSummary: summaryFlags.isSummary,
+            containsCompactionSummary: summaryFlags.containsSummary
         )
     }
 

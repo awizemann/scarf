@@ -28,17 +28,19 @@ public struct HermesMessage: Identifiable, Sendable {
     /// (`reasoning_content IS NOT NULL …`), never the blob itself. (t-aud27)
     public let reasoningContentAvailable: Bool
 
-    /// Hermes v0.20 `_meta.hermes.compactionSummary` — the ENTIRE message
-    /// is a replayed compaction handoff summary, not real conversation
-    /// content. Set only on `session/load`/`session/resume` replay
-    /// chunks; always `false` for live turns and older Hermes hosts. UI
-    /// collapses these behind a disclosure row by default.
+    /// The ENTIRE message is a persisted compaction handoff summary, not
+    /// real conversation content. Set at hydration time by
+    /// `HermesDataService.messageFromRow` via
+    /// `classifyCompactionSummary(content:)` — Hermes persists summaries
+    /// as ordinary rows distinguished only by their content markers.
+    /// Always `false` for live turns and rows written by hosts predating
+    /// the markers. UI collapses these behind a disclosure row.
     public let isCompactionSummary: Bool
-    /// Hermes v0.20 `_meta.hermes.containsCompactionSummary` — a
-    /// merged-tail replay message: real preserved content followed by a
-    /// compaction summary. UI keeps the message fully visible (never
-    /// collapsed — that would hide the preserved content) and shows only
-    /// a subtle badge.
+    /// A merged-tail message: real preserved content followed by the
+    /// merge delimiter and a compaction summary. Set at hydration time
+    /// (see `isCompactionSummary`). UI keeps the message fully visible
+    /// (never collapsed — that would hide the preserved content) and
+    /// shows only a subtle badge.
     public let containsCompactionSummary: Bool
 
 
@@ -121,6 +123,65 @@ public struct HermesMessage: Identifiable, Sendable {
         let rt = b.timestamp ?? .distantPast
         if lt != rt { return lt < rt }
         return a.id < b.id
+    }
+
+    // MARK: - Compaction-summary classification (hydration-time)
+
+    /// The exact handoff prefixes Hermes embeds at the start of persisted
+    /// compaction-summary content. Mirrors
+    /// `ContextCompressor._starts_with_summary_prefix` in Hermes'
+    /// `agent/context_compressor.py`:
+    ///  - `SUMMARY_PREFIX` (current + every `_HISTORICAL_SUMMARY_PREFIXES`
+    ///    variant) all begin with the same distinctive bracketed sentence
+    ///    opener, so matching on that opener covers the whole family
+    ///    without byte-pinning the full multi-sentence prefix text.
+    ///  - `LEGACY_SUMMARY_PREFIX` is the short pre-v0.19 form.
+    /// Content-prefix detection is deliberate: Hermes persists summaries
+    /// as ORDINARY message rows in `state.db` (no schema flag), so the
+    /// marker is the only durable signal available at hydration time.
+    /// Older hosts that never wrote these markers simply never match —
+    /// degrading to plain unstyled bubbles.
+    private static let compactionSummaryPrefixes = [
+        "[CONTEXT COMPACTION — REFERENCE ONLY]",
+        "[CONTEXT SUMMARY]:",
+    ]
+
+    /// Merge-into-tail delimiter (`_MERGED_SUMMARY_DELIMITER` in Hermes'
+    /// `agent/context_compressor.py`): when a standalone summary role
+    /// would break turn alternation, Hermes preserves the tail message's
+    /// own content first, then this delimiter, then the summary (whose
+    /// handoff prefix lands right after it rather than at the start).
+    private static let mergedSummaryDelimiter =
+        "[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]"
+
+    /// Classify persisted message content the way Hermes'
+    /// `ContextCompressor.classify_summary_content` does.
+    ///
+    /// Returns `(isSummary, containsSummary)`:
+    ///  - `(true, false)` — standalone: the entire message IS a
+    ///    compaction handoff (prefix at the very start, ignoring
+    ///    leading whitespace). UI may collapse it.
+    ///  - `(false, true)` — merged-tail: real preserved content, then
+    ///    the merge delimiter, then the summary. UI must keep it
+    ///    visible (badge only).
+    ///  - `(false, false)` — ordinary content. A marker appearing
+    ///    mid-content (e.g. quoted in a code block) does NOT match:
+    ///    only the documented positions count.
+    public static func classifyCompactionSummary(
+        content: String
+    ) -> (isSummary: Bool, containsSummary: Bool) {
+        func startsWithPrefix(_ text: Substring) -> Bool {
+            compactionSummaryPrefixes.contains { text.hasPrefix($0) }
+        }
+        let text = content.drop(while: \.isWhitespace)
+        // Merged-tail first, mirroring Hermes: if the delimiter is
+        // present anywhere, the summary prefix must follow it — a
+        // prefix elsewhere does not count.
+        if let range = text.range(of: mergedSummaryDelimiter) {
+            let after = text[range.upperBound...].drop(while: \.isWhitespace)
+            return startsWithPrefix(after) ? (false, true) : (false, false)
+        }
+        return startsWithPrefix(text) ? (true, false) : (false, false)
     }
 
     /// Return a copy of this message with `toolCalls` replaced. Used
