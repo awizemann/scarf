@@ -354,6 +354,11 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
             // is a real result set (which we attribute to the most
             // recent marker we saw).
             if let idx = markerIndex(in: chunk) {
+                // The marker index comes from remote stdout — a hostile
+                // or corrupted host could emit an out-of-range index.
+                guard idx >= 0, idx < expectedCount else {
+                    throw BackendError.parseFailure(stdoutHead: String(chunk.prefix(200)))
+                }
                 // Next array (if any) is this statement's result set.
                 // If the next array is ALSO a marker, the current
                 // statement returned zero rows.
