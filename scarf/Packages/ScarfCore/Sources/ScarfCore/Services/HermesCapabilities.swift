@@ -530,6 +530,27 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// tokens without re-adding the server (v0.18+).
     public var hasMCPReauth: Bool { atLeastSemver(0, 18, 0) }
 
+    // MARK: v0.20 (v2026.8.3) flags
+
+    /// ACP `/compact` was renamed `/compress` (v0.20+, v2026.8.3).
+    public var hasCompressCommand: Bool { isV020OrLater }
+
+    /// `hermes curator adopt` / `hermes curator list-unmanaged` — adopt
+    /// stray notes into curator management and list unmanaged ones
+    /// (v0.20+, v2026.8.3).
+    public var hasCuratorAdopt: Bool { isV020OrLater }
+
+    /// `hermes approvals suggest` — suggest an approval decision for a
+    /// pending request (v0.20+, v2026.8.3).
+    public var hasApprovalsSuggest: Bool { isV020OrLater }
+
+    /// `hermes cron runs` — list past cron job runs (v0.20+, v2026.8.3).
+    public var hasCronRuns: Bool { isV020OrLater }
+
+    /// `hermes sessions export --format md|html|qmd|trace` — additional
+    /// session export formats beyond the default (v0.20+, v2026.8.3).
+    public var hasSessionsExportFormats: Bool { isV020OrLater }
+
     // MARK: Convenience predicates
 
     /// Whether the connected host is on the v0.13 line or newer. Convenience
@@ -565,6 +586,11 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// for UI copy that toggles on the v0.17 → v0.18 boundary without
     /// proxying through a feature-specific flag.
     public var isV018OrLater: Bool { atLeastSemver(0, 18, 0) }
+
+    /// Whether the connected host is on the v0.20 line or newer. Convenience
+    /// for UI copy that toggles on the v0.19 → v0.20 boundary without
+    /// proxying through a feature-specific flag.
+    public var isV020OrLater: Bool { atLeastSemver(0, 20, 0) }
 
     private func atLeastSemver(_ major: Int, _ minor: Int, _ patch: Int) -> Bool {
         guard let s = semver else { return false }
