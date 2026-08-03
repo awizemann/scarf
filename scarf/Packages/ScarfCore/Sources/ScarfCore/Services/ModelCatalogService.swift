@@ -645,7 +645,13 @@ public struct ModelCatalogService: Sendable {
         // only the marketing identifier changed.
         "openrouter/x-ai/grok-4.20-beta": "x-ai/grok-4.20",
         "xai/grok-4.20-beta": "grok-4.20",
-        // (Vercel alias removed in v0.15 — Vercel AI Gateway was deleted.)
+
+        // v0.20: DeepSeek retired `deepseek-chat`/`deepseek-reasoner` on
+        // 2026-07-24; Hermes's model_normalize.py wire-remaps both to
+        // `deepseek-v4-flash` (chat = non-thinking, reasoner = thinking —
+        // thinking mode is controlled separately via extra_body.thinking).
+        "deepseek/deepseek-chat": "deepseek-v4-flash",
+        "deepseek/deepseek-reasoner": "deepseek-v4-flash",
 
         // v0.15: xAI retired a swath of Grok models on May 15. Mirrors
         // `hermes_cli/xai_retirement.py` `_RETIRED_MODELS` — all roll to
@@ -688,7 +694,9 @@ public struct ModelCatalogService: Sendable {
     /// in `hermes-agent/hermes_cli/providers.py`.
     ///
     /// Empty as of v0.15 — Vercel AI Gateway (the only prior entry) was
-    /// removed from Hermes entirely. Kept as a hook for future demotions.
+    /// removed from Hermes entirely, then reintroduced in v0.20 as the
+    /// aggregator `vercel` (see `ModelPreflight.aggregatorProviders`)
+    /// without being re-added here. Kept as a hook for future demotions.
     public static let demotedProviders: Set<String> = []
 
     // MARK: - Image-generation model allowlist (curated)
@@ -762,8 +770,9 @@ public struct ModelCatalogService: Sendable {
         // fans a prompt out to multiple advisor models and aggregates.
         // No credentials (auth_type "virtual"); model IDs are preset
         // names, not catalog slugs. Replaced `google-gemini-cli`, which
-        // v0.18 removed in favor of the models.dev-backed `vertex`
-        // provider (Google Vertex AI, OAuth2 SA/ADC).
+        // v0.18 removed in favor of `vertex` (Google Vertex AI,
+        // OAuth2 SA/ADC) — an overlay-only provider, not models.dev-
+        // backed (see the `vertex` entry below).
         "moa": HermesProviderOverlay(
             displayName: "Mixture of Agents",
             baseURL: "moa://local",
@@ -873,6 +882,29 @@ public struct ModelCatalogService: Sendable {
             subscriptionGated: false,
             docURL: nil
         ),
+        // -- v0.20 additions ---------------------------------------------
+        // Hermes v2026.8.3 added Fireworks AI as overlay-only (not in
+        // models.dev). Wire ID `fireworks` matches HERMES_OVERLAYS
+        // verbatim; env var FIREWORKS_API_KEY.
+        "fireworks": HermesProviderOverlay(
+            displayName: "Fireworks AI",
+            baseURL: "https://api.fireworks.ai/inference/v1",
+            authType: .apiKey,
+            subscriptionGated: false,
+            docURL: nil
+        ),
+        // Vertex authenticates via OAuth2 (service-account JSON / ADC),
+        // not a static API key — resolved specially by Hermes's
+        // agent/vertex_adapter.py (auth_type "vertex" in providers.py),
+        // like bedrock's aws_sdk. Closest Scarf authType is
+        // .oauthExternal. No base URL; no API key.
+        "vertex": HermesProviderOverlay(
+            displayName: "Google Vertex AI",
+            baseURL: nil,
+            authType: .oauthExternal,
+            subscriptionGated: false,
+            docURL: nil
+        ),
     ]
 
     /// Provider-ID aliases — verbatim mirror of `ALIASES` in
@@ -944,6 +976,10 @@ public struct ModelCatalogService: Sendable {
         // `vertex` provider (Google Vertex AI, OAuth2 SA/ADC). Vertex
         // needs no entry here: its aliases live in models.py's picker
         // table, not providers.py ALIASES, which this dict mirrors.
+        // vercel (models.dev ID for AI Gateway)
+        "ai-gateway": "vercel",
+        "aigateway": "vercel",
+        "vercel-ai-gateway": "vercel",
         // huggingface
         "hf": "huggingface",
         "hugging-face": "huggingface",
@@ -970,6 +1006,11 @@ public struct ModelCatalogService: Sendable {
         // gmi
         "gmi-cloud": "gmi",
         "gmicloud": "gmi",
+        // fireworks
+        "fireworks-ai": "fireworks",
+        "fw": "fireworks",
+        // upstage
+        "solar": "upstage",
         // Local server aliases → virtual "local" concept (resolved via user config)
         "lm-studio": "lmstudio",
         "lm_studio": "lmstudio",
@@ -1003,6 +1044,7 @@ public struct ModelCatalogService: Sendable {
     /// Hermes version bumps so display drift stays minimal.
     public static let providerDisplayNameOverrides: [String: String] = [
         "alibaba": "Qwen Cloud",
+        "upstage": "Upstage Solar",
     ]
 }
 

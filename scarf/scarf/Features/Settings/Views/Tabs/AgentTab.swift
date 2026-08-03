@@ -4,10 +4,14 @@ import ScarfCore
 /// Agent tab — turns, reasoning effort, tool use enforcement, approvals, gateway timing, service tier.
 struct AgentTab: View {
     @Bindable var viewModel: SettingsViewModel
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
 
     var body: some View {
         SettingsSection(title: "Turns & Reasoning", icon: "arrow.2.circlepath") {
-            StepperRow(label: "Max Turns", value: viewModel.config.maxTurns, range: 1...200) { viewModel.setMaxTurns($0) }
+            // When `agent.max_turns` is absent (sentinel 0) show the host's
+            // effective default — 500 on v0.20+, 60 before — without writing
+            // it back. Only a user step writes a value.
+            StepperRow(label: "Max Turns", value: viewModel.config.displayMaxTurns(capabilities: capabilitiesStore?.capabilities ?? .empty), range: 1...1000) { viewModel.setMaxTurns($0) }
             PickerRow(label: "Reasoning Effort", selection: viewModel.config.reasoningEffort, options: ["none", "minimal", "low", "medium", "high", "xhigh"]) { viewModel.setReasoningEffort($0) }
             PickerRow(label: "Tool Use Enforcement", selection: viewModel.config.toolUseEnforcement, options: ["auto", "true", "false"]) { viewModel.setToolUseEnforcement($0) }
         }

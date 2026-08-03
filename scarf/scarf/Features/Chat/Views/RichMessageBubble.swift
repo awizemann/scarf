@@ -37,6 +37,14 @@ struct RichMessageBubble: View, Equatable {
     @State private var reasoningExpanded = false
     @State private var lazyReasoningContent: String?
 
+    /// Hermes v0.20 replayed compaction summaries. `isCompactionSummary`
+    /// (the whole message IS the handoff summary) renders as a
+    /// collapsed disclosure row instead of a normal bubble, starting
+    /// closed — the summary is Hermes' internal context bookkeeping,
+    /// not something the user asked for or wrote. `@State` so
+    /// expanding one bubble doesn't re-render siblings.
+    @State private var compactionSummaryExpanded = false
+
     private var toolCardStyle: ToolCardStyle {
         ToolCardStyle(rawValue: toolCardStyleRaw) ?? .full
     }
@@ -73,12 +81,75 @@ struct RichMessageBubble: View, Equatable {
         // `chatStream.handleACPEvent` to see whether streaming churn
         // lives in the parent, the bubble, or the event handler.
         let _: Void = ScarfMon.event(.chatRender, "mac.RichMessageBubble.body")
-        if message.isUser {
+        if message.isCompactionSummary {
+            // The ENTIRE message is a replayed handoff summary (Hermes
+            // v0.20 `_meta.hermes.compactionSummary`) — collapse it
+            // behind a disclosure row regardless of role, rather than
+            // rendering a normal user/assistant bubble the user never
+            // actually wrote or read.
+            compactionSummaryRow
+        } else if message.isUser {
             userBubble
         } else if message.isAssistant {
             assistantBubble
         }
         // Tool result messages are rendered inline in ToolCallCard, not as standalone bubbles
+    }
+
+    // MARK: - Compaction Summary
+
+    /// Collapsed-by-default disclosure for a replayed compaction
+    /// summary message (`_meta.hermes.compactionSummary`). Matches the
+    /// REASONING disclosure's visual language (icon + uppercase label +
+    /// tinted capsule) so it reads as "transcript chrome" rather than a
+    /// conversational turn. `.textSelection(.enabled)` on the expanded
+    /// text keeps it consistent with every other bubble for copy —
+    /// there's no separate "copy" affordance to wire up.
+    private var compactionSummaryRow: some View {
+        DisclosureGroup(isExpanded: $compactionSummaryExpanded) {
+            Text(message.content)
+                .font(ChatFontScale.monoSmall(chatFontScale))
+                .foregroundStyle(ScarfColor.foregroundMuted)
+                .italic()
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 6)
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 11))
+                Text("CONVERSATION COMPACTED — SUMMARY")
+                    .font(ChatFontScale.captionStrong(chatFontScale))
+                    .tracking(0.5)
+            }
+        }
+        .foregroundStyle(ScarfColor.foregroundFaint)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 7).fill(ScarfColor.backgroundSecondary)
+                .overlay(RoundedRectangle(cornerRadius: 7)
+                    .strokeBorder(ScarfColor.border, lineWidth: 1))
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Subtle marker for a merged-tail replay message
+    /// (`_meta.hermes.containsCompactionSummary`): real preserved turn
+    /// content followed by a compaction summary. The message stays
+    /// fully visible on purpose (collapsing would hide the preserved
+    /// content) — this is just a badge, not a disclosure.
+    @ViewBuilder
+    private var containsCompactionSummaryBadge: some View {
+        if message.containsCompactionSummary {
+            HStack(spacing: 3) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 8))
+                Text("Includes compacted history")
+                    .font(ChatFontScale.caption2(chatFontScale))
+            }
+            .foregroundStyle(ScarfColor.foregroundFaint)
+        }
     }
 
     // MARK: - User Bubble
@@ -156,14 +227,17 @@ struct RichMessageBubble: View, Equatable {
                     .fill(ScarfColor.accent)
                 )
             }
-            if let time = message.timestamp {
+            if message.timestamp != nil || message.containsCompactionSummary {
                 HStack(spacing: 4) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 9))
-                        .foregroundStyle(ScarfColor.success)
-                    Text(time, style: .time)
-                        .font(ChatFontScale.caption2(chatFontScale))
-                        .foregroundStyle(ScarfColor.foregroundFaint)
+                    containsCompactionSummaryBadge
+                    if let time = message.timestamp {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(ScarfColor.success)
+                        Text(time, style: .time)
+                            .font(ChatFontScale.caption2(chatFontScale))
+                            .foregroundStyle(ScarfColor.foregroundFaint)
+                    }
                 }
                 .padding(.trailing, 4)
             }
@@ -477,6 +551,9 @@ struct RichMessageBubble: View, Equatable {
             // speak.
             if message.id != 0, !message.content.isEmpty {
                 speakButton
+            }
+            if message.containsCompactionSummary {
+                containsCompactionSummaryBadge
             }
         }
         .font(ChatFontScale.caption(chatFontScale))

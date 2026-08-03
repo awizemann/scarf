@@ -169,7 +169,7 @@ struct SettingsView: View {
         case "model.default": return vm.config.model
         case "model.provider": return vm.config.provider
         case "approvals.mode": return vm.config.approvalMode
-        case "agent.max_turns": return String(vm.config.maxTurns)
+        case "agent.max_turns": return String(vm.config.displayMaxTurns(capabilities: caps))
         case "display.show_cost": return vm.config.showCost ? "true" : "false"
         case "display.show_reasoning": return vm.config.showReasoning ? "true" : "false"
         case "display.streaming": return vm.config.streaming ? "true" : "false"
@@ -197,7 +197,9 @@ struct SettingsView: View {
     private var agentSection: some View {
         Section("Agent") {
             LabeledContent("Approval mode", value: vm.config.approvalMode)
-            LabeledContent("Max turns", value: "\(vm.config.maxTurns)")
+            // Sentinel-aware: absent key shows the host's effective default
+            // (500 on v0.20+, 60 before) rather than 0.
+            LabeledContent("Max turns", value: "\(vm.config.displayMaxTurns(capabilities: caps))")
             LabeledContent("Service tier", value: vm.config.serviceTier)
             yesNoRow("Verbose logging", vm.config.verbose)
             LabeledContent("Tool use enforcement", value: vm.config.toolUseEnforcement)
@@ -346,27 +348,38 @@ struct SettingsView: View {
         }
     }
 
-    /// v0.13 Google Chat status. Whether the platform shows up at all
-    /// is driven by whether `gateway.platforms.google-chat.*` exists in
-    /// config.yaml on the remote — if absent, we render "Not configured".
-    /// Hermes accepts either `google-chat` or `googlechat` as the
-    /// identifier; check both spellings defensively.
+    /// Google Chat status. Checks for a top-level `google_chat:` block in
+    /// the raw YAML — the same config-block presence probe the Mac app's
+    /// `PlatformsViewModel.hasConfigBlock` uses. It can't key off
+    /// `gatewayPlatforms` anymore: google_chat has no allowlist keys (Wave
+    /// B4 removed it from `gatewayAllowlistPlatforms`), so the parser never
+    /// creates an entry for it. The real Hermes identifier is `google_chat`
+    /// (plugins/platforms/google_chat/adapter.py); the legacy hyphenated
+    /// spellings are checked so configs written by older Scarf builds
+    /// still read as configured.
     private var googleChatStatusLabel: String {
-        if vm.config.gatewayPlatforms["google-chat"] != nil
-            || vm.config.gatewayPlatforms["googlechat"] != nil {
+        let topLevelBlocks = Set(
+            vm.rawYAML.components(separatedBy: "\n")
+                .filter { !$0.hasPrefix(" ") && !$0.hasPrefix("\t") }
+                .compactMap { line -> String? in
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    guard trimmed.hasSuffix(":") else { return nil }
+                    return String(trimmed.dropLast())
+                }
+        )
+        for name in ["google_chat", "google-chat", "googlechat"] where topLevelBlocks.contains(name) {
             return "configured"
         }
         return "not configured"
     }
 
-    /// v0.13 cross-platform busy-ack toggle. We summarize per platform
-    /// so users on iOS get a faithful read of the per-platform flag —
-    /// "off on slack, on elsewhere" is a real configuration shape.
-    /// Empty `gatewayPlatforms` shows "default".
+    /// Busy-ack toggle is GLOBAL (`display.busy_ack_enabled`) — Hermes
+    /// never had a working per-platform variant, so surface the single
+    /// global value rather than a per-platform summary.
     @ViewBuilder
     private var gatewayBusyAckRow: some View {
-        let value = summariseGatewayBool(\GatewayPlatformSettings.busyAckEnabled, defaultLabel: "on")
-        LabeledContent("Gateway: busy ack", value: value)
+        LabeledContent("Gateway: busy ack",
+                       value: vm.config.displayBusyAckEnabled ? "on" : "off")
     }
 
     @ViewBuilder

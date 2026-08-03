@@ -298,6 +298,60 @@ import Foundation
         #expect(!names.contains("queue"))
     }
 
+    @MainActor
+    @Test func availableCommandsUsesCompactNamePreV020() {
+        // Pre-0.20 hosts must render byte-identical to today: the
+        // fallback command list surfaces `/compact`, never `/compress`.
+        let vm = RichChatViewModel(context: .local)
+        vm.setSessionId("scratch-session")
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.6.1)")
+        vm.publishCapabilities(caps)
+        let names = vm.availableCommands.map(\.name)
+        #expect(names.contains("compact"))
+        #expect(!names.contains("compress"))
+    }
+
+    @MainActor
+    @Test func availableCommandsUsesCompressNameOnV020() {
+        // v0.20+ hosts renamed the ACP command; the fallback list must
+        // switch to `/compress` and never show `/compact` alongside it.
+        let vm = RichChatViewModel(context: .local)
+        vm.setSessionId("scratch-session")
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)")
+        vm.publishCapabilities(caps)
+        let names = vm.availableCommands.map(\.name)
+        #expect(names.contains("compress"))
+        #expect(!names.contains("compact"))
+    }
+
+    @MainActor
+    @Test func availableCommandsDedupesCompressAgainstACPAdvertised() {
+        // When Hermes itself advertises `/compress` via
+        // `available_commands_update`, the static fallback must not
+        // duplicate it (or reintroduce `/compact`) alongside the
+        // ACP-sourced entry.
+        let vm = RichChatViewModel(context: .local)
+        vm.setSessionId("scratch-session")
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)")
+        vm.publishCapabilities(caps)
+        vm.handleACPEvent(
+            .availableCommands(sessionId: "scratch-session", commands: [
+                ["name": "compress", "description": "Compress the conversation history"]
+            ])
+        )
+        let names = vm.availableCommands.map(\.name)
+        #expect(names.filter { $0 == "compress" }.count == 1)
+        #expect(!names.contains("compact"))
+    }
+
+    @Test func sessionRequiredCommandNamesCoversBothCompactSpellings() {
+        // The grey-out set is capability-independent (static), so it
+        // must cover both spellings even though only one is ever
+        // surfaced in the menu at a time.
+        #expect(RichChatViewModel.sessionRequiredCommandNames.contains("compact"))
+        #expect(RichChatViewModel.sessionRequiredCommandNames.contains("compress"))
+    }
+
     @Test func parseGoalArgumentRecognizesClearVariants() {
         #expect(RichChatViewModel.parseGoalArgument("--clear") == .clear)
         #expect(RichChatViewModel.parseGoalArgument("clear") == .clear)

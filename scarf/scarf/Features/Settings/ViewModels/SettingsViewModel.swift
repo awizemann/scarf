@@ -509,4 +509,92 @@ final class SettingsViewModel {
     private func runHermes(_ arguments: [String]) -> (output: String, exitCode: Int32) {
         context.runHermes(arguments)
     }
+
+    // MARK: - Allowlist suggestions (Hermes v0.20+, `hermes approvals suggest`)
+
+    /// Proposals mined from approval history. Only populated on v0.20+
+    /// hosts — the SecurityTab section that triggers `loadApprovalSuggestions`
+    /// is capability-gated on `hasApprovalsSuggest`, so pre-0.20 hosts never
+    /// issue the CLI call and never see the section.
+    var approvalProposals: [HermesApprovalProposal] = []
+    var isLoadingApprovalSuggestions = false
+    /// Non-nil after a load attempt; distinguishes "no proposals" from
+    /// "not loaded yet" so the empty state renders honestly.
+    var approvalSuggestionsLoaded = false
+    var approvalSuggestMessage: String?
+    /// Proposal currently being applied (its `n`), to disable just that row's button.
+    var applyingProposalN: Int?
+
+    /// Run the read-only mining pass (`approvals suggest --json`). Never
+    /// destructive — nothing is written without `--apply`.
+    func loadApprovalSuggestions(force: Bool = false) {
+        if isLoadingApprovalSuggestions { return }
+        if approvalSuggestionsLoaded && !force { return }
+        isLoadingApprovalSuggestions = true
+        let svc = fileService
+        let log = logger
+        Task.detached { [weak self] in
+            let result = svc.runHermesCLISplit(args: HermesApprovalsSuggestParser.suggestArgs(), timeout: 60)
+            let proposals = result.exitCode == 0 ? HermesApprovalsSuggestParser.parse(json: result.stdout) : nil
+            if proposals == nil {
+                log.warning("approvals suggest failed (exit \(result.exitCode)): \(result.stderr.prefix(300))")
+            }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.approvalProposals = proposals ?? []
+                self.approvalSuggestionsLoaded = true
+                self.isLoadingApprovalSuggestions = false
+                if proposals == nil {
+                    self.approvalSuggestMessage = "Couldn't mine approval history."
+                }
+            }
+        }
+    }
+
+    /// Apply exactly ONE proposal (`--apply <n>`). Writes to
+    /// `command_allowlist` in config.yaml, so this only ever runs from an
+    /// explicit per-proposal user click — no bulk apply exists by design.
+    /// On success the config and the proposal list are both reloaded (the
+    /// CLI re-numbers survivors, so stale `n` values must not be reused).
+    func applyApprovalProposal(_ proposal: HermesApprovalProposal) {
+        guard applyingProposalN == nil,
+              let args = HermesApprovalsSuggestParser.applyArgs(indices: [proposal.n]) else { return }
+        applyingProposalN = proposal.n
+        let svc = fileService
+        let log = logger
+        Task.detached { [weak self] in
+            let result = svc.runHermesCLISplit(args: args, timeout: 60)
+            let applied = result.exitCode == 0
+                ? HermesApprovalsSuggestParser.parseApplyResult(json: result.stdout)
+                : nil
+            if applied == nil {
+                log.warning("approvals suggest --apply \(proposal.n) failed (exit \(result.exitCode)): \(result.stderr.prefix(300))")
+            }
+            let cfg = applied != nil ? svc.loadConfig() : nil
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.applyingProposalN = nil
+                if let applied {
+                    if let cfg { self.config = cfg }
+                    self.approvalSuggestMessage =
+                        "Added \(applied.applied.joined(separator: ", ")) — allowlist now \(applied.allowlistSize) entries"
+                } else {
+                    self.approvalSuggestMessage = "Apply failed: \(result.stderr.isEmpty ? result.stdout.prefix(200) : result.stderr.prefix(200))"
+                }
+                // Indices shift after an apply — always re-mine.
+                self.loadApprovalSuggestions(force: true)
+                // Compare-before-clear (same pattern as
+                // MCPServersViewModel.statusMessage): a newer banner from a
+                // subsequent apply must not be wiped by this one's timer.
+                let shownMessage = self.approvalSuggestMessage
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    guard let self else { return }
+                    if self.approvalSuggestMessage == shownMessage {
+                        self.approvalSuggestMessage = nil
+                    }
+                }
+            }
+        }
+    }
 }

@@ -33,6 +33,10 @@ final class DashboardViewModel {
     /// `ActivityEntry` rows for the Dashboard's "Recent activity" card.
     /// Same data source as ActivityView, just a smaller slice.
     var recentActivity: [ActivityEntry] = []
+    /// Per-model token/cost breakdown (Hermes v0.20+). Empty on older
+    /// hosts whose state.db lacks the `session_model_usage` table —
+    /// the Dashboard section hides itself in that case.
+    var modelUsage: [HermesDataService.ModelUsageStat] = []
     var config = HermesConfig.empty
     var gatewayState: GatewayState?
     var hermesRunning = false
@@ -94,6 +98,7 @@ final class DashboardViewModel {
             stats = snapshot.stats
             recentSessions = snapshot.recentSessions
             sessionPreviews = snapshot.sessionPreviews
+            modelUsage = snapshot.modelUsage
             recentActivity = snapshot.recentToolCalls.flatMap { msg in
                 msg.toolCalls.map { call in
                     ActivityEntry(

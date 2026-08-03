@@ -568,4 +568,56 @@ import Foundation
     @Test func isV018OrLater_emptyFalse() {
         #expect(!HermesCapabilities.empty.isV018OrLater)
     }
+
+    // MARK: - v0.20 capability flags
+
+    @Test func v020FlagsAllOnForV020Host() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)")
+        #expect(caps.hasCompressCommand)
+        #expect(caps.hasCuratorAdopt)
+        #expect(caps.hasApprovalsSuggest)
+        #expect(caps.hasCronRuns)
+        #expect(caps.hasSessionsExportFormats)
+        #expect(caps.isV020OrLater)
+    }
+
+    @Test func v019HostHidesV020Flags() {
+        // Every v0.20 flag must stay off on a pristine v0.19 host so the UI
+        // degrades silently; v0.18 flags themselves remain on.
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.19.2 (2026.7.20)")
+        #expect(!caps.hasCompressCommand)
+        #expect(!caps.hasCuratorAdopt)
+        #expect(!caps.hasApprovalsSuggest)
+        #expect(!caps.hasCronRuns)
+        #expect(!caps.hasSessionsExportFormats)
+        #expect(!caps.isV020OrLater)
+        // v0.18 surfaces stay alive on a v0.19 host.
+        #expect(caps.hasCronAttachToSession)
+        #expect(caps.hasMCPReauth)
+        #expect(caps.isV018OrLater)
+    }
+
+    @Test func v0_20_patchReleaseStillEnablesAllFlags() {
+        // A future v0.20.x patch should still enable every v0.20 flag —
+        // patches don't roll back capability gates.
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.1 (2026.8.10)")
+        #expect(caps.hasCompressCommand)
+        #expect(caps.hasCuratorAdopt)
+        #expect(caps.hasApprovalsSuggest)
+        #expect(caps.hasCronRuns)
+        #expect(caps.hasSessionsExportFormats)
+        #expect(caps.isV020OrLater)
+    }
+
+    @Test func isV020OrLater_v020HostTrue() {
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)").isV020OrLater)
+    }
+
+    @Test func isV020OrLater_v019HostFalse() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.19.2 (2026.7.20)").isV020OrLater)
+    }
+
+    @Test func isV020OrLater_emptyFalse() {
+        #expect(!HermesCapabilities.empty.isV020OrLater)
+    }
 }

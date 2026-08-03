@@ -834,6 +834,15 @@ public struct HermesConfig: Sendable {
     public var provider: String
     public var maxTurns: Int
     public var personality: String
+
+    /// Capability-appropriate display value for `agent.max_turns`.
+    /// `maxTurns == 0` means the key is absent from config.yaml (parse
+    /// sentinel); the effective server default is then 500 on Hermes
+    /// v0.20+ and 60 on earlier hosts. Display-only — callers must never
+    /// write the resolved value back to config.yaml.
+    public func displayMaxTurns(capabilities: HermesCapabilities) -> Int {
+        maxTurns > 0 ? maxTurns : (capabilities.isV020OrLater ? 500 : 60)
+    }
     public var terminalBackend: String
     public var memoryEnabled: Bool
     public var memoryCharLimit: Int
@@ -896,10 +905,17 @@ public struct HermesConfig: Sendable {
     /// patches and API payloads. Surface a toggle so users with hard
     /// redaction requirements can opt back in.
     public var redactionEnabled: Bool
-    /// `agent.runtime_metadata_footer` — opt-in compact footer on each
-    /// final reply (provider/model/cost/turn count). Off by default;
-    /// useful for cost auditing and screen-recording demos.
+    /// `display.runtime_footer.enabled` — opt-in compact footer on the
+    /// final reply of a turn (e.g. `model · 68% · ~/projects`). Off by
+    /// default; useful for cost auditing and screen-recording demos.
+    /// (Older Scarf builds wrote the nonexistent
+    /// `agent.runtime_metadata_footer`; the YAML reader still accepts it
+    /// as a fallback, but writes target only the real key.)
     public var runtimeMetadataFooter: Bool
+    /// `display.busy_ack_enabled` — GLOBAL "agent is working…" ack toggle.
+    /// Hermes reads only this key (gateway/run.py); there is no working
+    /// per-platform variant. Default `true` matches the server default.
+    public var displayBusyAckEnabled: Bool
     /// `web.backend` — the shared Web Tools backend (all supported
     /// hosts). v0.13+ hosts treat it as the fallback the per-capability
     /// overrides below inherit from when unset.
@@ -915,7 +931,7 @@ public struct HermesConfig: Sendable {
     // -- Hermes v0.13 additions ----------------------------------------
     // Per-platform Messaging Gateway settings dictionary keyed by Hermes
     // platform identifier (`slack`, `telegram`, `matrix`, `mattermost`,
-    // `whatsapp`, `dingtalk`, `google-chat`). Populated only for platforms
+    // `whatsapp`, `dingtalk`). Populated only for platforms
     // whose `gateway.platforms.<platform>.*` block exists in config.yaml —
     // platforms without an explicit block don't appear in the dictionary.
     // Editing surfaces (per-platform setup forms) read with a `?? .empty`
@@ -1050,6 +1066,7 @@ public struct HermesConfig: Sendable {
         cacheTTL: String = "5m",
         redactionEnabled: Bool = false,
         runtimeMetadataFooter: Bool = false,
+        displayBusyAckEnabled: Bool = true,
         gatewayPlatforms: [String: GatewayPlatformSettings] = [:],
         imageGenModel: String = "",
         openrouterResponseCacheEnabled: Bool = false,
@@ -1068,6 +1085,7 @@ public struct HermesConfig: Sendable {
         self.cacheTTL = cacheTTL
         self.redactionEnabled = redactionEnabled
         self.runtimeMetadataFooter = runtimeMetadataFooter
+        self.displayBusyAckEnabled = displayBusyAckEnabled
         self.gatewayPlatforms = gatewayPlatforms
         self.imageGenModel = imageGenModel
         self.openrouterResponseCacheEnabled = openrouterResponseCacheEnabled

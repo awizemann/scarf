@@ -553,6 +553,29 @@ private struct LocalSQLite3Transport: ServerTransport {
         #expect(results[2].count == 1)
     }
 
+    /// Hardening: a hostile/corrupted remote emitting a marker row with an
+    /// out-of-range index (e.g. `__SCARF_RS_BEGIN__999`) must throw
+    /// `BackendError.parseFailure`, not crash with index-out-of-range.
+    /// We provoke it through the public API: a SELECT whose result row is
+    /// itself marker-shaped, so the parser reads it as marker 999.
+    @Test func queryBatchRejectsOutOfRangeMarkerIndex() async throws {
+        try requireSqlite3()
+        let dbURL = try makeFixtureStateDB()
+        defer {
+            try? FileManager.default.removeItem(at: dbURL)
+            try? FileManager.default.removeItem(at: dbURL.deletingLastPathComponent().appendingPathComponent("state.db"))
+        }
+        let ctx = makeFixtureContext(dbURL: dbURL)
+        let backend = RemoteSQLiteBackend(context: ctx, transport: LocalSQLite3Transport())
+        _ = await backend.open()
+
+        await #expect(throws: BackendError.self) {
+            _ = try await backend.queryBatch([
+                (sql: "SELECT '__SCARF_RS_BEGIN__999' AS marker", params: [])
+            ])
+        }
+    }
+
     // MARK: - Column-order preservation (v2.18 parser)
 
     /// Insert a raw row directly via libsqlite3 (the backend opens the

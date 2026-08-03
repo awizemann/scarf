@@ -40,6 +40,65 @@ enum SessionDeletedSignal {
     nonisolated static let contextKey = "context"
 }
 
+/// `hermes sessions export --format {jsonl,md,qmd,html,trace}` (v0.20+,
+/// gated on `HermesCapabilities.hasSessionsExportFormats`). Cases mirror the
+/// CLI's own `--format` choices exactly, so `cliValue == rawValue`.
+///
+/// Stdout (`-`) support was verified against the live v0.20 CLI rather than
+/// assumed from `--help` text, because the help text is misleading: the
+/// qmd/md validation error ("stdout (-) is only supported with --format
+/// jsonl") reads as if only jsonl supports it, but `trace` accepts `-` too
+/// (confirmed via `hermes sessions export - --format trace --dry-run
+/// --session-id <real-id>` — it proceeded straight to transcript lookup,
+/// never hit the stdout-format guard). `html` and `md`/`qmd` do error and
+/// require a real output path/directory.
+enum SessionExportFormat: String, CaseIterable, Identifiable {
+    case jsonl
+    case markdown = "md"
+    case quarto = "qmd"
+    case html
+    case trace
+
+    var id: String { rawValue }
+
+    /// Value passed to `--format`.
+    var cliValue: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .jsonl: return "JSONL"
+        case .markdown: return "Markdown"
+        case .quarto: return "Quarto"
+        case .html: return "HTML"
+        case .trace: return "Trace"
+        }
+    }
+
+    /// `jsonl` and `trace` write to the CLI's `-` stdout sentinel — Scarf
+    /// captures those bytes and writes them to the chosen Mac path itself
+    /// (the existing local/remote-safe flow). `html`/`md`/`qmd` don't
+    /// support stdout and must be given a real output path, which the CLI
+    /// then writes to wherever `hermes` runs.
+    var usesStdout: Bool { self == .jsonl || self == .trace }
+
+    /// md/qmd export a *directory* of files (CLI default:
+    /// `<hermes home>/session-exports`), not a single file.
+    var isDirectoryOutput: Bool { self == .markdown || self == .quarto }
+
+    /// Sensible single-file extension. Unused for `isDirectoryOutput`
+    /// formats, which pick a destination folder instead.
+    var fileExtension: String {
+        switch self {
+        case .jsonl: return "jsonl"
+        case .markdown: return "md"
+        case .quarto: return "qmd"
+        case .html: return "html"
+        // Trace emits Claude Code JSONL for the HF Agent Trace Viewer.
+        case .trace: return "jsonl"
+        }
+    }
+}
+
 @Observable
 final class SessionsViewModel {
     let context: ServerContext
@@ -99,6 +158,27 @@ final class SessionsViewModel {
     /// failures stay until the next attempt, because an export that
     /// reports nothing at all is the bug this replaced.
     var exportMessage: String?
+
+    // MARK: - Export format picker (v0.20, hasSessionsExportFormats)
+
+    /// Bound to the format-picker sheet's `Picker`. Reset to `.jsonl`
+    /// whenever a new export flow starts so a stale pick from a previous
+    /// session doesn't leak forward.
+    var exportFormat: SessionExportFormat = .jsonl
+    /// Bound to the format-picker sheet's "Redact secrets" `Toggle`.
+    var exportRedact = false
+    /// Drives the format-picker sheet. Only ever set `true` by
+    /// `beginExportFlow` when the host is v0.20+; pre-0.20 hosts skip
+    /// straight to the save panel exactly as before.
+    var showExportOptionsSheet = false
+
+    /// Session to export, captured when the picker sheet opens so
+    /// `confirmExportOptions()` knows what to hand the CLI. `nil` means
+    /// "export all".
+    private var pendingExportSessionId: String?
+    /// Filename/folder-name stem (no extension) suggested to the save/open
+    /// panel once the format is chosen.
+    private var pendingExportBaseName: String = "hermes-sessions"
 
     // MARK: - Project attribution (v2.5)
     //
@@ -283,44 +363,135 @@ final class SessionsViewModel {
 
     // MARK: - Export
 
-    func exportSession(_ session: HermesSession) {
-        beginExport(sessionId: session.id, suggestedName: "\(session.id).jsonl")
+    /// Formats offered in the export picker. On a remote context only the
+    /// stdout-capable formats (`jsonl`, `trace`) are offered: the path
+    /// formats (`html`/`md`/`qmd`) hand the save panel's Mac-local path to
+    /// a CLI that executes on the far host over SSH, so the file would land
+    /// on the remote box while the success banner claims a local path (the
+    /// exact bug class `beginExport`'s doc comment describes for the stdout
+    /// flow). Local contexts keep all five formats.
+    var availableExportFormats: [SessionExportFormat] {
+        context.isRemote
+            ? SessionExportFormat.allCases.filter(\.usesStdout)
+            : SessionExportFormat.allCases
     }
 
-    func exportAll() {
-        beginExport(sessionId: nil, suggestedName: "hermes-sessions.jsonl")
+    /// - Parameter formatsAvailable: `HermesCapabilities.hasSessionsExportFormats`,
+    ///   read by the view from `@Environment(\.hermesCapabilities)`. The
+    ///   view model has no capability store of its own — same split as
+    ///   `PlatformsView`/`GatewayBehaviorViewModel`, where the environment
+    ///   read stays in SwiftUI and the flag crosses in as a plain `Bool`.
+    func exportSession(_ session: HermesSession, formatsAvailable: Bool) {
+        beginExportFlow(sessionId: session.id, suggestedBaseName: session.id, formatsAvailable: formatsAvailable)
+    }
+
+    func exportAll(formatsAvailable: Bool) {
+        beginExportFlow(sessionId: nil, suggestedBaseName: "hermes-sessions", formatsAvailable: formatsAvailable)
+    }
+
+    /// Pre-0.20 hosts: identical to the original behavior — straight to the
+    /// save panel, jsonl only, no picker sheet. v0.20+: opens the
+    /// format/redact picker sheet; `confirmExportOptions()` continues once
+    /// the user picks.
+    private func beginExportFlow(sessionId: String?, suggestedBaseName: String, formatsAvailable: Bool) {
+        guard formatsAvailable else {
+            exportFormat = .jsonl
+            exportRedact = false
+            beginExport(sessionId: sessionId, suggestedName: "\(suggestedBaseName).jsonl", format: .jsonl, redact: false)
+            return
+        }
+        pendingExportSessionId = sessionId
+        pendingExportBaseName = suggestedBaseName
+        exportFormat = .jsonl
+        exportRedact = false
+        showExportOptionsSheet = true
+    }
+
+    /// Called from the picker sheet's "Export" button. Routes to the
+    /// stdout-capture flow (jsonl/trace) or the real-output-path flow
+    /// (html/md/qmd) depending on the chosen format.
+    func confirmExportOptions() {
+        showExportOptionsSheet = false
+        let sessionId = pendingExportSessionId
+        let baseName = pendingExportBaseName
+        pendingExportSessionId = nil
+        beginExport(
+            sessionId: sessionId,
+            suggestedName: "\(baseName).\(exportFormat.fileExtension)",
+            format: exportFormat,
+            redact: exportRedact
+        )
+    }
+
+    func cancelExportOptions() {
+        showExportOptionsSheet = false
+        pendingExportSessionId = nil
     }
 
     /// The export always lands on **this Mac**, whichever host Hermes runs
     /// on — that's what someone driving a Mac GUI is asking for.
     ///
-    /// Passing the panel's path to the CLI can't do that: on a remote
-    /// context `hermes` executes on the far host over SSH, so a path from
-    /// `NSSavePanel` (a path on this Mac) either fails against a directory
-    /// the host doesn't have or dumps the file on the remote box where the
-    /// user will never find it. Instead we ask the CLI for the payload on
-    /// **stdout** (`sessions export -`, jsonl) and write those bytes here.
-    /// Same code path for local and remote — nothing to branch on.
-    private func beginExport(sessionId: String?, suggestedName: String) {
+    /// For `jsonl`/`trace` (stdout-capable formats), passing the panel's
+    /// path to the CLI can't do that: on a remote context `hermes` executes
+    /// on the far host over SSH, so a path from `NSSavePanel` (a path on
+    /// this Mac) either fails against a directory the host doesn't have or
+    /// dumps the file on the remote box where the user will never find it.
+    /// Instead we ask the CLI for the payload on **stdout** (`sessions
+    /// export -`) and write those bytes here. Same code path for local and
+    /// remote — nothing to branch on.
+    ///
+    /// `html`/`md`/`qmd` don't support stdout at all (confirmed against the
+    /// live v0.20 CLI — see `SessionExportFormat`'s doc comment), so those
+    /// hand the CLI the chosen path directly; the file lands on whichever
+    /// host `hermes` runs on, same as any other path-taking CLI flag on a
+    /// remote context.
+    private func beginExport(sessionId: String?, suggestedName: String, format: SessionExportFormat, redact: Bool) {
+        if format.isDirectoryOutput {
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.canCreateDirectories = true
+            panel.prompt = "Export"
+            panel.message = "Choose a folder for the \(format.displayName) export."
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            performPathExport(to: url, sessionId: sessionId, format: format, redact: redact)
+            return
+        }
         let panel = NSSavePanel()
         panel.nameFieldStringValue = suggestedName
-        // `jsonl` has no system-declared UTType. Minting a dynamic one
-        // stops the panel rewriting the name to `.json`, which the old
-        // `[.json]` list did to every export.
-        panel.allowedContentTypes = [UTType(filenameExtension: "jsonl") ?? .json]
+        // Formats like `jsonl` have no system-declared UTType. Minting a
+        // dynamic one stops the panel rewriting the name to something else,
+        // which the old `[.json]` list did to every jsonl export.
+        panel.allowedContentTypes = [UTType(filenameExtension: format.fileExtension) ?? .json]
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        performExport(to: url, sessionId: sessionId)
+        if format.usesStdout {
+            performExport(to: url, sessionId: sessionId, format: format, redact: redact)
+        } else {
+            performPathExport(to: url, sessionId: sessionId, format: format, redact: redact)
+        }
+    }
+
+    /// Builds the `hermes sessions export` argv. `format`/`redact` default
+    /// to the pre-0.20 shape (`jsonl`, no `--redact`) so every existing
+    /// call site — and the argv-shape tests pinning them — keeps producing
+    /// exactly the same arguments it always has.
+    static func exportArguments(output: String, sessionId: String?, format: SessionExportFormat = .jsonl, redact: Bool = false) -> [String] {
+        var args = ["sessions", "export", output]
+        if format != .jsonl { args += ["--format", format.cliValue] }
+        if redact { args += ["--redact"] }
+        if let sessionId { args += ["--session-id", sessionId] }
+        return args
     }
 
     /// Pipes the export out of the CLI and writes it to `url` on this Mac.
     /// Detached because a remote export is an SSH round-trip streaming the
     /// whole payload — running it inline would block the main actor for its
     /// full duration.
-    func performExport(to url: URL, sessionId: String?) {
-        // `-` is the CLI's "write jsonl to stdout" sentinel.
-        var args = ["sessions", "export", "-"]
-        if let sessionId { args += ["--session-id", sessionId] }
+    func performExport(to url: URL, sessionId: String?, format: SessionExportFormat = .jsonl, redact: Bool = false) {
+        // `-` is the CLI's "write to stdout" sentinel — only valid for
+        // stdout-capable formats (jsonl/trace).
+        let args = Self.exportArguments(output: "-", sessionId: sessionId, format: format, redact: redact)
         Task.detached { [sessionExportRunner, context, args, url, self] in
             let result = sessionExportRunner(context, args)
             let outcome = Self.writeExport(result: result, to: url)
@@ -333,6 +504,31 @@ final class SessionsViewModel {
                     // Only clear our own banner — a newer export may
                     // have replaced it while we slept.
                     if self?.exportMessage == banner { self?.exportMessage = nil }
+                }
+            }
+        }
+    }
+
+    /// Real-output-path flow for `html`/`md`/`qmd`: the CLI writes the file
+    /// (or directory of files) itself, so there's no stdout payload to pipe
+    /// back — we just run the command and report the exit code.
+    func performPathExport(to url: URL, sessionId: String?, format: SessionExportFormat, redact: Bool) {
+        let args = Self.exportArguments(output: url.path, sessionId: sessionId, format: format, redact: redact)
+        Task.detached { [sessionExportRunner, context, args, url, self] in
+            let result = sessionExportRunner(context, args)
+            await MainActor.run {
+                if result.exitCode == 0 {
+                    let banner = "Exported to \(url.path)"
+                    self.exportMessage = banner
+                    Task { @MainActor [weak self] in
+                        try? await Task.sleep(for: .seconds(5))
+                        if self?.exportMessage == banner { self?.exportMessage = nil }
+                    }
+                } else {
+                    let detail = Self.errorSummary(from: result.stderr)
+                    self.exportMessage = detail.isEmpty
+                        ? "Export failed (exit \(result.exitCode))."
+                        : "Export failed: \(detail)"
                 }
             }
         }

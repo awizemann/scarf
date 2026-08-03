@@ -28,10 +28,15 @@ final class GatewayBehaviorViewModel {
     // Allowlist
     var items: [String] = []
 
-    // Behavior toggles
+    // Behavior toggles.
+    //
+    // `busyAckEnabled` is GLOBAL: Hermes reads only `display.busy_ack_enabled`
+    // (gateway/run.py bridges it to HERMES_GATEWAY_BUSY_ACK_ENABLED); the
+    // per-platform `gateway.platforms.<p>.busy_ack_enabled` key Scarf used
+    // to write was never read. The toggle is surfaced in each platform's
+    // setup view for discoverability but edits apply gateway-wide.
     var busyAckEnabled: Bool = true
     var gatewayRestartNotification: Bool = false
-    var slashCommandNoticeTTLSeconds: Int = 0
 
     var message: String?
     var isSaving: Bool = false
@@ -63,9 +68,8 @@ final class GatewayBehaviorViewModel {
         } else {
             items = []
         }
-        busyAckEnabled              = block.busyAckEnabled
+        busyAckEnabled              = cfg.displayBusyAckEnabled
         gatewayRestartNotification  = block.gatewayRestartNotification
-        slashCommandNoticeTTLSeconds = block.slashCommandNoticeTTLSeconds
     }
 
     /// Persist edits in two phases:
@@ -75,10 +79,11 @@ final class GatewayBehaviorViewModel {
     ///    Skipped when the platform has no `kind` (no allowlist surface)
     ///    or the host doesn't advertise `hasGatewayAllowlists`.
     /// 2. **Scalar saves** via `PlatformSetupHelpers.saveForm` for the
-    ///    three v0.13 behavior toggles. Each gated on its own capability
-    ///    flag; the TTL field rides on the `hasGatewayBusyAckToggle ‖
-    ///    hasGatewayRestartNotification` proxy (see WS-5 plan §Open Questions
-    ///    Q5 + WS-1 Decision F).
+    ///    behavior toggles, each gated on its own capability flag. Busy
+    ///    ack writes the GLOBAL `display.busy_ack_enabled` — the only key
+    ///    Hermes reads. (The old per-platform busy-ack key and the
+    ///    `slash_command_notice_ttl_seconds` key were never read by any
+    ///    Hermes version and are no longer written.)
     func save() {
         isSaving = true
         defer {
@@ -110,21 +115,13 @@ final class GatewayBehaviorViewModel {
 
         // Step 2: scalar saves via `hermes config set`.
         var configKV: [String: String] = [:]
-        let prefix = "gateway.platforms.\(platform)."
         if capabilities.hasGatewayBusyAckToggle {
-            configKV[prefix + "busy_ack_enabled"] =
+            configKV["display.busy_ack_enabled"] =
                 PlatformSetupHelpers.envBool(busyAckEnabled)
         }
         if capabilities.hasGatewayRestartNotification {
-            configKV[prefix + "gateway_restart_notification"] =
+            configKV["gateway.platforms.\(platform).gateway_restart_notification"] =
                 PlatformSetupHelpers.envBool(gatewayRestartNotification)
-        }
-        // TTL field rides on either of the v0.13 toggles being available —
-        // proxy gating per WS-1 Decision F + WS-5 Q5. // TODO(WS-5-Q5)
-        if capabilities.hasGatewayBusyAckToggle
-            || capabilities.hasGatewayRestartNotification {
-            configKV[prefix + "slash_command_notice_ttl_seconds"] =
-                String(slashCommandNoticeTTLSeconds)
         }
 
         if configKV.isEmpty {
