@@ -179,7 +179,7 @@ struct AdvancedTab: View {
             ToggleRow(
                 label: "Runtime metadata footer",
                 isOn: viewModel.config.runtimeMetadataFooter
-            ) { viewModel.setSetting("agent.runtime_metadata_footer", value: $0 ? "true" : "false") }
+            ) { viewModel.setSetting("display.runtime_footer.enabled", value: $0 ? "true" : "false") }
         }
     }
 

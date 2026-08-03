@@ -54,8 +54,11 @@ struct GatewayBehaviorSection: View {
                     )
                 }
                 if capabilities.hasGatewayBusyAckToggle {
+                    // Global setting (`display.busy_ack_enabled`) — Hermes
+                    // has no per-platform busy-ack key, so the label says
+                    // so to avoid implying a per-platform scope.
                     ToggleRow(
-                        label: "Send 'Agent is working…' ack",
+                        label: "Send 'Agent is working…' ack (all platforms)",
                         isOn: viewModel.busyAckEnabled
                     ) { viewModel.busyAckEnabled = $0 }
                 }
@@ -65,17 +68,8 @@ struct GatewayBehaviorSection: View {
                         isOn: viewModel.gatewayRestartNotification
                     ) { viewModel.gatewayRestartNotification = $0 }
                 }
-                // TTL field rides on either v0.13 toggle being available
-                // — proxy gating per WS-1 Decision F. // TODO(WS-5-Q5)
-                if capabilities.hasGatewayBusyAckToggle
-                    || capabilities.hasGatewayRestartNotification {
-                    StepperRow(
-                        label: "Auto-delete slash-command notices (s)",
-                        value: viewModel.slashCommandNoticeTTLSeconds,
-                        range: 0...3600,
-                        step: 5
-                    ) { viewModel.slashCommandNoticeTTLSeconds = $0 }
-                }
+                // `slash_command_notice_ttl_seconds` control removed —
+                // the key never existed in any Hermes version.
             }
 
             HStack {

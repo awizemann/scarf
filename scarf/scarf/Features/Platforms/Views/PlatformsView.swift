@@ -29,7 +29,7 @@ struct PlatformsView: View {
     private var visiblePlatforms: [HermesToolPlatform] {
         KnownPlatforms.all.filter { p in
             switch p.name {
-            case "google-chat", "googlechat":
+            case "google_chat":
                 return capabilities.hasGoogleChatPlatform
             default:
                 return true
@@ -186,8 +186,8 @@ struct PlatformsView: View {
         case "homeassistant":  HomeAssistantSetupView(context: ctx)
         case "webhook":        WebhookSetupView(context: ctx)
         case "yuanbao":        yuanbaoPanel
-        case "microsoft-teams": microsoftTeamsPanel
-        case "google-chat", "googlechat": googleChatPanel
+        case "teams":          microsoftTeamsPanel
+        case "google_chat":    googleChatPanel
         default:
             SettingsSection(title: LocalizedStringKey(viewModel.selected.displayName), icon: KnownPlatforms.icon(for: viewModel.selected.name)) {
                 ReadOnlyRow(label: "Setup", value: "No setup form for this platform yet.")
@@ -212,7 +212,7 @@ struct PlatformsView: View {
     /// platform). Surface that explicitly so users know the setup
     /// path differs from the native adapters.
     private var microsoftTeamsPanel: some View {
-        SettingsSection(title: "Microsoft Teams", icon: KnownPlatforms.icon(for: "microsoft-teams")) {
+        SettingsSection(title: "Microsoft Teams", icon: KnownPlatforms.icon(for: "teams")) {
             ReadOnlyRow(label: "Type", value: "Plugin-shipped gateway platform (v0.12+)")
             ReadOnlyRow(label: "Setup", value: "Install the plugin from the Plugins tab, then run `hermes setup` to register the bot.")
             ReadOnlyRow(label: "Configured", value: viewModel.hasConfigBlock(for: viewModel.selected) ? "Yes" : "No")
@@ -227,13 +227,13 @@ struct PlatformsView: View {
     @ViewBuilder
     private var googleChatPanel: some View {
         VStack(alignment: .leading, spacing: ScarfSpace.s3) {
-            SettingsSection(title: "Google Chat", icon: KnownPlatforms.icon(for: "google-chat")) {
+            SettingsSection(title: "Google Chat", icon: KnownPlatforms.icon(for: "google_chat")) {
                 ReadOnlyRow(label: "Type", value: "Generic env-driven gateway adapter (v0.13+)")
                 ReadOnlyRow(label: "Setup", value: "Run `hermes setup` and select Google Chat to walk the OAuth flow.")
                 ReadOnlyRow(label: "Configured", value: viewModel.hasConfigBlock(for: viewModel.selected) ? "Yes" : "No")
             }
             GatewayBehaviorSection(
-                platform: "google-chat",
+                platform: "google_chat",
                 capabilities: capabilities,
                 context: viewModel.context
             )

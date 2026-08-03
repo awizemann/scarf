@@ -346,27 +346,26 @@ struct SettingsView: View {
         }
     }
 
-    /// v0.13 Google Chat status. Whether the platform shows up at all
-    /// is driven by whether `gateway.platforms.google-chat.*` exists in
-    /// config.yaml on the remote — if absent, we render "Not configured".
-    /// Hermes accepts either `google-chat` or `googlechat` as the
-    /// identifier; check both spellings defensively.
+    /// Google Chat status. The real Hermes identifier is `google_chat`
+    /// (plugins/platforms/google_chat/adapter.py); the legacy hyphenated
+    /// spellings are checked so configs written by older Scarf builds
+    /// still read as configured.
     private var googleChatStatusLabel: String {
-        if vm.config.gatewayPlatforms["google-chat"] != nil
+        if vm.config.gatewayPlatforms["google_chat"] != nil
+            || vm.config.gatewayPlatforms["google-chat"] != nil
             || vm.config.gatewayPlatforms["googlechat"] != nil {
             return "configured"
         }
         return "not configured"
     }
 
-    /// v0.13 cross-platform busy-ack toggle. We summarize per platform
-    /// so users on iOS get a faithful read of the per-platform flag —
-    /// "off on slack, on elsewhere" is a real configuration shape.
-    /// Empty `gatewayPlatforms` shows "default".
+    /// Busy-ack toggle is GLOBAL (`display.busy_ack_enabled`) — Hermes
+    /// never had a working per-platform variant, so surface the single
+    /// global value rather than a per-platform summary.
     @ViewBuilder
     private var gatewayBusyAckRow: some View {
-        let value = summariseGatewayBool(\GatewayPlatformSettings.busyAckEnabled, defaultLabel: "on")
-        LabeledContent("Gateway: busy ack", value: value)
+        LabeledContent("Gateway: busy ack",
+                       value: vm.config.displayBusyAckEnabled ? "on" : "off")
     }
 
     @ViewBuilder

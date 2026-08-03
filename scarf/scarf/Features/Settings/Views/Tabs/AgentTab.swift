@@ -7,7 +7,7 @@ struct AgentTab: View {
 
     var body: some View {
         SettingsSection(title: "Turns & Reasoning", icon: "arrow.2.circlepath") {
-            StepperRow(label: "Max Turns", value: viewModel.config.maxTurns, range: 1...200) { viewModel.setMaxTurns($0) }
+            StepperRow(label: "Max Turns", value: viewModel.config.maxTurns, range: 1...1000) { viewModel.setMaxTurns($0) }
             PickerRow(label: "Reasoning Effort", selection: viewModel.config.reasoningEffort, options: ["none", "minimal", "low", "medium", "high", "xhigh"]) { viewModel.setReasoningEffort($0) }
             PickerRow(label: "Tool Use Enforcement", selection: viewModel.config.toolUseEnforcement, options: ["auto", "true", "false"]) { viewModel.setToolUseEnforcement($0) }
         }
