@@ -82,15 +82,25 @@ struct HermesV020ParityWaveB4Tests {
         #expect(HermesConfig(yaml: "").displayBusyAckEnabled == true)
     }
 
-    // MARK: - agent.max_turns default tracks Hermes (500)
+    // MARK: - agent.max_turns absent-key sentinel + capability-driven display
 
-    @Test func maxTurnsDefaultsTo500() {
-        #expect(HermesConfig(yaml: "").maxTurns == 500)
+    /// The parser must NOT bake in either host generation's default —
+    /// Hermes's server default changed at v0.20 (60 → 500), so an absent
+    /// key parses to the 0 sentinel and display surfaces resolve it per
+    /// capabilities via `displayMaxTurns(capabilities:)`.
+    @Test func maxTurnsAbsentKeyParsesToSentinelAndDisplayFollowsCapabilities() {
+        let absent = HermesConfig(yaml: "")
+        #expect(absent.maxTurns == 0)
+        #expect(absent.displayMaxTurns(capabilities: HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)")) == 500)
+        #expect(absent.displayMaxTurns(capabilities: HermesCapabilities.parseLine("Hermes Agent v0.19.2 (2026.7.20)")) == 60)
+        #expect(absent.displayMaxTurns(capabilities: .empty) == 60)
         let cfg = HermesConfig(yaml: """
         agent:
           max_turns: 42
         """)
         #expect(cfg.maxTurns == 42)
+        // Explicit value wins regardless of host generation.
+        #expect(cfg.displayMaxTurns(capabilities: .empty) == 42)
     }
 
     // MARK: - Skills CLI argv (no --yes; it never existed)

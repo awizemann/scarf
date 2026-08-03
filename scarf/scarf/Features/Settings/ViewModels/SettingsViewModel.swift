@@ -583,8 +583,16 @@ final class SettingsViewModel {
                 }
                 // Indices shift after an apply — always re-mine.
                 self.loadApprovalSuggestions(force: true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
-                    self?.approvalSuggestMessage = nil
+                // Compare-before-clear (same pattern as
+                // MCPServersViewModel.statusMessage): a newer banner from a
+                // subsequent apply must not be wiped by this one's timer.
+                let shownMessage = self.approvalSuggestMessage
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    guard let self else { return }
+                    if self.approvalSuggestMessage == shownMessage {
+                        self.approvalSuggestMessage = nil
+                    }
                 }
             }
         }

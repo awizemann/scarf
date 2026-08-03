@@ -363,6 +363,19 @@ final class SessionsViewModel {
 
     // MARK: - Export
 
+    /// Formats offered in the export picker. On a remote context only the
+    /// stdout-capable formats (`jsonl`, `trace`) are offered: the path
+    /// formats (`html`/`md`/`qmd`) hand the save panel's Mac-local path to
+    /// a CLI that executes on the far host over SSH, so the file would land
+    /// on the remote box while the success banner claims a local path (the
+    /// exact bug class `beginExport`'s doc comment describes for the stdout
+    /// flow). Local contexts keep all five formats.
+    var availableExportFormats: [SessionExportFormat] {
+        context.isRemote
+            ? SessionExportFormat.allCases.filter(\.usesStdout)
+            : SessionExportFormat.allCases
+    }
+
     /// - Parameter formatsAvailable: `HermesCapabilities.hasSessionsExportFormats`,
     ///   read by the view from `@Environment(\.hermesCapabilities)`. The
     ///   view model has no capability store of its own — same split as

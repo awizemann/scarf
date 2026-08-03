@@ -21,7 +21,7 @@ turns the "reconcile on every Hermes bump" chore into a mechanical gate:
 Usage:
     scripts/check-hermes-tables.py [path/to/hermes-agent]
 
-The Hermes checkout defaults to $HERMES_SRC, then the ScarfBox vendor path.
+The Hermes checkout defaults to $HERMES_SRC, then ~/.hermes/hermes-agent.
 Check the checkout out at the tag Scarf targets (see HermesCapabilities.swift)
 before trusting the result. Exits 1 on any FAIL, 0 on PASS/WARN.
 """
@@ -38,7 +38,7 @@ CATALOG_SWIFT = os.path.join(
 PREFLIGHT_SWIFT = os.path.join(
     REPO, "scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift")
 DEFAULT_HERMES = os.environ.get(
-    "HERMES_SRC", os.path.expanduser("~/Developer/ScarfBox/Vendor/hermes-agent"))
+    "HERMES_SRC", os.path.expanduser("~/.hermes/hermes-agent"))
 MODELS_DEV_CACHE = os.path.expanduser("~/.hermes/models_dev_cache.json")
 
 failures = []
@@ -96,6 +96,18 @@ def check(lane, scarf, hermes, missing_msg, extra_msg):
 
 def main():
     hermes_src = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_HERMES
+    if len(sys.argv) <= 1:
+        # Make checkout drift visible when relying on the default path.
+        print(f"using default hermes-agent checkout: {hermes_src}")
+        import subprocess
+        try:
+            desc = subprocess.run(
+                ["git", "-C", hermes_src, "describe", "--tags", "--always"],
+                capture_output=True, text=True, timeout=10)
+            if desc.returncode == 0:
+                print(f"checkout version: {desc.stdout.strip()}")
+        except OSError:
+            pass
     providers_py = os.path.join(hermes_src, "hermes_cli/providers.py")
     if not os.path.exists(providers_py):
         sys.exit(f"error: {providers_py} not found — pass the hermes-agent checkout path")

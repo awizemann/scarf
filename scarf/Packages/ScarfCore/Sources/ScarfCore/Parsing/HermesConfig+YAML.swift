@@ -333,7 +333,13 @@ public extension HermesConfig {
         self.init(
             model: str("model.default", default: "unknown"),
             provider: str("model.provider", default: "unknown"),
-            maxTurns: int("agent.max_turns", default: 500),
+            // 0 is the "key absent" sentinel, NOT a real default. Hermes's
+            // server-side default changed at v0.20 (60 → 500), so parsing a
+            // concrete number here would bake one host generation's default
+            // into configs read from the other. Display surfaces resolve the
+            // sentinel via `displayMaxTurns(capabilities:)`; nothing writes
+            // the resolved value back unless the user edits it.
+            maxTurns: int("agent.max_turns", default: 0),
             personality: str("display.personality", default: "default"),
             terminalBackend: str("terminal.backend", default: "local"),
             memoryEnabled: bool("memory.memory_enabled", default: false),
