@@ -425,7 +425,7 @@ public final class RichChatViewModel {
     /// - **Always** (no session AND active session): `/new`. It's the
     ///   "open a session" affordance and arms the v0.13+ `[<name>]`
     ///   argument hint via `hasNewWithSessionName`.
-    /// - **Active-session-only**: `/clear`, `/compact`, `/cost`, `/model`,
+    /// - **Active-session-only**: `/clear`, `/compact` (`/compress` on v0.20+), `/cost`, `/model`,
     ///   `/tools`, `/reload-skills`, `/help`, `/exit`. Each requires a
     ///   live session; surfacing them pre-session would mislead.
     public static func alwaysAvailableCommands(
@@ -454,7 +454,7 @@ public final class RichChatViewModel {
                 source: .alwaysAvailable
             ),
             HermesSlashCommand(
-                name: "compact",
+                name: capabilities.hasCompressCommand ? "compress" : "compact",
                 description: "Compress the conversation history",
                 argumentHint: nil,
                 source: .alwaysAvailable
@@ -664,7 +664,7 @@ public final class RichChatViewModel {
         }
         let nonInterruptive = supported.filter { !occupied.contains($0.name) }
         // Static fallbacks. `/new` always shows; the rest of the agent-
-        // level command set (`/clear`, `/compact`, `/cost`, `/model`,
+        // level command set (`/clear`, `/compact`/`/compress`, `/cost`, `/model`,
         // `/tools`, `/reload-skills`, `/help`, `/exit`) only when a
         // session is active — Hermes ACP doesn't re-emit
         // `available_commands_update` after `session/load`, so without
@@ -1031,7 +1031,7 @@ public final class RichChatViewModel {
     ///
     /// Two grey-out conditions:
     /// - **No active session** (P2 of the projects-feature fix): every
-    ///   agent-side command (`/clear /compact /cost /model /tools
+    ///   agent-side command (`/clear /compact(/compress) /cost /model /tools
     ///   /reload-skills /help /exit`, plus capability-gated `/yolo
     ///   /sessions /codex-runtime` and non-interruptive `/steer /goal
     ///   /queue /subgoal`) needs a live ACP session to do anything.
@@ -1059,8 +1059,12 @@ public final class RichChatViewModel {
     /// by `disabledSlashCommandNames` to grey-out the menu rows when the
     /// user is looking at the input bar pre-session. Kept in one place
     /// so the menu and any future enable/disable checks stay in sync.
+    /// Includes both `compact` and `compress` since this set is a static,
+    /// capability-independent membership check — `alwaysAvailableCommands`
+    /// only ever emits one of the two spellings depending on
+    /// `hasCompressCommand`, so the unused name here is inert.
     public static let sessionRequiredCommandNames: Set<String> = [
-        "clear", "compact", "cost", "model", "tools",
+        "clear", "compact", "compress", "cost", "model", "tools",
         "reload-skills", "help", "exit",
         "yolo", "sessions", "codex-runtime",
         "steer", "queue"
