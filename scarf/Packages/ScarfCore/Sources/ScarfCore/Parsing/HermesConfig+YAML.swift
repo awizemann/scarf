@@ -154,7 +154,15 @@ public extension HermesConfig {
             enabled: bool("compression.enabled", default: true),
             threshold: double("compression.threshold", default: 0.5),
             targetRatio: double("compression.target_ratio", default: 0.2),
-            protectLastN: int("compression.protect_last_n", default: 20)
+            protectLastN: int("compression.protect_last_n", default: 20),
+            // -- v0.20 tuning keys. `threshold_tokens` defaults to `None`
+            // in Hermes (config_defaults.py:577); 0 is Scarf's "absent"
+            // sentinel and Hermes treats <= 0 as off, so the round-trip is
+            // lossless either way.
+            thresholdTokens: int("compression.threshold_tokens", default: 0),
+            minTailUserMessages: int("compression.min_tail_user_messages", default: 1),
+            idleCompactAfterSeconds: int("compression.idle_compact_after_seconds", default: 0),
+            progressNotices: bool("compression.progress_notices", default: false)
         )
 
         let checkpoints = CheckpointSettings(
@@ -440,7 +448,14 @@ public extension HermesConfig {
             modelBaseURL: str("model.base_url"),
             modelAPIKey: str("model.api_key"),
             modelAPIMode: str("model.api_mode"),
-            modelContextLength: str("model.context_length")
+            modelContextLength: str("model.context_length"),
+            // -- v0.20 additions -------------------------------------
+            // `agent.reasoning_overrides` is a nested map — parseNestedYAML
+            // records `key: value` children under the parent's dotted path.
+            // Keys arrive unquoted (HermesYAML strips a quoting layer) so
+            // `'llama3:8b': high` reads back as `llama3:8b`.
+            reasoningOverrides: maps["agent.reasoning_overrides"] ?? [:],
+            excludedProviders: lists["model_catalog.excluded_providers"] ?? []
         )
     }
 }

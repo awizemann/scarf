@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 /// General tab — model picker (provider auto-follows), personality, locale.
 /// Credential management lives in the Credential Pools sidebar item; a hint
@@ -39,6 +40,12 @@ struct GeneralTab: View {
             // Model picker, which presents providers and models together.
             ReadOnlyRow(label: "Provider", value: viewModel.config.provider)
             credentialsHint
+        }
+
+        // v0.20: `model_catalog.excluded_providers` — hide providers from
+        // model pickers and Hermes's built-in resolution. Hidden pre-v0.20.
+        if let capabilities = capabilitiesStore?.capabilities, capabilities.isV020OrLater {
+            ExcludedProvidersSection(viewModel: viewModel, capabilities: capabilities)
         }
 
         SettingsSection(title: "Personality", icon: "theatermasks") {
@@ -95,5 +102,93 @@ struct GeneralTab: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.quaternary.opacity(0.3))
+    }
+}
+
+/// Editor for `model_catalog.excluded_providers` (v0.20+) — a simple list
+/// of provider IDs hidden from model pickers and Hermes's built-in model
+/// resolution (matched case-insensitively by Hermes). Lists are
+/// inexpressible via `hermes config set`, so writes go through the
+/// direct-YAML path; removing the last row deletes the key entirely.
+private struct ExcludedProvidersSection: View {
+    @Bindable var viewModel: SettingsViewModel
+    let capabilities: HermesCapabilities
+    @State private var newProvider = ""
+    @State private var knownProviderIDs: [String] = []
+
+    var body: some View {
+        SettingsSection(title: "Excluded Providers", icon: "eye.slash") {
+            ForEach(viewModel.config.excludedProviders, id: \.self) { provider in
+                HStack {
+                    Text(provider)
+                        .font(ScarfFont.monoSmall)
+                        .foregroundStyle(ScarfColor.foregroundPrimary)
+                    Spacer()
+                    Button {
+                        save(viewModel.config.excludedProviders.filter { $0 != provider })
+                    } label: {
+                        Image(systemName: "minus.circle")
+                            .foregroundStyle(ScarfColor.foregroundMuted)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Stop excluding this provider")
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(ScarfColor.backgroundTertiary.opacity(0.5))
+            }
+            HStack {
+                TextField("Provider ID (e.g. openrouter)", text: $newProvider)
+                    .textFieldStyle(.roundedBorder)
+                    .font(ScarfFont.monoSmall)
+                    .onSubmit { addNew(newProvider) }
+                if !suggestions.isEmpty {
+                    Menu {
+                        ForEach(suggestions, id: \.self) { id in
+                            Button(id) { addNew(id) }
+                        }
+                    } label: {
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .frame(width: 28)
+                    .help("Known provider IDs")
+                }
+                Button("Add") { addNew(newProvider) }
+                    .controlSize(.small)
+                    .disabled(newProvider.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(ScarfColor.backgroundTertiary.opacity(0.5))
+            .help("Excluded providers are hidden from model pickers and skipped by Hermes's built-in model resolution.")
+        }
+        .task {
+            let ids = await ModelCatalogService(context: viewModel.context)
+                .loadProvidersAsync()
+                .map(\.providerID)
+            knownProviderIDs = ids.sorted()
+        }
+    }
+
+    private var suggestions: [String] {
+        let excluded = Set(viewModel.config.excludedProviders.map { $0.lowercased() })
+        return knownProviderIDs.filter { !excluded.contains($0.lowercased()) }
+    }
+
+    private func addNew(_ raw: String) {
+        let id = raw.trimmingCharacters(in: .whitespaces)
+        guard !id.isEmpty else { return }
+        guard !viewModel.config.excludedProviders.contains(where: { $0.caseInsensitiveCompare(id) == .orderedSame }) else {
+            newProvider = ""
+            return
+        }
+        save(viewModel.config.excludedProviders + [id])
+        newProvider = ""
+    }
+
+    private func save(_ providers: [String]) {
+        viewModel.saveExcludedProviders(providers, capabilities: capabilities)
     }
 }

@@ -86,10 +86,29 @@ public enum HermesYAML {
                 continue
             }
 
-            // Key-value or section line.
-            guard let colonIdx = trimmed.firstIndex(of: ":") else { continue }
-            let key = String(trimmed[trimmed.startIndex..<colonIdx]).trimmingCharacters(in: .whitespaces)
-            let afterColon = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
+            // Key-value or section line. Quoted keys (`'llama3:8b': high`)
+            // may contain colons, so a naive first-colon split would cut
+            // inside the quotes — scan past the closing quote first.
+            // Written by v0.20's reasoning-overrides editor; plain keys
+            // take the original path.
+            let key: String
+            let afterColon: String
+            if let quote = trimmed.first, quote == "'" || quote == "\"" {
+                let body = trimmed.dropFirst()
+                guard let close = closingQuoteIndex(in: body, quote: quote) else { continue }
+                var raw = String(body[body.startIndex..<close])
+                if quote == "'" {
+                    raw = raw.replacingOccurrences(of: "''", with: "'")
+                }
+                let rest = body[body.index(after: close)...].trimmingCharacters(in: .whitespaces)
+                guard rest.hasPrefix(":") else { continue }
+                key = raw
+                afterColon = String(rest.dropFirst()).trimmingCharacters(in: .whitespaces)
+            } else {
+                guard let colonIdx = trimmed.firstIndex(of: ":") else { continue }
+                key = String(trimmed[trimmed.startIndex..<colonIdx]).trimmingCharacters(in: .whitespaces)
+                afterColon = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
+            }
 
             let path = currentPath(joinedWith: key)
 
@@ -122,6 +141,25 @@ public enum HermesYAML {
             }
         }
         return ParsedYAML(values: values, lists: lists, maps: maps)
+    }
+
+    /// Index of the closing quote in `body` (which starts just AFTER the
+    /// opening quote). Single-quoted YAML escapes an embedded quote by
+    /// doubling (`''`), so skip doubled pairs.
+    private static func closingQuoteIndex(in body: Substring, quote: Character) -> Substring.Index? {
+        var i = body.startIndex
+        while i < body.endIndex {
+            if body[i] == quote {
+                let next = body.index(after: i)
+                if quote == "'", next < body.endIndex, body[next] == quote {
+                    i = body.index(after: next)   // escaped '' — keep going
+                    continue
+                }
+                return i
+            }
+            i = body.index(after: i)
+        }
+        return nil
     }
 
     /// Strip a single layer of surrounding single or double quotes from a YAML scalar.
