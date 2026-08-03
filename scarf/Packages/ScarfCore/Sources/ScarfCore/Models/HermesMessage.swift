@@ -28,6 +28,19 @@ public struct HermesMessage: Identifiable, Sendable {
     /// (`reasoning_content IS NOT NULL …`), never the blob itself. (t-aud27)
     public let reasoningContentAvailable: Bool
 
+    /// Hermes v0.20 `_meta.hermes.compactionSummary` — the ENTIRE message
+    /// is a replayed compaction handoff summary, not real conversation
+    /// content. Set only on `session/load`/`session/resume` replay
+    /// chunks; always `false` for live turns and older Hermes hosts. UI
+    /// collapses these behind a disclosure row by default.
+    public let isCompactionSummary: Bool
+    /// Hermes v0.20 `_meta.hermes.containsCompactionSummary` — a
+    /// merged-tail replay message: real preserved content followed by a
+    /// compaction summary. UI keeps the message fully visible (never
+    /// collapsed — that would hide the preserved content) and shows only
+    /// a subtle badge.
+    public let containsCompactionSummary: Bool
+
 
     public init(
         id: Int,
@@ -42,7 +55,9 @@ public struct HermesMessage: Identifiable, Sendable {
         finishReason: String?,
         reasoning: String?,
         reasoningContent: String? = nil,
-        reasoningContentAvailable: Bool = false
+        reasoningContentAvailable: Bool = false,
+        isCompactionSummary: Bool = false,
+        containsCompactionSummary: Bool = false
     ) {
         self.id = id
         self.sessionId = sessionId
@@ -57,6 +72,8 @@ public struct HermesMessage: Identifiable, Sendable {
         self.reasoning = reasoning
         self.reasoningContent = reasoningContent
         self.reasoningContentAvailable = reasoningContentAvailable
+        self.isCompactionSummary = isCompactionSummary
+        self.containsCompactionSummary = containsCompactionSummary
     }
     public var isUser: Bool { role == "user" }
     public var isAssistant: Bool { role == "assistant" }
@@ -125,7 +142,9 @@ public struct HermesMessage: Identifiable, Sendable {
             finishReason: finishReason,
             reasoning: reasoning,
             reasoningContent: reasoningContent,
-            reasoningContentAvailable: reasoningContentAvailable
+            reasoningContentAvailable: reasoningContentAvailable,
+            isCompactionSummary: isCompactionSummary,
+            containsCompactionSummary: containsCompactionSummary
         )
     }
 }

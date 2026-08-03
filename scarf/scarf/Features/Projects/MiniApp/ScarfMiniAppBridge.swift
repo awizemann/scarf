@@ -226,7 +226,7 @@ final class ScarfMiniAppBridge: NSObject, WKScriptMessageHandlerWithReply {
     private static func eventJSON(_ event: ACPEvent) -> String? {
         let obj: [String: Any]
         switch event {
-        case .messageChunk(_, let text): obj = ["type": "message", "text": text]
+        case .messageChunk(_, let text, _, _): obj = ["type": "message", "text": text]
         case .thoughtChunk(_, let text): obj = ["type": "thought", "text": text]
         case .toolCallStart(_, let call): obj = ["type": "tool", "title": call.title, "status": call.status]
         case .toolCallUpdate: obj = ["type": "tool_update"]

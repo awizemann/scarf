@@ -176,7 +176,31 @@ public struct AnyCodable: Codable, @unchecked Sendable {
 /// event is constructed. Same rationale + treatment as `AnyCodable` above; we
 /// keep the raw `Any` rather than box every consumer in macOS + iOS + tests.
 public enum ACPEvent: @unchecked Sendable {
-    case messageChunk(sessionId: String, text: String)
+    /// `isCompactionSummary` / `containsCompactionSummary` reflect Hermes
+    /// v0.20's `_meta.hermes.compactionSummary` /
+    /// `_meta.hermes.containsCompactionSummary` flags, stamped on
+    /// `agent_message_chunk` updates during `session/load` /
+    /// `session/resume` history replay (see
+    /// `_history_summary_meta` in Hermes' `acp_adapter/server.py`).
+    /// Both default `false` — absent `_meta`, or `_meta` from an older
+    /// host or a live (non-replay) chunk, parses as "not a summary"
+    /// with zero behavior change.
+    case messageChunk(
+        sessionId: String,
+        text: String,
+        isCompactionSummary: Bool = false,
+        containsCompactionSummary: Bool = false
+    )
+    /// Same compaction-summary semantics as `.messageChunk`, but for
+    /// `user_message_chunk` replay updates — the compressor sometimes
+    /// persists a standalone handoff summary under `role="user"` to
+    /// keep turn alternation valid.
+    case userMessageChunk(
+        sessionId: String,
+        text: String,
+        isCompactionSummary: Bool = false,
+        containsCompactionSummary: Bool = false
+    )
     case thoughtChunk(sessionId: String, text: String)
     case toolCallStart(sessionId: String, call: ACPToolCallEvent)
     case toolCallUpdate(sessionId: String, update: ACPToolCallUpdateEvent)
@@ -193,7 +217,8 @@ public enum ACPEvent: @unchecked Sendable {
     /// from a session the VM is no longer attached to.
     public var sessionId: String? {
         switch self {
-        case let .messageChunk(sid, _),
+        case let .messageChunk(sid, _, _, _),
+             let .userMessageChunk(sid, _, _, _),
              let .thoughtChunk(sid, _),
              let .toolCallStart(sid, _),
              let .toolCallUpdate(sid, _),
@@ -348,7 +373,23 @@ public enum ACPEventParser {
         switch updateType {
         case "agent_message_chunk":
             let text = extractContentText(from: update)
-            return .messageChunk(sessionId: sessionId, text: text)
+            let meta = extractCompactionMeta(from: update)
+            return .messageChunk(
+                sessionId: sessionId,
+                text: text,
+                isCompactionSummary: meta.isSummary,
+                containsCompactionSummary: meta.containsSummary
+            )
+
+        case "user_message_chunk":
+            let text = extractContentText(from: update)
+            let meta = extractCompactionMeta(from: update)
+            return .userMessageChunk(
+                sessionId: sessionId,
+                text: text,
+                isCompactionSummary: meta.isSummary,
+                containsCompactionSummary: meta.containsSummary
+            )
 
         case "agent_thought_chunk":
             let text = extractContentText(from: update)
@@ -419,6 +460,25 @@ public enum ACPEventParser {
             return text
         }
         return ""
+    }
+
+    /// Parse Hermes v0.20's `_meta.hermes.compactionSummary` /
+    /// `_meta.hermes.containsCompactionSummary` flags off a message-chunk
+    /// update. `_meta` is ACP's reserved extensibility namespace — any
+    /// shape (missing, non-dict, extra sibling keys, non-bool flag
+    /// values) is tolerated and simply yields `(false, false)` rather
+    /// than throwing, since older Hermes hosts and live (non-replay)
+    /// chunks never send it at all.
+    nonisolated private static func extractCompactionMeta(
+        from update: [String: Any]
+    ) -> (isSummary: Bool, containsSummary: Bool) {
+        guard let meta = update["_meta"] as? [String: Any],
+              let hermes = meta["hermes"] as? [String: Any] else {
+            return (false, false)
+        }
+        let isSummary = (hermes["compactionSummary"] as? Bool) ?? false
+        let containsSummary = (hermes["containsCompactionSummary"] as? Bool) ?? false
+        return (isSummary, containsSummary)
     }
 
     nonisolated private static func extractContentArrayText(from update: [String: Any]) -> String {
