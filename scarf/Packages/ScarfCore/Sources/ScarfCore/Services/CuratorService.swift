@@ -60,6 +60,16 @@ public actor CuratorService {
         return Self.parseListArchivedText(stdout)
     }
 
+    /// `hermes curator list-unmanaged` (v0.20+, caller gates on
+    /// `hasCuratorAdopt`). Text output only — header `unmanaged skills
+    /// (N):`, one indented row per skill, and a trailing adopt hint.
+    /// The no-unmanaged sentinel folds to `[]`.
+    public func listUnmanaged() async throws -> [HermesCuratorUnmanagedSkill] {
+        let (code, stdout, stderr) = await runHermes(args: ["curator", "list-unmanaged"], timeout: 30)
+        try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "list-unmanaged")
+        return Self.parseListUnmanaged(stdout)
+    }
+
     // MARK: - Writes (legacy v0.12 verbs; service form)
 
     public func runNow(synchronous: Bool, timeout: TimeInterval) async throws {
@@ -117,6 +127,34 @@ public actor CuratorService {
         let (code, stdout, stderr) = await runHermes(args: args, timeout: 60)
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "prune")
         return Self.parsePrune(stdout, days: days)
+    }
+
+    // MARK: - Writes (new in v0.20 — caller gates on hasCuratorAdopt)
+
+    /// `hermes curator adopt <name> --yes` — hands one unmanaged skill to
+    /// the curator (provenance is a user declaration; reversible only by
+    /// editing the usage record). `--yes` is passed unconditionally: the
+    /// CLI's confirmation prompt is interactive `[y/N]` and Scarf can't
+    /// answer prompts — Scarf gates on its own UI confirm instead.
+    public func adopt(name: String) async throws {
+        let (code, stdout, stderr) = await runHermes(
+            args: ["curator", "adopt", name, "--yes"],
+            timeout: 30
+        )
+        try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "adopt")
+    }
+
+    /// `hermes curator adopt --all-unmanaged [--dry-run] --yes` — adopts
+    /// every curation-eligible unmanaged skill. Same `--yes` rationale as
+    /// `adopt(name:)`. Returns raw stdout (the adopted / would-adopt list)
+    /// for display; callers preview with `dryRun: true` first.
+    @discardableResult
+    public func adoptAll(dryRun: Bool) async throws -> String {
+        var args = ["curator", "adopt", "--all-unmanaged", "--yes"]
+        if dryRun { args.append("--dry-run") }
+        let (code, stdout, stderr) = await runHermes(args: args, timeout: 60)
+        try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "adopt")
+        return stdout
     }
 
     // MARK: - Pure parsers (nonisolated; safe to call from VMs without awaits)
@@ -214,6 +252,60 @@ public actor CuratorService {
                     reason: reason,
                     sizeBytes: sizeBytes,
                     path: path
+                )
+            )
+        }
+        return rows
+    }
+
+    /// Parse `hermes curator list-unmanaged` stdout (verified live on
+    /// v0.20.0):
+    ///
+    ///     unmanaged skills (50):
+    ///       find-nearby     activity=   0  last_activity=never    (no marker)
+    ///       godmode         activity=   0  last_activity=never    (created_by:null)
+    ///
+    ///     adopt one with `hermes curator adopt <name>`, or all with …
+    ///
+    /// Rows are the lines carrying `activity=`; the header, footer hint,
+    /// and any empty sentinel are skipped. Names may contain spaces —
+    /// the name is everything before `activity=`.
+    public nonisolated static func parseListUnmanaged(_ stdout: String) -> [HermesCuratorUnmanagedSkill] {
+        var rows: [HermesCuratorUnmanagedSkill] = []
+        for raw in stdout.components(separatedBy: .newlines) {
+            guard let activityRange = raw.range(of: "activity=") else { continue }
+            let name = String(raw[..<activityRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { continue }
+
+            var remainder = String(raw[activityRange.upperBound...])
+            let activityDigits = remainder
+                .drop(while: { $0 == " " })
+                .prefix(while: { $0.isNumber })
+            let activity = Int(activityDigits) ?? 0
+
+            var lastActivity = ""
+            if let laRange = remainder.range(of: "last_activity=") {
+                remainder = String(remainder[laRange.upperBound...])
+                // Label runs until the marker parenthetical (or EOL).
+                if let paren = remainder.firstIndex(of: "(") {
+                    lastActivity = String(remainder[..<paren]).trimmingCharacters(in: .whitespaces)
+                } else {
+                    lastActivity = remainder.trimmingCharacters(in: .whitespaces)
+                }
+            }
+
+            var marker = ""
+            if let open = remainder.firstIndex(of: "("),
+               let close = remainder[open...].firstIndex(of: ")") {
+                marker = String(remainder[remainder.index(after: open)..<close])
+            }
+
+            rows.append(
+                HermesCuratorUnmanagedSkill(
+                    name: name,
+                    activityCount: activity,
+                    lastActivityLabel: lastActivity,
+                    markerLabel: marker
                 )
             )
         }

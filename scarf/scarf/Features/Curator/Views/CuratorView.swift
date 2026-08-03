@@ -34,6 +34,12 @@ struct CuratorView: View {
         capabilitiesStore?.capabilities.hasCuratorArchive ?? false
     }
 
+    /// v0.20 adopt surface. Hidden entirely on pre-0.20 hosts so the
+    /// legacy layout renders byte-identical.
+    private var adoptAvailable: Bool {
+        capabilitiesStore?.capabilities.hasCuratorAdopt ?? false
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: ScarfSpace.s4) {
@@ -56,6 +62,9 @@ struct CuratorView: View {
 
                 statusSummary
                 skillCountsSection
+                if adoptAvailable {
+                    unmanagedSection
+                }
                 pinnedSection
                 activityTables
 
@@ -80,6 +89,9 @@ struct CuratorView: View {
             await viewModel.load()
             if archiveAvailable {
                 await viewModel.loadArchive()
+            }
+            if adoptAvailable {
+                await viewModel.loadUnmanaged()
             }
         }
         .sheet(isPresented: $showRestoreSheet) {
@@ -202,6 +214,55 @@ struct CuratorView: View {
                     countCell(value: viewModel.status.staleSkills, label: "Stale")
                     countCell(value: viewModel.status.archivedSkills, label: "Archived")
                     Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    /// v0.20 unmanaged-skills card. Surfaces the count from the status
+    /// header plus per-row / bulk Adopt actions. Empty state renders
+    /// nothing — no unmanaged skills means nothing to adopt.
+    @ViewBuilder
+    private var unmanagedSection: some View {
+        let count = viewModel.status.unmanagedCount ?? viewModel.unmanagedSkills.count
+        if count > 0 {
+            ScarfCard {
+                VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+                    HStack {
+                        ScarfSectionHeader("Unmanaged skills")
+                        Spacer()
+                        if viewModel.isAdopting {
+                            ProgressView().controlSize(.small)
+                        }
+                        Button("Adopt All (\(count))") {
+                            Task { await viewModel.adoptAll() }
+                        }
+                        .disabled(viewModel.isAdopting)
+                        .help("Hand every unmanaged skill to the curator (they become prunable/archivable)")
+                    }
+                    Text("Skills with no provenance marker are never auto-staled or archived. Adopting hands them to the curator.")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                    ForEach(viewModel.unmanagedSkills) { row in
+                        HStack(alignment: .center, spacing: ScarfSpace.s2) {
+                            Text(row.name)
+                                .scarfStyle(.body)
+                                .foregroundStyle(ScarfColor.foregroundPrimary)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            counterChip(label: "activity", value: row.activityCount)
+                            Text(row.lastActivityLabel)
+                                .scarfStyle(.caption)
+                                .foregroundStyle(ScarfColor.foregroundFaint)
+                                .frame(width: 92, alignment: .trailing)
+                            Button("Adopt") {
+                                Task { await viewModel.adopt(row.name) }
+                            }
+                            .disabled(viewModel.isAdopting)
+                            .help("Hand \(row.name) to the curator")
+                        }
+                        .padding(.vertical, 2)
+                    }
                 }
             }
         }

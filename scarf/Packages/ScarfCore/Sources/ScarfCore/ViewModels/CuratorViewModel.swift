@@ -35,6 +35,11 @@ public final class CuratorViewModel {
     public private(set) var archivedSkills: [HermesCuratorArchivedSkill] = []
     public private(set) var isLoadingArchive = false
 
+    // Unmanaged/adopt state (v0.20+ only — populated by `loadUnmanaged()`
+    // on hosts where `hasCuratorAdopt` is true).
+    public private(set) var unmanagedSkills: [HermesCuratorUnmanagedSkill] = []
+    public private(set) var isAdopting = false
+
     // Archive-idle ("prune") state — `pruneSummary` non-nil while the confirm
     // sheet is mid-flight; `isPruning` flips during the archive step.
     public private(set) var pruneSummary: CuratorPruneSummary?
@@ -115,6 +120,39 @@ public final class CuratorViewModel {
             errorMessage = (error as? LocalizedError)?.errorDescription
                 ?? error.localizedDescription
         }
+    }
+
+    /// Refresh the unmanaged-skills list. No-op on hosts without
+    /// `hasCuratorAdopt` — the caller gates the call (mirrors
+    /// `loadArchive`).
+    public func loadUnmanaged() async {
+        do {
+            unmanagedSkills = try await service.listUnmanaged()
+        } catch {
+            unmanagedSkills = []
+            errorMessage = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+        }
+    }
+
+    // MARK: - Writes (v0.20 adopt — caller gates on hasCuratorAdopt)
+
+    public func adopt(_ skill: String) async {
+        isAdopting = true
+        await runWithReload(verb: "adopt", successMessage: "Adopted \(skill)") {
+            try await self.service.adopt(name: skill)
+        }
+        isAdopting = false
+        await loadUnmanaged()
+    }
+
+    public func adoptAll() async {
+        isAdopting = true
+        await runWithReload(verb: "adopt", successMessage: "Adopted all unmanaged skills") {
+            _ = try await self.service.adoptAll(dryRun: false)
+        }
+        isAdopting = false
+        await loadUnmanaged()
     }
 
     // MARK: - Writes (v0.12)
