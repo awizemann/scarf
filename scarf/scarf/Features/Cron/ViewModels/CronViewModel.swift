@@ -86,6 +86,40 @@ final class CronViewModel {
         }
     }
 
+    // MARK: - Run history (Hermes v0.20+, `hermes cron runs`)
+
+    /// Durable execution attempts for the selected job. Only loaded when
+    /// the (capability-gated) RUN HISTORY disclosure is expanded — the
+    /// view gates on `hasCronRuns`, so pre-0.20 hosts never issue the call.
+    var runHistory: [HermesCronRun] = []
+    var isLoadingRunHistory = false
+    /// Job id the current `runHistory` belongs to; stale-guard for
+    /// selection changes racing a slow (remote) CLI call.
+    @ObservationIgnored private var runHistoryJobID: String?
+
+    /// `hermes cron runs <jobID> --limit 20` (text output — no --json in
+    /// v0.20; parsed by `HermesCronRunsParser`).
+    func loadRunHistory(jobID: String, force: Bool = false) {
+        if !force, runHistoryJobID == jobID, !runHistory.isEmpty { return }
+        if runHistoryJobID != jobID { runHistory = [] }  // don't flash the previous job's rows
+        runHistoryJobID = jobID
+        isLoadingRunHistory = true
+        let svc = fileService
+        let log = logger
+        Task.detached { [weak self] in
+            let result = svc.runHermesCLISplit(args: HermesCronRunsParser.args(jobID: jobID, limit: 20), timeout: 30)
+            let runs = result.exitCode == 0 ? HermesCronRunsParser.parse(text: result.stdout) : []
+            if result.exitCode != 0 {
+                log.warning("cron runs failed (exit \(result.exitCode)): \(result.stderr.prefix(300))")
+            }
+            await MainActor.run { [weak self] in
+                guard let self, self.runHistoryJobID == jobID else { return }
+                self.runHistory = runs
+                self.isLoadingRunHistory = false
+            }
+        }
+    }
+
     // MARK: - CLI wrappers
 
     func pauseJob(_ job: HermesCronJob) {
