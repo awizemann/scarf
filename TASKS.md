@@ -45,6 +45,7 @@
 - [ ] iOS: route confirmModelPreflight through LocalModelConfigPlan (live stale-key bug, same class as Mac) (id: t-52f4564b) (added: 2026-07-14)
 - [ ] Low-risk consolidation: 3× semverCompare and 7× shell-quoting copies → shared utils (id: t-a21accf0) (added: 2026-07-14)
 - [ ] Reliable connect-time Hermes version read (persist + single cached probe) — enabler for any floor/nudge (id: t-bfd15aef) (added: 2026-07-14)
+- [ ] Hermes v0.20 Phase 3 — new settings key surfaces (id: t-1cc0a505) (added: 2026-08-03)
 
 ## Doing
 
@@ -52,6 +53,17 @@
 
 ## Done
 
+- [x] Hermes v0.20 Phase 2 — high-value adoption (id: t-9fd50744) (added: 2026-08-03)
+- [x] v0.20 Wave C4 — compaction summary styling (id: t-641d65a5) (added: 2026-08-03)
+- [x] v0.20 Wave C1 — pinned/last-activity sidebar + per-model costs (id: t-bba31d39) (added: 2026-08-03)
+- [x] v0.20 Wave C3 — approvals suggest + cron runs history (id: t-44f5de1b) (added: 2026-08-03)
+- [x] v0.20 Wave C2 — sessions export formats (id: t-e04cf93d) (added: 2026-08-03)
+- [x] Hermes v0.20 parity Phase 1 — forced fixes + pre-existing bugs (id: t-66ae4ad4) (added: 2026-08-03)
+- [x] v0.20 Wave B4 — platform ids, gateway dead keys, small fixes (id: t-dc335826) (added: 2026-08-03)
+- [x] v0.20 Wave B3 — provider tables reconciliation (id: t-84cb4b65) (added: 2026-08-03)
+- [x] v0.20 Wave B2 — curator header parse + adopt surface (id: t-a6da024d) (added: 2026-08-03)
+- [x] v0.20 Wave B1 — ACP /compress gating (id: t-a3c84077) (added: 2026-08-03)
+- [x] v0.20 Wave A — HermesCapabilities v0.20 group + tests (id: t-0fb9f96f) (added: 2026-08-03)
 - [x] Fix gh#134: render markdown tables via Marker engine (id: t-2ece52eb) (added: 2026-07-22)
 - [x] TestFlight: NIOCore.ChannelError error 0 on cellular/Tailscale — SSH login timeout retry (id: t-9fdcbfa4) (added: 2026-07-18)
 - [x] gh#133: ScarfGo runtime SSH uses wrong Keychain key — per-server key resolution (id: t-ff08242c) (added: 2026-07-18)
