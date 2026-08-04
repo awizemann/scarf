@@ -19,6 +19,17 @@
   <a href="https://www.buymeacoffee.com/awizemann"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="28"></a>
 </p>
 
+## What's New in 2.18.1
+
+**Power settings for Hermes 0.20.** The best new knobs from the Herald release, each verified against Hermes source and gated to 0.20 hosts:
+
+- **Compression tuning** — absolute token threshold, guaranteed recent-message tail, idle compaction, and progress notices, beside the existing threshold control.
+- **Per-model reasoning effort** — pin `max`/`ultra` thinking on your heavyweight model and `low` on your fast one, with Hermes's own matching rules. Written via Scarf's surgical YAML editor since `hermes config set` can't write dictionaries.
+- **Excluded providers** — hide providers you never use from every model picker.
+- **YAML writer hardened** — an adversarial audit before release caught and fixed two corruption-class edge cases (inline flow syntax, CRLF/commented section headers) that also harden the existing gateway allowlist writes.
+
+See the full [v2.18.1 release notes](https://github.com/awizemann/scarf/releases/tag/v2.18.1).
+
 ## What's New in 2.18.0
 
 **Hermes v0.20 parity.** Full compatibility with Hermes v0.19 "Quicksilver" and v0.20 "Herald" (~5,700 upstream commits), plus the best of what landed — all capability-gated, so older Hermes hosts behave exactly as before.
