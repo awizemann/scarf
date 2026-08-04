@@ -113,7 +113,9 @@ private struct ReasoningOverridesSection: View {
     private func addNew() {
         let pattern = newPattern.trimmingCharacters(in: .whitespaces)
         guard !pattern.isEmpty else { return }
-        var pairs = sortedOverrides.filter { $0.key != pattern }
+        // Case-insensitive replace-on-add so "Claude-Opus" doesn't sit
+        // alongside an existing "claude-opus" row.
+        var pairs = sortedOverrides.filter { $0.key.caseInsensitiveCompare(pattern) != .orderedSame }
         pairs.append((key: pattern, value: newEffort))
         save(pairs)
         newPattern = ""

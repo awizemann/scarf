@@ -218,4 +218,144 @@ import Testing
         #expect(HermesConfig.empty.excludedProviders.isEmpty)
         #expect(HermesConfig.empty.reasoningOverrides.isEmpty)
     }
+
+    // MARK: - Fresh-eyes audit regressions (flow dicts, CRLF, aliases)
+
+    @Test func inlineEmptyFlowDictIsReplacedNotDuplicated() {
+        // Stock cli-config.yaml.example:916 ships `reasoning_overrides: {}`
+        // uncommented — hermes doctor scaffolds user configs from it, so
+        // this is the MAINLINE shape. It must be replaced, never duplicated.
+        let yaml = "agent:\n  reasoning_effort: medium\n  reasoning_overrides: {}\n  verbose: false\n"
+        let updated = PowerSettingsWriter.setReasoningOverrides(
+            in: yaml, pairs: [(key: "gpt-5.2", value: "low")], capabilities: v020
+        )!
+        #expect(occurrences(of: "reasoning_overrides", in: updated) == 1)
+        #expect(!updated.contains("{}"))
+        #expect(updated.contains("reasoning_effort: medium"))
+        #expect(updated.contains("verbose: false"))
+        #expect(HermesConfig(yaml: updated).reasoningOverrides == ["gpt-5.2": "low"])
+    }
+
+    @Test func inlinePopulatedFlowDictIsReplacedNotDuplicated() {
+        let yaml = "agent:\n  reasoning_overrides: {old-model: low}\n"
+        let updated = PowerSettingsWriter.setReasoningOverrides(
+            in: yaml, pairs: [(key: "new-model", value: "high")], capabilities: v020
+        )!
+        #expect(occurrences(of: "reasoning_overrides", in: updated) == 1)
+        #expect(!updated.contains("old-model"))
+        #expect(HermesConfig(yaml: updated).reasoningOverrides == ["new-model": "high"])
+    }
+
+    @Test func emptyPairsDeleteInlineFlowDictLine() {
+        let yaml = "agent:\n  reasoning_overrides: {a: low}\n  verbose: false\n"
+        let updated = PowerSettingsWriter.setReasoningOverrides(
+            in: yaml, pairs: [], capabilities: v020
+        )!
+        #expect(!updated.contains("reasoning_overrides"))
+        #expect(updated.contains("verbose: false"))
+    }
+
+    @Test func inlineFlowListIsReplacedNotDuplicated() {
+        // setList variant of the same bug (`excluded_providers: []`).
+        let yaml = "model_catalog:\n  excluded_providers: []\n  refresh_hours: 24\n"
+        let updated = PowerSettingsWriter.setExcludedProviders(
+            in: yaml, providers: ["groq"], capabilities: v020
+        )!
+        #expect(occurrences(of: "excluded_providers", in: updated) == 1)
+        #expect(!updated.contains("[]"))
+        #expect(updated.contains("refresh_hours: 24"))
+        #expect(HermesConfig(yaml: updated).excludedProviders == ["groq"])
+    }
+
+    @Test func inlinePopulatedFlowListIsReplacedNotDuplicated() {
+        let yaml = "model_catalog:\n  excluded_providers: [alpha, beta]\n"
+        let updated = PowerSettingsWriter.setExcludedProviders(
+            in: yaml, providers: ["groq"], capabilities: v020
+        )!
+        #expect(occurrences(of: "excluded_providers", in: updated) == 1)
+        #expect(!updated.contains("alpha"))
+        #expect(HermesConfig(yaml: updated).excludedProviders == ["groq"])
+    }
+
+    @Test func flowDictReadBackIsVisibleInParsedConfig() {
+        // Hand-written flat flow dicts must be VISIBLE, not silently active.
+        let cfg = HermesConfig(yaml: "agent:\n  reasoning_overrides: {a-model: low, 'llama3:8b': high}\n")
+        #expect(cfg.reasoningOverrides == ["a-model": "low", "llama3:8b": "high"])
+        let empty = HermesConfig(yaml: "agent:\n  reasoning_overrides: {}\n")
+        #expect(empty.reasoningOverrides == [:])
+        // Trailing comment after the brace tolerated.
+        let commented = HermesConfig(yaml: "agent:\n  reasoning_overrides: {b: max}  # note\n")
+        #expect(commented.reasoningOverrides == ["b": "max"])
+        // Nested/exotic flow falls back to empty (never crashes) — and the
+        // writer still replaces the line (covered above), so nothing is
+        // silently retained.
+        let exotic = HermesConfig(yaml: "agent:\n  reasoning_overrides: {a: {b: c}}\n")
+        #expect(exotic.reasoningOverrides == [:])
+    }
+
+    @Test func sectionHeaderWithTrailingCommentIsNotDuplicated() {
+        // `agent:  # note` used to read as section-missing → a SECOND
+        // top-level `agent:` appended → PyYAML last-wins clobbers the
+        // original mapping. Must splice into the existing section.
+        let yaml = "agent:  # tuning knobs\n  reasoning_effort: medium\n"
+        let updated = PowerSettingsWriter.setReasoningOverrides(
+            in: yaml, pairs: [(key: "m", value: "low")], capabilities: v020
+        )!
+        #expect(occurrences(of: "agent:", in: updated) == 1)
+        #expect(updated.contains("# tuning knobs"))
+        let cfg = HermesConfig(yaml: updated)
+        #expect(cfg.reasoningEffort == "medium")
+        #expect(cfg.reasoningOverrides == ["m": "low"])
+    }
+
+    @Test func crlfFileEditedWithoutDuplicatingSection() {
+        let yaml = "agent:\r\n  reasoning_effort: medium\r\n  reasoning_overrides: {}\r\nmodel:\r\n  default: x\r\n"
+        let updated = PowerSettingsWriter.setReasoningOverrides(
+            in: yaml, pairs: [(key: "m", value: "high")], capabilities: v020
+        )!
+        #expect(occurrences(of: "agent:", in: updated) == 1)
+        #expect(occurrences(of: "reasoning_overrides", in: updated) == 1)
+        // Original CRLF flavor preserved; no bare-LF lines introduced.
+        #expect(updated.contains("\r\n"))
+        #expect(!updated.replacingOccurrences(of: "\r\n", with: "").contains("\n"))
+        #expect(updated.contains("reasoning_effort: medium"))
+        #expect(updated.contains("default: x"))
+    }
+
+    @Test func crlfFileEditedWithoutDuplicatingListSection() {
+        // setList shares the locator — gateway allowlists had the same
+        // pre-existing exposure.
+        let yaml = "slack:\r\n  reply_to_mode: thread\r\n"
+        let updated = GatewayConfigWriter.setList(
+            in: yaml, platform: "slack", key: "allowed_channels", items: ["C1"]
+        )
+        #expect(occurrences(of: "slack:", in: updated) == 1)
+        #expect(updated.contains("\r\n"))
+        #expect(!updated.replacingOccurrences(of: "\r\n", with: "").contains("\n"))
+        #expect(updated.contains("reply_to_mode: thread"))
+        #expect(updated.contains("- C1"))
+    }
+
+    @Test func hermesDisableAliasesAcceptedAndRoundTrippedVerbatim() {
+        // parse_reasoning_effort (hermes_constants.py:967) accepts
+        // disabled/false/off as "none" aliases — a hand-edited alias row
+        // must not brick the save, and the user's spelling is preserved.
+        for alias in ["disabled", "false", "off", "none"] {
+            #expect(HermesReasoningEffort.isValid(alias))
+            let updated = PowerSettingsWriter.setReasoningOverrides(
+                in: "agent:\n  verbose: false\n",
+                pairs: [(key: "some-model", value: alias)],
+                capabilities: v020
+            )
+            #expect(updated != nil)
+            #expect(updated!.contains("some-model: \(alias)"))
+        }
+        #expect(!HermesReasoningEffort.isValid("bogus"))
+        // Aliases are pass-through only — never offered in the picker.
+        #expect(!HermesReasoningEffort.levels(capabilities: v020).contains("disabled"))
+    }
+
+    private func occurrences(of needle: String, in haystack: String) -> Int {
+        haystack.components(separatedBy: needle).count - 1
+    }
 }

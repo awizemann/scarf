@@ -404,7 +404,16 @@ final class SettingsViewModel {
     private func saveDirectYAML(label: String, transform: (String) -> String?) {
         let path = context.paths.configYAML
         let existing = context.readText(path) ?? ""
-        guard let updated = transform(existing) else { return }
+        guard let updated = transform(existing) else {
+            // Writer refused (invalid value or capability-gated) — surface
+            // it instead of silently dropping the save, mirroring the
+            // write-failure toast below.
+            saveMessage = "Could not save \(label): a value was rejected as invalid"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                self?.saveMessage = nil
+            }
+            return
+        }
         if updated != existing {
             guard context.writeText(path, content: updated) else {
                 saveMessage = "Failed to save \(label)"

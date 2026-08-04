@@ -112,16 +112,32 @@ public enum HermesYAML {
 
             let path = currentPath(joinedWith: key)
 
-            if afterColon.isEmpty || afterColon == "|" || afterColon == ">" {
+            if afterColon.isEmpty || afterColon == "|" || afterColon == ">"
+                || afterColon.hasPrefix("#") {
+                // `#` — a section header carrying only a trailing comment
+                // (`agent:  # note`) still opens a block.
                 // Section header or empty-valued key — push onto stack so children nest.
                 stack.append((indent: indent, name: key))
                 continue
             }
 
-            // Inline `{}` / `[]` literals → treat as empty.
-            if afterColon == "{}" {
+            // Inline flow dict `{...}` → parse flat scalar entries so
+            // hand-written flow content (`reasoning_overrides: {a: low}`)
+            // is visible in the UI instead of silently active. Nested or
+            // exotic flow values fall back to an EMPTY map (the direct-YAML
+            // writers still replace the line, so nothing is retained
+            // silently). A trailing `# comment` after the brace is allowed.
+            if afterColon.hasPrefix("{"),
+               let close = afterColon.lastIndex(of: "}"),
+               afterColon[afterColon.index(after: close)...]
+                   .trimmingCharacters(in: .whitespaces)
+                   .isEmpty
+                   || afterColon[afterColon.index(after: close)...]
+                       .trimmingCharacters(in: .whitespaces)
+                       .hasPrefix("#") {
+                let inner = String(afterColon[afterColon.index(after: afterColon.startIndex)..<close])
                 values[path] = ""
-                maps[path] = [:]
+                maps[path] = parseFlatFlowMap(inner) ?? [:]
                 continue
             }
             if afterColon == "[]" {
@@ -141,6 +157,43 @@ public enum HermesYAML {
             }
         }
         return ParsedYAML(values: values, lists: lists, maps: maps)
+    }
+
+    /// Parse the inside of a single-line flow dict (`a: low, 'b:c': high`)
+    /// into a flat scalar map. Returns `[:]` for empty content and `nil`
+    /// when the content is nested/exotic (embedded `{`/`[`, or an entry
+    /// that doesn't split into `key: value`) — callers treat nil as empty.
+    private static func parseFlatFlowMap(_ inner: String) -> [String: String]? {
+        let body = inner.trimmingCharacters(in: .whitespaces)
+        if body.isEmpty { return [:] }
+        if body.contains("{") || body.contains("[") { return nil }
+        var result: [String: String] = [:]
+        for part in body.split(separator: ",") {
+            let entry = part.trimmingCharacters(in: .whitespaces)
+            if entry.isEmpty { continue }
+            guard let (k, v) = splitFlowEntry(entry), !k.isEmpty, !v.isEmpty else { return nil }
+            result[k] = v
+        }
+        return result
+    }
+
+    /// Split one `key: value` flow entry, honoring a quoted key that may
+    /// contain colons (`'llama3:8b': high`).
+    private static func splitFlowEntry(_ entry: String) -> (String, String)? {
+        if let quote = entry.first, quote == "'" || quote == "\"" {
+            let body = entry.dropFirst()
+            guard let close = closingQuoteIndex(in: body, quote: quote) else { return nil }
+            var key = String(body[body.startIndex..<close])
+            if quote == "'" { key = key.replacingOccurrences(of: "''", with: "'") }
+            let rest = body[body.index(after: close)...].trimmingCharacters(in: .whitespaces)
+            guard rest.hasPrefix(":") else { return nil }
+            let value = String(rest.dropFirst()).trimmingCharacters(in: .whitespaces)
+            return (key, stripYAMLQuotes(value))
+        }
+        guard let colon = entry.firstIndex(of: ":") else { return nil }
+        let key = String(entry[entry.startIndex..<colon]).trimmingCharacters(in: .whitespaces)
+        let value = String(entry[entry.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+        return (key, stripYAMLQuotes(value))
     }
 
     /// Index of the closing quote in `body` (which starts just AFTER the

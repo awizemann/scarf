@@ -10,6 +10,12 @@ public enum HermesReasoningEffort {
     /// v0.20 additions.
     public static let v020Levels = ["max", "ultra"]
 
+    /// Disable aliases `parse_reasoning_effort` treats identically to
+    /// "none" (hermes_constants.py:967): a hand-edited `disabled` / `false`
+    /// / `off` row is Hermes-valid and must pass validation verbatim — the
+    /// UI never offers these, but it must not reject (or rewrite) them.
+    public static let disableAliases = ["disabled", "false", "off"]
+
     /// Effort options to offer for the given host generation.
     public static func levels(capabilities: HermesCapabilities) -> [String] {
         capabilities.isV020OrLater ? baseLevels + v020Levels : baseLevels
@@ -17,7 +23,8 @@ public enum HermesReasoningEffort {
 
     /// Whether Hermes's `parse_reasoning_effort` would accept this value.
     public static func isValid(_ effort: String) -> Bool {
-        (baseLevels + v020Levels).contains(effort.trimmingCharacters(in: .whitespaces).lowercased())
+        let normalized = effort.trimmingCharacters(in: .whitespaces).lowercased()
+        return (baseLevels + v020Levels + disableAliases).contains(normalized)
     }
 }
 

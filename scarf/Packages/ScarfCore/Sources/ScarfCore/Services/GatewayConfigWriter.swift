@@ -58,6 +58,23 @@ public enum GatewayConfigWriter {
         key: String,
         items: [String]
     ) -> String {
+        // Preserve the file's line-ending flavor: work on LF internally,
+        // re-emit CRLF on output when the input used CRLF (a CRLF file
+        // previously failed every `trimmed ==` match, so the section was
+        // "missing" and a DUPLICATE top-level section was appended — which
+        // PyYAML resolves last-wins, clobbering the original section).
+        let usesCRLF = yaml.contains("\r\n")
+        let normalized = usesCRLF ? yaml.replacingOccurrences(of: "\r\n", with: "\n") : yaml
+        let result = setListLF(in: normalized, platform: platform, key: key, items: items)
+        return usesCRLF ? result.replacingOccurrences(of: "\n", with: "\r\n") : result
+    }
+
+    private static func setListLF(
+        in yaml: String,
+        platform: String,
+        key: String,
+        items: [String]
+    ) -> String {
         let keyIndent = 2   // `<platform>:\n  <key>:`
         let itemIndent = 4  // `<platform>:\n  <key>:\n    - item`
 
@@ -117,6 +134,19 @@ public enum GatewayConfigWriter {
     /// `#`, leading specials) are single-quoted; pair order is preserved as
     /// given.
     public static func setMap(
+        in yaml: String,
+        section: String,
+        key: String,
+        pairs: [(key: String, value: String)]
+    ) -> String {
+        // Same CRLF round-trip contract as `setList` — see the comment there.
+        let usesCRLF = yaml.contains("\r\n")
+        let normalized = usesCRLF ? yaml.replacingOccurrences(of: "\r\n", with: "\n") : yaml
+        let result = setMapLF(in: normalized, section: section, key: key, pairs: pairs)
+        return usesCRLF ? result.replacingOccurrences(of: "\n", with: "\r\n") : result
+    }
+
+    private static func setMapLF(
         in yaml: String,
         section: String,
         key: String,
@@ -230,12 +260,12 @@ public enum GatewayConfigWriter {
         // Inside the platform block, find `<key>:` at indent 2, OR the end
         // of the platform's body if the key is missing.
         var keyIdx: Int?
-        var lastBodyIdx = platformIdx
         var i = platformIdx + 1
+        var lastBodyIdx = platformIdx
         while i < lines.count {
             let line = lines[i]
             let indent = leadingSpaces(line)
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty || trimmed.hasPrefix("#") {
                 i += 1
                 continue
@@ -244,8 +274,18 @@ public enum GatewayConfigWriter {
                 // Out of the platform's block (next top-level section).
                 break
             }
-            if indent == 2 && trimmed == "\(key):" {
-                keyIdx = i
+            if indent == 2, let kind = keyLineKind(trimmed: trimmed, key: key) {
+                switch kind {
+                case .blockHeader:
+                    keyIdx = i
+                case .inlineValue:
+                    // `key: {…}` / `key: […]` / `key: scalar` — the whole
+                    // block is this single line; replacing it completes the
+                    // edit. (Stock cli-config.yaml.example ships
+                    // `reasoning_overrides: {}` uncommented — treating this
+                    // as key-missing used to splice a DUPLICATE key.)
+                    return .found(i...i)
+                }
                 break
             }
             lastBodyIdx = i
@@ -288,6 +328,28 @@ public enum GatewayConfigWriter {
         }
 
         return .found(keyIdx...endIdx)
+    }
+
+    /// Classify a trimmed line against `<key>:`.
+    private enum KeyLineKind {
+        /// `key:` with nothing (or only a comment) after the colon — a block
+        /// header whose bullet/entry rows follow on subsequent lines.
+        case blockHeader
+        /// `key: <something>` — an inline value (flow dict `{…}`, flow list
+        /// `[…]`, or scalar) occupying a single line.
+        case inlineValue
+    }
+
+    /// Match `trimmed` against the target key, tolerating an inline flow /
+    /// scalar value or a trailing comment. Returns nil when the line is not
+    /// this key at all.
+    private static func keyLineKind(trimmed: String, key: String) -> KeyLineKind? {
+        let header = "\(key):"
+        guard trimmed.hasPrefix(header) else { return nil }
+        let rest = trimmed.dropFirst(header.count)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if rest.isEmpty || rest.hasPrefix("#") { return .blockHeader }
+        return .inlineValue
     }
 
     private static func replaceBlock(
@@ -370,19 +432,27 @@ public enum GatewayConfigWriter {
         return n
     }
 
-    /// Find the first line whose trimmed content equals `header` AND whose
-    /// leading-space count equals `indent`. Comment-only and blank lines
-    /// are skipped. Returns the line's index or `nil`.
+    /// Find the first line whose trimmed content equals `header` (or is
+    /// `header` followed only by a `# comment`) AND whose leading-space
+    /// count equals `indent`. Comment-only and blank lines are skipped;
+    /// stray `\r` (CRLF remnants) is stripped before matching so a section
+    /// header is never mistaken for missing — a miss here appends a second
+    /// top-level section, which PyYAML resolves last-wins (data loss).
+    /// Returns the line's index or `nil`.
     private static func firstIndex(
         of lines: [String],
         headerLineEqualTo header: String,
         indent: Int
     ) -> Int? {
         for (i, line) in lines.enumerated() {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
-            if leadingSpaces(line) == indent && trimmed == header {
-                return i
+            guard leadingSpaces(line) == indent else { continue }
+            if trimmed == header { return i }
+            if trimmed.hasPrefix(header) {
+                let rest = trimmed.dropFirst(header.count)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if rest.isEmpty || rest.hasPrefix("#") { return i }
             }
         }
         return nil
