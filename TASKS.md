@@ -45,7 +45,7 @@
 - [ ] iOS: route confirmModelPreflight through LocalModelConfigPlan (live stale-key bug, same class as Mac) (id: t-52f4564b) (added: 2026-07-14)
 - [ ] Low-risk consolidation: 3× semverCompare and 7× shell-quoting copies → shared utils (id: t-a21accf0) (added: 2026-07-14)
 - [ ] Reliable connect-time Hermes version read (persist + single cached probe) — enabler for any floor/nudge (id: t-bfd15aef) (added: 2026-07-14)
-- [ ] Hermes v0.20 Phase 3 — new settings key surfaces (id: t-1cc0a505) (added: 2026-08-03)
+- [ ] Hermes v0.20 deferred settings surfaces (pickup-ready backlog) (id: t-1cc0a505) (added: 2026-08-03)
 
 ## Doing
 
@@ -53,6 +53,7 @@
 
 ## Done
 
+- [x] v0.20 power settings pass — compression, reasoning overrides, excluded providers (id: t-f4d59e66) (added: 2026-08-03)
 - [x] Hermes v0.20 Phase 2 — high-value adoption (id: t-9fd50744) (added: 2026-08-03)
 - [x] v0.20 Wave C4 — compaction summary styling (id: t-641d65a5) (added: 2026-08-03)
 - [x] v0.20 Wave C1 — pinned/last-activity sidebar + per-model costs (id: t-bba31d39) (added: 2026-08-03)
