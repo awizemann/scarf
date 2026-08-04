@@ -6,6 +6,114 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.18.1</title>
+      <sparkle:version>57</sparkle:version>
+      <sparkle:shortVersionString>2.18.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Tue, 04 Aug 2026 21:09:23 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.18.1</p>
+<p>A fast follow to v2.18.0 with one theme: <strong>power settings for Hermes 0.20&#x27;s best new knobs</strong> — compression tuning, per-model reasoning effort, and provider exclusions — every key verified against Hermes source, and the YAML-writing machinery behind them hardened by an adversarial audit before shipping.</p>
+<h2>New: compression tuning</h2>
+<p>Hermes 0.20 overhauled context compression and exposed real controls. Four of them now live beside the existing threshold slider (on 0.20 hosts):</p>
+<ul>
+  <li><strong>Absolute token threshold</strong> (<code>compression.threshold_tokens</code>) — trigger compression at a fixed token count instead of a context-ratio; Hermes uses the lower of the two when both are set. Setting 0 turns it off — a round-trip we verified is lossless against Hermes&#x27;s own coercion logic.</li>
+  <li><strong>Guaranteed conversation tail</strong> (<code>compression.min_tail_user_messages</code>) — your N most recent user messages always survive compaction.</li>
+  <li><strong>Idle compaction</strong> (<code>compression.idle_compact_after_seconds</code>) — compact proactively while the session sits idle instead of pausing mid-conversation.</li>
+  <li><strong>Progress notices</strong> (<code>compression.progress_notices</code>) — see when compression runs instead of wondering about the pause.</li>
+</ul>
+<h2>New: per-model reasoning effort</h2>
+<p>A <strong>Per-Model Reasoning</strong> table in the Agent tab: pin reasoning effort per model — your heavyweight model thinks at <code>max</code> or <code>ultra</code> (the new 0.20 tiers, now in the pickers on 0.20 hosts) while your fast model stays at <code>low</code>. Matching follows Hermes&#x27;s own resolver — exact names or common spelling variants (dots/dashes, optional provider prefix), first match wins, overrides beat the global setting.</p>
+<p>Under the hood this writes the <code>agent.reasoning_overrides</code> dictionary — a key Hermes&#x27;s own <code>config set</code> can&#x27;t write (dots in model names) — via Scarf&#x27;s surgical YAML editor: your comments and unknown keys elsewhere in config.yaml are preserved byte-for-byte, and removing the last row removes the key entirely.</p>
+<h2>New: excluded providers</h2>
+<p>A list editor in the Model section for <code>model_catalog.excluded_providers</code> — providers you never use disappear from every model picker and from built-in resolution. Free-text entry with suggestions from your live provider catalog; any capitalization works (Hermes lowercases on match — verified).</p>
+<h2>Hardened: the YAML writer, adversarially audited</h2>
+<p>Before cutting this release we ran a fresh-eyes audit against the new write paths and fixed everything it found — including two corruption-class bugs that never shipped:</p>
+<ul>
+  <li><strong>Inline flow syntax is now understood.</strong> The stock Hermes example config ships <code>reasoning_overrides: {}</code> inline — the writer previously would have appended a duplicate key instead of replacing that line, and a hand-written inline dict was invisible to the UI while staying silently active. Both fixed: inline dicts/lists are replaced in place and flat inline content is read back into the editor.</li>
+  <li><strong>Section headers with trailing comments and CRLF files are safe.</strong> Either could previously trick the writer into appending a duplicate top-level section — which YAML&#x27;s last-wins rule would resolve by discarding your entire original section. Fixed in the shared locator, which also hardens the pre-existing gateway allowlist write path; line endings are preserved on output.</li>
+  <li><strong>Hermes&#x27;s disable aliases are honored.</strong> A hand-edited <code>disabled</code>/<code>false</code>/<code>off</code> effort value is preserved verbatim instead of silently blocking all edits to the section, and any rejected write now shows an error instead of doing nothing.</li>
+</ul>
+<p>Every fix carries a regression test; writer output was cross-validated by loading it with PyYAML — the same parser Hermes uses.</p>
+<h2>Under the hood</h2>
+<ul>
+  <li>25 new tests this release (settings round-trips, quoted-key YAML, flow-dict handling, CRLF, alias values); the suite now runs 1,090.</li>
+  <li>All three new surfaces are capability-gated on Hermes v0.20 — on older hosts, Settings renders exactly as v2.18.0.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li><strong>Sparkle</strong> will offer the update automatically, or use <strong>Scarf → Check for Updates</strong>. macOS 14.6+ deployment target unchanged.</li>
+  <li><strong>Hermes target unchanged: v0.20.0 (v2026.8.3)</strong>, minimum v0.6.0. The new settings appear only against 0.20+ hosts.</li>
+  <li>One known limitation: hand-written comments <em>inside</em> an existing <code>reasoning_overrides</code> block are not preserved when you edit the table (comments everywhere else in config.yaml are untouched).</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.18.1/Scarf-v2.18.1-Universal.zip"
+                 sparkle:edSignature="5N8lHL6gLwEfHGRBnqdJlegbmwhiWcMgEwZk2TTtrOvfC7IYeGDhpB3bBEDa+zV8Q6+/aRvSZ5D0nWz0jFfPAA=="
+                 length="22096806"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.18.0</title>
       <sparkle:version>56</sparkle:version>
       <sparkle:shortVersionString>2.18.0</sparkle:shortVersionString>
