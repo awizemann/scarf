@@ -24,3 +24,6 @@ What shipped for the Hermes v0.20.0 (v2026.8.3) cycle and why (branch feat/herme
 - extends [[Hermes v0.18 Compatibility Decisions]]
 - relates_to [[Hermes v0.20.0 Audit Findings]]
 - implements [[Hermes Capability Gating Pattern]]
+
+
+- [done] Power-settings pass shipped post-v2.18.0 (merge db8c070): compression.threshold_tokens/min_tail_user_messages/idle_compact_after_seconds/progress_notices rows; agent.reasoning_overrides table via new GatewayConfigWriter.setMap + PowerSettingsWriter (dict unsupported by `hermes config set` — config_defaults.py:248 says so outright; matching is spelling-tolerant variant matching per hermes_constants.py:1064, NOT substring; valid efforts minimal…ultra + none-alias, hermes_constants.py:942-967); excluded providers key is **model_catalog.excluded_providers** (inventory.py:100 — NOT top-level as the audit note guessed). HermesYAML learned quoted-key parsing (model patterns with `:` round-trip). All gated isV020OrLater; 14 tests in PowerSettingsV020Tests. Remaining Phase 3 backlog: task t-1cc0a505. #done
