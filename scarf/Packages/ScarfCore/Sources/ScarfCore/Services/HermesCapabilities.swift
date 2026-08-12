@@ -651,6 +651,16 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// v2026.7.30 — same window as `hasSTTUnifiedLanguage`, floor v0.20).
     public var hasSTTLocalVADTuning: Bool { isV020OrLater }
 
+    /// `gateway.profile_routes` (and the top-level `profile_routes` form) —
+    /// per-guild/channel/thread routing of inbound gateway messages to
+    /// distinct Hermes profiles (hermes-agent commit 5e65f6d79f
+    /// "feat(gateway): add profile-based routing for inbound messages",
+    /// 2026-06-27). Unlike most of the v0.20 surface this one is genuinely
+    /// older: the first tag containing it is v2026.7.20, whose
+    /// `pyproject.toml` reads `version = "0.19.0"` (the preceding tag
+    /// v2026.7.7.2 was 0.18.2), so the true floor is **v0.19**, not v0.20.
+    public var hasGatewayProfileRoutes: Bool { isV019OrLater }
+
     // MARK: Convenience predicates
 
     /// Whether the connected host is on the v0.13 line or newer. Convenience
@@ -686,6 +696,11 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// for UI copy that toggles on the v0.17 → v0.18 boundary without
     /// proxying through a feature-specific flag.
     public var isV018OrLater: Bool { atLeastSemver(0, 18, 0) }
+
+    /// Whether the connected host is on the v0.19 line or newer. Convenience
+    /// for UI copy that toggles on the v0.18 → v0.19 boundary without
+    /// proxying through a feature-specific flag.
+    public var isV019OrLater: Bool { atLeastSemver(0, 19, 0) }
 
     /// Whether the connected host is on the v0.20 line or newer. Convenience
     /// for UI copy that toggles on the v0.19 → v0.20 boundary without

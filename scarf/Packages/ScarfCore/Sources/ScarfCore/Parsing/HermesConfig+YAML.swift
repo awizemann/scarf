@@ -540,7 +540,12 @@ public extension HermesConfig {
             // -- P3b additions (v0.20+, all first released v2026.7.30) --
             commandSecrets: commandSecrets,
             telemetry: telemetry,
-            database: database
+            database: database,
+            // `profile_routes` is a list of MAPS — the one shape
+            // parseNestedYAML doesn't model — so it gets its own scanner,
+            // which also reports which of the two accepted forms Hermes
+            // would actually read (v0.19+, gateway/profile_routing.py).
+            profileRoutes: ProfileRoutesYAML.parse(yaml)
         )
     }
 }

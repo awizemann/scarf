@@ -1349,6 +1349,13 @@ public struct HermesConfig: Sendable {
     /// `DatabaseSettings`.
     public var database: DatabaseSettings
 
+    /// `profile_routes` / `gateway.profile_routes` (v0.19+) — inbound
+    /// gateway messages routed to different Hermes profiles by
+    /// platform/guild/channel/thread. A list of maps, so `hermes config set`
+    /// can't express it; writes go through `ProfileRoutesWriter` direct-YAML.
+    /// See `HermesProfileRoutes` for the matching + ranking semantics.
+    public var profileRoutes: HermesProfileRoutes
+
 
     public init(
         model: String,
@@ -1432,7 +1439,8 @@ public struct HermesConfig: Sendable {
         approvalSmartPolicy: String = "",
         commandSecrets: CommandSecretsSettings = .empty,
         telemetry: TelemetrySettings = .empty,
-        database: DatabaseSettings = .empty
+        database: DatabaseSettings = .empty,
+        profileRoutes: HermesProfileRoutes = .empty
     ) {
         self.cacheTTL = cacheTTL
         self.redactionEnabled = redactionEnabled
@@ -1516,6 +1524,7 @@ public struct HermesConfig: Sendable {
         self.commandSecrets = commandSecrets
         self.telemetry = telemetry
         self.database = database
+        self.profileRoutes = profileRoutes
     }
     public nonisolated static let empty = HermesConfig(
         model: "unknown",

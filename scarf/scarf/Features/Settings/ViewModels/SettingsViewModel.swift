@@ -570,6 +570,41 @@ final class SettingsViewModel {
         }
     }
 
+    /// Write `profile_routes` (a list of MAPS — beyond both `hermes config
+    /// set` and the scalar/flat-map direct-YAML writers). Refused silently
+    /// on pre-v0.19 hosts, where the key didn't exist yet.
+    ///
+    /// `location` must come from the freshly-read config so the write lands
+    /// in whichever of the two accepted forms Hermes actually reads
+    /// (top-level wins over `gateway.` — gateway/config.py:1356).
+    func saveProfileRoutes(
+        _ routes: [HermesProfileRoute],
+        location: HermesProfileRoutes.Location,
+        capabilities: HermesCapabilities
+    ) {
+        saveDirectYAML(label: "profile_routes") { yaml in
+            // Re-derive the live location from the YAML we are about to
+            // edit rather than trusting the snapshot the view was rendered
+            // from: Hermes (or a hand edit) may have moved the block since
+            // the last load, and writing the wrong form would silently
+            // shadow the user's edit.
+            let live = ProfileRoutesYAML.parse(yaml).location
+            return ProfileRoutesWriter.setProfileRoutes(
+                in: yaml,
+                routes: routes,
+                location: live == .absent ? location : live,
+                capabilities: capabilities
+            )
+        }
+    }
+
+    /// `gateway.multiplex_profiles` — the prerequisite for profile routing
+    /// (gateway/run.py:23923 returns before matching when it's off). Plain
+    /// scalar, so the CLI handles it.
+    func setMultiplexProfiles(_ value: Bool) {
+        setSetting("gateway.multiplex_profiles", value: value ? "true" : "false")
+    }
+
     /// Shared read → transform → write → reload path for the direct-YAML
     /// writers, mirroring `GatewayConfigWriter.saveList`'s no-op-on-equal
     /// behavior and `setSetting`'s save toast.

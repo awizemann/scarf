@@ -37,6 +37,14 @@ struct AgentTab: View {
             StepperRow(label: "Gateway Timeout (s)", value: viewModel.config.gatewayTimeout, range: 60...7200, step: 60) { viewModel.setGatewayTimeout($0) }
             StepperRow(label: "Notify Interval (s)", value: viewModel.config.gatewayNotifyInterval, range: 0...3600, step: 30) { viewModel.setGatewayNotifyInterval($0) }
         }
+
+        // v0.19+: `profile_routes` — route inbound gateway messages to
+        // different profiles by platform/server/channel/thread. Older than
+        // the rest of this tab's gated surface (first tag v2026.7.20 =
+        // Hermes 0.19.0), hence its own floor.
+        if let capabilities = capabilitiesStore?.capabilities, capabilities.hasGatewayProfileRoutes {
+            ProfileRoutesSection(viewModel: viewModel, capabilities: capabilities)
+        }
     }
 }
 
