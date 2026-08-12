@@ -7,7 +7,7 @@ source_paths: [README.md, scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/
 source_paths_inferred: false
 source_sha: 8da06bf74aa0b22581939e623f70e5dc0af37ff6
 created: 2026-05-29
-updated: 2026-08-03
+updated: 2026-08-12
 reviewed: 2026-07-23
 reviewed_by: audit:claude-code (background)
 ---
@@ -27,3 +27,6 @@ reviewed_by: audit:claude-code (background)
 
 
 - [v020-target] Hermes v0.20.0 (v2026.8.3) audited 2026-08-03 and parity implemented on branch feat/hermes-v020-parity (unmerged pending Alan's review; see [[Hermes v0.20.0 Audit Findings]] and documents/hermes-v0.20.0-audit-report.md). v0.20 capability group: isV020OrLater + hasCompressCommand/hasCuratorAdopt/hasApprovalsSuggest/hasCronRuns/hasSessionsExportFormats. Forced fixes shipped: /compact→/compress gating, curator-managed-skills header dual parse, provider tables (vercel/fireworks/vertex/upstage/deepseek), buzz platform, capability-aware max_turns display (500 at v0.20+, 60 before). Pre-existing bugs fixed same cycle: skills uninstall/update --yes (never existed; uninstall needs stdin "y"), agent.runtime_metadata_footer→display.runtime_footer.enabled, google_chat/teams platform ids, global display.busy_ack_enabled, slash_command_notice_ttl_seconds removed. Adopted features: pinned/last-activity sidebar + session_model_usage dashboard (schema-detected), export formats (md/html/qmd/trace + --redact; remote contexts stdout-only jsonl/trace), approvals suggest, cron runs history, compaction-summary styling (hydration-layer marker classification mirroring ContextCompressor.classify_summary_content — NOT the ACP _meta replay path, which the DB clobbers). state.db SCHEMA_VERSION 25: all additive, DDL now lives in hermes_state_common.py. check-hermes-tables.py default path now ~/.hermes/hermes-agent. #v020
+
+
+- [update-2026-08-12] The v0.20 parity work is fully MERGED to main (shipped in the v2.18.x line; the "unmerged pending review" caveat above is stale). The Phase 3 leftovers run also landed on main 2026-08-12 (commits 0bdbf90..75456b4): browser.cloud_provider key fix, HermesVersionCache single cached/persisted version probe, and the remaining v0.20 settings surfaces except import-agent/sync (still t-1cc0a505). New capability flags added with per-key semver floors (v0.18/v0.19/v0.20) — see HermesCapabilities.swift. Scarf's Hermes target remains v0.20.0 (v2026.8.3); upstream main has ~1,200 unreleased commits including the Browser Use CLI 3.0 default-backend flip — audit when the next tag lands (skill: hermes-release-audit). #current
