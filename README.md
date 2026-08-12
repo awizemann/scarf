@@ -19,6 +19,17 @@
   <a href="https://www.buymeacoffee.com/awizemann"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="28"></a>
 </p>
 
+## What's New in 2.19.0
+
+**The Hermes 0.20 settings backlog, closed — and a browser picker that finally works.**
+
+- **Browser provider fix** — the backend picker had been writing a config key Hermes never read; every selection was silently ignored. It now writes `browser.cloud_provider` with the real provider list, and Auto-detect genuinely clears the key (Hermes 0.19+).
+- **Gateway profile routing** — a list editor for routing gateway messages to profiles by platform/guild/channel/thread, mirroring Hermes's specificity-ranked matching, written via the lossless YAML editor.
+- **Six new settings surfaces** — title generation, per-task reasoning effort, smart approval policy, secrets sources (CLI vault + Bitwarden cache), voice STT/TTS tuning, telemetry + SQLite journal knobs. Each gated to the Hermes version its key shipped in.
+- **Faster version detection** — one cached, persisted probe per server; instant capability-gated UI at launch, no blanking on a transient probe failure.
+
+See the full [v2.19.0 release notes](https://github.com/awizemann/scarf/releases/tag/v2.19.0).
+
 ## What's New in 2.18.1
 
 **Power settings for Hermes 0.20.** The best new knobs from the Herald release, each verified against Hermes source and gated to 0.20 hosts:
