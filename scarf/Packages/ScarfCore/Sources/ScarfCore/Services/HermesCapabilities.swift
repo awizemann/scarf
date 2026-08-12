@@ -556,6 +556,24 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `hasConfigUnset`).
     public var hasAuxiliaryReasoningEffort: Bool { atLeastSemver(0, 19, 0) }
 
+    /// `tts.deepinfra.{model,voice}` — DeepInfra as a TTS backend, alongside
+    /// its existing `stt.deepinfra.model` sibling (v0.19+, hermes-agent
+    /// commit fe002eb124 "feat(providers): Support DeepInfra as an LLM
+    /// provider" — the same commit scaffolded the `tts`/`stt` DeepInfra
+    /// blocks — first released v2026.7.20 = 0.19.0).
+    public var hasDeepInfraTTS: Bool { atLeastSemver(0, 19, 0) }
+
+    /// `tts.xai.{language,speed,optimize_streaming_latency,sample_rate,
+    /// bit_rate}` — the rest of xAI TTS's tunable params beyond voice/model
+    /// (v0.19+, hermes-agent commit 5c6499ce4d "feat: surface all xAI TTS
+    /// params in desktop GUI config", first released v2026.7.20 = 0.19.0).
+    /// That commit also added `tts.xai.text_normalization`, but commit
+    /// 6bb8a0aef1 dropped it again before any tagged release shipped it
+    /// ("not honored by the xAI TTS backend") — Scarf never surfaces that
+    /// key. `auto_speech_tags` predates this flag; see
+    /// `hasXAITTSAutoSpeechTags`.
+    public var hasXAITTSAdvancedParams: Bool { atLeastSemver(0, 19, 0) }
+
     // MARK: v0.20 (v2026.8.3) flags
 
     /// ACP `/compact` was renamed `/compress` (v0.20+, v2026.8.3).
@@ -614,6 +632,24 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// 9d4bfd5e3 "fix(config): register WAL sizing pragmas in
     /// DEFAULT_CONFIG" — both first released v2026.7.30).
     public var hasDatabaseJournalSettings: Bool { isV020OrLater }
+
+    /// `stt.language` (global fallback hint, default `"en"`) +
+    /// `stt.groq.{model,language}` — the unified STT language resolver
+    /// (v0.20+, hermes-agent commit a10bd49ddd "feat(stt): unify language
+    /// resolution across all STT providers" + commit bc997a36a8 "feat(stt):
+    /// default global stt.language to 'en'", both first released
+    /// v2026.7.30 — between the v0.19.0 tag (v2026.7.20) and the v0.20.0
+    /// tag (v2026.8.3), so the next guaranteed floor is v0.20). Groq's STT
+    /// provider itself predates this (env-var only); the commit is what
+    /// makes `stt.groq.model`/`stt.groq.language` config-driven.
+    public var hasSTTUnifiedLanguage: Bool { isV020OrLater }
+
+    /// `stt.local.{vad,vad_min_silence_ms,no_speech_prob_threshold,
+    /// logprob_threshold}` — faster-whisper anti-hallucination tuning
+    /// (v0.20+, hermes-agent commit bf8004e3a8 "fix(stt): kill
+    /// faster-whisper silence hallucinations at the source", first released
+    /// v2026.7.30 — same window as `hasSTTUnifiedLanguage`, floor v0.20).
+    public var hasSTTLocalVADTuning: Bool { isV020OrLater }
 
     // MARK: Convenience predicates
 

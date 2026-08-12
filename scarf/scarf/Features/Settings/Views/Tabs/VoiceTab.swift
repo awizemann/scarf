@@ -41,8 +41,25 @@ struct VoiceTab: View {
                 if capabilitiesStore?.capabilities.hasXAITTSAutoSpeechTags == true {
                     ToggleRow(label: "Auto speech tags", isOn: viewModel.config.voice.ttsXAIAutoSpeechTags) { viewModel.setTTSXAIAutoSpeechTags($0) }
                 }
+                // v0.19: the rest of xAI TTS's tunable params — hidden on
+                // pre-v0.19 hosts (hasXAITTSAdvancedParams). No
+                // `text_normalization` row: Hermes added then dropped that
+                // key before any tagged release shipped it.
+                if capabilitiesStore?.capabilities.hasXAITTSAdvancedParams == true {
+                    EditableTextField(label: "Language", value: viewModel.config.voice.ttsXAILanguage) { viewModel.setTTSXAILanguage($0) }
+                    DoubleStepperRow(label: "Speed", value: viewModel.config.voice.ttsXAISpeed, range: 0.7...1.5, step: 0.1) { viewModel.setTTSXAISpeed($0) }
+                    StepperRow(label: "Streaming Latency Opt.", value: viewModel.config.voice.ttsXAIOptimizeStreamingLatency, range: 0...2, step: 1) { viewModel.setTTSXAIOptimizeStreamingLatency($0) }
+                    PickerRow(label: "Sample Rate", selection: String(viewModel.config.voice.ttsXAISampleRate), options: ["22050", "24000", "44100", "48000"]) { viewModel.setTTSXAISampleRate(Int($0) ?? 24000) }
+                    StepperRow(label: "Bit Rate", value: viewModel.config.voice.ttsXAIBitRate, range: 32000...320000, step: 8000) { viewModel.setTTSXAIBitRate($0) }
+                }
                 if capabilitiesStore?.capabilities.hasXAIVoiceCloning == true {
                     xaiCloningBadge
+                }
+            case "deepinfra":
+                // v0.19: DeepInfra TTS — hidden on pre-v0.19 hosts (hasDeepInfraTTS).
+                if capabilitiesStore?.capabilities.hasDeepInfraTTS == true {
+                    EditableTextField(label: "Model", value: viewModel.config.voice.ttsDeepInfraModel) { viewModel.setTTSDeepInfraModel($0) }
+                    EditableTextField(label: "Voice", value: viewModel.config.voice.ttsDeepInfraVoice) { viewModel.setTTSDeepInfraVoice($0) }
                 }
             default:
                 EmptyView()
@@ -52,12 +69,35 @@ struct VoiceTab: View {
         SettingsSection(title: "Speech-to-Text", icon: "waveform") {
             ToggleRow(label: "Enabled", isOn: viewModel.config.voice.sttEnabled) { viewModel.setSTTEnabled($0) }
             PickerRow(label: "Provider", selection: viewModel.config.voice.sttProvider, options: viewModel.sttProviders) { viewModel.setSTTProvider($0) }
+            // v0.20: global language hint applied to every provider unless a
+            // per-provider language overrides it — hidden on pre-v0.20 hosts
+            // (hasSTTUnifiedLanguage). Default "en"; empty restores auto-detect.
+            if capabilitiesStore?.capabilities.hasSTTUnifiedLanguage == true {
+                EditableTextField(label: "Language (global)", value: viewModel.config.voice.sttLanguage) { viewModel.setSTTLanguage($0) }
+            }
             switch viewModel.config.voice.sttProvider {
             case "local":
                 PickerRow(label: "Model", selection: viewModel.config.voice.sttLocalModel, options: ["tiny", "base", "small", "medium", "large-v3"]) { viewModel.setSTTLocalModel($0) }
                 EditableTextField(label: "Language", value: viewModel.config.voice.sttLocalLanguage) { viewModel.setSTTLocalLanguage($0) }
+                // v0.20: faster-whisper anti-hallucination VAD tuning —
+                // hidden on pre-v0.20 hosts (hasSTTLocalVADTuning).
+                if capabilitiesStore?.capabilities.hasSTTLocalVADTuning == true {
+                    ToggleRow(label: "VAD Filter", isOn: viewModel.config.voice.sttLocalVAD) { viewModel.setSTTLocalVAD($0) }
+                    StepperRow(label: "Min Silence (ms)", value: viewModel.config.voice.sttLocalVADMinSilenceMS, range: 0...5000, step: 50) { viewModel.setSTTLocalVADMinSilenceMS($0) }
+                    DoubleStepperRow(label: "No-Speech Threshold", value: viewModel.config.voice.sttLocalNoSpeechProbThreshold, range: 0.0...1.0, step: 0.05) { viewModel.setSTTLocalNoSpeechProbThreshold($0) }
+                    DoubleStepperRow(label: "Logprob Threshold", value: viewModel.config.voice.sttLocalLogprobThreshold, range: -5.0...0.0, step: 0.1) { viewModel.setSTTLocalLogprobThreshold($0) }
+                }
+            case "groq":
+                // v0.20: config-driven Groq STT knobs — hidden on pre-v0.20
+                // hosts (hasSTTUnifiedLanguage; the provider itself is
+                // older, but the model/language keys were env-only before).
+                if capabilitiesStore?.capabilities.hasSTTUnifiedLanguage == true {
+                    PickerRow(label: "Model", selection: viewModel.config.voice.sttGroqModel, options: ["whisper-large-v3", "whisper-large-v3-turbo", "distil-whisper-large-v3-en"]) { viewModel.setSTTGroqModel($0) }
+                    EditableTextField(label: "Language", value: viewModel.config.voice.sttGroqLanguage) { viewModel.setSTTGroqLanguage($0) }
+                }
             case "openai":
                 EditableTextField(label: "Model", value: viewModel.config.voice.sttOpenAIModel) { viewModel.setSTTOpenAIModel($0) }
+                EditableTextField(label: "Language", value: viewModel.config.voice.sttOpenAILanguage) { viewModel.setSTTOpenAILanguage($0) }
             case "mistral":
                 EditableTextField(label: "Model", value: viewModel.config.voice.sttMistralModel) { viewModel.setSTTMistralModel($0) }
             default:

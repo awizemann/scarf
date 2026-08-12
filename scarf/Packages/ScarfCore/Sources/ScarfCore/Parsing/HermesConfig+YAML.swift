@@ -118,7 +118,28 @@ public extension HermesConfig {
             ttsXAIVoiceID: str("tts.xai.voice_id"),
             ttsXAIModel: str("tts.xai.model"),
             // v0.15 round-trip — read the auto-speech-tags toggle back.
-            ttsXAIAutoSpeechTags: bool("tts.xai.auto_speech_tags", default: false)
+            ttsXAIAutoSpeechTags: bool("tts.xai.auto_speech_tags", default: false),
+            // v0.19 round-trip (hasXAITTSAdvancedParams) — read back even on
+            // pre-v0.19 hosts where the keys are simply absent (defaults win).
+            ttsXAILanguage: str("tts.xai.language", default: "en"),
+            ttsXAISpeed: double("tts.xai.speed", default: 1.0),
+            ttsXAIOptimizeStreamingLatency: int("tts.xai.optimize_streaming_latency", default: 0),
+            ttsXAISampleRate: int("tts.xai.sample_rate", default: 24000),
+            ttsXAIBitRate: int("tts.xai.bit_rate", default: 128000),
+            // v0.19 round-trip (hasDeepInfraTTS).
+            ttsDeepInfraModel: str("tts.deepinfra.model"),
+            ttsDeepInfraVoice: str("tts.deepinfra.voice", default: "default"),
+            // Predates version tracking, like sttOpenAIModel; ungated.
+            sttOpenAILanguage: str("stt.openai.language"),
+            // v0.20 round-trip (hasSTTUnifiedLanguage).
+            sttLanguage: str("stt.language", default: "en"),
+            sttGroqModel: str("stt.groq.model", default: "whisper-large-v3-turbo"),
+            sttGroqLanguage: str("stt.groq.language"),
+            // v0.20 round-trip (hasSTTLocalVADTuning).
+            sttLocalVAD: bool("stt.local.vad", default: true),
+            sttLocalVADMinSilenceMS: int("stt.local.vad_min_silence_ms", default: 500),
+            sttLocalNoSpeechProbThreshold: double("stt.local.no_speech_prob_threshold", default: 0.6),
+            sttLocalLogprobThreshold: double("stt.local.logprob_threshold", default: -1.0)
         )
 
         func aux(_ name: String) -> AuxiliaryModel {

@@ -260,6 +260,22 @@ public struct VoiceSettings: Sendable, Equatable {
     /// hosts ignore the key; Scarf hides the toggle when
     /// `HermesCapabilities.hasXAITTSAutoSpeechTags` is false.
     public var ttsXAIAutoSpeechTags: Bool
+    /// xAI TTS advanced params. v0.19+ (`hasXAITTSAdvancedParams`):
+    /// `tts.xai.language` (BCP-47 or "auto", default "en"),
+    /// `tts.xai.speed` (0.7-1.5, default 1.0),
+    /// `tts.xai.optimize_streaming_latency` (0-2, default 0),
+    /// `tts.xai.sample_rate` (22050/24000/44100/48000, default 24000),
+    /// `tts.xai.bit_rate` (MP3 bitrate, default 128000).
+    public var ttsXAILanguage: String
+    public var ttsXAISpeed: Double
+    public var ttsXAIOptimizeStreamingLatency: Int
+    public var ttsXAISampleRate: Int
+    public var ttsXAIBitRate: Int
+    /// DeepInfra TTS. v0.19+ (`hasDeepInfraTTS`): `tts.deepinfra.model`
+    /// (empty = first tts-tagged model from the live catalog),
+    /// `tts.deepinfra.voice` (default "default").
+    public var ttsDeepInfraModel: String
+    public var ttsDeepInfraVoice: String
 
     // STT
     public var sttEnabled: Bool
@@ -268,6 +284,25 @@ public struct VoiceSettings: Sendable, Equatable {
     public var sttLocalLanguage: String
     public var sttOpenAIModel: String
     public var sttMistralModel: String
+    /// `stt.openai.language` — per-provider override of the global STT
+    /// language hint (empty = auto-detect). Predates version tracking,
+    /// like the sibling `sttOpenAIModel`; ungated.
+    public var sttOpenAILanguage: String
+    /// Global STT language hint applied to every provider unless a
+    /// per-provider `language` overrides it. v0.20+ (`hasSTTUnifiedLanguage`).
+    /// Default `"en"` (Hermes default as of v2026.7.30; empty restores
+    /// auto-detect).
+    public var sttLanguage: String
+    /// `stt.groq.{model,language}`. v0.20+ (`hasSTTUnifiedLanguage`).
+    public var sttGroqModel: String
+    public var sttGroqLanguage: String
+    /// `stt.local.*` anti-hallucination VAD tuning. v0.20+
+    /// (`hasSTTLocalVADTuning`). `vad` defaults true (Silero VAD filter);
+    /// the three numeric knobs only take effect when `vad` is enabled.
+    public var sttLocalVAD: Bool
+    public var sttLocalVADMinSilenceMS: Int
+    public var sttLocalNoSpeechProbThreshold: Double
+    public var sttLocalLogprobThreshold: Double
 
 
     public init(
@@ -290,7 +325,22 @@ public struct VoiceSettings: Sendable, Equatable {
         sttMistralModel: String,
         ttsXAIVoiceID: String = "",
         ttsXAIModel: String = "",
-        ttsXAIAutoSpeechTags: Bool = false
+        ttsXAIAutoSpeechTags: Bool = false,
+        ttsXAILanguage: String = "en",
+        ttsXAISpeed: Double = 1.0,
+        ttsXAIOptimizeStreamingLatency: Int = 0,
+        ttsXAISampleRate: Int = 24000,
+        ttsXAIBitRate: Int = 128000,
+        ttsDeepInfraModel: String = "",
+        ttsDeepInfraVoice: String = "default",
+        sttOpenAILanguage: String = "",
+        sttLanguage: String = "en",
+        sttGroqModel: String = "whisper-large-v3-turbo",
+        sttGroqLanguage: String = "",
+        sttLocalVAD: Bool = true,
+        sttLocalVADMinSilenceMS: Int = 500,
+        sttLocalNoSpeechProbThreshold: Double = 0.6,
+        sttLocalLogprobThreshold: Double = -1.0
     ) {
         self.recordKey = recordKey
         self.maxRecordingSeconds = maxRecordingSeconds
@@ -306,12 +356,27 @@ public struct VoiceSettings: Sendable, Equatable {
         self.ttsXAIVoiceID = ttsXAIVoiceID
         self.ttsXAIModel = ttsXAIModel
         self.ttsXAIAutoSpeechTags = ttsXAIAutoSpeechTags
+        self.ttsXAILanguage = ttsXAILanguage
+        self.ttsXAISpeed = ttsXAISpeed
+        self.ttsXAIOptimizeStreamingLatency = ttsXAIOptimizeStreamingLatency
+        self.ttsXAISampleRate = ttsXAISampleRate
+        self.ttsXAIBitRate = ttsXAIBitRate
+        self.ttsDeepInfraModel = ttsDeepInfraModel
+        self.ttsDeepInfraVoice = ttsDeepInfraVoice
         self.sttEnabled = sttEnabled
         self.sttProvider = sttProvider
         self.sttLocalModel = sttLocalModel
         self.sttLocalLanguage = sttLocalLanguage
         self.sttOpenAIModel = sttOpenAIModel
         self.sttMistralModel = sttMistralModel
+        self.sttOpenAILanguage = sttOpenAILanguage
+        self.sttLanguage = sttLanguage
+        self.sttGroqModel = sttGroqModel
+        self.sttGroqLanguage = sttGroqLanguage
+        self.sttLocalVAD = sttLocalVAD
+        self.sttLocalVADMinSilenceMS = sttLocalVADMinSilenceMS
+        self.sttLocalNoSpeechProbThreshold = sttLocalNoSpeechProbThreshold
+        self.sttLocalLogprobThreshold = sttLocalLogprobThreshold
     }
     public nonisolated static let empty = VoiceSettings(
         recordKey: "ctrl+b",

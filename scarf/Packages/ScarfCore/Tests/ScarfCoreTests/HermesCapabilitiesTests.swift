@@ -591,6 +591,18 @@ import Foundation
         #expect(caps.hasAuxiliaryReasoningEffort)
     }
 
+    @Test func v019FlagsOnForV019Host_deepInfraTTSAndXAIAdvancedParams() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.7.20)")
+        #expect(caps.hasDeepInfraTTS)
+        #expect(caps.hasXAITTSAdvancedParams)
+    }
+
+    @Test func v018HostHidesV019TTSFlags() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)")
+        #expect(!caps.hasDeepInfraTTS)
+        #expect(!caps.hasXAITTSAdvancedParams)
+    }
+
     @Test func isV018OrLater_v018HostTrue() {
         #expect(HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)").isV018OrLater)
     }
@@ -617,6 +629,8 @@ import Foundation
         #expect(caps.hasCommandSecretSource)
         #expect(caps.hasSharedMetricsTelemetry)
         #expect(caps.hasDatabaseJournalSettings)
+        #expect(caps.hasSTTUnifiedLanguage)
+        #expect(caps.hasSTTLocalVADTuning)
         #expect(caps.isV020OrLater)
     }
 
@@ -634,11 +648,16 @@ import Foundation
         #expect(!caps.hasCommandSecretSource)
         #expect(!caps.hasSharedMetricsTelemetry)
         #expect(!caps.hasDatabaseJournalSettings)
+        #expect(!caps.hasSTTUnifiedLanguage)
+        #expect(!caps.hasSTTLocalVADTuning)
         #expect(!caps.isV020OrLater)
         // v0.18 surfaces stay alive on a v0.19 host.
         #expect(caps.hasCronAttachToSession)
         #expect(caps.hasMCPReauth)
         #expect(caps.isV018OrLater)
+        // v0.19 flags stay alive on a v0.19 host.
+        #expect(caps.hasDeepInfraTTS)
+        #expect(caps.hasXAITTSAdvancedParams)
     }
 
     @Test func v0_20_patchReleaseStillEnablesAllFlags() {
@@ -655,6 +674,8 @@ import Foundation
         #expect(caps.hasCommandSecretSource)
         #expect(caps.hasSharedMetricsTelemetry)
         #expect(caps.hasDatabaseJournalSettings)
+        #expect(caps.hasSTTUnifiedLanguage)
+        #expect(caps.hasSTTLocalVADTuning)
         #expect(caps.isV020OrLater)
     }
 

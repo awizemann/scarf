@@ -58,7 +58,7 @@ final class SettingsViewModel {
     // `HermesCapabilities.hasXAIVoiceCloning` and the badge in VoiceTab.
     // The provider option itself is ungated so pre-v0.13 hosts with xAI
     // keys can still pick it.
-    var ttsProviders = ["edge", "elevenlabs", "openai", "minimax", "mistral", "neutts", "piper", "xai"]
+    var ttsProviders = ["edge", "elevenlabs", "openai", "minimax", "mistral", "neutts", "piper", "xai", "deepinfra"]
     var sttProviders = ["local", "groq", "openai", "mistral"]
     /// Static-message translation languages honored by Hermes v0.13's
     /// `display.language` key. The first row's empty value writes no
@@ -337,12 +337,31 @@ final class SettingsViewModel {
     func setTTSXAIModel(_ value: String) { setSetting("tts.xai.model", value: value) }
     // v0.15: auto-insert speech-control tags into xAI TTS output.
     func setTTSXAIAutoSpeechTags(_ value: Bool) { setSetting("tts.xai.auto_speech_tags", value: value ? "true" : "false") }
+    // -- xAI TTS advanced params (v0.19+, hasXAITTSAdvancedParams).
+    func setTTSXAILanguage(_ value: String) { setSetting("tts.xai.language", value: value) }
+    func setTTSXAISpeed(_ value: Double) { setSetting("tts.xai.speed", value: String(value)) }
+    func setTTSXAIOptimizeStreamingLatency(_ value: Int) { setSetting("tts.xai.optimize_streaming_latency", value: String(value)) }
+    func setTTSXAISampleRate(_ value: Int) { setSetting("tts.xai.sample_rate", value: String(value)) }
+    func setTTSXAIBitRate(_ value: Int) { setSetting("tts.xai.bit_rate", value: String(value)) }
+    // -- DeepInfra TTS (v0.19+, hasDeepInfraTTS).
+    func setTTSDeepInfraModel(_ value: String) { setSetting("tts.deepinfra.model", value: value) }
+    func setTTSDeepInfraVoice(_ value: String) { setSetting("tts.deepinfra.voice", value: value) }
     func setSTTEnabled(_ value: Bool) { setSetting("stt.enabled", value: value ? "true" : "false") }
     func setSTTProvider(_ value: String) { setSetting("stt.provider", value: value) }
     func setSTTLocalModel(_ value: String) { setSetting("stt.local.model", value: value) }
     func setSTTLocalLanguage(_ value: String) { setSetting("stt.local.language", value: value) }
     func setSTTOpenAIModel(_ value: String) { setSetting("stt.openai.model", value: value) }
+    func setSTTOpenAILanguage(_ value: String) { setSetting("stt.openai.language", value: value) }
     func setSTTMistralModel(_ value: String) { setSetting("stt.mistral.model", value: value) }
+    // -- Global STT language hint + Groq knobs (v0.20+, hasSTTUnifiedLanguage).
+    func setSTTLanguage(_ value: String) { setSetting("stt.language", value: value) }
+    func setSTTGroqModel(_ value: String) { setSetting("stt.groq.model", value: value) }
+    func setSTTGroqLanguage(_ value: String) { setSetting("stt.groq.language", value: value) }
+    // -- Local STT VAD anti-hallucination tuning (v0.20+, hasSTTLocalVADTuning).
+    func setSTTLocalVAD(_ value: Bool) { setSetting("stt.local.vad", value: value ? "true" : "false") }
+    func setSTTLocalVADMinSilenceMS(_ value: Int) { setSetting("stt.local.vad_min_silence_ms", value: String(value)) }
+    func setSTTLocalNoSpeechProbThreshold(_ value: Double) { setSetting("stt.local.no_speech_prob_threshold", value: String(value)) }
+    func setSTTLocalLogprobThreshold(_ value: Double) { setSetting("stt.local.logprob_threshold", value: String(value)) }
 
     // MARK: - Memory
 
