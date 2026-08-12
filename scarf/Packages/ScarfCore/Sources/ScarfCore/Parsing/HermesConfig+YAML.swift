@@ -43,6 +43,15 @@ public extension HermesConfig {
             let raw = values[key] ?? def
             return HermesYAML.stripYAMLQuotes(raw)
         }
+        // True-optional int: `nil` means "key absent from config.yaml",
+        // distinct from any concrete int including 0. Used for
+        // `database.wal_autocheckpoint` / `database.journal_size_limit`,
+        // where Hermes reads `database.get(key)` directly and treats an
+        // absent key differently from `0` (see DatabaseSettings doc).
+        func intOpt(_ key: String) -> Int? {
+            guard let raw = values[key] else { return nil }
+            return Int(raw)
+        }
 
         let dockerEnv = maps["terminal.docker_env"] ?? [:]
         let commandAllowlist = lists["permanent_allowlist"] ?? lists["command_allowlist"] ?? []
@@ -256,7 +265,40 @@ public extension HermesConfig {
             overrideExisting: bool("secrets.bitwarden.override_existing", default: false),
             serverURL: str("secrets.bitwarden.server_url"),
             cacheTTLSeconds: int("secrets.bitwarden.cache_ttl_seconds", default: 300),
-            autoInstall: bool("secrets.bitwarden.auto_install", default: true)
+            autoInstall: bool("secrets.bitwarden.auto_install", default: true),
+            // `secrets.bitwarden.encrypted_cache` — v0.20+ (commit
+            // 1384087729, first released v2026.7.30). `max_stale_seconds`
+            // defaults to 0 ("no stale fallback"), a real value distinct
+            // from unset.
+            encryptedCache: BitwardenEncryptedCacheSettings(
+                enabled: bool("secrets.bitwarden.encrypted_cache.enabled", default: false),
+                maxStaleSeconds: int("secrets.bitwarden.encrypted_cache.max_stale_seconds", default: 0)
+            )
+        )
+
+        // `secrets.command.*` — v0.20+ any-CLI vault helper secret source
+        // (commit 3d5dd8efa5, first released v2026.7.30). See
+        // `CommandSecretsSettings` for the trust-model note on `command`.
+        let commandSecrets = CommandSecretsSettings(
+            enabled: bool("secrets.command.enabled", default: false),
+            command: str("secrets.command.command"),
+            helperTimeoutSeconds: double("secrets.command.helper_timeout_seconds", default: 3.0),
+            overrideExisting: bool("secrets.command.override_existing", default: false)
+        )
+
+        // `telemetry.shared_metrics` — v0.20+ opt-in local aggregate
+        // metrics (Relay pipeline, first released v2026.7.30).
+        let telemetry = TelemetrySettings(
+            sharedMetricsEnabled: bool("telemetry.shared_metrics.enabled", default: false)
+        )
+
+        // `database.*` — SQLite journal/WAL sizing pragmas, v0.20+ (first
+        // released v2026.7.30). `wal_autocheckpoint` / `journal_size_limit`
+        // are true optionals: absent key != 0.
+        let database = DatabaseSettings(
+            journalMode: str("database.journal_mode", default: "wal"),
+            walAutocheckpoint: intOpt("database.wal_autocheckpoint"),
+            journalSizeLimit: intOpt("database.journal_size_limit")
         )
 
         // Slack fields live under both `platforms.slack.*` (newer) and `slack.*`
@@ -473,7 +515,11 @@ public extension HermesConfig {
             excludedProviders: lists["model_catalog.excluded_providers"] ?? [],
             // `approvals.smart_policy` (v0.20+, config_defaults.py:2053) —
             // free-form policy text for the smart-approval guardian.
-            approvalSmartPolicy: str("approvals.smart_policy")
+            approvalSmartPolicy: str("approvals.smart_policy"),
+            // -- P3b additions (v0.20+, all first released v2026.7.30) --
+            commandSecrets: commandSecrets,
+            telemetry: telemetry,
+            database: database
         )
     }
 }

@@ -613,6 +613,10 @@ import Foundation
         #expect(caps.hasCronRuns)
         #expect(caps.hasSessionsExportFormats)
         #expect(caps.hasApprovalSmartPolicy)
+        #expect(caps.hasBitwardenEncryptedCache)
+        #expect(caps.hasCommandSecretSource)
+        #expect(caps.hasSharedMetricsTelemetry)
+        #expect(caps.hasDatabaseJournalSettings)
         #expect(caps.isV020OrLater)
     }
 
@@ -626,6 +630,10 @@ import Foundation
         #expect(!caps.hasCronRuns)
         #expect(!caps.hasSessionsExportFormats)
         #expect(!caps.hasApprovalSmartPolicy)
+        #expect(!caps.hasBitwardenEncryptedCache)
+        #expect(!caps.hasCommandSecretSource)
+        #expect(!caps.hasSharedMetricsTelemetry)
+        #expect(!caps.hasDatabaseJournalSettings)
         #expect(!caps.isV020OrLater)
         // v0.18 surfaces stay alive on a v0.19 host.
         #expect(caps.hasCronAttachToSession)
@@ -643,6 +651,10 @@ import Foundation
         #expect(caps.hasCronRuns)
         #expect(caps.hasSessionsExportFormats)
         #expect(caps.hasApprovalSmartPolicy)
+        #expect(caps.hasBitwardenEncryptedCache)
+        #expect(caps.hasCommandSecretSource)
+        #expect(caps.hasSharedMetricsTelemetry)
+        #expect(caps.hasDatabaseJournalSettings)
         #expect(caps.isV020OrLater)
     }
 

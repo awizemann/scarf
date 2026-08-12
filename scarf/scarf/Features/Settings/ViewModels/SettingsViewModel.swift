@@ -452,6 +452,63 @@ final class SettingsViewModel {
     func setBitwardenCacheTTLSeconds(_ value: Int) { setSetting("secrets.bitwarden.cache_ttl_seconds", value: String(value)) }
     func setBitwardenAutoInstall(_ value: Bool) { setSetting("secrets.bitwarden.auto_install", value: value ? "true" : "false") }
 
+    /// `secrets.bitwarden.encrypted_cache.*` (v0.20+, gated by the caller
+    /// on `hasBitwardenEncryptedCache`). `max_stale_seconds` default is a
+    /// real `0` ("no stale fallback"), not an unset sentinel — plain
+    /// scalar write, no unset machinery needed.
+    func setBitwardenEncryptedCacheEnabled(_ value: Bool) { setSetting("secrets.bitwarden.encrypted_cache.enabled", value: value ? "true" : "false") }
+    func setBitwardenEncryptedCacheMaxStaleSeconds(_ value: Int) { setSetting("secrets.bitwarden.encrypted_cache.max_stale_seconds", value: String(value)) }
+
+    // MARK: - Secrets (command helper, v0.20+)
+
+    /// `secrets.command.*` — any-CLI vault helper secret source (v0.20+,
+    /// gated by the caller on `hasCommandSecretSource`). `command` is run
+    /// via `/bin/sh -c` with the same trust level as the user's own
+    /// `.env` file — see `CommandSecretsSettings` doc.
+    func setCommandSecretsEnabled(_ value: Bool) { setSetting("secrets.command.enabled", value: value ? "true" : "false") }
+    func setCommandSecretsCommand(_ value: String) { setSetting("secrets.command.command", value: value) }
+    func setCommandSecretsHelperTimeoutSeconds(_ value: Double) { setSetting("secrets.command.helper_timeout_seconds", value: String(value)) }
+    func setCommandSecretsOverrideExisting(_ value: Bool) { setSetting("secrets.command.override_existing", value: value ? "true" : "false") }
+
+    // MARK: - Telemetry (v0.20+)
+
+    /// `telemetry.shared_metrics.enabled` — privacy-safe opt-in local
+    /// aggregate metrics; no remote sink. Gated by the caller on
+    /// `hasSharedMetricsTelemetry`.
+    func setSharedMetricsEnabled(_ value: Bool) { setSetting("telemetry.shared_metrics.enabled", value: value ? "true" : "false") }
+
+    // MARK: - Database (v0.20+)
+
+    /// `database.journal_mode` — closed enum in practice (`wal`/`delete`;
+    /// `hermes_state.resolve_journal_mode()` falls back to `wal` for
+    /// anything else), so the UI offers a picker, not free text. Gated on
+    /// `hasDatabaseJournalSettings`.
+    func setDatabaseJournalMode(_ value: String) { setSetting("database.journal_mode", value: value) }
+
+    /// `database.wal_autocheckpoint` (pages) — true optional. `nil` clears
+    /// the key via `unsetSetting` (SQLite default: 1000-page
+    /// autocheckpoint); a concrete value, including `0`, writes a scalar.
+    /// Do NOT collapse this to an empty-string write — `0` and "absent"
+    /// are different Hermes behaviors here.
+    func setDatabaseWalAutocheckpoint(_ value: Int?) {
+        if let value {
+            setSetting("database.wal_autocheckpoint", value: String(value))
+        } else {
+            unsetSetting("database.wal_autocheckpoint")
+        }
+    }
+
+    /// `database.journal_size_limit` (bytes) — true optional, same
+    /// unset-vs-empty hazard as `setDatabaseWalAutocheckpoint`. `nil`
+    /// clears the key (SQLite default: no limit).
+    func setDatabaseJournalSizeLimit(_ value: Int?) {
+        if let value {
+            setSetting("database.journal_size_limit", value: String(value))
+        } else {
+            unsetSetting("database.journal_size_limit")
+        }
+    }
+
     /// Read-only status panel via `hermes secrets bitwarden status`. Mirrors
     /// how `runConfigCheck` shells a read; returns the captured text output
     /// (a Rich panel). Empty on non-zero exit.

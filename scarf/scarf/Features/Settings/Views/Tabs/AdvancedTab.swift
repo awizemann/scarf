@@ -90,6 +90,14 @@ struct AdvancedTab: View {
             v017Section
         }
 
+        if capabilitiesStore?.capabilities.hasSharedMetricsTelemetry ?? false {
+            telemetrySection
+        }
+
+        if capabilitiesStore?.capabilities.hasDatabaseJournalSettings ?? false {
+            databaseSection
+        }
+
         SettingsSection(title: "Config Diagnostics", icon: "stethoscope") {
             HStack {
                 Text("Actions")
@@ -165,6 +173,95 @@ struct AdvancedTab: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
+    }
+
+    /// `telemetry.shared_metrics.enabled` — v0.20+, privacy-safe opt-in
+    /// aggregate metrics written only to this profile's local telemetry
+    /// directory. No remote sink exists; collection is off by default.
+    @ViewBuilder
+    private var telemetrySection: some View {
+        SettingsSection(title: "Telemetry", icon: "chart.bar") {
+            ToggleRow(
+                label: "Shared usage metrics",
+                isOn: viewModel.config.telemetry.sharedMetricsEnabled
+            ) { viewModel.setSharedMetricsEnabled($0) }
+        }
+        HStack {
+            Text("")
+                .font(.caption)
+                .frame(width: 160, alignment: .trailing)
+            Text("Privacy-safe aggregate metrics written only to this profile's local telemetry directory. Collection is opt-in and there is no remote sink — nothing leaves this machine.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+    }
+
+    /// `database.*` — SQLite journal mode + WAL sizing pragmas (v0.20+).
+    /// Framed for remote/container server operators: WAL is the normal
+    /// default, but weak-fsync/shared filesystems (macOS virtiofs, NFS,
+    /// SMB) need `delete` instead. `walAutocheckpoint` /
+    /// `journalSizeLimit` are true optionals (nil = SQLite default);
+    /// unset either via the "Custom" toggle rather than a 0 value, which
+    /// means something different (see `DatabaseSettings` doc).
+    @ViewBuilder
+    private var databaseSection: some View {
+        SettingsSection(title: "Database (SQLite)", icon: "cylinder.split.1x2") {
+            PickerRow(
+                label: "Journal Mode",
+                selection: viewModel.config.database.journalMode,
+                options: ["wal", "delete"]
+            ) { viewModel.setDatabaseJournalMode($0) }
+
+            optionalIntRow(
+                label: "WAL Autocheckpoint (pages)",
+                value: viewModel.config.database.walAutocheckpoint,
+                range: 0...1_000_000,
+                step: 100,
+                onChange: { viewModel.setDatabaseWalAutocheckpoint($0) }
+            )
+            optionalIntRow(
+                label: "Journal Size Limit (bytes)",
+                value: viewModel.config.database.journalSizeLimit,
+                range: 0...1_073_741_824,
+                step: 1_048_576,
+                onChange: { viewModel.setDatabaseJournalSizeLimit($0) }
+            )
+        }
+        HStack {
+            Text("")
+                .font(.caption)
+                .frame(width: 160, alignment: .trailing)
+            Text("`delete` trades WAL's crash-safety guarantees for compatibility with weak-fsync or shared filesystems — use it for macOS virtiofs, NFS, or SMB-backed Hermes homes. Autocheckpoint/size-limit pragmas apply only when set; leave them off for SQLite's own defaults (1000-page autocheckpoint, no size cap).")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+    }
+
+    /// A true-optional integer row: a "Custom" toggle gates a Stepper.
+    /// Turning the toggle off calls `onChange(nil)`, which the caller
+    /// wires to `unsetSetting` rather than writing an empty/zero scalar —
+    /// this is the empty-string-vs-unset hazard case, so 0 must stay a
+    /// distinct, reachable value from "unset".
+    @ViewBuilder
+    private func optionalIntRow(
+        label: String,
+        value: Int?,
+        range: ClosedRange<Int>,
+        step: Int,
+        onChange: @escaping (Int?) -> Void
+    ) -> some View {
+        ToggleRow(label: "\(label) — Custom", isOn: value != nil) { isOn in
+            onChange(isOn ? (value ?? range.lowerBound) : nil)
+        }
+        if let value {
+            StepperRow(label: label, value: value, range: range, step: step) { onChange($0) }
+        }
     }
 
     /// Caching, redaction, and runtime-metadata footer — all v0.12+

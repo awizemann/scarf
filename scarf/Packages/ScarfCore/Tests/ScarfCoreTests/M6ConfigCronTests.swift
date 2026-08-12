@@ -376,6 +376,106 @@ import Foundation
         #expect(c.approvalSmartPolicy == "")
     }
 
+    // MARK: - P3b: secrets.bitwarden.encrypted_cache, secrets.command,
+    // telemetry.shared_metrics, database.*
+
+    @Test func parsesBitwardenEncryptedCache() {
+        let yaml = """
+        secrets:
+          bitwarden:
+            enabled: true
+            encrypted_cache:
+              enabled: true
+              max_stale_seconds: 3600
+        """
+        let c = HermesConfig(yaml: yaml)
+        #expect(c.bitwarden.encryptedCache.enabled == true)
+        #expect(c.bitwarden.encryptedCache.maxStaleSeconds == 3600)
+    }
+
+    @Test func bitwardenEncryptedCacheDefaultsWhenAbsent() {
+        let c = HermesConfig(yaml: "")
+        #expect(c.bitwarden.encryptedCache.enabled == false)
+        // 0 is a meaningful default ("no stale fallback"), not an unset
+        // sentinel — verified against config_defaults.py's encrypted_cache
+        // sub-dict.
+        #expect(c.bitwarden.encryptedCache.maxStaleSeconds == 0)
+    }
+
+    @Test func parsesCommandSecrets() {
+        let yaml = """
+        secrets:
+          command:
+            enabled: true
+            command: "cat /run/user/1000/hermes-secrets.env"
+            helper_timeout_seconds: 5
+            override_existing: true
+        """
+        let c = HermesConfig(yaml: yaml)
+        #expect(c.commandSecrets.enabled == true)
+        #expect(c.commandSecrets.command == "cat /run/user/1000/hermes-secrets.env")
+        #expect(c.commandSecrets.helperTimeoutSeconds == 5)
+        #expect(c.commandSecrets.overrideExisting == true)
+    }
+
+    @Test func commandSecretsDefaultsWhenAbsent() {
+        let c = HermesConfig(yaml: "")
+        #expect(c.commandSecrets.enabled == false)
+        #expect(c.commandSecrets.command == "")
+        // Source-verified against agent/secret_sources/command.py's
+        // _COMMAND_TIMEOUT_SECONDS = 3.0.
+        #expect(c.commandSecrets.helperTimeoutSeconds == 3.0)
+        // Off by default, unlike Bitwarden/1Password override_existing.
+        #expect(c.commandSecrets.overrideExisting == false)
+    }
+
+    @Test func parsesSharedMetricsTelemetry() {
+        let yaml = """
+        telemetry:
+          shared_metrics:
+            enabled: true
+        """
+        let c = HermesConfig(yaml: yaml)
+        #expect(c.telemetry.sharedMetricsEnabled == true)
+    }
+
+    @Test func sharedMetricsTelemetryDefaultsToDisabled() {
+        let c = HermesConfig(yaml: "")
+        #expect(c.telemetry.sharedMetricsEnabled == false)
+    }
+
+    @Test func parsesDatabaseSettings() {
+        let yaml = """
+        database:
+          journal_mode: delete
+          wal_autocheckpoint: 500
+          journal_size_limit: 104857600
+        """
+        let c = HermesConfig(yaml: yaml)
+        #expect(c.database.journalMode == "delete")
+        #expect(c.database.walAutocheckpoint == 500)
+        #expect(c.database.journalSizeLimit == 104_857_600)
+    }
+
+    @Test func databaseSettingsDefaultsWhenAbsent() {
+        let c = HermesConfig(yaml: "")
+        #expect(c.database.journalMode == "wal")
+        // The empty-vs-unset hazard: absent keys must decode to nil, not
+        // 0 — 0 is a valid (if unusual) autocheckpoint/size-limit value.
+        #expect(c.database.walAutocheckpoint == nil)
+        #expect(c.database.journalSizeLimit == nil)
+    }
+
+    @Test func databaseWalAutocheckpointDistinguishesZeroFromUnset() {
+        let yaml = """
+        database:
+          wal_autocheckpoint: 0
+        """
+        let c = HermesConfig(yaml: yaml)
+        // A configured 0 must round-trip as Optional(0), not nil.
+        #expect(c.database.walAutocheckpoint == Optional(0))
+    }
+
     @Test func parsesPermanentAllowlist() {
         let yaml = """
         permanent_allowlist:

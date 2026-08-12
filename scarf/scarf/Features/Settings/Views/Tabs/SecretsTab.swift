@@ -13,10 +13,12 @@ import ScarfDesign
 /// a self-hosted vault URL.
 struct SecretsTab: View {
     @Bindable var viewModel: SettingsViewModel
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
     @State private var statusOutput: String = ""
     @State private var showStatus = false
 
     private var bitwarden: BitwardenSettings { viewModel.config.bitwarden }
+    private var commandSecrets: CommandSecretsSettings { viewModel.config.commandSecrets }
 
     var body: some View {
         SettingsSection(title: "Bitwarden Secrets Manager", icon: "key.horizontal") {
@@ -33,6 +35,14 @@ struct SecretsTab: View {
             .scarfStyle(.caption)
             .foregroundStyle(ScarfColor.foregroundMuted)
             .padding(.horizontal, ScarfSpace.s4)
+
+        if capabilitiesStore?.capabilities.hasBitwardenEncryptedCache ?? false {
+            encryptedCacheSection
+        }
+
+        if capabilitiesStore?.capabilities.hasCommandSecretSource ?? false {
+            commandSecretsSection
+        }
 
         SettingsSection(title: "Status", icon: "stethoscope") {
             HStack {
@@ -59,6 +69,40 @@ struct SecretsTab: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(.quaternary.opacity(0.5))
             }
+        }
+    }
+
+    // MARK: - Encrypted cache (v0.20+, `secrets.bitwarden.encrypted_cache`)
+
+    /// Optional encrypted last-good fallback for Bitwarden network/timeout
+    /// outages. Auth failures never fall back — only NETWORK/TIMEOUT.
+    private var encryptedCacheSection: some View {
+        let cache = bitwarden.encryptedCache
+        return SettingsSection(title: "Encrypted Stale Cache", icon: "lock.doc") {
+            ToggleRow(label: "Enabled", isOn: cache.enabled) { viewModel.setBitwardenEncryptedCacheEnabled($0) }
+            StepperRow(label: "Max Stale (s)", value: cache.maxStaleSeconds, range: 0...604_800, step: 60) { viewModel.setBitwardenEncryptedCacheMaxStaleSeconds($0) }
+                .help("How long a cached secret stays usable after Bitwarden becomes unreachable due to a network or timeout error. 0 = no stale fallback (Hermes default).")
+        }
+    }
+
+    // MARK: - Command helper (v0.20+, `secrets.command.*`)
+
+    /// Any-CLI vault helper secret source — composes with Bitwarden/
+    /// 1Password rather than replacing them.
+    private var commandSecretsSection: some View {
+        let cmd = commandSecrets
+        return VStack(alignment: .leading, spacing: 0) {
+            SettingsSection(title: "Command Helper", icon: "terminal") {
+                ToggleRow(label: "Enabled", isOn: cmd.enabled) { viewModel.setCommandSecretsEnabled($0) }
+                EditableTextField(label: "Command", value: cmd.command) { viewModel.setCommandSecretsCommand($0) }
+                DoubleStepperRow(label: "Helper Timeout (s)", value: cmd.helperTimeoutSeconds, range: 0.5...60, step: 0.5) { viewModel.setCommandSecretsHelperTimeoutSeconds($0) }
+                ToggleRow(label: "Override Existing", isOn: cmd.overrideExisting) { viewModel.setCommandSecretsOverrideExisting($0) }
+            }
+            Text("Run via `/bin/sh -c` with the same trust level as your own `.env` file — the requested secret key is passed only through an environment variable, never interpolated into the command string. Must print `KEY=VALUE` lines on stdout; keep it fast and non-interactive (no unlock prompts). Override Existing defaults off, unlike Bitwarden/1Password, since a local helper isn't a central rotation authority.")
+                .scarfStyle(.caption)
+                .foregroundStyle(ScarfColor.foregroundMuted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, ScarfSpace.s4)
         }
     }
 }

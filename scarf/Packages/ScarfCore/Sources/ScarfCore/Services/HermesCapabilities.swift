@@ -586,6 +586,35 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// present at is v0.20).
     public var hasApprovalSmartPolicy: Bool { isV020OrLater }
 
+    /// `secrets.bitwarden.encrypted_cache.{enabled,max_stale_seconds}` —
+    /// optional encrypted last-good Bitwarden fallback for network/timeout
+    /// outages (v0.20+, hermes-agent commit 1384087729 "fix(secrets): add
+    /// encrypted Bitwarden stale cache", first released v2026.7.30).
+    public var hasBitwardenEncryptedCache: Bool { isV020OrLater }
+
+    /// `secrets.command.*` — any-CLI vault helper secret source (v0.20+,
+    /// hermes-agent commit 3d5dd8efa5 "feat(secrets): add `command` secret
+    /// source + unified secrets.provider selector", first released
+    /// v2026.7.30).
+    public var hasCommandSecretSource: Bool { isV020OrLater }
+
+    /// `telemetry.shared_metrics.enabled` — privacy-safe opt-in aggregate
+    /// metrics written only to this profile's local telemetry directory,
+    /// no remote sink (v0.20+, Relay pipeline commits 3bd338d2a9,
+    /// 64faff6768, 056e7df0e0, 9baa8cc96c, 36185bf2e2, 43d994986e,
+    /// 841a5a744a/14bed44c8c revert+reapply, all first released
+    /// v2026.7.30).
+    public var hasSharedMetricsTelemetry: Bool { isV020OrLater }
+
+    /// `database.{journal_mode,wal_autocheckpoint,journal_size_limit}` —
+    /// SQLite journal mode + WAL sizing pragmas applied by every Hermes
+    /// database opener (v0.20+; `journal_mode` via commit 91351b7b7
+    /// "fix(state): make journal mode canonical and behaviorally
+    /// verified", `wal_autocheckpoint`/`journal_size_limit` via commit
+    /// 9d4bfd5e3 "fix(config): register WAL sizing pragmas in
+    /// DEFAULT_CONFIG" — both first released v2026.7.30).
+    public var hasDatabaseJournalSettings: Bool { isV020OrLater }
+
     // MARK: Convenience predicates
 
     /// Whether the connected host is on the v0.13 line or newer. Convenience

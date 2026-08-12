@@ -908,6 +908,10 @@ public struct BitwardenSettings: Sendable, Equatable {
     public var serverURL: String
     public var cacheTTLSeconds: Int
     public var autoInstall: Bool
+    /// `secrets.bitwarden.encrypted_cache` (v0.20+, gated on
+    /// `HermesCapabilities.hasBitwardenEncryptedCache`). See
+    /// `BitwardenEncryptedCacheSettings` for details.
+    public var encryptedCache: BitwardenEncryptedCacheSettings
 
 
     public init(
@@ -917,7 +921,8 @@ public struct BitwardenSettings: Sendable, Equatable {
         overrideExisting: Bool = false,
         serverURL: String = "",
         cacheTTLSeconds: Int = 300,
-        autoInstall: Bool = true
+        autoInstall: Bool = true,
+        encryptedCache: BitwardenEncryptedCacheSettings = .empty
     ) {
         self.enabled = enabled
         self.accessTokenEnv = accessTokenEnv
@@ -926,6 +931,7 @@ public struct BitwardenSettings: Sendable, Equatable {
         self.serverURL = serverURL
         self.cacheTTLSeconds = cacheTTLSeconds
         self.autoInstall = autoInstall
+        self.encryptedCache = encryptedCache
     }
     public nonisolated static let empty = BitwardenSettings(
         enabled: false,
@@ -934,8 +940,121 @@ public struct BitwardenSettings: Sendable, Equatable {
         overrideExisting: false,
         serverURL: "",
         cacheTTLSeconds: 300,
-        autoInstall: true
+        autoInstall: true,
+        encryptedCache: .empty
     )
+}
+
+/// `secrets.bitwarden.encrypted_cache` (Hermes v0.20+, hermes-agent commit
+/// `1384087729` "fix(secrets): add encrypted Bitwarden stale cache", first
+/// released v2026.7.30). Optional encrypted last-good fallback for
+/// network/timeout outages: when enabled, successful BWS fetches write
+/// AES-GCM encrypted cache material under `~/.hermes/cache/`. If a later
+/// startup can't reach Bitwarden due to NETWORK/TIMEOUT, Hermes may use
+/// this cache for up to `maxStaleSeconds`. Auth failures never fall back.
+/// `maxStaleSeconds: 0` is Hermes's own default and means "no stale
+/// fallback" — a meaningful value, not an empty/unset sentinel.
+public struct BitwardenEncryptedCacheSettings: Sendable, Equatable {
+    public var enabled: Bool
+    public var maxStaleSeconds: Int
+
+    public init(enabled: Bool = false, maxStaleSeconds: Int = 0) {
+        self.enabled = enabled
+        self.maxStaleSeconds = maxStaleSeconds
+    }
+    public nonisolated static let empty = BitwardenEncryptedCacheSettings(enabled: false, maxStaleSeconds: 0)
+}
+
+/// `secrets.command.*` — an any-CLI vault helper secret source (Hermes
+/// v0.20+, hermes-agent commit `3d5dd8efa5` "feat(secrets): add `command`
+/// secret source + unified secrets.provider selector", first released
+/// v2026.7.30). Unlike Bitwarden/1Password this isn't defaulted in
+/// `config_defaults.py`'s `secrets` dict — it's a dynamically-registered
+/// source with its own `config_schema()`
+/// (`agent/secret_sources/command.py`). `command` is run via `/bin/sh -c`
+/// with the same trust level as the user's own `.env` file — the
+/// requested secret key is passed only via an env var to the child, never
+/// interpolated into the shell string; the helper must print a
+/// `KEY=VALUE` blob on stdout. `overrideExisting` defaults to `false`
+/// (unlike Bitwarden/1Password) since a local helper isn't a central
+/// rotation authority.
+public struct CommandSecretsSettings: Sendable, Equatable {
+    public var enabled: Bool
+    public var command: String
+    public var helperTimeoutSeconds: Double
+    public var overrideExisting: Bool
+
+    public init(
+        enabled: Bool = false,
+        command: String = "",
+        helperTimeoutSeconds: Double = 3.0,
+        overrideExisting: Bool = false
+    ) {
+        self.enabled = enabled
+        self.command = command
+        self.helperTimeoutSeconds = helperTimeoutSeconds
+        self.overrideExisting = overrideExisting
+    }
+    public nonisolated static let empty = CommandSecretsSettings(
+        enabled: false,
+        command: "",
+        helperTimeoutSeconds: 3.0,
+        overrideExisting: false
+    )
+}
+
+/// `telemetry.shared_metrics` (Hermes v0.20+, hermes_cli/config_defaults.py
+/// — Relay pipeline, landed via commits `3bd338d2a9`, `64faff6768`,
+/// `056e7df0e0`, `9baa8cc96c`, `36185bf2e2`, `43d994986e`,
+/// `841a5a744a`/`14bed44c8c` (revert+reapply), all first released
+/// v2026.7.30). Privacy-safe aggregate metrics written only to this
+/// profile's local telemetry directory — collection is opt-in and no
+/// remote sink exists. Default `enabled: false`.
+public struct TelemetrySettings: Sendable, Equatable {
+    public var sharedMetricsEnabled: Bool
+
+    public init(sharedMetricsEnabled: Bool = false) {
+        self.sharedMetricsEnabled = sharedMetricsEnabled
+    }
+    public nonisolated static let empty = TelemetrySettings(sharedMetricsEnabled: false)
+}
+
+/// `database.*` — SQLite journal/WAL sizing pragmas applied by every
+/// Hermes database opener (Hermes v0.20+; `journal_mode` via commit
+/// `91351b7b7` "fix(state): make journal mode canonical and behaviorally
+/// verified", `wal_autocheckpoint`/`journal_size_limit` via commit
+/// `9d4bfd5e3` "fix(config): register WAL sizing pragmas in
+/// DEFAULT_CONFIG" — both first released v2026.7.30).
+///
+/// `journalMode`: closed enum in practice — `hermes_state.resolve_journal_mode()`
+/// lower-cases + validates against `{"wal", "delete"}` and falls back to
+/// `"wal"` for anything else, so Scarf offers only these two documented
+/// values via a picker rather than free text.
+///
+/// `walAutocheckpoint` / `journalSizeLimit`: optional ints (pages / bytes).
+/// `nil` = SQLite/Hermes default (autocheckpoint 1000 pages, no size
+/// limit) — verified in `hermes_state.py` which reads
+/// `database.get("wal_autocheckpoint")` / `database.get("journal_size_limit")`
+/// directly (`None` when absent) and only applies a PRAGMA when the value
+/// is a concrete int. This is the empty-string-vs-unset hazard: `nil` is
+/// meaningfully different from `0`, so both are modeled as true optionals
+/// and written via `SettingsViewModel.unsetSetting` when cleared, never
+/// via an empty-string sentinel.
+public struct DatabaseSettings: Sendable, Equatable {
+    public var journalMode: String
+    public var walAutocheckpoint: Int?
+    public var journalSizeLimit: Int?
+
+    public init(
+        journalMode: String = "wal",
+        walAutocheckpoint: Int? = nil,
+        journalSizeLimit: Int? = nil
+    ) {
+        self.journalMode = journalMode
+        self.walAutocheckpoint = walAutocheckpoint
+        self.journalSizeLimit = journalSizeLimit
+    }
+    public nonisolated static let empty = DatabaseSettings(journalMode: "wal", walAutocheckpoint: nil, journalSizeLimit: nil)
 }
 
 // MARK: - Root Config
@@ -1151,6 +1270,19 @@ public struct HermesConfig: Sendable {
     /// "Always ESCALATE commands touching /etc". Empty means "no extra
     /// policy" (Hermes default).
     public var approvalSmartPolicy: String
+    /// `secrets.command.*` (v0.20+, `agent/secret_sources/command.py`
+    /// `config_schema()`, first released v2026.7.30). See
+    /// `CommandSecretsSettings`. Not defaulted in `config_defaults.py`
+    /// (dynamically-registered secret source), so Scarf's own struct
+    /// default stands in for "absent block".
+    public var commandSecrets: CommandSecretsSettings
+    /// `telemetry.shared_metrics` (v0.20+, hermes_cli/config_defaults.py,
+    /// Relay pipeline, first released v2026.7.30). See `TelemetrySettings`.
+    public var telemetry: TelemetrySettings
+    /// `database.*` — SQLite journal/WAL sizing pragmas (v0.20+,
+    /// hermes_cli/config_defaults.py, first released v2026.7.30). See
+    /// `DatabaseSettings`.
+    public var database: DatabaseSettings
 
 
     public init(
@@ -1232,7 +1364,10 @@ public struct HermesConfig: Sendable {
         modelContextLength: String = "",
         reasoningOverrides: [String: String] = [:],
         excludedProviders: [String] = [],
-        approvalSmartPolicy: String = ""
+        approvalSmartPolicy: String = "",
+        commandSecrets: CommandSecretsSettings = .empty,
+        telemetry: TelemetrySettings = .empty,
+        database: DatabaseSettings = .empty
     ) {
         self.cacheTTL = cacheTTL
         self.redactionEnabled = redactionEnabled
@@ -1313,6 +1448,9 @@ public struct HermesConfig: Sendable {
         self.reasoningOverrides = reasoningOverrides
         self.excludedProviders = excludedProviders
         self.approvalSmartPolicy = approvalSmartPolicy
+        self.commandSecrets = commandSecrets
+        self.telemetry = telemetry
+        self.database = database
     }
     public nonisolated static let empty = HermesConfig(
         model: "unknown",
