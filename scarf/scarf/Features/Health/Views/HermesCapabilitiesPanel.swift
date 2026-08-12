@@ -92,6 +92,14 @@ struct HermesCapabilitiesPanel: View {
                     Text("· \(activeFlagCount) capabilities active")
                         .scarfStyle(.caption)
                         .foregroundStyle(ScarfColor.foregroundMuted)
+                    if store.isProvisional {
+                        // Shown when this version came from the persisted
+                        // last-known value rather than a probe that succeeded
+                        // this session — the host may have changed since.
+                        Text("· remembered (probe unavailable)")
+                            .scarfStyle(.caption)
+                            .foregroundStyle(ScarfColor.warning)
+                    }
                 }
             } else {
                 VStack(alignment: .leading, spacing: 2) {

@@ -237,8 +237,11 @@ struct ProjectTemplateInstaller: Sendable {
         // fail → the throw below aborts the WHOLE template install. Gate it on
         // the host's capability (failed probe → .empty → conservative: drop).
         // A specific platform (`discord`, …) is baseline and always forwarded.
-        let (versionOut, versionExit) = context.runHermes(["--version"], timeout: 10)
-        let caps = versionExit == 0 ? HermesCapabilities.parse(versionOut) : .empty
+        // Shared with the window's capability store via `HermesVersionCache`,
+        // so this is usually a cache hit rather than a fresh subprocess; a
+        // failed probe still yields `.empty` (never a remembered value) —
+        // flag gating must not run on an optimistic guess.
+        let caps = HermesVersionCache.shared.capabilitiesSync(for: context)
 
         for job in plan.cronJobs {
             var args = ["cron", "create", "--name", job.name]

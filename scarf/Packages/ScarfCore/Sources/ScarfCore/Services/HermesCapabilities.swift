@@ -713,13 +713,27 @@ public struct HermesCapabilities: Sendable, Equatable {
     }
 }
 
-/// Per-server capability cache. One per `ContextBoundRoot` (Mac) / iOS scene
-/// root, injected via `.environment(_:)`. Refreshes once on init; callers
-/// invoke `refresh()` after a Hermes update or when the server changes.
+/// Per-server, observable view of the host's capability flags. One per
+/// `ContextBoundRoot` (Mac) / iOS scene root, injected via `.environment(_:)`.
 ///
-/// Not thread-safe across instances — each server gets its own store, and
-/// the underlying `runHermesCLI` call is detached so we never block
-/// MainActor.
+/// The store no longer owns detection — `HermesVersionCache` does, so this
+/// window's probe is shared with every other probe site (template install,
+/// fleet apply, other windows on the same host) and survives relaunches.
+/// The store's job is the *lifecycle*:
+///
+/// 1. **Optimistic seed.** On init, publish the last-known version for this
+///    connection (persisted from a previous launch) so capability-gated UI
+///    doesn't flash empty on cold start. `isProvisional` is `true` while that
+///    value is unverified.
+/// 2. **Reconcile.** When the (shared, deduped) probe answers, replace the
+///    seed with ground truth and clear `isProvisional` — so a host that was
+///    *downgraded* since last launch loses the UI it no longer supports.
+/// 3. **Fall back.** If the probe fails, keep the last-known value (flagged
+///    provisional) and, failing that, `.empty` — the original conservative
+///    hide-everything default.
+///
+/// Not thread-safe across instances — it's `@MainActor`; the probe itself is
+/// detached so we never block MainActor.
 @Observable
 @MainActor
 public final class HermesCapabilitiesStore {
@@ -730,61 +744,82 @@ public final class HermesCapabilitiesStore {
     public private(set) var capabilities: HermesCapabilities = .empty
     public private(set) var isLoading = true
 
-    public let context: ServerContext
-    private var refreshTask: Task<Void, Never>?
+    /// `true` when `capabilities` came from the persisted last-known version
+    /// rather than a probe that completed in this session. UI that wants to
+    /// be honest about it (the Health diagnostics strip) can say "remembered".
+    public private(set) var isProvisional = false
 
-    public init(context: ServerContext) {
+    public let context: ServerContext
+    private let cache: HermesVersionCache
+    private var refreshTask: Task<Void, Never>?
+    /// Guards against an older in-flight load clobbering a newer one's result
+    /// (e.g. a slow initial probe landing after the user hit "Re-detect").
+    private var generation = 0
+
+    public init(context: ServerContext, cache: HermesVersionCache = .shared) {
         self.context = context
-        // Kick off a one-shot detection. Subsequent refreshes are explicit.
-        // Task captures `[weak self]`, so if the store is freed before
-        // detection completes the closure simply no-ops.
+        self.cache = cache
+
+        // Seed synchronously: an in-process result if some other call site
+        // already probed this host, else the persisted last-known value.
+        if let hit = cache.cached(for: context) {
+            capabilities = hit
+            isLoading = false
+        } else {
+            let remembered = cache.lastKnown(for: context)
+            capabilities = remembered
+            isProvisional = remembered.detected
+        }
+
+        // Kick off detection. Task captures `[weak self]`, so if the store is
+        // freed before detection completes the closure simply no-ops.
         refreshTask = Task { [weak self] in
-            await self?.refresh()
+            await self?.load(force: false)
         }
     }
 
+    /// Re-probe this host, bypassing the memoized result. Use after
+    /// `hermes update` or when the user asks to re-detect.
     public func refresh() async {
-        isLoading = true
-        let context = self.context
-        let parsed = await Task.detached(priority: .utility) { () -> HermesCapabilities in
-            return Self.detectSync(context: context)
-        }.value
+        await load(force: true)
+    }
 
-        self.capabilities = parsed
-        self.isLoading = false
+    private func load(force: Bool) async {
+        generation += 1
+        let gen = generation
+        // Don't flash "Detecting…" for a load that's already answered by the
+        // in-process cache — only a forced or genuinely cold load is a wait.
+        if force || cache.cached(for: context) == nil { isLoading = true }
+
+        let probed = force
+            ? await cache.refresh(for: context)
+            : await cache.capabilities(for: context)
+
+        // A newer load started while we were awaiting — its answer wins.
+        guard gen == generation else { return }
+
+        if probed.detected {
+            capabilities = probed
+            isProvisional = false
+        } else {
+            // Probe failed. Prefer the last-known version over blanking the
+            // whole UI; `.empty` (conservative default) when we've never
+            // successfully probed this connection.
+            let remembered = cache.lastKnown(for: context)
+            capabilities = remembered
+            isProvisional = remembered.detected
+        }
+        isLoading = false
 
         #if canImport(os)
-        if parsed.detected {
-            logger.info("Hermes \(parsed.versionLine, privacy: .public) detected on \(self.context.displayName, privacy: .public)")
+        if probed.detected {
+            logger.info("Hermes \(probed.versionLine, privacy: .public) detected on \(self.context.displayName, privacy: .public)")
+        } else if capabilities.detected {
+            logger.warning("Hermes version probe failed on \(self.context.displayName, privacy: .public); using last-known \(self.capabilities.versionLine, privacy: .public)")
         } else {
             logger.warning("Hermes version not detected on \(self.context.displayName, privacy: .public)")
         }
         #endif
-    }
-
-    /// Synchronous detection helper. Lives here (not on `HermesCapabilities`)
-    /// because `ServerContext.makeTransport()` is a side-effecting call that
-    /// pulls in the platform-appropriate transport (LocalTransport on Mac,
-    /// CitadelServerTransport on iOS). The pure parser remains side-effect-free.
-    nonisolated private static func detectSync(context: ServerContext) -> HermesCapabilities {
-        let transport = context.makeTransport()
-        let executable = context.paths.hermesBinary
-        do {
-            let result = try transport.runProcess(
-                executable: executable,
-                args: ["--version"],
-                stdin: nil,
-                timeout: 10
-            )
-            // `hermes --version` writes to stdout but Scarf's transport
-            // helpers occasionally split error output across stderr — fold
-            // both so the parser sees whichever stream the line lands on.
-            let combined = result.stdoutString + result.stderrString
-            guard result.exitCode == 0 else { return .empty }
-            return HermesCapabilities.parse(combined)
-        } catch {
-            return .empty
-        }
     }
 }
 

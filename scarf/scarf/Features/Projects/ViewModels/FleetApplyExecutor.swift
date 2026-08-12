@@ -169,8 +169,9 @@ struct FleetApplyExecutor: Sendable {
         // version-gated flags rather than risk an argparse error that fails
         // the whole `cron create`). FleetApplyPlan.cronCreateArgs owns the
         // per-flag gating + source→target path rewriting.
-        let (versionOut, versionExit) = ctx.runHermes(["--version"], timeout: 10)
-        let caps = versionExit == 0 ? HermesCapabilities.parse(versionOut) : .empty
+        // Cached per *connection* (see `HermesVersionCache.key(for:)`), so a
+        // fleet of mixed-version hosts still gets each host's own answer.
+        let caps = HermesVersionCache.shared.capabilitiesSync(for: ctx)
 
         var created = 0, skipped = 0, failed = 0, deliverAllDowngrades = 0, scriptOnlySkipped = 0
         var createdNames: [String] = []
