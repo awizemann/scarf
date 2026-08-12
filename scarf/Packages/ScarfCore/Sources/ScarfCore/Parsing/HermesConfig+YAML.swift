@@ -362,7 +362,7 @@ public extension HermesConfig {
             reasoningEffort: str("agent.reasoning_effort", default: "medium"),
             showCost: bool("display.show_cost", default: false),
             approvalMode: str("approvals.mode", default: "manual"),
-            browserBackend: str("browser.backend"),
+            browserCloudProvider: str("browser.cloud_provider"),
             memoryProvider: str("memory.provider"),
             dockerEnv: dockerEnv,
             commandAllowlist: commandAllowlist,

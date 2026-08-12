@@ -530,6 +530,17 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// tokens without re-adding the server (v0.18+).
     public var hasMCPReauth: Bool { atLeastSemver(0, 18, 0) }
 
+    // MARK: v0.19 (v2026.7.20) flags
+
+    /// `hermes config get <key>` / `hermes config unset <key>` subcommands
+    /// (v0.19+, `hermes_cli/config.py:unset_config_value`, introduced by
+    /// Hermes commit 53adb3fd97, first released in v2026.7.20 = 0.19.0).
+    /// Pre-v0.19 hosts only have `config set`, so any UI affordance that
+    /// removes a key — as opposed to writing an empty value, which is NOT
+    /// equivalent for keys like `browser.cloud_provider` — must hide itself
+    /// behind this flag rather than issue a command that exits non-zero.
+    public var hasConfigUnset: Bool { atLeastSemver(0, 19, 0) }
+
     // MARK: v0.20 (v2026.8.3) flags
 
     /// ACP `/compact` was renamed `/compress` (v0.20+, v2026.8.3).

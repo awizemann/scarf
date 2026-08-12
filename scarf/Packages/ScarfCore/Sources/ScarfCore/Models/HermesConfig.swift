@@ -880,7 +880,22 @@ public struct HermesConfig: Sendable {
     public var reasoningEffort: String
     public var showCost: Bool
     public var approvalMode: String
-    public var browserBackend: String
+    /// `browser.cloud_provider` — the browser automation provider Hermes
+    /// dispatches to. Valid ids: `local`, `camofox`, and the plugin-provided
+    /// `browser-use` / `browserbase` / `firecrawl`.
+    ///
+    /// Empty means the key is absent, which Hermes treats as auto-detect
+    /// (Browser Use, then Browserbase, by credentials) rather than as
+    /// `local`. A present-but-empty `cloud_provider: ""` also parses to `""`
+    /// here but Hermes normalizes it to `local` — writers must therefore
+    /// remove the key (`hermes config unset`) rather than write an empty
+    /// scalar. Scarf never writes the empty form.
+    ///
+    /// NOTE: Scarf <= 2.18.1 read and wrote `browser.backend`, which has
+    /// never been a Hermes key in any released version — see the v0.20
+    /// compatibility note. Stale `browser.backend` values are deliberately
+    /// NOT read back here; surfacing them would imply an inert key is live.
+    public var browserCloudProvider: String
     public var memoryProvider: String
     public var dockerEnv: [String: String]
     public var commandAllowlist: [String]
@@ -1059,7 +1074,7 @@ public struct HermesConfig: Sendable {
         reasoningEffort: String,
         showCost: Bool,
         approvalMode: String,
-        browserBackend: String,
+        browserCloudProvider: String,
         memoryProvider: String,
         dockerEnv: [String: String],
         commandAllowlist: [String],
@@ -1148,7 +1163,7 @@ public struct HermesConfig: Sendable {
         self.reasoningEffort = reasoningEffort
         self.showCost = showCost
         self.approvalMode = approvalMode
-        self.browserBackend = browserBackend
+        self.browserCloudProvider = browserCloudProvider
         self.memoryProvider = memoryProvider
         self.dockerEnv = dockerEnv
         self.commandAllowlist = commandAllowlist
@@ -1218,7 +1233,7 @@ public struct HermesConfig: Sendable {
         reasoningEffort: "medium",
         showCost: false,
         approvalMode: "manual",
-        browserBackend: "",
+        browserCloudProvider: "",
         memoryProvider: "",
         dockerEnv: [:],
         commandAllowlist: [],

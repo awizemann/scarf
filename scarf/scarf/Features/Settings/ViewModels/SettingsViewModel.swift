@@ -26,7 +26,33 @@ final class SettingsViewModel {
     // values on older hosts. (Vercel Sandbox was removed as a terminal
     // backend in v0.15 alongside the Vercel AI Gateway provider removal.)
     var terminalBackends = ["local", "docker", "singularity", "modal", "daytona", "ssh"]
-    var browserBackends = ["browseruse", "firecrawl", "local"]
+    /// `browser.cloud_provider` options. The ids are Hermes' own provider
+    /// names: `local` and `camofox` are hardcoded rows in
+    /// `hermes_cli/tools_config.py`'s Browser Automation section, while
+    /// `browser-use` / `browserbase` / `firecrawl` come from the bundled
+    /// `plugins/browser/*/provider.py` `.name` properties (note the hyphen
+    /// in `browser-use` — `browseruse`, which Scarf wrote until 2.18.1, is
+    /// not a registered provider and makes Hermes log a warning and fall
+    /// back to auto-detect).
+    ///
+    /// The leading empty row means "auto-detect": with
+    /// `browser.cloud_provider` absent, `tools/browser_tool._get_cloud_provider`
+    /// tries Browser Use then Browserbase by credentials. That is NOT the
+    /// same as `local`, which explicitly disables cloud dispatch — so
+    /// `setBrowserCloudProvider` routes it to `hermes config unset` rather
+    /// than writing an empty scalar (an empty value normalizes to `local`).
+    ///
+    /// `browser.cloud_provider` has existed since Hermes v0.4.0
+    /// (`v2026.3.23`), well below Scarf's minimum supported host, so this
+    /// picker needs no capability gate.
+    var browserCloudProviders: [(id: String, label: String)] = [
+        ("",            "Auto-detect (default)"),
+        ("local",       "Local Browser"),
+        ("browser-use", "Browser Use"),
+        ("browserbase", "Browserbase"),
+        ("firecrawl",   "Firecrawl"),
+        ("camofox",     "Camofox"),
+    ]
     // v0.13: `xai` joins the TTS provider list. xAI shipped TTS earlier
     // (v0.12) but the v0.13 add-on is custom voice cloning — see
     // `HermesCapabilities.hasXAIVoiceCloning` and the badge in VoiceTab.
@@ -95,7 +121,23 @@ final class SettingsViewModel {
     /// Set a scalar config value via `hermes config set <key> <value>` and reload
     /// the config on success so the UI reflects the new state.
     func setSetting(_ key: String, value: String) {
-        let result = runHermes(["config", "set", key, value])
+        applyConfigWrite(key, arguments: ["config", "set", key, value])
+    }
+
+    /// Remove a config key entirely via `hermes config unset <key>`.
+    ///
+    /// This is NOT the same as `setSetting(key, value: "")`. `hermes config
+    /// set <key> ""` writes an empty scalar, and for several keys Hermes
+    /// distinguishes "key present but empty" from "key absent" — most
+    /// visibly `browser.cloud_provider`, where a present-but-empty value
+    /// normalizes to `local` (cloud dispatch off) while an absent key means
+    /// auto-detect. Use this whenever a picker offers a "not set" row.
+    func unsetSetting(_ key: String) {
+        applyConfigWrite(key, arguments: ["config", "unset", key])
+    }
+
+    private func applyConfigWrite(_ key: String, arguments: [String]) {
+        let result = runHermes(arguments)
         if result.exitCode == 0 {
             saveMessage = "Saved \(key)"
             config = fileService.loadConfig()
@@ -103,7 +145,7 @@ final class SettingsViewModel {
                 self?.saveMessage = nil
             }
         } else {
-            logger.warning("hermes config set \(key) failed (exit \(result.exitCode)): \(result.output)")
+            logger.warning("hermes \(arguments.joined(separator: " ")) failed (exit \(result.exitCode)): \(result.output)")
             // Surface the CLI's reason instead of a generic failure — e.g.
             // "Cannot set '<key>': it is managed by your administrator" when the
             // key is pinned under managed scope (/etc/hermes), so the user
@@ -234,7 +276,18 @@ final class SettingsViewModel {
 
     // MARK: - Browser
 
-    func setBrowserBackend(_ value: String) { setSetting("browser.backend", value: value) }
+    /// Writes `browser.cloud_provider`. The empty selection removes the key
+    /// rather than writing `""` — Hermes' `_get_cloud_provider()` branches on
+    /// `"cloud_provider" in browser_cfg`, so a present-but-empty value
+    /// normalizes to `local` and silently disables cloud dispatch, which is
+    /// not what "auto-detect" means.
+    func setBrowserCloudProvider(_ value: String) {
+        if value.isEmpty {
+            unsetSetting("browser.cloud_provider")
+        } else {
+            setSetting("browser.cloud_provider", value: value)
+        }
+    }
     func setBrowserInactivityTimeout(_ value: Int) { setSetting("browser.inactivity_timeout", value: String(value)) }
     func setBrowserCommandTimeout(_ value: Int) { setSetting("browser.command_timeout", value: String(value)) }
     func setBrowserRecordSessions(_ value: Bool) { setSetting("browser.record_sessions", value: value ? "true" : "false") }
