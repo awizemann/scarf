@@ -44,8 +44,9 @@
 - [ ] Decide 0.18 update-nudge + prep v2.17 release (local models + session-layer) (id: t-c1ed7f7c) (added: 2026-07-14)
 - [ ] iOS: route confirmModelPreflight through LocalModelConfigPlan (live stale-key bug, same class as Mac) (id: t-52f4564b) (added: 2026-07-14)
 - [ ] Low-risk consolidation: 3× semverCompare and 7× shell-quoting copies → shared utils (id: t-a21accf0) (added: 2026-07-14)
-- [ ] Reliable connect-time Hermes version read (persist + single cached probe) — enabler for any floor/nudge (id: t-bfd15aef) (added: 2026-07-14)
 - [ ] Hermes v0.20 deferred settings surfaces (pickup-ready backlog) (id: t-1cc0a505) (added: 2026-08-03)
+- [ ] Sweep pickers with present-but-empty "" rows that claim to unset (displayLanguages, memoryProviders) (id: t-9634ae74) (added: 2026-08-12)
+- [ ] Follow-ups from the 2026-08-12 fresh-eyes audit (profile_routes edge cases + bitwarden default drift) (id: t-6a6d692c) (added: 2026-08-12) (priority: low)
 
 ## Doing
 
@@ -53,6 +54,12 @@
 
 ## Done
 
+- [x] P3d: gateway.profile_routes list editor (id: t-934fdf81) (added: 2026-08-12)
+- [x] P3c: Settings — STT/TTS knob expansion (id: t-02eae1a0) (added: 2026-08-12)
+- [x] P3b: Settings — secrets.bitwarden.encrypted_cache + secrets.command.* + telemetry.shared_metrics + database.* knobs (id: t-5d23ef3f) (added: 2026-08-12)
+- [x] P3a: Settings — auxiliary.title_generation block + per-task reasoning_effort + approvals.smart_policy (id: t-2e72ce08) (added: 2026-08-12)
+- [x] Reliable connect-time Hermes version read (persist + single cached probe) — enabler for any floor/nudge (id: t-bfd15aef) (added: 2026-07-14)
+- [x] P1: Fix browser settings surface — browser.cloud_provider key + valid provider ids (id: t-72900077) (added: 2026-08-12) (priority: high)
 - [x] v0.20 power settings pass — compression, reasoning overrides, excluded providers (id: t-f4d59e66) (added: 2026-08-03)
 - [x] Hermes v0.20 Phase 2 — high-value adoption (id: t-9fd50744) (added: 2026-08-03)
 - [x] v0.20 Wave C4 — compaction summary styling (id: t-641d65a5) (added: 2026-08-03)
