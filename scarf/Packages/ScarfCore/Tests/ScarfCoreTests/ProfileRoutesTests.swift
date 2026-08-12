@@ -128,6 +128,67 @@ final class ProfileRoutesTests: XCTestCase {
         XCTAssertTrue(route.enabledIsExplicit)
     }
 
+    /// Regression: Hermes disables a route with `if not self.enabled`
+    /// (profile_routing.py:92), so every scalar PyYAML resolves to a falsy
+    /// Python value disables it — not just the literal `false`. Reading
+    /// `enabled: no` as *enabled* was worse than a display bug: the rule
+    /// round-trips through the writer as `enabled: true`, silently
+    /// re-enabling a route the operator had switched off.
+    func testYAMLFalsyEnabledSpellingsAllDisableTheRoute() {
+        for spelling in ["false", "False", "FALSE", "no", "No", "NO", "off", "Off", "0", "null", "~", ""] {
+            let yaml = """
+            gateway:
+              profile_routes:
+                - name: paused
+                  platform: slack
+                  profile: p
+                  enabled: \(spelling)
+            """
+            let route = ProfileRoutesYAML.parse(yaml).routes[0]
+            XCTAssertFalse(route.enabled, "`enabled: \(spelling)` is falsy to Hermes")
+            XCTAssertTrue(route.enabledIsExplicit, "`enabled: \(spelling)` is an explicit key")
+
+            // …and a rewrite must not resurrect it.
+            let out = ProfileRoutesWriter.setProfileRoutes(
+                in: yaml, routes: [route], location: .gateway, capabilities: v019
+            )
+            XCTAssertNotNil(out)
+            XCTAssertFalse(ProfileRoutesYAML.parse(out!).routes[0].enabled,
+                           "rewrite of `enabled: \(spelling)` must stay disabled")
+        }
+    }
+
+    /// The mirror image: PyYAML loads a *quoted* `'false'` as a non-empty
+    /// `str`, which is truthy — so the route stays live. Quoting changes
+    /// the answer, and the reader must read the raw scalar to see that.
+    func testQuotedFalseIsATruthyStringNotABoolean() {
+        for spelling in ["'false'", "\"no\"", "true", "yes", "on", "1", "maybe"] {
+            let yaml = """
+            gateway:
+              profile_routes:
+                - name: live
+                  platform: slack
+                  profile: p
+                  enabled: \(spelling)
+            """
+            let route = ProfileRoutesYAML.parse(yaml).routes[0]
+            XCTAssertTrue(route.enabled, "`enabled: \(spelling)` is truthy to Hermes")
+        }
+    }
+
+    /// A trailing comment must not be mistaken for part of the value.
+    func testEnabledIgnoresTrailingComment() {
+        let yaml = """
+        gateway:
+          profile_routes:
+            - name: paused
+              platform: slack
+              profile: p
+              enabled: no   # muted during the migration
+        """
+        XCTAssertFalse(ProfileRoutesYAML.parse(yaml).routes[0].enabled)
+    }
+
     func testConfigParseExposesRoutes() {
         let config = HermesConfig(yaml: """
         model:

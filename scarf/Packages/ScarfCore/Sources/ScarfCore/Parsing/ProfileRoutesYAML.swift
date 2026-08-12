@@ -12,6 +12,16 @@ import Foundation
 /// (rule fields).
 public enum ProfileRoutesYAML {
 
+    /// Unquoted scalars PyYAML loads as something Python considers falsy —
+    /// the YAML 1.1 `false` spellings PyYAML's bool resolver accepts, the
+    /// null spellings (including an empty value), and integer zero. Only
+    /// these disable a route; anything else is truthy to `if not
+    /// self.enabled`. Case-folded before lookup, which over-matches
+    /// PyYAML's stricter `no|No|NO` casing by a harmless margin.
+    private static let falsyScalars: Set<String> = [
+        "false", "no", "off", "0", "", "null", "~",
+    ]
+
     /// Keys Scarf models. Everything else in a rule is preserved verbatim.
     private static let knownKeys: Set<String> = [
         "name", "platform", "profile", "guild_id", "chat_id", "thread_id", "enabled",
@@ -297,7 +307,22 @@ public enum ProfileRoutesYAML {
             case "chat_id": route.chatID = value
             case "thread_id": route.threadID = value
             case "enabled":
-                route.enabled = value.lowercased() != "false"
+                // Hermes tests this with `if not self.enabled`
+                // (profile_routing.py:92), so what matters is Python
+                // truthiness of whatever PyYAML resolved — not the literal
+                // string "false". PyYAML resolves YAML 1.1 booleans, so
+                // `no` / `off` (any case) are `False`; a null value
+                // (`enabled:`, `enabled: null`, `enabled: ~`) is `None`;
+                // and `0` is the int zero. All four disable the route.
+                // Everything else — including the *quoted* string
+                // `'false'`, which PyYAML loads as a non-empty str — is
+                // truthy. Hence the raw, pre-quote-strip value: quoting
+                // changes the answer exactly the way Python sees it.
+                route.enabled = !Self.falsyScalars.contains(
+                    rawValue.prefix(while: { $0 != "#" })
+                        .trimmingCharacters(in: .whitespaces)
+                        .lowercased()
+                )
                 route.enabledIsExplicit = true
             default: break
             }
