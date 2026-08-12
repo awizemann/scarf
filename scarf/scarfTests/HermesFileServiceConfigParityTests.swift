@@ -226,10 +226,19 @@ struct SettingsWriteReadParityTests {
     private static let knownInterpolatedTemplates: Set<String> = [
         #"auxiliary.\(task).\(field)"#,
         #"auxiliary.\(task).timeout"#,
+        #"auxiliary.\(task).reasoning_effort"#,
+        #"auxiliary.title_generation.\(field)"#,
     ]
 
+    /// Fields the Title Generation section writes via
+    /// `setTitleGeneration(field:)` (AuxiliaryTab); enabled/timeout/
+    /// reasoning_effort/language go through dedicated literal setters.
+    private static let titleGenerationFields = ["provider", "model", "base_url", "api_key"]
+
     private static func expandedAuxKeys() -> [String] {
-        auxTasks.flatMap { task in auxFields.map { "auxiliary.\(task).\($0)" } }
+        auxTasks.flatMap { task in
+            (auxFields + ["reasoning_effort"]).map { "auxiliary.\(task).\($0)" }
+        } + titleGenerationFields.map { "auxiliary.title_generation.\($0)" }
     }
 
     // MARK: Key extraction
@@ -413,7 +422,11 @@ struct SettingsWriteReadParityTests {
         // (`func setSetting(`). What remains are call sites.
         let allCalls = try NSRegularExpression(pattern: #"setSetting\("#)
             .numberOfMatches(in: source, range: NSRange(location: 0, length: ns.length))
-        let declarations = try NSRegularExpression(pattern: #"func\s+setSetting\("#)
+        // `unsetSetting(` contains `setSetting(` as a substring, so its
+        // declaration must be subtracted too; unsetSetting CALL sites stay
+        // in the gate deliberately — an unset key is still a managed key
+        // whose literal the parity scan should capture.
+        let declarations = try NSRegularExpression(pattern: #"func\s+(?:un)?setSetting\("#)
             .numberOfMatches(in: source, range: NSRange(location: 0, length: ns.length))
         let callSites = allCalls - declarations
 
