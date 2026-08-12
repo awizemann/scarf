@@ -244,6 +244,13 @@ final class SettingsViewModel {
     func setToolUseEnforcement(_ value: String) { setSetting("agent.tool_use_enforcement", value: value) }
     func setApprovalMode(_ value: String) { setSetting("approvals.mode", value: value) }
     func setApprovalTimeout(_ value: Int) { setSetting("approvals.timeout", value: String(value)) }
+    /// `approvals.smart_policy` (v0.20+) — free-text policy appended to the
+    /// smart-approval guardian's system prompt. Empty writes an empty
+    /// scalar ("no extra policy"), matching Hermes's own default; this is
+    /// NOT the same as unsetting the key, but for a free-text policy field
+    /// the two behave identically (Hermes treats an absent key and an
+    /// empty string the same way — both mean "no extra policy").
+    func setApprovalSmartPolicy(_ value: String) { setSetting("approvals.smart_policy", value: value) }
 
     // MARK: - Terminal
 
@@ -365,6 +372,42 @@ final class SettingsViewModel {
     }
     func setAuxiliaryTimeout(_ task: String, value: Int) {
         setSetting("auxiliary.\(task).timeout", value: String(value))
+    }
+    /// `auxiliary.<task>.reasoning_effort` (v0.19+, capability-gated by the
+    /// caller on `hasAuxiliaryReasoningEffort`). `""` means "unset — inherit
+    /// provider default", matching Hermes's own default value for this
+    /// field (config_defaults.py has every task default to `""`), so
+    /// writing an empty scalar here is safe and behaves the same as an
+    /// absent key — this is NOT one of the empty-vs-unset hazard keys.
+    /// Valid non-empty values: `AuxiliaryReasoningEffort.allCases`.
+    func setAuxiliaryReasoningEffort(_ task: String, value: String) {
+        setSetting("auxiliary.\(task).reasoning_effort", value: value)
+    }
+
+    // MARK: - Title generation (auxiliary.title_generation)
+
+    /// `auxiliary.title_generation.enabled` — title generation predates
+    /// Hermes's calendar-version scheme, so this is ungated (unlike the
+    /// `language` field below).
+    func setTitleGenerationEnabled(_ value: Bool) {
+        setSetting("auxiliary.title_generation.enabled", value: value ? "true" : "false")
+    }
+    func setTitleGeneration(field: String, value: String) {
+        setSetting("auxiliary.title_generation.\(field)", value: value)
+    }
+    func setTitleGenerationTimeout(_ value: Int) {
+        setSetting("auxiliary.title_generation.timeout", value: String(value))
+    }
+    /// `auxiliary.title_generation.reasoning_effort` (v0.19+, same
+    /// empty-is-default semantics as `setAuxiliaryReasoningEffort`).
+    func setTitleGenerationReasoningEffort(_ value: String) {
+        setSetting("auxiliary.title_generation.reasoning_effort", value: value)
+    }
+    /// `auxiliary.title_generation.language` (v0.18+, capability-gated by
+    /// the caller on `hasTitleGenerationLanguage`). Empty means "match the
+    /// chat's own language" (Hermes default).
+    func setTitleGenerationLanguage(_ value: String) {
+        setSetting("auxiliary.title_generation.language", value: value)
     }
 
     // MARK: - Image generation (v0.13+)

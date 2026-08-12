@@ -8,22 +8,47 @@ public struct AuxiliaryModel: Sendable, Equatable {
     public var baseURL: String
     public var apiKey: String
     public var timeout: Int
-
+    /// `auxiliary.<task>.reasoning_effort` (Hermes v0.19+,
+    /// hermes_cli/config_defaults.py — every auxiliary task carries this
+    /// field). Valid values per `hermes_constants.VALID_REASONING_EFFORTS`:
+    /// `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`, plus the
+    /// `none` alias (`parse_reasoning_effort` also accepts `false`/
+    /// `disabled`) meaning "explicitly disable thinking" as opposed to an
+    /// empty string, which means "inherit the provider default". Scarf
+    /// stores the raw string and writes it verbatim; validation of the
+    /// allowed set lives in `AuxiliaryReasoningEffort`.
+    public var reasoningEffort: String
 
     public init(
         provider: String,
         model: String,
         baseURL: String,
         apiKey: String,
-        timeout: Int
+        timeout: Int,
+        reasoningEffort: String = ""
     ) {
         self.provider = provider
         self.model = model
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.timeout = timeout
+        self.reasoningEffort = reasoningEffort
     }
-    public nonisolated static let empty = AuxiliaryModel(provider: "auto", model: "", baseURL: "", apiKey: "", timeout: 30)
+    public nonisolated static let empty = AuxiliaryModel(provider: "auto", model: "", baseURL: "", apiKey: "", timeout: 30, reasoningEffort: "")
+}
+
+/// Valid `auxiliary.<task>.reasoning_effort` values, source-verified against
+/// `hermes_constants.VALID_REASONING_EFFORTS` + `parse_reasoning_effort`
+/// (hermes-agent HEAD == v2026.8.3 / v0.20.0). `none` is a Scarf-facing
+/// alias for Hermes's disable-thinking sentinel (Hermes also accepts
+/// `false`/`disabled`, but `none` is what `hermes_constants.py`'s docstring
+/// uses and what the picker offers).
+public enum AuxiliaryReasoningEffort: String, CaseIterable, Sendable {
+    case none, minimal, low, medium, high, xhigh, max, ultra
+
+    /// Empty string means "unset — inherit provider default" and is not a
+    /// member of this enum; callers surface it as a separate "Default" row.
+    public static let validRawValues: Set<String> = Set(allCases.map(\.rawValue))
 }
 
 /// Group of display-related settings mirroring the `display:` block in config.yaml.
@@ -334,6 +359,12 @@ public struct AuxiliarySettings: Sendable, Equatable {
     public var flushMemories: AuxiliaryModel
     /// v0.12+; pre-v0.12 Hermes installs ignore this slot.
     public var curator: AuxiliaryModel
+    /// `auxiliary.title_generation` — predates Hermes's calendar-version
+    /// scheme (present well before the v0.12 line, unlike `curator`), so
+    /// this block is read/written ungated like the other long-standing
+    /// auxiliary tasks. See `TitleGenerationSettings` for field-level
+    /// version notes (`language` is v0.18+).
+    public var titleGeneration: TitleGenerationSettings
 
 
     public init(
@@ -345,7 +376,8 @@ public struct AuxiliarySettings: Sendable, Equatable {
         approval: AuxiliaryModel,
         mcp: AuxiliaryModel,
         flushMemories: AuxiliaryModel,
-        curator: AuxiliaryModel
+        curator: AuxiliaryModel,
+        titleGeneration: TitleGenerationSettings = .empty
     ) {
         self.vision = vision
         self.webExtract = webExtract
@@ -356,6 +388,7 @@ public struct AuxiliarySettings: Sendable, Equatable {
         self.mcp = mcp
         self.flushMemories = flushMemories
         self.curator = curator
+        self.titleGeneration = titleGeneration
     }
     public nonisolated static let empty = AuxiliarySettings(
         vision: .empty,
@@ -366,7 +399,62 @@ public struct AuxiliarySettings: Sendable, Equatable {
         approval: .empty,
         mcp: .empty,
         flushMemories: .empty,
-        curator: .empty
+        curator: .empty,
+        titleGeneration: .empty
+    )
+}
+
+/// `auxiliary.title_generation` — the LLM call that names a new chat
+/// session. Unlike the other auxiliary tasks it carries two extra fields
+/// beyond the standard provider/model/base_url/api_key/timeout/
+/// reasoning_effort shape: `enabled` (title generation can be turned off
+/// entirely — config_defaults.py defaults it to `True`) and `language`
+/// (force titles into a specific language regardless of chat language;
+/// v0.18+, added alongside `display.language` — hermes-agent commit
+/// cf58f1a520, first released v2026.7.1 = v0.18.0). Kept as its own struct
+/// rather than folded into `AuxiliaryModel` so those two fields don't leak
+/// into every other auxiliary task's shape.
+public struct TitleGenerationSettings: Sendable, Equatable {
+    public var enabled: Bool
+    public var provider: String
+    public var model: String
+    public var baseURL: String
+    public var apiKey: String
+    public var timeout: Int
+    public var reasoningEffort: String
+    /// v0.18+ — see type doc. Empty means "match the chat's language"
+    /// (Hermes default).
+    public var language: String
+
+    public init(
+        enabled: Bool,
+        provider: String,
+        model: String,
+        baseURL: String,
+        apiKey: String,
+        timeout: Int,
+        reasoningEffort: String,
+        language: String
+    ) {
+        self.enabled = enabled
+        self.provider = provider
+        self.model = model
+        self.baseURL = baseURL
+        self.apiKey = apiKey
+        self.timeout = timeout
+        self.reasoningEffort = reasoningEffort
+        self.language = language
+    }
+
+    public nonisolated static let empty = TitleGenerationSettings(
+        enabled: true,
+        provider: "auto",
+        model: "",
+        baseURL: "",
+        apiKey: "",
+        timeout: 30,
+        reasoningEffort: "",
+        language: ""
     )
 }
 
@@ -1054,6 +1142,15 @@ public struct HermesConfig: Sendable {
     /// from model pickers and built-in resolution (inventory.py:100,
     /// case-insensitive on the Hermes side). List — direct-YAML writes.
     public var excludedProviders: [String]
+    /// `approvals.smart_policy` (v0.20+, hermes_cli/config_defaults.py:2053
+    /// — landed at commit bd1db5460a, first released v2026.7.30; the next
+    /// numbered Hermes minor after that calendar tag is v0.20.0 =
+    /// v2026.8.3, so this is gated `isV020OrLater` rather than v0.19).
+    /// Free-form operator policy text appended to the smart-approval
+    /// guardian's system prompt (trusted channel) when non-empty — e.g.
+    /// "Always ESCALATE commands touching /etc". Empty means "no extra
+    /// policy" (Hermes default).
+    public var approvalSmartPolicy: String
 
 
     public init(
@@ -1134,7 +1231,8 @@ public struct HermesConfig: Sendable {
         modelAPIMode: String = "",
         modelContextLength: String = "",
         reasoningOverrides: [String: String] = [:],
-        excludedProviders: [String] = []
+        excludedProviders: [String] = [],
+        approvalSmartPolicy: String = ""
     ) {
         self.cacheTTL = cacheTTL
         self.redactionEnabled = redactionEnabled
@@ -1214,6 +1312,7 @@ public struct HermesConfig: Sendable {
         self.modelContextLength = modelContextLength
         self.reasoningOverrides = reasoningOverrides
         self.excludedProviders = excludedProviders
+        self.approvalSmartPolicy = approvalSmartPolicy
     }
     public nonisolated static let empty = HermesConfig(
         model: "unknown",

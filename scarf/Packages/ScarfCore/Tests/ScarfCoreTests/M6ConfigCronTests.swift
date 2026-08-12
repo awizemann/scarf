@@ -296,6 +296,86 @@ import Foundation
         #expect(c.auxiliary.mcp.provider == "auto")
     }
 
+    // MARK: - P3a: title_generation, per-task reasoning_effort, approvals.smart_policy
+
+    @Test func parsesAuxiliaryReasoningEffort() {
+        let yaml = """
+        auxiliary:
+          vision:
+            provider: openai
+            reasoning_effort: high
+          compression:
+            provider: anthropic
+            reasoning_effort: none
+        """
+        let c = HermesConfig(yaml: yaml)
+        #expect(c.auxiliary.vision.reasoningEffort == "high")
+        #expect(c.auxiliary.compression.reasoningEffort == "none")
+        // Not-configured tasks default reasoning_effort to empty
+        // ("inherit provider default"), matching Hermes's own default.
+        #expect(c.auxiliary.mcp.reasoningEffort == "")
+    }
+
+    @Test func parsesTitleGenerationBlock() {
+        let yaml = """
+        auxiliary:
+          title_generation:
+            enabled: false
+            provider: openai
+            model: gpt-4o-mini
+            base_url: https://example.test
+            api_key: sk-test
+            timeout: 45
+            reasoning_effort: minimal
+            language: ja
+        """
+        let c = HermesConfig(yaml: yaml)
+        let t = c.auxiliary.titleGeneration
+        #expect(t.enabled == false)
+        #expect(t.provider == "openai")
+        #expect(t.model == "gpt-4o-mini")
+        #expect(t.baseURL == "https://example.test")
+        #expect(t.apiKey == "sk-test")
+        #expect(t.timeout == 45)
+        #expect(t.reasoningEffort == "minimal")
+        #expect(t.language == "ja")
+    }
+
+    @Test func titleGenerationDefaultsWhenAbsent() {
+        let c = HermesConfig(yaml: "")
+        let t = c.auxiliary.titleGeneration
+        // Hermes defaults `enabled: True`, `provider: "auto"`, `timeout: 30`
+        // (hermes_cli/config_defaults.py:919-928).
+        #expect(t.enabled == true)
+        #expect(t.provider == "auto")
+        #expect(t.timeout == 30)
+        #expect(t.language == "")
+        #expect(t.reasoningEffort == "")
+    }
+
+    @Test func auxiliaryReasoningEffortValidValues() {
+        // Source-verified against hermes_constants.VALID_REASONING_EFFORTS
+        // + parse_reasoning_effort's "none" alias (hermes-agent HEAD ==
+        // v2026.8.3).
+        let expected: Set<String> = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
+        #expect(AuxiliaryReasoningEffort.validRawValues == expected)
+    }
+
+    @Test func parsesApprovalSmartPolicy() {
+        let yaml = """
+        approvals:
+          mode: smart
+          smart_policy: "Always ESCALATE commands touching /etc"
+        """
+        let c = HermesConfig(yaml: yaml)
+        #expect(c.approvalSmartPolicy == "Always ESCALATE commands touching /etc")
+    }
+
+    @Test func approvalSmartPolicyDefaultsToEmpty() {
+        let c = HermesConfig(yaml: "")
+        #expect(c.approvalSmartPolicy == "")
+    }
+
     @Test func parsesPermanentAllowlist() {
         let yaml = """
         permanent_allowlist:

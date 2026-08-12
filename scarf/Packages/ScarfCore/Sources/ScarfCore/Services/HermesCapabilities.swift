@@ -530,6 +530,14 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// tokens without re-adding the server (v0.18+).
     public var hasMCPReauth: Bool { atLeastSemver(0, 18, 0) }
 
+    /// `auxiliary.title_generation.language` — force generated chat titles
+    /// into a specific language regardless of the chat's own language
+    /// (v0.18+, hermes-agent commit cf58f1a520 "support language-aware
+    /// title generation", first released v2026.7.1 = v0.18.0). The rest of
+    /// the `title_generation` block predates version tracking and is
+    /// ungated.
+    public var hasTitleGenerationLanguage: Bool { atLeastSemver(0, 18, 0) }
+
     // MARK: v0.19 (v2026.7.20) flags
 
     /// `hermes config get <key>` / `hermes config unset <key>` subcommands
@@ -540,6 +548,13 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// equivalent for keys like `browser.cloud_provider` — must hide itself
     /// behind this flag rather than issue a command that exits non-zero.
     public var hasConfigUnset: Bool { atLeastSemver(0, 19, 0) }
+
+    /// `auxiliary.<task>.reasoning_effort` — per-task thinking-level
+    /// override on every auxiliary task (v0.19+, hermes-agent commit
+    /// df5700ebe3 "per-task reasoning_effort for auxiliary models" #64597,
+    /// first released v2026.7.20 = 0.19.0 — the same tag that introduced
+    /// `hasConfigUnset`).
+    public var hasAuxiliaryReasoningEffort: Bool { atLeastSemver(0, 19, 0) }
 
     // MARK: v0.20 (v2026.8.3) flags
 
@@ -561,6 +576,15 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `hermes sessions export --format md|html|qmd|trace` — additional
     /// session export formats beyond the default (v0.20+, v2026.8.3).
     public var hasSessionsExportFormats: Bool { isV020OrLater }
+
+    /// `approvals.smart_policy` — operator-customizable free-text policy
+    /// appended to the smart-approval guardian's system prompt
+    /// (hermes-agent commit bd1db5460a "feat(approvals): operator-
+    /// customizable smart-approval policy", first released v2026.7.30 —
+    /// between the v0.19.0 tag (v2026.7.20) and the v0.20.0 tag
+    /// (v2026.8.3), so the next numbered floor this key is guaranteed
+    /// present at is v0.20).
+    public var hasApprovalSmartPolicy: Bool { isV020OrLater }
 
     // MARK: Convenience predicates
 

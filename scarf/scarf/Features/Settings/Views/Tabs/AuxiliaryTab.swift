@@ -139,6 +139,12 @@ struct AuxiliaryTab: View {
                 auxRows(for: task.key)
             }
         }
+        // Title generation (auxiliary.title_generation) — the sub-model
+        // task that names new chat sessions. Ungated: the base block
+        // predates version tracking. Only the `language` row is v0.18+.
+        SettingsSection(title: "Title Generation", icon: "text.quote") {
+            titleGenerationRows
+        }
         // -- Hermes v0.13 additions ---------------------------------
         // Image-gen model picker. Hermes v0.13 honors `image_gen.model`
         // as a top-level YAML key; pre-v0.13 hosts ignore it silently.
@@ -216,6 +222,50 @@ struct AuxiliaryTab: View {
         EditableTextField(label: "Base URL", value: model.baseURL) { viewModel.setAuxiliary(key, field: "base_url", value: $0) }
         SecretTextField(label: "API Key", value: model.apiKey) { viewModel.setAuxiliary(key, field: "api_key", value: $0) }
         StepperRow(label: "Timeout (s)", value: model.timeout, range: 5...3600, step: 5) { viewModel.setAuxiliaryTimeout(key, value: $0) }
+        if capabilitiesStore?.capabilities.hasAuxiliaryReasoningEffort ?? false {
+            reasoningEffortPicker(value: model.reasoningEffort) { viewModel.setAuxiliaryReasoningEffort(key, value: $0) }
+        }
+    }
+
+    /// Shared reasoning-effort picker for `auxiliary.<task>.reasoning_effort`
+    /// (v0.19+) — "Default" writes an empty scalar (provider default);
+    /// the other options are `AuxiliaryReasoningEffort`'s raw values,
+    /// source-verified against `hermes_constants.VALID_REASONING_EFFORTS`
+    /// + `parse_reasoning_effort`'s `"none"` alias.
+    @ViewBuilder
+    private func reasoningEffortPicker(value: String, onChange: @escaping (String) -> Void) -> some View {
+        PickerRow(
+            label: "Reasoning Effort",
+            selection: value,
+            options: [""] + AuxiliaryReasoningEffort.allCases.map(\.rawValue),
+            optionLabel: { $0.isEmpty ? "Default" : $0.capitalized },
+            onChange: onChange
+        )
+    }
+
+    /// `auxiliary.title_generation` rows. Distinct from `auxRows` because
+    /// this task carries two extra fields (`enabled`, `language`) that no
+    /// other auxiliary task has.
+    @ViewBuilder
+    private var titleGenerationRows: some View {
+        let settings = viewModel.config.auxiliary.titleGeneration
+        ToggleRow(label: "Enabled", isOn: settings.enabled) { viewModel.setTitleGenerationEnabled($0) }
+        EditableTextField(label: "Provider", value: settings.provider) { viewModel.setTitleGeneration(field: "provider", value: $0) }
+        EditableTextField(label: "Model", value: settings.model) { viewModel.setTitleGeneration(field: "model", value: $0) }
+        EditableTextField(label: "Base URL", value: settings.baseURL) { viewModel.setTitleGeneration(field: "base_url", value: $0) }
+        SecretTextField(label: "API Key", value: settings.apiKey) { viewModel.setTitleGeneration(field: "api_key", value: $0) }
+        StepperRow(label: "Timeout (s)", value: settings.timeout, range: 5...3600, step: 5) { viewModel.setTitleGenerationTimeout($0) }
+        if capabilitiesStore?.capabilities.hasAuxiliaryReasoningEffort ?? false {
+            reasoningEffortPicker(value: settings.reasoningEffort) { viewModel.setTitleGenerationReasoningEffort($0) }
+        }
+        if capabilitiesStore?.capabilities.hasTitleGenerationLanguage ?? false {
+            EditableTextField(label: "Language", value: settings.language) { viewModel.setTitleGenerationLanguage($0) }
+            Text("Force generated titles into this language (e.g. `en`, `ja`) regardless of the chat's own language. Leave blank to match the chat.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 4)
+        }
     }
 
     @ViewBuilder

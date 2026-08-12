@@ -13,6 +13,14 @@ struct SecurityTab: View {
         capabilitiesStore?.capabilities.hasApprovalsSuggest ?? false
     }
 
+    /// v0.20+ `approvals.smart_policy`. Same floor as `hasApprovalsSuggest`
+    /// but a distinct capability flag — the two features shipped together
+    /// but are unrelated, so each gets its own name rather than one
+    /// standing in for the other.
+    private var hasApprovalSmartPolicy: Bool {
+        capabilitiesStore?.capabilities.hasApprovalSmartPolicy ?? false
+    }
+
     var body: some View {
         SettingsSection(title: "Redaction", icon: "eye.slash") {
             ToggleRow(label: "Redact Secrets", isOn: viewModel.config.security.redactSecrets) { viewModel.setRedactSecrets($0) }
@@ -39,6 +47,9 @@ struct SecurityTab: View {
             }
         }
 
+        if hasApprovalSmartPolicy {
+            smartApprovalPolicySection
+        }
         if hasApprovalsSuggest {
             allowlistSuggestionsSection
         }
@@ -47,6 +58,30 @@ struct SecurityTab: View {
             PickerRow(label: "Mode", selection: viewModel.config.humanDelay.mode, options: ["off", "natural", "custom"]) { viewModel.setHumanDelayMode($0) }
             StepperRow(label: "Min (ms)", value: viewModel.config.humanDelay.minMS, range: 0...10_000, step: 50) { viewModel.setHumanDelayMinMS($0) }
             StepperRow(label: "Max (ms)", value: viewModel.config.humanDelay.maxMS, range: 0...10_000, step: 50) { viewModel.setHumanDelayMaxMS($0) }
+        }
+    }
+
+    // MARK: - Smart approval policy (v0.20+, `approvals.smart_policy`)
+
+    /// Free-text policy appended to the smart-approval guardian's system
+    /// prompt when non-empty (e.g. "Always ESCALATE commands touching
+    /// /etc"). Paired above the Allowlist Suggestions section — both are
+    /// smart-approval-adjacent surfaces that shipped in the same Hermes
+    /// release, and the mined suggestions are more useful once the
+    /// operator has seen the free-text policy knob that shapes them.
+    private var smartApprovalPolicySection: some View {
+        SettingsSection(title: "Smart Approval Policy", icon: "text.badge.checkmark") {
+            VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+                Text("Extra rules appended to the smart-approval guardian's system prompt, e.g. \"Always ESCALATE commands touching /etc\" or \"APPROVE docker compose restarts under ~/deploys\". Only used when Approval Mode is smart.")
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                EditableTextField(label: "Policy", value: viewModel.config.approvalSmartPolicy) {
+                    viewModel.setApprovalSmartPolicy($0)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(ScarfSpace.s3)
         }
     }
 

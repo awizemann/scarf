@@ -118,9 +118,23 @@ public extension HermesConfig {
                 model: str("auxiliary.\(name).model"),
                 baseURL: str("auxiliary.\(name).base_url"),
                 apiKey: str("auxiliary.\(name).api_key"),
-                timeout: int("auxiliary.\(name).timeout", default: 30)
+                timeout: int("auxiliary.\(name).timeout", default: 30),
+                // `auxiliary.<task>.reasoning_effort` — v0.19+
+                // (hermes-agent commit df5700ebe3, first released
+                // v2026.7.20 = v0.19.0). Empty = provider default.
+                reasoningEffort: str("auxiliary.\(name).reasoning_effort")
             )
         }
+        let titleGeneration = TitleGenerationSettings(
+            enabled: bool("auxiliary.title_generation.enabled", default: true),
+            provider: str("auxiliary.title_generation.provider", default: "auto"),
+            model: str("auxiliary.title_generation.model"),
+            baseURL: str("auxiliary.title_generation.base_url"),
+            apiKey: str("auxiliary.title_generation.api_key"),
+            timeout: int("auxiliary.title_generation.timeout", default: 30),
+            reasoningEffort: str("auxiliary.title_generation.reasoning_effort"),
+            language: str("auxiliary.title_generation.language")
+        )
         let auxiliary = AuxiliarySettings(
             vision: aux("vision"),
             webExtract: aux("web_extract"),
@@ -130,7 +144,8 @@ public extension HermesConfig {
             approval: aux("approval"),
             mcp: aux("mcp"),
             flushMemories: aux("flush_memories"),
-            curator: aux("curator")
+            curator: aux("curator"),
+            titleGeneration: titleGeneration
         )
 
         let security = SecuritySettings(
@@ -455,7 +470,10 @@ public extension HermesConfig {
             // Keys arrive unquoted (HermesYAML strips a quoting layer) so
             // `'llama3:8b': high` reads back as `llama3:8b`.
             reasoningOverrides: maps["agent.reasoning_overrides"] ?? [:],
-            excludedProviders: lists["model_catalog.excluded_providers"] ?? []
+            excludedProviders: lists["model_catalog.excluded_providers"] ?? [],
+            // `approvals.smart_policy` (v0.20+, config_defaults.py:2053) —
+            // free-form policy text for the smart-approval guardian.
+            approvalSmartPolicy: str("approvals.smart_policy")
         )
     }
 }

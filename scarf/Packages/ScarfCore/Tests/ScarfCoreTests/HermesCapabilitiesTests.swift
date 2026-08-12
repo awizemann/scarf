@@ -557,6 +557,40 @@ import Foundation
         #expect(caps.isV018OrLater)
     }
 
+    @Test func v018FlagsIncludeTitleGenerationLanguage() {
+        // `auxiliary.title_generation.language` landed at the same v0.18
+        // boundary as `hasCronAttachToSession`/`hasMCPReauth`.
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)")
+        #expect(caps.hasTitleGenerationLanguage)
+    }
+
+    @Test func v017HostHidesTitleGenerationLanguage() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.17.0 (2026.6.19)")
+        #expect(!caps.hasTitleGenerationLanguage)
+    }
+
+    // MARK: - v0.19 capability flags
+
+    @Test func v019FlagsAllOnForV019Host() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.7.20)")
+        #expect(caps.hasConfigUnset)
+        #expect(caps.hasAuxiliaryReasoningEffort)
+    }
+
+    @Test func v018HostHidesV019Flags() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)")
+        #expect(!caps.hasConfigUnset)
+        #expect(!caps.hasAuxiliaryReasoningEffort)
+        // v0.18 surfaces stay alive.
+        #expect(caps.hasCronAttachToSession)
+        #expect(caps.hasMCPReauth)
+    }
+
+    @Test func v0_19_patchReleaseStillEnablesAuxiliaryReasoningEffort() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.19.2 (2026.7.30)")
+        #expect(caps.hasAuxiliaryReasoningEffort)
+    }
+
     @Test func isV018OrLater_v018HostTrue() {
         #expect(HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)").isV018OrLater)
     }
@@ -578,6 +612,7 @@ import Foundation
         #expect(caps.hasApprovalsSuggest)
         #expect(caps.hasCronRuns)
         #expect(caps.hasSessionsExportFormats)
+        #expect(caps.hasApprovalSmartPolicy)
         #expect(caps.isV020OrLater)
     }
 
@@ -590,6 +625,7 @@ import Foundation
         #expect(!caps.hasApprovalsSuggest)
         #expect(!caps.hasCronRuns)
         #expect(!caps.hasSessionsExportFormats)
+        #expect(!caps.hasApprovalSmartPolicy)
         #expect(!caps.isV020OrLater)
         // v0.18 surfaces stay alive on a v0.19 host.
         #expect(caps.hasCronAttachToSession)
@@ -606,6 +642,7 @@ import Foundation
         #expect(caps.hasApprovalsSuggest)
         #expect(caps.hasCronRuns)
         #expect(caps.hasSessionsExportFormats)
+        #expect(caps.hasApprovalSmartPolicy)
         #expect(caps.isV020OrLater)
     }
 
