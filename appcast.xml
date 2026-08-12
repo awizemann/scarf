@@ -6,6 +6,113 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.19.0</title>
+      <sparkle:version>58</sparkle:version>
+      <sparkle:shortVersionString>2.19.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Wed, 12 Aug 2026 17:06:44 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.19.0</p>
+<p>This release closes out the Hermes 0.20 settings backlog and fixes a browser configuration bug that&#x27;s been silently broken since the picker shipped: Scarf was writing a config key Hermes has never read. Alongside the fixes, six new settings surfaces land — profile routing rules, secrets sources, voice tuning, and more — every key source-verified against Hermes v2026.8.3 and gated to the Hermes version that actually understands it.</p>
+<h2>Fixed: the browser provider picker now actually works</h2>
+<p>The Settings → Browser backend picker wrote <code>browser.backend</code> — a key that, after a source-history audit of every released Hermes version, turns out to have <strong>never existed</strong>. Hermes reads <code>browser.cloud_provider</code>. Every selection made in that picker was silently ignored.</p>
+<p>The picker now writes the right key with the right values — <strong>Local Browser, Browser Use, Browserbase, Firecrawl, and Camofox</strong> — plus an <strong>Auto-detect</strong> option that genuinely clears the key. That last part matters: <code>hermes config set key &quot;&quot;</code> writes an <em>empty</em> value rather than removing the key, and an empty <code>browser.cloud_provider</code> forces local mode instead of restoring auto-detection. Scarf now uses <code>hermes config unset</code> (Hermes 0.19+) for true clearing; on older hosts the picker simply doesn&#x27;t offer the auto-detect row rather than lying about it.</p>
+<h2>New: gateway profile routing rules</h2>
+<p>A full list editor for <code>gateway.profile_routes</code> (Hermes 0.19+): route incoming gateway messages to different profiles by platform, guild, channel, or thread. The editor mirrors Hermes&#x27;s real matching semantics — rules rank by <strong>specificity</strong> (thread beats channel beats guild), not list order, and the UI shows the effective match order with rank badges so there&#x27;s no guessing.</p>
+<p>Because <code>hermes config set</code> can&#x27;t write lists of objects, this uses Scarf&#x27;s surgical YAML editor: comments, unknown keys, and everything else in your config survive edits byte-for-byte. The editor also refuses ambiguous configs (like a populated inline flow list) with an explanation instead of writing changes Hermes would ignore. One real corruption bug was caught by the pre-release audit and fixed: a route disabled with <code>enabled: no</code>, <code>off</code>, or <code>0</code> (all valid YAML) previously read back as enabled — and an unrelated edit would have re-enabled it on disk.</p>
+<h2>New: settings surfaces across the board</h2>
+<p>All capability-gated to the Hermes version each key first shipped in — older hosts render exactly as before:</p>
+<ul>
+  <li><strong>Title generation</strong> (Auxiliary tab): provider, model, base URL, API key, timeout, and — on 0.18+ — response language for auto-generated session titles.</li>
+  <li><strong>Per-task reasoning effort</strong> (0.19+): every auxiliary task (vision, compression, curator, …) gets its own thinking-level picker, from <code>minimal</code> to <code>ultra</code>.</li>
+  <li><strong>Smart approval policy</strong> (0.20, Security tab): free-text guidance for Hermes&#x27;s LLM approval reviewer, beside the existing allowlist suggestions.</li>
+  <li><strong>Secrets sources</strong> (0.20, Secrets tab): the any-CLI vault helper (<code>secrets.command</code>) and Bitwarden&#x27;s encrypted cache with its staleness ceiling.</li>
+  <li><strong>Voice</strong> (0.19/0.20, Voice tab): global and per-provider STT language, Groq model selection, local-STT VAD anti-hallucination tuning, xAI TTS speed/language/streaming/sample-rate knobs, and DeepInfra TTS model + voice.</li>
+  <li><strong>Advanced</strong> (0.20): the shared-metrics telemetry privacy toggle (default off) and SQLite journal tuning (<code>journal_mode</code>, WAL autocheckpoint, journal size limit) for remote and container servers.</li>
+</ul>
+<p>Two keys from the original plan were deliberately dropped after source verification showed they don&#x27;t exist in released Hermes (<code>tts.xai.text_normalization</code>, a global <code>tts.speed</code>) — Scarf doesn&#x27;t write keys Hermes won&#x27;t read.</p>
+<h2>Faster, steadier version detection</h2>
+<p>Scarf detects your Hermes version to decide which features to show. That probe is now <strong>cached, deduplicated, and persisted</strong>: one probe per server connection instead of several per session, the last-known version seeds the UI instantly at launch (marked provisional until the live probe confirms), and a transient probe failure no longer blanks every version-gated surface for the session. Cache entries key on the actual connection — a Docker or SSH host never inherits your Mac&#x27;s version — and expire after ten minutes so an out-of-band <code>hermes update</code> is picked up promptly.</p>
+<h2>Under the hood</h2>
+<ul>
+  <li>Two independent adversarial audits ran before this release: one per phase during development, one fresh-eyes pass across the full diff — the latter validated every claimed key name, default, and version floor against Hermes source at tag v2026.8.3 and found zero mismatches.</li>
+  <li>The settings write/read parity gate got stricter: it now also covers <code>unsetSetting</code> call sites and the new interpolated writer shapes, so a settings key that saves but doesn&#x27;t read back fails CI.</li>
+  <li>90+ new tests this release (YAML round-trips incl. comments/CRLF/unknown keys, version-cache lifecycle, capability floors, profile-route semantics); the ScarfCore suite now runs 1,152, plus 301 app-target tests.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li><strong>Sparkle</strong> will offer the update automatically, or use <strong>Scarf → Check for Updates</strong>. macOS 14.6+ deployment target unchanged.</li>
+  <li><strong>Hermes target unchanged: v0.20.0 (v2026.8.3)</strong>, minimum v0.6.0. New surfaces appear only on hosts that support them (per-key floors at 0.18/0.19/0.20).</li>
+  <li>If you had set a browser backend in Settings before this release, re-select it once — the old value was written to a key Hermes never read.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.19.0/Scarf-v2.19.0-Universal.zip"
+                 sparkle:edSignature="6FnxO3FI9+L6TALl1aA7zXWOjD9r8/7SfuiD6WvaTAKHL+UJzUbF8xS5RAtFoBNmZS5yea2x0oH6hKlTP0P5AA=="
+                 length="22336402"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.18.1</title>
       <sparkle:version>57</sparkle:version>
       <sparkle:shortVersionString>2.18.1</sparkle:shortVersionString>
