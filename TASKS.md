@@ -47,6 +47,7 @@
 - [ ] Hermes v0.20 deferred settings surfaces (pickup-ready backlog) (id: t-1cc0a505) (added: 2026-08-03)
 - [ ] Sweep pickers with present-but-empty "" rows that claim to unset (displayLanguages, memoryProviders) (id: t-9634ae74) (added: 2026-08-12)
 - [ ] Follow-ups from the 2026-08-12 fresh-eyes audit (profile_routes edge cases + bitwarden default drift) (id: t-6a6d692c) (added: 2026-08-12) (priority: low)
+- [ ] Fix flaky HermesVersionCacheTests.storeKeepsRememberedVersionWhenProbeFails (id: t-6e1e9c86) (added: 2026-08-13)
 
 ## Doing
 
@@ -54,6 +55,18 @@
 
 ## Done
 
+- [x] v2.19.1 R5: Audit fixes + release prep (id: t-257807c1) (added: 2026-08-13)
+- [x] v2.19.1 R6: Fix uninstall leaving project registered + isolate boilerplate UI tests (id: t-e41efefb) (added: 2026-08-13)
+- [x] v2.19.1 R1: UI tests must not write real ~/.hermes projects.json (id: t-537267c1) (added: 2026-08-13)
+- [x] v2.19.1 R4: Wiki freshness pass (compat target, Roadmap, TestFlight caveat) (id: t-1f948f5e) (added: 2026-08-13)
+- [x] v2.19.1 R2: Fix MiniAppBridge onEvent unhandled rejection (id: t-119b7f60) (added: 2026-08-13)
+- [x] v2.19.1 R3: Update DASHBOARD_SCHEMA.md with 5 missing widget types (id: t-2f7523e3) (added: 2026-08-13)
+- [x] Demo shoot P6: Plan-conformance audit + final fresh-eyes audit (id: t-73f2fc87) (added: 2026-08-13)
+- [x] Demo shoot P5: Shot list + chat session script (id: t-16ded24e) (added: 2026-08-13)
+- [x] Demo shoot P4: Seed Hermes side (projects.json, Kanban, cron) (id: t-75781f07) (added: 2026-08-13)
+- [x] Demo shoot P3: Harness mini-app (Run a user test) (id: t-b0bb5ddf) (added: 2026-08-13)
+- [x] Demo shoot P2: Harness .scarf/ dashboard scaffold (id: t-bdd220dc) (added: 2026-08-13)
+- [x] Demo shoot P1: Recon — Scarf contracts + harness survey brief (id: t-aa0701f6) (added: 2026-08-13)
 - [x] P3d: gateway.profile_routes list editor (id: t-934fdf81) (added: 2026-08-12)
 - [x] P3c: Settings — STT/TTS knob expansion (id: t-02eae1a0) (added: 2026-08-12)
 - [x] P3b: Settings — secrets.bitwarden.encrypted_cache + secrets.command.* + telemetry.shared_metrics + database.* knobs (id: t-5d23ef3f) (added: 2026-08-12)
