@@ -57,6 +57,12 @@ Available in English, 简体中文, Deutsch, Français, Español, 日本語, and
 
 Connecting takes about a minute: add a server (same details as `ssh user@host`), tap **Generate Key**, paste the public key into the host's `~/.ssh/authorized_keys`, tap **Test connection**. Full walkthrough: [ScarfGo Onboarding](https://github.com/awizemann/scarf/wiki/ScarfGo-Onboarding) · feature tour: [ScarfGo](https://github.com/awizemann/scarf/wiki/ScarfGo) · Mac-vs-iOS matrix: [Platform Differences](https://github.com/awizemann/scarf/wiki/Platform-Differences).
 
+## What's New in 2.19.2
+
+**Runaway SSH reconnects fixed** ([gh#138](https://github.com/awizemann/scarf/issues/138)). With a side-effectful SSH ProxyCommand — Cloudflare Zero Trust's `cloudflared` was the reported case — a dropped connection could make Scarf's background pollers dial the host every few seconds forever, opening a browser OAuth tab per attempt (thousands overnight). A per-host circuit breaker now stops all outbound SSH after 3 consecutive connection failures and retries with a single probe on exponential backoff (30s → 5min cap). Explicit actions — Test Connection, Reconnect — always reset it and get a real attempt. Local setups and ScarfGo are unaffected.
+
+Full notes: [v2.19.2](https://github.com/awizemann/scarf/releases/tag/v2.19.2)
+
 ## What's New in 2.19.1
 
 **Uninstalled projects no longer come back.** A hardening patch that closes a long-standing feedback loop and its cover-ups:
