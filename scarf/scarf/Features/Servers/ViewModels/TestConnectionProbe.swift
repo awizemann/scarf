@@ -15,6 +15,10 @@ struct TestConnectionProbe {
         guard !host.isEmpty else {
             return .failure(message: "Host is empty", stderr: "", command: "")
         }
+        // The user explicitly asked to try this host — their intent
+        // overrides any open circuit breaker (gh#138), and background
+        // traffic should resume immediately if the connection is back.
+        SSHConnectionGate.shared.reset(SSHConnectionGate.key(host: host, port: config.port))
 
         // Same options SSHTransport uses, plus -v for verbose ssh trace.
         // We deliberately skip ControlMaster here so the probe is a fresh

@@ -49,6 +49,11 @@ public struct SSHTransport: ServerTransport {
     /// socket per server, lives under the app's Caches so macOS can sweep it.
     nonisolated private var controlDir: String { Self.controlDirPath() }
 
+    /// Circuit-breaker key for this endpoint (gh#138). All gate accounting
+    /// for this transport — and for `SSHScriptRunner` against the same
+    /// config — uses this key.
+    nonisolated var gateKey: String { SSHConnectionGate.key(host: config.host, port: config.port) }
+
     /// Per-server snapshot cache directory (for SQLite `.backup` drops).
     nonisolated private var snapshotDir: String { Self.snapshotDirPath(for: contextID) }
 
@@ -134,7 +139,7 @@ public struct SSHTransport: ServerTransport {
     public func closeControlMaster() {
         ensureControlDir()
         let args = sshArgs(extra: ["-O", "exit", hostSpec])
-        _ = try? runLocal(executable: sshBinary, args: args, stdin: nil, timeout: 10)
+        _ = try? runLocal(executable: sshBinary, args: args, stdin: nil, timeout: 10, gate: .none)
     }
 
     /// Recover from a ControlMaster whose TCP session died while its master
@@ -155,7 +160,8 @@ public struct SSHTransport: ServerTransport {
             executable: sshBinary,
             args: sshArgs(extra: ["-O", "check", hostSpec]),
             stdin: nil,
-            timeout: 5
+            timeout: 5,
+            gate: .none
         )
         guard let check, check.exitCode == 0 else { return }
 
@@ -364,7 +370,7 @@ public struct SSHTransport: ServerTransport {
         scpArgs.append(localTmpURL.path)
         scpArgs.append("\(hostSpec):\(tmp)")
 
-        let scpResult = try runLocal(executable: scpBinary, args: scpArgs, stdin: nil, timeout: 60)
+        let scpResult = try runLocal(executable: scpBinary, args: scpArgs, stdin: nil, timeout: 60, gate: .admitOnly)
         if scpResult.exitCode != 0 {
             throw TransportError.classifySSHFailure(host: config.host, exitCode: scpResult.exitCode, stderr: scpResult.stderrString)
         }
@@ -532,6 +538,10 @@ public struct SSHTransport: ServerTransport {
         #else
         return AsyncThrowingStream { continuation in
             Task.detached { [self] in
+                if case .blocked(let retryAt) = SSHConnectionGate.shared.admit(gateKey) {
+                    continuation.finish(throwing: TransportError.circuitOpen(host: config.host, retryAt: retryAt))
+                    return
+                }
                 ensureControlDir()
                 // `bash -lc` (login shell) so PATH picks up profile-only
                 // entries like pipx's `~/.local/bin` — same rationale as
@@ -587,6 +597,11 @@ public struct SSHTransport: ServerTransport {
                 }
                 try? outPipe.fileHandleForReading.close()
                 try? errPipe.fileHandleForReading.close()
+                if proc.terminationStatus == 255 {
+                    SSHConnectionGate.shared.recordFailure(gateKey)
+                } else {
+                    SSHConnectionGate.shared.recordSuccess(gateKey)
+                }
                 if proc.terminationStatus != 0 {
                     continuation.finish(throwing: TransportError.classifySSHFailure(
                         host: config.host, exitCode: proc.terminationStatus, stderr: stderrTail
@@ -605,6 +620,10 @@ public struct SSHTransport: ServerTransport {
         #else
         return AsyncThrowingStream { continuation in
             Task.detached { [self] in
+                if case .blocked(let retryAt) = SSHConnectionGate.shared.admit(gateKey) {
+                    continuation.finish(throwing: TransportError.circuitOpen(host: config.host, retryAt: retryAt))
+                    return
+                }
                 ensureControlDir()
                 // Same `bash -lc` wrapping as `streamLines` so PATH picks
                 // up profile-only entries (pipx, asdf, conda). The
@@ -650,6 +669,11 @@ public struct SSHTransport: ServerTransport {
                 }
                 try? outPipe.fileHandleForReading.close()
                 try? errPipe.fileHandleForReading.close()
+                if proc.terminationStatus == 255 {
+                    SSHConnectionGate.shared.recordFailure(gateKey)
+                } else {
+                    SSHConnectionGate.shared.recordSuccess(gateKey)
+                }
                 if proc.terminationStatus != 0 {
                     continuation.finish(throwing: TransportError.classifySSHFailure(
                         host: config.host, exitCode: proc.terminationStatus, stderr: stderrTail
@@ -762,12 +786,35 @@ public struct SSHTransport: ServerTransport {
     /// `LocalTransport.runProcess` — duplicated rather than shared because
     /// SSH-specific code paths live on this type and we want all Process
     /// lifecycle in one place per transport.
-    nonisolated private func runLocal(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+    /// How an invocation participates in the per-host circuit breaker
+    /// (gh#138).
+    enum GatePolicy {
+        /// Blocked while the gate is open; exit code feeds the gate.
+        case full
+        /// Blocked while the gate is open, but the exit code is NOT fed
+        /// back. For `scp`, whose exit codes don't distinguish connection
+        /// failure (it exits 1, where ssh exits 255) — a dead connection
+        /// must not be scored as a success.
+        case admitOnly
+        /// Exempt entirely. Only for local-only ControlMaster ops
+        /// (`-O check` / `-O exit`) — those never dial the remote, so they
+        /// must neither be blocked nor poison the gate with their
+        /// non-zero "no master running" exits.
+        case none
+    }
+
+    nonisolated private func runLocal(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?, gate: GatePolicy = .full) throws -> ProcessResult {
         #if os(iOS)
         // iOS uses `CitadelServerTransport` instead of spawning ssh/scp
         // binaries. Reaching here from iOS is a wiring bug.
         throw TransportError.other(message: "SSHTransport.runLocal is unavailable on iOS")
         #else
+        if gate != .none, case .blocked(let retryAt) = SSHConnectionGate.shared.admit(gateKey) {
+            // Fail fast WITHOUT spawning ssh: with a ProxyCommand like
+            // cloudflared, merely attempting the dial has side effects
+            // (browser OAuth tabs) — the whole point of the breaker.
+            throw TransportError.circuitOpen(host: config.host, retryAt: retryAt)
+        }
         ensureControlDir()
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: executable)
@@ -835,6 +882,10 @@ public struct SSHTransport: ServerTransport {
                 let captured = pipeCapture.wait()
                 try? stdoutPipe.fileHandleForReading.close()
                 try? stderrPipe.fileHandleForReading.close()
+                // A timeout is connection-level for gate purposes: the
+                // reported cloudflared scenario is precisely ssh blocking
+                // on its ProxyCommand's OAuth dance until our timer fires.
+                if gate == .full { SSHConnectionGate.shared.recordFailure(gateKey) }
                 throw TransportError.timeout(seconds: timeout, partialStdout: captured.stdout)
             }
         } else {
@@ -844,6 +895,16 @@ public struct SSHTransport: ServerTransport {
         try? stdoutPipe.fileHandleForReading.close()
         try? stderrPipe.fileHandleForReading.close()
         try? stdinPipe.fileHandleForWriting.close()
+        if gate == .full {
+            // Exit 255 is ssh's own failure code (dial/auth/proxy); any
+            // other exit means the remote actually ran our command, which
+            // proves the connection is alive — even if the command failed.
+            if proc.terminationStatus == 255 {
+                SSHConnectionGate.shared.recordFailure(gateKey)
+            } else {
+                SSHConnectionGate.shared.recordSuccess(gateKey)
+            }
+        }
         return ProcessResult(exitCode: proc.terminationStatus, stdout: captured.stdout, stderr: captured.stderr)
         #endif
     }

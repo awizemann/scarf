@@ -814,6 +814,12 @@ final class ChatViewModel {
     }
 
     func resumeSession(_ sessionId: String) {
+        // Explicit user action: clear any open SSH circuit breaker for
+        // this host (gh#138) so the resume gets a real attempt instead of
+        // an instant fail-fast from background-poller history.
+        if case .ssh(let cfg) = context.kind {
+            SSHConnectionGate.shared.reset(SSHConnectionGate.key(host: cfg.host, port: cfg.port))
+        }
         isStartingSession = true
         beginStartIntent()
         voiceEnabled = false

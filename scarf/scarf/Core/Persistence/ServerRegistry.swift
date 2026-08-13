@@ -142,6 +142,9 @@ final class ServerRegistry {
         if let removed, case .ssh(let config) = removed.kind {
             let transport = SSHTransport(contextID: id, config: config, displayName: removed.displayName)
             transport.closeControlMaster()
+            // Drop any circuit-breaker state (gh#138) so a future re-add of
+            // the same host starts clean.
+            SSHConnectionGate.shared.reset(SSHConnectionGate.key(host: config.host, port: config.port))
         }
         SSHTransport.pruneSnapshotCache(for: id)
         // Drop process-wide cache entries keyed on this ServerID so a future

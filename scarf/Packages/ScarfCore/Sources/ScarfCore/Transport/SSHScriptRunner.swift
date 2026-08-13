@@ -121,6 +121,33 @@ public enum SSHScriptRunner {
 
     #if os(macOS)
     private static func runOverSSH(script: String, config: SSHConfig, timeout: TimeInterval, cancelFlag: CancelFlag) async -> Outcome {
+        // Per-host circuit breaker (gh#138): fail fast without spawning
+        // ssh while the gate is open, and feed connection-level outcomes
+        // back so this path counts alongside SSHTransport's.
+        let gateKey = SSHConnectionGate.key(host: config.host, port: config.port)
+        if case .blocked(let retryAt) = SSHConnectionGate.shared.admit(gateKey) {
+            let secs = max(0, Int(retryAt.timeIntervalSinceNow))
+            return .connectFailure("Connection to \(config.host) is paused after repeated failures. Retrying in \(secs)s.")
+        }
+        let outcome = await runOverSSHUngated(script: script, config: config, timeout: timeout, cancelFlag: cancelFlag)
+        switch outcome {
+        case .completed(_, _, let exitCode):
+            if exitCode == 255 {
+                SSHConnectionGate.shared.recordFailure(gateKey)
+            } else {
+                SSHConnectionGate.shared.recordSuccess(gateKey)
+            }
+        case .connectFailure(let reason):
+            // Timeouts count (an OAuth-blocked ProxyCommand looks exactly
+            // like this); local launch errors and cancellation don't.
+            if reason.hasPrefix("Script timed out") {
+                SSHConnectionGate.shared.recordFailure(gateKey)
+            }
+        }
+        return outcome
+    }
+
+    private static func runOverSSHUngated(script: String, config: SSHConfig, timeout: TimeInterval, cancelFlag: CancelFlag) async -> Outcome {
         var sshArgv: [String] = [
             "-o", "ControlMaster=auto",
             "-o", "ControlPath=\(SSHTransport.controlDirPath())/%C",

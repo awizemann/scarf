@@ -22,6 +22,10 @@ public enum TransportError: LocalizedError {
     /// Timed out waiting for a process to finish. `partialStdout` carries
     /// whatever output was captured before the timer fired.
     case timeout(seconds: TimeInterval, partialStdout: Data)
+    /// The per-host connection circuit breaker is open (gh#138): repeated
+    /// connection failures paused outbound attempts to this host until
+    /// `retryAt`. No ssh process was spawned for this call.
+    case circuitOpen(host: String, retryAt: Date)
     /// Something we didn't plan for. Fall-through bucket with enough context
     /// for a bug report.
     case other(message: String)
@@ -43,6 +47,9 @@ public enum TransportError: LocalizedError {
             return "File I/O failed at \(path): \(msg)"
         case .timeout(let secs, _):
             return "Command timed out after \(Int(secs))s."
+        case .circuitOpen(let host, let retryAt):
+            let secs = max(0, Int(retryAt.timeIntervalSinceNow))
+            return "Connection to \(host) is paused after repeated failures. Retrying in \(secs)s."
         case .other(let msg):
             return msg
         }
