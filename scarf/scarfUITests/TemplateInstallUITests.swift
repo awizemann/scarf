@@ -8,7 +8,9 @@
 //
 //  ## Isolation (load-bearing — read before adding a test here)
 //
-//  `setUpWithError` mints `<runner-tmp>/scarf-uitest-home-<uuid>/`, drops
+//  `ScarfUITestCase` (see UITestIsolation.swift) is the base class for
+//  every suite in this target; its `setUpWithError` mints
+//  `<runner-tmp>/scarf-uitest-home-<uuid>/`, drops
 //  the `.scarf-test-home-marker` sentinel in it, and copies over
 //  `config.yaml` / `auth.json` / `.env` from the real `~/.hermes`. Every
 //  app launch MUST go through `makeApp()`, which pins both
@@ -64,109 +66,20 @@
 
 import XCTest
 
-final class TemplateInstallUITests: XCTestCase {
-
-    /// Real user home — NOT `NSHomeDirectory()`, which inside the
-    /// XCUITest runner sandbox returns
-    /// `~/Library/Containers/com.scarfUITests.xctrunner/Data`. The Mac
-    /// app itself runs unsandboxed and reads from `~/.hermes/`, so any
-    /// path the harness checks against the same data must point at the
-    /// un-sandboxed home. `getpwuid(getuid()).pw_dir` is the canonical
-    /// UNIX answer.
-    private static let realHome: String = {
-        guard let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir else {
-            return NSHomeDirectory()
-        }
-        return String(cString: dir)
-    }()
-
-    private static let hermesBinary = (realHome as NSString)
-        .appendingPathComponent(".local/bin/hermes")
-
-    /// Sentinel filename `HermesProfileResolver` requires inside a
-    /// `SCARF_HERMES_HOME` override before it will honor the override.
-    /// Duplicated as a literal rather than imported from ScarfCore — the
-    /// UI-test target links neither the app nor the package.
-    private static let testHomeMarkerFilename = ".scarf-test-home-marker"
-
-    /// Throwaway Hermes home for the current test method, created in
-    /// `setUpWithError` and torn down in `tearDownWithError`. Every
-    /// `XCUIApplication` this suite launches gets pointed at it (see
-    /// `makeApp`), so nothing the app-under-test writes can reach the
-    /// developer's real `~/.hermes`.
-    private var isolatedHome: String!
+final class TemplateInstallUITests: ScarfUITestCase {
 
     override func setUpWithError() throws {
-        continueAfterFailure = false
-
         // Refuse to run if `hermes` isn't on the dev Mac. The harness's
         // whole premise is "validate against the real Hermes install
         // pre-release"; failing here is friendlier than letting tests
-        // crash later in the install flow.
+        // crash later in the install flow. Checked BEFORE super mints
+        // the throwaway home so a skip leaves nothing behind.
         guard FileManager.default.isExecutableFile(atPath: Self.hermesBinary) else {
             throw XCTSkip("Hermes binary not found at \(Self.hermesBinary) — Layer B requires a real Hermes install on the dev Mac.")
         }
-
-        isolatedHome = try Self.makeIsolatedHermesHome()
-    }
-
-    override func tearDownWithError() throws {
-        if let isolatedHome {
-            try? FileManager.default.removeItem(atPath: isolatedHome)
-        }
-        isolatedHome = nil
-    }
-
-    /// Build a disposable Hermes home under the runner's container tmp —
-    /// the same directory the journey test already uses for the install
-    /// parent dir, chosen because the sandboxed runner can write it and
-    /// the unsandboxed app can read/write it.
-    ///
-    /// Seeded with the sentinel marker plus best-effort copies of the
-    /// dev Mac's `config.yaml` / `auth.json` / `.env`, so the app boots
-    /// with realistic credentials (the whole point of Layer B) while
-    /// every WRITE — `scarf/projects.json`, `cron/jobs.json`, sessions,
-    /// memories — lands in the throwaway copy.
-    private static func makeIsolatedHermesHome() throws -> String {
-        let fm = FileManager.default
-        let home = (NSTemporaryDirectory() as NSString)
-            .appendingPathComponent("scarf-uitest-home-\(UUID().uuidString)")
-        for sub in ["", "/scarf", "/cron", "/sessions", "/logs"] {
-            try fm.createDirectory(atPath: home + sub, withIntermediateDirectories: true)
-        }
-        // Without this marker HermesProfileResolver ignores the override
-        // outright and falls back to the real ~/.hermes.
-        try Data().write(to: URL(fileURLWithPath: home + "/" + testHomeMarkerFilename))
-        let realHermes = (realHome as NSString).appendingPathComponent(".hermes")
-        for file in ["config.yaml", "auth.json", ".env"] {
-            let src = (realHermes as NSString).appendingPathComponent(file)
-            guard fm.fileExists(atPath: src) else { continue }
-            // Copy rather than symlink so a write can never follow the
-            // link back into the real home.
-            try? fm.copyItem(atPath: src, toPath: home + "/" + file)
-        }
-        return home
-    }
-
-    /// An `XCUIApplication` pinned to this test's throwaway Hermes home.
-    ///
-    /// `SCARF_HERMES_HOME` is what `HermesProfileResolver.resolveLocalHome()`
-    /// reads, so it redirects every in-app `context.paths.*` (registry,
-    /// cron, sessions, memories). `HERMES_HOME` is what the `hermes` CLI
-    /// itself reads; `LocalTransport` hands subprocesses the app's own
-    /// environment, so setting it here keeps CLI-side writes (cron job
-    /// registration during template install) out of the real home too.
-    ///
-    /// This pairing is the isolation mechanism `TestModeFlags` and
-    /// `HermesProfileResolver` were both written to expect — it was
-    /// documented but never actually wired up here, which is how UI runs
-    /// leaked "HackerNews Daily Digest" rows into the real registry.
-    private func makeApp(extraLaunchArguments: [String] = []) -> XCUIApplication {
-        let app = XCUIApplication()
-        app.launchArguments = ["--scarf-test-mode"] + extraLaunchArguments
-        app.launchEnvironment["SCARF_HERMES_HOME"] = isolatedHome
-        app.launchEnvironment["HERMES_HOME"] = isolatedHome
-        return app
+        // Isolation (throwaway `SCARF_HERMES_HOME`/`HERMES_HOME` + the
+        // sentinel marker, and `makeApp()`) lives in `ScarfUITestCase`.
+        try super.setUpWithError()
     }
 
     /// Smoke test: Scarf launches normally against the real Hermes home,

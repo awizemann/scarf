@@ -28,6 +28,22 @@ import os
 ///
 /// **SECRET-SAFE**: `secretsScope` carries `config.json` keys whose
 /// values are `keychain://…` refs — the field NAMES, never the values.
+/// Failures `ProjectStore` raises on its own (as opposed to transport
+/// I/O errors it lets through).
+public enum ProjectStoreError: LocalizedError, Sendable, Equatable {
+    /// `save` was handed a project whose root directory no longer exists
+    /// — usually a stale in-memory `ProjectEntry` for a project that was
+    /// just uninstalled or deleted out from under the UI.
+    case projectRootMissing(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .projectRootMissing(let path):
+            return "Project directory no longer exists at \(path); refusing to re-create it."
+        }
+    }
+}
+
 public struct ProjectStore: Sendable {
     #if canImport(os)
     private static let logger = Logger(subsystem: "com.scarf", category: "ProjectStore")
@@ -80,7 +96,22 @@ public struct ProjectStore: Sendable {
     /// Write the canonical record AND index it into the registry
     /// (back-filling `ProjectEntry.uuid`). Throws on any I/O failure so
     /// callers can roll back; fire-and-forget callers use `try?`.
+    ///
+    /// **Refuses to save a project whose root directory is gone.**
+    /// `writeRecord` does `mkdir -p <root>/.scarf` and `indexInRegistry`
+    /// appends a registry row, so saving a deleted project *resurrects*
+    /// it: the dir comes back holding only `.scarf/project.json`, and the
+    /// registry row returns carrying its original UUID. That is exactly
+    /// how template uninstall used to "fail": the uninstaller removed
+    /// files + row correctly, the file watcher fired, the cockpit
+    /// reloaded with `force`, `load()` missed the just-deleted
+    /// `project.json`, and its `derive() + save()` fallback re-created
+    /// both. A save can only ever *describe* a project that exists on
+    /// disk — never conjure one.
     public nonisolated func save(_ project: ScarfProject) throws {
+        guard transport.fileExists(project.rootPath) else {
+            throw ProjectStoreError.projectRootMissing(project.rootPath)
+        }
         try writeRecord(project)
         try indexInRegistry(project)
     }

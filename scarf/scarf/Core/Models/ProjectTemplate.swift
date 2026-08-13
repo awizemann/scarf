@@ -338,6 +338,9 @@ nonisolated enum ProjectTemplateError: LocalizedError, Sendable {
     case unsafeZipEntry(String)
     case lockFileMissing(String)
     case lockFileParseFailed(String)
+    /// The uninstall removed the project's files but couldn't rewrite
+    /// `~/.hermes/scarf/projects.json`, so the sidebar row survives.
+    case registryUpdateFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -367,6 +370,8 @@ nonisolated enum ProjectTemplateError: LocalizedError, Sendable {
             return "No template.lock.json found at \(path). This project wasn't installed by Scarf's template system — remove it by hand."
         case .lockFileParseFailed(let s):
             return "Couldn't read template.lock.json: \(s)"
+        case .registryUpdateFailed(let s):
+            return "Removed the template's files, but couldn't update the projects list: \(s). The project may still appear in the sidebar — try the uninstall again."
         }
     }
 }

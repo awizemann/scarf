@@ -7,25 +7,17 @@
 
 import XCTest
 
-final class scarfUITests: XCTestCase {
-
-    override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
-
-        // In UI tests it is usually best to stop immediately when a failure occurs.
-        continueAfterFailure = false
-
-        // In UI tests it’s important to set the initial state - such as interface orientation - required for your tests before they run. The setUp method is a good place to do this.
-    }
-
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
-    }
+/// Smoke + launch-performance coverage. Inherits `ScarfUITestCase` so
+/// both tests run against a per-test throwaway Hermes home rather than
+/// the developer's real `~/.hermes` — Scarf writes on launch (registry
+/// migration, AGENTS.md refresh), so even "just launch it" is a writer.
+final class scarfUITests: ScarfUITestCase {
 
     @MainActor
     func testExample() throws {
-        // UI tests must launch the application that they test.
-        let app = XCUIApplication()
+        // UI tests must launch the application that they test. Always
+        // via `makeApp()` — a bare `XCUIApplication()` escapes isolation.
+        let app = makeApp()
         app.launch()
 
         // Use XCTAssert and related functions to verify your tests produce the correct results.
@@ -34,8 +26,12 @@ final class scarfUITests: XCTestCase {
     @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
+        // Each iteration gets a fresh, still-isolated app instance; the
+        // throwaway home is shared across iterations, which is exactly
+        // what an unmodified `~/.hermes` gave the old version — same
+        // warm-cache shape, just not the user's data.
         measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
+            makeApp().launch()
         }
     }
 }

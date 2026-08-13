@@ -7,19 +7,18 @@
 
 import XCTest
 
-final class scarfUITestsLaunchTests: XCTestCase {
+/// Launch-screenshot test. Inherits `ScarfUITestCase` for the throwaway
+/// Hermes home — see UITestIsolation.swift for why every launch in this
+/// target must go through `makeApp()`.
+final class scarfUITestsLaunchTests: ScarfUITestCase {
 
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
         true
     }
 
-    override func setUpWithError() throws {
-        continueAfterFailure = false
-    }
-
     @MainActor
     func testLaunch() throws {
-        let app = XCUIApplication()
+        let app = makeApp()
         app.launch()
 
         // Insert steps here to perform after app launch but before taking a screenshot,

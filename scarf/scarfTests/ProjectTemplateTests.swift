@@ -512,6 +512,130 @@ struct ProjectTemplateUninstallerTests {
         #expect(FileManager.default.fileExists(atPath: plan.projectDir + "/.scarf/template.lock.json") == false)
     }
 
+    /// **Regression: "uninstall completes but the project stays in the
+    /// sidebar."** The uninstaller itself was innocent — it removed the
+    /// row and saved. What resurrected the project was the cockpit's
+    /// lazy-migration fallback: the file watcher fires while uninstall
+    /// deletes files, `ProjectCockpitView.onChange` calls
+    /// `viewModel.load(force: true)`, `ProjectStore.load` misses the
+    /// just-deleted `.scarf/project.json`, and the `derive() + save()`
+    /// fallback re-creates BOTH the project dir (via `mkdir -p
+    /// <root>/.scarf`) and the registry row (via `indexInRegistry`) —
+    /// carrying the ORIGINAL uuid, which is why the resurrected row
+    /// looked untouched. `ProjectStore.save` now refuses to save a
+    /// project whose root is gone.
+    @Test func cockpitStyleRefreshAfterUninstallDoesNotResurrectProject() throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        let parentDir = scratch + "/parent"
+        try FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
+
+        let bundle = try ProjectTemplateServiceTests.makeBundle(dir: scratch, files: [
+            "README.md": "# Minimal",
+            "AGENTS.md": "# Agent notes",
+            "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
+        ])
+        let service = ProjectTemplateService(context: home.context)
+        let inspection = try service.inspect(zipPath: bundle)
+        defer { service.cleanupTempDir(inspection.unpackedDir) }
+        let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
+        let installer = ProjectTemplateInstaller(context: home.context)
+        let entry = try installer.install(plan: plan)
+
+        let uninstaller = ProjectTemplateUninstaller(context: home.context)
+        try uninstaller.uninstall(plan: try uninstaller.loadUninstallPlan(for: entry))
+
+        // Replay exactly what ProjectCockpitViewModel.load(force:) does
+        // with the stale `ProjectEntry` it is still holding.
+        let store = ProjectStore(context: home.context)
+        #expect(store.load(projectPath: entry.path) == nil)
+        #expect(throws: ProjectStoreError.self) {
+            try store.save(store.derive(from: entry))
+        }
+
+        // Neither the dir nor the registry row comes back.
+        #expect(FileManager.default.fileExists(atPath: entry.path) == false)
+        let registryAfter = ProjectDashboardService(context: home.context).loadRegistry()
+        #expect(registryAfter.projects.isEmpty)
+    }
+
+    /// Registry rows carry a stable uuid; paths do not. A row whose
+    /// path drifted (project moved, or the path was recorded with a
+    /// different-but-equivalent spelling) must still be removed.
+    @Test func removesRegistryRowByUUIDWhenPathDrifted() throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let uuid = UUID()
+        let service = ProjectDashboardService(context: home.context)
+        try service.saveRegistry(ProjectRegistry(projects: [
+            ProjectEntry(name: "Renamed", path: "/somewhere/else/moved", uuid: uuid)
+        ]))
+        let target = ProjectEntry(name: "Original", path: "/original/path", uuid: uuid)
+        #expect(ProjectTemplateUninstaller.matches(service.loadRegistry().projects[0], project: target))
+    }
+
+    /// Pre-Phase-1 rows have no uuid, so the fallback is a PATH compare
+    /// — and it must normalize both sides. `/tmp/x` and `/private/tmp/x`
+    /// are the same directory on macOS; a raw `==` leaves the row behind.
+    @Test func matchesLegacyRowByNormalizedPath() throws {
+        // Real directory: `URL.resolvingSymlinksInPath()` only rewrites
+        // path components that actually exist, so the fixture has to be
+        // on disk for `/tmp` → `/private/tmp` to resolve.
+        let name = "scarf-normalize-probe-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: "/tmp/" + name, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: "/tmp/" + name) }
+
+        let uuidlessRow = ProjectEntry(name: "Legacy", path: "/tmp/" + name + "/")
+        let target = ProjectEntry(name: "Legacy", path: "/private/tmp/./" + name)
+        #expect(ProjectTemplateUninstaller.matches(uuidlessRow, project: target))
+        // Different project at a sibling path must NOT match.
+        let other = ProjectEntry(name: "Other", path: "/private/tmp/" + name + "-other")
+        #expect(ProjectTemplateUninstaller.matches(uuidlessRow, project: other) == false)
+    }
+
+    /// A registry write failure used to be logged and swallowed, so the
+    /// sheet showed "uninstalled" while the sidebar row survived. It now
+    /// throws so the VM lands on `.failed`.
+    @Test func surfacesRegistryWriteFailure() throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        let parentDir = scratch + "/parent"
+        try FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
+
+        let bundle = try ProjectTemplateServiceTests.makeBundle(dir: scratch, files: [
+            "README.md": "# Minimal",
+            "AGENTS.md": "# Agent notes",
+            "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
+        ])
+        let service = ProjectTemplateService(context: home.context)
+        let inspection = try service.inspect(zipPath: bundle)
+        defer { service.cleanupTempDir(inspection.unpackedDir) }
+        let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
+        let installer = ProjectTemplateInstaller(context: home.context)
+        let entry = try installer.install(plan: plan)
+
+        let uninstaller = ProjectTemplateUninstaller(context: home.context)
+        let uninstallPlan = try uninstaller.loadUninstallPlan(for: entry)
+
+        // Make the registry unwritable by replacing projects.json with a
+        // directory — `writeFile` then fails for reasons no retry inside
+        // the uninstaller could fix.
+        let registryPath = home.context.paths.projectsRegistry
+        try FileManager.default.removeItem(atPath: registryPath)
+        try FileManager.default.createDirectory(atPath: registryPath, withIntermediateDirectories: true)
+
+        #expect(throws: ProjectTemplateError.self) {
+            try uninstaller.uninstall(plan: uninstallPlan)
+        }
+        // The destructive steps still ran — the throw is about the
+        // registry only, and a retry is safe.
+        #expect(FileManager.default.fileExists(atPath: plan.projectDir) == false)
+    }
+
     @Test func loadUninstallPlanRejectsProjectWithoutLock() throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }

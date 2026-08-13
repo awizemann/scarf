@@ -217,27 +217,56 @@ struct ProjectTemplateUninstaller: Sendable {
             }
         }
 
-        // 5. Projects registry — remove the entry by path (more stable
-        // than name: user may have renamed the project in the UI).
+        // 5. Projects registry — remove the entry by UUID when the row
+        // carries one (the stable key: survives a rename AND a path
+        // change), falling back to a normalized path compare for
+        // pre-Phase-1 rows that have no UUID yet. Raw string equality
+        // alone is too brittle — the same project dir can be spelled
+        // `/tmp/x` or `/private/tmp/x`, with or without a trailing
+        // slash, so both sides go through `Self.normalizedPath`.
         let dashboardService = ProjectDashboardService(context: context)
         var registry = dashboardService.loadRegistry()
-        registry.projects.removeAll { $0.path == plan.project.path }
-        // saveRegistry throws now — log a write failure but don't abort
-        // the uninstall. Every earlier step already completed (files
-        // removed, skills removed, cron jobs removed, memory stripped,
-        // Keychain cleared); failing here leaves a stale registry row
-        // pointing at a deleted project — cosmetic and easy to fix
-        // from the sidebar.
+        registry.projects.removeAll { Self.matches($0, project: plan.project) }
+        // A failed registry write is NOT cosmetic: the row survives,
+        // the sidebar keeps showing a project whose files are gone, and
+        // the success screen would claim a clean removal. Surface it
+        // the way every other hard failure in this method surfaces —
+        // by throwing — so `TemplateUninstallerViewModel` lands on
+        // `.failed` and the user sees why. Everything destructive has
+        // already run at this point, so a retry is safe: the plan's
+        // remaining steps are all no-ops on second pass.
         do {
             try dashboardService.saveRegistry(registry)
         } catch {
-            Self.logger.warning("uninstall couldn't rewrite projects registry: \(error.localizedDescription, privacy: .public)")
+            Self.logger.error("uninstall couldn't rewrite projects registry: \(error.localizedDescription, privacy: .public)")
+            throw ProjectTemplateError.registryUpdateFailed(error.localizedDescription)
         }
 
         Self.logger.info("uninstalled template \(plan.lock.templateId, privacy: .public) from \(plan.project.path, privacy: .public)")
     }
 
     // MARK: - Helpers
+
+    /// Does this registry row denote the project the plan is removing?
+    /// UUID first (stable across renames and moves), path second for
+    /// rows minted before `ProjectEntry.uuid` existed. Never falls back
+    /// to name — the user can rename a project in the sidebar, and two
+    /// projects can share a name.
+    nonisolated static func matches(_ entry: ProjectEntry, project: ProjectEntry) -> Bool {
+        if let target = project.uuid, let candidate = entry.uuid {
+            return candidate == target
+        }
+        return normalizedPath(entry.path) == normalizedPath(project.path)
+    }
+
+    /// Canonical spelling of a filesystem path for comparison purposes:
+    /// symlinks resolved (`/tmp` → `/private/tmp`), `.`/`..` collapsed,
+    /// trailing slash dropped. Matches how `ProjectTemplateService`
+    /// compares extracted paths against their base dir. Applied to BOTH
+    /// sides of every compare — never one.
+    nonisolated static func normalizedPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path
+    }
 
     nonisolated private func lockPath(for project: ProjectEntry) -> String {
         project.path + "/.scarf/template.lock.json"
