@@ -3,7 +3,22 @@
 //  scarfUITests
 //
 //  Layer B of the dogfooding-templates harness — drives Scarf via XCUITest
-//  against the developer Mac's real `~/.hermes/` installation.
+//  against a per-test throwaway Hermes home seeded from the developer
+//  Mac's real installation.
+//
+//  ## Isolation (load-bearing — read before adding a test here)
+//
+//  `setUpWithError` mints `<runner-tmp>/scarf-uitest-home-<uuid>/`, drops
+//  the `.scarf-test-home-marker` sentinel in it, and copies over
+//  `config.yaml` / `auth.json` / `.env` from the real `~/.hermes`. Every
+//  app launch MUST go through `makeApp()`, which pins both
+//  `SCARF_HERMES_HOME` (read by `HermesProfileResolver`, redirects the
+//  app's own file I/O) and `HERMES_HOME` (read by the `hermes` CLI that
+//  `LocalTransport` spawns with the app's environment). Constructing a
+//  bare `XCUIApplication()` here launches Scarf against the developer's
+//  REAL `~/.hermes` and its writes are permanent — that omission is
+//  exactly how stale "HackerNews Daily Digest" rows ended up in the real
+//  `~/.hermes/scarf/projects.json`.
 //
 //  Two tests:
 //  1. `testAppLaunchesAndSurfacesAWindow` — smoke that proves the
@@ -68,6 +83,19 @@ final class TemplateInstallUITests: XCTestCase {
     private static let hermesBinary = (realHome as NSString)
         .appendingPathComponent(".local/bin/hermes")
 
+    /// Sentinel filename `HermesProfileResolver` requires inside a
+    /// `SCARF_HERMES_HOME` override before it will honor the override.
+    /// Duplicated as a literal rather than imported from ScarfCore — the
+    /// UI-test target links neither the app nor the package.
+    private static let testHomeMarkerFilename = ".scarf-test-home-marker"
+
+    /// Throwaway Hermes home for the current test method, created in
+    /// `setUpWithError` and torn down in `tearDownWithError`. Every
+    /// `XCUIApplication` this suite launches gets pointed at it (see
+    /// `makeApp`), so nothing the app-under-test writes can reach the
+    /// developer's real `~/.hermes`.
+    private var isolatedHome: String!
+
     override func setUpWithError() throws {
         continueAfterFailure = false
 
@@ -78,6 +106,67 @@ final class TemplateInstallUITests: XCTestCase {
         guard FileManager.default.isExecutableFile(atPath: Self.hermesBinary) else {
             throw XCTSkip("Hermes binary not found at \(Self.hermesBinary) — Layer B requires a real Hermes install on the dev Mac.")
         }
+
+        isolatedHome = try Self.makeIsolatedHermesHome()
+    }
+
+    override func tearDownWithError() throws {
+        if let isolatedHome {
+            try? FileManager.default.removeItem(atPath: isolatedHome)
+        }
+        isolatedHome = nil
+    }
+
+    /// Build a disposable Hermes home under the runner's container tmp —
+    /// the same directory the journey test already uses for the install
+    /// parent dir, chosen because the sandboxed runner can write it and
+    /// the unsandboxed app can read/write it.
+    ///
+    /// Seeded with the sentinel marker plus best-effort copies of the
+    /// dev Mac's `config.yaml` / `auth.json` / `.env`, so the app boots
+    /// with realistic credentials (the whole point of Layer B) while
+    /// every WRITE — `scarf/projects.json`, `cron/jobs.json`, sessions,
+    /// memories — lands in the throwaway copy.
+    private static func makeIsolatedHermesHome() throws -> String {
+        let fm = FileManager.default
+        let home = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("scarf-uitest-home-\(UUID().uuidString)")
+        for sub in ["", "/scarf", "/cron", "/sessions", "/logs"] {
+            try fm.createDirectory(atPath: home + sub, withIntermediateDirectories: true)
+        }
+        // Without this marker HermesProfileResolver ignores the override
+        // outright and falls back to the real ~/.hermes.
+        try Data().write(to: URL(fileURLWithPath: home + "/" + testHomeMarkerFilename))
+        let realHermes = (realHome as NSString).appendingPathComponent(".hermes")
+        for file in ["config.yaml", "auth.json", ".env"] {
+            let src = (realHermes as NSString).appendingPathComponent(file)
+            guard fm.fileExists(atPath: src) else { continue }
+            // Copy rather than symlink so a write can never follow the
+            // link back into the real home.
+            try? fm.copyItem(atPath: src, toPath: home + "/" + file)
+        }
+        return home
+    }
+
+    /// An `XCUIApplication` pinned to this test's throwaway Hermes home.
+    ///
+    /// `SCARF_HERMES_HOME` is what `HermesProfileResolver.resolveLocalHome()`
+    /// reads, so it redirects every in-app `context.paths.*` (registry,
+    /// cron, sessions, memories). `HERMES_HOME` is what the `hermes` CLI
+    /// itself reads; `LocalTransport` hands subprocesses the app's own
+    /// environment, so setting it here keeps CLI-side writes (cron job
+    /// registration during template install) out of the real home too.
+    ///
+    /// This pairing is the isolation mechanism `TestModeFlags` and
+    /// `HermesProfileResolver` were both written to expect — it was
+    /// documented but never actually wired up here, which is how UI runs
+    /// leaked "HackerNews Daily Digest" rows into the real registry.
+    private func makeApp(extraLaunchArguments: [String] = []) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["--scarf-test-mode"] + extraLaunchArguments
+        app.launchEnvironment["SCARF_HERMES_HOME"] = isolatedHome
+        app.launchEnvironment["HERMES_HOME"] = isolatedHome
+        return app
     }
 
     /// Smoke test: Scarf launches normally against the real Hermes home,
@@ -88,8 +177,7 @@ final class TemplateInstallUITests: XCTestCase {
     /// tests do.
     @MainActor
     func testAppLaunchesAndSurfacesAWindow() throws {
-        let app = XCUIApplication()
-        app.launchArguments = ["--scarf-test-mode"]
+        let app = makeApp()
         app.launch()
         defer { app.terminate() }
 
@@ -148,25 +236,27 @@ final class TemplateInstallUITests: XCTestCase {
     /// **Side effects.** Installs a real project at
     /// `<runner-tmp>/scarf-uitest-<uuid>/awizemann-hackernews-digest`,
     /// registers a paused cron job, and registers an entry in
-    /// `~/.hermes/scarf/projects.json` — all of which the test then
-    /// removes via the in-app uninstall flow. Crashes mid-flow leave
-    /// at most one tagged cron job + one tmpdir; both recoverable
-    /// without re-running the test.
+    /// `projects.json` — all inside this test's throwaway Hermes home
+    /// (see `makeApp`), and all removed again by the in-app uninstall
+    /// flow. Crashes mid-flow leak nothing durable: `tearDownWithError`
+    /// deletes the throwaway home, cron job included, and the real
+    /// `~/.hermes` is never a write target.
     ///
-    /// **Known cohabitation hazard.** If the dev Mac already has a
-    /// project installed from the same template
-    /// (`awizemann/hackernews-digest`), the install pipeline
-    /// uniquifies the new project's name (e.g. "HackerNews Daily
-    /// Digest 2"), but BOTH projects' cron jobs get registered
-    /// under the same `[tmpl:awizemann/hackernews-digest] Daily HN
-    /// digest` name. The uninstaller resolves cron jobs to remove
-    /// by NAME (`ProjectTemplateUninstaller.loadUninstallPlan`,
-    /// circa 2026.5), so it can target the WRONG project's cron
-    /// job. Manifests as: test passes, your real project's cron
-    /// disappears. Track issue: cron-job IDs should be stored in
-    /// the lock file at install time and resolved by ID. Until
-    /// fixed, run this test against a Mac that doesn't already
-    /// have the test template installed manually.
+    /// **Cohabitation hazard — resolved by isolation.** This test used
+    /// to run against the real `~/.hermes`, where a manually-installed
+    /// copy of the same template (`awizemann/hackernews-digest`) made
+    /// the installer uniquify the new project's name ("HackerNews Daily
+    /// Digest 2") while registering BOTH projects' cron jobs under the
+    /// same `[tmpl:awizemann/hackernews-digest] Daily HN digest` name.
+    /// Since `ProjectTemplateUninstaller.loadUninstallPlan` resolves
+    /// cron jobs to remove by NAME, the uninstall could target the
+    /// user's real job — "test passes, your real cron disappears".
+    /// The throwaway home starts empty, so there is nothing to collide
+    /// with: the project installs under its exact manifest name and its
+    /// cron job is the only one in that home. (The underlying
+    /// resolve-by-name weakness in the uninstaller still exists and is
+    /// worth fixing separately — cron-job IDs should be recorded in the
+    /// lock file at install time and resolved by ID.)
     @MainActor
     func testFullCatalogToInstallToDashboardJourney() throws {
         // `/tmp` is sandbox-protected for the XCUITest runner —
@@ -189,9 +279,7 @@ final class TemplateInstallUITests: XCTestCase {
             try? FileManager.default.removeItem(atPath: parentDir)
         }
 
-        let app = XCUIApplication()
-        app.launchArguments = [
-            "--scarf-test-mode",
+        let app = makeApp(extraLaunchArguments: [
             // Hand the install URL to ScarfApp.init() via launch
             // args — see scarfApp.swift's `--scarf-test-install-url`
             // block. Equivalent to a `scarf://install?url=…` deep
@@ -203,7 +291,7 @@ final class TemplateInstallUITests: XCTestCase {
             // sheet automatically once the window surfaces.
             "--scarf-test-install-url",
             Self.hnDigestInstallURL
-        ]
+        ])
         app.launch()
 
         // Surface the window, same dance as the smoke test.
@@ -283,19 +371,18 @@ final class TemplateInstallUITests: XCTestCase {
         openProject.click()
 
         // 7. Project row appears in sidebar. The installer assigns
-        // the human-readable manifest name and uniquifies on
-        // collision — if the dev Mac already has a "HackerNews
-        // Daily Digest" project (e.g. installed manually for v2.8
-        // verification), the test's install lands at "HackerNews
-        // Daily Digest 2" or similar. Match a numbered suffix
-        // explicitly so we don't grab the user's existing project
-        // and right-click-uninstall it (the user's data is sacred —
-        // see the v2.7 sentinel-marker incident report).
-        // The `.tag(project)` accessibility-id propagation has been
-        // flaky in our hands — try BEGINSWITH (works on the matching
-        // Identifiable) and fall back to a tree dump for diagnostics.
+        // the human-readable manifest name and uniquifies only on
+        // collision. This test's Hermes home is a fresh empty tmpdir,
+        // so there is nothing to collide with and the row lands at the
+        // exact manifest name — no numbered suffix. (Before isolation
+        // this ran against the real `~/.hermes` and had to match a
+        // suffix to avoid right-click-uninstalling the user's own
+        // project; the user's data is sacred — see the v2.7
+        // sentinel-marker incident report.) BEGINSWITH still, because
+        // `.tag(project)` accessibility-id propagation has been flaky
+        // in our hands; falls back to a tree dump for diagnostics.
         let projectRow = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH 'projects.row.HackerNews Daily Digest '"))
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'projects.row.HackerNews Daily Digest'"))
             .firstMatch
         if !projectRow.waitForExistence(timeout: 30) {
             let allProjectRows = app.descendants(matching: .any)
@@ -306,6 +393,9 @@ final class TemplateInstallUITests: XCTestCase {
             XCTFail("Installed project didn't appear in sidebar with a numbered suffix.")
             return
         }
+
+        print("[Layer B] isolated registry after install:",
+              (try? String(contentsOfFile: isolatedHome + "/scarf/projects.json", encoding: .utf8)) ?? "<unreadable>")
 
         // Capture the post-install screenshot for triage / before
         // tearing down.
@@ -343,19 +433,32 @@ final class TemplateInstallUITests: XCTestCase {
         )
         uninstallDone.click()
 
-        // 9. Project row with the numbered suffix disappears from
-        // the sidebar. The base "HackerNews Daily Digest" (the
-        // user's manual install) stays — only the test's uniquified
-        // copy should be gone. Re-query rather than reusing the
-        // earlier handle because XCUITest sometimes caches a
-        // stale snapshot of `.exists`.
+        // 9. The project row disappears from the sidebar. It is the
+        // only HN Digest project in this throwaway home, so the
+        // assertion is unconditional. Re-query rather than reusing the
+        // earlier handle because XCUITest sometimes caches a stale
+        // snapshot of `.exists`.
         let removedDeadline = Date().addingTimeInterval(15)
         var stillThere = true
         while stillThere && Date() < removedDeadline {
             Thread.sleep(forTimeInterval: 0.5)
             stillThere = app.descendants(matching: .any)
-                .matching(NSPredicate(format: "identifier BEGINSWITH 'projects.row.HackerNews Daily Digest '"))
+                .matching(NSPredicate(format: "identifier BEGINSWITH 'projects.row.HackerNews Daily Digest'"))
                 .firstMatch.exists
+        }
+        if stillThere {
+            let remaining = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier BEGINSWITH 'projects.row.'"))
+                .allElementsBoundByIndex
+                .map { $0.identifier }
+            print("[Layer B] projects.row.* still present after uninstall:", remaining)
+            let registry = (isolatedHome ?? "") + "/scarf/projects.json"
+            let contents = (try? String(contentsOfFile: registry, encoding: .utf8)) ?? "<unreadable>"
+            print("[Layer B] isolated registry after uninstall:", contents)
+            let snap = XCTAttachment(screenshot: app.screenshot())
+            snap.name = "row-still-present-after-uninstall"
+            snap.lifetime = .keepAlways
+            add(snap)
         }
         XCTAssertFalse(
             stillThere,
