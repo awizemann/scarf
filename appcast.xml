@@ -6,6 +6,102 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.19.2</title>
+      <sparkle:version>60</sparkle:version>
+      <sparkle:shortVersionString>2.19.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Thu, 13 Aug 2026 22:25:45 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.19.2</p>
+<p>A focused point release for one nasty failure mode reported in <a href="https://github.com/awizemann/scarf/issues/138">gh#138</a>: if your SSH connection sits behind something that reacts to every connection attempt — Cloudflare Zero Trust being the reported case — a dropped connection could make Scarf&#x27;s reconnect behavior spawn hundreds or thousands of browser OAuth tabs while you were away. Scarf now stops dialing a dead host after a few failures and backs off instead.</p>
+<h2>Fixed: runaway SSH reconnects (the browser-tab explosion)</h2>
+<p>Scarf deliberately uses your system <code>ssh</code>, so everything in <code>~/.ssh/config</code> — ProxyJump, agents, and ProxyCommands like Cloudflare&#x27;s <code>cloudflared access ssh</code> — just works. The flip side: with a side-effectful ProxyCommand, <em>every</em> fresh connection attempt has consequences. Cloudflared opens a browser tab for OAuth; hardware-key and Secretive agents prompt for a touch.</p>
+<p>Normally one shared ControlMaster session absorbs all of Scarf&#x27;s SSH traffic. But when the connection dropped and re-authentication was required, the master died — and Scarf&#x27;s background pollers (the remote file watcher checks every 3 seconds, the connection status pill every 15) each kept trying to establish a fresh connection, forever, with no backoff. Overnight with an expired Zero Trust session, that&#x27;s over a thousand attempts an hour, each one a new tab.</p>
+<p>v2.19.2 adds a per-host <strong>circuit breaker</strong> in front of every outbound SSH attempt:</p>
+<ul>
+  <li>After <strong>3 consecutive connection-level failures</strong>, the breaker opens: further attempts fail instantly <em>without launching ssh at all</em> — so no ProxyCommand runs, no tabs open, no agent prompts fire.</li>
+  <li>While open, a <strong>single probe</strong> retries on exponential backoff (30 seconds, doubling to a 5-minute cap). The moment a probe succeeds, everything resumes at full speed.</li>
+  <li><strong>Your intent overrides the breaker.</strong> Test Connection, the chat Reconnect button, and re-adding a server all reset it immediately — an explicit action always gets a real attempt.</li>
+  <li>Only connection-level failures count. A remote command that runs and fails proves the connection is alive, and closes the breaker.</li>
+</ul>
+<p>The chat session&#x27;s own reconnect was already capped at 5 attempts with backoff; the breaker now brings every background code path — file watching, status polling, file reads/writes, remote SQLite queries — under the same discipline.</p>
+<h2>Under the hood</h2>
+<ul>
+  <li>New <code>SSHConnectionGate</code> in ScarfCore with 9 deterministic unit tests covering the full backoff schedule, single-probe admission, and per-host isolation, plus an end-to-end test that trips the breaker with real <code>ssh</code> processes and proves the fail-fast path never spawns one.</li>
+  <li><code>scp</code> invocations participate in admission but never score the breaker — scp&#x27;s exit codes can&#x27;t distinguish a connection failure from a file error.</li>
+  <li>Local-only ControlMaster maintenance (<code>ssh -O check</code> / <code>-O exit</code>) is exempt: it never dials the remote and must not poison the breaker.</li>
+  <li>Full suite green: 1,162 ScarfCore tests.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<p>Scarf updates automatically via Sparkle; this release requires macOS 14.6+ as usual. No Hermes version change — v0.20.0 remains the target, and every earlier host back to v0.6.0 keeps working. Local (non-SSH) setups are entirely unaffected. No ScarfGo/TestFlight build is needed: iOS uses its own Citadel-based transport, which already has connection pooling and is not part of this code path.</p>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.19.2/Scarf-v2.19.2-Universal.zip"
+                 sparkle:edSignature="NyQ10nFtjI5K7xbb/ZOXWjCvt39xmXm82brlD+KyAeUQKRSpgxB0cNOovaKZ+sQg9x46gnRm5x4PvjbupspTDw=="
+                 length="22136560"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.19.1</title>
       <sparkle:version>59</sparkle:version>
       <sparkle:shortVersionString>2.19.1</sparkle:shortVersionString>
