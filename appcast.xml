@@ -6,6 +6,105 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.19.1</title>
+      <sparkle:version>59</sparkle:version>
+      <sparkle:shortVersionString>2.19.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Thu, 13 Aug 2026 18:03:42 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.19.1</p>
+<p>A hardening patch centered on one long-standing mystery finally solved: uninstalled projects that reappeared in the Projects sidebar. The uninstaller was never the culprit — the cockpit&#x27;s own file watcher was quietly resurrecting deleted projects. That&#x27;s fixed, along with a mini-app bridge polish, honest test isolation, and a documentation catch-up for the dashboard schema.</p>
+<h2>Fixed: uninstalled projects no longer come back</h2>
+<p>Uninstalling a project template deleted the files correctly — and then the project reappeared in the registry, sometimes with its directory re-created. The root cause was a feedback loop, not the uninstaller: the deletions fired the project cockpit&#x27;s file watcher, the forced reload found <code>.scarf/project.json</code> missing, and its derive-and-save fallback silently re-created both the directory and the registry row (a <code>try?</code> hid every trace).</p>
+<p>Three changes close the loop for good:</p>
+<ul>
+  <li><strong>A save can only describe a project that exists.</strong> <code>ProjectStore.save</code> now refuses to write a record for a project whose root directory is gone — nothing can conjure a deleted project back into existence. The check is transport-aware: on remote (SSH) hosts, a connection blip is <em>not</em> mistaken for a deleted directory, so a flaky link surfaces as the real connection error instead of a misleading &quot;directory no longer exists.&quot;</li>
+  <li><strong>Registry removal is rename-proof.</strong> Uninstall now matches the registry row by the project&#x27;s stable id, with a normalized-path fallback (symlinks resolved, trailing slashes dropped) covering rows minted before ids existed — and covering rows whose id was re-minted for the same directory.</li>
+  <li><strong>Registry write failures are loud.</strong> A failed registry update after uninstall now shows a real &quot;Uninstall Failed — try again&quot; screen instead of a false success. All destructive steps are idempotent, so retrying is safe.</li>
+</ul>
+<p>A launch-time side benefit: a registry row pointing at a directory you deleted by hand no longer gets that directory silently re-created — Scarf logs it and moves on.</p>
+<h2>Fixed: UI tests wrote into the real <code>~/.hermes</code></h2>
+<p>The template-install UI tests launched the app without the documented test-home override, so every CI-style run installed a real project into the tester&#x27;s actual <code>~/.hermes/scarf/projects.json</code> — which is exactly how the resurrection bug&#x27;s leftovers were first noticed. All UI test suites (including the stock launch/performance tests) now share one isolation harness: a per-run throwaway Hermes home with the sentinel marker, applied to both the app and the <code>hermes</code> CLI it spawns. Verified by hashing the real registry before and after repeated full install/uninstall journeys — byte-identical.</p>
+<h2>Fixed: mini-app <code>onEvent</code> no longer logs an unhandled rejection</h2>
+<p>A mini-app calling <code>scarf.onEvent(...)</code> without the <code>events</code> permission grant hit an unhandled promise rejection in the console — the bridge shim dropped the subscription&#x27;s failure on the floor. It now settles the promise itself and warns once, since <code>onEvent</code> has no return value to hand the caller. Granted-permission behavior is unchanged, and the fix is pinned by a regression test.</p>
+<h2>Docs: the dashboard schema is complete again</h2>
+<p><code>DASHBOARD_SCHEMA.md</code> documented 7 widget types; Scarf renders 12. The missing five — <code>markdown_file</code>, <code>log_tail</code>, <code>cron_status</code>, <code>status_grid</code>, and <code>kanban_summary</code> — are now documented with examples, along with <code>image</code>, the <code>stat</code> widget&#x27;s <code>sparkline</code> field, and the full <code>list</code> status vocabulary (7 canonical states plus synonyms). Every field name was verified against the decoder and renderer, not the previous docs.</p>
+<h2>Under the hood</h2>
+<ul>
+  <li>New unit tests: the resurrection repro (watcher-style reload after uninstall), registry matching by drifted path / legacy path / diverged id, and a fabricated unwritable-registry failure. 306 scarfTests + 1152 ScarfCore tests green.</li>
+  <li>Shared <code>ScarfUITestCase</code> base class replaces ~100 lines of duplicated UI-test harness.</li>
+  <li>Stale comment fixes and a README/schema widget-list sync.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<p>Scarf updates automatically via Sparkle; this release requires macOS 14.6+ as usual. No Hermes version change — v0.20.0 remains the target, and every earlier host back to v0.6.0 keeps working. No ScarfGo build is needed: the mini-app bridge fix rides in the shared core and ships with the next TestFlight build alongside other iOS changes.</p>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.19.1/Scarf-v2.19.1-Universal.zip"
+                 sparkle:edSignature="CuV7UCRrXuBWMRf2oEaXq8CBJL1XfZWDyBnU75P5+IPXjeCfnrdJoe5c2/BaRPEkPdgg+wGR4pGxJmg7oGQMDA=="
+                 length="22340365"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.19.0</title>
       <sparkle:version>58</sparkle:version>
       <sparkle:shortVersionString>2.19.0</sparkle:shortVersionString>
