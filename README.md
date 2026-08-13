@@ -176,7 +176,7 @@ Drop a `.scarf/dashboard.json` into any project and Scarf renders a live-updatin
 }
 ```
 
-Register the project by appending `{ "name": "...", "path": "..." }` to `~/.hermes/scarf/projects.json` (or click **Projects → +**). Widget types: `stat`, `progress`, `text`, `table`, `chart`, `list`, and `webview` (embeds a full browser tab for local dev servers, reports, Grafana, …). Full schema + examples: [DASHBOARD_SCHEMA.md](scarf/docs/DASHBOARD_SCHEMA.md).
+Register the project by appending `{ "name": "...", "path": "..." }` to `~/.hermes/scarf/projects.json` (or click **Projects → +**). Widget types: `stat` (with optional `sparkline`), `progress`, `text`, `table`, `chart`, `list`, `webview` (embeds a full browser tab for local dev servers, reports, Grafana, …), `markdown_file`, `log_tail`, `cron_status`, `status_grid`, `kanban_summary`, and `image`. Full schema + examples: [DASHBOARD_SCHEMA.md](scarf/docs/DASHBOARD_SCHEMA.md).
 
 ## Architecture
 
