@@ -3,43 +3,46 @@ title: Roadmap
 type: note
 permalink: scarf-wiki/roadmap
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-08-13
 ---
 
 # Roadmap
 
-What's next for Scarf. Public, opinionated, subject to change. The internal version of this lives in [`scarf/docs/ROADMAP.md`](https://github.com/awizemann/scarf/blob/main/scarf/docs/ROADMAP.md) — the public wiki version is a distillation.
+What's next for Scarf. Public, opinionated, subject to change.
 
-## Now (2.5)
+> This page was frozen at "Now (2.5)" for a long stretch while Scarf shipped fourteen releases (v2.5 → v2.19). The roadmap is being re-planned rather than reconstructed after the fact — the "Now / Near-term" section below is deliberately thin, grounded only in the open task board (`TASKS.md`) and recent release notes, not backfilled speculation. Check the [Release Notes Index](Release-Notes-Index) for everything that's already shipped.
 
-- **[ScarfGo](ScarfGo) public TestFlight.** First public iPhone companion build. Pulse the beta tester pool; iterate on feedback over 2.5.x patches.
-- **Mac Sessions parity.** Project filter + badges shipped in 2.5 alongside the iOS work. Watch for follow-up on per-project Insights views.
-- **Documentation pass.** Wiki reorganized to surface ScarfGo as a first-class section. [Platform Differences](Platform-Differences) is the new canonical reference for "what's different on iOS".
+## Shipped since this page was last current
 
-## Near-term (2.6 candidates)
+One line each, oldest to newest — see the [Release Notes Index](Release-Notes-Index) for full detail:
 
-- **iOS cron editor.** Add / remove / toggle cron jobs from the phone. Data model is already shared; just needs the editor sheet.
-- ~~**iOS scoped Settings editor.**~~ ✅ Shipped in v2.5 — Quick Edits sheet covers 7 commonly-changed keys via `hermes config set`. Arbitrary-key editing is the v2.6+ stretch.
-- **iOS push notifications, lit up.** Three things need to happen together: enable the Push Notifications capability in the Xcode target, ship a Hermes-side push sender, flip `NotificationRouter.apnsEnabled = true`. Skeleton + lock-screen "Approve / Deny" action category are already in place.
-- **iPad layout pass.** v2.5 ships iPhone-only (`TARGETED_DEVICE_FAMILY = 1`, Catalyst + Designed-for-iPad disabled). `.tabViewStyle(.sidebarAdaptable)` is wired in the view layer; flipping the target flag and verifying is the bulk of the work.
-- **More MCP presets.** The curated list grows as MCP ecosystem matures.
-- **Mermaid diagrams in the wiki.** Architecture pages get a lot of value from one good diagram.
-- **Per-project FSEvents on remote.** Remote currently has one global mtime-poll loop ([HermesFileWatcher](Core-Services) has a TODO); per-project paths would reduce remote chattiness.
+- **2.6** — Hermes v0.12 catch-up: autonomous Curator, multimodal ACP images, 5 new providers, Teams + Yuanbao gateways, read-only Kanban.
+- **2.7 / 2.7.1 / 2.7.5** — Perf overhaul (skeleton-then-hydrate chat, SSH cancellation), then Kanban grew into a full drag-and-drop board.
+- **2.8** — Hermes v0.13: Persistent Goals, ACP `/queue`, Kanban diagnostics + recovery UX, Curator archive/prune.
+- **2.9.x** — Hermes v0.14: `/subgoal`/`/yolo`/`/sessions`/`/codex-runtime`, xAI Grok OAuth + NovitaAI providers, Hermes Proxy.
+- **2.10.x** — Hermes v0.15 ("The Velocity Release"): OpenAI first-class provider, Kanban v0.15 maturation wave, Bitwarden Secrets, MCP mTLS.
+- **2.11** — Hermes v0.16: first `state.db` schema change since v0.11 (`messages.active` soft-delete), live session titles.
+- **2.12** — Hermes v0.17: zero mandatory compat changes; WhatsApp Business Cloud API + SimpleX gateways.
+- **2.13** — ScarfGo gains Hermes profile switching; iOS remote-connection pooling reliability fix.
+- **2.15** — Projects grow up: per-project cockpit, Mini-apps, Fleet & Portfolio, one-click Upgrade Project.
+- **2.16.x** — Hermes v0.18 catch-up: in-place session compaction search, Web Tools tab fixed, lossless cron round-trip, SSH ControlMaster self-healing.
+- **2.17.x** — Local model support + session-layer work (see Release Notes Index for detail).
+- **2.18** — Hermes v0.19 "Quicksilver" + v0.20 "Herald" parity: pinned sessions, per-model costs, richer session export, approval suggestions, cron run history.
+- **2.19** — Hermes v0.20 settings backlog closed (profile routing, title generation, reasoning effort, secrets sources, voice tuning, telemetry); browser provider picker bug fixed; cached version detection.
 
-## Medium-term
+Also shipped along the way: [ScarfGo](ScarfGo) public TestFlight (iOS companion), full i18n for 7 languages, [Project Templates](Project-Templates), and the multi-server / remote-SSH architecture.
 
-- **iOS localization.** Translate the strings the Mac app already has; reuse the `.strings` files. 7 languages on Mac; iOS is English-only in v1.
-- **iOS Health summary card.** Reduced version of the Mac Health view — gateway / DB / agent crash status. Read-mostly, doesn't need a full editor.
-- **Custom commands palette.** A ⌘K-style palette for quick actions across all sidebar sections (Mac).
-- **Better Insights.** Rolling heatmaps, drill-downs from any chart, exportable summaries.
-- **Voice mode polish.** Speaker selection, partial-results display, better handling of long-form dictation.
-- **In-app log filtering by structured fields.** Currently text-search; a typed query (level=error AND component=gateway AND session=...) would help.
+## Now / Near-term
 
-## Long-term / speculative
+Grounded in the open items on the task board (`TASKS.md`) as of 2026-08-13:
 
-- **Versioned docs.** GitHub wikis don't support `/v1.0/` paths natively; could mirror to GitHub Pages with a static-site generator (deferred — see [Wiki Maintenance](Wiki-Maintenance) "Out of scope").
-- **DocC → wiki bridge** for auto-generated API reference.
-- **Translated wiki pages** if there's demand.
+- **v2.19.1 patch pass** — in progress: UI-test isolation fix (tests were writing to a real `~/.hermes/projects.json`), a MiniAppBridge `onEvent` unhandled-rejection fix, `DASHBOARD_SCHEMA.md` updated for 5 missing widget types, and this wiki freshness pass.
+- **Hermes v0.20 deferred settings backlog** (`t-1cc0a505`) — import-agent, sync, and other parked Phase 3 settings surfaces from the v0.20 audit.
+- **Audit follow-ups** — a sweep of pickers with present-but-empty `""` rows that incorrectly claim to unset a value (`t-9634ae74`), and profile_routes edge cases + Bitwarden default drift from the 2026-08-12 fresh-eyes audit (`t-6a6d692c`).
+- **Marketing site + README FAQ refresh** for the v2.15 Projects model (`t-83c4c692`), superseding an older open PR.
+- A long tail of smaller verification/fix items tagged `[todo/*]` and `[followup/*]` in `TASKS.md` — mostly CLI-wire-shape verifications against live Hermes hosts and targeted bug fixes (image-attachment routing diagnosis, remote server connection editing, large-`state.db` performance).
+
+No larger initiative has been scoped and committed yet beyond this list — check back once the next planning pass lands, or watch [TASKS.md](https://github.com/awizemann/scarf/blob/main/TASKS.md) directly for the live board.
 
 ## What we're NOT doing
 
@@ -54,4 +57,4 @@ What's next for Scarf. Public, opinionated, subject to change. The internal vers
 Open an issue at <https://github.com/awizemann/scarf/issues> with what you want and why. Star the repo if you'd use it (signal helps prioritization).
 
 ---
-_Last updated: 2026-04-25 — Scarf v2.5.0 + ScarfGo public TestFlight_
+_Last updated: 2026-08-13 — Scarf v2.19.0. Rewritten after a long freeze (previously stuck at "Now (2.5)" since 2026-04-25): added a shipped-since compressed history and narrowed Now/Near-term to what's actually grounded in the open task board — the roadmap is being re-planned, not reconstructed._

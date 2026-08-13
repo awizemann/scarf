@@ -16,7 +16,7 @@ _Last updated: 2026-04-25._
 
 ## Plain summary
 
-Scarf and ScarfGo are companion clients for the open-source [Hermes AI agent](https://github.com/awizemann/hermes-agent). Both apps connect from your device to a Hermes host you (or your team) operate. **Neither app collects, transmits, or stores your data on any server controlled by the developer.** All data the apps work with stays on your device or on Hermes hosts you configured yourself.
+Scarf and ScarfGo are companion clients for the open-source [Hermes AI agent](https://github.com/hermes-ai/hermes-agent). Both apps connect from your device to a Hermes host you (or your team) operate. **Neither app collects, transmits, or stores your data on any server controlled by the developer.** All data the apps work with stays on your device or on Hermes hosts you configured yourself.
 
 ## Apps covered
 
