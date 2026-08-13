@@ -12,6 +12,7 @@ Every Scarf release in chronological order. The notes themselves live in `releas
 
 | Version | Date | GitHub release | Notes file |
 |---|---|---|---|
+| **v2.19.2** | 2026-08-13 | [v2.19.2](https://github.com/awizemann/scarf/releases/tag/v2.19.2) | [`releases/v2.19.2/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v2.19.2/RELEASE_NOTES.md) |
 | **v2.19.1** | 2026-08-13 | [v2.19.1](https://github.com/awizemann/scarf/releases/tag/v2.19.1) | [`releases/v2.19.1/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v2.19.1/RELEASE_NOTES.md) |
 | **v2.19.0** | 2026-08-12 | [v2.19.0](https://github.com/awizemann/scarf/releases/tag/v2.19.0) | [`releases/v2.19.0/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v2.19.0/RELEASE_NOTES.md) |
 | **v2.18.1** | 2026-08-04 | [v2.18.1](https://github.com/awizemann/scarf/releases/tag/v2.18.1) | [`releases/v2.18.1/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v2.18.1/RELEASE_NOTES.md) |
@@ -114,4 +115,4 @@ When `scripts/release.sh <version>` completes a full (non-draft) release, this p
 This is one of the [wiki update triggers](Wiki-Maintenance) that future Claude Code sessions will follow automatically.
 
 ---
-_Last updated: 2026-08-12 — Scarf v2.19.0 (Hermes 0.20 settings backlog closed; browser provider key fix; profile routing editor)_
+_Last updated: 2026-08-13 — Scarf v2.19.2 (SSH circuit breaker: runaway reconnects behind Cloudflare Zero Trust no longer spawn browser tabs, gh#138)_

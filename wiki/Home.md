@@ -10,7 +10,7 @@ created: 2026-05-29
 
 **The native Mac & iOS app for the [Hermes AI agent](https://github.com/hermes-ai/hermes-agent).** Full visibility into what Hermes is doing, when, and what it creates — on your Mac against one local install or many remote ones, and from your iPhone over SSH with **ScarfGo**.
 
-**Latest release:** [v2.19.1](https://github.com/awizemann/scarf/releases/tag/v2.19.1) — uninstalled projects no longer resurrect in the sidebar (the cockpit's file watcher was silently re-creating deleted projects; saves can no longer describe a project that doesn't exist, registry removal is rename-proof, and registry-write failures surface honestly), UI tests fully isolated from the real `~/.hermes`, the mini-app `onEvent` unhandled rejection fixed, and the dashboard schema docs completed (all 12 widget types). Previous: [v2.19.0](https://github.com/awizemann/scarf/releases/tag/v2.19.0) closed the Hermes 0.20 settings backlog and fixed the silently-broken browser provider picker. All earlier versions: [Release Notes Index](Release-Notes-Index).
+**Latest release:** [v2.19.2](https://github.com/awizemann/scarf/releases/tag/v2.19.2) — runaway SSH reconnects fixed ([gh#138](https://github.com/awizemann/scarf/issues/138)): with a side-effectful ProxyCommand like Cloudflare Zero Trust's `cloudflared`, a dropped connection could make background pollers open a browser OAuth tab per retry, thousands overnight. A per-host circuit breaker now stops all outbound SSH after 3 consecutive connection failures and probes on exponential backoff (30s → 5min); Test Connection and Reconnect always reset it. Previous: [v2.19.1](https://github.com/awizemann/scarf/releases/tag/v2.19.1) fixed project resurrection, isolated UI tests from the real `~/.hermes`, and completed the dashboard schema docs. All earlier versions: [Release Notes Index](Release-Notes-Index).
 
 **Mobile:** [Join the ScarfGo public TestFlight](https://testflight.apple.com/join/qCrRpcTz) — see [ScarfGo](ScarfGo) for the feature tour and [ScarfGo Onboarding](ScarfGo-Onboarding) for the one-minute SSH setup.
 
@@ -58,4 +58,4 @@ Scarf 2.0+ is a multi-window app — one window per Hermes server, local or remo
 Open-source (MIT), actively maintained. See [Roadmap](Roadmap) for what's coming.
 
 ---
-_Last updated: 2026-08-13 — Scarf v2.19.1 (project-resurrection fix, test isolation, mini-app polish). Home page restructured this cycle: single latest-release summary (history lives in the Release Notes Index), iOS in the positioning line, Projects-first feature map._
+_Last updated: 2026-08-13 — Scarf v2.19.2 (SSH circuit breaker, gh#138)._
