@@ -90,6 +90,11 @@ import Foundation
         #expect(js.contains("Object.freeze"))
         // The deferred event channel must throw, not silently no-op.
         #expect(js.contains("onEvent"))
+        // onEvent hands the caller no promise, so the shim must settle the
+        // events.subscribe rejection itself — a denied `events` grant must
+        // not surface as an unhandled rejection in the mini-app's console.
+        #expect(js.contains("post(\"events.subscribe\", []).catch("))
+        #expect(js.contains("console.warn(\"scarf.onEvent: \""))
     }
 
     @Test func minBridgeVersionGate() {

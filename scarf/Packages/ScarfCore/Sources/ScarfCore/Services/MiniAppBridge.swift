@@ -245,7 +245,16 @@ public enum MiniAppBridge {
               }
             }),
             onEvent: (cb) => {
-              if (typeof cb === "function") { __listeners.push(cb); post("events.subscribe", []); }
+              if (typeof cb === "function") {
+                __listeners.push(cb);
+                // onEvent has no return value to hand the caller, so the
+                // subscribe promise is ours to settle: without this catch a
+                // denied `events` permission surfaces as an unhandled
+                // rejection in every mini-app that calls onEvent.
+                post("events.subscribe", []).catch((e) => {
+                  console.warn("scarf.onEvent: " + (e && e.message ? e.message : e));
+                });
+              }
             }
           };
           Object.defineProperty(window, "scarf", { value: Object.freeze(api), writable: false, configurable: false });
