@@ -579,6 +579,18 @@ struct ProjectTemplateUninstallerTests {
     /// Pre-Phase-1 rows have no uuid, so the fallback is a PATH compare
     /// — and it must normalize both sides. `/tmp/x` and `/private/tmp/x`
     /// are the same directory on macOS; a raw `==` leaves the row behind.
+    @Test func matchesRowWithDivergedUUIDBySamePath() {
+        // A row re-minted with a fresh uuid for the same directory must
+        // still be removed — uuid inequality alone can't clear a row.
+        let path = "/Users/nobody/Developer/reminted-\(UUID().uuidString)"
+        let row = ProjectEntry(name: "P", path: path, uuid: UUID())
+        let target = ProjectEntry(name: "P", path: path, uuid: UUID())
+        #expect(ProjectTemplateUninstaller.matches(row, project: target))
+        // Different uuid AND different path stays untouched.
+        let other = ProjectEntry(name: "Q", path: path + "-other", uuid: UUID())
+        #expect(ProjectTemplateUninstaller.matches(other, project: target) == false)
+    }
+
     @Test func matchesLegacyRowByNormalizedPath() throws {
         // Real directory: `URL.resolvingSymlinksInPath()` only rewrites
         // path components that actually exist, so the fixture has to be

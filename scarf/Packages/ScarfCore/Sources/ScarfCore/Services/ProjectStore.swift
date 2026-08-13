@@ -109,8 +109,17 @@ public struct ProjectStore: Sendable {
     /// both. A save can only ever *describe* a project that exists on
     /// disk — never conjure one.
     public nonisolated func save(_ project: ScarfProject) throws {
-        guard transport.fileExists(project.rootPath) else {
-            throw ProjectStoreError.projectRootMissing(project.rootPath)
+        // `fileExists` cannot distinguish "absent" from "transport down"
+        // (SSH returns false for both). Refuse only when the parent
+        // directory is reachable — proof the transport works and the
+        // root alone is gone. When the parent is unreachable too, fall
+        // through: a dead transport makes writeRecord throw the real
+        // error instead of a misleading "directory no longer exists".
+        if !transport.fileExists(project.rootPath) {
+            let parent = (project.rootPath as NSString).deletingLastPathComponent
+            if transport.fileExists(parent) {
+                throw ProjectStoreError.projectRootMissing(project.rootPath)
+            }
         }
         try writeRecord(project)
         try indexInRegistry(project)

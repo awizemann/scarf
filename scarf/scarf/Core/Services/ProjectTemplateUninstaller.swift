@@ -253,9 +253,13 @@ struct ProjectTemplateUninstaller: Sendable {
     /// to name — the user can rename a project in the sidebar, and two
     /// projects can share a name.
     nonisolated static func matches(_ entry: ProjectEntry, project: ProjectEntry) -> Bool {
-        if let target = project.uuid, let candidate = entry.uuid {
-            return candidate == target
+        if let target = project.uuid, let candidate = entry.uuid,
+           candidate == target {
+            return true
         }
+        // Path fallback runs even when both uuids are present but differ:
+        // a row re-minted with a fresh uuid for the same directory must
+        // still be removed, or the uninstall leaves it behind.
         return normalizedPath(entry.path) == normalizedPath(project.path)
     }
 

@@ -11,7 +11,7 @@ struct StatusGridWidgetView: View {
     private var cells: [StatusGridCell] { widget.cells ?? [] }
 
     /// Auto-fit columns when not specified: aim for ~6 cells per row, capped
-    /// at 12, floored at 4. Ensures both 8-cell and 36-cell grids look ok.
+    /// at 12, floored at 1. Ensures both 8-cell and 36-cell grids look ok.
     private var columnCount: Int {
         if let n = widget.gridColumns, n > 0 { return min(20, n) }
         let count = cells.count
