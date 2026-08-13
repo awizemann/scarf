@@ -57,16 +57,16 @@ Available in English, 简体中文, Deutsch, Français, Español, 日本語, and
 
 Connecting takes about a minute: add a server (same details as `ssh user@host`), tap **Generate Key**, paste the public key into the host's `~/.ssh/authorized_keys`, tap **Test connection**. Full walkthrough: [ScarfGo Onboarding](https://github.com/awizemann/scarf/wiki/ScarfGo-Onboarding) · feature tour: [ScarfGo](https://github.com/awizemann/scarf/wiki/ScarfGo) · Mac-vs-iOS matrix: [Platform Differences](https://github.com/awizemann/scarf/wiki/Platform-Differences).
 
-## What's New in 2.19.0
+## What's New in 2.19.1
 
-**The Hermes 0.20 settings backlog, closed — and a browser picker that finally works.**
+**Uninstalled projects no longer come back.** A hardening patch that closes a long-standing feedback loop and its cover-ups:
 
-- **Browser provider fix** — the backend picker had been writing a config key Hermes never read; it now writes `browser.cloud_provider` with the real provider list (Hermes 0.19+).
-- **Gateway profile routing** — route gateway messages to profiles by platform/guild/channel/thread, mirroring Hermes's specificity-ranked matching.
-- **Six new settings surfaces** — title generation, per-task reasoning effort, smart approval policy, secrets sources, voice STT/TTS tuning, telemetry + SQLite journal knobs — each gated to the Hermes version its key shipped in.
-- **Faster version detection** — one cached, persisted probe per server; instant capability-gated UI at launch.
+- **Project resurrection fixed** — uninstalling a project deleted its files, then the cockpit's file watcher quietly re-created the directory and registry row. Saves can no longer describe a project that doesn't exist, registry removal is rename-proof, and a failed registry write shows a real error instead of false success.
+- **UI tests isolated** — the template-install tests had been writing into the real `~/.hermes` (which is how the leftovers were first spotted); all suites now run in a throwaway Hermes home.
+- **Mini-app polish** — `scarf.onEvent` without the `events` grant no longer logs an unhandled rejection.
+- **Dashboard schema docs complete** — all 12 widget types documented (5 were missing), including the `stat` sparkline.
 
-Full notes: [v2.19.0](https://github.com/awizemann/scarf/releases/tag/v2.19.0) · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
+Full notes: [v2.19.1](https://github.com/awizemann/scarf/releases/tag/v2.19.1) · v2.19.0 closed the Hermes 0.20 settings backlog and fixed the browser provider picker · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
 
 ## Features
 
