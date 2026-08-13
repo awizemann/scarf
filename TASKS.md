@@ -55,6 +55,7 @@
 
 ## Done
 
+- [x] gh#138: SSH circuit breaker — stop unbounded reconnect attempts (Zero Trust tab explosion) (id: t-2e60f224) (added: 2026-08-13)
 - [x] v2.19.1 R5: Audit fixes + release prep (id: t-257807c1) (added: 2026-08-13)
 - [x] v2.19.1 R6: Fix uninstall leaving project registered + isolate boilerplate UI tests (id: t-e41efefb) (added: 2026-08-13)
 - [x] v2.19.1 R1: UI tests must not write real ~/.hermes projects.json (id: t-537267c1) (added: 2026-08-13)
