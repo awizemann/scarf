@@ -371,7 +371,7 @@ struct RootView: View {
     var body: some View {
         switch model.state {
         case .loading:
-            ProgressView("Loading…")
+            LaunchView()
         case .serverList:
             ServerListView(model: model)
         case .onboarding(let forNewServer):
@@ -399,6 +399,36 @@ struct RootView: View {
                     await model.forget(id: id)
                 }
             )
+        }
+    }
+}
+
+/// Branded launch/splash shown while `RootModel.load()` reads the saved
+/// servers from disk (a 1–2s Keychain + UserDefaults read on a cold
+/// start). Replaces a bare `ProgressView("Loading…")` so the first frame
+/// after the system launch screen still reads as ScarfGo rather than a
+/// blank spinner.
+private struct LaunchView: View {
+    var body: some View {
+        ZStack {
+            Color(.systemBackground).ignoresSafeArea()
+            // Icon dead-center at the same 120pt size as the UILaunchScreen
+            // image that renders immediately before this view, so the handoff
+            // from system launch screen → SwiftUI is seamless (the corners
+            // just soften). ~22% continuous radius approximates the squircle.
+            Image("LaunchLogo")
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: 120, height: 120)
+                .clipShape(RoundedRectangle(cornerRadius: 27, style: .continuous))
+                .accessibilityLabel("ScarfGo")
+            // Spinner sits below the icon without shifting it off-center.
+            VStack {
+                Spacer()
+                ProgressView()
+                    .padding(.bottom, 96)
+            }
         }
     }
 }

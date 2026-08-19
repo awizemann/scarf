@@ -1,0 +1,8 @@
+{
+  "images" : [
+    { "filename" : "launchicon-120.png", "idiom" : "universal", "scale" : "1x" },
+    { "filename" : "launchicon-240.png", "idiom" : "universal", "scale" : "2x" },
+    { "filename" : "launchicon-360.png", "idiom" : "universal", "scale" : "3x" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}

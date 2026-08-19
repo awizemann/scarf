@@ -17,6 +17,13 @@ struct ServerListView: View {
 
     @State private var serverPendingForget: ServerRow?
 
+    /// The server whose connection is in flight. Set the instant a row is
+    /// tapped so the row shows a spinner and the list disables — otherwise
+    /// the async `connect()` (Keychain read + transport warm-up) reads as a
+    /// dead tap. Cleared only on failure; on success the view unmounts as
+    /// `state` flips to `.connected`.
+    @State private var connectingID: ServerID?
+
     var body: some View {
         NavigationStack {
             List {
@@ -42,8 +49,15 @@ struct ServerListView: View {
 
                 Section {
                     ForEach(sortedServers, id: \.id) { row in
-                        ServerListRow(row: row) {
-                            Task { await model.connect(to: row.id) }
+                        ServerListRow(row: row, isConnecting: connectingID == row.id) {
+                            guard connectingID == nil else { return }
+                            connectingID = row.id
+                            Task {
+                                await model.connect(to: row.id)
+                                // Reached only if connect failed (still on the
+                                // list); on success this view is already gone.
+                                connectingID = nil
+                            }
                         }
                         .scarfGoCompactListRow()
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -62,6 +76,9 @@ struct ServerListView: View {
             .scarfGoListDensity()
             .scrollContentBackground(.hidden)
             .background(ScarfColor.backgroundPrimary)
+            // Block a second tap (or a swipe-to-forget) while a connect is
+            // in flight; the tapped row keeps its spinner.
+            .disabled(connectingID != nil)
             .navigationTitle("Servers")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -138,6 +155,7 @@ struct ServerListView: View {
 
 private struct ServerListRow: View {
     let row: ServerListView.ServerRow
+    var isConnecting: Bool = false
     let onTap: () -> Void
 
     var body: some View {
@@ -152,14 +170,18 @@ private struct ServerListRow: View {
                         .font(.body)
                         .fontWeight(.medium)
                         .foregroundStyle(.primary)
-                    Text(hostLine)
+                    Text(isConnecting ? "Connecting…" : hostLine)
                         .font(.caption)
                         .foregroundStyle(ScarfColor.foregroundMuted)
                 }
                 Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                if isConnecting {
+                    ProgressView()
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
             .contentShape(Rectangle())
         }
