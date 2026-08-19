@@ -735,11 +735,11 @@ private actor ConnectionHolder {
 
     private func openSSH() async throws -> SSHClient {
         let key = try await keyProvider()
-        guard let parts = Ed25519KeyGenerator.decodeRawEd25519PEM(key.privateKeyPEM) else {
-            throw TransportError.other(message: "Stored private key is not in the expected Scarf Ed25519 PEM format")
-        }
-        guard let ck = try? Curve25519.Signing.PrivateKey(rawRepresentation: parts.privateKey) else {
-            throw TransportError.other(message: "Stored private key is malformed")
+        let ck: Curve25519.Signing.PrivateKey
+        do {
+            ck = try SSHPrivateKeyDecoding.curve25519PrivateKey(fromPEM: key.privateKeyPEM)
+        } catch {
+            throw TransportError.other(message: String(describing: error))
         }
         let username = config.user ?? "root"
         let host = config.host

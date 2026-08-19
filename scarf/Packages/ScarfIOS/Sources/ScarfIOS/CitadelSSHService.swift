@@ -129,13 +129,11 @@ public struct CitadelSSHService: SSHConnectionTester {
         config: IOSServerConfig,
         key: SSHKeyBundle
     ) throws -> SSHClientSettings {
-        guard let parts = Ed25519KeyGenerator.decodeRawEd25519PEM(key.privateKeyPEM) else {
-            throw SSHConnectionTestError.other(
-                "Stored private key is not in the expected Scarf Ed25519 PEM format"
-            )
-        }
-        guard let ck = try? Curve25519.Signing.PrivateKey(rawRepresentation: parts.privateKey) else {
-            throw SSHConnectionTestError.other("Stored private key is malformed")
+        let ck: Curve25519.Signing.PrivateKey
+        do {
+            ck = try SSHPrivateKeyDecoding.curve25519PrivateKey(fromPEM: key.privateKeyPEM)
+        } catch {
+            throw SSHConnectionTestError.other(String(describing: error))
         }
         let username = config.user ?? "root"
         let auth: SSHAuthenticationMethod = .ed25519(

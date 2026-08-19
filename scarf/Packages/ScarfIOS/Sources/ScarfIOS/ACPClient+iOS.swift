@@ -138,11 +138,11 @@ public extension ACPClient {
         config: SSHConfig,
         key: SSHKeyBundle
     ) async throws -> SSHClient {
-        guard let parts = Ed25519KeyGenerator.decodeRawEd25519PEM(key.privateKeyPEM) else {
-            throw ACPChannelError.launchFailed("Stored private key is not in the expected Scarf Ed25519 PEM format")
-        }
-        guard let ck = try? Curve25519.Signing.PrivateKey(rawRepresentation: parts.privateKey) else {
-            throw ACPChannelError.launchFailed("Stored private key is malformed")
+        let ck: Curve25519.Signing.PrivateKey
+        do {
+            ck = try SSHPrivateKeyDecoding.curve25519PrivateKey(fromPEM: key.privateKeyPEM)
+        } catch {
+            throw ACPChannelError.launchFailed(String(describing: error))
         }
         let username = config.user ?? "root"
         let host = config.host
