@@ -8,13 +8,13 @@
 
 /* Begin PBXBuildFile section */
 		53495AB62F7B992C00BD31AD /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 53SWIFTTERM0001 /* SwiftTerm */; };
+		53MARKER00010 /* Marker in Frameworks */ = {isa = PBXBuildFile; productRef = 53MARKER00001 /* Marker */; };
 		53SCARFCORE0010 /* ScarfCore in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFCORE0001 /* ScarfCore */; };
 		53SCARFCORE0011 /* ScarfCore in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFCORE0002 /* ScarfCore */; };
 		53SCARFDESIGN0010 /* ScarfDesign in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFDESIGN0001 /* ScarfDesign */; };
 		53SCARFDESIGN0011 /* ScarfDesign in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFDESIGN0002 /* ScarfDesign */; };
 		53SCARFIOS0010 /* ScarfIOS in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFIOS0001 /* ScarfIOS */; };
 		53SPARKLE00010 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 53SPARKLE00011 /* Sparkle */; };
-		53MARKER00010 /* Marker in Frameworks */ = {isa = PBXBuildFile; productRef = 53MARKER00001 /* Marker */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -533,13 +533,15 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Scarf iOS/Scarf_iOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 60;
+				CURRENT_PROJECT_VERSION = 61;
 				DEVELOPMENT_TEAM = 3Q6X2L86C4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Scarf iOS/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = ScarfGo;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ScarfGo connects to your self-hosted Hermes server over SSH, including servers on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -575,13 +577,15 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Scarf iOS/Scarf_iOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 60;
+				CURRENT_PROJECT_VERSION = 61;
 				DEVELOPMENT_TEAM = 3Q6X2L86C4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Scarf iOS/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = ScarfGo;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ScarfGo connects to your self-hosted Hermes server over SSH, including servers on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
