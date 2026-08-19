@@ -2444,7 +2444,21 @@ final class ChatController {
             // the id isn't restorable (t-217da62b; see
             // attemptReconnect's doc comment). Load fails detectably
             // instead, which surfaces the real "session gone" state.
-            let resolvedID = try await client.loadSession(cwd: cwd, sessionId: sessionID)
+            //
+            // Fallback (mirrors the Mac resume path, ChatViewModel.swift:1559):
+            // sessions that were never ACP-persisted — cron/scheduled runs,
+            // CLI sessions — can't be restored, so Hermes returns null/empty
+            // and `loadSession` throws `invalidResponse(... not restorable)`.
+            // Rather than dead-end the user on a raw ACP error, open a FRESH
+            // ACP session in the same cwd; the transcript still replays from
+            // state.db below (via the original `sessionID`), so the user sees
+            // the past content and can continue in a new context.
+            let resolvedID: String
+            do {
+                resolvedID = try await client.loadSession(cwd: cwd, sessionId: sessionID)
+            } catch {
+                resolvedID = try await client.newSession(cwd: cwd)
+            }
             vm.setSessionId(resolvedID)
             loadDraft()
             // Pull the transcript out of state.db so the user sees
