@@ -47,6 +47,27 @@ public final class CuratorViewModel {
     /// Idle threshold (days) chosen in `planPrune`, reused by `confirmPrune`.
     private var plannedPruneDays = 90
 
+    // Ledger state (v0.20.4+ only — populated by `loadLedger()` on hosts
+    // where `hasCuratorLedger` is true).
+    public private(set) var ledgerEntries: [HermesCuratorLedgerEntry] = []
+    public private(set) var isLoadingLedger = false
+
+    // Purge ("permanently delete archived skills") state — `purgeSummary`
+    // non-nil while the destructive-confirm sheet is mid-flight; `isPurging`
+    // flips during the actual delete step. Distinct end-to-end from prune
+    // (archive-only, reversible) — never share state between the two.
+    public private(set) var purgeSummary: CuratorPurgeSummary?
+    public private(set) var isPurging = false
+    /// TTL threshold chosen in `planPurge`, reused by `confirmPurge`. `nil`
+    /// means "use `curator.archive_ttl_days` from config".
+    private var plannedPurgeDays: Int?
+
+    // Per-entry rollback state — tracks which ledger row is mid-rollback so
+    // the row can show an inline spinner, and the last result for a toast /
+    // inline message once it completes.
+    public private(set) var pendingRollbackEntryID: String?
+    public private(set) var lastRollbackResult: CuratorEntryRollbackResult?
+
     // Track which active-skill row is currently being archived so the
     // row chrome can show an inline spinner without blocking the rest.
     public private(set) var pendingArchiveName: String?
@@ -133,6 +154,98 @@ public final class CuratorViewModel {
             errorMessage = (error as? LocalizedError)?.errorDescription
                 ?? error.localizedDescription
         }
+    }
+
+    /// Refresh the ledger. No-op-safe on hosts without `hasCuratorLedger` —
+    /// the caller gates the call (mirrors `loadArchive`).
+    public func loadLedger(skill: String? = nil, limit: Int? = nil) async {
+        isLoadingLedger = true
+        defer { isLoadingLedger = false }
+        do {
+            ledgerEntries = try await service.ledger(skill: skill, limit: limit)
+        } catch {
+            ledgerEntries = []
+            errorMessage = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+        }
+    }
+
+    // MARK: - Writes (v0.20.4 purge — caller gates on hasCuratorPurge)
+
+    /// Stage 1 of the purge flow. Calls `curator purge [--days N]
+    /// --dry-run` and populates `purgeSummary` (the archived skills a real
+    /// purge would **permanently delete**); the View binds its destructive
+    /// confirm sheet to the non-nil presence of this property. `days` is
+    /// remembered for `confirmPurge`.
+    public func planPurge(days: Int? = nil) async {
+        plannedPurgeDays = days
+        do {
+            purgeSummary = try await service.purge(days: days, dryRun: true)
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+            purgeSummary = nil
+        }
+    }
+
+    /// Stage 2 of the purge flow. **Permanently deletes** the archived
+    /// skills previewed by `planPurge` — unlike `confirmPrune`, this is not
+    /// reversible from the Archived list. Clears `purgeSummary` regardless
+    /// of outcome so the confirm sheet dismisses.
+    public func confirmPurge() async {
+        isPurging = true
+        do {
+            let result = try await service.purge(days: plannedPurgeDays, dryRun: false)
+            let purged = result.purgedCount ?? result.count
+            transientMessage = purged == 1 ? "Permanently deleted 1 skill" : "Permanently deleted \(purged) skills"
+            errorMessage = nil
+            await loadArchive()
+            await load()
+            // Ledger only reloads if the View has already populated it this
+            // session (mirrors the capability-gating-at-call-site
+            // convention — the VM has no direct capability access).
+            if !ledgerEntries.isEmpty { await loadLedger() }
+            scheduleTransientClear()
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+        }
+        isPurging = false
+        purgeSummary = nil
+    }
+
+    /// Cancel the in-flight purge-confirm flow without deleting anything.
+    public func cancelPurge() {
+        purgeSummary = nil
+    }
+
+    // MARK: - Writes (v0.20.4 entry rollback — caller gates on hasCuratorEntryRollback)
+
+    /// Roll back one ledger mutation (`hermes curator rollback <entryID>`).
+    /// Refreshes the ledger and status afterward either way so the row
+    /// reflects the new state (a successful rollback appends a fresh
+    /// ledger entry recording the rollback itself).
+    public func rollbackEntry(_ entryID: String) async {
+        pendingRollbackEntryID = entryID
+        do {
+            let result = try await service.rollbackEntry(entryID)
+            lastRollbackResult = result
+            if result.succeeded {
+                transientMessage = result.message ?? "Rolled back entry \(entryID)"
+                errorMessage = nil
+            } else {
+                errorMessage = result.message ?? "Rollback of \(entryID) failed"
+                transientMessage = nil
+            }
+            scheduleTransientClear()
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+            transientMessage = nil
+        }
+        pendingRollbackEntryID = nil
+        await loadLedger()
+        await load()
     }
 
     // MARK: - Writes (v0.20 adopt — caller gates on hasCuratorAdopt)

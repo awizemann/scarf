@@ -478,4 +478,167 @@ import Foundation
         #expect(!big.sizeLabel.isEmpty)
         #expect(big.sizeLabel != "1500000")
     }
+
+    // MARK: - Ledger (v0.20.4, hermes_cli/curator.py:539 `_cmd_ledger`)
+
+    /// Verbatim fixed-width table shape, one plain row + one `absorbed
+    /// into` row + one `rollback of` row, plus the trailing hint line —
+    /// all reproduced from Python's `f"{...:<14} {...:<12} {...:<8}
+    /// {...:<12} {...}"` format so column offsets match exactly.
+    @Test func ledgerParsesPopulatedTableWithSuffixArrows() {
+        let out = """
+        id             when         actor    action       skill
+        ab12cd34ef56   2026-08-18   curator  archive      old-helper
+        cd34ef56ab12   2026-08-17   agent    absorb       scratch-pad  → absorbed into 'notes'
+        ef56ab12cd34   2026-08-16   user     rollback     old-helper  → rollback of ab12cd34ef56
+
+        Roll back a single mutation with `hermes curator rollback <id>`; whole-tree snapshots remain available via `hermes curator rollback --list`.
+        """
+        let rows = CuratorService.parseLedger(out)
+        #expect(rows.count == 3)
+
+        #expect(rows[0].entryID == "ab12cd34ef56")
+        #expect(rows[0].whenLabel == "2026-08-18")
+        #expect(rows[0].actor == "curator")
+        #expect(rows[0].action == "archive")
+        #expect(rows[0].skill == "old-helper")
+        #expect(rows[0].absorbedInto == nil)
+        #expect(rows[0].rollbackTarget == nil)
+
+        #expect(rows[1].entryID == "cd34ef56ab12")
+        #expect(rows[1].actor == "agent")
+        #expect(rows[1].action == "absorb")
+        #expect(rows[1].skill == "scratch-pad")
+        #expect(rows[1].absorbedInto == "notes")
+        #expect(rows[1].rollbackTarget == nil)
+
+        #expect(rows[2].entryID == "ef56ab12cd34")
+        #expect(rows[2].actor == "user")
+        #expect(rows[2].action == "rollback")
+        #expect(rows[2].skill == "old-helper")
+        #expect(rows[2].absorbedInto == nil)
+        #expect(rows[2].rollbackTarget == "ab12cd34ef56")
+    }
+
+    /// Empty-state sentinel folds to `[]`, not a parse error.
+    @Test func ledgerEmptyStateIsEmpty() {
+        let out = "curator: ledger is empty (or skills.ledger is disabled)."
+        let rows = CuratorService.parseLedger(out)
+        #expect(rows.isEmpty)
+    }
+
+    // MARK: - Purge (v0.20.4, hermes_cli/curator.py:570 `_cmd_purge`)
+
+    /// Disabled sentinel (`curator.archive_ttl_days` is 0, no `--days`
+    /// override) is recognized so the service can surface it via
+    /// `disabledReason` instead of throwing.
+    @Test func purgeDisabledMessageIsRecognized() {
+        let out = "curator: purge disabled (curator.archive_ttl_days is 0). Set the config key or pass --days N to purge archives older than N days."
+        let disabled = CuratorService.parsePurgeDisabled(out)
+        #expect(disabled == out)
+    }
+
+    @Test func purgeNonDisabledOutputIsNotFlagged() {
+        let out = "Archived skills older than 90d:\n  old-helper\n(dry run — nothing deleted)"
+        #expect(CuratorService.parsePurgeDisabled(out) == nil)
+    }
+
+    /// Dry-run preview: candidate rows + the trailing "(dry run …)" line,
+    /// which must not be mistaken for a candidate.
+    @Test func purgeDryRunOutputParsesCandidates() {
+        let out = """
+        Archived skills older than 90d:
+          old-helper
+          scratch-pad
+        (dry run — nothing deleted)
+        """
+        let summary = CuratorService.parsePurge(out, days: 90)
+        #expect(summary.count == 2)
+        #expect(summary.candidates.map(\.name) == ["old-helper", "scratch-pad"])
+        #expect(summary.days == 90)
+        #expect(summary.purgedCount == nil)
+    }
+
+    /// Confirmed live run: same candidate rows, but the footer is
+    /// `curator: purged N archived skill(s). Ledger entries recorded.`
+    /// instead of the dry-run sentinel — `purgedCount` must reflect it.
+    @Test func purgeConfirmedRunOutputParsesPurgedCount() {
+        let out = """
+        Archived skills older than 90d:
+          old-helper
+          scratch-pad
+        curator: purged 2 archived skill(s). Ledger entries recorded.
+        """
+        let summary = CuratorService.parsePurge(out, days: 90)
+        #expect(summary.count == 2)
+        #expect(summary.purgedCount == 2)
+        #expect(summary.days == 90)
+    }
+
+    /// No-candidates sentinel → empty summary, effective days parsed from
+    /// the message even when the caller didn't pass an explicit override.
+    @Test func purgeNoCandidatesParsesEffectiveDays() {
+        let out = "curator: no archived skills older than 45d."
+        let summary = CuratorService.parsePurge(out, days: nil)
+        #expect(summary.count == 0)
+        #expect(summary.purgedCount == nil)
+    }
+
+    // MARK: - Rollback (v0.20.4, hermes_cli/curator.py:660 `_cmd_rollback`, entry_id form)
+
+    /// Successful single-mutation rollback: header block fields + the
+    /// trailing `curator: <message>` success line.
+    @Test func rollbackEntrySuccessParsesFields() {
+        let out = """
+        Rollback target: ledger entry ab12cd34ef56
+          action: archive
+          skill:  old-helper
+          actor:  curator
+          when:   2026-08-18T10:00:00Z
+          files:  3
+        curator: restored 3 file(s) from ledger entry ab12cd34ef56
+        """
+        let result = CuratorService.parseRollbackEntry(out, entryID: "ab12cd34ef56")
+        #expect(result != nil)
+        #expect(result?.succeeded == true)
+        #expect(result?.action == "archive")
+        #expect(result?.skill == "old-helper")
+        #expect(result?.actor == "curator")
+        #expect(result?.filesTouched == 3)
+        #expect(result?.message == "restored 3 file(s) from ledger entry ab12cd34ef56")
+    }
+
+    /// Unknown entry id → failure result, not a thrown decode error.
+    @Test func rollbackEntryUnknownIDParsesAsFailure() {
+        let out = "curator: no ledger entry 'bogus-id'. See `hermes curator ledger` for entry ids, or use `--id <snapshot>` for whole-tree snapshot rollback."
+        let result = CuratorService.parseRollbackEntry(out, entryID: "bogus-id")
+        #expect(result != nil)
+        #expect(result?.succeeded == false)
+        #expect(result?.message?.contains("no ledger entry 'bogus-id'") == true)
+    }
+
+    /// Rollback-mechanism failure (target found, restore itself failed).
+    @Test func rollbackEntryMechanismFailureParsesAsFailure() {
+        let out = """
+        Rollback target: ledger entry ab12cd34ef56
+          action: archive
+          skill:  old-helper
+          actor:  curator
+          when:   2026-08-18T10:00:00Z
+          files:  3
+        curator: rollback failed — blob missing for old-helper/SKILL.md
+        """
+        let result = CuratorService.parseRollbackEntry(out, entryID: "ab12cd34ef56")
+        #expect(result != nil)
+        #expect(result?.succeeded == false)
+        #expect(result?.message == "blob missing for old-helper/SKILL.md")
+    }
+
+    /// Output with no recognizable `curator:` line at all (genuine
+    /// transport failure) must return `nil` so the caller falls back to
+    /// throwing via `ensureSuccess`, not a fabricated result.
+    @Test func rollbackEntryUnrecognizedOutputReturnsNil() {
+        let result = CuratorService.parseRollbackEntry("", entryID: "ab12cd34ef56")
+        #expect(result == nil)
+    }
 }
