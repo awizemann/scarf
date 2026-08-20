@@ -139,7 +139,15 @@ public extension HermesConfig {
             sttLocalVAD: bool("stt.local.vad", default: true),
             sttLocalVADMinSilenceMS: int("stt.local.vad_min_silence_ms", default: 500),
             sttLocalNoSpeechProbThreshold: double("stt.local.no_speech_prob_threshold", default: 0.6),
-            sttLocalLogprobThreshold: double("stt.local.logprob_threshold", default: -1.0)
+            sttLocalLogprobThreshold: double("stt.local.logprob_threshold", default: -1.0),
+            // v0.20.4 round-trip.
+            sttLocalUnloadAfterIdleSeconds: int("stt.local.unload_after_idle_seconds", default: 0),
+            // Top-level `stt.cloud_trim_*` — siblings of `stt.local.*`, NOT
+            // nested under it.
+            sttCloudTrimSilence: bool("stt.cloud_trim_silence", default: true),
+            sttCloudTrimThresholdDB: double("stt.cloud_trim_threshold_db", default: -40),
+            sttCloudTrimKeepMS: int("stt.cloud_trim_keep_ms", default: 300),
+            wakeWordCapture: str("wake_word.capture", default: "auto")
         )
 
         func aux(_ name: String) -> AuxiliaryModel {
@@ -152,7 +160,10 @@ public extension HermesConfig {
                 // `auxiliary.<task>.reasoning_effort` — v0.19+
                 // (hermes-agent commit df5700ebe3, first released
                 // v2026.7.20 = v0.19.0). Empty = provider default.
-                reasoningEffort: str("auxiliary.\(name).reasoning_effort")
+                reasoningEffort: str("auxiliary.\(name).reasoning_effort"),
+                // v0.20.4+ true-optional cap (documented for `compression`;
+                // harmless to read for every task via the shared `aux` helper).
+                maxConcurrency: intOpt("auxiliary.\(name).max_concurrency")
             )
         }
         let titleGeneration = TitleGenerationSettings(
@@ -163,7 +174,9 @@ public extension HermesConfig {
             apiKey: str("auxiliary.title_generation.api_key"),
             timeout: int("auxiliary.title_generation.timeout", default: 30),
             reasoningEffort: str("auxiliary.title_generation.reasoning_effort"),
-            language: str("auxiliary.title_generation.language")
+            language: str("auxiliary.title_generation.language"),
+            // v0.20.4+ true-optional cap on simultaneous title calls.
+            maxConcurrency: intOpt("auxiliary.title_generation.max_concurrency")
         )
         let auxiliary = AuxiliarySettings(
             vision: aux("vision"),
@@ -175,7 +188,10 @@ public extension HermesConfig {
             mcp: aux("mcp"),
             flushMemories: aux("flush_memories"),
             curator: aux("curator"),
-            titleGeneration: titleGeneration
+            titleGeneration: titleGeneration,
+            // v0.20.4+ — NOT `agent.background_review.enabled`; nested under
+            // the top-level `auxiliary:` block (source-verified).
+            backgroundReviewEnabled: bool("auxiliary.background_review.enabled", default: true)
         )
 
         let security = SecuritySettings(
@@ -226,7 +242,8 @@ public extension HermesConfig {
             provider: str("delegation.provider"),
             baseURL: str("delegation.base_url"),
             apiKey: str("delegation.api_key"),
-            maxIterations: int("delegation.max_iterations", default: 50)
+            maxIterations: int("delegation.max_iterations", default: 250),
+            maxConcurrentChildren: int("delegation.max_concurrent_children", default: 10)
         )
 
         let discord = DiscordSettings(
@@ -455,6 +472,8 @@ public extension HermesConfig {
             userProfileEnabled: bool("memory.user_profile_enabled", default: true),
             toolUseEnforcement: str("agent.tool_use_enforcement", default: "auto"),
             gatewayTimeout: int("agent.gateway_timeout", default: 1800),
+            cronDrainTimeout: int("agent.cron_drain_timeout", default: 30),
+            gatewayTurnLeaseTimeout: int("agent.gateway_turn_lease_timeout", default: 1800),
             approvalTimeout: int("approvals.timeout", default: 60),
             fileReadMaxChars: int("file_read_max_chars", default: 100_000),
             cronWrapResponse: bool("cron.wrap_response", default: true),
@@ -545,7 +564,41 @@ public extension HermesConfig {
             // parseNestedYAML doesn't model — so it gets its own scanner,
             // which also reports which of the two accepted forms Hermes
             // would actually read (v0.19+, gateway/profile_routing.py).
-            profileRoutes: ProfileRoutesYAML.parse(yaml)
+            profileRoutes: ProfileRoutesYAML.parse(yaml),
+            // `multiplex_profile_allowlist` (v0.20.4+) — true-optional list.
+            // A top-level key takes PRECEDENCE over `gateway.*` (gateway/
+            // config.py:1190-1195, 1413-1423) — mirrors the top-level-wins
+            // pattern `ProfileRoutesYAML.parse` uses for `multiplex_profiles`.
+            // `nil` = key absent from config.yaml at either spelling
+            // (serve-all). A malformed value — present as a scalar, or as a
+            // mapping (a section header with children but no bullet list) —
+            // is normalized to `[]`, matching upstream's fail-safe of
+            // serving only the "default" profile, rather than failing open
+            // (nil → serve-all) or being silently dropped.
+            multiplexProfileAllowlist: Self.multiplexProfileAllowlist(
+                values: values, lists: lists, maps: maps
+            )
         )
+    }
+
+    /// Resolve `multiplex_profile_allowlist` from the three `ParsedYAML`
+    /// dictionaries, checking the top-level spelling before falling back to
+    /// `gateway.*` (see the call site's doc comment for the precedence +
+    /// fail-closed rationale).
+    private static func multiplexProfileAllowlist(
+        values: [String: String], lists: [String: [String]], maps: [String: [String: String]]
+    ) -> [String]? {
+        func resolve(_ key: String) -> [String]? {
+            if let list = lists[key] { return list }
+            if values[key] != nil { return [] }
+            // A mapping-valued key (section header with `key: value`
+            // children but no bullet list) fails CLOSED to `[]` — Hermes
+            // restricts to the default profile rather than serving all.
+            if maps[key]?.isEmpty == false { return [] }
+            return nil
+        }
+        if let resolved = resolve("multiplex_profile_allowlist") { return resolved }
+        if let resolved = resolve("gateway.multiplex_profile_allowlist") { return resolved }
+        return nil
     }
 }

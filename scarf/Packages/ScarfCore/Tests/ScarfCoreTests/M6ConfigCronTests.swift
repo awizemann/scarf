@@ -637,7 +637,148 @@ import Foundation
         #expect(toggled.contextFrom == job.contextFrom)
         #expect(toggled.noAgent == job.noAgent)
         #expect(toggled.attachToSession == job.attachToSession)
-        #expect(toggled.extra == job.extra)
+        // Unknown keys survive; the disable only ADDS the pause marker.
+        #expect(toggled.extra["enabled_toolsets"] == job.extra["enabled_toolsets"])
+    }
+
+    // MARK: - v0.20.4 pause-marker gate (cron/jobs.py:571–582)
+
+    /// Enabling a paused job must clear both pause markers and land on a
+    /// runnable state, or v0.20.4's `is_job_runnable()` keeps refusing to
+    /// fire it even though the row reads enabled=true.
+    @Test func withEnabledTrueClearsPauseMarkersAndSchedules() {
+        let paused = HermesCronJob(
+            id: "j", name: "N", prompt: "p",
+            schedule: CronSchedule(kind: "cron"),
+            enabled: false,
+            state: "paused",
+            extra: [
+                "paused_at": .string("2026-08-01T10:00:00+00:00"),
+                "paused_reason": .string("operator"),
+                "monitor_script": .string("check.sh"),
+                "run_claim": .object(["by": .string("mac-studio")]),
+            ]
+        )
+        let resumed = paused.withEnabled(true)
+        #expect(resumed.enabled)
+        #expect(resumed.state == "scheduled")
+        #expect(resumed.extra["paused_at"] == nil)
+        #expect(resumed.extra["paused_reason"] == nil)
+        // Unrelated Hermes-owned keys are untouched by the resume.
+        #expect(resumed.extra["monitor_script"] == .string("check.sh"))
+        #expect(resumed.extra["run_claim"] == .object(["by": .string("mac-studio")]))
+    }
+
+    @Test func withEnabledFalseSetsPauseMarkers() {
+        let job = HermesCronJob(
+            id: "j", name: "N", prompt: "p",
+            schedule: CronSchedule(kind: "cron"),
+            enabled: true, state: "scheduled",
+            extra: ["monitor_url": .string("https://example.test/ping")]
+        )
+        let now = Date(timeIntervalSince1970: 1_785_542_400)  // 2026-08-01T00:00:00Z
+        let pausedJob = job.withEnabled(false, now: now)
+        #expect(pausedJob.enabled == false)
+        #expect(pausedJob.state == "paused")
+        #expect(pausedJob.extra["paused_at"] == .string("2026-08-01T00:00:00Z"))
+        #expect(pausedJob.extra["monitor_url"] == .string("https://example.test/ping"))
+    }
+
+    /// Disable → enable must leave the record in a firing shape with no
+    /// residual markers anywhere in the serialized JSON.
+    @Test func pauseThenResumeRoundTripsToRunnableJSON() throws {
+        let job = HermesCronJob(
+            id: "j", name: "N", prompt: "p",
+            schedule: CronSchedule(kind: "cron"),
+            enabled: true, state: "scheduled",
+            extra: ["enabled_toolsets": .array([.string("files")])]
+        )
+        let cycled = job.withEnabled(false).withEnabled(true)
+        let text = String(decoding: try JSONEncoder().encode(cycled), as: UTF8.self)
+        #expect(!text.contains("paused_at"))
+        #expect(!text.contains("paused_reason"))
+        #expect(text.contains("\"state\":\"scheduled\""))
+        #expect(text.contains("enabled_toolsets"))
+    }
+
+    /// A hand-edited jobs.json with `null` name/prompt/state must not fail
+    /// the whole-file decode (it used to take every other job down too).
+    @Test func nullRequiredStringsDecodeToDefaults() throws {
+        let json = Data("""
+        {"id":"j","name":null,"prompt":null,"state":null,
+         "schedule":{"kind":"cron"},"enabled":true}
+        """.utf8)
+        let job = try JSONDecoder().decode(HermesCronJob.self, from: json)
+        #expect(job.id == "j")
+        #expect(job.name == "")
+        #expect(job.prompt == "")
+        #expect(job.state == "")
+        // `enabled: true` + no stored state → effective_job_state's
+        // `stored or "scheduled"` fallback (cron/jobs.py:601).
+        #expect(job.effectiveState == "scheduled")
+        #expect(job.stateIcon == "clock")
+
+        // Absent keys behave the same way.
+        let sparse = Data("""
+        {"id":"j2","schedule":{"kind":"cron"},"enabled":true}
+        """.utf8)
+        let job2 = try JSONDecoder().decode(HermesCronJob.self, from: sparse)
+        #expect(job2.name == "")
+    }
+
+    /// `error` is the live terminal state Hermes persists; Scarf mapped
+    /// only the legacy `failed` spelling and fell through to a "?" icon.
+    @Test func stateIconMapsErrorAndPaused() {
+        func job(_ state: String, enabled: Bool = true) -> HermesCronJob {
+            HermesCronJob(
+                id: "j", name: "N", prompt: "p",
+                schedule: CronSchedule(kind: "cron"),
+                enabled: enabled, state: state
+            )
+        }
+        // Terminal states survive regardless of `enabled`.
+        #expect(job("error").stateIcon == "xmark.circle")
+        #expect(job("failed").stateIcon == "xmark.circle")
+        #expect(job("scheduled").stateIcon == "clock")
+        // A DISABLED job stored as paused still reads paused.
+        #expect(job("paused", enabled: false).stateIcon == "pause.circle")
+    }
+
+    /// Ported `effective_job_state` (cron/jobs.py:585-602): the scheduler
+    /// honours `enabled`, so an enabled job must never display as paused —
+    /// the 07-30 upstream outage failure mode (list looked frozen while
+    /// the fleet kept running).
+    @Test func effectiveStateNeverShowsPausedForAnEnabledJob() {
+        func job(_ state: String, enabled: Bool, pausedAt: String? = nil) -> HermesCronJob {
+            HermesCronJob(
+                id: "j", name: "N", prompt: "p",
+                schedule: CronSchedule(kind: "cron"),
+                enabled: enabled, state: state,
+                extra: pausedAt.map { ["paused_at": .string($0)] } ?? [:]
+            )
+        }
+        // enabled=true is authoritative — stale `state`/`paused_at` lose.
+        #expect(job("paused", enabled: true).effectiveState == "scheduled")
+        #expect(job("scheduled", enabled: true, pausedAt: "2026-08-20T00:00:00Z").effectiveState == "scheduled")
+        #expect(job("running", enabled: true).effectiveState == "running")
+        // Terminal states are preserved regardless of `enabled`.
+        #expect(job("completed", enabled: true).effectiveState == "completed")
+        #expect(job("error", enabled: true).effectiveState == "error")
+        #expect(job("completed", enabled: false).effectiveState == "completed")
+        // Disabled: pause marker OR stored `paused` → paused; else the
+        // stored state, falling back to "paused".
+        #expect(job("paused", enabled: false).effectiveState == "paused")
+        #expect(job("scheduled", enabled: false, pausedAt: "2026-08-20T00:00:00Z").effectiveState == "paused")
+        #expect(job("scheduled", enabled: false).effectiveState == "scheduled")
+        #expect(job("", enabled: false).effectiveState == "paused")
+        // An explicit JSON null marker is NOT a pause marker (Hermes
+        // reads it via `.get()`, so null and absent are equivalent).
+        #expect(job("scheduled", enabled: false, pausedAt: nil).effectiveState == "scheduled")
+        let nullMarker = HermesCronJob(
+            id: "j", name: "N", prompt: "p", schedule: CronSchedule(kind: "cron"),
+            enabled: false, state: "scheduled", extra: ["paused_at": .null]
+        )
+        #expect(nullMarker.effectiveState == "scheduled")
     }
 
     @Test func hermesCronJobAttachToSessionRoundTrip() throws {
@@ -712,14 +853,16 @@ import Foundation
         #expect(job.preRunScript == "echo pre")
         #expect(job.schedule.minutes == 30)
 
-        let reencoded = try JSONEncoder().encode(job.withEnabled(false).withEnabled(true))
+        // A plain re-encode must be lossless. (The enable/disable toggle
+        // deliberately rewrites state + pause markers — see the
+        // withEnabled tests below — so it can't stand in for this check.)
+        let reencoded = try JSONEncoder().encode(job)
         let a = stripNulls(try JSONSerialization.jsonObject(with: original)) as! NSDictionary
         let b = stripNulls(try JSONSerialization.jsonObject(with: reencoded)) as! NSDictionary
         #expect(a == b)
 
         // Explicit nulls on UNKNOWN keys survive byte-for-byte (they live
-        // in `extra`; Hermes distinguishes wrote-null from never-wrote for
-        // fields like paused_at only cosmetically, but don't churn them).
+        // in `extra`).
         let text = String(decoding: reencoded, as: UTF8.self)
         #expect(text.contains("\"paused_at\""))
         #expect(text.contains("\"run_claim\""))

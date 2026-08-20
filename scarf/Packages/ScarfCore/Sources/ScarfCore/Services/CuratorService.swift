@@ -129,6 +129,74 @@ public actor CuratorService {
         return Self.parsePrune(stdout, days: days)
     }
 
+    // MARK: - Reads (new in v0.20.4 — caller gates on hasCuratorLedger)
+
+    /// `hermes curator ledger [--skill N] [--limit N]` — the per-mutation
+    /// audit trail (curator/agent/user actions), newest first. Text-only
+    /// verb (no `--json`); `limit` mirrors the CLI's own default of 20 when
+    /// `nil` so an unset value still bounds the request.
+    public func ledger(skill: String? = nil, limit: Int? = nil) async throws -> [HermesCuratorLedgerEntry] {
+        var args = ["curator", "ledger"]
+        if let skill { args += ["--skill", skill] }
+        args += ["--limit", String(limit ?? 20)]
+        let (code, stdout, stderr) = await runHermes(args: args, timeout: 30)
+        try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "ledger")
+        return Self.parseLedger(stdout)
+    }
+
+    // MARK: - Writes (new in v0.20.4 — caller gates on hasCuratorPurge)
+
+    /// `hermes curator purge [--days N] [--dry-run] [-y]` — **permanently
+    /// deletes** archived skills past `curator.archive_ttl_days` (or the
+    /// explicit `days` override). This is disk deletion, unlike `prune`
+    /// (archive-only, reversible) — never conflate the two. `-y` is passed
+    /// unconditionally on a live run for the same reason `prune`/`adopt`
+    /// do: Hermes's confirmation prompt is interactive `[y/N]` and Scarf
+    /// can't answer it — Scarf's own destructive-confirm sheet gates the
+    /// call instead. When Hermes reports the verb as disabled (TTL is 0 and
+    /// no override was given), the exit code is non-zero but this is a
+    /// legitimate "nothing to do, here's why" response, not a transport
+    /// failure — it's surfaced via `disabledReason` rather than a thrown
+    /// error.
+    @discardableResult
+    public func purge(days: Int? = nil, dryRun: Bool) async throws -> CuratorPurgeSummary {
+        var args = ["curator", "purge"]
+        if let days { args += ["--days", String(days)] }
+        args.append(dryRun ? "--dry-run" : "-y")
+        let (code, stdout, stderr) = await runHermes(args: args, timeout: 60)
+        if let disabled = Self.parsePurgeDisabled(stdout) {
+            return CuratorPurgeSummary(candidates: [], days: days, disabledReason: disabled)
+        }
+        try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "purge")
+        return Self.parsePurge(stdout, days: days)
+    }
+
+    // MARK: - Writes (new in v0.20.4 — caller gates on hasCuratorEntryRollback)
+
+    /// `hermes curator rollback <entry_id> -y` — reverts a single ledger
+    /// mutation (content-addressed blob restore), distinct from the bare
+    /// `hermes curator rollback` whole-tree snapshot form (unchanged,
+    /// unmodeled here). `-y` is passed unconditionally for the same
+    /// interactive-prompt reason as `purge`/`prune` — Scarf's own confirm
+    /// gates the call.
+    @discardableResult
+    public func rollbackEntry(_ entryID: String) async throws -> CuratorEntryRollbackResult {
+        let (code, stdout, stderr) = await runHermes(
+            args: ["curator", "rollback", entryID, "-y"],
+            timeout: 30
+        )
+        // A rollback failure ("no ledger entry", "rollback failed — …") is
+        // Hermes's success channel reporting a domain failure, not a
+        // transport error — parse it into the result rather than throwing,
+        // so the UI can show *why* inline. Only a genuinely non-zero exit
+        // with no recognizable Hermes response is a thrown transport error.
+        if let result = Self.parseRollbackEntry(stdout, entryID: entryID) {
+            return result
+        }
+        try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "rollback")
+        throw CuratorError.decoding(verb: "rollback", message: "unrecognized rollback output")
+    }
+
     // MARK: - Writes (new in v0.20 — caller gates on hasCuratorAdopt)
 
     /// `hermes curator adopt <name> --yes` — hands one unmanaged skill to
@@ -344,6 +412,249 @@ public actor CuratorService {
             candidates.append(CuratorPruneCandidate(name: name, idleDays: idle))
         }
         return CuratorPruneSummary(candidates: candidates, days: days)
+    }
+
+    /// Parse `hermes curator ledger [--skill N] [--limit N]` text output
+    /// (`hermes_cli/curator.py:539`, `_cmd_ledger`). Fixed-width columns:
+    ///
+    ///     id             when         actor    action       skill
+    ///     ab12cd34ef56   3d ago       curator  archive      old-helper
+    ///     cd34ef56ab12   5h ago       agent    absorb       scratch-pad  → absorbed into 'notes'
+    ///     ef56ab12cd34   never        user     rollback     old-helper   → rollback of ab12cd34ef56
+    ///
+    /// The `when` column is a RELATIVE age, not a date: `_fmt_ts` renders
+    /// `"{N}s|m|h|d ago"`, `"never"` for a missing timestamp, or the raw
+    /// string when it won't parse as ISO. (The `when:` field of `curator
+    /// rollback <id>` detail output is different — that one IS the raw ISO
+    /// timestamp; see `parseRollbackEntry`.) `whenLabel` is therefore
+    /// carried through verbatim for display and never parsed as a date.
+    ///
+    /// and the empty-state sentinel `curator: ledger is empty (or
+    /// skills.ledger is disabled).`. The header row and the trailing
+    /// "Roll back a single mutation with …" hint are skipped. Columns are
+    /// fixed-width left-justified (`{:<14} {:<12} {:<8} {:<12} skill`), so
+    /// we split positionally rather than on whitespace runs — a skill name
+    /// may itself contain spaces, and it's always the trailing column.
+    public nonisolated static func parseLedger(_ stdout: String) -> [HermesCuratorLedgerEntry] {
+        var rows: [HermesCuratorLedgerEntry] = []
+        for raw in stdout.components(separatedBy: .newlines) {
+            let line = raw.hasSuffix("\r") ? String(raw.dropLast()) : raw
+            guard !line.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+            if line.hasPrefix("id") && line.contains("when") && line.contains("actor") { continue }
+            if line.contains("ledger is empty") { continue }
+            // The trailing hint is a single `print` — "Roll back a single
+            // mutation with …; whole-tree snapshots remain available via …"
+            // — so the prefix test covers the whole line. There is no
+            // separate line starting with "whole-tree snapshots remain".
+            if line.hasPrefix("Roll back a single mutation") { continue }
+
+            // Fixed column layout: id<14> " " when<12> " " actor<8> " "
+            // action<12> " " skill[+suffix]. Guard against a short/odd
+            // line (future Hermes layout change) by falling back to a
+            // best-effort whitespace split rather than crashing or
+            // silently dropping the row.
+            guard line.count >= 50 else {
+                if let fallback = parseLedgerRowFallback(line) { rows.append(fallback) }
+                continue
+            }
+            let chars = Array(line)
+            let idField = String(chars[0..<14]).trimmingCharacters(in: .whitespaces)
+            let whenField = String(chars[15..<27]).trimmingCharacters(in: .whitespaces)
+            let actorField = String(chars[28..<36]).trimmingCharacters(in: .whitespaces)
+            let actionField = String(chars[37..<49]).trimmingCharacters(in: .whitespaces)
+            let rest = String(chars[50...]).trimmingCharacters(in: .whitespaces)
+            guard !idField.isEmpty else { continue }
+
+            var skill = rest
+            var absorbedInto: String?
+            var rollbackTarget: String?
+            if let r = rest.range(of: "  → absorbed into '") {
+                skill = String(rest[..<r.lowerBound]).trimmingCharacters(in: .whitespaces)
+                var tail = String(rest[r.upperBound...])
+                if let close = tail.firstIndex(of: "'") { tail = String(tail[..<close]) }
+                absorbedInto = tail
+            } else if let r = rest.range(of: "  → rollback of ") {
+                skill = String(rest[..<r.lowerBound]).trimmingCharacters(in: .whitespaces)
+                rollbackTarget = String(rest[r.upperBound...]).trimmingCharacters(in: .whitespaces)
+            }
+
+            rows.append(
+                HermesCuratorLedgerEntry(
+                    entryID: idField,
+                    whenLabel: whenField,
+                    actor: actorField,
+                    action: actionField,
+                    skill: skill,
+                    absorbedInto: absorbedInto,
+                    rollbackTarget: rollbackTarget
+                )
+            )
+        }
+        return rows
+    }
+
+    /// Best-effort fallback for a ledger row shorter than the expected
+    /// fixed-width layout — collapses whitespace runs into single
+    /// separators. Loses fidelity on skill names containing spaces, but
+    /// keeps the row visible instead of dropping it outright.
+    private nonisolated static func parseLedgerRowFallback(_ line: String) -> HermesCuratorLedgerEntry? {
+        let parts = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+        guard parts.count >= 5 else { return nil }
+        return HermesCuratorLedgerEntry(
+            entryID: parts[0],
+            whenLabel: parts[1],
+            actor: parts[2],
+            action: parts[3],
+            skill: parts[4...].joined(separator: " ")
+        )
+    }
+
+    /// `hermes curator purge` prints this exact message and exits non-zero
+    /// when `curator.archive_ttl_days` is 0 and no `--days` override was
+    /// given. Returns the message verbatim, or `nil` when this isn't that
+    /// response.
+    public nonisolated static func parsePurgeDisabled(_ stdout: String) -> String? {
+        for raw in stdout.components(separatedBy: .newlines) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("curator: purge disabled") {
+                return line
+            }
+        }
+        return nil
+    }
+
+    /// Parse `hermes curator purge [--days N] [--dry-run] [-y]` text output
+    /// (`hermes_cli/curator.py:570`, `_cmd_purge`). Shapes:
+    ///
+    ///     Archived skills older than 90d:
+    ///       old-helper
+    ///       scratch-pad
+    ///     (dry run — nothing deleted)
+    ///
+    /// or, on a live run:
+    ///
+    ///     Archived skills older than 90d:
+    ///       old-helper
+    ///       scratch-pad
+    ///     curator: purged 2 archived skill(s). Ledger entries recorded.
+    ///
+    /// or the no-candidates sentinel `curator: no archived skills older
+    /// than {N}d.` / `curator: no archive directory — nothing to purge.`
+    /// `days` in the result comes from the request when given, else parsed
+    /// out of the header line so a config-default run still reports the
+    /// effective threshold.
+    ///
+    /// Note the casing split in `_cmd_purge`: the header is `Archived skills
+    /// older than {N}d:` (capital A) while the no-candidates sentinel is
+    /// `curator: no archived skills older than {N}d.` (lowercase, prefixed).
+    /// The threshold scan is therefore case-insensitive and anchored on the
+    /// shared `archived skills older than ` substring — matching only the
+    /// capitalized header would leave `days` nil on exactly the run where
+    /// Hermes reports the effective TTL and nothing else.
+    public nonisolated static func parsePurge(_ stdout: String, days: Int?) -> CuratorPurgeSummary {
+        var candidates: [CuratorPurgeCandidate] = []
+        var effectiveDays = days
+        var purgedCount: Int?
+        for raw in stdout.components(separatedBy: .newlines) {
+            if let headerRange = raw.range(of: "archived skills older than ", options: .caseInsensitive) {
+                let after = raw[headerRange.upperBound...]
+                let digits = after.prefix(while: { $0.isNumber })
+                if let n = Int(digits) { effectiveDays = n }
+                continue
+            }
+            if raw.hasPrefix("curator: purged ") {
+                let after = raw.dropFirst("curator: purged ".count)
+                let digits = after.prefix(while: { $0.isNumber })
+                purgedCount = Int(digits)
+                continue
+            }
+            // Candidate rows are the only indented lines Hermes prints here
+            // (`print(f"  {p.name}")`). Every footer — including the dry-run
+            // marker `(dry run — nothing deleted)` — starts at column 0, so
+            // the indent guard alone separates rows from chrome.
+            guard let first = raw.first, first == " " || first == "\t" else { continue }
+            let name = raw.trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { continue }
+            candidates.append(CuratorPurgeCandidate(name: name))
+        }
+        return CuratorPurgeSummary(candidates: candidates, days: effectiveDays, purgedCount: purgedCount)
+    }
+
+    /// Parse `hermes curator rollback <entry_id> [-y]` text output
+    /// (`hermes_cli/curator.py:660`, `_cmd_rollback`, single-mutation
+    /// branch only — the bare whole-tree form is unchanged and unparsed
+    /// here). Success shape:
+    ///
+    ///     Rollback target: ledger entry ab12cd34ef56
+    ///       action: archive
+    ///       skill:  old-helper
+    ///       actor:  curator
+    ///       when:   2026-08-18T10:00:00Z
+    ///       files:  3
+    ///     curator: restored 3 file(s) from ledger entry ab12cd34ef56
+    ///
+    /// Unknown-entry failure:
+    ///
+    ///     curator: no ledger entry 'bogus-id'. See `hermes curator ledger`
+    ///     for entry ids, or use `--id <snapshot>` for whole-tree snapshot
+    ///     rollback.
+    ///
+    /// Rollback-mechanism failure:
+    ///
+    ///     curator: rollback failed — <message>
+    ///
+    /// Returns `nil` when `stdout` doesn't contain a recognizable `curator:`
+    /// response line at all (a genuine transport/exit-code failure, which
+    /// the caller surfaces via `ensureSuccess` instead).
+    public nonisolated static func parseRollbackEntry(_ stdout: String, entryID: String) -> CuratorEntryRollbackResult? {
+        var action: String?
+        var skill: String?
+        var actor: String?
+        var when: String?
+        var files: Int?
+        var message: String?
+        var succeeded = false
+        var sawCuratorLine = false
+
+        for raw in stdout.components(separatedBy: .newlines) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("action:") {
+                action = String(line.dropFirst("action:".count)).trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("skill:") {
+                skill = String(line.dropFirst("skill:".count)).trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("actor:") {
+                actor = String(line.dropFirst("actor:".count)).trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("when:") {
+                when = String(line.dropFirst("when:".count)).trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("files:") {
+                files = Int(line.dropFirst("files:".count).trimmingCharacters(in: .whitespaces))
+            } else if line.hasPrefix("curator: rollback failed") {
+                sawCuratorLine = true
+                succeeded = false
+                message = String(line.dropFirst("curator: rollback failed".count))
+                    .trimmingCharacters(in: CharacterSet(charactersIn: " —-"))
+            } else if line.hasPrefix("curator: no ledger entry") {
+                sawCuratorLine = true
+                succeeded = false
+                message = line.dropFirst("curator: ".count).description
+            } else if line.hasPrefix("curator:") {
+                sawCuratorLine = true
+                succeeded = true
+                message = String(line.dropFirst("curator:".count)).trimmingCharacters(in: .whitespaces)
+            }
+        }
+
+        guard sawCuratorLine else { return nil }
+        return CuratorEntryRollbackResult(
+            entryID: entryID,
+            action: action,
+            skill: skill,
+            actor: actor,
+            whenLabel: when,
+            filesTouched: files,
+            succeeded: succeeded,
+            message: message
+        )
     }
 
     // MARK: - CLI invocation

@@ -41,6 +41,23 @@ struct CuratorView: View {
         capabilitiesStore?.capabilities.hasCuratorAdopt ?? false
     }
 
+    /// v0.20.4 ledger surface. Hidden entirely on pre-0.20.4 hosts.
+    private var ledgerAvailable: Bool {
+        capabilitiesStore?.capabilities.hasCuratorLedger ?? false
+    }
+
+    /// v0.20.4 purge (permanent delete) surface.
+    private var purgeAvailable: Bool {
+        capabilitiesStore?.capabilities.hasCuratorPurge ?? false
+    }
+
+    /// v0.20.4 per-entry rollback surface. Gates the "roll back this
+    /// entry" action on ledger rows independently of `ledgerAvailable` —
+    /// a host could in principle have one without the other.
+    private var entryRollbackAvailable: Bool {
+        capabilitiesStore?.capabilities.hasCuratorEntryRollback ?? false
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: ScarfSpace.s4) {
@@ -79,6 +96,18 @@ struct CuratorView: View {
                     )
                 }
 
+                if ledgerAvailable {
+                    CuratorLedgerSection(
+                        entries: viewModel.ledgerEntries,
+                        isLoading: viewModel.isLoadingLedger,
+                        rollbackAvailable: entryRollbackAvailable,
+                        pendingRollbackEntryID: viewModel.pendingRollbackEntryID,
+                        onRollback: { entry in
+                            Task { await viewModel.rollbackEntry(entry.id) }
+                        }
+                    )
+                }
+
                 if let report = viewModel.lastReportMarkdown {
                     lastReportSection(markdown: report)
                 }
@@ -93,6 +122,9 @@ struct CuratorView: View {
             }
             if adoptAvailable {
                 await viewModel.loadUnmanaged()
+            }
+            if ledgerAvailable {
+                await viewModel.loadLedger()
             }
         }
         .sheet(isPresented: $showRestoreSheet) {
@@ -115,6 +147,27 @@ struct CuratorView: View {
                     },
                     onCancel: {
                         viewModel.cancelPrune()
+                    }
+                )
+            }
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { viewModel.purgeSummary != nil },
+                set: { isShown in
+                    if !isShown { viewModel.cancelPurge() }
+                }
+            )
+        ) {
+            if let summary = viewModel.purgeSummary {
+                CuratorPurgeConfirmSheet(
+                    summary: summary,
+                    isPurging: viewModel.isPurging,
+                    onConfirm: {
+                        Task { await viewModel.confirmPurge() }
+                    },
+                    onCancel: {
+                        viewModel.cancelPurge()
                     }
                 )
             }
@@ -158,6 +211,14 @@ struct CuratorView: View {
                         Button("Idle ≥ 60 days")  { Task { await viewModel.planPrune(days: 60) } }
                         Button("Idle ≥ 90 days")  { Task { await viewModel.planPrune(days: 90) } }
                         Button("Idle ≥ 180 days") { Task { await viewModel.planPrune(days: 180) } }
+                    }
+                    if purgeAvailable {
+                        // Deliberately a separate, plainly-labeled entry —
+                        // never folded into the Archive menu above. "Archive"
+                        // is reversible; "Permanently Delete" is not.
+                        Button("Permanently Delete Archived…") {
+                            Task { await viewModel.planPurge() }
+                        }
                     }
                 } else {
                     Button("Restore Archived…") {

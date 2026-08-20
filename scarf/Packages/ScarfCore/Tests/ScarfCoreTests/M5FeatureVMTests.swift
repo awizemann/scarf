@@ -657,6 +657,194 @@ import Foundation
         }
     }
 
+    // MARK: - Cron resume semantics (Hermes `resume_job` parity)
+
+    /// Read the raw persisted jobs.json so we can assert on key PRESENCE,
+    /// not just decoded values (`next_run_at: nil` decodes the same whether
+    /// the key is absent or explicitly null — but only ABSENT triggers
+    /// Hermes's recompute-on-load recovery).
+    @MainActor
+    private func rawJob(_ home: URL, id: String) throws -> [String: Any] {
+        let data = try Data(contentsOf: home.appendingPathComponent("cron/jobs.json"))
+        let file = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let jobs = try #require(file["jobs"] as? [[String: Any]])
+        return try #require(jobs.first { $0["id"] as? String == id })
+    }
+
+    /// When the `hermes cron resume` CLI is unreachable (here: a
+    /// nonexistent binary hint), the JSON fallback must NOT leave a stale
+    /// past `next_run_at` behind. Hermes's scheduler would read it as
+    /// "overdue", fire a catch-up run on the very next tick, and that fire
+    /// flows through `mark_job_run` — consuming one of the job's
+    /// `repeat.times` (cron/jobs.py:3019-3032). Clearing the key hands the
+    /// recompute to Hermes's own loader (cron/jobs.py:3210-3231), which is
+    /// what `resume_job` would have written.
+    @Test @MainActor func cronResumeFallbackClearsStaleNextRunAt() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, home) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            await vm.upsert(HermesCronJob(
+                id: "j1", name: "Recurring", prompt: "p",
+                schedule: CronSchedule(kind: "cron", expression: "0 9 * * *"),
+                enabled: false, state: "paused",
+                nextRunAt: "2020-01-01T09:00:00Z",
+                extra: ["paused_at": .string("2020-01-01T08:00:00Z")]
+            ))
+
+            #expect(await vm.toggleEnabled(id: "j1"))
+            #expect(vm.lastToggleRoute == .jsonFallback)
+            #expect(vm.lastError == nil)
+
+            let raw = try rawJob(home, id: "j1")
+            #expect(raw["enabled"] as? Bool == true)
+            #expect(raw["state"] as? String == "scheduled")
+            // The key must be ABSENT, not null-valued.
+            #expect(raw["next_run_at"] == nil)
+            #expect(raw["paused_at"] == nil)
+            // enabled=true with a pause marker is the contradiction Hermes
+            // self-heals by force-disabling (cron/jobs.py:3161-3183).
+            #expect(vm.jobs[0].effectiveState == "scheduled")
+        }
+    }
+
+    /// Pausing is the other direction and must keep `next_run_at` — Hermes's
+    /// `pause_job` doesn't touch it, and resume recomputes it anyway.
+    @Test @MainActor func cronPauseKeepsNextRunAtAndStampsTheMarker() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, home) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            await vm.upsert(HermesCronJob(
+                id: "j1", name: "Recurring", prompt: "p",
+                schedule: CronSchedule(kind: "cron", expression: "0 9 * * *"),
+                enabled: true, state: "scheduled",
+                nextRunAt: "2030-01-01T09:00:00Z"
+            ))
+
+            #expect(await vm.toggleEnabled(id: "j1"))
+            #expect(vm.lastToggleRoute == .jsonFallback)
+            let raw = try rawJob(home, id: "j1")
+            #expect(raw["enabled"] as? Bool == false)
+            #expect(raw["state"] as? String == "paused")
+            #expect(raw["next_run_at"] as? String == "2030-01-01T09:00:00Z")
+            #expect(raw["paused_at"] as? String != nil)
+            #expect(vm.jobs[0].effectiveState == "paused")
+        }
+    }
+
+    /// `resume_job` RAISES for a one-shot whose deadline has passed beyond
+    /// the grace window (cron/jobs.py:2217-2222) — the record it would
+    /// write can never fire. Scarf must refuse rather than persist a state
+    /// Hermes's own CLI declines to produce.
+    @Test @MainActor func cronRefusesResumingAPastDeadlineOneShot() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, home) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            await vm.upsert(HermesCronJob(
+                id: "j1", name: "One shot", prompt: "p",
+                schedule: CronSchedule(kind: "once", runAt: "2020-01-01T09:00:00Z"),
+                enabled: false, state: "paused"
+            ))
+
+            #expect(await vm.toggleEnabled(id: "j1") == false)
+            #expect(vm.lastToggleRoute == .refused)
+            #expect(vm.lastError?.contains("One shot") == true)
+            // Nothing was written: the job is still paused on disk.
+            #expect(try rawJob(home, id: "j1")["enabled"] as? Bool == false)
+            #expect(vm.jobs[0].enabled == false)
+        }
+    }
+
+    /// An already-run one-shot is never eligible again
+    /// (`_recoverable_oneshot_run_at` returns None on any `last_run_at`),
+    /// even with a future `run_at`.
+    @Test @MainActor func cronRefusesResumingAOneShotThatAlreadyRan() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            await vm.upsert(HermesCronJob(
+                id: "j1", name: "Done", prompt: "p",
+                schedule: CronSchedule(kind: "once", runAt: "2030-01-01T09:00:00Z"),
+                enabled: false, state: "completed",
+                lastRunAt: "2026-01-01T09:00:00Z"
+            ))
+            #expect(await vm.toggleEnabled(id: "j1") == false)
+            #expect(vm.lastToggleRoute == .refused)
+            #expect(vm.lastError?.contains("already ran") == true)
+        }
+    }
+
+    /// Inside the 120-second grace window the one-shot is still eligible,
+    /// so the resume goes through.
+    @Test @MainActor func cronResumesAOneShotInsideTheGraceWindow() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            let now = Date(timeIntervalSince1970: 1_800_000_000)
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime]
+            await vm.upsert(HermesCronJob(
+                id: "j1", name: "Just late", prompt: "p",
+                schedule: CronSchedule(
+                    kind: "once",
+                    runAt: iso.string(from: now.addingTimeInterval(-30))
+                ),
+                enabled: false, state: "paused"
+            ))
+            #expect(await vm.setEnabled(id: "j1", enabled: true, now: now))
+            #expect(vm.lastToggleRoute == .jsonFallback)
+            #expect(vm.jobs[0].enabled)
+
+            // …and just outside it, the same job is refused.
+            let vm2 = IOSCronViewModel(context: ctx)
+            await vm2.load()
+            #expect(await vm2.setEnabled(
+                id: "j1", enabled: false, now: now
+            ))
+            #expect(await vm2.setEnabled(
+                id: "j1", enabled: true, now: now.addingTimeInterval(200)
+            ) == false)
+            #expect(vm2.lastToggleRoute == .refused)
+        }
+    }
+
+    /// Pausing a past-deadline one-shot is always allowed — only the
+    /// resume direction has the precondition.
+    @Test @MainActor func cronPausingAPastDeadlineOneShotIsAllowed() async throws {
+        try await withLocalTransportFactory { [self] in
+            let (ctx, _) = try makeFakeHermes()
+            let vm = IOSCronViewModel(context: ctx)
+            await vm.upsert(HermesCronJob(
+                id: "j1", name: "One shot", prompt: "p",
+                schedule: CronSchedule(kind: "once", runAt: "2020-01-01T09:00:00Z"),
+                enabled: true, state: "scheduled"
+            ))
+            #expect(await vm.toggleEnabled(id: "j1"))
+            #expect(vm.jobs[0].enabled == false)
+        }
+    }
+
+    /// The CLI-outcome classifier decides fallback vs. refusal. A shell
+    /// that can't find `hermes` is "unavailable" (fall back); anything
+    /// Hermes itself printed is a refusal we must surface, never paper
+    /// over with a JSON write.
+    @Test @MainActor func cronCLIOutcomeClassification() {
+        #expect(IOSCronViewModel.looksLikeMissingBinary("bash: hermes: command not found"))
+        #expect(IOSCronViewModel.looksLikeMissingBinary("sh: 1: hermes: not found"))
+        #expect(IOSCronViewModel.looksLikeMissingBinary(
+            "/bin/sh: /nope/hermes: No such file or directory"))
+        #expect(IOSCronViewModel.looksLikeMissingBinary(
+            "ValueError: Cannot resume: one-shot time 2020-01-01T09:00:00 is in the past") == false)
+        // Hermes's own wording is what the user sees.
+        #expect(IOSCronViewModel.refusalMessage(
+            verb: "resume",
+            output: "Traceback…\nValueError: Cannot resume: one-shot time is in the past\n",
+            exitCode: 1
+        ) == "ValueError: Cannot resume: one-shot time is in the past")
+        // …with a generic fallback when it printed nothing.
+        #expect(IOSCronViewModel.refusalMessage(verb: "pause", output: "  \n", exitCode: 2)
+            == "hermes cron pause failed (exit 2).")
+    }
+
     // MARK: - M6 Settings
 
     @Test @MainActor func settingsLoadsFromConfigYAML() async throws {

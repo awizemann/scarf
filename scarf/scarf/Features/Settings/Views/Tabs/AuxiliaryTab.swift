@@ -225,6 +225,21 @@ struct AuxiliaryTab: View {
         if capabilitiesStore?.capabilities.hasAuxiliaryReasoningEffort ?? false {
             reasoningEffortPicker(value: model.reasoningEffort) { viewModel.setAuxiliaryReasoningEffort(key, value: $0) }
         }
+        // v0.20.4+ — documented only for `compression`.
+        if key == "compression", capabilitiesStore?.capabilities.isV0204OrLater ?? false {
+            maxConcurrencyRow(value: model.maxConcurrency) { viewModel.setAuxiliaryMaxConcurrency(key, value: $0) }
+        }
+    }
+
+    /// Shared "max concurrency" row for the v0.20.4+ true-optional
+    /// `auxiliary.<task>.max_concurrency` cap. `0` in the stepper means
+    /// "unlimited" (unsets the key); any positive value writes it.
+    @ViewBuilder
+    private func maxConcurrencyRow(value: Int?, onChange: @escaping (Int?) -> Void) -> some View {
+        StepperRow(label: "Max Concurrency", value: value ?? 0, range: 0...50, step: 1) { newValue in
+            onChange(newValue == 0 ? nil : newValue)
+        }
+        .help("Caps simultaneous calls for this task to reduce request-burst 429s during provider incidents. 0 = unlimited (legacy behavior).")
     }
 
     /// Shared reasoning-effort picker for `auxiliary.<task>.reasoning_effort`
@@ -265,6 +280,9 @@ struct AuxiliaryTab: View {
                 .foregroundStyle(.tertiary)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 4)
+        }
+        if capabilitiesStore?.capabilities.isV0204OrLater ?? false {
+            maxConcurrencyRow(value: settings.maxConcurrency) { viewModel.setTitleGenerationMaxConcurrency($0) }
         }
     }
 

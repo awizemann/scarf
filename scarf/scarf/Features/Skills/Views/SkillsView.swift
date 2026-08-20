@@ -20,6 +20,8 @@ struct SkillsView: View {
     @Environment(\.serverContext) private var serverContext
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     @State private var currentTab: Tab = .installed
+    /// Skill awaiting confirmation for a destructive `--force` update.
+    @State private var forceUpdateTarget: String?
 
     init(context: ServerContext) {
         _viewModel = State(initialValue: SkillsViewModel(context: context))
@@ -724,6 +726,13 @@ struct SkillsView: View {
             }
             .padding()
             Divider()
+            // Hermes v0.20.4+ leaves locally-edited skills alone. Empty
+            // on older hosts (they never skip), so this section is
+            // invisible there and the tab renders exactly as before.
+            if !viewModel.skippedLocalEdits.isEmpty {
+                keptLocalEditsSection
+                Divider()
+            }
             if viewModel.updates.isEmpty {
                 ContentUnavailableView(
                     "No Updates",
@@ -755,6 +764,57 @@ struct SkillsView: View {
                     .padding()
                 }
             }
+        }
+    }
+
+    /// Skills the last "Update All" deliberately did not touch because
+    /// the user has edited them on disk. The per-skill override re-runs
+    /// `skills update <name> --force` for that one skill only — it is
+    /// destructive, so it's never applied in bulk and only appears on
+    /// hosts that understand `--force` in this sense (v0.20.4+).
+    private var keptLocalEditsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(
+                "\(viewModel.skippedLocalEdits.count) skill(s) kept your local edits",
+                systemImage: "pencil.and.outline"
+            )
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(.orange)
+            ForEach(viewModel.skippedLocalEdits, id: \.self) { name in
+                HStack {
+                    Text(name)
+                        .font(.system(.body, design: .monospaced))
+                    Spacer()
+                    if capabilitiesStore?.capabilities.hasSkillsUpdateForce ?? false {
+                        Button("Update anyway…") {
+                            forceUpdateTarget = name
+                        }
+                        .controlSize(.small)
+                    }
+                }
+            }
+            Text("Updating these would overwrite your edits, so Hermes skipped them.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .alert(
+            "Discard local edits to \(forceUpdateTarget ?? "")?",
+            isPresented: Binding(
+                get: { forceUpdateTarget != nil },
+                set: { if !$0 { forceUpdateTarget = nil } }
+            )
+        ) {
+            Button("Cancel", role: .cancel) { forceUpdateTarget = nil }
+            Button("Update & Discard", role: .destructive) {
+                if let name = forceUpdateTarget {
+                    viewModel.forceUpdateSkill(name)
+                }
+                forceUpdateTarget = nil
+            }
+        } message: {
+            Text("The upstream version will replace your edited copy. This can't be undone.")
         }
     }
 }

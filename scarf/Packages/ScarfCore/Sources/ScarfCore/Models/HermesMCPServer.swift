@@ -19,6 +19,30 @@ public enum MCPTransport: String, Sendable, Equatable, CaseIterable, Identifiabl
     #endif
 }
 
+/// Hermes v0.20.4+ — optional per-user identity header attached to this
+/// server's HTTP/SSE requests (`identity_header:` nested block; see
+/// `mcp_tool.py._resolve_identity_header`). `valueFrom == .static` requires
+/// `value`; `.profile` resolves the value to the active Hermes profile name
+/// at connect time and `value` is ignored (kept for round-trip fidelity).
+public struct MCPIdentityHeader: Sendable, Equatable {
+    public enum ValueSource: String, Sendable, Equatable, CaseIterable, Identifiable {
+        case `static`
+        case profile
+
+        public var id: String { rawValue }
+    }
+
+    public var name: String
+    public var valueFrom: ValueSource
+    public var value: String
+
+    public init(name: String, valueFrom: ValueSource = .static, value: String = "") {
+        self.name = name
+        self.valueFrom = valueFrom
+        self.value = value
+    }
+}
+
 public struct HermesMCPServer: Identifiable, Sendable, Equatable {
     public let name: String
     public let transport: MCPTransport
@@ -60,6 +84,24 @@ public struct HermesMCPServer: Identifiable, Sendable, Equatable {
     /// path. `nil` = key absent = Hermes default (`true`). Surfaced in
     /// MCPServerEditorView when `HermesCapabilities.hasMCPClientCerts` is on.
     public let sslVerify: String?
+    /// Hermes v0.20.4+ — optional per-user identity header for HTTP/SSE
+    /// transports (`identity_header:` nested block). `nil` when the key is
+    /// absent from the YAML. Surfaced in MCPServerEditorView when
+    /// `HermesCapabilities.hasMCPIdentityHeader` is on. This is a nested
+    /// block, not a single scalar, so it is NOT a candidate for the flat
+    /// single-line `patchMCPServerField` scalar helpers — HermesFileService
+    /// writes it with a dedicated sub-block writer that must not disturb
+    /// sibling unknown blocks.
+    public let identityHeader: MCPIdentityHeader?
+    /// Hermes v0.20.4+ — `strict_redirect_headers` bool for HTTP/SSE
+    /// transports (Portable Agent Plugins v1 §7.2.1: configured headers must
+    /// not follow a cross-origin redirect). `nil` = key absent = Hermes
+    /// default (`false`).
+    public let strictRedirectHeaders: Bool?
+    /// Hermes v0.20.4+ — working directory for stdio-transport servers
+    /// (`cwd:` scalar, `StdioServerParameters.cwd`). `nil` = key absent =
+    /// Hermes's own process cwd.
+    public let cwd: String?
 
 
     public init(
@@ -83,7 +125,10 @@ public struct HermesMCPServer: Identifiable, Sendable, Equatable {
         supportsParallelToolCalls: Bool? = nil,
         clientCert: String? = nil,
         clientKey: String? = nil,
-        sslVerify: String? = nil
+        sslVerify: String? = nil,
+        identityHeader: MCPIdentityHeader? = nil,
+        strictRedirectHeaders: Bool? = nil,
+        cwd: String? = nil
     ) {
         self.name = name
         self.transport = transport
@@ -106,6 +151,9 @@ public struct HermesMCPServer: Identifiable, Sendable, Equatable {
         self.clientCert = clientCert
         self.clientKey = clientKey
         self.sslVerify = sslVerify
+        self.identityHeader = identityHeader
+        self.strictRedirectHeaders = strictRedirectHeaders
+        self.cwd = cwd
     }
     public var id: String { name }
 

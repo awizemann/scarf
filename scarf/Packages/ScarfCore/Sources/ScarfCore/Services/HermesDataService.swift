@@ -43,6 +43,9 @@ public actor HermesDataService {
     private var hasRewindCountColumn = false
     private var hasSessionActivityColumns = false
     private var hasSessionModelUsageTable = false
+    private var hasHiddenColumn = false
+    private var hasLastReadAtColumn = false
+    private var hasListableChildSupport = false
 
     /// Last error from `open()` / `refresh()`, user-presentable. `nil`
     /// means the last attempt succeeded. Views surface this when their
@@ -83,6 +86,9 @@ public actor HermesDataService {
         hasRewindCountColumn = await backend.hasRewindCountColumn
         hasSessionActivityColumns = await backend.hasSessionActivityColumns
         hasSessionModelUsageTable = await backend.hasSessionModelUsageTable
+        hasHiddenColumn = await backend.hasHiddenColumn
+        hasLastReadAtColumn = await backend.hasLastReadAtColumn
+        hasListableChildSupport = await backend.hasListableChildSupport
         lastOpenError = await backend.lastOpenError
         return ok
     }
@@ -97,6 +103,9 @@ public actor HermesDataService {
         hasRewindCountColumn = await backend.hasRewindCountColumn
         hasSessionActivityColumns = await backend.hasSessionActivityColumns
         hasSessionModelUsageTable = await backend.hasSessionModelUsageTable
+        hasHiddenColumn = await backend.hasHiddenColumn
+        hasLastReadAtColumn = await backend.hasLastReadAtColumn
+        hasListableChildSupport = await backend.hasListableChildSupport
         lastOpenError = await backend.lastOpenError
         return ok
     }
@@ -153,7 +162,126 @@ public actor HermesDataService {
         if hasSessionActivityColumns {
             cols += ", pinned, last_activity_at, last_activity_description"
         }
+        // v0.20.4: read watermark. Appended last and read by column
+        // NAME in sessionFromRow, same pattern as everything above.
+        // Absent (pre-v0.20.4 DB) → identical SELECT shape to today.
+        // READ ONLY: Scarf never writes `last_read_at` — state.db is
+        // opened read-only and Hermes owns the watermark
+        // (`set_session_read`). Scarf only derives `isUnread` from it.
+        if hasLastReadAtColumn {
+            cols += ", last_read_at"
+        }
         return cols
+    }
+
+    /// `sessionColumns` plus Hermes's session-recency expression, for the
+    /// LIST queries only.
+    ///
+    /// Ports `_sql_session_last_active` (hermes_state_common.py:169-191):
+    /// the freshest of `last_activity_at` and `MAX(messages.timestamp)`,
+    /// falling back to `started_at`. The message max is the dominant term
+    /// — the durable heartbeat is rate-limited (~60 s) and best-effort, so
+    /// after a turn writes messages `last_activity_at` lags them. Deriving
+    /// unread from the heartbeat alone silently under-reports.
+    ///
+    /// **Cost.** This is a correlated subquery per row, so it rides ONLY
+    /// on the queries whose rows feed the unread badge, and only when
+    /// `last_read_at` exists — without the watermark column `isUnread` is
+    /// unconditionally false and the subquery would buy nothing. That gate
+    /// also keeps the emitted SQL byte-identical on pre-v0.20.4 hosts.
+    /// Hermes pays exactly the same per-row cost in `list_sessions_rich`,
+    /// and `messages.session_id` is indexed.
+    private var sessionListColumns: String {
+        guard hasLastReadAtColumn else { return sessionColumns }
+        let a = hasListableChildSupport ? "s" : "sessions"
+        let msgMax = "(SELECT MAX(_act_m.timestamp) FROM messages _act_m WHERE _act_m.session_id = \(a).id)"
+        // The heartbeat column only exists from v0.20; without it the
+        // expression degrades to MAX(messages.timestamp) ?? started_at,
+        // which is still the dominant term.
+        let freshest: String = hasSessionActivityColumns
+            ? "(SELECT MAX(_act_v.v) FROM (SELECT \(a).last_activity_at AS v UNION ALL SELECT \(msgMax)) _act_v)"
+            : msgMax
+        return sessionColumns + ", COALESCE(\(freshest), \(a).started_at) AS last_active"
+    }
+
+    // MARK: - Session list predicate (Hermes parity)
+
+    /// `FROM` clause for the session-list queries. Aliased to `s` only
+    /// when the listable-child predicate is active — it needs a stable
+    /// outer alias to correlate its `sessions p` subqueries against.
+    /// Without it the emitted SQL stays byte-identical to pre-v0.20.4.
+    private var sessionListFrom: String {
+        hasListableChildSupport ? "sessions s" : "sessions"
+    }
+
+    /// `WHERE` predicate selecting the rows a session list shows.
+    ///
+    /// Mirrors Hermes's `_LISTABLE_CHILD_SQL`
+    /// (hermes_state_common.py:169-175): roots, plus branch children,
+    /// plus reset children — subagent runs and compression
+    /// continuations stay out. Reset children are identified by the
+    /// `_reset_from` marker in `model_config`, with the same-`session_key`
+    /// legacy fallback for rows written before the marker existed
+    /// (`_legacy_reset_child_sql`, :117-133). Without this, a
+    /// conversation continued after `/reset` is invisible in Scarf.
+    ///
+    /// `json_extract` is used rather than the `->>` operator Hermes
+    /// spells it with: `->>` needs SQLite 3.38+ *syntax* support, while
+    /// `json_extract` is the portable spelling of the same thing and
+    /// the JSON1 availability is probed at open().
+    ///
+    /// `hidden = 0` rides along when `sessions.hidden` exists so Scarf
+    /// shows the same set Hermes does.
+    private var sessionListPredicate: String {
+        var clauses: [String] = []
+        if hasListableChildSupport {
+            let branch = """
+                json_extract(COALESCE(s.model_config, '{}'), '$._branched_from') IS NOT NULL \
+                OR EXISTS (SELECT 1 FROM sessions p WHERE p.id = s.parent_session_id \
+                AND p.end_reason = 'branched' AND s.started_at >= p.ended_at)
+                """
+            clauses.append("(s.parent_session_id IS NULL OR \(branch) OR \(Self.resetChildSQL))")
+        } else {
+            clauses.append("parent_session_id IS NULL")
+        }
+        if hasHiddenColumn {
+            clauses.append(hasListableChildSupport ? "s.hidden = 0" : "hidden = 0")
+        }
+        return clauses.joined(separator: " AND ")
+    }
+
+    /// Hermes's `_RESET_CHILD_SQL` (hermes_state_common.py:139-143)
+    /// against the outer alias `s`: the durable `_reset_from` marker,
+    /// or the pre-marker heuristic — a child riding its parent's exact
+    /// non-empty routing key where the parent ended at a reset
+    /// boundary. `_RESET_END_REASONS` is copied verbatim from :100-113.
+    private static let resetChildSQL = """
+        json_extract(COALESCE(s.model_config, '{}'), '$._reset_from') IS NOT NULL \
+        OR EXISTS (SELECT 1 FROM sessions p WHERE p.id = s.parent_session_id \
+        AND p.end_reason IN ('session_reset', 'session_switch', 'idle', 'daily', 'suspended', 'resume_pending_expired') \
+        AND s.session_key IS NOT NULL AND s.session_key != '' AND s.session_key = p.session_key)
+        """
+
+    /// Hermes's `_ephemeral_child_sql` (hermes_state_common.py:178-190)
+    /// for the children of one parent: subagent runs only — not branch,
+    /// reset, or compression continuations. Used by
+    /// `fetchSubagentSessions` so a post-reset conversation isn't
+    /// rendered as a subagent run of the session it continued.
+    private var subagentChildPredicate: String {
+        guard hasListableChildSupport else { return "parent_session_id = ?" }
+        let branch = """
+            json_extract(COALESCE(s.model_config, '{}'), '$._branched_from') IS NOT NULL \
+            OR EXISTS (SELECT 1 FROM sessions p WHERE p.id = s.parent_session_id \
+            AND p.end_reason = 'branched' AND s.started_at >= p.ended_at)
+            """
+        let compression = """
+            EXISTS (SELECT 1 FROM sessions p WHERE p.id = s.parent_session_id \
+            AND p.end_reason = 'compression')
+            """
+        return """
+            s.parent_session_id = ? AND NOT (\(branch)) \
+            AND NOT (\(compression)) AND NOT (\(Self.resetChildSQL))
+            """
     }
 
     private var messageColumns: String {
@@ -246,7 +374,7 @@ public actor HermesDataService {
     // MARK: - Session Queries
 
     public func fetchSessions(limit: Int = QueryDefaults.sessionLimit) async -> [HermesSession] {
-        let sql = "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id IS NULL ORDER BY started_at DESC LIMIT ?"
+        let sql = "SELECT \(sessionListColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?"
         do {
             let rows = try await backend.query(sql, params: [.integer(Int64(limit))])
             return rows.map { sessionFromRow($0) }
@@ -257,7 +385,7 @@ public actor HermesDataService {
     }
 
     public func fetchSessionsInPeriod(since: Date) async -> [HermesSession] {
-        let sql = "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id IS NULL AND started_at >= ? ORDER BY started_at DESC"
+        let sql = "SELECT \(sessionColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) AND started_at >= ? ORDER BY started_at DESC"
         do {
             let rows = try await backend.query(sql, params: [.real(since.timeIntervalSince1970)])
             return rows.map { sessionFromRow($0) }
@@ -267,7 +395,7 @@ public actor HermesDataService {
     }
 
     public func fetchSubagentSessions(parentId: String) async -> [HermesSession] {
-        let sql = "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id = ? ORDER BY started_at ASC"
+        let sql = "SELECT \(sessionColumns) FROM \(sessionListFrom) WHERE \(subagentChildPredicate) ORDER BY started_at ASC"
         do {
             let rows = try await backend.query(sql, params: [.text(parentId)])
             return rows.map { sessionFromRow($0) }
@@ -627,9 +755,19 @@ public actor HermesDataService {
         // discoverable: Hermes search_messages includes them
         // (`active = 1 OR compacted = 1`), while rewind/undo rows
         // (active=0, compacted=0) stay hidden. Mirror that so Scarf
-        // search matches `hermes sessions search` on the same DB.
-        // Transcript/activity fetches above stay active-only — Hermes
-        // reloads only the active set there too.
+        // searches the same ROW SET as `hermes sessions search` on the
+        // same DB. Transcript/activity fetches above stay active-only
+        // — Hermes reloads only the active set there too.
+        //
+        // The QUERY TEXT deliberately does NOT match Hermes's: Hermes
+        // strips FTS5's special characters
+        // (`_FTS5_SPECIAL_CHARS`/`_sanitize_fts5_query`, completed in
+        // v0.20.4 by c595dcb955), whereas `sanitizeFTSQuery` below
+        // quotes each token as a phrase. Both keep MATCH parsable;
+        // quoting additionally preserves the term (`gateway/run.py`
+        // stays one phrase rather than becoming `gateway run py`), so
+        // Scarf can return hits on punctuated terms that Hermes
+        // broadens. Kept on purpose — do not "fix" it into parity.
         let activeClause: String
         if hasMessagesActiveColumn {
             activeClause = hasCompactedColumn
@@ -851,10 +989,10 @@ public actor HermesDataService {
         let sql: String
         let params: [SQLValue]
         if let after {
-            sql = "SELECT id FROM sessions WHERE parent_session_id IS NULL AND started_at > ? ORDER BY started_at DESC LIMIT 1"
+            sql = "SELECT id FROM \(sessionListFrom) WHERE \(sessionListPredicate) AND started_at > ? ORDER BY started_at DESC LIMIT 1"
             params = [.real(after.timeIntervalSince1970)]
         } else {
-            sql = "SELECT id FROM sessions WHERE parent_session_id IS NULL ORDER BY started_at DESC LIMIT 1"
+            sql = "SELECT id FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT 1"
             params = []
         }
         do {
@@ -1106,7 +1244,7 @@ public actor HermesDataService {
         var statements: [(sql: String, params: [SQLValue])] = [
             (statsSQL(), []),
             (
-                "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id IS NULL ORDER BY started_at DESC LIMIT ?",
+                "SELECT \(sessionColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?",
                 [.integer(Int64(sessionLimit))]
             ),
             (
@@ -1191,7 +1329,7 @@ public actor HermesDataService {
         let previewLimit = limit
         let statements: [(sql: String, params: [SQLValue])] = [
             (
-                "SELECT \(sessionColumns) FROM sessions WHERE parent_session_id IS NULL ORDER BY started_at DESC LIMIT ?",
+                "SELECT \(sessionListColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?",
                 [.integer(Int64(limit))]
             ),
             (
@@ -1341,6 +1479,22 @@ public actor HermesDataService {
                   let idx = row.columnIndex["last_activity_description"] else { return nil }
             return row.optionalString(at: idx)
         }()
+        // v0.20.4 read watermark — same by-NAME resolution. NULL stays
+        // nil, which `HermesSession.isUnread` reads as "never tracked =
+        // read" (Hermes's `session_unread`, hermes_state.py:8455-8466).
+        let lastReadAt: Date? = {
+            guard hasLastReadAtColumn,
+                  let idx = row.columnIndex["last_read_at"] else { return nil }
+            return row.date(at: idx)
+        }()
+        // Hermes's `_sql_session_last_active`, selected as `last_active`
+        // by the LIST queries only (`sessionListColumns`). Absent on the
+        // single-session / subagent / analytics shapes — `isUnread` then
+        // falls back to the reduced `lastActivityAt ?? startedAt`.
+        let lastActive: Date? = {
+            guard let idx = row.columnIndex["last_active"] else { return nil }
+            return row.date(at: idx)
+        }()
         return HermesSession(
             id: row.string(at: 0),
             source: row.string(at: 1),
@@ -1366,7 +1520,9 @@ public actor HermesDataService {
             rewindCount: rewindCount,
             pinned: pinned,
             lastActivityAt: lastActivityAt,
-            lastActivityDescription: lastActivityDescription
+            lastActivityDescription: lastActivityDescription,
+            lastReadAt: lastReadAt,
+            lastActive: lastActive
         )
     }
 

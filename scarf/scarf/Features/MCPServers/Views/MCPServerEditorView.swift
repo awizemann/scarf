@@ -64,6 +64,13 @@ struct MCPServerEditorView: View {
                        capabilitiesStore?.capabilities.hasMCPClientCerts == true {
                         tlsSection
                     }
+                    if capabilitiesStore?.capabilities.hasMCPIdentityHeader == true {
+                        if viewModel.server.transport != .stdio {
+                            identityHeaderSection
+                        } else {
+                            cwdSection
+                        }
+                    }
                     if viewModel.server.hasOAuthToken {
                         oauthSection
                     }
@@ -290,6 +297,71 @@ struct MCPServerEditorView: View {
                 }
                 Text("mTLS for HTTP / SSE transports. Requires Hermes v0.15+.")
                     .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// v0.20.4 — optional per-user identity header for HTTP/SSE servers.
+    /// Shown only under the `hasMCPIdentityHeader` gate in `body`. Kept
+    /// minimal per the nested-block shape: name, a value-from picker, and
+    /// a value field shown only in "static" mode.
+    private var identityHeaderSection: some View {
+        sectionBox(title: "Identity header") {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("Attach identity header", isOn: $viewModel.identityHeaderEnabled)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                if viewModel.identityHeaderEnabled {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Header name").font(.caption).foregroundStyle(.secondary)
+                        TextField("X-User-Id", text: $viewModel.identityHeaderNameDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                    }
+                    Picker("Value from", selection: $viewModel.identityHeaderValueFromDraft) {
+                        Text("Static").tag(MCPIdentityHeader.ValueSource.static)
+                        Text("Profile").tag(MCPIdentityHeader.ValueSource.profile)
+                    }
+                    .pickerStyle(.segmented)
+                    if viewModel.identityHeaderValueFromDraft == .static {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Value").font(.caption).foregroundStyle(.secondary)
+                            TextField("alice", text: $viewModel.identityHeaderValueDraft)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    } else {
+                        Text("Resolves to the active Hermes profile name at connect time.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Toggle(
+                    "Strict redirect headers",
+                    isOn: Binding<Bool>(
+                        get: { viewModel.strictRedirectHeadersDraft ?? false },
+                        set: { viewModel.strictRedirectHeadersDraft = $0 }
+                    )
+                )
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                Text("Don't forward configured headers across a cross-origin redirect. Requires Hermes v0.20.4+.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// v0.20.4 — working directory for stdio servers. Shown only under the
+    /// `hasMCPIdentityHeader` gate in `body`.
+    private var cwdSection: some View {
+        sectionBox(title: "Working directory") {
+            VStack(alignment: .leading, spacing: 4) {
+                TextField("/path/to/project", text: $viewModel.cwdDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                Text("Working directory the server process launches in. Leave blank for Hermes's own cwd. Requires Hermes v0.20.4+.")
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }

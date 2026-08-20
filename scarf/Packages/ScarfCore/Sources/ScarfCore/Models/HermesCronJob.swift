@@ -127,13 +127,17 @@ public struct HermesCronJob: Identifiable, Sendable, Codable {
     public nonisolated init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id                = try c.decode(String.self, forKey: .id)
-        self.name              = try c.decode(String.self, forKey: .name)
-        self.prompt            = try c.decode(String.self, forKey: .prompt)
+        // `name`/`prompt`/`state` are required keys in every jobs.json
+        // Hermes writes, but a hand-edited file can carry `null` (or drop
+        // the key) — and a hard decode there fails the WHOLE file, taking
+        // every other job's list entry down with it. Default instead.
+        self.name              = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        self.prompt            = try c.decodeIfPresent(String.self, forKey: .prompt) ?? ""
         self.skills            = try c.decodeIfPresent([String].self, forKey: .skills)
         self.model             = try c.decodeIfPresent(String.self, forKey: .model)
         self.schedule          = try c.decode(CronSchedule.self, forKey: .schedule)
         self.enabled           = try c.decode(Bool.self, forKey: .enabled)
-        self.state             = try c.decode(String.self, forKey: .state)
+        self.state             = try c.decodeIfPresent(String.self, forKey: .state) ?? ""
         self.deliver           = try c.decodeIfPresent(String.self, forKey: .deliver)
         self.nextRunAt         = try c.decodeIfPresent(String.self, forKey: .nextRunAt)
         self.lastRunAt         = try c.decodeIfPresent(String.self, forKey: .lastRunAt)
@@ -169,8 +173,41 @@ public struct HermesCronJob: Identifiable, Sendable, Codable {
     /// author in the face — every field must be forwarded, or a toggle
     /// round-trip silently strips it from jobs.json (workdir/contextFrom/
     /// noAgent were dropped this way until the v0.18 audit caught it).
-    public nonisolated func withEnabled(_ newEnabled: Bool) -> HermesCronJob {
-        HermesCronJob(
+    ///
+    /// Flipping `enabled` alone is NOT enough. Since v0.20.4
+    /// `is_job_runnable()` (cron/jobs.py:571–582, claim gate :2862) refuses
+    /// to fire whenever `state == "paused"` OR `paused_at` is set —
+    /// regardless of `enabled` — so an enable-toggle that forwards the old
+    /// pause markers produces a job that looks enabled and never runs.
+    /// We therefore mirror Hermes's own `pause_job`/`resume_job`
+    /// (cron/jobs.py:2196–2233): disable sets `state = "paused"` +
+    /// `paused_at`; enable sets `state = "scheduled"` and clears
+    /// `paused_at`/`paused_reason`.
+    ///
+    /// Deliberately UNGATED (no `hasCronPauseMarkerGate` check). Those two
+    /// Hermes functions are byte-identical at v0.20.0 (v2026.8.3) and
+    /// v0.20.4 (v2026.8.18), so these markers are exactly what every
+    /// supported host already writes for itself; older hosts simply ignore
+    /// them in the runnable check. Gating would also be awkward here — the
+    /// capability store is a service, unreachable from the model layer —
+    /// and an always-correct write beats a version-conditional one.
+    ///
+    /// `now` is injectable for deterministic tests only.
+    public nonisolated func withEnabled(_ newEnabled: Bool, now: Date = Date()) -> HermesCronJob {
+        // Pause markers live in `extra` (Scarf doesn't model them as
+        // fields); clearing means removing the keys — Hermes reads them
+        // via `.get()`, so absent and null are equivalent.
+        var newExtra = extra
+        if newEnabled {
+            newExtra.removeValue(forKey: "paused_at")
+            newExtra.removeValue(forKey: "paused_reason")
+        } else {
+            newExtra["paused_at"] = .string(Self.pauseTimestampFormatter.string(from: now))
+        }
+        // Unconditional, matching pause_job/resume_job: a toggled job is
+        // by definition no longer in whatever terminal state it held.
+        let newState = newEnabled ? "scheduled" : "paused"
+        return HermesCronJob(
             id: id,
             name: name,
             prompt: prompt,
@@ -178,7 +215,7 @@ public struct HermesCronJob: Identifiable, Sendable, Codable {
             model: model,
             schedule: schedule,
             enabled: newEnabled,
-            state: state,
+            state: newState,
             deliver: deliver,
             nextRunAt: nextRunAt,
             lastRunAt: lastRunAt,
@@ -193,9 +230,18 @@ public struct HermesCronJob: Identifiable, Sendable, Codable {
             contextFrom: contextFrom,
             noAgent: noAgent,
             attachToSession: attachToSession,
-            extra: extra
+            extra: newExtra
         )
     }
+
+    /// ISO 8601 UTC with fractional seconds omitted — the shape
+    /// `datetime.isoformat()` produces for Hermes's own `paused_at`.
+    private static let pauseTimestampFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        return f
+    }()
 
     public nonisolated func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -228,12 +274,115 @@ public struct HermesCronJob: Identifiable, Sendable, Codable {
         }
     }
 
+    /// Hermes's `ONESHOT_GRACE_SECONDS` (cron/jobs.py:118) — how late a
+    /// one-shot may be and still be eligible to fire.
+    public static let oneShotGraceSeconds: TimeInterval = 120
+
+    /// Whether re-enabling this job would produce a state Hermes's own CLI
+    /// refuses to write.
+    ///
+    /// `resume_job` (cron/jobs.py:2212-2233) recomputes `next_run_at` via
+    /// `compute_next_run` and RAISES when the result is `None` for a
+    /// `kind == "once"` schedule — i.e. the deadline has passed (beyond the
+    /// grace window) or the one-shot already ran. Resuming such a job would
+    /// leave an `enabled` record that can never fire; Scarf refuses at the
+    /// UI instead of writing it.
+    ///
+    /// Mirrors `_recoverable_oneshot_run_at` (cron/jobs.py:838-865), which
+    /// is what `compute_next_run` delegates to for `kind == "once"`.
+    public nonisolated func oneShotIsUnresumable(now: Date = Date()) -> Bool {
+        guard schedule.kind == "once" else { return false }
+        // `last_run_at` set → "already run, never eligible again".
+        if let lastRunAt, !lastRunAt.isEmpty { return true }
+        guard let runAt = schedule.runAt, !runAt.isEmpty else { return true }
+        guard let deadline = Self.parseHermesTimestamp(runAt) else { return true }
+        return deadline < now.addingTimeInterval(-Self.oneShotGraceSeconds)
+    }
+
+    /// Lenient parse of a Hermes `datetime.isoformat()` string. Handles the
+    /// offset-bearing spellings via `CronScheduleFormatter.isoDate`, plus the
+    /// naive (offset-less) spelling older Hermes builds persisted — read as
+    /// UTC, matching `_ensure_aware`.
+    nonisolated static func parseHermesTimestamp(_ iso: String) -> Date? {
+        if let d = CronScheduleFormatter.isoDate(iso) { return d }
+        let naive = DateFormatter()
+        naive.locale = Locale(identifier: "en_US_POSIX")
+        naive.timeZone = TimeZone(secondsFromGMT: 0)
+        for format in ["yyyy-MM-dd'T'HH:mm:ss.SSSSSS", "yyyy-MM-dd'T'HH:mm:ss.SSS", "yyyy-MM-dd'T'HH:mm:ss"] {
+            naive.dateFormat = format
+            if let d = naive.date(from: iso) { return d }
+        }
+        return nil
+    }
+
+    /// Copy of this job with `next_run_at` cleared, for the JSON-write
+    /// fallback path when the `hermes cron resume` CLI is unreachable.
+    ///
+    /// Scarf can't evaluate a cron expression, so it can't reproduce
+    /// `resume_job`'s recomputed `next_run_at` locally. It doesn't have to:
+    /// `_get_due_jobs_locked` (cron/jobs.py:3210-3231) treats a missing
+    /// `next_run_at` as a recovery case and recomputes it from the schedule
+    /// via `compute_next_run(schedule, now)` for `cron`/`interval` kinds
+    /// (and `_recoverable_oneshot_run_at` for one-shots), then persists it.
+    /// Clearing the field therefore hands the recomputation to Hermes and
+    /// gets exactly the "next future run from now" that `resume_job` would
+    /// have written — while a STALE past `next_run_at` would instead trigger
+    /// a spurious catch-up fire that consumes one of `repeat.times`.
+    public nonisolated func clearingNextRunAt() -> HermesCronJob {
+        HermesCronJob(
+            id: id, name: name, prompt: prompt, skills: skills, model: model,
+            schedule: schedule, enabled: enabled, state: state, deliver: deliver,
+            nextRunAt: nil, lastRunAt: lastRunAt, lastError: lastError,
+            preRunScript: preRunScript, deliveryFailures: deliveryFailures,
+            lastDeliveryError: lastDeliveryError, timeoutType: timeoutType,
+            timeoutSeconds: timeoutSeconds, silent: silent, workdir: workdir,
+            contextFrom: contextFrom, noAgent: noAgent,
+            attachToSession: attachToSession, extra: extra
+        )
+    }
+
+    /// Operator-facing state, ported from Hermes's `effective_job_state`
+    /// (cron/jobs.py:585–602).
+    ///
+    /// The scheduler honours `enabled`, not `state` — so a job with
+    /// `enabled == true` must NEVER display as paused. That divergence was
+    /// the 07-30 outage failure mode upstream: the list looked frozen while
+    /// the fleet kept running. Terminal states (`completed` / `error`) are
+    /// preserved regardless of `enabled`.
+    ///
+    /// The pause marker Hermes checks (`_has_pause_marker`) is `paused_at`,
+    /// which Scarf carries verbatim in `extra` (see `withEnabled`).
+    public nonisolated var effectiveState: String {
+        let stored = state.trimmingCharacters(in: .whitespaces)
+        if stored == "completed" || stored == "error" { return stored }
+        let hasPauseMarker: Bool = {
+            guard let marker = extra["paused_at"] else { return false }
+            if case .null = marker { return false }
+            return true
+        }()
+        if !enabled {
+            if hasPauseMarker || stored == "paused" { return "paused" }
+            return stored.isEmpty ? "paused" : stored
+        }
+        // enabled == true is authoritative: never claim paused.
+        if stored == "paused" || hasPauseMarker { return "scheduled" }
+        return stored.isEmpty ? "scheduled" : stored
+    }
+
+    /// Human-readable state for list rows and detail headers. Always the
+    /// effective state — never the raw stored one.
+    public nonisolated var stateDisplay: String { effectiveState }
+
     public nonisolated var stateIcon: String {
-        switch state {
+        switch effectiveState {
         case "scheduled": return "clock"
         case "running": return "play.circle"
         case "completed": return "checkmark.circle"
-        case "failed": return "xmark.circle"
+        // `error` is the live terminal state Hermes persists and that
+        // effective_job_state() preserves (cron/jobs.py:585–602); `failed`
+        // is Scarf-era legacy kept for older jobs.json files.
+        case "error", "failed": return "xmark.circle"
+        case "paused": return "pause.circle"
         default: return "questionmark.circle"
         }
     }

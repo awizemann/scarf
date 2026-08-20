@@ -6,10 +6,30 @@ import Foundation
 /// (`busy_ack_enabled`, `gateway_restart_notification`,
 /// `slash_command_notice_ttl_seconds`).
 ///
+/// **Stale-doc fix (v0.20.4 audit, Tier 3 #4): keys live TOP-LEVEL, not
+/// under `gateway.platforms.<platform>.*`.** Source-verified (v0.16+) as
+/// `<platform>.<key>` — e.g. `discord.allowed_channels`,
+/// `slack.allowed_channels`, `telegram.allowed_chats`. The doc comments
+/// below previously claimed the `gateway.platforms.<platform>.*` path;
+/// that block is a dead/legacy shape Hermes never reads from. See the
+/// actual parsing logic in `HermesConfig+YAML.swift` (`gatewayAllowlistPlatforms`
+/// loop, which already used the correct top-level prefix — only these doc
+/// comments were wrong).
+///
 /// The struct carries all three list fields so a single shape fits every
 /// platform; only the field matching `GatewayAllowlistKind.kind(for:)` is
 /// surfaced in the editor for a given platform. The other two stay empty
 /// and round-trip through the YAML parser unchanged.
+///
+/// **Allowlist-kind mapping (see `GatewayAllowlistKind.kind(for:)`).**
+/// Slack/Mattermost/Discord → `.channels`; Telegram/DingTalk → `.chats`;
+/// Matrix → `.rooms`. WhatsApp and Google Chat are deliberately excluded —
+/// both gate access through other mechanisms (`allow_from`/
+/// `group_allow_from` for WhatsApp, `GOOGLE_CHAT_ALLOWED_USERS` for Google
+/// Chat), so an `allowed_*` list would be a silent no-op for them. LINE has
+/// an `allowed_rooms` concept too, but it's **environment-variable-only**
+/// (never exposed via `config.yaml`) — deliberately excluded from this
+/// Swift mapping; don't re-add it thinking it's a gap.
 ///
 /// **Defaults track Hermes v0.13.** `busyAckEnabled = true`,
 /// `gatewayRestartNotification = false`, `slashCommandNoticeTTLSeconds = 0`
@@ -18,22 +38,22 @@ import Foundation
 /// an entry into `gatewayPlatforms` when at least one v0.13 key is present
 /// in the file.
 public struct GatewayPlatformSettings: Sendable, Equatable {
-    /// `gateway.platforms.<platform>.allowed_channels` — Slack, Mattermost,
-    /// Google Chat. Empty when the platform doesn't use channels.
+    /// `<platform>.allowed_channels` (top-level) — Slack, Mattermost,
+    /// Discord. Empty when the platform doesn't use channels.
     public var allowedChannels: [String]
-    /// `gateway.platforms.<platform>.allowed_chats` — Telegram, WhatsApp.
+    /// `<platform>.allowed_chats` (top-level) — Telegram, DingTalk.
     /// Empty when the platform doesn't use chats.
     public var allowedChats: [String]
-    /// `gateway.platforms.<platform>.allowed_rooms` — Matrix, DingTalk.
+    /// `<platform>.allowed_rooms` (top-level) — Matrix.
     /// Empty when the platform doesn't use rooms.
     public var allowedRooms: [String]
-    /// `gateway.platforms.<platform>.busy_ack_enabled`. Default `true` — set
+    /// `<platform>.busy_ack_enabled` (top-level). Default `true` — set
     /// to `false` to suppress per-message "agent is working…" acks.
     public var busyAckEnabled: Bool
-    /// `gateway.platforms.<platform>.gateway_restart_notification`. Default
+    /// `<platform>.gateway_restart_notification` (top-level). Default
     /// `false` — set to `true` to post a "Gateway restarted" notice on boot.
     public var gatewayRestartNotification: Bool
-    /// `gateway.platforms.<platform>.slash_command_notice_ttl_seconds`.
+    /// `<platform>.slash_command_notice_ttl_seconds` (top-level).
     /// Default `0` (disabled). Positive values auto-delete slash-command
     /// notices after N seconds.
     public var slashCommandNoticeTTLSeconds: Int

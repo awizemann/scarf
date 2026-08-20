@@ -90,6 +90,11 @@ struct AdvancedTab: View {
             ReadOnlyRow(label: "Provider", value: viewModel.config.delegation.provider)
             EditableTextField(label: "Base URL", value: viewModel.config.delegation.baseURL) { viewModel.setDelegationBaseURL($0) }
             StepperRow(label: "Max Iterations", value: viewModel.config.delegation.maxIterations, range: 1...500, step: 5) { viewModel.setDelegationMaxIterations($0) }
+            // v0.20.4+ — server default 10, floor 1, no ceiling.
+            if capabilitiesStore?.capabilities.isV0204OrLater ?? false {
+                StepperRow(label: "Max Concurrent Children", value: viewModel.config.delegation.maxConcurrentChildren, range: 1...500, step: 1) { viewModel.setDelegationMaxConcurrentChildren($0) }
+                    .help("Max parallel child agents per delegation batch. Values above 10 multiply API cost linearly.")
+            }
         }
 
         SettingsSection(title: "Cron", icon: "clock") {

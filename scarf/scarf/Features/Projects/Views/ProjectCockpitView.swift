@@ -205,11 +205,13 @@ struct ProjectCockpitView: View {
         let hasKanban = capabilitiesStore?.capabilities.hasKanban ?? false
         let hasDashboard = viewModel?.dashboard != nil
         let hasSite = siteWidget != nil
+        let hasProjectTrust = capabilitiesStore?.capabilities.hasSkillsProjectTrust ?? false
         return CockpitPanel.allCases.filter { panel in
             switch panel {
             case .dashboard: return hasDashboard   // hidden for dashboard-less projects
             case .board:     return hasKanban
             case .site:      return hasSite        // hidden without a webview widget
+            case .skills:    return hasProjectTrust // v0.20.4 repo-local skills + trust
             default:         return true
             }
         }
@@ -279,6 +281,8 @@ struct ProjectCockpitView: View {
             )
         case .secrets:
             CockpitSecretsPanel(names: viewModel?.scarfProject?.secretsScope ?? [])
+        case .skills:
+            CockpitProjectSkillsPanel(projectRoot: project.path)
         case .templates:
             CockpitTemplatesPanel(
                 templateID: viewModel?.templateID,
@@ -312,7 +316,7 @@ struct ProjectCockpitView: View {
 // MARK: - Panel identity
 
 private enum CockpitPanel: String, CaseIterable {
-    case dashboard, sessions, board, site, context, cron, memory, secrets, templates, slash, miniapps, fleet
+    case dashboard, sessions, board, site, context, cron, memory, secrets, skills, templates, slash, miniapps, fleet
 
     var title: String {
         switch self {
@@ -324,6 +328,7 @@ private enum CockpitPanel: String, CaseIterable {
         case .cron:      return "Cron"
         case .memory:    return "Memory"
         case .secrets:   return "Secrets"
+        case .skills:    return "Skills"
         case .templates: return "Templates"
         case .slash:     return "Slash"
         case .miniapps:  return "Mini-apps"
@@ -341,6 +346,7 @@ private enum CockpitPanel: String, CaseIterable {
         case .cron:      return "clock"
         case .memory:    return "brain"
         case .secrets:   return "key"
+        case .skills:    return "sparkles"
         case .templates: return "shippingbox"
         case .slash:     return "slash.circle"
         case .miniapps:  return "macwindow"
@@ -560,6 +566,106 @@ private struct CockpitTemplatesPanel: View {
 }
 
 /// Shared empty-state for the lightweight panels.
+/// Repo-local ("project") skills — Hermes v0.20.4. A checkout can carry
+/// skills under `./.hermes/skills` or `./.agents/skills`, but Hermes
+/// only loads them once the repo root is trusted. The panel shows what's
+/// on disk plus the trust toggle, which shells out to
+/// `hermes skills trust|untrust <path>`.
+///
+/// Gated on `hasSkillsProjectTrust` at the panel bar, so it never
+/// appears on hosts without the verbs.
+private struct CockpitProjectSkillsPanel: View {
+    let projectRoot: String
+
+    @Environment(\.serverContext) private var serverContext
+    @State private var viewModel: ProjectSkillsViewModel?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            trustBar
+            Divider()
+            content
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .task(id: projectRoot) {
+            let vm = ProjectSkillsViewModel(context: serverContext, projectRoot: projectRoot)
+            viewModel = vm
+            await vm.load()
+        }
+    }
+
+    @ViewBuilder
+    private var trustBar: some View {
+        if let vm = viewModel {
+            HStack(spacing: 10) {
+                Image(systemName: vm.isTrusted ? "checkmark.seal.fill" : "hand.raised.slash")
+                    .foregroundStyle(vm.isTrusted ? ScarfColor.success : ScarfColor.foregroundMuted)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(vm.isTrusted ? "Trusted for project skills" : "Not trusted")
+                        .font(.callout.weight(.medium))
+                    Text(vm.isTrusted
+                        ? "Skills in this repo load for sessions started here, ahead of same-named profile skills."
+                        : "Skills in this repo are ignored until you trust it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if vm.isTrusted {
+                    Button("Untrust") { vm.setTrusted(false) }
+                        .controlSize(.small)
+                        .disabled(vm.isBusy)
+                } else {
+                    Button("Trust Repo") { vm.setTrusted(true) }
+                        .controlSize(.small)
+                        .buttonStyle(.borderedProminent)
+                        .disabled(vm.isBusy)
+                }
+            }
+            .padding(10)
+            if let message = vm.message {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 6)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let vm = viewModel, !vm.skills.isEmpty {
+            List(vm.skills) { skill in
+                HStack(spacing: 10) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(vm.isTrusted ? ScarfColor.accentActive : ScarfColor.foregroundMuted)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(skill.name).font(.callout)
+                        Text(skill.source)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if !vm.isTrusted {
+                        Text("inactive")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .listStyle(.plain)
+        } else if viewModel?.isLoading ?? true {
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            CockpitEmptyState(
+                icon: "sparkles",
+                text: "No repo-local skills. Add them under \(ProjectSkillsScanner.subdirectories.joined(separator: " or "))."
+            )
+        }
+    }
+}
+
 struct CockpitEmptyState: View {
     let icon: String
     let text: String

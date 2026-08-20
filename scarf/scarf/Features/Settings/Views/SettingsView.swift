@@ -106,7 +106,13 @@ struct SettingsView: View {
             label: "Loading settings…",
             isEmpty: viewModel.rawConfigYAML.isEmpty
         )
-        .onAppear { viewModel.load() }
+        .onAppear {
+            // Decides whether Hermes' in-code built-in personalities are
+            // unioned into the personality picker — must be set before load.
+            viewModel.hasBuiltinPersonalitiesInCode =
+                capabilitiesStore?.capabilities.hasBuiltinPersonalitiesInCode ?? false
+            viewModel.load()
+        }
     }
 
     private var pageHeader: some View {

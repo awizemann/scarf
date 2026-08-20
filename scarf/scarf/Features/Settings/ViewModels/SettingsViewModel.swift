@@ -87,6 +87,12 @@ final class SettingsViewModel {
     /// Reload and post-save reloads pass `force: true` (t-aud24).
     @ObservationIgnored private var hasLoaded = false
 
+    /// Host capability, pushed in by `SettingsView` from
+    /// `\.hermesCapabilities` before `load()`. See `parsePersonalities()`.
+    /// Defaults to `false` — the conservative reading (show only what the
+    /// config actually contains) until capabilities are known.
+    var hasBuiltinPersonalitiesInCode: Bool = false
+
     func load(force: Bool = false) {
         if !force, hasLoaded || isLoading { return }
         hasLoaded = true
@@ -284,6 +290,9 @@ final class SettingsViewModel {
     func setServiceTier(_ value: String) { setSetting("agent.service_tier", value: value) }
     func setGatewayNotifyInterval(_ value: Int) { setSetting("agent.gateway_notify_interval", value: String(value)) }
     func setGatewayTimeout(_ value: Int) { setSetting("agent.gateway_timeout", value: String(value)) }
+    // -- v0.20.4+ (isV0204OrLater).
+    func setCronDrainTimeout(_ value: Int) { setSetting("agent.cron_drain_timeout", value: String(value)) }
+    func setGatewayTurnLeaseTimeout(_ value: Int) { setSetting("agent.gateway_turn_lease_timeout", value: String(value)) }
     func setToolUseEnforcement(_ value: String) { setSetting("agent.tool_use_enforcement", value: value) }
     func setApprovalMode(_ value: String) { setSetting("approvals.mode", value: value) }
     func setApprovalTimeout(_ value: Int) { setSetting("approvals.timeout", value: String(value)) }
@@ -405,6 +414,15 @@ final class SettingsViewModel {
     func setSTTLocalVADMinSilenceMS(_ value: Int) { setSetting("stt.local.vad_min_silence_ms", value: String(value)) }
     func setSTTLocalNoSpeechProbThreshold(_ value: Double) { setSetting("stt.local.no_speech_prob_threshold", value: String(value)) }
     func setSTTLocalLogprobThreshold(_ value: Double) { setSetting("stt.local.logprob_threshold", value: String(value)) }
+    // -- v0.20.4+ (isV0204OrLater).
+    func setSTTLocalUnloadAfterIdleSeconds(_ value: Int) { setSetting("stt.local.unload_after_idle_seconds", value: String(value)) }
+    /// `stt.cloud_trim_silence` / `stt.cloud_trim_threshold_db` /
+    /// `stt.cloud_trim_keep_ms` — TOP-LEVEL siblings of `stt.local.*`.
+    func setSTTCloudTrimSilence(_ value: Bool) { setSetting("stt.cloud_trim_silence", value: value ? "true" : "false") }
+    func setSTTCloudTrimThresholdDB(_ value: Double) { setSetting("stt.cloud_trim_threshold_db", value: String(value)) }
+    func setSTTCloudTrimKeepMS(_ value: Int) { setSetting("stt.cloud_trim_keep_ms", value: String(value)) }
+    /// `wake_word.capture` — `auto` | `local` | `client`.
+    func setWakeWordCapture(_ value: String) { setSetting("wake_word.capture", value: value) }
 
     // MARK: - Memory
 
@@ -445,6 +463,24 @@ final class SettingsViewModel {
     func setAuxiliaryReasoningEffort(_ task: String, value: String) {
         setSetting("auxiliary.\(task).reasoning_effort", value: value)
     }
+    /// `auxiliary.<task>.max_concurrency` (v0.20.4+, isV0204OrLater) —
+    /// true-optional cap on simultaneous calls for that task. Currently
+    /// only surfaced for `compression`. Empty clears back to unlimited.
+    func setAuxiliaryMaxConcurrency(_ task: String, value: Int?) {
+        if let value {
+            setSetting("auxiliary.\(task).max_concurrency", value: String(value))
+        } else {
+            unsetSetting("auxiliary.\(task).max_concurrency")
+        }
+    }
+    /// `auxiliary.background_review.enabled` (v0.20.4+, isV0204OrLater) —
+    /// NOT `agent.background_review.enabled`; nested under the top-level
+    /// `auxiliary:` block. On by default; post-turn self-improvement fork
+    /// that runs after nudge intervals fire — costs tokens. `false` skips
+    /// automatic forks (`/refine` still works).
+    func setBackgroundReviewEnabled(_ value: Bool) {
+        setSetting("auxiliary.background_review.enabled", value: value ? "true" : "false")
+    }
 
     // MARK: - Title generation (auxiliary.title_generation)
 
@@ -470,6 +506,15 @@ final class SettingsViewModel {
     /// chat's own language" (Hermes default).
     func setTitleGenerationLanguage(_ value: String) {
         setSetting("auxiliary.title_generation.language", value: value)
+    }
+    /// `auxiliary.title_generation.max_concurrency` (v0.20.4+,
+    /// isV0204OrLater) — true-optional cap on simultaneous title calls.
+    func setTitleGenerationMaxConcurrency(_ value: Int?) {
+        if let value {
+            setSetting("auxiliary.title_generation.max_concurrency", value: String(value))
+        } else {
+            unsetSetting("auxiliary.title_generation.max_concurrency")
+        }
     }
 
     // MARK: - Image generation (v0.13+)
@@ -569,6 +614,24 @@ final class SettingsViewModel {
         } else {
             unsetSetting("database.journal_size_limit")
         }
+    }
+
+    /// `gateway.multiplex_profile_allowlist` (v0.20.4+) warning helper for
+    /// `ProfileRoutesSection` — returns a user-facing message when
+    /// `profile` would never be reachable at runtime even though a route
+    /// targets it, or `nil` when there's nothing to warn about.
+    ///
+    /// Semantics (source-verified against gateway/config.py
+    /// `_normalize_multiplex_profile_allowlist`): a `nil` allowlist means
+    /// the key is absent — historical serve-all behavior, so every profile
+    /// is reachable and no warning is ever shown. `"default"` is implicitly
+    /// always allowed regardless of list contents, so it's exempted here
+    /// even when the list doesn't literally contain it.
+    func multiplexProfileAllowlistWarning(for profile: String) -> String? {
+        guard let allowlist = config.multiplexProfileAllowlist else { return nil }
+        if profile.isEmpty || profile == "default" { return nil }
+        if allowlist.contains(profile) { return nil }
+        return "Profile \"\(profile)\" is not in `gateway.multiplex_profile_allowlist` — Hermes will reject messages routed here."
     }
 
     /// Read-only status panel via `hermes secrets bitwarden status`. Mirrors
@@ -689,6 +752,8 @@ final class SettingsViewModel {
     func setDelegationProvider(_ value: String) { setSetting("delegation.provider", value: value) }
     func setDelegationBaseURL(_ value: String) { setSetting("delegation.base_url", value: value) }
     func setDelegationMaxIterations(_ value: Int) { setSetting("delegation.max_iterations", value: String(value)) }
+    /// v0.20.4+ (isV0204OrLater) — server-side default 10, floor 1, no ceiling.
+    func setDelegationMaxConcurrentChildren(_ value: Int) { setSetting("delegation.max_concurrent_children", value: String(value)) }
     func setCronWrapResponse(_ value: Bool) { setSetting("cron.wrap_response", value: value ? "true" : "false") }
 
     // MARK: - v0.17 config surfaces
@@ -788,29 +853,18 @@ final class SettingsViewModel {
         context.openInLocalEditor(context.paths.configYAML)
     }
 
+    /// Picker options: the user entries under `agent.personalities`, plus
+    /// Hermes' 14 built-ins on hosts that carry them in code (v0.20.4 moved
+    /// them out of config.yaml into `hermes_cli/personality.py`). Pre-v0.20.4
+    /// hosts ship the built-ins as editable YAML, so the config parse is
+    /// authoritative there and a deleted entry stays deleted — see
+    /// `HermesPersonalities.resolve`.
     private func parsePersonalities() -> [String] {
-        var names: [String] = []
-        var inPersonalities = false
-        for line in rawConfigYAML.components(separatedBy: "\n") {
-            if line.trimmingCharacters(in: .whitespaces) == "personalities:" && line.hasPrefix("  ") {
-                inPersonalities = true
-                continue
-            }
-            if inPersonalities {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.isEmpty { continue }
-                let indent = line.prefix(while: { $0 == " " }).count
-                if indent <= 2 && !trimmed.isEmpty {
-                    inPersonalities = false
-                    continue
-                }
-                if indent == 4 && trimmed.contains(":") {
-                    let name = String(trimmed.split(separator: ":")[0])
-                    names.append(name)
-                }
-            }
-        }
-        return names
+        HermesPersonalities.pickerOptions(
+            yaml: rawConfigYAML,
+            current: config.personality,
+            hasBuiltinPersonalitiesInCode: hasBuiltinPersonalitiesInCode
+        )
     }
 
     @discardableResult

@@ -74,6 +74,39 @@ public protocol HermesQueryBackend: Sendable {
     /// entirely.
     var hasSessionModelUsageTable: Bool { get async }
 
+    /// True iff the connected DB has the v0.20.4 `sessions.hidden`
+    /// column (Hermes hides a session from its own listings without
+    /// deleting it). Detected one-time at `open()`; when present the
+    /// session-list queries add `hidden = 0` so Scarf shows the same
+    /// set Hermes does. Absent (pre-v0.20.4) → the filter is omitted
+    /// and the emitted SQL is byte-identical to the pre-v0.20.4 shape.
+    var hasHiddenColumn: Bool { get async }
+
+    /// True iff the connected DB has the v0.20.4
+    /// `sessions.last_read_at` column — the read watermark Hermes
+    /// stamps via `set_session_read`. Detected one-time at `open()`;
+    /// when present it joins the session SELECT shape and drives the
+    /// unread indicator (`HermesSession.isUnread`). Scarf never WRITES
+    /// it — state.db is opened read-only and Scarf is a reader of
+    /// Hermes state.
+    var hasLastReadAtColumn: Bool { get async }
+
+    /// True iff this DB can evaluate Hermes's `_LISTABLE_CHILD_SQL` /
+    /// `_ephemeral_child_sql` predicates — i.e. it is a v0.20.4+ DB
+    /// (`hidden` AND `last_read_at` present, the release that made
+    /// Hermes's own listing surface reset children), it carries the
+    /// columns those predicates read (`model_config`, `session_key`,
+    /// `end_reason`, `started_at`, `ended_at`), and the SQLite doing
+    /// the work has the JSON1 `json_extract` function.
+    ///
+    /// Gating on the v0.20.4 marker columns (rather than merely on
+    /// `model_config` existing, which is ancient) is deliberate: it
+    /// keeps every pre-v0.20.4 host on the exact roots-only listing
+    /// query it has today, results included, while v0.20.4+ hosts get
+    /// the same roots + branch + reset set `hermes sessions list`
+    /// shows.
+    var hasListableChildSupport: Bool { get async }
+
     /// User-presentable error from the most recent `open()` (or the
     /// most recent failed query for the remote backend's
     /// connectivity-loss codepath). `nil` means everything is healthy.

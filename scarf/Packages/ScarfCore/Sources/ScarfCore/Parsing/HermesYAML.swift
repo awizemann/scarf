@@ -140,9 +140,24 @@ public enum HermesYAML {
                 maps[path] = parseFlatFlowMap(inner) ?? [:]
                 continue
             }
-            if afterColon == "[]" {
+            // Inline flow list `[...]` (`["work", "personal"]`, `[]`) →
+            // parse into a bullet-equivalent `[String]` rather than falling
+            // through to the scalar `values[path]` branch below, which would
+            // read a valid flow list as a malformed scalar. Mirrors the flow
+            // dict handling above; a trailing `# comment` after the bracket
+            // is allowed. Reused by `ProjectSkillsScanner.parseTrustedProjectDirs`
+            // for the same inline-array shape.
+            if afterColon.hasPrefix("["),
+               let close = afterColon.lastIndex(of: "]"),
+               afterColon[afterColon.index(after: close)...]
+                   .trimmingCharacters(in: .whitespaces)
+                   .isEmpty
+                   || afterColon[afterColon.index(after: close)...]
+                       .trimmingCharacters(in: .whitespaces)
+                       .hasPrefix("#") {
+                let inner = String(afterColon[afterColon.index(after: afterColon.startIndex)..<close])
                 values[path] = ""
-                lists[path] = []
+                lists[path] = parseFlatFlowList(inner)
                 continue
             }
 
@@ -175,6 +190,18 @@ public enum HermesYAML {
             result[k] = v
         }
         return result
+    }
+
+    /// Parse the inside of a single-line flow list (`"work", 'personal', x`)
+    /// into trimmed, quote-stripped items. Handles both quoted and bare
+    /// entries and arbitrary internal spacing; empty entries (from `[]` or a
+    /// stray trailing comma) are dropped. Shared by `parseNestedYAML`'s
+    /// inline-array handling and `ProjectSkillsScanner.parseTrustedProjectDirs`.
+    public static func parseFlatFlowList(_ inner: String) -> [String] {
+        inner.split(separator: ",").compactMap { part in
+            let value = stripYAMLQuotes(part.trimmingCharacters(in: .whitespaces))
+            return value.isEmpty ? nil : value
+        }
     }
 
     /// Split one `key: value` flow entry, honoring a quoted key that may

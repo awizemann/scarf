@@ -41,6 +41,18 @@ final class MCPServerEditorViewModel {
     /// `ssl_verify` value at save (see `resolvedSSLVerify`).
     var sslVerifyPeer: Bool
     var sslCAPathDraft: String
+    /// v0.20.4 — identity_header drafts (HTTP / SSE only). `identityHeaderEnabled`
+    /// toggles the block on/off in the UI; the name/valueFrom/value drafts are
+    /// only meaningful (and only written) while it's on.
+    var identityHeaderEnabled: Bool
+    var identityHeaderNameDraft: String
+    var identityHeaderValueFromDraft: MCPIdentityHeader.ValueSource
+    var identityHeaderValueDraft: String
+    /// v0.20.4 — strict_redirect_headers (HTTP / SSE only). `nil` = key
+    /// absent = Hermes default (`false`).
+    var strictRedirectHeadersDraft: Bool?
+    /// v0.20.4 — cwd (stdio only). Empty string = key absent.
+    var cwdDraft: String
     var showSecrets: Bool = false
     var isSaving: Bool = false
     var saveError: String?
@@ -73,6 +85,12 @@ final class MCPServerEditorViewModel {
             self.sslVerifyPeer = true
             self.sslCAPathDraft = storedVerify  // "" for plain default-on
         }
+        self.identityHeaderEnabled = server.identityHeader != nil
+        self.identityHeaderNameDraft = server.identityHeader?.name ?? ""
+        self.identityHeaderValueFromDraft = server.identityHeader?.valueFrom ?? .static
+        self.identityHeaderValueDraft = server.identityHeader?.value ?? ""
+        self.strictRedirectHeadersDraft = server.strictRedirectHeaders
+        self.cwdDraft = server.cwd ?? ""
     }
 
     /// Collapse the two SSL-verify controls back into the single
@@ -131,6 +149,28 @@ final class MCPServerEditorViewModel {
         let originalCert = server.clientCert
         let originalKey = server.clientKey
         let originalVerify = server.sslVerify
+        // v0.20.4 drafts. Scarf writes an identity_header only in the shapes
+        // Hermes's own `_resolve_identity_header` accepts — a blank `name`,
+        // or `value_from: static` with a blank `value`, are both "warn and
+        // ignore" cases there, so writing one would put a header in the
+        // user's config that never gets sent AND that Scarf's own reader
+        // drops on the next load. Refusing beats round-tripping garbage.
+        // (`profile` mode needs no value: Hermes substitutes the active
+        // profile name at connect time.)
+        let trimmedIdentityName = identityHeaderNameDraft.trimmingCharacters(in: .whitespaces)
+        let identityHeaderIsResolvable = identityHeaderEnabled
+            && !trimmedIdentityName.isEmpty
+            && (identityHeaderValueFromDraft == .profile
+                || !identityHeaderValueDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+        let identityHeaderValue: MCPIdentityHeader? = identityHeaderIsResolvable
+            ? MCPIdentityHeader(name: trimmedIdentityName, valueFrom: identityHeaderValueFromDraft, value: identityHeaderValueDraft)
+            : nil
+        let originalIdentityHeader = server.identityHeader
+        let strictRedirectValue = strictRedirectHeadersDraft
+        let originalStrictRedirect = server.strictRedirectHeaders
+        let trimmedCwd = cwdDraft.trimmingCharacters(in: .whitespaces)
+        let cwdValue: String? = trimmedCwd.isEmpty ? nil : trimmedCwd
+        let originalCwd = server.cwd
 
         let service = fileService
         let transport = server.transport
@@ -190,6 +230,15 @@ final class MCPServerEditorViewModel {
                     if verifyValue != originalVerify {
                         if !service.setMCPServerSSLVerify(name: name, value: verifyValue) { ok = false }
                     }
+                    if identityHeaderValue != originalIdentityHeader {
+                        if !service.setMCPServerIdentityHeader(name: name, header: identityHeaderValue) { ok = false }
+                    }
+                    if strictRedirectValue != originalStrictRedirect {
+                        if !service.setMCPServerStrictRedirectHeaders(name: name, value: strictRedirectValue) { ok = false }
+                    }
+                } else if cwdValue != originalCwd {
+                    // v0.20.4 — cwd is stdio-only.
+                    if !service.setMCPServerCwd(name: name, path: cwdValue) { ok = false }
                 }
                 return ok
             }()

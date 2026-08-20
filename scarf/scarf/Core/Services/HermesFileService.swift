@@ -242,7 +242,10 @@ struct HermesFileService: Sendable {
                 supportsParallelToolCalls: server.supportsParallelToolCalls,
                 clientCert: server.clientCert,
                 clientKey: server.clientKey,
-                sslVerify: server.sslVerify
+                sslVerify: server.sslVerify,
+                identityHeader: server.identityHeader,
+                strictRedirectHeaders: server.strictRedirectHeaders,
+                cwd: server.cwd
             )
         }
     }
@@ -388,6 +391,57 @@ struct HermesFileService: Sendable {
                 )
             } else {
                 Self.removeScalar(key: "ssl_verify", in: &entryLines)
+            }
+        }
+    }
+
+    /// Updates the v0.20.4 `identity_header:` nested block — a fixed-shape
+    /// `name` / `value_from` / `value` mapping, not a scalar, so it uses a
+    /// dedicated sub-block writer rather than `replaceOrInsertScalar`. Pass
+    /// `nil` to drop the block entirely. `value` is omitted from the
+    /// written block when `valueFrom == .profile` (Hermes ignores it in
+    /// that mode; matches the manifest's documented shape). Caller is
+    /// responsible for capability-gating —
+    /// `HermesCapabilities.hasMCPIdentityHeader`.
+    @discardableResult
+    nonisolated func setMCPServerIdentityHeader(name: String, header: MCPIdentityHeader?) -> Bool {
+        patchMCPServerField(name: name) { entryLines in
+            Self.replaceOrInsertIdentityHeader(header: header, in: &entryLines)
+        }
+    }
+
+    /// Updates the v0.20.4 `strict_redirect_headers` bool scalar (HTTP/SSE
+    /// only — Portable Agent Plugins v1 §7.2.1). Pass `nil` to drop the key
+    /// (Hermes default `false` applies).
+    @discardableResult
+    nonisolated func setMCPServerStrictRedirectHeaders(name: String, value: Bool?) -> Bool {
+        patchMCPServerField(name: name) { entryLines in
+            if let value {
+                Self.replaceOrInsertScalar(
+                    key: "strict_redirect_headers",
+                    value: value ? "true" : "false",
+                    in: &entryLines
+                )
+            } else {
+                Self.removeScalar(key: "strict_redirect_headers", in: &entryLines)
+            }
+        }
+    }
+
+    /// Updates the v0.20.4 `cwd` scalar — working directory for stdio
+    /// servers only (`StdioServerParameters.cwd`). Pass `nil`/empty to drop
+    /// the key (Hermes uses its own process cwd).
+    @discardableResult
+    nonisolated func setMCPServerCwd(name: String, path: String?) -> Bool {
+        patchMCPServerField(name: name) { entryLines in
+            if let path, !path.trimmingCharacters(in: .whitespaces).isEmpty {
+                Self.replaceOrInsertScalar(
+                    key: "cwd",
+                    value: path.trimmingCharacters(in: .whitespaces),
+                    in: &entryLines
+                )
+            } else {
+                Self.removeScalar(key: "cwd", in: &entryLines)
             }
         }
     }
@@ -571,6 +625,12 @@ struct HermesFileService: Sendable {
         var resources = false
         var prompts = false
         var subSection: String?
+        // v0.20.4 — identity_header is a small fixed-shape nested block
+        // (name / value_from / value). Captured separately from `fields`
+        // since it's not a flat scalar.
+        var identityHeaderName: String?
+        var identityHeaderValueFrom: String?
+        var identityHeaderValue: String?
 
         func flush() {
             guard let name = currentName else { return }
@@ -607,6 +667,62 @@ struct HermesFileService: Sendable {
             let clientCert = fields["client_cert"].map { Self.firstListElementOrScalar($0) }
             let clientKey = fields["client_key"].map { Self.unquote($0) }
             let sslVerify = fields["ssl_verify"].map { Self.unquote($0) }
+            // v0.20.4 — identity_header. Every rejection below mirrors a
+            // `logger.warning(... "— ignoring")` branch of
+            // `mcp_tool.py._resolve_identity_header`, so what Scarf shows
+            // is what Hermes will actually send:
+            //
+            //   * missing/blank `name`             → dropped
+            //   * `value_from` neither static nor  → dropped (NOT coerced to
+            //     profile (typo, wrong type, …)      static: a typo'd source
+            //                                        sends no header at all,
+            //                                        and showing a static
+            //                                        header would be a lie)
+            //   * static (incl. the absent/empty   → dropped when `value` is
+            //     `value_from` default) …            missing or blank
+            //
+            // `profile` mode ignores `value` entirely (Hermes substitutes
+            // the active profile name at connect time). The raw YAML lines
+            // are untouched in every case — this only affects what the model
+            // exposes, not what patchMCPServerField preserves.
+            let identityHeader: MCPIdentityHeader? = {
+                guard let rawName = identityHeaderName else { return nil }
+                let name = Self.unquote(rawName).trimmingCharacters(in: .whitespaces)
+                guard !name.isEmpty else { return nil }
+                // `(raw.get("value_from") or "static")`: absent OR empty ⇒ static.
+                let rawSource = identityHeaderValueFrom
+                    .map { Self.unquote($0).trimmingCharacters(in: .whitespaces).lowercased() } ?? ""
+                switch rawSource.isEmpty ? "static" : rawSource {
+                case "profile":
+                    return MCPIdentityHeader(name: name, valueFrom: .profile, value: "")
+                case "static":
+                    let value = identityHeaderValue.map { Self.unquote($0) } ?? ""
+                    guard !value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+                    return MCPIdentityHeader(name: name, valueFrom: .static, value: value)
+                default:
+                    return nil
+                }
+            }()
+            // v0.20.4 — `strict_redirect_headers` is read by Hermes as
+            // `bool(config.get("strict_redirect_headers"))`, i.e. Python
+            // truthiness over the PyYAML-decoded scalar, not a strict
+            // true/false match. So the YAML 1.1 boolean spellings
+            // (`yes`/`on`/`y`) and any other non-empty scalar (`1`, a
+            // stray string) are all truthy, while the false spellings,
+            // `0`, and the null/empty forms are falsy. Key absent stays
+            // nil — "unset", which Scarf's writer preserves as an absent
+            // key rather than an explicit `false`.
+            let strictRedirectHeaders: Bool? = {
+                guard let raw = fields["strict_redirect_headers"] else { return nil }
+                let s = Self.unquote(raw).trimmingCharacters(in: .whitespaces).lowercased()
+                switch s {
+                case "", "false", "no", "off", "n", "0", "null", "~":
+                    return false
+                default:
+                    return true
+                }
+            }()
+            let cwd = fields["cwd"].map { Self.unquote($0) }
             let server = HermesMCPServer(
                 name: name,
                 transport: transport,
@@ -628,7 +744,10 @@ struct HermesFileService: Sendable {
                 supportsParallelToolCalls: parallel,
                 clientCert: clientCert,
                 clientKey: clientKey,
-                sslVerify: sslVerify
+                sslVerify: sslVerify,
+                identityHeader: identityHeader,
+                strictRedirectHeaders: strictRedirectHeaders,
+                cwd: cwd
             )
             servers.append(server)
 
@@ -642,6 +761,9 @@ struct HermesFileService: Sendable {
             resources = false
             prompts = false
             subSection = nil
+            identityHeaderName = nil
+            identityHeaderValueFrom = nil
+            identityHeaderValue = nil
         }
 
         for rawLine in location.block.dropFirst() {
@@ -712,7 +834,24 @@ struct HermesFileService: Sendable {
                     if trimmed.hasPrefix("- ") {
                         excludeList.append(Self.unquote(String(trimmed.dropFirst(2))))
                     }
+                case "identity_header":
+                    if let colonIdx = trimmed.firstIndex(of: ":") {
+                        let key = String(trimmed[..<colonIdx]).trimmingCharacters(in: .whitespaces)
+                        let value = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
+                        switch key {
+                        case "name": identityHeaderName = value
+                        case "value_from": identityHeaderValueFrom = value
+                        case "value": identityHeaderValue = value
+                        default: break
+                        }
+                    }
                 default:
+                    // Any other nested block (unknown v0.20.4+ keys, future
+                    // additions) is intentionally NOT parsed into fields —
+                    // it's still physically present in `location.block` /
+                    // `entryLines` and survives untouched through
+                    // patchMCPServerField's line-based mutators, which only
+                    // ever touch the specific key they're asked to edit.
                     break
                 }
             }
@@ -919,6 +1058,70 @@ struct HermesFileService: Sendable {
             lines.replaceSubrange(headerIndex..<end, with: newLines)
         } else {
             // Insert just before the first indent<=2 line we find after the header, else at end.
+            var insertAt = lines.count
+            for index in 1..<lines.count {
+                let line = lines[index]
+                let indent = line.prefix(while: { $0 == " " }).count
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if indent <= 2 && !trimmed.isEmpty && !trimmed.hasPrefix("#") {
+                    insertAt = index
+                    break
+                }
+            }
+            lines.insert(contentsOf: newLines, at: insertAt)
+        }
+    }
+
+    /// Writes/removes the `identity_header:` nested block. Scoped narrowly
+    /// to lines at indent==4 matching exactly `"identity_header:"` so it
+    /// never touches an unrelated sibling block that also happens to be
+    /// nested (e.g. a hand-authored `tools:` or a future unknown key) — the
+    /// same containment discipline as `replaceOrInsertSubMap` /
+    /// `replaceOrInsertToolsBlock`, which is what the regression test in
+    /// HermesFileServiceConfigParityTests pins.
+    nonisolated private static func replaceOrInsertIdentityHeader(header: MCPIdentityHeader?, in lines: inout [String]) {
+        var headerIndex: Int?
+        var removeEnd: Int?
+        for index in 1..<lines.count {
+            let line = lines[index]
+            let indent = line.prefix(while: { $0 == " " }).count
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if indent == 4 && trimmed == "identity_header:" {
+                headerIndex = index
+                continue
+            }
+            if headerIndex != nil {
+                if indent >= 6 {
+                    continue
+                } else if trimmed.isEmpty || trimmed.hasPrefix("#") {
+                    continue
+                } else {
+                    removeEnd = index
+                    break
+                }
+            }
+        }
+
+        guard let header, !header.name.trimmingCharacters(in: .whitespaces).isEmpty else {
+            if let headerIndex, let end = removeEnd {
+                lines.removeSubrange(headerIndex..<end)
+            } else if let headerIndex {
+                lines.removeSubrange(headerIndex..<lines.count)
+            }
+            return
+        }
+
+        var newLines: [String] = ["    identity_header:"]
+        newLines.append("      name: \(yamlScalar(header.name))")
+        newLines.append("      value_from: \(header.valueFrom.rawValue)")
+        if header.valueFrom == .static {
+            newLines.append("      value: \(yamlScalar(header.value))")
+        }
+
+        if let headerIndex {
+            let end = removeEnd ?? lines.count
+            lines.replaceSubrange(headerIndex..<end, with: newLines)
+        } else {
             var insertAt = lines.count
             for index in 1..<lines.count {
                 let line = lines[index]
