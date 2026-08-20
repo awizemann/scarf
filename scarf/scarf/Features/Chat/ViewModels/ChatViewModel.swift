@@ -601,6 +601,10 @@ final class ChatViewModel {
             let ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                // A one-click banner fix is a `repaired` preflight outcome —
+                // the config was wrong and the app corrected it in place,
+                // without the user picking a model.
+                Analytics.record("model_preflight_result", props: ["outcome": ok ? "repaired" : "failed"])
                 if ok {
                     self.modelProviderMismatch = nil
                 } else {
@@ -633,6 +637,7 @@ final class ChatViewModel {
             let ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                Analytics.record("model_preflight_result", props: ["outcome": ok ? "repaired" : "failed"])
                 if ok {
                     self.modelProviderMismatch = nil
                 } else {
@@ -777,6 +782,17 @@ final class ChatViewModel {
     /// Terminal mode ignores the prompt — the wizard runs in rich-chat
     /// only.
     func startNewSession(projectPath: String?, initialPrompt: String?) {
+        // One event per user-initiated start. `origin` records the only
+        // entry distinction the Mac can make honestly today: a chat opened
+        // under a project scope vs. the global chat surface. The Kanban and
+        // cron origins in the taxonomy have no macOS entry point into this
+        // method — Kanban opens the chat window, which lands here as
+        // `project` or `chat`, and cron sessions are created by Hermes
+        // itself, never by this app.
+        Analytics.record("chat_session_started", props: [
+            "mode": "new",
+            "origin": projectPath == nil ? "chat" : "project",
+        ])
         // Flip the loading flag synchronously on the user's tap so
         // SwiftUI paints the session-list overlay on the same tick
         // — `startACPSession` won't reach `acpStatus = .spawning`
@@ -814,6 +830,11 @@ final class ChatViewModel {
     }
 
     func resumeSession(_ sessionId: String) {
+        // `origin: chat` — a resume always comes from the session list in
+        // the chat surface. The session's own project scope is only
+        // recovered later (asynchronously, from the attribution sidecar),
+        // and would describe the session rather than where the user was.
+        Analytics.record("chat_session_started", props: ["mode": "resume", "origin": "chat"])
         // Explicit user action: clear any open SSH circuit breaker for
         // this host (gh#138) so the resume gets a real attempt instead of
         // an instant fail-fast from background-poller history.
@@ -858,6 +879,7 @@ final class ChatViewModel {
     }
 
     func continueLastSession() {
+        Analytics.record("chat_session_started", props: ["mode": "continue_last", "origin": "chat"])
         isStartingSession = true
         let intent = beginStartIntent()
         voiceEnabled = false
@@ -910,6 +932,17 @@ final class ChatViewModel {
 
     // MARK: - Send Message
 
+    /// How the user produced the prompt that's being sent. Analytics-only —
+    /// nothing about the send behaves differently per case. `voice` exists
+    /// for parity with the taxonomy and iOS; the Mac's voice mode drives the
+    /// *terminal* pane (`sendToTerminal`), which never reaches `sendText`,
+    /// so no macOS path emits it today.
+    enum ChatInputMode: String {
+        case typed
+        case voice
+        case quickCommand = "quick_command"
+    }
+
     func sendText(_ text: String) {
         sendText(text, images: [])
     }
@@ -924,7 +957,20 @@ final class ChatViewModel {
     /// Terminal mode silently drops attachments — there's no way to
     /// pipe binary content through the TTY. Surface a one-shot warning
     /// so the user knows.
-    func sendText(_ text: String, images: [ChatImageAttachment]) {
+    func sendText(_ text: String, images: [ChatImageAttachment], inputMode: ChatInputMode = .typed) {
+        // The one and only `message_sent` emission site, and deliberately the
+        // outermost one: `sendText` is reachable only from user actions (the
+        // composer, the compress sheet, the goal pill's clear button).
+        // Everything downstream — `sendViaACP`, `addUserMessage`, the wizard
+        // kickoff replay, auto-resumed cron turns — can fire without a user
+        // having sent anything, and must never count.
+        //
+        // Nothing derived from `text` is recorded: not its length, not its
+        // first character, not whether it looked like a slash command.
+        Analytics.record("message_sent", props: [
+            "has_attachment": images.isEmpty ? "false" : "true",
+            "input_mode": inputMode.rawValue,
+        ])
         if displayMode == .richChat {
             if let client = acpClient {
                 sendViaACP(client: client, text: text, images: images)
@@ -1468,7 +1514,14 @@ final class ChatViewModel {
         // arguments here lets `confirmModelPreflight` replay them
         // unchanged after the user picks a model.
         let preflight = ModelPreflight.check(fileService.loadConfig())
-        if !preflight.isConfigured {
+        // `passed` is emitted here rather than inside `ModelPreflight` so it
+        // fires once per session start (the user-visible gate), not once per
+        // background config-diagnostics refresh. The failing branch stays
+        // silent — its outcome is whatever the user then does with the sheet
+        // (`confirmed` / `cancelled` / `failed`).
+        if preflight.isConfigured {
+            Analytics.record("model_preflight_result", props: ["outcome": "passed"])
+        } else {
             pendingStartArgs = (sessionId, projectPath, initialPrompt)
             modelPreflightReason = preflight.reason
             acpStatus = ""
@@ -1560,6 +1613,13 @@ final class ChatViewModel {
                     } catch {
                         guard startStillCurrent(intent, client: client) else { return }
                         logger.info("Session \(sessionId) not found in ACP, creating new session with history")
+                        // Sessions Hermes never ACP-persisted (cron runs, CLI
+                        // sessions) can't be `session/load`ed; we open a fresh
+                        // one in the same cwd and replay the transcript from
+                        // state.db. Worth measuring — it's the difference
+                        // between a resume and a new context wearing a
+                        // resume's clothes.
+                        Analytics.record("session_resume_fallback", props: ["kind": "new_session_fallback"])
                         acpStatus = ACPPhase.creatingNewSession
                         resolvedSessionId = try await client.newSession(cwd: cwd)
                     }
@@ -2052,6 +2112,7 @@ final class ChatViewModel {
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                Analytics.record("model_preflight_result", props: ["outcome": ok ? "confirmed" : "failed"])
                 if ok {
                     // The plan wrote a coherent model+provider pair —
                     // when the pick came from the mismatch banner's
@@ -2079,14 +2140,32 @@ final class ChatViewModel {
     /// — no error banner, since this isn't a failure, just a deferral.
     @MainActor
     func cancelModelPreflight() {
+        Analytics.record("model_preflight_result", props: ["outcome": "cancelled"])
         modelPreflightReason = nil
         pendingStartArgs = nil
     }
 
     /// Respond to a permission request from the ACP agent.
+    /// Collapse an agent-supplied permission option id onto the taxonomy's
+    /// two-value `decision`. The id itself is never recorded: Hermes picks
+    /// those strings and a future one could carry anything.
+    static func analyticsPermissionDecision(optionId: String) -> String {
+        let id = optionId.lowercased()
+        // Substring match, not equality: Hermes ships `reject_once` /
+        // `reject_always` alongside a bare `deny`. Deliberately no `"no"`
+        // marker — it would swallow `allow_now`.
+        for marker in ["deny", "reject", "decline", "cancel"] where id.contains(marker) {
+            return "deny"
+        }
+        return "approve"
+    }
+
     func respondToPermission(optionId: String) {
         guard let client = acpClient,
               let permission = richChatViewModel.pendingPermission else { return }
+        Analytics.record("permission_prompt_responded", props: [
+            "decision": Self.analyticsPermissionDecision(optionId: optionId),
+        ])
         Task {
             await client.respondToPermission(requestId: permission.requestId, optionId: optionId)
         }

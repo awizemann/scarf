@@ -509,9 +509,27 @@ final class ServerLiveStatus: Identifiable {
         refresh()
     }
 
+    // MARK: - Hermes control
+    //
+    // The three public entry points are the menu bar's Start / Stop /
+    // Restart buttons, and each emits exactly one `hermes_control_action`
+    // carrying its own `action` — `restartHermes` routes through the
+    // private `performStart`, not `startHermes`, so a restart reports one
+    // `restart` event rather than a `restart` plus a stray `start`.
+
+    /// Fire the gateway start and report whether the CLI accepted it.
+    private nonisolated static func performStart(_ context: ServerContext) -> Bool {
+        context.runHermes(["gateway", "start"]).exitCode == 0
+    }
+
     func startHermes() {
-        Task.detached { [context] in
-            _ = context.runHermes(["gateway", "start"])
+        Task { [context] in
+            let ok = await Task.detached { Self.performStart(context) }.value
+            Analytics.record("hermes_control_action", props: [
+                "action": "start",
+                "source": "menu_bar",
+                "outcome": ok ? "succeeded" : "failed",
+            ])
         }
         // Refresh after a short delay to pick up the new state.
         Task { [weak self] in
@@ -521,7 +539,14 @@ final class ServerLiveStatus: Identifiable {
     }
 
     func stopHermes() {
-        Task.detached { [fileService] in _ = fileService.stopHermes() }
+        Task { [fileService] in
+            let ok = await Task.detached { fileService.stopHermes() }.value
+            Analytics.record("hermes_control_action", props: [
+                "action": "stop",
+                "source": "menu_bar",
+                "outcome": ok ? "succeeded" : "failed",
+            ])
+        }
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             self?.refresh()
@@ -529,12 +554,19 @@ final class ServerLiveStatus: Identifiable {
     }
 
     func restartHermes() {
-        Task.detached { [fileService] in
-            _ = fileService.stopHermes()
-        }
-        Task { [weak self] in
+        Task { [weak self, fileService, context] in
+            let stopped = await Task.detached { fileService.stopHermes() }.value
             try? await Task.sleep(nanoseconds: 2_000_000_000)
-            self?.startHermes()
+            let started = await Task.detached { Self.performStart(context) }.value
+            // A restart only succeeded if both halves did; a stop that
+            // found nothing running still has to bring the gateway back.
+            Analytics.record("hermes_control_action", props: [
+                "action": "restart",
+                "source": "menu_bar",
+                "outcome": stopped && started ? "succeeded" : "failed",
+            ])
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            self?.refresh()
         }
     }
 

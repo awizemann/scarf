@@ -154,6 +154,14 @@ nonisolated enum Analytics {
         durationBucket(Date().timeIntervalSince(start))
     }
 
+    /// Coarse count bucket for tool calls in an agent turn. Same rationale
+    /// and same single definition as ``durationBucket(_:)``: it lives in
+    /// `ScarfCore` so the turn events the package emits through the recorder
+    /// seam and anything the app buckets directly agree exactly.
+    nonisolated static func toolCallCountBucket(_ count: Int) -> String {
+        ScarfAnalytics.toolCallCountBucket(count)
+    }
+
     // MARK: - ScarfCore bridge
 
     /// Forwards `ScarfCore`'s analytics seam into this facade.

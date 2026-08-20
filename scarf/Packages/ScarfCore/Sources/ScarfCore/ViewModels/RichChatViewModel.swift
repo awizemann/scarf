@@ -672,6 +672,7 @@ public final class RichChatViewModel {
         // menu. Deduped against ACP / project / quick names so once a
         // session starts and the ACP server advertises its richer
         // versions, the ACP-sourced entry wins.
+        noteSlashCommandFallbackIfNeeded()
         let alwaysAvailable = Self.alwaysAvailableCommands(
             capabilities: capabilitiesGate,
             hasActiveSession: sessionId != nil
@@ -1182,6 +1183,41 @@ public final class RichChatViewModel {
             && streamingAssistantText.isEmpty
     }
 
+    // MARK: - Analytics turn tracking (Phase 4)
+    //
+    // Deliberately separate from the user-visible `currentTurnStart` /
+    // `turnDurations` stopwatch: that one is reset by *every*
+    // `finalizeStreamingMessage`, which runs once per completed tool call,
+    // so it can't answer "did this turn end". These three answer exactly
+    // one question — has the turn that is currently in flight already
+    // reported — so `agent_turn_completed` / `agent_turn_failed` fire at
+    // most once per turn no matter how many chunks, tool calls, finalizes
+    // or late connection-lost events stream through.
+    //
+    // All three are `@ObservationIgnored`: they carry no UI meaning, and
+    // mutating an observed property from the `availableCommands` getter
+    // (see `noteSlashCommandFallbackIfNeeded`) would write to state during
+    // a SwiftUI view update.
+
+    /// Start of the in-flight agent turn, or `nil` when no turn is open
+    /// (idle, or the turn already reported). Cleared at the moment the
+    /// terminal event is emitted — that nil-ing *is* the once-per-turn
+    /// guard.
+    @ObservationIgnored
+    private var analyticsTurnStart: Date?
+
+    /// Tool calls started since the in-flight turn began. Reset with
+    /// `analyticsTurnStart`, never mid-turn.
+    @ObservationIgnored
+    private var analyticsTurnToolCalls = 0
+
+    /// Once-per-session latch for `session_resume_fallback`'s
+    /// `slash_command_fallback` kind. `availableCommands` is a computed
+    /// property read on every composer render; without this the fallback
+    /// would emit at frame rate.
+    @ObservationIgnored
+    private var analyticsReportedSlashFallback = false
+
     // DB polling state (used in terminal mode fallback)
     private var lastKnownFingerprint: HermesDataService.MessageFingerprint?
     private var debounceTask: Task<Void, Never>?
@@ -1283,6 +1319,12 @@ public final class RichChatViewModel {
         // ContextBoundRoot so this stale carry-over isn't reachable
         // there.
         projectScopedCommands = []
+        // Any turn still in flight belongs to the session we're leaving and
+        // has no honest outcome — drop it rather than attributing it to the
+        // session we're about to attach to. The slash-command fallback latch
+        // re-arms because the next session gets its own answer.
+        discardAnalyticsTurn()
+        analyticsReportedSlashFallback = false
         currentTurnStart = nil
         turnDurations = [:]
         transientHint = nil
@@ -1387,6 +1429,10 @@ public final class RichChatViewModel {
         if !isAgentWorking {
             currentTurnStart = Date()
         }
+        // Analytics turn clock. Same "only on a fresh turn" rule as the
+        // stopwatch above, but with its own state so a mid-turn finalize
+        // can't close it early.
+        beginAnalyticsTurn()
         isAgentWorking = true
         streamingAssistantText = ""
         streamingThinkingText = ""
@@ -1397,6 +1443,83 @@ public final class RichChatViewModel {
         // slow streaming fine, but rapid responses (slash commands especially)
         // arrive faster than the anchor can track.
         requestScrollToBottom()
+    }
+
+    // MARK: - Analytics: agent turn lifecycle
+
+    /// Map an ACP `stopReason` onto the taxonomy's `error_kind`. `nil` means
+    /// "this turn succeeded" — only `end_turn` qualifies.
+    ///
+    /// The input is a small closed vocabulary Hermes emits, but it is still a
+    /// *string from the agent*, so it is never forwarded: anything
+    /// unrecognized collapses to `agent_error` rather than leaking through.
+    static func analyticsTurnErrorKind(stopReason: String) -> String? {
+        switch stopReason.lowercased() {
+        case "end_turn":
+            return nil
+        case "cancelled", "canceled":
+            // A user-cancelled turn is not an agent failure; it gets its own
+            // kind so the failure rate isn't inflated by people changing
+            // their minds mid-run.
+            return "cancelled"
+        case "timeout", "timed_out":
+            return "timeout"
+        default:
+            // `refusal`, `error`, `max_tokens`, and anything a future Hermes
+            // invents.
+            return "agent_error"
+        }
+    }
+
+    /// Open an analytics turn. Idempotent for the turn's lifetime — a
+    /// `/steer`-style mid-run send must not restart the clock or wipe the
+    /// tool-call tally.
+    private func beginAnalyticsTurn() {
+        guard analyticsTurnStart == nil else { return }
+        analyticsTurnStart = Date()
+        analyticsTurnToolCalls = 0
+    }
+
+    /// Close the in-flight analytics turn, emitting exactly one terminal
+    /// event. A second call (a connection-lost arriving after the prompt
+    /// already completed, a retry ladder, a `reset()` mid-stream) finds
+    /// `analyticsTurnStart == nil` and does nothing.
+    ///
+    /// - Parameter errorKind: `nil` for a successful turn.
+    private func endAnalyticsTurn(errorKind: String?) {
+        guard let start = analyticsTurnStart else { return }
+        analyticsTurnStart = nil
+        let toolCalls = analyticsTurnToolCalls
+        analyticsTurnToolCalls = 0
+        if let errorKind {
+            ScarfAnalytics.record("agent_turn_failed", ["error_kind": errorKind])
+        } else {
+            ScarfAnalytics.record("agent_turn_completed", [
+                "duration_bucket": ScarfAnalytics.durationBucket(Date().timeIntervalSince(start)),
+                "tool_call_count_bucket": ScarfAnalytics.toolCallCountBucket(toolCalls),
+            ])
+        }
+    }
+
+    /// Abandon the in-flight turn without reporting it. Used by `reset()`:
+    /// the user switched sessions or restarted the chat, so whatever was in
+    /// flight has no honest outcome to record.
+    private func discardAnalyticsTurn() {
+        analyticsTurnStart = nil
+        analyticsTurnToolCalls = 0
+    }
+
+    /// Emit `session_resume_fallback {kind: slash_command_fallback}` the first
+    /// time this session has to fall back to the static command list because
+    /// Hermes never advertised one (it doesn't re-emit
+    /// `available_commands_update` after `session/load`). Latched — see
+    /// `analyticsReportedSlashFallback`.
+    private func noteSlashCommandFallbackIfNeeded() {
+        guard !analyticsReportedSlashFallback,
+              sessionId != nil,
+              acpCommands.isEmpty else { return }
+        analyticsReportedSlashFallback = true
+        ScarfAnalytics.record("session_resume_fallback", ["kind": "slash_command_fallback"])
     }
 
     /// Process a streaming ACP event and update the message list.
@@ -1641,6 +1764,11 @@ public final class RichChatViewModel {
             startedAt: Date()
         )
         streamingToolCalls.append(toolCall)
+        // Tally for `agent_turn_completed`'s bucket. Counted at *start* so a
+        // turn cut short by a disconnect still has an honest tally; the
+        // running total survives the per-tool-call `finalizeStreamingMessage`
+        // that clears `streamingToolCalls`.
+        analyticsTurnToolCalls += 1
         upsertStreamingMessage()
     }
 
@@ -1753,6 +1881,9 @@ public final class RichChatViewModel {
         // mid-session — once a real number lands the count resumes from
         // there rather than snapping back to 0.
         acpCompressionCount = max(acpCompressionCount, response.compressionCount)
+        // The turn's one terminal event. `end_turn` is the only success;
+        // everything else maps onto a bounded `error_kind`.
+        endAnalyticsTurn(errorKind: Self.analyticsTurnErrorKind(stopReason: response.stopReason))
         isAgentWorking = false
         // v2.8 / Hermes v0.13 — Hermes runs the next `/queue`-deferred
         // prompt server-side now that this turn has settled. Drain the
@@ -1794,6 +1925,9 @@ public final class RichChatViewModel {
             finishReason: nil,
             reasoning: nil
         ))
+        // A turn that died with the connection. No-op if the prompt already
+        // completed and this is the transport noticing afterwards.
+        endAnalyticsTurn(errorKind: "connection_lost")
         isAgentWorking = false
         pendingPermission = nil
         buildMessageGroups()
@@ -2173,11 +2307,23 @@ public final class RichChatViewModel {
         // honest about the gap) — caller can retry by reopening the
         // session.
         if let reason = transportFailure {
+            // The user is looking at a partial (often empty) transcript
+            // because the fetch tripped a transport failure. One event per
+            // load attempt; the reason string itself never leaves this scope.
+            ScarfAnalytics.record("session_resume_fallback", ["kind": "history_fallback"])
             acpError = "Couldn't load full chat history — the connection to \(dataService.context.displayName) timed out."
             acpErrorHint = "Reopen the session to retry, or check the SSH link if this keeps happening."
             acpErrorDetails = reason
             acpErrorOAuthProvider = nil
             hasMoreHistory = true
+        } else if messages.isEmpty {
+            // No transport failure, but the resume still produced nothing to
+            // read — the session's rows aren't in `state.db` (a session
+            // garbage-collected server-side, or one that never persisted).
+            // Distinct from `history_fallback`: nothing failed, the history
+            // simply isn't there.
+            ScarfAnalytics.record("session_resume_fallback", ["kind": "sparse_transcript"])
+            startToolHydration(loadingForSession: self.sessionId ?? sessionId)
         } else {
             // v2.8 — kick off background hydration of tool_calls JSON
             // and tool result rows for the just-loaded skeleton.

@@ -68,4 +68,18 @@ public enum ScarfAnalytics {
         if seconds < 60 { return "15_60s" }
         return "gt_60s"
     }
+
+    /// Coarse count bucket for "how many tool calls did this turn make".
+    /// Same reasoning as ``durationBucket(_:)``: an exact count is
+    /// high-cardinality and, on a long agentic run, close to a fingerprint of
+    /// the task itself. Negative input (impossible today, but the type allows
+    /// it) collapses into `"0"` rather than producing a surprise token.
+    ///
+    /// Buckets: `0`, `1_3`, `4_10`, `gt_10`.
+    public static func toolCallCountBucket(_ count: Int) -> String {
+        guard count > 0 else { return "0" }
+        if count <= 3 { return "1_3" }
+        if count <= 10 { return "4_10" }
+        return "gt_10"
+    }
 }

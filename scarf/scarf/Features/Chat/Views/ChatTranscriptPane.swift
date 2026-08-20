@@ -9,7 +9,7 @@ import ScarfDesign
 struct ChatTranscriptPane: View {
     @Bindable var richChat: RichChatViewModel
     @Bindable var chatViewModel: ChatViewModel
-    var onSend: (String, [ChatImageAttachment]) -> Void
+    var onSend: (String, [ChatImageAttachment], ChatViewModel.ChatInputMode) -> Void
     var isEnabled: Bool
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     @Environment(AppCoordinator.self) private var coordinator
@@ -32,7 +32,9 @@ struct ChatTranscriptPane: View {
                 projectName: chatViewModel.currentProjectName,
                 gitBranch: chatViewModel.currentGitBranch,
                 activeGoal: richChat.activeGoal,
-                onClearGoal: { chatViewModel.sendText("/goal --clear") },
+                onClearGoal: {
+                    chatViewModel.sendText("/goal --clear", images: [], inputMode: .quickCommand)
+                },
                 activeSubgoals: richChat.activeSubgoals,
                 approvalMode: chatViewModel.approvalMode,
                 queuedPrompts: richChat.queuedPrompts,

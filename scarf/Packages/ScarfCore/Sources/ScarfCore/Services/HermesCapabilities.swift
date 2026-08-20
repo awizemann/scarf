@@ -882,6 +882,45 @@ public final class HermesCapabilitiesStore {
         }
     }
 
+    // MARK: - Analytics
+
+    /// Versions already reported this process, keyed by `"<semver>|<flag>"`.
+    ///
+    /// Every store on every window probes its own host, `refresh()` re-probes
+    /// on demand, and the version almost never changes — so an event per
+    /// refresh would be pure repetition. `@MainActor` (inherited from the
+    /// enclosing class) is the whole synchronization story; no lock needed.
+    ///
+    /// The provisional flag is part of the key rather than folded away: a
+    /// remembered version that is later confirmed by a real probe is a
+    /// genuinely different fact, and the pair is still bounded at two events
+    /// per version per process.
+    private static var reportedVersions: Set<String> = []
+
+    /// Emit `hermes_version_detected` the first time this process sees this
+    /// (version, provisional) pair.
+    ///
+    /// Only `semver` is recorded — never `versionLine`, which is the raw
+    /// `hermes --version` banner and can carry arbitrary text from the host.
+    /// A build we can't parse a semver out of reports nothing at all rather
+    /// than reporting something unbounded.
+    static func noteDetectedVersion(_ capabilities: HermesCapabilities, provisional: Bool) {
+        guard let semver = capabilities.semver else { return }
+        let version = semver.description
+        let key = "\(version)|\(provisional)"
+        guard reportedVersions.insert(key).inserted else { return }
+        ScarfAnalytics.record("hermes_version_detected", [
+            "version": version,
+            "provisional": provisional ? "true" : "false",
+        ])
+    }
+
+    /// Test hook: forget everything ``noteDetectedVersion(_:provisional:)``
+    /// has reported, so a test can exercise the dedupe from a clean slate.
+    static func resetReportedVersionsForTesting() {
+        reportedVersions = []
+    }
+
     /// Re-probe this host, bypassing the memoized result. Use after
     /// `hermes update` or when the user asks to re-detect.
     public func refresh() async {
@@ -905,6 +944,7 @@ public final class HermesCapabilitiesStore {
         if probed.detected {
             capabilities = probed
             isProvisional = false
+            Self.noteDetectedVersion(probed, provisional: false)
         } else {
             // Probe failed. Prefer the last-known version over blanking the
             // whole UI; `.empty` (conservative default) when we've never
@@ -912,6 +952,15 @@ public final class HermesCapabilitiesStore {
             let remembered = cache.lastKnown(for: context)
             capabilities = remembered
             isProvisional = remembered.detected
+            ScarfAnalytics.record("hermes_probe_failed", [
+                "fallback": remembered.detected ? "last_known" : "empty",
+            ])
+            if remembered.detected {
+                // The version the UI is actually gated on, flagged as
+                // unverified — otherwise a host that only ever answers from
+                // the persisted cache would look undetectable.
+                Self.noteDetectedVersion(remembered, provisional: true)
+            }
         }
         isLoading = false
 

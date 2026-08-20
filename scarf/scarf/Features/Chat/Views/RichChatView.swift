@@ -17,7 +17,7 @@ import ScarfDesign
 /// can scroll horizontally inside the panes rather than losing them.
 struct RichChatView: View {
     @Bindable var richChat: RichChatViewModel
-    var onSend: (String, [ChatImageAttachment]) -> Void
+    var onSend: (String, [ChatImageAttachment], ChatViewModel.ChatInputMode) -> Void
     var isEnabled: Bool
     @Environment(HermesFileWatcher.self) private var fileWatcher
     @Environment(ChatViewModel.self) private var chatViewModel

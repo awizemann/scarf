@@ -12,7 +12,7 @@ struct RichChatInputBar: View {
     /// preserves the v0.11 wire shape; non-empty images are forwarded
     /// as ACP image content blocks (Hermes v0.12+; the composer hides
     /// the attachment UI on older hosts).
-    let onSend: (String, [ChatImageAttachment]) -> Void
+    let onSend: (String, [ChatImageAttachment], ChatViewModel.ChatInputMode) -> Void
     let isEnabled: Bool
     var commands: [HermesSlashCommand] = []
     var showCompressButton: Bool = false
@@ -498,7 +498,7 @@ struct RichChatInputBar: View {
                 Button("Compress") {
                     let focus = compressFocus.trimmingCharacters(in: .whitespacesAndNewlines)
                     let command = focus.isEmpty ? "/compress" : "/compress \(focus)"
-                    onSend(command, [])
+                    onSend(command, [], .quickCommand)
                     showCompressSheet = false
                 }
                 .buttonStyle(ScarfPrimaryButton())
@@ -602,7 +602,7 @@ struct RichChatInputBar: View {
     private func send() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
-        onSend(trimmed, attachments)
+        onSend(trimmed, attachments, .typed)
         text = ""
         attachments.removeAll()
         showMenu = false
