@@ -2517,6 +2517,11 @@ final class ChatViewModel {
     func toggleTTS() {
         guard let tv = terminalView, voiceEnabled else { return }
         sendToTerminal(tv, text: "/voice tts\r")
+        // Record only the on transition — `!ttsEnabled` here is "about to
+        // become true" since the toggle happens on the next line.
+        if !ttsEnabled {
+            Analytics.record("voice_used", props: ["kind": "tts"])
+        }
         ttsEnabled.toggle()
     }
 
@@ -2524,6 +2529,10 @@ final class ChatViewModel {
         guard let tv = terminalView, voiceEnabled else { return }
         let ctrlB: [UInt8] = [0x02]
         tv.send(source: tv, data: ctrlB[0..<1])
+        // Record only when this press starts recording, not when it stops.
+        if !isRecording {
+            Analytics.record("voice_used", props: ["kind": "push_to_talk"])
+        }
         isRecording.toggle()
     }
 

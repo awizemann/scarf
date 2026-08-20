@@ -152,6 +152,11 @@ struct SkillBootstrapService: Sendable {
         try transport.createDirectory(categorizedRoot)
         try transport.createDirectory(destDir)
         try transport.writeFile(destSkillMd, data: bundledData)
+        // Only the actual write above counts as an install — the
+        // early-return above (destination already current) is
+        // deliberately silent, matching `hermes_control_action`'s
+        // edge-triggered pattern: report the transition, not every check.
+        Analytics.record("skill_installed", props: ["source": "bundled"])
 
         // Carry any companion files (assets, examples, etc.) the skill
         // ships alongside SKILL.md. Walks one level deep — skills don't

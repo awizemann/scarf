@@ -106,7 +106,37 @@ enum SidebarSection: String, CaseIterable, Identifiable {
 
 @Observable
 final class AppCoordinator {
-    var selectedSection: SidebarSection = .dashboard
+    /// Sidebar section names already reported this process. `section_viewed`
+    /// must fire once per section, not once per click — sidebar taps,
+    /// programmatic hand-offs (kanban, credential re-auth, the settings
+    /// command), and re-selecting the section you're already on all funnel
+    /// through the same `didSet`, so a single `Set` here is the one dedupe
+    /// point rather than guarding every one of the dozen call sites that
+    /// assign `selectedSection` across the app.
+    ///
+    /// `private(set)`, not `private`: `Analytics.record` is a no-op under
+    /// XCTest (`isSyntheticHost`), so `AnalyticsFeatureUsageEventsTests`
+    /// asserts on this set's contents directly through `@testable import`
+    /// rather than trying to intercept a call that never reaches a sink.
+    private(set) var viewedSections: Set<String> = []
+
+    var selectedSection: SidebarSection = .dashboard {
+        didSet {
+            let name = selectedSection.rawValue
+            guard viewedSections.insert(name).inserted else { return }
+            Analytics.record("section_viewed", props: ["section": name])
+        }
+    }
+
+    /// Every window starts on `.dashboard`, but a property initializer's
+    /// default value never runs `didSet` — so without this the very first
+    /// section a user sees would never be recorded. Records it once here
+    /// instead of duplicating the dedupe logic.
+    init() {
+        viewedSections.insert(selectedSection.rawValue)
+        Analytics.record("section_viewed", props: ["section": selectedSection.rawValue])
+    }
+
     var selectedSessionId: String?
     var selectedProjectName: String?
 

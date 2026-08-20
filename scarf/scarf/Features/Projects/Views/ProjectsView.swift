@@ -160,7 +160,7 @@ struct ProjectsView: View {
                 // flow — no new entry-point logic, just a different
                 // way to surface the URL. The install sheet's
                 // `awaitingParentDirectory` stage takes over from here.
-                installerViewModel.openRemoteURL(url)
+                installerViewModel.openRemoteURL(url, source: "hub")
                 showingCatalogSheet = false
                 showingInstallSheet = true
             }

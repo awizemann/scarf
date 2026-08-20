@@ -48,13 +48,31 @@ final class TemplateInstallerViewModel {
     /// inside a View body.
     var readmeBody: String?
 
+    /// Analytics source token for the install currently in flight —
+    /// `"hub"` (Browse Catalog), `"url"` (Install from URL / a
+    /// `scarf://install` deep link), or the local-file entry points
+    /// (Install from File, Finder double-click, drag-onto-icon). The
+    /// taxonomy's third bucket, `"bundled"`, has no macOS analogue for
+    /// templates — nothing ships a template inside the app bundle the way
+    /// `SkillBootstrapService` ships skills — so it's never produced here;
+    /// local-file installs fall into `"url"` too, since like a pasted URL
+    /// they're an external file the user supplied rather than something
+    /// Scarf shipped or curated. Recorded on `confirmInstall()`, not at
+    /// entry, so a cancelled or failed install never counts.
+    private var installSource = "url"
+
     // MARK: - Entry points
 
     /// Inspect a local `.scarftemplate` file. Moves stage to `.inspecting`
     /// then either `.awaitingParentDirectory` or `.failed`. The unpacked
     /// README body is read off MainActor here and stored on the VM so the
     /// preview sheet doesn't do sync I/O during View body evaluation.
-    func openLocalFile(_ zipPath: String) {
+    ///
+    /// - Parameter source: analytics source token; defaults to `"url"` (the
+    ///   local-file case). `openRemoteURL` overrides it before delegating
+    ///   here for a catalog pick.
+    func openLocalFile(_ zipPath: String, source: String = "url") {
+        installSource = source
         resetTempState()
         stage = .inspecting
         let service = templateService
@@ -98,7 +116,8 @@ final class TemplateInstallerViewModel {
     /// transfer responses omit that header. The authoritative check is the
     /// actual on-disk file size after the download completes — it runs
     /// unconditionally and covers the chunked-transfer case.
-    func openRemoteURL(_ url: URL) {
+    func openRemoteURL(_ url: URL, source: String = "url") {
+        installSource = source
         resetTempState()
         stage = .fetching(sourceDescription: url.host ?? url.absoluteString)
         Task.detached { [weak self] in
@@ -127,7 +146,8 @@ final class TemplateInstallerViewModel {
                 }
                 try FileManager.default.moveItem(atPath: tempURL.path, toPath: tempZip)
                 await MainActor.run { [weak self] in
-                    self?.openLocalFile(tempZip)
+                    guard let self else { return }
+                    self.openLocalFile(tempZip, source: self.installSource)
                 }
             } catch {
                 await MainActor.run { [weak self] in
@@ -203,6 +223,25 @@ final class TemplateInstallerViewModel {
                     self.plan = nil
                     self.chosenParentDirectory = nil
                     self.readmeBody = nil
+                    Analytics.record("template_installed", props: ["source": self.installSource])
+                    // `manifest.id` is arbitrary author-controlled text
+                    // (`TemplateExporterViewModel` seeds it from the
+                    // project's own free-typed name), so it can never ride
+                    // along as `template` — every template install, hub or
+                    // otherwise, is user- or third-party-authored content,
+                    // not something Scarf ships or curates, so "custom" is
+                    // the honest coarse value rather than inventing a
+                    // "builtin" bucket nothing here would ever produce.
+                    Analytics.record("project_created", props: [
+                        "template": "custom",
+                        "method": "import",
+                    ])
+                    // A template can bundle skills (namespaced under
+                    // `templates/<slug>/`); each one installed here arrived
+                    // through the same channel as the template itself.
+                    for _ in plan.manifest.contents.skills ?? [] {
+                        Analytics.record("skill_installed", props: ["source": self.installSource])
+                    }
                 }
             } catch {
                 await MainActor.run { [weak self] in

@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import Stats
 import os
 
 @main
@@ -14,6 +15,11 @@ struct ScarfApp: App {
     @State private var updater = UpdaterService()
 
     init() {
+        // Captured before anything else runs so `launch_completed`'s
+        // `duration_bucket` covers the whole init body, not just the tail.
+        // `Date()` is not I/O — no blocking work is added by this line.
+        let launchStart = Date()
+
         // ScarfMon — open-source perf instrumentation. Reads the
         // user-toggled mode from UserDefaults and installs the
         // matching backend set. Default `.signpostOnly` keeps
@@ -145,7 +151,32 @@ struct ScarfApp: App {
            idx + 1 < CommandLine.arguments.count,
            let url = URL(string: "scarf://install?url=" + CommandLine.arguments[idx + 1]) {
             TemplateURLRouter.shared.handle(url)
+            // XCUITest's bypass for the deep-link install flow, not a real
+            // `scarf://` open — never the same `kind` the real onOpenURL
+            // handler below reports.
+            Analytics.record("deep_link_opened", props: ["kind": "test"])
         }
+
+        // MARK: - first_run / launch_completed
+        //
+        // `first_run` fires exactly once — precisely when the marker comes
+        // back unset — and `warm` on `launch_completed` is the same read:
+        // "was this marker already set when this launch started" (i.e. NOT
+        // the first-ever launch). See `Analytics.FirstRunMarker` for why
+        // this is a UserDefaults-driven helper rather than inline code.
+        let warm = Analytics.FirstRunMarker.consumeAndMarkLaunched(defaults: .standard)
+        if !warm {
+            Analytics.record("first_run")
+        }
+        // `registry` (built above) is already fully loaded from
+        // `servers.json` by this point — `entries.count` is free, no
+        // additional I/O. `record()` itself is nonisolated fire-and-forget,
+        // so nothing here waits on the analytics call.
+        Analytics.record("launch_completed", props: [
+            "duration_bucket": .string(Analytics.durationBucket(since: launchStart)),
+            "server_count_bucket": .string(Analytics.serverCountBucket(registry.entries.count + 1)),
+            "warm": .bool(warm),
+        ])
     }
 
     var body: some Scene {
@@ -182,6 +213,11 @@ struct ScarfApp: App {
                     // into Scarf first.
                     .onOpenURL { url in
                         TemplateURLRouter.shared.handle(url)
+                        // Never the URL string itself — only that a real
+                        // OS-level deep link (browser click, Finder
+                        // double-click, drag-onto-icon) arrived, as
+                        // distinct from the XCUITest bypass in `init()`.
+                        Analytics.record("deep_link_opened", props: ["kind": "install_template"])
                         NSApplication.shared.activate()
                     }
             } else {

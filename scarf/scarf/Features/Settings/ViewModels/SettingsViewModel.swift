@@ -138,6 +138,10 @@ final class SettingsViewModel {
 
     private func applyConfigWrite(_ key: String, arguments: [String]) {
         let result = runHermes(arguments)
+        Analytics.record("setting_changed", props: [
+            "key": Self.analyticsSettingKey(key),
+            "outcome": result.exitCode == 0 ? "succeeded" : "failed",
+        ])
         if result.exitCode == 0 {
             saveMessage = "Saved \(key)"
             config = fileService.loadConfig()
@@ -159,6 +163,45 @@ final class SettingsViewModel {
                 self?.saveMessage = nil
             }
         }
+    }
+
+    // MARK: - Analytics
+
+    /// Sanitizes a `hermes config set/unset` key for `setting_changed`'s
+    /// `key` prop — the identifier only, never the value being set (that
+    /// requirement is enforced structurally: `applyConfigWrite` never sees
+    /// the value at all here, only `key`).
+    ///
+    /// Every `setSetting`/`unsetSetting` call site in this file passes a
+    /// literal dotted path (`"display.streaming"`, `"model.default"`, …)
+    /// except `setAuxiliary(_:field:value:)`, which interpolates a `task`
+    /// and `field` into `"auxiliary.<task>.<field>"` — checked against
+    /// `AuxiliaryTab.swift`, both come from that view's fixed task/field
+    /// pickers, never a text field, so today every key is already a
+    /// bounded-cardinality token. This sanitizer is defense-in-depth
+    /// against that assumption breaking in the future rather than a fix
+    /// for a leak that exists today: it caps to the first three
+    /// dot-segments (covers every current key shape, including the
+    /// three-level auxiliary keys). Each segment is kept **only** if it's
+    /// already a short bounded-cardinality token (`[a-z0-9_]`, ≤40 chars,
+    /// case-insensitive) — anything else collapses to a fixed opaque
+    /// placeholder rather than being character-filtered in place: filtering
+    /// disallowed characters out of e.g. `/Users/someone/secret.txt` still
+    /// leaves `Userssomeonesecrettxt`, and "someone" surviving as a
+    /// substring is exactly the leak this exists to prevent. All-or-nothing
+    /// per segment is the only shape that can't leak a fragment.
+    nonisolated static func analyticsSettingKey(_ key: String) -> String {
+        let segments = key.split(separator: ".", omittingEmptySubsequences: false).prefix(3)
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789_")
+        let cleaned = segments.map { segment -> String in
+            let lowered = segment.lowercased()
+            guard !lowered.isEmpty, lowered.count <= 40,
+                  lowered.unicodeScalars.allSatisfy(allowed.contains) else {
+                return "unknown"
+            }
+            return lowered
+        }
+        return cleaned.joined(separator: ".")
     }
 
     // MARK: - Model

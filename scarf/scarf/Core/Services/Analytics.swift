@@ -162,6 +162,21 @@ nonisolated enum Analytics {
         ScarfAnalytics.toolCallCountBucket(count)
     }
 
+    /// Coarse count bucket for `launch_completed`'s `server_count_bucket` —
+    /// how many servers (Local + every registered remote) exist at launch.
+    /// Phase 5 only; unlike `durationBucket`/`toolCallCountBucket` this has
+    /// no `ScarfCore` counterpart because nothing inside the package needs
+    /// it. Buckets: `0`, `1`, `2_5`, `gt_5`. Negative input (impossible
+    /// today) collapses into `"0"` rather than producing a surprise token.
+    nonisolated static func serverCountBucket(_ count: Int) -> String {
+        switch count {
+        case ..<1: return "0"
+        case 1: return "1"
+        case 2...5: return "2_5"
+        default: return "gt_5"
+        }
+    }
+
     // MARK: - ScarfCore bridge
 
     /// Forwards `ScarfCore`'s analytics seam into this facade.
@@ -208,6 +223,31 @@ nonisolated enum Analytics {
     nonisolated static func applicationDidEnterBackground() {
         guard let client = sharedClient else { return }
         Task { await client.applicationDidEnterBackground() }
+    }
+
+    // MARK: - first_run / launch_completed warm flag
+
+    /// The pure decision logic behind `first_run`/`launch_completed`'s
+    /// `warm` prop, pulled out of `scarfApp.init` so it's testable against
+    /// a throwaway `UserDefaults` suite instead of either instantiating
+    /// `ScarfApp` (which spins up real transports, registries, and
+    /// background bootstrap tasks) or touching the app's real
+    /// `UserDefaults.standard` from a test run.
+    enum FirstRunMarker {
+        /// Not `scarf.v27.snapshotCacheCleaned` or any other existing
+        /// flag — this needs to mean specifically "has this install ever
+        /// completed a launch", which nothing else already tracks.
+        static let key = "com.scarf.analytics.hasLaunchedBefore"
+
+        /// Reads the marker (`warm` = it was already set, i.e. this is
+        /// *not* the first-ever launch), then sets it. Call exactly once
+        /// per launch — a second call in the same process would report
+        /// `warm == true` even on a genuine first run.
+        nonisolated static func consumeAndMarkLaunched(defaults: UserDefaults) -> Bool {
+            let warm = defaults.bool(forKey: key)
+            defaults.set(true, forKey: key)
+            return warm
+        }
     }
 
     // MARK: - Opt-out

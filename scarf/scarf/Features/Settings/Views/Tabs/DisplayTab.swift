@@ -1,6 +1,7 @@
 import SwiftUI
 import ScarfCore
 import ScarfDesign
+import Stats
 
 /// Display tab — streaming, reasoning, cost, skin, compact mode, inline diffs, bell, etc.
 struct DisplayTab: View {
@@ -92,7 +93,10 @@ struct DisplayTab: View {
 
         SettingsSection(title: "Feedback", icon: "bell") {
             ToggleRow(label: "Bell on Complete", isOn: viewModel.config.display.bellOnComplete) { viewModel.setBellOnComplete($0) }
-            ToggleRow(label: "Notify when Hermes finishes", isOn: notifyOnComplete) { notifyOnComplete = $0 }
+            ToggleRow(label: "Notify when Hermes finishes", isOn: notifyOnComplete) {
+                notifyOnComplete = $0
+                Analytics.record("notification_toggled", props: ["enabled": .bool($0)])
+            }
         }
     }
 }
