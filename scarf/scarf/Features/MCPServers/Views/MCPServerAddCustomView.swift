@@ -14,6 +14,7 @@ struct MCPServerAddCustomView: View {
     @State private var url: String = ""
     @State private var auth: String = "none"
     @State private var sseReadTimeout: String = ""
+    @State private var showCatalog = false
 
     /// `.sse` is a v0.13+ surface; pre-v0.13 hosts only see stdio + http.
     /// Iterating `MCPTransport.allCases` directly would render the SSE
@@ -33,6 +34,7 @@ struct MCPServerAddCustomView: View {
                 Text("Add Custom MCP Server")
                     .scarfStyle(.headline)
                 Spacer()
+                Button("Browse Catalog…") { showCatalog = true }
                 Button("Cancel") { dismiss() }
                 Button("Add") {
                     submit()
@@ -81,6 +83,30 @@ struct MCPServerAddCustomView: View {
             }
         }
         .frame(minWidth: 560, minHeight: 500)
+        .sheet(isPresented: $showCatalog) {
+            OptionalMCPCatalogPickerView { entry in
+                applyCatalogEntry(entry)
+                showCatalog = false
+            } onCancel: {
+                showCatalog = false
+            }
+        }
+    }
+
+    /// Prefills the add-form fields from a picked catalog entry. Stdio
+    /// entries (e.g. `n8n`) only carry a name/description in the roster —
+    /// Scarf doesn't run the catalog's `install:` bootstrap, so the user
+    /// still has to fill in `command`/`args` by hand after picking.
+    private func applyCatalogEntry(_ entry: OptionalMCPCatalogEntry) {
+        name = entry.name
+        transport = availableTransports.contains(entry.transport) ? entry.transport : .http
+        if let url = entry.url {
+            self.url = url
+        }
+        switch entry.authKind {
+        case .oauth: auth = "oauth"
+        case .apiKey, .none: auth = "none"
+        }
     }
 
     private var stdioSection: some View {
