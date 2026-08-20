@@ -1,0 +1,158 @@
+import Foundation
+import Stats
+import StatsCloudflare
+import os
+
+private nonisolated let logger = Logger(subsystem: "com.scarf", category: "Analytics")
+
+/// App-wide analytics facade over a single `StatsClient` (swift-stats).
+///
+/// Everything here is `nonisolated` and fire-and-forget: `record(_:props:)` is
+/// the one entry point the rest of the app uses, and it never suspends, never
+/// touches disk on the caller's thread and never throws. If the client cannot
+/// be constructed (a malformed endpoint is the only way that can happen) the
+/// facade degrades to a no-op — analytics must never be able to fail a launch.
+///
+/// Props discipline (see documents/analytics/swift-stats-adoption-event-taxonomy.md):
+/// snake_case event names, flat props, **no** free text, file paths, URLs,
+/// hostnames or identifiers. Durations and counts go in as coarse bucket
+/// strings. Nothing in this file reads user content, and callers must not pass
+/// any.
+///
+/// `nonisolated` in full: the app target defaults new declarations to
+/// `@MainActor`, and analytics must be callable from any isolation without a
+/// hop — an inherited `@MainActor` on `sharedClient` makes `record()` from a
+/// background context a hard error under the Swift 6 language mode.
+nonisolated enum Analytics {
+    /// Stable for the lifetime of the install-id scheme — changing it
+    /// re-buckets every existing install into a new anonymous identity.
+    private static let installIdSalt = "scarf-macos-2026"
+
+    /// Project-scoped, append-only **write** key. It necessarily ships inside
+    /// the binary: it can add events to this one project and can read nothing,
+    /// which is the whole design of the key class (schema §2.4).
+    private static let writeKey = "sk_stats_twAbMaSzUKQCa3w4EfgXRV2s6dnUZYVDGKN0mrNK0ks"
+
+    private static let endpointString = "https://api.swiftstats.co"
+
+    /// Debug builds and the decoupled dev copy installed by
+    /// `scripts/build-detached.sh` (a Release build at
+    /// `/Applications/scarf-dev.app`) are pre-release traffic and must not
+    /// pollute production metrics. Only the bundle's own last path component is
+    /// inspected, and only to produce a `Bool` — no path ever reaches a prop.
+    private static var isPreRelease: Bool {
+        #if DEBUG
+        return true
+        #else
+        return Bundle.main.bundleURL.lastPathComponent == "scarf-dev.app"
+        #endif
+    }
+
+    /// The one place the app's stats configuration is defined. Exposed
+    /// `internal` (not `private`) purely so tests can build the *same*
+    /// configuration around an `InMemorySink` — the shipping call site is
+    /// ``sharedClient`` below and nothing else may call this.
+    ///
+    /// Note what is *not* here: `screenMetrics` and `colorScheme` are left at
+    /// their defaults rather than read from `NSScreen`/`NSApp`, which would
+    /// mean touching AppKit on the main thread during client construction.
+    static func makeConfiguration(
+        sink: any StatsSink,
+        isPreRelease: Bool,
+        storageDirectory: URL? = nil,
+        clock: any StatsClock = SystemStatsClock()
+    ) -> StatsConfiguration {
+        StatsConfiguration(
+            appId: "com.scarf.app",
+            projectId: "scarf",
+            installIdSalt: installIdSalt,
+            sink: sink,
+            autoEvents: [.appOpen, .appBackground, .sessions],
+            storageDirectory: storageDirectory,
+            isPreRelease: isPreRelease,
+            clock: clock
+        )
+    }
+
+    /// True inside a test run or a SwiftUI preview. Both launch the real app
+    /// bundle, whose lifecycle observers would otherwise fire `app_open` /
+    /// `app_background` at the live endpoint on every `xcodebuild test` — noise
+    /// that no `isPreRelease` flag makes worth sending.
+    private static var isSyntheticHost: Bool {
+        let environment = ProcessInfo.processInfo.environment
+        return environment["XCTestConfigurationFilePath"] != nil
+            || environment["XCTestBundlePath"] != nil
+            || environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+    }
+
+    /// Lazily built exactly once (static `let` = `swift_once`), on whichever
+    /// thread records first. `StatsClient.init` allocates two actors and does
+    /// no I/O — the queue file is opened on the `EventStore` actor on demand —
+    /// so this is safe to trigger from the launch path.
+    ///
+    /// `nil` means "analytics is off for this process".
+    private static let sharedClient: StatsClient? = {
+        guard !isSyntheticHost else { return nil }
+        do {
+            let sink = CloudflareSink(
+                endpoint: try CloudflareEndpoint(string: endpointString),
+                writeKey: writeKey
+            )
+            return StatsClient(configuration: makeConfiguration(sink: sink, isPreRelease: isPreRelease))
+        } catch {
+            // Deliberately not fatal, and deliberately not logging `error`'s
+            // description with `.public` — degrade to a no-op instead.
+            logger.error("Analytics disabled: the stats client could not be configured")
+            return nil
+        }
+    }()
+
+    /// The client, for Settings (consent toggles, enable/disable UI). `nil`
+    /// when analytics failed to configure.
+    static var client: StatsClient? { sharedClient }
+
+    // MARK: - Recording
+
+    /// The app-wide entry point. Non-suspending and fire-and-forget: the event
+    /// is buffered in memory and drained onto the client actor asynchronously.
+    ///
+    /// - Parameters:
+    ///   - name: snake_case, `^[a-z][a-z0-9_]*$`, from the taxonomy.
+    ///   - props: flat, bounded-cardinality values only. Never user text,
+    ///     paths, URLs, hostnames or identifiers.
+    nonisolated static func record(_ name: String, props: [String: StatsValue] = [:]) {
+        sharedClient?.record(name, props: props)
+    }
+
+    // MARK: - Lifecycle
+
+    /// Fire-and-forget passthrough for `NSApplication.didBecomeActive`.
+    nonisolated static func applicationDidBecomeActive() {
+        guard let client = sharedClient else { return }
+        Task { await client.applicationDidBecomeActive() }
+    }
+
+    /// Fire-and-forget passthrough for `NSApplication.didResignActive`.
+    ///
+    /// AppKit has no true "did enter background" — a macOS app that loses focus
+    /// keeps running — so resigning active is the closest analogue, and is what
+    /// the package's session-gap logic expects: it starts the inactivity timer
+    /// rather than ending anything, and `didBecomeActive` resumes the same
+    /// session if the user comes back inside the 30-minute macOS gap.
+    nonisolated static func applicationDidEnterBackground() {
+        guard let client = sharedClient else { return }
+        Task { await client.applicationDidEnterBackground() }
+    }
+
+    // MARK: - Opt-out
+
+    /// Master switch. `false` stops collection and clears the queue.
+    static func setEnabled(_ newValue: Bool) async {
+        await sharedClient?.setEnabled(newValue)
+    }
+
+    /// `false` when analytics is switched off *or* unavailable.
+    static var isEnabled: Bool {
+        get async { await sharedClient?.isEnabled ?? false }
+    }
+}

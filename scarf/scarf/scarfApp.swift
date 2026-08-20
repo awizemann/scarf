@@ -611,10 +611,19 @@ final class ServerLiveStatusRegistry {
         let nc = NotificationCenter.default
         // queue: .main → the block runs on the main thread, so
         // MainActor.assumeIsolated is safe and avoids a Task hop.
+        // These two blocks are also the app's single, app-lifetime pair of
+        // foreground/background signals, so the analytics lifecycle hangs off
+        // them rather than off a per-window `.onReceive` (which would fire once
+        // per open window). AppKit has no true "did enter background" — a
+        // macOS app that loses focus keeps running — so `didResignActive` is
+        // the closest analogue and is what starts swift-stats' session-gap
+        // timer. Both calls are nonisolated and non-suspending.
         _ = nc.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Analytics.applicationDidEnterBackground()
             MainActor.assumeIsolated { self?.setLowPowerMode(true) }
         }
         _ = nc.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Analytics.applicationDidBecomeActive()
             MainActor.assumeIsolated { self?.setLowPowerMode(false) }
         }
         // gh#123: system sleep usually kills the TCP session behind each

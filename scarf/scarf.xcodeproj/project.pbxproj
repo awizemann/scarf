@@ -15,6 +15,10 @@
 		53SCARFDESIGN0011 /* ScarfDesign in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFDESIGN0002 /* ScarfDesign */; };
 		53SCARFIOS0010 /* ScarfIOS in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFIOS0001 /* ScarfIOS */; };
 		53SPARKLE00010 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 53SPARKLE00011 /* Sparkle */; };
+		53SWIFTSTATS0010 /* Stats in Frameworks */ = {isa = PBXBuildFile; productRef = 53SWIFTSTATS0001 /* Stats */; };
+		53SWIFTSTATS0011 /* StatsCloudflare in Frameworks */ = {isa = PBXBuildFile; productRef = 53SWIFTSTATS0002 /* StatsCloudflare */; };
+		53SWIFTSTATS0012 /* Stats in Frameworks */ = {isa = PBXBuildFile; productRef = 53SWIFTSTATS0003 /* Stats */; };
+		53SWIFTSTATS0013 /* StatsTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 53SWIFTSTATS0004 /* StatsTesting */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -147,6 +151,8 @@
 				53SCARFCORE0010 /* ScarfCore in Frameworks */,
 				53SCARFDESIGN0010 /* ScarfDesign in Frameworks */,
 				53SPARKLE00010 /* Sparkle in Frameworks */,
+				53SWIFTSTATS0010 /* Stats in Frameworks */,
+				53SWIFTSTATS0011 /* StatsCloudflare in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -154,6 +160,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				53SWIFTSTATS0012 /* Stats in Frameworks */,
+				53SWIFTSTATS0013 /* StatsTesting in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -289,6 +297,8 @@
 				53SCARFCORE0001 /* ScarfCore */,
 				53SCARFDESIGN0001 /* ScarfDesign */,
 				53SPARKLE00011 /* Sparkle */,
+				53SWIFTSTATS0001 /* Stats */,
+				53SWIFTSTATS0002 /* StatsCloudflare */,
 			);
 			productName = scarf;
 			productReference = 534959402F7B83B600BD31AD /* scarf.app */;
@@ -312,6 +322,8 @@
 			);
 			name = scarfTests;
 			packageProductDependencies = (
+				53SWIFTSTATS0003 /* Stats */,
+				53SWIFTSTATS0004 /* StatsTesting */,
 			);
 			productName = scarfTests;
 			productReference = 5349594F2F7B83B700BD31AD /* scarfTests.xctest */;
@@ -396,6 +408,7 @@
 				53SCARFDESIGN0020 /* XCLocalSwiftPackageReference "Packages/ScarfDesign" */,
 				53SCARFIOS0020 /* XCLocalSwiftPackageReference "Packages/ScarfIOS" */,
 				53SPARKLE00012 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				53SWIFTSTATS0020 /* XCRemoteSwiftPackageReference "swift-stats" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 534959412F7B83B600BD31AD /* Products */;
@@ -853,7 +866,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 14.6;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 2.19.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.scarf.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -889,7 +902,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 14.6;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 2.19.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.scarf.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1087,6 +1100,14 @@
 				minimumVersion = 2.6.0;
 			};
 		};
+		53SWIFTSTATS0020 /* XCRemoteSwiftPackageReference "swift-stats" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/awizemann/swift-stats.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.2.0;
+			};
+		};
 		53SWIFTTERM0002 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm.git";
@@ -1127,6 +1148,26 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 53SPARKLE00012 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		53SWIFTSTATS0001 /* Stats */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 53SWIFTSTATS0020 /* XCRemoteSwiftPackageReference "swift-stats" */;
+			productName = Stats;
+		};
+		53SWIFTSTATS0002 /* StatsCloudflare */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 53SWIFTSTATS0020 /* XCRemoteSwiftPackageReference "swift-stats" */;
+			productName = StatsCloudflare;
+		};
+		53SWIFTSTATS0003 /* Stats */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 53SWIFTSTATS0020 /* XCRemoteSwiftPackageReference "swift-stats" */;
+			productName = Stats;
+		};
+		53SWIFTSTATS0004 /* StatsTesting */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 53SWIFTSTATS0020 /* XCRemoteSwiftPackageReference "swift-stats" */;
+			productName = StatsTesting;
 		};
 		53SWIFTTERM0001 /* SwiftTerm */ = {
 			isa = XCSwiftPackageProductDependency;
