@@ -7,7 +7,7 @@ source_paths: [README.md, scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/
 source_paths_inferred: false
 source_sha: 8da06bf74aa0b22581939e623f70e5dc0af37ff6
 created: 2026-05-29
-updated: 2026-08-12
+updated: 2026-08-20
 reviewed: 2026-07-23
 reviewed_by: audit:claude-code (background)
 ---
@@ -30,3 +30,6 @@ reviewed_by: audit:claude-code (background)
 
 
 - [update-2026-08-12] The v0.20 parity work is fully MERGED to main (shipped in the v2.18.x line; the "unmerged pending review" caveat above is stale). The Phase 3 leftovers run also landed on main 2026-08-12 (commits 0bdbf90..75456b4): browser.cloud_provider key fix, HermesVersionCache single cached/persisted version probe, and the remaining v0.20 settings surfaces except import-agent/sync (still t-1cc0a505). New capability flags added with per-key semver floors (v0.18/v0.19/v0.20) — see HermesCapabilities.swift. Scarf's Hermes target remains v0.20.0 (v2026.8.3); upstream main has ~1,200 unreleased commits including the Browser Use CLI 3.0 default-backend flip — audit when the next tag lands (skill: hermes-release-audit). #current
+
+
+- [v0204-target] Hermes v0.20.4 (v2026.8.18) audited 2026-08-20 (patch line v0.20.1–v0.20.4, ~3,016 commits); parity implemented on branch feat/hermes-v0204-parity (12 commits, UNMERGED pending Alan's review, not pushed). Schema effectively additive (sessions +hidden/+last_read_at/+title_source/+git_metadata_generation, SCHEMA_VERSION 26); ACP wire clean. New patch-level flag group isV0204OrLater (8 flags). See [[Hermes v0.20.4 Audit Findings]] and [[Hermes v0.20.4 Compatibility Decisions]]. Once merged, Scarf's target becomes v0.20.4; upstream method note: diff _BUILTIN_SUBCOMMANDS in hermes_cli/main.py (cli.py has no argparse). #current
