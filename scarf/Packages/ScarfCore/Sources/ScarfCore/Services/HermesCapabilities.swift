@@ -995,6 +995,11 @@ public final class HermesCapabilitiesStore {
     /// Re-probe this host, bypassing the memoized result. Use after
     /// `hermes update` or when the user asks to re-detect.
     public func refresh() async {
+        // Let the init-time load finish first: if the forced load interleaved
+        // with it, the generation guard could leave the older load's
+        // `isLoading = true` standing after refresh() returns. Awaiting it
+        // also makes "everything has settled when refresh() returns" hold.
+        await refreshTask?.value
         await load(force: true)
     }
 
