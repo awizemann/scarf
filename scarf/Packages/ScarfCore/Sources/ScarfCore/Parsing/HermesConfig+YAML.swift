@@ -565,21 +565,40 @@ public extension HermesConfig {
             // which also reports which of the two accepted forms Hermes
             // would actually read (v0.19+, gateway/profile_routing.py).
             profileRoutes: ProfileRoutesYAML.parse(yaml),
-            // `gateway.multiplex_profile_allowlist` (v0.20.4+) — true-optional
-            // list. `nil` = key absent from config.yaml (serve-all). A
-            // malformed value (present as a scalar, not a bullet list) is
-            // normalized to `[]` — matching upstream's fail-safe of serving
-            // only the "default" profile — rather than silently dropped.
-            multiplexProfileAllowlist: {
-                if let list = lists["gateway.multiplex_profile_allowlist"] {
-                    return list
-                }
-                if values["gateway.multiplex_profile_allowlist"] != nil {
-                    // Malformed: present as a scalar, not a list. Fail safe.
-                    return []
-                }
-                return nil
-            }()
+            // `multiplex_profile_allowlist` (v0.20.4+) — true-optional list.
+            // A top-level key takes PRECEDENCE over `gateway.*` (gateway/
+            // config.py:1190-1195, 1413-1423) — mirrors the top-level-wins
+            // pattern `ProfileRoutesYAML.parse` uses for `multiplex_profiles`.
+            // `nil` = key absent from config.yaml at either spelling
+            // (serve-all). A malformed value — present as a scalar, or as a
+            // mapping (a section header with children but no bullet list) —
+            // is normalized to `[]`, matching upstream's fail-safe of
+            // serving only the "default" profile, rather than failing open
+            // (nil → serve-all) or being silently dropped.
+            multiplexProfileAllowlist: Self.multiplexProfileAllowlist(
+                values: values, lists: lists, maps: maps
+            )
         )
+    }
+
+    /// Resolve `multiplex_profile_allowlist` from the three `ParsedYAML`
+    /// dictionaries, checking the top-level spelling before falling back to
+    /// `gateway.*` (see the call site's doc comment for the precedence +
+    /// fail-closed rationale).
+    private static func multiplexProfileAllowlist(
+        values: [String: String], lists: [String: [String]], maps: [String: [String: String]]
+    ) -> [String]? {
+        func resolve(_ key: String) -> [String]? {
+            if let list = lists[key] { return list }
+            if values[key] != nil { return [] }
+            // A mapping-valued key (section header with `key: value`
+            // children but no bullet list) fails CLOSED to `[]` — Hermes
+            // restricts to the default profile rather than serving all.
+            if maps[key]?.isEmpty == false { return [] }
+            return nil
+        }
+        if let resolved = resolve("multiplex_profile_allowlist") { return resolved }
+        if let resolved = resolve("gateway.multiplex_profile_allowlist") { return resolved }
+        return nil
     }
 }

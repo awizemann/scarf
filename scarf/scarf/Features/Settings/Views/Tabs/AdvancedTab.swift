@@ -92,7 +92,7 @@ struct AdvancedTab: View {
             StepperRow(label: "Max Iterations", value: viewModel.config.delegation.maxIterations, range: 1...500, step: 5) { viewModel.setDelegationMaxIterations($0) }
             // v0.20.4+ — server default 10, floor 1, no ceiling.
             if capabilitiesStore?.capabilities.isV0204OrLater ?? false {
-                StepperRow(label: "Max Concurrent Children", value: viewModel.config.delegation.maxConcurrentChildren, range: 1...50, step: 1) { viewModel.setDelegationMaxConcurrentChildren($0) }
+                StepperRow(label: "Max Concurrent Children", value: viewModel.config.delegation.maxConcurrentChildren, range: 1...500, step: 1) { viewModel.setDelegationMaxConcurrentChildren($0) }
                     .help("Max parallel child agents per delegation batch. Values above 10 multiply API cost linearly.")
             }
         }

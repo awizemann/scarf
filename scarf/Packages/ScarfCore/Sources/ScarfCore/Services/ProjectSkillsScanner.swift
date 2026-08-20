@@ -103,10 +103,7 @@ public enum ProjectSkillsScanner: Sendable {
                 let after = trimmed.dropFirst(key.count).trimmingCharacters(in: .whitespaces)
                 if after.hasPrefix("[") && after.hasSuffix("]") {
                     let body = after.dropFirst().dropLast()
-                    for part in body.split(separator: ",") {
-                        let value = String(part).trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
-                        if !value.isEmpty { collected.append(value) }
-                    }
+                    collected.append(contentsOf: HermesYAML.parseFlatFlowList(String(body)))
                     return collected
                 }
                 listIndent = raw.prefix { $0 == " " || $0 == "\t" }.count

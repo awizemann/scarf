@@ -77,6 +77,61 @@ struct HermesV0204ConfigTests {
         #expect(cfg.multiplexProfileAllowlist == [])
     }
 
+    /// Inline flow list, quoted entries with spacing — previously fell
+    /// through to the scalar branch and was misread as malformed → `[]`.
+    @Test func multiplexProfileAllowlistFlowListQuotedWithSpaces() {
+        let cfg = HermesConfig(yaml: """
+        gateway:
+          multiplex_profile_allowlist: [ "work", 'personal' ]
+        """)
+        #expect(cfg.multiplexProfileAllowlist == ["work", "personal"])
+    }
+
+    /// Inline flow list, unquoted, no spaces.
+    @Test func multiplexProfileAllowlistFlowListUnquoted() {
+        let cfg = HermesConfig(yaml: """
+        gateway:
+          multiplex_profile_allowlist: [work,personal]
+        """)
+        #expect(cfg.multiplexProfileAllowlist == ["work", "personal"])
+    }
+
+    /// A mapping-valued key must fail CLOSED to `[]` (Hermes restricts to
+    /// the default profile), not fail OPEN to `nil` (serve-all).
+    @Test func multiplexProfileAllowlistMappingFailsClosedToEmpty() {
+        let cfg = HermesConfig(yaml: """
+        gateway:
+          multiplex_profile_allowlist:
+            work: true
+            personal: false
+        """)
+        #expect(cfg.multiplexProfileAllowlist == [])
+    }
+
+    /// Top-level `multiplex_profile_allowlist` takes precedence over
+    /// `gateway.multiplex_profile_allowlist` (gateway/config.py:1190-1195,
+    /// 1413-1423).
+    @Test func multiplexProfileAllowlistTopLevelPrecedenceOverGateway() {
+        let cfg = HermesConfig(yaml: """
+        multiplex_profile_allowlist:
+          - work
+        gateway:
+          multiplex_profile_allowlist:
+            - personal
+        """)
+        #expect(cfg.multiplexProfileAllowlist == ["work"])
+    }
+
+    /// Top-level only, no `gateway.*` spelling present at all.
+    @Test func multiplexProfileAllowlistTopLevelOnly() {
+        let cfg = HermesConfig(yaml: """
+        multiplex_profile_allowlist:
+          - work
+          - personal
+        """)
+        #expect(cfg.multiplexProfileAllowlist == ["work", "personal"])
+    }
+
     // MARK: - auxiliary.background_review.enabled (NOT agent.*)
 
     @Test func backgroundReviewEnabledDefaultsToTrue() {

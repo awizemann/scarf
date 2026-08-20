@@ -97,9 +97,14 @@ struct ProfileRoutesSection: View {
                 ProfileRouteRow(
                     rank: row.rank,
                     route: row.route,
-                    // v0.20.4+ — `gateway.multiplex_profile_allowlist`.
-                    // `nil` allowlist (key absent) means "no warning".
-                    allowlistWarning: capabilities.isV0204OrLater
+                    // v0.20.4+ — `gateway.multiplex_profile_allowlist`. The
+                    // allowlist is inert without multiplexing actually
+                    // enabled (gateway/profiles.py:987), so only surface the
+                    // warning once `multiplex_profiles` is on — otherwise a
+                    // route just never runs, and that's already covered by
+                    // `multiplexPrerequisite` above. `nil` allowlist (key
+                    // absent) means "no warning" either way.
+                    allowlistWarning: (capabilities.isV0204OrLater && block.multiplexProfiles)
                         ? viewModel.multiplexProfileAllowlistWarning(for: row.route.profile)
                         : nil,
                     onEdit: {
