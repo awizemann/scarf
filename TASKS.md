@@ -52,9 +52,22 @@
 ## Doing
 
 - [ ] Refresh marketing site + README FAQ for v2.15 Projects (supersede PR #109) (id: t-83c4c692) (added: 2026-06-28)
+- [ ] Analytics follow-up: consent groups, bundled-skill bootstrap event, template install source attribution (id: t-855abc31) (added: 2026-08-20)
 
 ## Done
 
+- [x] Analytics P7: final plan-conformance + fresh-eye audit of the full integration (id: t-49988fd8) (added: 2026-08-20)
+- [x] Analytics P6: ScarfMon Stats backend + diagnostics events (id: t-f65db83c) (added: 2026-08-20)
+- [x] Analytics P5: feature-usage & lifecycle events (id: t-76e53878) (added: 2026-08-20)
+- [x] Analytics P4: chat, session & Hermes events (id: t-e56c8a9b) (added: 2026-08-20)
+- [x] Analytics P3: connection & transport events (id: t-8e07a481) (added: 2026-08-20)
+- [x] Analytics P2: opt-out UI in Settings → Advanced + privacy manifest declarations (id: t-2c07bda8) (added: 2026-08-20)
+- [x] Analytics P1: swift-stats foundation — SPM dep, macOS 15 target, Analytics facade, lifecycle wiring (id: t-432e7d7d) (added: 2026-08-20)
+- [x] Marker 0.9.0 — Phase 4: update drifted memory note + clean commit (id: t-b48ca4bf) (added: 2026-08-20)
+- [x] Marker 0.9.0 — Phase 3: build, visual verify, fresh-eye audit (id: t-80721a02) (added: 2026-08-20)
+- [x] Marker 0.9.0 — Phase 2: padded-checkbox parse tests + full test run (id: t-467a826e) (added: 2026-08-20)
+- [x] Marker 0.9.0 — Phase 1: bump pin to 0.9.0 and re-resolve packages (id: t-1919bb9c) (added: 2026-08-20)
+- [x] Fix ScarfGo import-key: connect path must accept OpenSSH keys (id: t-67ddfa05) (added: 2026-08-19) (priority: high)
 - [x] gh#138: SSH circuit breaker — stop unbounded reconnect attempts (Zero Trust tab explosion) (id: t-2e60f224) (added: 2026-08-13)
 - [x] v2.19.1 R5: Audit fixes + release prep (id: t-257807c1) (added: 2026-08-13)
 - [x] v2.19.1 R6: Fix uninstall leaving project registered + isolate boilerplate UI tests (id: t-e41efefb) (added: 2026-08-13)
