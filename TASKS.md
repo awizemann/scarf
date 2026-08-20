@@ -52,10 +52,10 @@
 ## Doing
 
 - [ ] Refresh marketing site + README FAQ for v2.15 Projects (supersede PR #109) (id: t-83c4c692) (added: 2026-06-28)
-- [ ] Analytics follow-up: consent groups, bundled-skill bootstrap event, template install source attribution (id: t-855abc31) (added: 2026-08-20)
 
 ## Done
 
+- [x] Analytics follow-up: consent groups, bundled-skill bootstrap event, template install source attribution (id: t-855abc31) (added: 2026-08-20)
 - [x] Analytics P7: final plan-conformance + fresh-eye audit of the full integration (id: t-49988fd8) (added: 2026-08-20)
 - [x] Analytics P6: ScarfMon Stats backend + diagnostics events (id: t-f65db83c) (added: 2026-08-20)
 - [x] Analytics P5: feature-usage & lifecycle events (id: t-76e53878) (added: 2026-08-20)
