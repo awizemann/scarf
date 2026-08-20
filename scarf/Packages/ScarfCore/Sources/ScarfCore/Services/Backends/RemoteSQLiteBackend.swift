@@ -281,7 +281,9 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
 
     // MARK: - Preflight parsing
 
-    private func parsePreflightOutput(_ stdout: String) throws {
+    /// Internal (not private) so the capability-derivation tests can drive
+    /// it with canned preflight stdout without standing up an SSH host.
+    func parsePreflightOutput(_ stdout: String) throws {
         // Expected output:
         //   <sqlite3 version line>
         //   [<sessions PRAGMA result>]

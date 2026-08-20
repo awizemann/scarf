@@ -70,16 +70,166 @@ public final class IOSCronViewModel {
         }
     }
 
-    /// Toggle `enabled` on the job with the given id, re-encode, and
-    /// write back. On failure, leaves the in-memory state unchanged
-    /// and sets `lastError`.
+    /// Which route the last `toggleEnabled` / `setEnabled` call took.
+    /// Diagnostic surface for tests and the "why is this stale" support
+    /// path — the CLI route carries full Hermes semantics, the JSON
+    /// route is the degraded fallback.
+    public private(set) var lastToggleRoute: ToggleRoute?
+
+    public enum ToggleRoute: String, Sendable {
+        /// `hermes cron pause|resume <id>` ran on the host.
+        case cli
+        /// The CLI was unreachable; Scarf rewrote jobs.json itself.
+        case jsonFallback
+        /// Hermes (or Scarf's port of its precondition) refused the change.
+        case refused
+    }
+
+    /// Toggle `enabled` on the job with the given id.
+    ///
+    /// **Preferred route: the Hermes CLI.** `hermes cron pause|resume <id>`
+    /// carries the full upstream semantics — `resume_job` (cron/jobs.py:
+    /// 2212-2233) recomputes `next_run_at` from now and refuses a
+    /// past-deadline one-shot — which a jobs.json rewrite can't reproduce.
+    /// iOS reaches it the same way macOS's `CronViewModel` does
+    /// (CronViewModel.swift:126-130): `ServerTransport.runProcess`, which
+    /// `CitadelServerTransport` implements over an SSH exec channel with
+    /// the PATH + `HERMES_HOME` guards already in place.
+    ///
+    /// **Fallback: the jobs.json marker write.** Only when the CLI is
+    /// genuinely unreachable (transport error, or `hermes` not on the
+    /// host's PATH). A refusal from the CLI is NOT a fallback trigger —
+    /// falling back there would write precisely the state Hermes declines
+    /// to produce.
     @discardableResult
     public func toggleEnabled(id: String) async -> Bool {
+        guard let prev = jobs.first(where: { $0.id == id }) else { return false }
+        return await setEnabled(id: id, enabled: !prev.enabled)
+    }
+
+    /// Explicit-target variant of `toggleEnabled`. Idempotent: setting a
+    /// job to the state it already holds still round-trips through Hermes
+    /// (matching `hermes cron resume` on an already-running job).
+    @discardableResult
+    public func setEnabled(id: String, enabled: Bool, now: Date = Date()) async -> Bool {
         guard let idx = jobs.firstIndex(where: { $0.id == id }) else { return false }
-        var updated = jobs
-        let prev = updated[idx]
-        updated[idx] = prev.withEnabled(!prev.enabled)
-        return await saveJobs(updated)
+        guard !isSaving else { return false }
+        let prev = jobs[idx]
+        lastError = nil
+
+        // Scarf-side port of `resume_job`'s precondition. Checked BEFORE
+        // either route so the refusal reads the same whether or not the
+        // host's CLI is reachable.
+        if enabled, prev.oneShotIsUnresumable(now: now) {
+            lastToggleRoute = .refused
+            lastError = Self.oneShotRefusalMessage(prev)
+            return false
+        }
+
+        // The CLI route is remote-only. On iOS every real context is
+        // `.ssh` (there is no local Hermes on a phone); a `.local`
+        // context here only ever comes from a macOS-hosted unit test,
+        // where spawning the developer's real `hermes` would be both
+        // wrong and non-deterministic. Local → straight to the fallback.
+        isSaving = true
+        let outcome: CLIOutcome = context.isRemote
+            ? await Self.runCronCLI(enabled ? "resume" : "pause", jobID: id, context: context)
+            : .unavailable
+        isSaving = false
+
+        switch outcome {
+        case .succeeded:
+            lastToggleRoute = .cli
+            // Hermes just rewrote jobs.json (next_run_at, paused_at,
+            // state); re-read rather than guessing what it wrote.
+            await load()
+            return true
+
+        case .refused(let message):
+            lastToggleRoute = .refused
+            lastError = message
+            return false
+
+        case .unavailable:
+            lastToggleRoute = .jsonFallback
+            var updated = jobs
+            var next = prev.withEnabled(enabled, now: now)
+            if enabled {
+                // A stale past `next_run_at` would make the scheduler fire a
+                // spurious catch-up run on the very next tick — and that fire
+                // flows through `mark_job_run`, consuming one of the job's
+                // `repeat.times` (cron/jobs.py:3019-3032). Clear it and let
+                // Hermes's own loader recompute (see `clearingNextRunAt`).
+                next = next.clearingNextRunAt()
+            }
+            updated[idx] = next
+            return await saveJobs(updated)
+        }
+    }
+
+    static func oneShotRefusalMessage(_ job: HermesCronJob) -> String {
+        if let lastRunAt = job.lastRunAt, !lastRunAt.isEmpty {
+            return "\"\(job.name)\" already ran — a one-shot job can't be resumed. Duplicate it to schedule a new run."
+        }
+        let when = job.schedule.runAt.map { CronScheduleFormatter.formatNextRun(iso: $0) } ?? "its scheduled time"
+        return "Can't resume \"\(job.name)\" — the one-shot time (\(when)) is in the past and would never fire. Duplicate it with a new time instead."
+    }
+
+    // MARK: - CLI route
+
+    enum CLIOutcome: Sendable {
+        /// The command ran and exited 0.
+        case succeeded
+        /// The command ran and exited non-zero — Hermes refused. Never
+        /// fall back to a JSON write on this.
+        case refused(String)
+        /// The command could not be run at all (transport failure, or
+        /// `hermes` isn't on the host). Fall back to the JSON write.
+        case unavailable
+    }
+
+    static func runCronCLI(_ verb: String, jobID: String, context: ServerContext) async -> CLIOutcome {
+        let ctx = context
+        return await Task.detached {
+            let result: ProcessResult
+            do {
+                result = try ctx.makeTransport().runProcess(
+                    executable: ctx.paths.hermesBinary,
+                    args: ["cron", verb, jobID],
+                    stdin: nil,
+                    timeout: 30
+                )
+            } catch {
+                return .unavailable
+            }
+            if result.exitCode == 0 { return .succeeded }
+            let combined = result.stderrString + "\n" + result.stdoutString
+            if result.exitCode == 127 || Self.looksLikeMissingBinary(combined) {
+                return .unavailable
+            }
+            return .refused(Self.refusalMessage(verb: verb, output: combined, exitCode: result.exitCode))
+        }.value
+    }
+
+    /// A shell that can't find `hermes` is "CLI unavailable", not a
+    /// refusal — the JSON fallback is the right answer there.
+    nonisolated static func looksLikeMissingBinary(_ output: String) -> Bool {
+        let lower = output.lowercased()
+        return lower.contains("command not found")
+            || lower.contains("hermes: not found")
+            || lower.contains("no such file or directory")
+    }
+
+    /// Surface Hermes's own wording when it gave any (its `resume_job`
+    /// ValueError explains the past-deadline one-shot far better than a
+    /// generic failure line), else a generic fallback.
+    nonisolated static func refusalMessage(verb: String, output: String, exitCode: Int32) -> String {
+        let line = output
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last(where: { !$0.isEmpty })
+        if let line, !line.isEmpty { return line }
+        return "hermes cron \(verb) failed (exit \(exitCode))."
     }
 
     /// Remove the job with `id` and save.

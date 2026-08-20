@@ -210,12 +210,12 @@ struct CronView: View {
                     Circle()
                         .fill(statusDotColor(job))
                         .frame(width: 7, height: 7)
-                        .opacity(job.state == "running" ? 0.55 : 1.0)
+                        .opacity(job.effectiveState == "running" ? 0.55 : 1.0)
                         .animation(
-                            job.state == "running"
+                            job.effectiveState == "running"
                                 ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true)
                                 : .default,
-                            value: job.state
+                            value: job.effectiveState
                         )
                 }
                 HStack(spacing: 10) {
@@ -281,7 +281,7 @@ struct CronView: View {
         // everything else — a paused job isn't running, regardless
         // of state-field churn.
         if !job.enabled { return ScarfColor.foregroundFaint }
-        if job.state == "running" { return ScarfColor.info }
+        if job.effectiveState == "running" { return ScarfColor.info }
         if job.lastError != nil { return ScarfColor.danger }
         return ScarfColor.success
     }
@@ -332,7 +332,7 @@ struct CronView: View {
                         .foregroundStyle(ScarfColor.foregroundPrimary)
                     ScarfBadge(job.enabled ? "active" : "paused",
                                kind: job.enabled ? .success : .neutral)
-                    if job.state == "running" {
+                    if job.effectiveState == "running" {
                         ScarfBadge("running…", kind: .info)
                     }
                 }
@@ -742,7 +742,7 @@ struct CronView: View {
     private func outputSummary(_ job: HermesCronJob) -> String {
         let timestamp = job.lastRunAt.map { CronScheduleFormatter.formatNextRun(iso: $0) } ?? "never"
         let status: String = {
-            if job.state == "running" { return "running…" }
+            if job.effectiveState == "running" { return "running…" }
             if job.lastError != nil { return "error" }
             if job.lastRunAt != nil { return "ok" }
             return "no runs yet"

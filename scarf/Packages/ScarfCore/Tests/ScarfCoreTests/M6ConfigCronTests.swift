@@ -713,7 +713,10 @@ import Foundation
         #expect(job.name == "")
         #expect(job.prompt == "")
         #expect(job.state == "")
-        #expect(job.stateIcon == "questionmark.circle")
+        // `enabled: true` + no stored state → effective_job_state's
+        // `stored or "scheduled"` fallback (cron/jobs.py:601).
+        #expect(job.effectiveState == "scheduled")
+        #expect(job.stateIcon == "clock")
 
         // Absent keys behave the same way.
         let sparse = Data("""
@@ -726,17 +729,56 @@ import Foundation
     /// `error` is the live terminal state Hermes persists; Scarf mapped
     /// only the legacy `failed` spelling and fell through to a "?" icon.
     @Test func stateIconMapsErrorAndPaused() {
-        func job(_ state: String) -> HermesCronJob {
+        func job(_ state: String, enabled: Bool = true) -> HermesCronJob {
             HermesCronJob(
                 id: "j", name: "N", prompt: "p",
                 schedule: CronSchedule(kind: "cron"),
-                enabled: true, state: state
+                enabled: enabled, state: state
             )
         }
+        // Terminal states survive regardless of `enabled`.
         #expect(job("error").stateIcon == "xmark.circle")
         #expect(job("failed").stateIcon == "xmark.circle")
-        #expect(job("paused").stateIcon == "pause.circle")
         #expect(job("scheduled").stateIcon == "clock")
+        // A DISABLED job stored as paused still reads paused.
+        #expect(job("paused", enabled: false).stateIcon == "pause.circle")
+    }
+
+    /// Ported `effective_job_state` (cron/jobs.py:585-602): the scheduler
+    /// honours `enabled`, so an enabled job must never display as paused —
+    /// the 07-30 upstream outage failure mode (list looked frozen while
+    /// the fleet kept running).
+    @Test func effectiveStateNeverShowsPausedForAnEnabledJob() {
+        func job(_ state: String, enabled: Bool, pausedAt: String? = nil) -> HermesCronJob {
+            HermesCronJob(
+                id: "j", name: "N", prompt: "p",
+                schedule: CronSchedule(kind: "cron"),
+                enabled: enabled, state: state,
+                extra: pausedAt.map { ["paused_at": .string($0)] } ?? [:]
+            )
+        }
+        // enabled=true is authoritative — stale `state`/`paused_at` lose.
+        #expect(job("paused", enabled: true).effectiveState == "scheduled")
+        #expect(job("scheduled", enabled: true, pausedAt: "2026-08-20T00:00:00Z").effectiveState == "scheduled")
+        #expect(job("running", enabled: true).effectiveState == "running")
+        // Terminal states are preserved regardless of `enabled`.
+        #expect(job("completed", enabled: true).effectiveState == "completed")
+        #expect(job("error", enabled: true).effectiveState == "error")
+        #expect(job("completed", enabled: false).effectiveState == "completed")
+        // Disabled: pause marker OR stored `paused` → paused; else the
+        // stored state, falling back to "paused".
+        #expect(job("paused", enabled: false).effectiveState == "paused")
+        #expect(job("scheduled", enabled: false, pausedAt: "2026-08-20T00:00:00Z").effectiveState == "paused")
+        #expect(job("scheduled", enabled: false).effectiveState == "scheduled")
+        #expect(job("", enabled: false).effectiveState == "paused")
+        // An explicit JSON null marker is NOT a pause marker (Hermes
+        // reads it via `.get()`, so null and absent are equivalent).
+        #expect(job("scheduled", enabled: false, pausedAt: nil).effectiveState == "scheduled")
+        let nullMarker = HermesCronJob(
+            id: "j", name: "N", prompt: "p", schedule: CronSchedule(kind: "cron"),
+            enabled: false, state: "scheduled", extra: ["paused_at": .null]
+        )
+        #expect(nullMarker.effectiveState == "scheduled")
     }
 
     @Test func hermesCronJobAttachToSessionRoundTrip() throws {

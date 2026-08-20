@@ -174,6 +174,36 @@ public actor HermesDataService {
         return cols
     }
 
+    /// `sessionColumns` plus Hermes's session-recency expression, for the
+    /// LIST queries only.
+    ///
+    /// Ports `_sql_session_last_active` (hermes_state_common.py:169-191):
+    /// the freshest of `last_activity_at` and `MAX(messages.timestamp)`,
+    /// falling back to `started_at`. The message max is the dominant term
+    /// — the durable heartbeat is rate-limited (~60 s) and best-effort, so
+    /// after a turn writes messages `last_activity_at` lags them. Deriving
+    /// unread from the heartbeat alone silently under-reports.
+    ///
+    /// **Cost.** This is a correlated subquery per row, so it rides ONLY
+    /// on the queries whose rows feed the unread badge, and only when
+    /// `last_read_at` exists — without the watermark column `isUnread` is
+    /// unconditionally false and the subquery would buy nothing. That gate
+    /// also keeps the emitted SQL byte-identical on pre-v0.20.4 hosts.
+    /// Hermes pays exactly the same per-row cost in `list_sessions_rich`,
+    /// and `messages.session_id` is indexed.
+    private var sessionListColumns: String {
+        guard hasLastReadAtColumn else { return sessionColumns }
+        let a = hasListableChildSupport ? "s" : "sessions"
+        let msgMax = "(SELECT MAX(_act_m.timestamp) FROM messages _act_m WHERE _act_m.session_id = \(a).id)"
+        // The heartbeat column only exists from v0.20; without it the
+        // expression degrades to MAX(messages.timestamp) ?? started_at,
+        // which is still the dominant term.
+        let freshest: String = hasSessionActivityColumns
+            ? "(SELECT MAX(_act_v.v) FROM (SELECT \(a).last_activity_at AS v UNION ALL SELECT \(msgMax)) _act_v)"
+            : msgMax
+        return sessionColumns + ", COALESCE(\(freshest), \(a).started_at) AS last_active"
+    }
+
     // MARK: - Session list predicate (Hermes parity)
 
     /// `FROM` clause for the session-list queries. Aliased to `s` only
@@ -344,7 +374,7 @@ public actor HermesDataService {
     // MARK: - Session Queries
 
     public func fetchSessions(limit: Int = QueryDefaults.sessionLimit) async -> [HermesSession] {
-        let sql = "SELECT \(sessionColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?"
+        let sql = "SELECT \(sessionListColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?"
         do {
             let rows = try await backend.query(sql, params: [.integer(Int64(limit))])
             return rows.map { sessionFromRow($0) }
@@ -1299,7 +1329,7 @@ public actor HermesDataService {
         let previewLimit = limit
         let statements: [(sql: String, params: [SQLValue])] = [
             (
-                "SELECT \(sessionColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?",
+                "SELECT \(sessionListColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?",
                 [.integer(Int64(limit))]
             ),
             (
@@ -1457,6 +1487,14 @@ public actor HermesDataService {
                   let idx = row.columnIndex["last_read_at"] else { return nil }
             return row.date(at: idx)
         }()
+        // Hermes's `_sql_session_last_active`, selected as `last_active`
+        // by the LIST queries only (`sessionListColumns`). Absent on the
+        // single-session / subagent / analytics shapes — `isUnread` then
+        // falls back to the reduced `lastActivityAt ?? startedAt`.
+        let lastActive: Date? = {
+            guard let idx = row.columnIndex["last_active"] else { return nil }
+            return row.date(at: idx)
+        }()
         return HermesSession(
             id: row.string(at: 0),
             source: row.string(at: 1),
@@ -1483,7 +1521,8 @@ public actor HermesDataService {
             pinned: pinned,
             lastActivityAt: lastActivityAt,
             lastActivityDescription: lastActivityDescription,
-            lastReadAt: lastReadAt
+            lastReadAt: lastReadAt,
+            lastActive: lastActive
         )
     }
 

@@ -53,6 +53,18 @@ public struct HermesSession: Identifiable, Sendable {
     /// — Hermes owns the watermark (`set_session_read`).
     public let lastReadAt: Date?
 
+    /// Hermes's session-recency expression, computed by the session-LIST
+    /// query only (`_sql_session_last_active`,
+    /// hermes_state_common.py:169-191): `MAX(last_activity_at,
+    /// MAX(messages.timestamp))`, falling back to `started_at`. `nil` on
+    /// queries that don't select it (single-session fetch, subagent
+    /// fetch) — `isUnread` then falls back to the reduced subset.
+    ///
+    /// It costs a correlated subquery per row, which is why it rides only
+    /// on the list queries whose rows feed the unread badge. Hermes pays
+    /// exactly the same per-row cost in `list_sessions_rich`.
+    public let lastActive: Date?
+
 
     public init(
         id: String,
@@ -80,7 +92,8 @@ public struct HermesSession: Identifiable, Sendable {
         pinned: Bool = false,
         lastActivityAt: Date? = nil,
         lastActivityDescription: String? = nil,
-        lastReadAt: Date? = nil
+        lastReadAt: Date? = nil,
+        lastActive: Date? = nil
     ) {
         self.id = id
         self.source = source
@@ -108,6 +121,7 @@ public struct HermesSession: Identifiable, Sendable {
         self.lastActivityAt = lastActivityAt
         self.lastActivityDescription = lastActivityDescription
         self.lastReadAt = lastReadAt
+        self.lastActive = lastActive
     }
     public var isSubagent: Bool { parentSessionId != nil }
 
@@ -119,17 +133,19 @@ public struct HermesSession: Identifiable, Sendable {
     /// unread when its last activity postdates the watermark. Hermes's
     /// explicit "mark unread" writes `0`, which any activity postdates.
     ///
-    /// Hermes computes last-activity as the freshest of
-    /// `last_activity_at` and `MAX(messages.timestamp)`, falling back
-    /// to `started_at`. Scarf's session list doesn't carry the message
-    /// max (it would cost a correlated subquery per row on every
-    /// sidebar load, remote included), so this uses the conservative
-    /// subset — `lastActivityAt ?? startedAt`. Conservative in the
-    /// right direction: it can only ever under-report unread, never
-    /// badge a conversation the user has actually read.
+    /// Last-activity is Hermes's `_sql_session_last_active`
+    /// (hermes_state_common.py:169-191): the freshest of
+    /// `last_activity_at` and `MAX(messages.timestamp)`, falling back to
+    /// `started_at`. The message max is the DOMINANT term — the durable
+    /// heartbeat is rate-limited (~60 s) and best-effort, so
+    /// `last_activity_at` routinely lags the messages a turn just wrote.
+    /// The session-list query computes the whole expression as
+    /// `lastActive`; when it's absent (a query that doesn't select it, or
+    /// a pre-v0.20 host) this degrades to the old `lastActivityAt ??
+    /// startedAt` subset, which can only under-report unread.
     public var isUnread: Bool {
         guard let lastReadAt else { return false }
-        guard let activity = lastActivityAt ?? startedAt else { return false }
+        guard let activity = lastActive ?? lastActivityAt ?? startedAt else { return false }
         return activity > lastReadAt
     }
 
@@ -166,7 +182,8 @@ public struct HermesSession: Identifiable, Sendable {
             rewindCount: rewindCount, pinned: pinned,
             lastActivityAt: lastActivityAt,
             lastActivityDescription: lastActivityDescription,
-            lastReadAt: lastReadAt
+            lastReadAt: lastReadAt,
+            lastActive: lastActive
         )
     }
 }
