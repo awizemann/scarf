@@ -788,29 +788,13 @@ final class SettingsViewModel {
         context.openInLocalEditor(context.paths.configYAML)
     }
 
+    /// Picker options: Hermes' 14 built-ins (hardcoded — v0.20.4 moved them out
+    /// of config.yaml into `hermes_cli/personality.py`) unioned with any user
+    /// entries under `agent.personalities`. Deduped by name, so pre-v0.20.4
+    /// hosts — whose config.yaml still ships the built-ins inline — render the
+    /// same list they always did.
     private func parsePersonalities() -> [String] {
-        var names: [String] = []
-        var inPersonalities = false
-        for line in rawConfigYAML.components(separatedBy: "\n") {
-            if line.trimmingCharacters(in: .whitespaces) == "personalities:" && line.hasPrefix("  ") {
-                inPersonalities = true
-                continue
-            }
-            if inPersonalities {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.isEmpty { continue }
-                let indent = line.prefix(while: { $0 == " " }).count
-                if indent <= 2 && !trimmed.isEmpty {
-                    inPersonalities = false
-                    continue
-                }
-                if indent == 4 && trimmed.contains(":") {
-                    let name = String(trimmed.split(separator: ":")[0])
-                    names.append(name)
-                }
-            }
-        }
-        return names
+        HermesPersonalities.pickerOptions(yaml: rawConfigYAML, current: config.personality)
     }
 
     @discardableResult

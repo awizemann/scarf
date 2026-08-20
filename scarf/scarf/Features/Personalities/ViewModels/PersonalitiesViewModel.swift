@@ -3,12 +3,23 @@ import ScarfCore
 import AppKit
 import os
 
-/// A personality defined under the `personalities:` block in config.yaml.
-/// Each entry may have a free-form `prompt` string plus arbitrary extra fields.
+/// A personality available to the agent: a Hermes built-in, or a user entry
+/// under the `agent.personalities:` block in config.yaml.
 struct HermesPersonality: Identifiable, Sendable, Equatable {
     var id: String { name }
     let name: String
     let prompt: String
+    let isBuiltin: Bool
+
+    nonisolated init(name: String, prompt: String, isBuiltin: Bool = false) {
+        self.name = name
+        self.prompt = prompt
+        self.isBuiltin = isBuiltin
+    }
+
+    nonisolated init(_ entry: HermesPersonalityEntry) {
+        self.init(name: entry.name, prompt: entry.prompt, isBuiltin: entry.isBuiltin)
+    }
 }
 
 @Observable
@@ -28,6 +39,15 @@ final class PersonalitiesViewModel {
     var soulPath: String { context.paths.soulMD }
     var message: String?
 
+    /// Picker rows for the active selection: neutral `default`, the resolved
+    /// names, plus the current selection if it matches none of them.
+    var activeOptions: [String] {
+        var options = ["default"] + personalities.map(\.name)
+        let current = activeName.trimmingCharacters(in: .whitespaces)
+        if !current.isEmpty, !options.contains(current) { options.insert(current, at: 1) }
+        return options
+    }
+
     func load() {
         let svc = fileService
         let ctx = context
@@ -45,47 +65,15 @@ final class PersonalitiesViewModel {
         }
     }
 
+    /// Built-ins (hardcoded from Hermes' `BUILTIN_PERSONALITIES`) unioned with
+    /// the user entries under `agent.personalities`. See
+    /// `HermesPersonalities.resolve` for why the union runs on every host
+    /// version rather than only on `hasBuiltinPersonalitiesInCode` ones.
+    ///
     /// Static form so the detached load can call into it without touching
-    /// MainActor-isolated state. The instance form below remains for any
-    /// other callers that need it.
+    /// MainActor-isolated state.
     nonisolated private static func parsePersonalitiesBlock(yaml: String) -> [HermesPersonality] {
-        guard !yaml.isEmpty else { return [] }
-        let parsed = HermesFileService.parseNestedYAML(yaml)
-        var nameSet: Set<String> = []
-        for key in parsed.values.keys where key.hasPrefix("personalities.") {
-            let parts = key.split(separator: ".", maxSplits: 2, omittingEmptySubsequences: false)
-            if parts.count >= 2 { nameSet.insert(String(parts[1])) }
-        }
-        for key in parsed.lists.keys where key.hasPrefix("personalities.") {
-            let parts = key.split(separator: ".", maxSplits: 2, omittingEmptySubsequences: false)
-            if parts.count >= 2 { nameSet.insert(String(parts[1])) }
-        }
-        return nameSet.sorted().map { name in
-            let prompt = parsed.values["personalities.\(name).prompt"] ?? ""
-            return HermesPersonality(name: name, prompt: HermesFileService.stripYAMLQuotes(prompt))
-        }
-    }
-
-    /// Parse the `personalities:` section of config.yaml using the nested parser.
-    /// Each personality is a top-level key under `personalities`, optionally with
-    /// a `prompt:` child.
-    private func parsePersonalitiesBlock() -> [HermesPersonality] {
-        guard let yaml = context.readText(context.paths.configYAML) else { return [] }
-        let parsed = HermesFileService.parseNestedYAML(yaml)
-        // Find all keys "personalities.<name>[.subkey]"
-        var nameSet: Set<String> = []
-        for key in parsed.values.keys where key.hasPrefix("personalities.") {
-            let parts = key.split(separator: ".", maxSplits: 2, omittingEmptySubsequences: false)
-            if parts.count >= 2 { nameSet.insert(String(parts[1])) }
-        }
-        for key in parsed.lists.keys where key.hasPrefix("personalities.") {
-            let parts = key.split(separator: ".", maxSplits: 2, omittingEmptySubsequences: false)
-            if parts.count >= 2 { nameSet.insert(String(parts[1])) }
-        }
-        return nameSet.sorted().map { name in
-            let prompt = parsed.values["personalities.\(name).prompt"] ?? ""
-            return HermesPersonality(name: name, prompt: HermesFileService.stripYAMLQuotes(prompt))
-        }
+        HermesPersonalities.resolve(yaml: yaml).map(HermesPersonality.init)
     }
 
     func setActive(_ name: String) {

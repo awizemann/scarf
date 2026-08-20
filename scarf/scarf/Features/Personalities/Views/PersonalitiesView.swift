@@ -16,7 +16,7 @@ struct PersonalitiesView: View {
         VStack(spacing: 0) {
             ScarfPageHeader(
                 "Personalities",
-                subtitle: "Per-personality model + prompt overrides defined in config.yaml."
+                subtitle: "Hermes' built-in personalities plus any you define under `agent.personalities` in config.yaml."
             ) {
                 HStack(spacing: ScarfSpace.s2) {
                     if let msg = viewModel.message {
@@ -55,7 +55,7 @@ struct PersonalitiesView: View {
                 ReadOnlyRow(label: "Current", value: viewModel.activeName.isEmpty ? "default" : viewModel.activeName)
                 ReadOnlyRow(label: "Defined", value: "None in config.yaml — add under `personalities:` to customize.")
             } else {
-                PickerRow(label: "Active", selection: viewModel.activeName, options: viewModel.personalities.map(\.name)) { viewModel.setActive($0) }
+                PickerRow(label: "Active", selection: viewModel.activeName, options: viewModel.activeOptions) { viewModel.setActive($0) }
             }
         }
     }
@@ -63,7 +63,7 @@ struct PersonalitiesView: View {
     @ViewBuilder
     private var listSection: some View {
         if !viewModel.personalities.isEmpty {
-            SettingsSection(title: "Defined Personalities", icon: "list.bullet") {
+            SettingsSection(title: "Available Personalities", icon: "list.bullet") {
                 ForEach(viewModel.personalities) { personality in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
@@ -76,6 +76,15 @@ struct PersonalitiesView: View {
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 1)
                                     .background(.green.opacity(0.15))
+                                    .clipShape(Capsule())
+                            }
+                            if personality.isBuiltin {
+                                Text("built-in")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 1)
+                                    .background(.quaternary.opacity(0.5))
                                     .clipShape(Capsule())
                             }
                             Spacer()
