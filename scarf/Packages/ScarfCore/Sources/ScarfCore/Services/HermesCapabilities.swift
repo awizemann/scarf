@@ -915,10 +915,28 @@ public final class HermesCapabilitiesStore {
         ])
     }
 
+    /// Fallback kinds already reported by ``noteProbeFailed(fallback:)`` this
+    /// process. Same static + `@MainActor` (inherited) pattern, and the same
+    /// rationale, as ``reportedVersions``: a store is built per window, every
+    /// window re-probes the same host, and a host that is simply unreachable
+    /// fails every probe — so an event per failed probe per store is pure
+    /// repetition of one fact. Bounded at two events per process (the two
+    /// fallback kinds).
+    private static var reportedProbeFailures: Set<String> = []
+
+    /// Emit `hermes_probe_failed` the first time this process falls back in
+    /// this way.
+    static func noteProbeFailed(fallback: String) {
+        guard reportedProbeFailures.insert(fallback).inserted else { return }
+        ScarfAnalytics.record("hermes_probe_failed", ["fallback": fallback])
+    }
+
     /// Test hook: forget everything ``noteDetectedVersion(_:provisional:)``
-    /// has reported, so a test can exercise the dedupe from a clean slate.
+    /// and ``noteProbeFailed(fallback:)`` have reported, so a test can
+    /// exercise the dedupe from a clean slate.
     static func resetReportedVersionsForTesting() {
         reportedVersions = []
+        reportedProbeFailures = []
     }
 
     /// Re-probe this host, bypassing the memoized result. Use after
@@ -952,9 +970,7 @@ public final class HermesCapabilitiesStore {
             let remembered = cache.lastKnown(for: context)
             capabilities = remembered
             isProvisional = remembered.detected
-            ScarfAnalytics.record("hermes_probe_failed", [
-                "fallback": remembered.detected ? "last_known" : "empty",
-            ])
+            Self.noteProbeFailed(fallback: remembered.detected ? "last_known" : "empty")
             if remembered.detected {
                 // The version the UI is actually gated on, flagged as
                 // unverified — otherwise a host that only ever answers from

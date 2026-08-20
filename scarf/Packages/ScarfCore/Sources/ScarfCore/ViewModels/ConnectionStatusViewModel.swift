@@ -103,30 +103,54 @@ public final class ConnectionStatusViewModel {
         probeTask = nil
     }
 
-    /// Set by ``retry()`` and consumed by the next probe that reaches a
-    /// healthy outcome, so `reconnect_succeeded` is only ever attributed to a
-    /// reconnect the *user* asked for. Cleared either way, so a later
-    /// background tick can never claim credit for it.
-    private var manualReconnectStart: Date?
+    /// The in-flight user-initiated reconnect, if any.
+    ///
+    /// `token` identifies the *specific* probe ``retry()`` launched. The
+    /// heartbeat runs every 15s, so at the moment the user hits Retry there
+    /// is very often a background probe already awaiting its SSH round-trip;
+    /// keying only on a start date let that older probe's completion consume
+    /// the attribution and emit `reconnect_succeeded{manual}` with a duration
+    /// that measured the heartbeat, not the user's wait. Only the probe
+    /// carrying this token may resolve it.
+    private struct ManualReconnect {
+        let token: UUID
+        let start: Date
+    }
+    private var pendingManualReconnect: ManualReconnect?
 
-    /// Manual probe — also invoked by the toolbar "Retry" button on error.
-    public func retry() {
+    /// Open a manual-reconnect attempt and return the token identifying it,
+    /// or `nil` when this tap isn't a reconnect at all.
+    ///
+    /// Split out of ``retry()`` (and `internal`, not `private`) so the
+    /// attribution can be tested without an SSH round-trip.
+    @discardableResult
+    func beginManualReconnect() -> UUID? {
         // The pill routes a plain tap here even when it's already green (a
         // "refresh now"), so only a probe launched from a *non-connected*
         // state is a reconnect. Without this guard, idly clicking a healthy
         // pill would manufacture reconnect events.
-        if status != .connected {
-            manualReconnectStart = Date()
-            ScarfAnalytics.record("reconnect_attempted", ["trigger": "manual"])
-        }
-        Task { await probeOnce() }
+        guard status != .connected else { return nil }
+        let token = UUID()
+        pendingManualReconnect = ManualReconnect(token: token, start: Date())
+        ScarfAnalytics.record("reconnect_attempted", ["trigger": "manual"])
+        return token
+    }
+
+    /// Manual probe — also invoked by the toolbar "Retry" button on error.
+    public func retry() {
+        let token = beginManualReconnect()
+        Task { await probeOnce(manualToken: token) }
     }
 
     /// Emit the degraded/reconnect events for a probe outcome. Called only
     /// from `probeOnce`, and deliberately edge-triggered: the heartbeat runs
     /// every 15s (slower when backgrounded) and a host that sits degraded for
     /// an hour must produce one event, not 240.
-    private func recordStatusTransition(from previous: Status, to next: Status) {
+    ///
+    /// `manualToken` is the token of the probe reporting this transition —
+    /// `nil` for every background heartbeat tick. A pending manual attempt is
+    /// only ever resolved by its own probe.
+    func recordStatusTransition(from previous: Status, to next: Status, manualToken: UUID?) {
         if case .degraded(_, _, let cause) = next {
             let wasSameCause: Bool
             if case .degraded(_, _, let old) = previous { wasSameCause = old == cause } else { wasSameCause = false }
@@ -136,16 +160,16 @@ public final class ConnectionStatusViewModel {
         }
         // A degraded outcome still proves SSH itself came back, so it counts
         // as a successful reconnect just like `.connected` does.
-        if let start = manualReconnectStart {
+        if let pending = pendingManualReconnect, pending.token == manualToken {
             switch next {
             case .connected, .degraded:
-                manualReconnectStart = nil
+                pendingManualReconnect = nil
                 ScarfAnalytics.record("reconnect_succeeded", [
                     "trigger": "manual",
-                    "duration_bucket": ScarfAnalytics.durationBucket(Date().timeIntervalSince(start)),
+                    "duration_bucket": ScarfAnalytics.durationBucket(Date().timeIntervalSince(pending.start)),
                 ])
             case .error:
-                manualReconnectStart = nil
+                pendingManualReconnect = nil
             case .idle:
                 break  // still retrying — the attempt isn't resolved yet
             }
@@ -164,7 +188,11 @@ public final class ConnectionStatusViewModel {
         }
     }
 
-    private func probeOnce() async {
+    /// - Parameter manualToken: non-`nil` only for the probe ``retry()``
+    ///   launched for a user-initiated reconnect. Carried through the
+    ///   short self-heal re-probe below, which is a continuation of the same
+    ///   attempt, so the reported duration covers the user's whole wait.
+    private func probeOnce(manualToken: UUID? = nil) async {
         let snapshot = context
         let hermesHome = context.paths.home
         // Two-tier probe in one SSH round-trip:
@@ -260,7 +288,7 @@ public final class ConnectionStatusViewModel {
         }()
 
         let previousStatus = status
-        defer { recordStatusTransition(from: previousStatus, to: status) }
+        defer { recordStatusTransition(from: previousStatus, to: status, manualToken: manualToken) }
 
         switch outcome {
         case .connected:
@@ -286,7 +314,7 @@ public final class ConnectionStatusViewModel {
                 Task { [weak self] in
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
                     if self?.consecutiveFailures ?? 0 > 0 {
-                        await self?.probeOnce()
+                        await self?.probeOnce(manualToken: manualToken)
                     }
                 }
             } else {

@@ -315,6 +315,75 @@ struct ScarfAnalyticsTurnEventsTests {
             #expect(capture.named("hermes_version_detected").isEmpty)
         }
     }
+
+    // MARK: - hermes_probe_failed dedupe
+
+    @Test @MainActor func aProbeFailureIsReportedOncePerProcessPerFallback() {
+        withCapture { capture in
+            HermesCapabilitiesStore.resetReportedVersionsForTesting()
+            defer { HermesCapabilitiesStore.resetReportedVersionsForTesting() }
+
+            // A host that is simply unreachable fails every probe, in every
+            // window, forever — one fact, not one event per probe.
+            for _ in 0..<5 {
+                HermesCapabilitiesStore.noteProbeFailed(fallback: "last_known")
+            }
+            #expect(capture.named("hermes_probe_failed") == [["fallback": "last_known"]])
+
+            // The other fallback kind is a genuinely different outcome (we
+            // have nothing remembered at all), so it reports once too.
+            HermesCapabilitiesStore.noteProbeFailed(fallback: "empty")
+            HermesCapabilitiesStore.noteProbeFailed(fallback: "empty")
+            #expect(capture.named("hermes_probe_failed") == [
+                ["fallback": "last_known"], ["fallback": "empty"],
+            ])
+        }
+    }
+
+    // MARK: - manual reconnect attribution
+
+    @Test @MainActor func onlyTheProbeRetryLaunchedClaimsTheManualReconnect() {
+        withCapture { capture in
+            let ctx = ServerContext(
+                id: UUID(),
+                displayName: "r",
+                kind: .ssh(SSHConfig(host: "nonexistent.invalid"))
+            )
+            let vm = ConnectionStatusViewModel(context: ctx)
+            // A remote starts `.idle`, so a tap here is a real reconnect.
+            let token = vm.beginManualReconnect()
+            #expect(token != nil)
+            #expect(capture.named("reconnect_attempted") == [["trigger": "manual"]])
+
+            // A background heartbeat probe that was already in flight when
+            // the user tapped completes first. It carries no token, so it
+            // must NOT claim the user's reconnect.
+            vm.recordStatusTransition(from: .idle, to: .connected, manualToken: nil)
+            #expect(capture.named("reconnect_succeeded").isEmpty)
+
+            // The probe `retry()` actually launched resolves it — once.
+            vm.recordStatusTransition(from: .idle, to: .connected, manualToken: token)
+            #expect(capture.named("reconnect_succeeded").count == 1)
+            #expect(capture.named("reconnect_succeeded").first?["trigger"] == "manual")
+
+            // And the attempt is consumed: a later tick can't re-report it.
+            vm.recordStatusTransition(from: .connected, to: .connected, manualToken: token)
+            #expect(capture.named("reconnect_succeeded").count == 1)
+        }
+    }
+
+    @Test @MainActor func tappingAHealthyPillIsNotAReconnect() {
+        withCapture { capture in
+            // Local contexts start `.connected`; the pill still routes a tap
+            // to `retry()` as a plain "refresh now".
+            let vm = ConnectionStatusViewModel(context: .local)
+            #expect(vm.beginManualReconnect() == nil)
+            #expect(capture.named("reconnect_attempted").isEmpty)
+
+            vm.recordStatusTransition(from: .connected, to: .connected, manualToken: nil)
+            #expect(capture.named("reconnect_succeeded").isEmpty)
+        }
+    }
 }
 
 }

@@ -72,6 +72,44 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Stable snake_case token for the `section` prop on `section_viewed`.
+    ///
+    /// Deliberately *not* `rawValue`/`displayName`: those are user-facing
+    /// copy, and renaming a sidebar item ("Quick Commands" → "Shortcuts")
+    /// would silently split one section's history into two series. This
+    /// switch is the analytics vocabulary and is used for nothing else —
+    /// changing a case here is a taxonomy change, not a UI change.
+    var analyticsToken: String {
+        switch self {
+        case .dashboard: return "dashboard"
+        case .insights: return "insights"
+        case .sessions: return "sessions"
+        case .activity: return "activity"
+        case .projects: return "projects"
+        case .chat: return "chat"
+        case .memory: return "memory"
+        case .curator: return "curator"
+        case .skills: return "skills"
+        case .platforms: return "platforms"
+        case .personalities: return "personalities"
+        case .quickCommands: return "quick_commands"
+        case .credentialPools: return "credential_pools"
+        case .plugins: return "plugins"
+        case .webhooks: return "webhooks"
+        case .profiles: return "profiles"
+        case .models: return "models"
+        case .proxy: return "proxy"
+        case .tools: return "tools"
+        case .mcpServers: return "mcp_servers"
+        case .gateway: return "gateway"
+        case .cron: return "cron"
+        case .kanban: return "kanban"
+        case .health: return "health"
+        case .logs: return "logs"
+        case .settings: return "settings"
+        }
+    }
+
     var icon: String {
         switch self {
         case .dashboard: return "gauge.with.dots.needle.33percent"
@@ -106,35 +144,34 @@ enum SidebarSection: String, CaseIterable, Identifiable {
 
 @Observable
 final class AppCoordinator {
-    /// Sidebar section names already reported this process. `section_viewed`
-    /// must fire once per section, not once per click — sidebar taps,
-    /// programmatic hand-offs (kanban, credential re-auth, the settings
-    /// command), and re-selecting the section you're already on all funnel
-    /// through the same `didSet`, so a single `Set` here is the one dedupe
-    /// point rather than guarding every one of the dozen call sites that
-    /// assign `selectedSection` across the app.
-    ///
-    /// `private(set)`, not `private`: `Analytics.record` is a no-op under
-    /// XCTest (`isSyntheticHost`), so `AnalyticsFeatureUsageEventsTests`
-    /// asserts on this set's contents directly through `@testable import`
-    /// rather than trying to intercept a call that never reaches a sink.
-    private(set) var viewedSections: Set<String> = []
-
     var selectedSection: SidebarSection = .dashboard {
-        didSet {
-            let name = selectedSection.rawValue
-            guard viewedSections.insert(name).inserted else { return }
-            Analytics.record("section_viewed", props: ["section": name])
-        }
+        didSet { Self.recordSectionViewed(selectedSection) }
     }
 
     /// Every window starts on `.dashboard`, but a property initializer's
     /// default value never runs `didSet` — so without this the very first
-    /// section a user sees would never be recorded. Records it once here
-    /// instead of duplicating the dedupe logic.
+    /// section a user sees would never be recorded.
     init() {
-        viewedSections.insert(selectedSection.rawValue)
-        Analytics.record("section_viewed", props: ["section": selectedSection.rawValue])
+        Self.recordSectionViewed(selectedSection)
+    }
+
+    /// Report `section_viewed` once per section per app *process*.
+    ///
+    /// The dedupe lives in `Analytics.recordOnce`, not in an instance
+    /// property, because `AppCoordinator` is per-window: `ContextBoundRoot`
+    /// builds a fresh one for every window and rebuilds it on every
+    /// server/profile switch, and each new coordinator's `init` re-reports
+    /// `.dashboard`. An instance-scoped `Set` therefore deduped only within
+    /// one window's lifetime and inflated the event several times per
+    /// session.
+    ///
+    /// Still one funnel point rather than a guard at each call site: sidebar
+    /// taps, programmatic hand-offs (kanban, credential re-auth, the settings
+    /// command) and re-selecting the current section all assign
+    /// `selectedSection`.
+    static func recordSectionViewed(_ section: SidebarSection) {
+        let token = section.analyticsToken
+        Analytics.recordOnce("section_viewed", key: "section_viewed:\(token)", props: ["section": token])
     }
 
     var selectedSessionId: String?

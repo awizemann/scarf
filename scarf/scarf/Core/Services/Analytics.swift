@@ -139,6 +139,51 @@ nonisolated enum Analytics {
         sharedClient?.record(name, props: props)
     }
 
+    // MARK: - Once-per-process recording
+
+    /// Keys already reported by ``recordOnce(_:key:props:)`` in this process.
+    ///
+    /// Guarded by a plain lock rather than an actor or `@MainActor` because
+    /// `record` itself is `nonisolated` and callers must not have to hop to
+    /// report an event. `internal` (via the accessors below) so tests can
+    /// assert on the dedupe without trying to intercept a `record` that is a
+    /// no-op under XCTest (`isSyntheticHost`).
+    private static let onceLock = NSLock()
+    private nonisolated(unsafe) static var recordedOnceKeys: Set<String> = []
+
+    /// Record `name` at most once per `key` per app *process*.
+    ///
+    /// Deliberately process-wide, not per-object: the callers that need this
+    /// (notably `section_viewed`) live on objects that are rebuilt whenever
+    /// the user opens a second window or switches server/profile, so an
+    /// instance-scoped `Set` would re-report the same fact several times per
+    /// session.
+    ///
+    /// - Returns: `true` when the event was newly reported, `false` when the
+    ///   key had already fired.
+    @discardableResult
+    nonisolated static func recordOnce(_ name: String, key: String, props: [String: String] = [:]) -> Bool {
+        onceLock.lock()
+        let inserted = recordedOnceKeys.insert(key).inserted
+        onceLock.unlock()
+        guard inserted else { return false }
+        record(name, props: props)
+        return true
+    }
+
+    /// Test hook: the keys ``recordOnce(_:key:props:)`` has consumed.
+    nonisolated static var recordedOnceKeysForTesting: Set<String> {
+        onceLock.lock(); defer { onceLock.unlock() }
+        return recordedOnceKeys
+    }
+
+    /// Test hook: forget every `recordOnce` key, so a test can exercise the
+    /// dedupe from a clean slate.
+    nonisolated static func resetRecordedOnceForTesting() {
+        onceLock.lock(); defer { onceLock.unlock() }
+        recordedOnceKeys = []
+    }
+
     // MARK: - Shared prop helpers
 
     /// Coarse duration bucket — the only shape a duration may take in a prop.

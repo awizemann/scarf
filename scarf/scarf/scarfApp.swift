@@ -169,7 +169,10 @@ struct ScarfApp: App {
         // this is a UserDefaults-driven helper rather than inline code.
         let warm = Analytics.FirstRunMarker.consumeAndMarkLaunched(defaults: .standard)
         if !warm {
-            Analytics.record("first_run")
+            // `platform` is part of `first_run`'s taxonomy shape: the same
+            // event name is emitted by the iOS app, and only this prop tells
+            // the two installs apart.
+            Analytics.record("first_run", props: ["platform": "macos"])
         }
         // `registry` (built above) is already fully loaded from
         // `servers.json` by this point — `entries.count` is free, no
@@ -550,11 +553,16 @@ final class ServerLiveStatus: Identifiable {
 
     // MARK: - Hermes control
     //
-    // The three public entry points are the menu bar's Start / Stop /
+    // The three public entry points here are the menu bar's Start / Stop /
     // Restart buttons, and each emits exactly one `hermes_control_action`
-    // carrying its own `action` — `restartHermes` routes through the
+    // with `source: "menu_bar"` — `restartHermes` routes through the
     // private `performStart`, not `startHermes`, so a restart reports one
     // `restart` event rather than a `restart` plus a stray `start`.
+    //
+    // The Health panel has its own Start / Stop / Restart (`HealthViewModel`),
+    // which emits the same event with `source: "health_panel"`. These are the
+    // only two sources; `source` is what separates them, so neither may
+    // report the other's.
 
     /// Fire the gateway start and report whether the CLI accepted it.
     private nonisolated static func performStart(_ context: ServerContext) -> Bool {

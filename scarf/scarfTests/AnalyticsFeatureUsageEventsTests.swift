@@ -24,34 +24,110 @@ struct AnalyticsFeatureUsageEventsTests {
 
     // MARK: - section_viewed dedupe
 
+    /// `Analytics.record` is a no-op under XCTest, so these assert on the
+    /// process-wide `recordOnce` key set — which is real — rather than on a
+    /// sink that never receives anything.
+    private static func sectionKeys() -> Set<String> {
+        Set(Analytics.recordedOnceKeysForTesting.filter { $0.hasPrefix("section_viewed:") })
+    }
+
     @Test("visiting the same section twice only records once")
     @MainActor
     func sameSectionDedupes() {
+        Analytics.resetRecordedOnceForTesting()
+        defer { Analytics.resetRecordedOnceForTesting() }
+
         let coordinator = AppCoordinator()
         // The initializer itself counts as the first visit (every window
         // starts on .dashboard, and a property initializer's default value
         // never runs `didSet`).
-        #expect(coordinator.viewedSections == ["Dashboard"])
+        #expect(Self.sectionKeys() == ["section_viewed:dashboard"])
 
         coordinator.selectedSection = .chat
-        #expect(coordinator.viewedSections == ["Dashboard", "Chat"])
+        #expect(Self.sectionKeys() == ["section_viewed:dashboard", "section_viewed:chat"])
 
         // Revisit .chat, then re-select .dashboard: neither is a NEW
         // section, so the set must not grow.
         coordinator.selectedSection = .settings
         coordinator.selectedSection = .chat
         coordinator.selectedSection = .dashboard
-        #expect(coordinator.viewedSections == ["Dashboard", "Chat", "Settings"])
+        #expect(Self.sectionKeys() == [
+            "section_viewed:dashboard", "section_viewed:chat", "section_viewed:settings",
+        ])
     }
 
     @Test("visiting two different sections records both")
     @MainActor
     func differentSectionsBothRecord() {
+        Analytics.resetRecordedOnceForTesting()
+        defer { Analytics.resetRecordedOnceForTesting() }
+
         let coordinator = AppCoordinator()
         coordinator.selectedSection = .insights
         coordinator.selectedSection = .kanban
-        #expect(coordinator.viewedSections.isSuperset(of: ["Dashboard", "Insights", "Kanban"]))
-        #expect(coordinator.viewedSections.count == 3)
+        #expect(Self.sectionKeys() == [
+            "section_viewed:dashboard", "section_viewed:insights", "section_viewed:kanban",
+        ])
+    }
+
+    /// The regression the audit caught: the dedupe used to be an instance
+    /// property, but `AppCoordinator` is per-window and is rebuilt on every
+    /// server/profile switch, and each new one re-reports `.dashboard` from
+    /// `init`. A second coordinator must add nothing it has already seen.
+    @Test("a second coordinator (new window or server switch) re-reports nothing")
+    @MainActor
+    func dedupeIsProcessWideAcrossCoordinators() {
+        Analytics.resetRecordedOnceForTesting()
+        defer { Analytics.resetRecordedOnceForTesting() }
+
+        let first = AppCoordinator()
+        first.selectedSection = .logs
+        #expect(Self.sectionKeys() == ["section_viewed:dashboard", "section_viewed:logs"])
+
+        // A brand-new window / post-switch coordinator: its `init` re-selects
+        // .dashboard and the user walks back to Logs. Both are already-seen
+        // facts, so the process-wide set is unchanged.
+        let second = AppCoordinator()
+        second.selectedSection = .logs
+        #expect(Self.sectionKeys() == ["section_viewed:dashboard", "section_viewed:logs"])
+
+        // A genuinely new section still records, from either coordinator.
+        second.selectedSection = .cron
+        #expect(Self.sectionKeys() == [
+            "section_viewed:dashboard", "section_viewed:logs", "section_viewed:cron",
+        ])
+    }
+
+    @Test("recordOnce reports the first call for a key and nothing after")
+    func recordOnceIsOncePerKey() {
+        Analytics.resetRecordedOnceForTesting()
+        defer { Analytics.resetRecordedOnceForTesting() }
+
+        #expect(Analytics.recordOnce("section_viewed", key: "k", props: ["section": "chat"]) == true)
+        #expect(Analytics.recordOnce("section_viewed", key: "k", props: ["section": "chat"]) == false)
+        #expect(Analytics.recordOnce("section_viewed", key: "k2") == true)
+    }
+
+    // MARK: - section tokens
+
+    @Test("section tokens are stable snake_case, not display copy")
+    func sectionTokensAreStableSnakeCase() {
+        // The point of the mapping: renaming the sidebar item must not
+        // rename the metric.
+        #expect(SidebarSection.quickCommands.analyticsToken == "quick_commands")
+        #expect(SidebarSection.mcpServers.analyticsToken == "mcp_servers")
+        #expect(SidebarSection.credentialPools.analyticsToken == "credential_pools")
+        // `.proxy` displays as "Hermes Proxy" and `.gateway` as "Messaging
+        // Gateway" — the token follows neither.
+        #expect(SidebarSection.proxy.analyticsToken == "proxy")
+        #expect(SidebarSection.gateway.analyticsToken == "gateway")
+
+        var seen: Set<String> = []
+        for section in SidebarSection.allCases {
+            let token = section.analyticsToken
+            #expect(token.range(of: "^[a-z][a-z0-9_]*$", options: .regularExpression) != nil)
+            #expect(seen.insert(token).inserted)
+        }
     }
 
     // MARK: - setting_changed key sanitization
