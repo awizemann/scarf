@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import Stats
 import StatsCloudflare
 import os
@@ -136,6 +137,49 @@ nonisolated enum Analytics {
     ///     paths, URLs, hostnames or identifiers.
     nonisolated static func record(_ name: String, props: [String: StatsValue] = [:]) {
         sharedClient?.record(name, props: props)
+    }
+
+    // MARK: - Shared prop helpers
+
+    /// Coarse duration bucket — the only shape a duration may take in a prop.
+    /// Defined once, in `ScarfCore`, so the events `ScarfCore` emits through
+    /// the recorder seam and the events the app emits directly bucket
+    /// identically. Phases 4/5 reuse this for turn and task durations.
+    nonisolated static func durationBucket(_ seconds: TimeInterval) -> String {
+        ScarfAnalytics.durationBucket(seconds)
+    }
+
+    /// Convenience for the common "one attempt, timed" shape.
+    nonisolated static func durationBucket(since start: Date) -> String {
+        durationBucket(Date().timeIntervalSince(start))
+    }
+
+    // MARK: - ScarfCore bridge
+
+    /// Forwards `ScarfCore`'s analytics seam into this facade.
+    ///
+    /// `ScarfCore` is shared verbatim with the iOS app and links no analytics
+    /// SDK; it only ever describes an event through
+    /// `ScarfAnalyticsRecording`. This is the macOS implementation of that
+    /// protocol, and the only place the two halves meet. iOS installs nothing,
+    /// so every `ScarfAnalytics.record` there stays a nil check.
+    private struct CoreBridge: ScarfAnalyticsRecording {
+        func record(_ name: String, _ props: [String: String]) {
+            Analytics.record(name, props: props.mapValues { StatsValue.string($0) })
+        }
+    }
+
+    /// Called once from the app's launch path. Idempotent — installing the
+    /// same stateless forwarder twice is harmless.
+    nonisolated static func installCoreBridge() {
+        ScarfAnalytics.install(CoreBridge())
+    }
+
+    /// String-only convenience. Almost every taxonomy prop is a
+    /// bounded-cardinality token, and call sites shouldn't have to `import
+    /// Stats` just to spell `.string(…)`.
+    nonisolated static func record(_ name: String, props: [String: String]) {
+        record(name, props: props.mapValues { StatsValue.string($0) })
     }
 
     // MARK: - Lifecycle

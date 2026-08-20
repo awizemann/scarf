@@ -69,6 +69,26 @@ public enum TransportError: LocalizedError {
         }
     }
 
+    /// Bounded, non-identifying token for the `error_kind` analytics prop.
+    ///
+    /// Deliberately derived from the *case*, never from an associated value:
+    /// every payload this enum carries (host, stderr, path) is user data and
+    /// must never reach a prop. Pairs with
+    /// `TransportError.classifySSHFailure`, which is what turns raw ssh
+    /// stderr into the case in the first place.
+    public var analyticsErrorKind: String {
+        switch self {
+        case .hostUnreachable:      return "host_unreachable"
+        case .authenticationFailed: return "auth_failed"
+        case .hostKeyMismatch:      return "host_key_mismatch"
+        case .commandFailed:        return "command_failed"
+        case .fileIO:               return "file_io"
+        case .timeout:              return "timeout"
+        case .circuitOpen:          return "circuit_open"
+        case .other:                return "other"
+        }
+    }
+
     /// Heuristic classifier: convert the ssh/scp stderr of a failed command
     /// into a specific `TransportError`. Used by `SSHTransport` after a
     /// non-zero exit. Defaults to `.commandFailed` when no known marker

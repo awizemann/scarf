@@ -13,8 +13,17 @@ struct TestConnectionProbe {
     func run() async -> AddServerViewModel.TestResult {
         let host = config.host.trimmingCharacters(in: .whitespaces)
         guard !host.isEmpty else {
+            // Not a connect attempt — no ssh is spawned, and the user hasn't
+            // finished filling the form. Nothing to report.
             return .failure(message: "Host is empty", stderr: "", command: "")
         }
+        // This is the app's one user-initiated, user-visible SSH connect:
+        // "Test Connection" in Add/Edit Server. The background pollers and
+        // internal retries deliberately do *not* emit connect_* — they'd
+        // outnumber real attempts by orders of magnitude, and the facts they
+        // carry are covered by circuit_breaker_* and connection_degraded.
+        let attemptStart = Date()
+        Analytics.record("connect_attempted", props: ["transport": "ssh"])
         // The user explicitly asked to try this host — their intent
         // overrides any open circuit breaker (gh#138), and background
         // traffic should resume immediately if the connection is back.
@@ -209,6 +218,16 @@ struct TestConnectionProbe {
         let envSummary = "SSH_AUTH_SOCK = \(agentEnv)\n\n"
 
         if exitCode == 0 {
+            // The *connection* is what connect_succeeded is about (its props
+            // are transport + duration, nothing about Hermes), and exit 0
+            // means ssh authenticated and ran our script. The "hermes binary
+            // not found" branch below is a healthy connection to a host
+            // without a usable Hermes — a Hermes-compatibility fact, not a
+            // transport one — so it is not reported as a connect failure.
+            Analytics.record("connect_succeeded", props: [
+                "transport": "ssh",
+                "duration_bucket": Analytics.durationBucket(since: attemptStart),
+            ])
             let lines = stdout.split(separator: "\n").map(String.init)
             let hermesPath = lines.first(where: { $0.hasPrefix("HERMES:") })?
                 .dropFirst("HERMES:".count).trimmingCharacters(in: .whitespaces) ?? ""
@@ -224,6 +243,11 @@ struct TestConnectionProbe {
             }
             return .success(hermesPath: String(hermesPath), dbFound: dbFound, suggestedRemoteHome: suggestedHome)
         }
+
+        Analytics.record("connect_failed", props: [
+            "transport": "ssh",
+            "error_kind": Self.analyticsErrorKind(host: host, exitCode: exitCode, stderr: stderr),
+        ])
 
         // Classify common failures by scanning the stderr trace.
         let lower = stderr.lowercased()
@@ -247,6 +271,36 @@ struct TestConnectionProbe {
             stderr: envSummary + (stderr.isEmpty ? "(ssh produced no stderr — this usually means the process itself failed to start, the executable couldn't be located, or stdin/stdout was closed unexpectedly.)" : stderr),
             command: displayCommand
         )
+    }
+
+    /// Bounded `error_kind` token for a failed probe.
+    ///
+    /// Routes through `TransportError` so this classification and the one the
+    /// rest of the transport layer uses can never drift apart, then takes the
+    /// case-derived token — no stderr, host, or message text ever leaves this
+    /// function. The two `exitCode == -1` cases are ours, not ssh's: the
+    /// detached probe above synthesizes that code (with a prefix it wrote
+    /// itself) for a 20s deadline and for a `Process` that wouldn't launch.
+    static func analyticsErrorKind(host: String, exitCode: Int32, stderr: String) -> String {
+        let error: TransportError
+        if exitCode == -1 {
+            error = stderr.hasPrefix("Timed out after")
+                ? .timeout(seconds: 20, partialStdout: Data())
+                : .other(message: "")
+        } else {
+            let classified = TransportError.classifySSHFailure(host: host, exitCode: exitCode, stderr: stderr)
+            // `classifySSHFailure` falls through to `.commandFailed`, which
+            // would be a lie for exit 255: ssh's own "something went wrong
+            // before/instead of the remote command" code means no remote
+            // command ever ran. Unrecognized 255s belong in the `other`
+            // bucket, which is exactly what that bucket is for.
+            if case .commandFailed = classified, exitCode == 255 {
+                error = .other(message: "")
+            } else {
+                error = classified
+            }
+        }
+        return error.analyticsErrorKind
     }
 
     /// Quote an argument for display in a copy-pasteable ssh command. Always

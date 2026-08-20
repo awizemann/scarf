@@ -119,6 +119,18 @@ final class ServerRegistry {
         entries.append(entry)
         save()
         onEntriesChanged?()
+        // Registry-level so every add path (Manage Servers, and anything
+        // added later) is covered exactly once. `transport` is the only
+        // prop: nothing about the host, user, port, or identity file is
+        // safe to send, and every entry this method creates is `.ssh` by
+        // construction — Local is implicit and never "added".
+        //
+        // The taxonomy's `key_source` prop is deliberately absent here: it
+        // describes the iOS onboarding flow's generate/import-key choice,
+        // which has no macOS analogue (the Mac defers entirely to
+        // ssh-agent or an existing on-disk identity file). Emitting a
+        // fabricated value would be worse than omitting the prop.
+        Analytics.record("server_added", props: ["transport": "ssh"])
         return entry
     }
 
@@ -138,6 +150,15 @@ final class ServerRegistry {
         let removed = entries.first { $0.id == id }
         entries.removeAll { $0.id == id }
         save()
+
+        // Only when an entry was actually there: `removeServer` is safe to
+        // call with an unknown id (the cache cleanup below still runs), and
+        // a no-op removal is not a user-visible event.
+        if let removed {
+            let transport: String
+            if case .local = removed.kind { transport = "local" } else { transport = "ssh" }
+            Analytics.record("server_removed", props: ["transport": transport])
+        }
 
         if let removed, case .ssh(let config) = removed.kind {
             let transport = SSHTransport(contextID: id, config: config, displayName: removed.displayName)

@@ -83,14 +83,21 @@ public final class SSHConnectionGate: @unchecked Sendable {
     /// The connection worked (the remote actually executed something —
     /// remote exit code is irrelevant). Fully closes the gate.
     public func recordSuccess(_ key: String) {
-        lock.lock(); defer { lock.unlock() }
+        var wasOpen = false
+        lock.lock()
+        wasOpen = states[key]?.isOpen ?? false
         states[key] = nil
+        lock.unlock()
+        // Emitted outside the lock, and only on the open → closed edge, so a
+        // healthy host's every successful call doesn't produce an event.
+        if wasOpen { ScarfAnalytics.record("circuit_breaker_closed") }
     }
 
     /// A connection-level failure (ssh exit 255 / dial timeout).
     public func recordFailure(_ key: String, now: Date = Date()) {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
         var state = states[key] ?? HostState()
+        let wasOpen = state.isOpen
         state.consecutiveFailures += 1
         if state.consecutiveFailures >= failureThreshold {
             state.currentDelay = state.isOpen
@@ -99,7 +106,20 @@ public final class SSHConnectionGate: @unchecked Sendable {
             state.isOpen = true
             state.nextAllowed = now.addingTimeInterval(state.currentDelay)
         }
+        let opened = !wasOpen && state.isOpen
+        let failures = state.consecutiveFailures
+        let delay = state.currentDelay
         states[key] = state
+        lock.unlock()
+        // Closed → open edge only. A failed probe while already open just
+        // doubles the backoff; re-announcing it every time would turn one
+        // dead host into an unbounded event stream.
+        if opened {
+            ScarfAnalytics.record("circuit_breaker_opened", [
+                "failure_count": String(failures),
+                "backoff_bucket": ScarfAnalytics.durationBucket(delay),
+            ])
+        }
     }
 
     /// Whether the gate is currently open (rejecting attempts) for `key`.
@@ -112,6 +132,11 @@ public final class SSHConnectionGate: @unchecked Sendable {
     /// Forget everything about `key`. Used when the user explicitly
     /// retries (Test Connection, manual reconnect) — user intent overrides
     /// the backoff — and when a server is removed.
+    ///
+    /// Intentionally silent for analytics: `circuit_breaker_closed` means
+    /// "the host recovered", and a forced clear proves nothing about the
+    /// host. The user-facing facts here are already covered by
+    /// `connect_attempted` / `reconnect_attempted` at the call sites.
     public func reset(_ key: String) {
         lock.lock(); defer { lock.unlock() }
         states[key] = nil

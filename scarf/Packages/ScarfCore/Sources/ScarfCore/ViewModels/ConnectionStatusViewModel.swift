@@ -103,9 +103,65 @@ public final class ConnectionStatusViewModel {
         probeTask = nil
     }
 
+    /// Set by ``retry()`` and consumed by the next probe that reaches a
+    /// healthy outcome, so `reconnect_succeeded` is only ever attributed to a
+    /// reconnect the *user* asked for. Cleared either way, so a later
+    /// background tick can never claim credit for it.
+    private var manualReconnectStart: Date?
+
     /// Manual probe — also invoked by the toolbar "Retry" button on error.
     public func retry() {
+        // The pill routes a plain tap here even when it's already green (a
+        // "refresh now"), so only a probe launched from a *non-connected*
+        // state is a reconnect. Without this guard, idly clicking a healthy
+        // pill would manufacture reconnect events.
+        if status != .connected {
+            manualReconnectStart = Date()
+            ScarfAnalytics.record("reconnect_attempted", ["trigger": "manual"])
+        }
         Task { await probeOnce() }
+    }
+
+    /// Emit the degraded/reconnect events for a probe outcome. Called only
+    /// from `probeOnce`, and deliberately edge-triggered: the heartbeat runs
+    /// every 15s (slower when backgrounded) and a host that sits degraded for
+    /// an hour must produce one event, not 240.
+    private func recordStatusTransition(from previous: Status, to next: Status) {
+        if case .degraded(_, _, let cause) = next {
+            let wasSameCause: Bool
+            if case .degraded(_, _, let old) = previous { wasSameCause = old == cause } else { wasSameCause = false }
+            if !wasSameCause {
+                ScarfAnalytics.record("connection_degraded", ["cause": Self.analyticsCause(cause)])
+            }
+        }
+        // A degraded outcome still proves SSH itself came back, so it counts
+        // as a successful reconnect just like `.connected` does.
+        if let start = manualReconnectStart {
+            switch next {
+            case .connected, .degraded:
+                manualReconnectStart = nil
+                ScarfAnalytics.record("reconnect_succeeded", [
+                    "trigger": "manual",
+                    "duration_bucket": ScarfAnalytics.durationBucket(Date().timeIntervalSince(start)),
+                ])
+            case .error:
+                manualReconnectStart = nil
+            case .idle:
+                break  // still retrying — the attempt isn't resolved yet
+            }
+        }
+    }
+
+    /// Bounded token for the `cause` prop. Note `profileActive`'s associated
+    /// profile name is dropped on the floor — it's user-chosen text.
+    nonisolated static func analyticsCause(_ cause: DegradedCause) -> String {
+        switch cause {
+        case .configMissing:    return "config_missing"
+        case .homeMissing:      return "home_missing"
+        case .configUnreadable: return "config_unreadable"
+        case .profileActive:    return "profile_active"
+        case .unknown:          return "unknown"
+        }
     }
 
     private func probeOnce() async {
@@ -202,6 +258,9 @@ public final class ConnectionStatusViewModel {
                 return .degraded(reason: reason, hint: hint, cause: cause)
             }
         }()
+
+        let previousStatus = status
+        defer { recordStatusTransition(from: previousStatus, to: status) }
 
         switch outcome {
         case .connected:

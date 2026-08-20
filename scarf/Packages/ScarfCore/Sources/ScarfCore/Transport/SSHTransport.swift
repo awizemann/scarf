@@ -154,7 +154,24 @@ public struct SSHTransport: ServerTransport {
     /// when one does, a trivial muxed remote command probes the session
     /// behind it. A hang or non-zero exit → `-O exit`, so the next caller
     /// handshakes fresh instead of joining the corpse.
-    public func recoverControlMasterIfDead(probeTimeout: TimeInterval = 10) {
+    ///
+    /// The return value exists so the caller can report *what happened* (see
+    /// the wake sweep in the macOS app, which turns it into one
+    /// `reconnect_attempted`/`reconnect_succeeded` pair per wake) without
+    /// re-probing.
+    public enum ControlMasterRecovery: Sendable, Equatable {
+        /// No master owned the socket — nothing to recover, and no evidence
+        /// either way about the host.
+        case noMaster
+        /// A master was there and the session behind it answered.
+        case alive
+        /// A master was there, the session behind it was dead, and we tore
+        /// the socket down so the next caller handshakes fresh.
+        case recovered
+    }
+
+    @discardableResult
+    public func recoverControlMasterIfDead(probeTimeout: TimeInterval = 10) -> ControlMasterRecovery {
         ensureControlDir()
         let check = try? runLocal(
             executable: sshBinary,
@@ -163,7 +180,7 @@ public struct SSHTransport: ServerTransport {
             timeout: 5,
             gate: .none
         )
-        guard let check, check.exitCode == 0 else { return }
+        guard let check, check.exitCode == 0 else { return .noMaster }
 
         let probe = try? runLocal(
             executable: sshBinary,
@@ -173,7 +190,9 @@ public struct SSHTransport: ServerTransport {
         )
         if (probe?.exitCode ?? 1) != 0 {
             closeControlMaster()
+            return .recovered
         }
+        return .alive
     }
 
     /// Common ssh options used by every invocation. Keep every `-o` flag

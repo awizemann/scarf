@@ -22,6 +22,14 @@ struct ScarfApp: App {
         // flips this between off / signpost-only / full.
         ScarfMonBoot.configure(mode: ScarfMonBoot.currentMode())
 
+        // Point ScarfCore's analytics seam at this target's facade. The
+        // package itself links no analytics SDK (it's shared verbatim with
+        // iOS, which installs nothing and stays a no-op); this is the single
+        // place the two halves are joined. Must run before anything that can
+        // transition the connection gate or a status view model, i.e. before
+        // the registries below are built.
+        Analytics.installCoreBridge()
+
         let registry = ServerRegistry()
         let live = ServerLiveStatusRegistry(registry: registry)
         // Re-fan-out statuses whenever the user adds/removes/renames a
@@ -654,9 +662,31 @@ final class ServerLiveStatusRegistry {
             // Give the network stack a beat to re-associate after wake so
             // a healthy master isn't misread as dead mid-DHCP.
             try? await Task.sleep(nanoseconds: 3_000_000_000)
+            // One event pair per wake, never per host: a fleet of ten
+            // remotes is still one reconnect the user experiences. The
+            // 3s settle above is excluded from the duration.
+            let start = Date()
+            var probed = 0
+            var alive = 0
             for (id, config, name) in remotes {
-                SSHTransport(contextID: id, config: config, displayName: name)
+                let outcome = SSHTransport(contextID: id, config: config, displayName: name)
                     .recoverControlMasterIfDead()
+                switch outcome {
+                case .noMaster: break   // nothing was connected; not a reconnect
+                case .alive: probed += 1; alive += 1
+                case .recovered: probed += 1
+                }
+            }
+            // Only hosts that actually had a master to check count as an
+            // attempt — otherwise every wake with zero live connections
+            // would report a reconnect that never happened.
+            guard probed > 0 else { return }
+            Analytics.record("reconnect_attempted", props: ["trigger": "wake"])
+            if alive > 0 {
+                Analytics.record("reconnect_succeeded", props: [
+                    "trigger": "wake",
+                    "duration_bucket": Analytics.durationBucket(since: start),
+                ])
             }
         }
     }
