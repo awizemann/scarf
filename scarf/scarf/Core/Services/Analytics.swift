@@ -32,6 +32,18 @@ nonisolated enum Analytics {
     /// Project-scoped, append-only **write** key. It necessarily ships inside
     /// the binary: it can add events to this one project and can read nothing,
     /// which is the whole design of the key class (schema §2.4).
+    ///
+    /// Posture (decided deliberately, not an oversight): this literal is
+    /// committed in the clear and always will be. Any client-side hiding
+    /// scheme — Keychain seeding, obfuscation, a fetch-at-launch indirection —
+    /// only moves the same secret into the same binary, so it buys nothing
+    /// against anyone willing to run `strings`. The key's blast radius is
+    /// bounded by its class: append-only, scoped to this one project, no read
+    /// access, so the worst an abuser can do is inject junk events into our
+    /// own metrics. We therefore **rotate on abuse**, not on a schedule: if
+    /// junk traffic shows up, mint a replacement key in the ScarfMon dashboard
+    /// (which is also where rotation/revocation happens), paste it here and
+    /// ship a build. Anything that ever gains read scope must NOT live here.
     private static let writeKey = "sk_stats_twAbMaSzUKQCa3w4EfgXRV2s6dnUZYVDGKN0mrNK0ks"
 
     private static let endpointString = "https://api.swiftstats.co"

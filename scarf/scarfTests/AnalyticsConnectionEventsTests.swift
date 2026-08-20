@@ -113,6 +113,50 @@ struct AnalyticsConnectionEventsTests {
         #expect(Analytics.durationBucket(since: Date(timeIntervalSinceNow: -120)) == "gt_60s")
     }
 
+    // MARK: - wake sweep classification
+
+    private func names(_ outcomes: [WakeReconnectMetrics.HostOutcome]) -> [String] {
+        WakeReconnectMetrics.events(for: outcomes, recoverySeconds: 1).map(\.name)
+    }
+
+    /// The regression this replaces: `.alive` (master healthy — nothing
+    /// reconnected) used to be counted as the success and `.recovered` (the
+    /// actual reconnect) was ignored, inverting the metric.
+    @Test("a wake where every master was healthy emits nothing")
+    func healthyWakeIsSilent() {
+        #expect(names([]).isEmpty)
+        #expect(names([.healthy, .healthy]).isEmpty)
+        #expect(names([.noMaster, .noMaster]).isEmpty)
+        #expect(names([.noMaster, .healthy]).isEmpty)
+    }
+
+    @Test("a torn-down dead master is one attempted + one succeeded")
+    func recoveredWakeReportsSuccess() {
+        #expect(names([.recovered]) == ["reconnect_attempted", "reconnect_succeeded"])
+        // One pair per wake, never per host.
+        #expect(names([.healthy, .recovered, .recovered, .noMaster])
+            == ["reconnect_attempted", "reconnect_succeeded"])
+    }
+
+    @Test("a teardown that left the master in place is attempted without succeeded")
+    func failedRecoveryReportsNoSuccess() {
+        #expect(names([.recoveryFailed]) == ["reconnect_attempted"])
+        #expect(names([.healthy, .recoveryFailed]) == ["reconnect_attempted"])
+        // Mixed fleet: one host recovering is enough to call the wake a success.
+        #expect(names([.recoveryFailed, .recovered])
+            == ["reconnect_attempted", "reconnect_succeeded"])
+    }
+
+    @Test("duration_bucket rides only the success and comes from the recovery work")
+    func durationBucketScopedToRecovery() {
+        let events = WakeReconnectMetrics.events(for: [.healthy, .recovered], recoverySeconds: 2)
+        #expect(events.first?.props == ["trigger": "wake"])
+        #expect(events.last?.props == [
+            "trigger": "wake",
+            "duration_bucket": Analytics.durationBucket(2),
+        ])
+    }
+
     // MARK: - error_kind, as the Add Server probe reports it
 
     @Test("the probe's error_kind covers the taxonomy's buckets")

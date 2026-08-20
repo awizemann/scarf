@@ -267,7 +267,17 @@ final class TemplateInstallerViewModel {
                     // A template can bundle skills (namespaced under
                     // `templates/<slug>/`); each one installed here arrived
                     // through the same channel as the template itself.
-                    for _ in plan.manifest.contents.skills ?? [] {
+                    //
+                    // Counted from the file copies the installer actually
+                    // performed, NOT from `manifest.contents.skills` (which is
+                    // what the author *declared*): the plan is what
+                    // `createSkillsFiles` writes, and a declared skill with no
+                    // files in the bundle aborts the whole install before we
+                    // get here. `install()` has no per-item result to consult,
+                    // but it is all-or-nothing — reaching this branch means
+                    // every planned copy landed — so the planned set is the
+                    // written set.
+                    for _ in 0..<Self.installedSkillCount(plan: plan) {
                         Analytics.record("skill_installed", props: ["source": source])
                     }
                 }
@@ -277,6 +287,28 @@ final class TemplateInstallerViewModel {
                 }
             }
         }
+    }
+
+    // MARK: - Analytics helpers
+
+    /// How many skills a successful install of `plan` actually wrote.
+    ///
+    /// Skills are directories: the plan carries one `TemplateFileCopy` per
+    /// *file*, all under `<skillsNamespaceDir>/<skillName>/…`, so the skill
+    /// count is the number of distinct first path components below the
+    /// namespace dir. Pure and `static` so the `skill_installed` cardinality
+    /// can be tested without an install.
+    nonisolated static func installedSkillCount(plan: TemplateInstallPlan) -> Int {
+        guard let namespaceDir = plan.skillsNamespaceDir else { return 0 }
+        let prefix = namespaceDir.hasSuffix("/") ? namespaceDir : namespaceDir + "/"
+        var names = Set<String>()
+        for copy in plan.skillsFiles {
+            guard copy.destinationPath.hasPrefix(prefix) else { continue }
+            let relative = String(copy.destinationPath.dropFirst(prefix.count))
+            guard let name = relative.split(separator: "/").first, !name.isEmpty else { continue }
+            names.insert(String(name))
+        }
+        return names.count
     }
 
     // MARK: - Cleanup

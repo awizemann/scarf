@@ -741,31 +741,35 @@ final class ServerLiveStatusRegistry {
             // Give the network stack a beat to re-associate after wake so
             // a healthy master isn't misread as dead mid-DHCP.
             try? await Task.sleep(nanoseconds: 3_000_000_000)
-            // One event pair per wake, never per host: a fleet of ten
-            // remotes is still one reconnect the user experiences. The
-            // 3s settle above is excluded from the duration.
-            let start = Date()
-            var probed = 0
-            var alive = 0
+            var outcomes: [WakeReconnectMetrics.HostOutcome] = []
+            // Only the teardown work is timed — not the settle, and not the
+            // health probes of hosts that turned out to be fine.
+            var recoverySeconds: TimeInterval = 0
             for (id, config, name) in remotes {
-                let outcome = SSHTransport(contextID: id, config: config, displayName: name)
-                    .recoverControlMasterIfDead()
-                switch outcome {
-                case .noMaster: break   // nothing was connected; not a reconnect
-                case .alive: probed += 1; alive += 1
-                case .recovered: probed += 1
+                let transport = SSHTransport(contextID: id, config: config, displayName: name)
+                let started = Date()
+                switch transport.recoverControlMasterIfDead() {
+                case .noMaster:
+                    outcomes.append(.noMaster)   // nothing was connected
+                case .alive:
+                    outcomes.append(.healthy)    // master fine; no reconnect happened
+                case .recovered:
+                    // `recoverControlMasterIfDead` returns `.recovered` as soon
+                    // as it has *issued* `-O exit`; it never checks whether the
+                    // socket actually went away. Re-check to find out: a second
+                    // call returning `.noMaster` means the master is genuinely
+                    // gone (the next ssh handshakes fresh — that's the success
+                    // the metric is about), while anything else means the
+                    // corpse survived the teardown and the user is still stuck.
+                    // Cheap: this only runs for hosts that were actually dead,
+                    // and the `-O check` it starts with is a local round-trip.
+                    let verify = transport.recoverControlMasterIfDead(probeTimeout: 3)
+                    recoverySeconds += Date().timeIntervalSince(started)
+                    outcomes.append(verify == .noMaster ? .recovered : .recoveryFailed)
                 }
             }
-            // Only hosts that actually had a master to check count as an
-            // attempt — otherwise every wake with zero live connections
-            // would report a reconnect that never happened.
-            guard probed > 0 else { return }
-            Analytics.record("reconnect_attempted", props: ["trigger": "wake"])
-            if alive > 0 {
-                Analytics.record("reconnect_succeeded", props: [
-                    "trigger": "wake",
-                    "duration_bucket": Analytics.durationBucket(since: start),
-                ])
+            for event in WakeReconnectMetrics.events(for: outcomes, recoverySeconds: recoverySeconds) {
+                Analytics.record(event.name, props: event.props)
             }
         }
     }
@@ -805,6 +809,57 @@ final class ServerLiveStatusRegistry {
     /// True if any registered server reports hermes running. Drives the
     /// menu bar icon (filled vs. outline hare).
     var anyRunning: Bool { statuses.contains(where: { $0.hermesRunning }) }
+}
+
+/// Turns the per-host outcomes of the post-wake ControlMaster sweep into the
+/// `reconnect_attempted` / `reconnect_succeeded` pair.
+///
+/// Pure and separate from the sweep so the classification can be tested
+/// without SSH. The rule it encodes (and the bug it replaces): an *attempt*
+/// is a host whose master had to be torn down, i.e. a reconnect actually
+/// happened. A host whose master was still healthy (`SSHTransport`'s `.alive`)
+/// is the opposite — nothing reconnected — and a wake where every host is
+/// healthy must emit nothing at all. The previous version counted `.alive` as
+/// the success and ignored `.recovered`, making wake reconnect metrics roughly
+/// the inverse of reality.
+///
+/// Volume matches the manual path in `ConnectionStatusViewModel`: one pair per
+/// wake, never per host — a fleet of ten remotes is still one reconnect the
+/// user experiences.
+nonisolated enum WakeReconnectMetrics {
+    /// What the sweep observed for a single host.
+    enum HostOutcome: Equatable {
+        /// No ControlMaster owned the socket: nothing was connected, so this
+        /// host is not evidence of anything either way.
+        case noMaster
+        /// The master was there and its session answered — no reconnect.
+        case healthy
+        /// A dead master was torn down and the socket is now gone.
+        case recovered
+        /// A dead master was torn down but the socket survived it — the
+        /// reconnect was attempted and did not work.
+        case recoveryFailed
+    }
+
+    struct Event {
+        let name: String
+        let props: [String: String]
+    }
+
+    /// - Parameter recoverySeconds: wall time spent on teardown work only —
+    ///   not the post-wake settle, and not the probes of healthy hosts.
+    static func events(for outcomes: [HostOutcome], recoverySeconds: TimeInterval) -> [Event] {
+        let attempted = outcomes.contains { $0 == .recovered || $0 == .recoveryFailed }
+        guard attempted else { return [] }
+        var events = [Event(name: "reconnect_attempted", props: ["trigger": "wake"])]
+        if outcomes.contains(.recovered) {
+            events.append(Event(name: "reconnect_succeeded", props: [
+                "trigger": "wake",
+                "duration_bucket": Analytics.durationBucket(recoverySeconds),
+            ]))
+        }
+        return events
+    }
 }
 
 struct MenuBarMenu: View {

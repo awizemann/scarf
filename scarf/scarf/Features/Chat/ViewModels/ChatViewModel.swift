@@ -829,12 +829,20 @@ final class ChatViewModel {
         startNewSession(projectPath: projectPath, initialPrompt: text)
     }
 
-    func resumeSession(_ sessionId: String) {
-        // `origin: chat` — a resume always comes from the session list in
-        // the chat surface. The session's own project scope is only
-        // recovered later (asynchronously, from the attribution sidecar),
-        // and would describe the session rather than where the user was.
-        Analytics.record("chat_session_started", props: ["mode": "resume", "origin": "chat"])
+    /// Resume an existing session.
+    ///
+    /// `origin` is the analytics attribution for the resulting
+    /// `chat_session_started{mode: resume}`. It defaults to `"chat"` — a
+    /// resume normally comes from the session list in the chat surface —
+    /// and the error banner's Reconnect button passes `"error_retry"`
+    /// instead: mechanically it's the same resume, but it's the user
+    /// retrying a session that just broke, not opening one, and folding the
+    /// two together inflates resume counts with failure recovery. The
+    /// session's own project scope is only recovered later (asynchronously,
+    /// from the attribution sidecar), and would describe the session rather
+    /// than where the user was.
+    func resumeSession(_ sessionId: String, origin: String = "chat") {
+        Analytics.record("chat_session_started", props: ["mode": "resume", "origin": origin])
         // Explicit user action: clear any open SSH circuit breaker for
         // this host (gh#138) so the resume gets a real attempt instead of
         // an instant fail-fast from background-poller history.

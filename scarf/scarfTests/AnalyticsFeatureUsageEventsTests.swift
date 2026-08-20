@@ -265,6 +265,61 @@ struct AnalyticsFeatureUsageEventsTests {
         #expect(await Self.awaitPendingSource(vm) == "url")
     }
 
+    /// `skill_installed` used to fire once per *declared* skill in
+    /// `manifest.contents.skills`. It now counts the skill directories the
+    /// installer actually writes, derived from the plan's file copies.
+    @Test("skill_installed counts written skill dirs, not declared names")
+    func installedSkillCountFollowsWrittenFiles() throws {
+        func plan(namespaceDir: String?, files: [String], declared: [String]?) -> TemplateInstallPlan {
+            TemplateInstallPlan(
+                manifest: ProjectTemplateServiceTests.sampleManifest(skills: declared),
+                unpackedDir: "/tmp/unpacked",
+                projectDir: "/tmp/project",
+                projectFiles: [],
+                skillsNamespaceDir: namespaceDir,
+                skillsFiles: files.map {
+                    TemplateFileCopy(sourceRelativePath: "skills/x", destinationPath: $0)
+                },
+                cronJobs: [],
+                memoryAppendix: nil,
+                memoryPath: ServerContext.local.paths.memoryMD,
+                projectRegistryName: "Example",
+                configSchema: nil,
+                configValues: [:],
+                manifestCachePath: nil
+            )
+        }
+        let ns = "/home/u/.hermes/skills/templates/example"
+
+        // Two skills, five files: two events, not five — and not the three
+        // the manifest happens to declare.
+        let two = plan(
+            namespaceDir: ns,
+            files: [
+                ns + "/alpha/SKILL.md",
+                ns + "/alpha/scripts/run.sh",
+                ns + "/beta/SKILL.md",
+                ns + "/beta/a.md",
+                ns + "/beta/b.md",
+            ],
+            declared: ["alpha", "beta", "gamma"]
+        )
+        #expect(TemplateInstallerViewModel.installedSkillCount(plan: two) == 2)
+
+        // A skill-less template writes nothing, however the manifest reads.
+        let none = plan(namespaceDir: nil, files: [], declared: ["alpha"])
+        #expect(TemplateInstallerViewModel.installedSkillCount(plan: none) == 0)
+
+        // Trailing slash on the namespace dir, and a stray copy outside it,
+        // must not manufacture a count.
+        let odd = plan(
+            namespaceDir: ns + "/",
+            files: [ns + "/alpha/SKILL.md", "/somewhere/else/SKILL.md"],
+            declared: nil
+        )
+        #expect(TemplateInstallerViewModel.installedSkillCount(plan: odd) == 1)
+    }
+
     @Test("server_count_bucket covers the taxonomy's four buckets")
     func serverCountBuckets() {
         #expect(Analytics.serverCountBucket(-1) == "0")
