@@ -56,6 +56,20 @@ nonisolated enum Analytics {
     /// Note what is *not* here: `screenMetrics` and `colorScheme` are left at
     /// their defaults rather than read from `NSScreen`/`NSApp`, which would
     /// mean touching AppKit on the main thread during client construction.
+    ///
+    /// Revisited for Phase 2: `StatsConfiguration.screenMetrics`/`colorScheme`
+    /// are plain `var`s on a value type consumed once by `StatsClient.init`
+    /// (`Packages` checkout: `Stats/StatsConfiguration.swift`,
+    /// `Stats/StatsClient.swift`) — the actor keeps no public setter to patch
+    /// either field in after construction, and `sharedClient` is a `static
+    /// let` that can legitimately fire first from a background thread (the
+    /// very first `record()` call, before `applicationDidBecomeActive()` ever
+    /// runs). Capturing `NSScreen.main`/effective appearance ahead of that
+    /// would mean either hopping to the main actor from a `nonisolated`
+    /// lazy initializer (a deadlock risk if that first call is already on
+    /// the main thread) or racing a background-thread AppKit read (undefined
+    /// behavior). Neither is worth it for two optional context fields, so
+    /// defaults stay — this is an accepted, documented gap, not an oversight.
     static func makeConfiguration(
         sink: any StatsSink,
         isPreRelease: Bool,

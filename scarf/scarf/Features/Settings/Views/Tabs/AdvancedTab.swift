@@ -21,6 +21,16 @@ struct AdvancedTab: View {
     @State private var showRemoteRestoreSheet = false
     @State private var diagnosticsOutput: String = ""
     @State private var showDiagnostics = false
+    /// Local mirror of `Analytics.isEnabled`. Starts `true` to match
+    /// swift-stats' documented default (enabled) — this avoids an
+    /// off-then-on flash while the async read in `.task` completes; if the
+    /// real persisted value is `false` the toggle corrects itself once that
+    /// read lands, same as any other async-loaded toggle.
+    @State private var analyticsEnabled = true
+    /// Guards against the `.task` load's write to `analyticsEnabled`
+    /// re-triggering as if the user flipped the toggle — that write must
+    /// not turn around and call `Analytics.setEnabled` again.
+    @State private var hasLoadedAnalyticsEnabled = false
 
     var body: some View {
         if capabilitiesStore?.capabilities.hasPromptCacheTTL ?? false {
@@ -93,6 +103,8 @@ struct AdvancedTab: View {
         if capabilitiesStore?.capabilities.hasSharedMetricsTelemetry ?? false {
             telemetrySection
         }
+
+        usageAnalyticsSection
 
         if capabilitiesStore?.capabilities.hasDatabaseJournalSettings ?? false {
             databaseSection
@@ -197,6 +209,41 @@ struct AdvancedTab: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
+    }
+
+    /// Scarf's own opt-out analytics, distinct from the Hermes-side
+    /// "Telemetry" section above: this toggle is **app-local** state
+    /// persisted by swift-stats in `UserDefaults` (keyed by app id), not a
+    /// Hermes config setting — it must never go through
+    /// `viewModel.setSetting`/`HermesConfig`.
+    @ViewBuilder
+    private var usageAnalyticsSection: some View {
+        SettingsSection(title: "Usage Analytics", icon: "chart.bar.xaxis") {
+            ToggleRow(
+                label: "Share anonymous usage statistics",
+                isOn: analyticsEnabled
+            ) { newValue in
+                analyticsEnabled = newValue
+                Task { await Analytics.setEnabled(newValue) }
+            }
+        }
+        HStack {
+            Text("")
+                .font(.caption)
+                .frame(width: 160, alignment: .trailing)
+            Text("Anonymous usage statistics only — never message content, hostnames, or file paths. Sent to the app developer to improve Scarf.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .task {
+            guard !hasLoadedAnalyticsEnabled else { return }
+            let enabled = await Analytics.isEnabled
+            analyticsEnabled = enabled
+            hasLoadedAnalyticsEnabled = true
+        }
     }
 
     /// `database.*` — SQLite journal mode + WAL sizing pragmas (v0.20+).

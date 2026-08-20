@@ -82,4 +82,31 @@ struct AnalyticsFacadeTests {
         // cannot disable the next one that runs.
         await client.setEnabled(true)
     }
+
+    @Test("re-enabling after opt-out resumes collection on the same client")
+    func reenablingResumesCollection() async throws {
+        let (client, sink, _, directory) = await makeHarness()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        await client.setEnabled(false)
+        #expect(await client.isEnabled == false)
+
+        client.record("section_viewed", props: ["section": .string("chat")])
+        await client.flush()
+        #expect(await sink.sentEventNames.isEmpty)
+
+        await client.setEnabled(true)
+        #expect(await client.isEnabled == true)
+
+        client.record("section_viewed", props: ["section": .string("chat")])
+        await client.flush()
+        await client.shutdown()
+
+        let names = await sink.sentEventNames
+        #expect(names.contains("section_viewed"))
+
+        // Leave the shared, persisted switch back at its default so this test
+        // cannot disable the next one that runs.
+        await client.setEnabled(true)
+    }
 }
