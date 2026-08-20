@@ -71,7 +71,7 @@ I'll acknowledge within 48 hours and coordinate disclosure timing. Standard 90-d
 
 ## Privacy
 
-See **[Privacy Policy](Privacy-Policy)** for what data the apps access and what they do not collect. Short version: nothing leaves your device or your Hermes host except over SSH connections you authorize. No analytics, no telemetry, no developer-controlled cloud.
+See **[Privacy Policy](Privacy-Policy)** for what data the apps access and what they do not collect. Short version: your content never leaves your device or your Hermes hosts. Scarf for macOS sends anonymous, content-free usage statistics to guide development — one toggle in Settings → Advanced turns them off. ScarfGo on iOS sends nothing.
 
 ## License
 
