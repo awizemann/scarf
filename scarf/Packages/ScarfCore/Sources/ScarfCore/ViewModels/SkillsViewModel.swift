@@ -51,6 +51,11 @@ public final class SkillsViewModel {
     public var hubQuery = ""
     public var hubResults: [HermesHubSkill] = []
     public var updates: [HermesSkillUpdate] = []
+    /// Skills the last `updateAll()` left untouched because they carry
+    /// local edits (Hermes v0.20.4+). Always empty on older hosts — they
+    /// never skip — so the UI section stays hidden and Updates renders
+    /// exactly as it did before.
+    public internal(set) var skippedLocalEdits: [String] = []
     public var isHubLoading = false
     public var hubMessage: String?
     public var hubSource: String = "all"
@@ -511,6 +516,19 @@ public final class SkillsViewModel {
         }
     }
 
+    /// Single-skill forced update. `--force` makes Hermes overwrite a
+    /// skill the user has edited on disk, destroying those edits — so it
+    /// is ONLY ever sent for one explicitly named skill, chosen by the
+    /// user from the "kept local edits" list. `updateAll()` must never
+    /// carry it.
+    ///
+    /// v0.20.4+ only. Callers gate on
+    /// `HermesCapabilities.hasSkillsUpdateForce`; older hosts have no
+    /// skip behaviour to override and don't surface the action.
+    nonisolated static func forceUpdateArgs(_ name: String) -> [String] {
+        ["skills", "update", name, "--force"]
+    }
+
     public func updateAll() {
         let bin = context.paths.hermesBinary
         let xport = transport
@@ -521,7 +539,25 @@ public final class SkillsViewModel {
                 transport: xport,
                 timeout: 300
             )
-            await self?.finishUpdateAll(exitCode: result.exitCode)
+            let report = HermesSkillsHubParser.parseUpdateReport(result.output)
+            await self?.finishUpdateAll(exitCode: result.exitCode, report: report)
+        }
+    }
+
+    /// Re-run the update for one skill with `--force`, discarding that
+    /// skill's local edits. Gate the call site on `hasSkillsUpdateForce`.
+    public func forceUpdateSkill(_ name: String) {
+        let bin = context.paths.hermesBinary
+        let xport = transport
+        isHubLoading = true
+        Task.detached { [weak self] in
+            let result = Self.runHermes(
+                executable: bin,
+                args: Self.forceUpdateArgs(name),
+                transport: xport,
+                timeout: 300
+            )
+            await self?.finishForceUpdate(name: name, exitCode: result.exitCode)
         }
     }
 
@@ -617,10 +653,33 @@ public final class SkillsViewModel {
     }
 
     @MainActor
-    private func finishUpdateAll(exitCode: Int32) async {
-        hubMessage = exitCode == 0 ? "Updated" : "Update failed"
+    private func finishUpdateAll(exitCode: Int32, report: HermesSkillsUpdateReport) async {
+        skippedLocalEdits = exitCode == 0 ? report.skipped : []
+        if exitCode != 0 {
+            hubMessage = "Update failed"
+        } else if report.skipped.isEmpty {
+            // Pre-v0.20.4 and clean v0.20.4 runs land here — same
+            // wording the UI has always shown.
+            hubMessage = "Updated"
+        } else {
+            hubMessage = "Updated \(report.updatedCount) · \(report.skipped.count) kept local edits"
+        }
         await load()
         checkForUpdates()
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        hubMessage = nil
+    }
+
+    @MainActor
+    private func finishForceUpdate(name: String, exitCode: Int32) async {
+        isHubLoading = false
+        if exitCode == 0 {
+            skippedLocalEdits.removeAll { $0 == name }
+            hubMessage = "Updated \(name) (local edits discarded)"
+        } else {
+            hubMessage = "Update failed for \(name)"
+        }
+        await load()
         try? await Task.sleep(nanoseconds: 3_000_000_000)
         hubMessage = nil
     }
