@@ -76,6 +76,18 @@ public enum GatewayAllowlistKind: String, Sendable, Equatable {
     /// `allowed_channels` at any Hermes version — access is gated via the
     /// `GOOGLE_CHAT_ALLOWED_USERS` env var (plugins/platforms/google_chat/
     /// adapter.py), so a channels allowlist would be a silent no-op.
+    // KNOWN GAP (v0.20.4 audit, Tier 3 #5): Discord actually has a real
+    // `discord.allowed_channels` allowlist (discord/adapter.py, enforced
+    // at message-handling time), which would make `discord` a `.channels`
+    // case here — but no Discord setup view currently wires up
+    // `GatewayBehaviorSection`/`GatewayBehaviorViewModel` the way Slack,
+    // Mattermost, Telegram, Matrix, and WhatsApp do, so returning `.channels`
+    // here today wouldn't surface any editor — only the doc comment above
+    // (`kind: GatewayAllowlistKind?` in `GatewayBehaviorViewModel`, which
+    // lists Discord as an example of a no-allowlist platform) would go
+    // stale. Left as a backlog item rather than fixed here: the real fix
+    // needs a Discord setup view wired to `GatewayBehaviorSection`, not
+    // just this one-line mapping change.
     public static func kind(for platform: String) -> GatewayAllowlistKind? {
         switch platform {
         case "slack", "mattermost": return .channels

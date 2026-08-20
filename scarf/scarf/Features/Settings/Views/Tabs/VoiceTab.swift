@@ -87,6 +87,12 @@ struct VoiceTab: View {
                     DoubleStepperRow(label: "No-Speech Threshold", value: viewModel.config.voice.sttLocalNoSpeechProbThreshold, range: 0.0...1.0, step: 0.05) { viewModel.setSTTLocalNoSpeechProbThreshold($0) }
                     DoubleStepperRow(label: "Logprob Threshold", value: viewModel.config.voice.sttLocalLogprobThreshold, range: -5.0...0.0, step: 0.1) { viewModel.setSTTLocalLogprobThreshold($0) }
                 }
+                // v0.20.4+ — releases the local whisper model after N idle
+                // seconds (frees VRAM on GPU; 0 = never unload).
+                if capabilitiesStore?.capabilities.isV0204OrLater ?? false {
+                    StepperRow(label: "Unload After Idle (s)", value: viewModel.config.voice.sttLocalUnloadAfterIdleSeconds, range: 0...3600, step: 30) { viewModel.setSTTLocalUnloadAfterIdleSeconds($0) }
+                        .help("0 = never unload the local whisper model. A positive value releases it (freeing VRAM on GPU) after this many idle seconds; the next voice message reloads it.")
+                }
             case "groq":
                 // v0.20: config-driven Groq STT knobs — hidden on pre-v0.20
                 // hosts (hasSTTUnifiedLanguage; the provider itself is
@@ -102,6 +108,27 @@ struct VoiceTab: View {
                 EditableTextField(label: "Model", value: viewModel.config.voice.sttMistralModel) { viewModel.setSTTMistralModel($0) }
             default:
                 EmptyView()
+            }
+            // v0.20.4+ — client-side ffmpeg silence trim applied before
+            // upload to cloud STT providers (groq/openai/mistral/xai/
+            // elevenlabs/deepinfra). TOP-LEVEL keys, not per-provider.
+            if capabilitiesStore?.capabilities.isV0204OrLater ?? false {
+                ToggleRow(label: "Trim Silence (Cloud STT)", isOn: viewModel.config.voice.sttCloudTrimSilence) { viewModel.setSTTCloudTrimSilence($0) }
+                    .help("Collapses pauses with ffmpeg client-side before upload to cloud STT providers. Reduces upload time, per-minute billing, and hallucination risk. Clips under 12s skip the trim; on any failure the original uploads untouched.")
+                if viewModel.config.voice.sttCloudTrimSilence {
+                    DoubleStepperRow(label: "Trim Threshold (dB)", value: viewModel.config.voice.sttCloudTrimThresholdDB, range: -80.0...(-10.0), step: 1.0) { viewModel.setSTTCloudTrimThresholdDB($0) }
+                        .help("Audio quieter than this counts as silence.")
+                    StepperRow(label: "Trim Keep (ms)", value: viewModel.config.voice.sttCloudTrimKeepMS, range: 0...2000, step: 50) { viewModel.setSTTCloudTrimKeepMS($0) }
+                        .help("How much of each pause survives the trim (keeps natural pacing).")
+                }
+            }
+        }
+
+        // v0.20.4+ — "Hey Hermes" hands-free wake word capture placement.
+        if capabilitiesStore?.capabilities.isV0204OrLater ?? false {
+            SettingsSection(title: "Wake Word", icon: "waveform.badge.mic") {
+                PickerRow(label: "Capture", selection: viewModel.config.voice.wakeWordCapture, options: ["auto", "local", "client"]) { viewModel.setWakeWordCapture($0) }
+                    .help("auto: backend PortAudio mic when one exists, else a remote desktop on a mic-less (headless/VPS) backend streams its own mic via the wake.feed RPC. local: always the backend mic. client: always desktop-streamed PCM (detection stays on the backend).")
             }
         }
     }

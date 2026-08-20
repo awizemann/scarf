@@ -18,6 +18,11 @@ public struct AuxiliaryModel: Sendable, Equatable {
     /// stores the raw string and writes it verbatim; validation of the
     /// allowed set lives in `AuxiliaryReasoningEffort`.
     public var reasoningEffort: String
+    /// `auxiliary.<task>.max_concurrency` (v0.20.4+) — true-optional cap on
+    /// simultaneous calls for this auxiliary task. Currently only
+    /// documented for `auxiliary.compression`. `nil` = key absent = legacy
+    /// unlimited behavior; distinct from any concrete int.
+    public var maxConcurrency: Int?
 
     public init(
         provider: String,
@@ -25,7 +30,8 @@ public struct AuxiliaryModel: Sendable, Equatable {
         baseURL: String,
         apiKey: String,
         timeout: Int,
-        reasoningEffort: String = ""
+        reasoningEffort: String = "",
+        maxConcurrency: Int? = nil
     ) {
         self.provider = provider
         self.model = model
@@ -33,8 +39,9 @@ public struct AuxiliaryModel: Sendable, Equatable {
         self.apiKey = apiKey
         self.timeout = timeout
         self.reasoningEffort = reasoningEffort
+        self.maxConcurrency = maxConcurrency
     }
-    public nonisolated static let empty = AuxiliaryModel(provider: "auto", model: "", baseURL: "", apiKey: "", timeout: 30, reasoningEffort: "")
+    public nonisolated static let empty = AuxiliaryModel(provider: "auto", model: "", baseURL: "", apiKey: "", timeout: 30, reasoningEffort: "", maxConcurrency: nil)
 }
 
 /// Valid `auxiliary.<task>.reasoning_effort` values, source-verified against
@@ -303,7 +310,26 @@ public struct VoiceSettings: Sendable, Equatable {
     public var sttLocalVADMinSilenceMS: Int
     public var sttLocalNoSpeechProbThreshold: Double
     public var sttLocalLogprobThreshold: Double
-
+    /// `stt.local.unload_after_idle_seconds` — v0.20.4+. `0` (default) =
+    /// never unload the local whisper model; a positive value releases it
+    /// (freeing VRAM on GPU) after that many idle seconds, reloading on the
+    /// next voice message.
+    public var sttLocalUnloadAfterIdleSeconds: Int
+    /// `stt.cloud_trim_silence` / `stt.cloud_trim_threshold_db` /
+    /// `stt.cloud_trim_keep_ms` — v0.20.4+. TOP-LEVEL siblings of
+    /// `stt.local.*` (NOT nested under `stt.local`). Client-side ffmpeg
+    /// silence trim applied before upload to cloud STT providers
+    /// (groq/openai/mistral/xai/elevenlabs/deepinfra). Default: trim on,
+    /// threshold -40dB, keep 300ms of each pause.
+    public var sttCloudTrimSilence: Bool
+    public var sttCloudTrimThresholdDB: Double
+    public var sttCloudTrimKeepMS: Int
+    /// `wake_word.capture` — v0.20.4+. `"auto"` (default) | `"local"` |
+    /// `"client"`. auto = backend PortAudio mic when one exists, else
+    /// remote-desktop streams via the `wake.feed` RPC; local = always the
+    /// backend mic; client = always desktop-streamed PCM (detection stays
+    /// on the backend).
+    public var wakeWordCapture: String
 
     public init(
         recordKey: String,
@@ -340,7 +366,12 @@ public struct VoiceSettings: Sendable, Equatable {
         sttLocalVAD: Bool = true,
         sttLocalVADMinSilenceMS: Int = 500,
         sttLocalNoSpeechProbThreshold: Double = 0.6,
-        sttLocalLogprobThreshold: Double = -1.0
+        sttLocalLogprobThreshold: Double = -1.0,
+        sttLocalUnloadAfterIdleSeconds: Int = 0,
+        sttCloudTrimSilence: Bool = true,
+        sttCloudTrimThresholdDB: Double = -40,
+        sttCloudTrimKeepMS: Int = 300,
+        wakeWordCapture: String = "auto"
     ) {
         self.recordKey = recordKey
         self.maxRecordingSeconds = maxRecordingSeconds
@@ -377,6 +408,11 @@ public struct VoiceSettings: Sendable, Equatable {
         self.sttLocalVADMinSilenceMS = sttLocalVADMinSilenceMS
         self.sttLocalNoSpeechProbThreshold = sttLocalNoSpeechProbThreshold
         self.sttLocalLogprobThreshold = sttLocalLogprobThreshold
+        self.sttLocalUnloadAfterIdleSeconds = sttLocalUnloadAfterIdleSeconds
+        self.sttCloudTrimSilence = sttCloudTrimSilence
+        self.sttCloudTrimThresholdDB = sttCloudTrimThresholdDB
+        self.sttCloudTrimKeepMS = sttCloudTrimKeepMS
+        self.wakeWordCapture = wakeWordCapture
     }
     public nonisolated static let empty = VoiceSettings(
         recordKey: "ctrl+b",
@@ -430,7 +466,14 @@ public struct AuxiliarySettings: Sendable, Equatable {
     /// auxiliary tasks. See `TitleGenerationSettings` for field-level
     /// version notes (`language` is v0.18+).
     public var titleGeneration: TitleGenerationSettings
-
+    /// `auxiliary.background_review.enabled` (v0.20.4+) — NOT
+    /// `agent.background_review.enabled`; the real YAML structure nests
+    /// `background_review:` under the top-level `auxiliary:` block
+    /// (source-verified against `cli-config.yaml.example` @ v2026.8.18).
+    /// Default `true`. Post-turn memory/skill self-improvement fork that
+    /// runs after a turn when nudge intervals fire; costs tokens. `false`
+    /// skips automatic forks (`/refine` still works).
+    public var backgroundReviewEnabled: Bool
 
     public init(
         vision: AuxiliaryModel,
@@ -442,7 +485,8 @@ public struct AuxiliarySettings: Sendable, Equatable {
         mcp: AuxiliaryModel,
         flushMemories: AuxiliaryModel,
         curator: AuxiliaryModel,
-        titleGeneration: TitleGenerationSettings = .empty
+        titleGeneration: TitleGenerationSettings = .empty,
+        backgroundReviewEnabled: Bool = true
     ) {
         self.vision = vision
         self.webExtract = webExtract
@@ -454,6 +498,7 @@ public struct AuxiliarySettings: Sendable, Equatable {
         self.flushMemories = flushMemories
         self.curator = curator
         self.titleGeneration = titleGeneration
+        self.backgroundReviewEnabled = backgroundReviewEnabled
     }
     public nonisolated static let empty = AuxiliarySettings(
         vision: .empty,
@@ -465,7 +510,8 @@ public struct AuxiliarySettings: Sendable, Equatable {
         mcp: .empty,
         flushMemories: .empty,
         curator: .empty,
-        titleGeneration: .empty
+        titleGeneration: .empty,
+        backgroundReviewEnabled: true
     )
 }
 
@@ -490,6 +536,10 @@ public struct TitleGenerationSettings: Sendable, Equatable {
     /// v0.18+ — see type doc. Empty means "match the chat's language"
     /// (Hermes default).
     public var language: String
+    /// `auxiliary.title_generation.max_concurrency` (v0.20.4+) —
+    /// true-optional cap on simultaneous title calls. `nil` = key absent =
+    /// legacy unlimited behavior.
+    public var maxConcurrency: Int?
 
     public init(
         enabled: Bool,
@@ -499,7 +549,8 @@ public struct TitleGenerationSettings: Sendable, Equatable {
         apiKey: String,
         timeout: Int,
         reasoningEffort: String,
-        language: String
+        language: String,
+        maxConcurrency: Int? = nil
     ) {
         self.enabled = enabled
         self.provider = provider
@@ -509,6 +560,7 @@ public struct TitleGenerationSettings: Sendable, Equatable {
         self.timeout = timeout
         self.reasoningEffort = reasoningEffort
         self.language = language
+        self.maxConcurrency = maxConcurrency
     }
 
     public nonisolated static let empty = TitleGenerationSettings(
@@ -519,7 +571,8 @@ public struct TitleGenerationSettings: Sendable, Equatable {
         apiKey: "",
         timeout: 30,
         reasoningEffort: "",
-        language: ""
+        language: "",
+        maxConcurrency: nil
     )
 }
 
@@ -669,23 +722,30 @@ public struct DelegationSettings: Sendable, Equatable {
     public var provider: String
     public var baseURL: String
     public var apiKey: String
+    /// `delegation.max_iterations` — max tool-calling turns per child.
+    /// Hermes v0.20.4 (migration 36) raised the server-side default 50→250.
     public var maxIterations: Int
-
+    /// `delegation.max_concurrent_children` — max parallel child agents per
+    /// batch. Hermes v0.20.4 (migration 37) raised the server-side default
+    /// 3→10 (floor 1, no ceiling).
+    public var maxConcurrentChildren: Int
 
     public init(
         model: String,
         provider: String,
         baseURL: String,
         apiKey: String,
-        maxIterations: Int
+        maxIterations: Int,
+        maxConcurrentChildren: Int = 10
     ) {
         self.model = model
         self.provider = provider
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.maxIterations = maxIterations
+        self.maxConcurrentChildren = maxConcurrentChildren
     }
-    public nonisolated static let empty = DelegationSettings(model: "", provider: "", baseURL: "", apiKey: "", maxIterations: 50)
+    public nonisolated static let empty = DelegationSettings(model: "", provider: "", baseURL: "", apiKey: "", maxIterations: 250, maxConcurrentChildren: 10)
 }
 
 /// Discord-specific platform settings (`discord.*`). Other platforms currently have thinner schemas.
@@ -1184,6 +1244,15 @@ public struct HermesConfig: Sendable {
     public var userProfileEnabled: Bool
     public var toolUseEnforcement: String      // "auto" | "true" | "false" | comma list
     public var gatewayTimeout: Int
+    /// `agent.cron_drain_timeout` (v0.20.4+) — cron-only floor under
+    /// gateway stop/restart drain (seconds), distinct from
+    /// `agent.restart_drain_timeout` (default 0). Default 30.
+    public var cronDrainTimeout: Int
+    /// `agent.gateway_turn_lease_timeout` (v0.20.4+) — max seconds an alias
+    /// routing key waits for an active turn holding the same resolved
+    /// session lease before Hermes rejects the inbound message. Non-positive
+    /// values fall back to the 1800-second default.
+    public var gatewayTurnLeaseTimeout: Int
     public var approvalTimeout: Int
     public var fileReadMaxChars: Int
     public var cronWrapResponse: Bool
@@ -1356,6 +1425,16 @@ public struct HermesConfig: Sendable {
     /// See `HermesProfileRoutes` for the matching + ranking semantics.
     public var profileRoutes: HermesProfileRoutes
 
+    /// `gateway.multiplex_profile_allowlist` (v0.20.4+, gateway/config.py) —
+    /// top-level key inside the `gateway:` block, a sibling of
+    /// `gateway.multiplex_profiles`. `nil` means the key is absent from
+    /// config.yaml — historical serve-all behavior (no allowlist, every
+    /// profile is reachable). An empty array `[]` means only the `"default"`
+    /// profile is allowed. `"default"` is implicitly always allowed even
+    /// when not listed. A malformed value (not a list, or a list containing
+    /// invalid entries) fails safe upstream to serving only `"default"`, so
+    /// Scarf's parser normalizes that case to `[]` rather than `nil`.
+    public var multiplexProfileAllowlist: [String]?
 
     public init(
         model: String,
@@ -1390,6 +1469,8 @@ public struct HermesConfig: Sendable {
         userProfileEnabled: Bool,
         toolUseEnforcement: String,
         gatewayTimeout: Int,
+        cronDrainTimeout: Int = 30,
+        gatewayTurnLeaseTimeout: Int = 1800,
         approvalTimeout: Int,
         fileReadMaxChars: Int,
         cronWrapResponse: Bool,
@@ -1440,7 +1521,8 @@ public struct HermesConfig: Sendable {
         commandSecrets: CommandSecretsSettings = .empty,
         telemetry: TelemetrySettings = .empty,
         database: DatabaseSettings = .empty,
-        profileRoutes: HermesProfileRoutes = .empty
+        profileRoutes: HermesProfileRoutes = .empty,
+        multiplexProfileAllowlist: [String]? = nil
     ) {
         self.cacheTTL = cacheTTL
         self.redactionEnabled = redactionEnabled
@@ -1484,6 +1566,8 @@ public struct HermesConfig: Sendable {
         self.userProfileEnabled = userProfileEnabled
         self.toolUseEnforcement = toolUseEnforcement
         self.gatewayTimeout = gatewayTimeout
+        self.cronDrainTimeout = cronDrainTimeout
+        self.gatewayTurnLeaseTimeout = gatewayTurnLeaseTimeout
         self.approvalTimeout = approvalTimeout
         self.fileReadMaxChars = fileReadMaxChars
         self.cronWrapResponse = cronWrapResponse
@@ -1525,6 +1609,7 @@ public struct HermesConfig: Sendable {
         self.telemetry = telemetry
         self.database = database
         self.profileRoutes = profileRoutes
+        self.multiplexProfileAllowlist = multiplexProfileAllowlist
     }
     public nonisolated static let empty = HermesConfig(
         model: "unknown",

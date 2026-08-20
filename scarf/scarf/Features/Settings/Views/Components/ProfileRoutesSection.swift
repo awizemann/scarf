@@ -97,6 +97,11 @@ struct ProfileRoutesSection: View {
                 ProfileRouteRow(
                     rank: row.rank,
                     route: row.route,
+                    // v0.20.4+ — `gateway.multiplex_profile_allowlist`.
+                    // `nil` allowlist (key absent) means "no warning".
+                    allowlistWarning: capabilities.isV0204OrLater
+                        ? viewModel.multiplexProfileAllowlistWarning(for: row.route.profile)
+                        : nil,
                     onEdit: {
                         editingIsNew = false
                         editing = row.route
@@ -196,6 +201,9 @@ struct ProfileRoutesSection: View {
 private struct ProfileRouteRow: View {
     let rank: Int?
     let route: HermesProfileRoute
+    /// v0.20.4+ — non-nil when this route's target profile isn't in
+    /// `gateway.multiplex_profile_allowlist` and would never fire.
+    var allowlistWarning: String? = nil
     let onEdit: () -> Void
     let onToggleEnabled: (Bool) -> Void
     let onRemove: () -> Void
@@ -243,6 +251,8 @@ private struct ProfileRouteRow: View {
                 warning(reason)
             } else if !route.enabled {
                 warning("Disabled — never matches.")
+            } else if let allowlistWarning {
+                warning(allowlistWarning)
             }
         }
         .padding(.horizontal, 12)

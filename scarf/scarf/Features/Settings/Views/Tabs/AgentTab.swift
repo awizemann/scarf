@@ -36,6 +36,13 @@ struct AgentTab: View {
             }
             StepperRow(label: "Gateway Timeout (s)", value: viewModel.config.gatewayTimeout, range: 60...7200, step: 60) { viewModel.setGatewayTimeout($0) }
             StepperRow(label: "Notify Interval (s)", value: viewModel.config.gatewayNotifyInterval, range: 0...3600, step: 30) { viewModel.setGatewayNotifyInterval($0) }
+            // v0.20.4+ (isV0204OrLater).
+            if capabilitiesStore?.capabilities.isV0204OrLater ?? false {
+                StepperRow(label: "Cron Drain Timeout (s)", value: viewModel.config.cronDrainTimeout, range: 0...600, step: 5) { viewModel.setCronDrainTimeout($0) }
+                    .help("Cron-only floor under gateway stop/restart drain. Distinct from Restart Drain Timeout. Default 30.")
+                StepperRow(label: "Gateway Turn Lease Timeout (s)", value: viewModel.config.gatewayTurnLeaseTimeout, range: 60...7200, step: 60) { viewModel.setGatewayTurnLeaseTimeout($0) }
+                    .help("Max time an alias routing key waits for an active turn holding the same session lease. Non-positive values fall back to 1800.")
+            }
         }
 
         // v0.19+: `profile_routes` — route inbound gateway messages to

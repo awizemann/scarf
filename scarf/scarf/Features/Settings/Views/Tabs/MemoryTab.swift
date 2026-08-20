@@ -4,6 +4,7 @@ import ScarfCore
 /// Memory tab — built-in memory settings + external provider picker.
 struct MemoryTab: View {
     @Bindable var viewModel: SettingsViewModel
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
 
     var body: some View {
         SettingsSection(title: "Built-in Memory", icon: "brain") {
@@ -15,6 +16,13 @@ struct MemoryTab: View {
             StepperRow(label: "Memory Char Limit", value: viewModel.config.memoryCharLimit, range: 500...10_000, step: 100) { viewModel.setMemoryCharLimit($0) }
             StepperRow(label: "User Char Limit", value: viewModel.config.userCharLimit, range: 500...10_000, step: 100) { viewModel.setUserCharLimit($0) }
             StepperRow(label: "Nudge Interval", value: viewModel.config.nudgeInterval, range: 1...50) { viewModel.setNudgeInterval($0) }
+            // v0.20.4+ (isV0204OrLater) — `auxiliary.background_review.enabled`,
+            // NOT `agent.background_review.enabled`. On by default; post-turn
+            // self-improvement fork that runs after nudge intervals fire.
+            if capabilitiesStore?.capabilities.isV0204OrLater ?? false {
+                ToggleRow(label: "Background Review", isOn: viewModel.config.auxiliary.backgroundReviewEnabled) { viewModel.setBackgroundReviewEnabled($0) }
+                    .help("On by default; post-turn self-improvement fork that writes skills/memories after a turn. Costs tokens. Off skips automatic forks (/refine still works).")
+            }
         }
 
         SettingsSection(title: "External Provider", icon: "externaldrive.connected.to.line.below") {
