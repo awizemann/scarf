@@ -48,6 +48,10 @@
 - [ ] Sweep pickers with present-but-empty "" rows that claim to unset (displayLanguages, memoryProviders) (id: t-9634ae74) (added: 2026-08-12)
 - [ ] Follow-ups from the 2026-08-12 fresh-eyes audit (profile_routes edge cases + bitwarden default drift) (id: t-6a6d692c) (added: 2026-08-12) (priority: low)
 - [ ] Fix flaky HermesVersionCacheTests.storeKeepsRememberedVersionWhenProbeFails (id: t-6e1e9c86) (added: 2026-08-13)
+- [ ] R2 [iOS]: App Store compliance — FileTimestamp manifest + export-compliance answer (id: t-aa7be288) (added: 2026-08-20) (priority: high)
+- [ ] R3 [iOS]: Resume fallback — typed catch, surfacing, analytics parity (id: t-238d2ab3) (added: 2026-08-20) (priority: high)
+- [ ] R4 [iOS]: Key import gate — reject unusable keys at paste time (id: t-a89ccf7a) (added: 2026-08-20)
+- [ ] R6 [iOS]: Splash — use LaunchIcon asset, drop 1024px main-thread decode (id: t-d8d0f1d3) (added: 2026-08-20) (priority: low)
 
 ## Doing
 
@@ -55,6 +59,20 @@
 
 ## Done
 
+- [x] R1: Privacy policy + analytics disclosure (BLOCKING — Alan wording decision) (id: t-da90e83e) (added: 2026-08-20) (priority: high)
+- [x] R5: Analytics accuracy — wake-reconnect inversion + minor event fixes (id: t-4280feb4) (added: 2026-08-20)
+- [x] F3: Audit fixes — MCP catalog data, personalities, curator polish, test honesty (id: t-bf82f45c) (added: 2026-08-20)
+- [x] F2: Audit fixes — multiplex allowlist parsing cluster + clamp (id: t-eeaebd8d) (added: 2026-08-20)
+- [x] F1: Audit fixes — cron resume semantics + unread accuracy + remote probe tests (id: t-d518c6c6) (added: 2026-08-20)
+- [x] P8: MCP — catalog surface + identity_header/cwd + round-trip test (id: t-973203c1) (added: 2026-08-20)
+- [x] P7: Settings — new v0.20.4 config keys + stale defaults/docs (id: t-2307f41e) (added: 2026-08-20)
+- [x] P6: Sessions UX — hidden filter, unread, reset-children (id: t-fbd97166) (added: 2026-08-20)
+- [x] P5: Curator — ledger, purge, per-entry rollback (id: t-43640ac5) (added: 2026-08-20)
+- [x] P4: Skills — update skipped-list reporting + project skills/trust (id: t-f754ab10) (added: 2026-08-20)
+- [x] P3: Provider tables — actual provider + renames (id: t-56ea9742) (added: 2026-08-20)
+- [x] P2: Cron pause-marker enable/disable + decode hardening (id: t-3290c0be) (added: 2026-08-20)
+- [x] P1: Personalities repair (built-ins + prefix + system_prompt) (id: t-37e4b0f0) (added: 2026-08-20)
+- [x] P0: Hermes v0.20.4 capability flags + tests (id: t-45d0f05f) (added: 2026-08-20)
 - [x] Analytics follow-up: consent groups, bundled-skill bootstrap event, template install source attribution (id: t-855abc31) (added: 2026-08-20)
 - [x] Analytics P7: final plan-conformance + fresh-eye audit of the full integration (id: t-49988fd8) (added: 2026-08-20)
 - [x] Analytics P6: ScarfMon Stats backend + diagnostics events (id: t-f65db83c) (added: 2026-08-20)
