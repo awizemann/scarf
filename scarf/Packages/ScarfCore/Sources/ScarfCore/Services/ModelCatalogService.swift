@@ -743,7 +743,7 @@ public struct ModelCatalogService: Sendable {
             docURL: "https://hermes-agent.nousresearch.com/docs/user-guide/setup/nous-portal"
         ),
         "openai-codex": HermesProviderOverlay(
-            displayName: "OpenAI Codex",
+            displayName: "ChatGPT or Codex Subscription",
             baseURL: "https://chatgpt.com/backend-api/codex",
             authType: .oauthExternal,
             subscriptionGated: false,
@@ -905,6 +905,16 @@ public struct ModelCatalogService: Sendable {
             subscriptionGated: false,
             docURL: nil
         ),
+        // Hermes v2026.8.18 added Actual Computer as overlay-only (not in
+        // models.dev). Wire ID `actual` matches HERMES_OVERLAYS verbatim;
+        // codex_responses transport; env var ACTUAL_API_KEY.
+        "actual": HermesProviderOverlay(
+            displayName: "Actual Computer",
+            baseURL: "https://api.actual.inc/v1",
+            authType: .apiKey,
+            subscriptionGated: false,
+            docURL: nil
+        ),
     ]
 
     /// Provider-ID aliases — verbatim mirror of `ALIASES` in
@@ -1011,6 +1021,10 @@ public struct ModelCatalogService: Sendable {
         "fw": "fireworks",
         // upstage
         "solar": "upstage",
+        // Actual Computer
+        "actual-computer": "actual",
+        "actualcomputer": "actual",
+        "aci": "actual",
         // Local server aliases → virtual "local" concept (resolved via user config)
         "lm-studio": "lmstudio",
         "lm_studio": "lmstudio",
