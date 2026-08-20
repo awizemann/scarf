@@ -189,6 +189,82 @@ struct AnalyticsFeatureUsageEventsTests {
 
     // MARK: - Buckets
 
+    /// `skills_bootstrapped` replaced a per-skill `skill_installed
+    /// {source:"bundled"}` that fired from the unattended launch bootstrap
+    /// and drowned the user-driven installs on that same event name.
+    @Test("skills_bootstrapped count_bucket covers the taxonomy's three buckets")
+    func bootstrapCountBuckets() {
+        #expect(SkillBootstrapService.bootstrapCountBucket(1) == "1")
+        #expect(SkillBootstrapService.bootstrapCountBucket(2) == "2_5")
+        #expect(SkillBootstrapService.bootstrapCountBucket(5) == "2_5")
+        #expect(SkillBootstrapService.bootstrapCountBucket(6) == "gt_5")
+        #expect(SkillBootstrapService.bootstrapCountBucket(999) == "gt_5")
+        // Never called with these, but no input may produce a fourth token.
+        #expect(SkillBootstrapService.bootstrapCountBucket(0) == "1")
+        #expect(SkillBootstrapService.bootstrapCountBucket(-3) == "1")
+    }
+
+    /// The nothing-written case — the steady state on every launch after
+    /// the first. A silent run is the whole point of the change, so the
+    /// decision is a pure function the test can read directly (
+    /// `Analytics.record` is a no-op under XCTest, so a sink can't be).
+    @Test("a bootstrap run that wrote nothing emits no event")
+    func bootstrapWithNothingWrittenIsSilent() {
+        #expect(SkillBootstrapService.bootstrapEventProps(written: 0) == nil)
+        #expect(SkillBootstrapService.bootstrapEventProps(written: 1) == ["count_bucket": "1"])
+        #expect(SkillBootstrapService.bootstrapEventProps(written: 4) == ["count_bucket": "2_5"])
+        #expect(SkillBootstrapService.bootstrapEventProps(written: 9) == ["count_bucket": "gt_5"])
+    }
+
+    // MARK: - template_installed / skill_installed source attribution
+
+    /// Locate a shipped `.scarftemplate` to drive the installer VM with.
+    nonisolated private static func locateExample(author: String, name: String) throws -> String {
+        var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        for _ in 0..<6 {
+            let candidate = dir.appendingPathComponent("templates/\(author)/\(name)/\(name).scarftemplate")
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate.path
+            }
+            dir = dir.deletingLastPathComponent()
+        }
+        throw ProjectTemplateError.requiredFileMissing("templates/\(author)/\(name)/\(name).scarftemplate")
+    }
+
+    @MainActor
+    private static func awaitPendingSource(_ vm: TemplateInstallerViewModel) async -> String? {
+        for _ in 0..<200 {
+            if let source = vm.pendingInstallSourceForTesting { return source }
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        return nil
+    }
+
+    /// The regression: `installSource` used to be one shared VM property
+    /// written at entry and read back at `confirmInstall()`, so a second
+    /// entry point landing while the first install was still in flight
+    /// re-attributed the first install to the second's source. The token
+    /// now rides the pending-install state, published in the same step as
+    /// the inspection it describes.
+    @Test("each install keeps its own source when a second entry interleaves")
+    @MainActor
+    func perInstallSourceSurvivesInterleavedEntry() async throws {
+        let bundle = try Self.locateExample(author: "awizemann", name: "hackernews-digest")
+        let vm = TemplateInstallerViewModel(context: .local)
+        defer { vm.cancel() }
+
+        // Entry A: a catalog pick.
+        vm.openLocalFile(bundle, source: "hub")
+        #expect(await Self.awaitPendingSource(vm) == "hub")
+
+        // Entry B lands while A is still awaiting confirmation: A's pending
+        // state (source included) is dropped wholesale rather than leaving
+        // a stale token behind for B — or B's token in front of A's bundle.
+        vm.openLocalFile(bundle, source: "url")
+        #expect(vm.pendingInstallSourceForTesting == nil)
+        #expect(await Self.awaitPendingSource(vm) == "url")
+    }
+
     @Test("server_count_bucket covers the taxonomy's four buckets")
     func serverCountBuckets() {
         #expect(Analytics.serverCountBucket(-1) == "0")

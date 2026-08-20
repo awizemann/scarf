@@ -82,6 +82,25 @@ nonisolated enum Analytics {
             projectId: "scarf",
             installIdSalt: installIdSalt,
             sink: sink,
+            // Explicit, not inherited: this is the same value as
+            // `StatsConsent.default`, spelled out so the posture is a
+            // decision rather than a package default that could shift
+            // under us. There is no per-event consent routing in the
+            // package — the groups gate *layers*, not individual events:
+            //
+            // - `.usage` gates event emission itself. EVERY event Scarf
+            //   records rides this one group, including the taxonomy's
+            //   "Diagnostics" events (`perf_measure`,
+            //   `bootstrap_task_failed`) — denying it emits nothing at all.
+            // - `.diagnostics` gates only the per-batch context block (OS,
+            //   device model, app version, locale, screen, color scheme).
+            //   Denying it sends the documented unknown values there; it
+            //   does not suppress any event.
+            // - `.identity` is deliberately NOT granted: it would buy a
+            //   stable cross-launch install id and a `userId` field, and
+            //   Scarf never calls `identify()`. Without it the install id
+            //   is ephemeral per session and no `userId` is ever sent.
+            consent: [.usage, .diagnostics],
             autoEvents: [.appOpen, .appBackground, .sessions],
             storageDirectory: storageDirectory,
             isPreRelease: isPreRelease,

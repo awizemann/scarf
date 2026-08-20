@@ -59,6 +59,7 @@ struct SkillBootstrapService: Sendable {
         let destRoot = context.paths.skillsDir
         try transport.createDirectory(destRoot)
 
+        var written = 0
         for skillDir in entries {
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: skillDir.path, isDirectory: &isDir), isDir.boolValue else {
@@ -66,10 +67,43 @@ struct SkillBootstrapService: Sendable {
             }
             let skillName = skillDir.lastPathComponent
             do {
-                try installSkill(from: skillDir, named: skillName, transport: transport)
+                if try installSkill(from: skillDir, named: skillName, transport: transport) {
+                    written += 1
+                }
             } catch {
                 Self.logger.warning("couldn't bootstrap skill \(skillName, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
+        }
+
+        // ONE event per bootstrap run that actually wrote something, not one
+        // per skill: this runs unattended on every launch, so a per-skill
+        // `skill_installed` would drown the user-driven installs that share
+        // that event name (and `"bundled"` is no longer part of
+        // `skill_installed`'s vocabulary anywhere). A run that wrote nothing
+        // — the steady state, every launch after the first — is silent,
+        // matching the edge-triggered pattern the rest of the taxonomy uses.
+        if let props = Self.bootstrapEventProps(written: written) {
+            Analytics.record("skills_bootstrapped", props: props)
+        }
+    }
+
+    /// Props for the one `skills_bootstrapped` event of a bootstrap run, or
+    /// `nil` when the run wrote nothing and must stay silent. Pure, so the
+    /// emit/don't-emit decision is testable — `Analytics.record` itself is a
+    /// no-op under XCTest.
+    nonisolated static func bootstrapEventProps(written: Int) -> [String: String]? {
+        guard written > 0 else { return nil }
+        return ["count_bucket": bootstrapCountBucket(written)]
+    }
+
+    /// Coarse count bucket for `skills_bootstrapped`. Only ever called with
+    /// `written > 0`, but `..<1` is mapped anyway so no caller can produce a
+    /// token outside the documented three.
+    nonisolated static func bootstrapCountBucket(_ count: Int) -> String {
+        switch count {
+        case ..<1, 1: return "1"
+        case 2...5: return "2_5"
+        default: return "gt_5"
         }
     }
 
@@ -89,11 +123,15 @@ struct SkillBootstrapService: Sendable {
     /// is on the new layout, the flat path is never re-created.
     private nonisolated static let bundledSkillCategory = "scarf"
 
+    /// - Returns: `true` when this call actually wrote the skill (missing or
+    ///   outdated destination), `false` when the installed copy was already
+    ///   current and nothing was touched. The caller sums these into the one
+    ///   `skills_bootstrapped` event.
     private nonisolated func installSkill(
         from sourceDir: URL,
         named skillName: String,
         transport: any ServerTransport
-    ) throws {
+    ) throws -> Bool {
         // Migration: if a prior Scarf version installed this skill at
         // the flat top-level path, remove it before writing the new
         // categorized copy. Safe because the flat path was always
@@ -146,17 +184,12 @@ struct SkillBootstrapService: Sendable {
             Self.logger.info(
                 "skill \(skillName, privacy: .public) at \(installed, privacy: .public) is current (bundled: \(bundledVersion, privacy: .public)); skipping"
             )
-            return
+            return false
         }
 
         try transport.createDirectory(categorizedRoot)
         try transport.createDirectory(destDir)
         try transport.writeFile(destSkillMd, data: bundledData)
-        // Only the actual write above counts as an install — the
-        // early-return above (destination already current) is
-        // deliberately silent, matching `hermes_control_action`'s
-        // edge-triggered pattern: report the transition, not every check.
-        Analytics.record("skill_installed", props: ["source": "bundled"])
 
         // Carry any companion files (assets, examples, etc.) the skill
         // ships alongside SKILL.md. Walks one level deep — skills don't
@@ -177,6 +210,7 @@ struct SkillBootstrapService: Sendable {
         Self.logger.info(
             "bootstrapped skill \(skillName, privacy: .public) at v\(bundledVersion, privacy: .public) (was: \(installedVersion ?? "missing", privacy: .public))"
         )
+        return true
     }
 
     // MARK: - Frontmatter version parse

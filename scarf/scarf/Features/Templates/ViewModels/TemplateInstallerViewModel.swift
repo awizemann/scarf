@@ -40,7 +40,11 @@ final class TemplateInstallerViewModel {
     }
 
     var stage: Stage = .idle
-    var inspection: TemplateInspection?
+
+    /// The inspected bundle awaiting confirmation. Derived from
+    /// ``pendingInstall`` rather than stored alongside it, so the bundle and
+    /// the analytics source token describing it cannot drift apart.
+    var inspection: TemplateInspection? { pendingInstall?.inspection }
     var plan: TemplateInstallPlan?
     var chosenParentDirectory: String?
     /// README body preloaded off MainActor when inspection completes, so the
@@ -48,18 +52,36 @@ final class TemplateInstallerViewModel {
     /// inside a View body.
     var readmeBody: String?
 
-    /// Analytics source token for the install currently in flight —
-    /// `"hub"` (Browse Catalog), `"url"` (Install from URL / a
-    /// `scarf://install` deep link), or the local-file entry points
-    /// (Install from File, Finder double-click, drag-onto-icon). The
-    /// taxonomy's third bucket, `"bundled"`, has no macOS analogue for
-    /// templates — nothing ships a template inside the app bundle the way
-    /// `SkillBootstrapService` ships skills — so it's never produced here;
-    /// local-file installs fall into `"url"` too, since like a pasted URL
+    /// The install awaiting confirmation: the inspected bundle plus the
+    /// analytics source token that entry point supplied.
+    ///
+    /// The source is carried *with* the pending install rather than in a
+    /// standalone VM property because two entries can overlap — a hub
+    /// download still in flight when the user opens a local file — and a
+    /// shared property would let the second entry's source be read back
+    /// for the first install. Each entry point captures its own token and
+    /// publishes it in the same MainActor step that publishes its
+    /// inspection, so the token and the bundle it describes can never come
+    /// apart.
+    ///
+    /// Tokens — the taxonomy's full vocabulary for `template_installed` /
+    /// `skill_installed`: `"hub"` (Browse Catalog) or `"url"` (Install
+    /// from URL, a `scarf://install` deep link, and the local-file entry
+    /// points — Install from File, Finder double-click, drag-onto-icon).
+    /// Local-file installs fall into `"url"` because, like a pasted URL,
     /// they're an external file the user supplied rather than something
     /// Scarf shipped or curated. Recorded on `confirmInstall()`, not at
     /// entry, so a cancelled or failed install never counts.
-    private var installSource = "url"
+    struct PendingInstall {
+        var inspection: TemplateInspection
+        var source: String
+    }
+
+    private var pendingInstall: PendingInstall?
+
+    /// Test seam: the source token currently paired with the pending
+    /// install, or `nil` when nothing is awaiting confirmation.
+    var pendingInstallSourceForTesting: String? { pendingInstall?.source }
 
     // MARK: - Entry points
 
@@ -69,10 +91,9 @@ final class TemplateInstallerViewModel {
     /// preview sheet doesn't do sync I/O during View body evaluation.
     ///
     /// - Parameter source: analytics source token; defaults to `"url"` (the
-    ///   local-file case). `openRemoteURL` overrides it before delegating
-    ///   here for a catalog pick.
+    ///   local-file case). `openRemoteURL` passes its own token through
+    ///   when it delegates here for a catalog pick.
     func openLocalFile(_ zipPath: String, source: String = "url") {
-        installSource = source
         resetTempState()
         stage = .inspecting
         let service = templateService
@@ -82,7 +103,9 @@ final class TemplateInstallerViewModel {
                 let readme = Self.readReadme(unpackedDir: inspection.unpackedDir)
                 await MainActor.run { [weak self] in
                     guard let self else { return }
-                    self.inspection = inspection
+                    // The bundle and its source token land in one step —
+                    // see `PendingInstall`.
+                    self.pendingInstall = PendingInstall(inspection: inspection, source: source)
                     self.readmeBody = readme
                     self.stage = .awaitingParentDirectory
                 }
@@ -117,7 +140,6 @@ final class TemplateInstallerViewModel {
     /// actual on-disk file size after the download completes — it runs
     /// unconditionally and covers the chunked-transfer case.
     func openRemoteURL(_ url: URL, source: String = "url") {
-        installSource = source
         resetTempState()
         stage = .fetching(sourceDescription: url.host ?? url.absoluteString)
         Task.detached { [weak self] in
@@ -147,7 +169,10 @@ final class TemplateInstallerViewModel {
                 try FileManager.default.moveItem(atPath: tempURL.path, toPath: tempZip)
                 await MainActor.run { [weak self] in
                     guard let self else { return }
-                    self.openLocalFile(tempZip, source: self.installSource)
+                    // `source` is the one this call captured, not a VM
+                    // property another entry point may have overwritten
+                    // while the download was in flight.
+                    self.openLocalFile(tempZip, source: source)
                 }
             } catch {
                 await MainActor.run { [weak self] in
@@ -209,6 +234,9 @@ final class TemplateInstallerViewModel {
 
     func confirmInstall() {
         guard let plan else { return }
+        // Read once, here, so the whole emission below describes the same
+        // install even if a new entry point lands mid-flight.
+        let source = pendingInstall?.source ?? "url"
         stage = .installing
         let installer = installer
         let service = templateService
@@ -219,11 +247,11 @@ final class TemplateInstallerViewModel {
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     self.stage = .succeeded(installed: entry)
-                    self.inspection = nil
+                    self.pendingInstall = nil
                     self.plan = nil
                     self.chosenParentDirectory = nil
                     self.readmeBody = nil
-                    Analytics.record("template_installed", props: ["source": self.installSource])
+                    Analytics.record("template_installed", props: ["source": source])
                     // `manifest.id` is arbitrary author-controlled text
                     // (`TemplateExporterViewModel` seeds it from the
                     // project's own free-typed name), so it can never ride
@@ -240,7 +268,7 @@ final class TemplateInstallerViewModel {
                     // `templates/<slug>/`); each one installed here arrived
                     // through the same channel as the template itself.
                     for _ in plan.manifest.contents.skills ?? [] {
-                        Analytics.record("skill_installed", props: ["source": self.installSource])
+                        Analytics.record("skill_installed", props: ["source": source])
                     }
                 }
             } catch {
@@ -262,7 +290,7 @@ final class TemplateInstallerViewModel {
         if let inspection {
             templateService.cleanupTempDir(inspection.unpackedDir)
         }
-        inspection = nil
+        pendingInstall = nil
         plan = nil
         chosenParentDirectory = nil
         readmeBody = nil
