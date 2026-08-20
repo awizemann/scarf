@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Privacy Policy — Scarf &amp; ScarfGo</title>
+  <meta name="description" content="Privacy policy for Scarf (macOS) and ScarfGo (iOS): your content never leaves your devices or your Hermes hosts; macOS sends anonymous opt-out usage statistics; iOS sends nothing.">
+  <link rel="canonical" href="https://awizemann.github.io/scarf/privacy/">
+  <meta name="theme-color" content="#C2563D" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1A1818" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="../favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+  <style>
+    :root { --accent:#C2563D; --bg:#FFFDFB; --fg:#1A1818; --muted:#6b6560; --rule:#e8e2dc; --code:#f4efe9; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#1A1818; --fg:#F2EEE9; --muted:#a39c94; --rule:#332e2b; --code:#262220; }
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--fg);
+      font:16px/1.65 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+    main { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 4rem; }
+    a { color:var(--accent); }
+    h1 { font-size:2rem; line-height:1.2; margin:0 0 .5rem; }
+    h2 { font-size:1.3rem; margin:2.2rem 0 .6rem; border-bottom:1px solid var(--rule); padding-bottom:.3rem; }
+    h3 { font-size:1.05rem; margin:1.6rem 0 .4rem; }
+    p, li { margin:.55rem 0; }
+    ul { padding-left:1.3rem; }
+    code { background:var(--code); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+    em { color:var(--muted); }
+    .home { display:inline-block; margin-bottom:1.5rem; text-decoration:none; font-weight:600; }
+  </style>
+</head>
+<body>
+<main>
+  <a class="home" href="../">&larr; Scarf</a>
+<h1>ScarfGo &amp; Scarf — Privacy Policy</h1>
+<p><em>Last updated: 2026-08-20.</em></p>
+<h2>Plain summary</h2>
+<p>Scarf and ScarfGo are companion clients for the open-source <a href="https://github.com/awizemann/hermes-agent">Hermes AI agent</a>. Both apps connect from your device to a Hermes host you (or your team) operate. <strong>Your content — chats, sessions, files, credentials — never leaves your device or your Hermes hosts.</strong> The macOS app additionally sends <strong>anonymous usage statistics</strong> to the developer to guide development; this is described below and can be switched off in Settings. <strong>ScarfGo on iOS sends nothing.</strong></p>
+<h2>Apps covered</h2>
+<ul>
+<li><strong>Scarf</strong> — macOS desktop client. Distributed via direct download (Sparkle) and built-in auto-update.</li>
+<li><strong>ScarfGo</strong> — iOS companion. Distributed via TestFlight (and, in future, the App Store).</li>
+</ul>
+<h2>What data the apps access</h2>
+<h3>On your device</h3>
+<ul>
+<li><strong>SSH credentials.</strong> ScarfGo generates and stores an SSH private key in the iOS Keychain (<code>kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly</code>, never iCloud-synced). Used solely to authenticate with Hermes hosts you configure. Scarf reads SSH keys from <code>~/.ssh/</code> like any other SSH client.</li>
+<li><strong>Server configuration.</strong> Host, user, port, nickname, and an optional remote <code>~/.hermes</code> path. Stored in <code>UserDefaults</code> (ScarfGo) or the standard app container (Scarf). Never transmitted off-device except as the destination address of your own SSH connections.</li>
+<li><strong>Hermes state cache.</strong> When you tap a session or open the Dashboard, the app downloads a snapshot of <code>~/.hermes/state.db</code> from your Hermes host over SFTP and reads it locally. Cached on-device temporarily for performance; cleared when the app is force-quit or the OS reclaims storage.</li>
+<li><strong>Project registry + session attribution sidecar.</strong> Scarf and ScarfGo read (and write, when you opt in) two JSON sidecar files on the Hermes host: <code>~/.hermes/scarf/projects.json</code> and <code>~/.hermes/scarf/session_project_map.json</code>. These describe the projects you've registered and which Hermes sessions belong to which project. Owned by you on your Hermes host.</li>
+</ul>
+<h3>On Hermes hosts you configure</h3>
+<p>Same as the <a href="https://hermes-agent.nousresearch.com/">Hermes agent privacy policy</a> (or whoever operates your Hermes deployment). The apps do not introduce any new server-side data collection.</p>
+<h2>Usage analytics (Scarf for macOS only)</h2>
+<p>Starting with v2.20, Scarf for macOS records anonymous product-usage events — for example "a chat session was started", "a settings field was changed", "the app reconnected after wake" — and sends them to the developer's analytics service (ScarfMon, at <code>api.swiftstats.co</code>, built on the open-source <a href="https://github.com/awizemann/swift-stats">swift-stats</a> package).</p>
+<p><strong>What an event contains.</strong> An event name plus a small set of fixed-vocabulary properties (e.g. <code>mode: resume</code>, <code>source: menu_bar</code>) and bucketed counts or durations. Properties are drawn from closed lists in the app's source — they can never contain chat content, prompts, file paths, hostnames, server names, profile names, SSH keys, or any other free-form text from your environment.</p>
+<p><strong>What identifies an event.</strong> A random identifier generated fresh each time the app launches. There is no persistent user ID, no device ID, no account, and no way for the developer to link two launches to the same person or machine.</p>
+<p><strong>Opting out.</strong> Settings → Advanced → Usage Analytics. Turning it off stops all collection immediately and persists across updates. Analytics is enabled by default; the toggle is one click.</p>
+<p><strong>What it is not.</strong> No third-party ad or analytics SDKs, no ad identifiers, no crash-content upload (crash logs stay on-device unless you share them with Apple through the standard macOS flow), no reading of any Hermes data for analytics purposes.</p>
+<p><strong>ScarfGo (iOS) collects nothing.</strong> The iOS app contains no analytics recorder and makes no analytics network calls. Its App Store privacy label ("Data Not Collected") reflects this.</p>
+<h2>What data the apps DO NOT collect</h2>
+<ul>
+<li><strong>No content collection.</strong> Nothing you type, read, or store in Hermes — chats, files, prompts, configs, credentials — is ever transmitted to the developer. The macOS usage analytics described above carry event names and fixed-vocabulary properties only.</li>
+<li><strong>No analytics on iOS.</strong> ScarfGo sends no events of any kind. On macOS, analytics is anonymous, content-free, and can be disabled in Settings → Advanced.</li>
+<li><strong>No crash-content upload.</strong> Crash logs stay on-device unless you choose to share them with Apple via the standard iOS / macOS reporting flows.</li>
+<li><strong>No ads or ad identifiers.</strong> The <code>IDFA</code> / <code>IDFV</code> are not read or transmitted.</li>
+<li><strong>No cloud accounts.</strong> There's no "Sign in with Scarf" — the apps only know about Hermes hosts you give them SSH access to.</li>
+<li><strong>No iCloud Keychain sync.</strong> SSH keys are explicitly marked <code>ThisDeviceOnly</code> so they don't propagate.</li>
+</ul>
+<h2>Network connections the apps make</h2>
+<ul>
+<li><strong>SSH connections</strong> to Hermes hosts you configured (port 22 by default; user-configurable). All Hermes data flows over these.</li>
+<li><strong>HTTPS to GitHub</strong> for Sparkle's update check (Scarf only) and to fetch the public template catalog (<code>https://awizemann.github.io/scarf/templates/</code>). No personally identifying headers; cacheable.</li>
+<li><strong>HTTPS to models.dev</strong> when Hermes refreshes its model catalog cache. Initiated by Hermes, not the apps directly.</li>
+<li><strong>HTTPS to <code>api.swiftstats.co</code></strong> (Scarf for macOS only, when usage analytics is enabled) carrying the anonymous usage events described above.</li>
+</ul>
+<p>That's the complete list. ScarfGo makes no other network requests; Scarf makes no other network requests beyond the optional analytics endpoint above.</p>
+<h2>Push notifications</h2>
+<p>ScarfGo includes a push-notification skeleton for future use — pending permissions on a remote agent run. <strong>The Push Notifications capability is disabled in shipping builds</strong> (gated by an internal <code>apnsEnabled = false</code> flag) until Apple Developer Program enrollment + a Hermes-side push sender land. No device tokens are registered with Apple's APNs servers in current builds.</p>
+<p>When push lands, only the device token will be transmitted, and only to the Hermes host you authorize (so it can address pushes back to your phone). Apple's APNs infrastructure will route the actual push payload, but the developer never sees it.</p>
+<h2>TestFlight beta program</h2>
+<p>If you join the ScarfGo beta via TestFlight, Apple shares anonymized crash reports + the email you used to redeem the invite with the developer. Apple's standard <a href="https://www.apple.com/legal/internet-services/itunes/testflight/">TestFlight terms</a> apply to that data — out of scope for this policy.</p>
+<h2>Security</h2>
+<ul>
+<li>iOS Keychain storage uses <code>kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly</code> so credentials are unreachable while the device is locked and never synced to iCloud.</li>
+<li>SSH connections use the same protocol stack as <code>ssh(1)</code> — strict host-key verification on first connect, key-based auth (no passwords are sent over the wire), and Citadel's pure-Swift implementation on iOS.</li>
+<li>The macOS app is notarized via Apple's standard Developer ID flow (signed + stapled by <code>xcrun notarytool</code> on every release). It is not App-Sandboxed — Scarf needs direct read access to <code>~/.hermes/</code> and the ability to spawn the <code>hermes</code> CLI, both of which the App Sandbox forbids. That's why Scarf is distributed via GitHub Releases + Sparkle rather than the Mac App Store.</li>
+<li>ScarfGo on iOS runs inside the standard iOS app sandbox — no special entitlements beyond Keychain access for the SSH key.</li>
+</ul>
+<h2>Children's privacy</h2>
+<p>Neither app is directed at children under 13 and we do not knowingly collect any data from them.</p>
+<h2>Your rights</h2>
+<p>The only data that reaches a developer-controlled server is the anonymous macOS usage events described above. You can stop them at any time (Settings → Advanced → Usage Analytics). Because events carry no persistent identifier, the developer cannot isolate "your" events afterward — there is nothing linkable to request deletion of or export. To remove all app-stored data from your device:</p>
+<ul>
+<li><strong>ScarfGo</strong>: delete the app. iOS purges the Keychain group + app container.</li>
+<li><strong>Scarf</strong>: delete <code>Scarf.app</code> from <code>/Applications</code>, then optionally remove <code>~/Library/Caches/scarf/</code> (remote SQLite snapshots), <code>~/Library/Preferences/com.scarf.app.plist</code> (server registry + preferences), and <code>~/Library/Application Support/com.scarf/</code> (skill snapshots).</li>
+</ul>
+<p>Your Hermes host's data (<code>~/.hermes/</code>) stays untouched — that's yours to manage.</p>
+<h2>Contact</h2>
+<p>Questions, concerns, or notice of a security issue: <a href="mailto:alan@wizemann.com">alan@wizemann.com</a>.</p>
+<h2>Changes</h2>
+<p>Material changes to this policy will be announced on the <a href="https://github.com/awizemann/scarf/wiki">Scarf wiki</a> and recorded here with a new "Last updated" date. Beta testers will see a TestFlight build note when policy changes affect data handling.</p>
+</main>
+</body>
+</html>
