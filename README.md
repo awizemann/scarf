@@ -61,22 +61,15 @@ Connecting takes about a minute: add a server (same details as `ssh user@host`),
 
 Scarf for macOS collects **anonymous usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames; no persistent identifier) to guide development. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/).
 
-## What's New in 2.19.2
+## What's New in 2.20.0
 
-**Runaway SSH reconnects fixed** ([gh#138](https://github.com/awizemann/scarf/issues/138)). With a side-effectful SSH ProxyCommand — Cloudflare Zero Trust's `cloudflared` was the reported case — a dropped connection could make Scarf's background pollers dial the host every few seconds forever, opening a browser OAuth tab per attempt (thousands overnight). A per-host circuit breaker now stops all outbound SSH after 3 consecutive connection failures and retries with a single probe on exponential backoff (30s → 5min cap). Explicit actions — Test Connection, Reconnect — always reset it and get a real attempt. Local setups and ScarfGo are unaffected.
+- **Hermes v0.20.4 parity** — new target (v2026.8.18), with fixes landed *before* the upgrade can break anything: personalities survive the built-ins move, ScarfGo cron toggles use real pause/resume semantics, and "Update All" skills reports what was actually updated.
+- **Session list upgrades** on v0.20.4 hosts: unread indicators, hidden sessions hidden, post-reset conversations listed.
+- **Curator ledger & purge** — browse the skill-mutation audit trail, roll back a single mutation, purge old archives behind a dry-run preview.
+- **Project skills, MCP catalog picker, and a dozen new settings** (wake-word capture, STT trimming, background-review kill switch, and more).
+- **Anonymous usage analytics (macOS, opt-out)** — content-free, no persistent identifier; see the [Privacy](#privacy) section. iOS sends nothing.
 
-Full notes: [v2.19.2](https://github.com/awizemann/scarf/releases/tag/v2.19.2)
-
-## What's New in 2.19.1
-
-**Uninstalled projects no longer come back.** A hardening patch that closes a long-standing feedback loop and its cover-ups:
-
-- **Project resurrection fixed** — uninstalling a project deleted its files, then the cockpit's file watcher quietly re-created the directory and registry row. Saves can no longer describe a project that doesn't exist, registry removal is rename-proof, and a failed registry write shows a real error instead of false success.
-- **UI tests isolated** — the template-install tests had been writing into the real `~/.hermes` (which is how the leftovers were first spotted); all suites now run in a throwaway Hermes home.
-- **Mini-app polish** — `scarf.onEvent` without the `events` grant no longer logs an unhandled rejection.
-- **Dashboard schema docs complete** — all 12 widget types documented (5 were missing), including the `stat` sparkline.
-
-Full notes: [v2.19.1](https://github.com/awizemann/scarf/releases/tag/v2.19.1) · v2.19.0 closed the Hermes 0.20 settings backlog and fixed the browser provider picker · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
+Full notes: [v2.20.0](https://github.com/awizemann/scarf/releases/tag/v2.20.0) · v2.19.2 stopped runaway SSH reconnects behind side-effectful ProxyCommands ([gh#138](https://github.com/awizemann/scarf/issues/138)) · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
 
 ## Features
 
@@ -127,14 +120,15 @@ Scarf is a multi-window app — each window binds to one Hermes server. Your loc
 ## Requirements & compatibility
 
 - **macOS 14.6+** (Scarf) · **iOS 18+** (ScarfGo) · Xcode 16+ to build from source.
-- **[Hermes](https://github.com/hermes-ai/hermes-agent) v0.6.0+** on each host. Current target: **v0.20.0 "Herald"** — every newer surface is capability-gated or schema-detected, so older hosts keep working with newer-only UI hidden.
+- **[Hermes](https://github.com/hermes-ai/hermes-agent) v0.6.0+** on each host. Current target: **v0.20.4 "Herald"** (v2026.8.18) — every newer surface is capability-gated or schema-detected, so older hosts keep working with newer-only UI hidden.
 
 | Hermes | Status |
 |--------|--------|
 | v0.6.0 – v0.17.0 (2026-03 → 2026-06) | Verified — full feature history in the [wiki compatibility page](https://github.com/awizemann/scarf/wiki/Hermes-Version-Compatibility) |
 | v0.18.x (2026-07) | Verified — `messages.compacted` schema detection, MoA + Vertex providers |
 | v0.19.x "Quicksilver" | Verified — audited as part of the v0.18.2 → v0.20.0 source delta |
-| v0.20.0 "Herald" (2026-08-03) | **Verified — current target** — pinned sessions, per-model cost, new exports, `/compress`, cron run history, profile routing |
+| v0.20.0 "Herald" (2026-08-03) | Verified — pinned sessions, per-model cost, new exports, `/compress`, cron run history, profile routing |
+| v0.20.4 "Herald" (2026-08-18) | **Verified — current target** — curator ledger/purge, project skills, unread sessions, MCP catalog + identity headers, personalities-in-code |
 
 Scarf reads Hermes's SQLite database and CLI output with automatic schema detection. If a Hermes update changes either, the Health view shows compatibility warnings.
 
