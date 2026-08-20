@@ -661,6 +661,53 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// v2026.7.7.2 was 0.18.2), so the true floor is **v0.19**, not v0.20.
     public var hasGatewayProfileRoutes: Bool { isV019OrLater }
 
+    // MARK: v0.20.4 (v2026.8.18) flags
+
+    /// `is_job_runnable()` now blocks a cron job from firing whenever
+    /// `state == "paused"` or `paused_at` is set, regardless of `enabled`
+    /// (v0.20.4+, cron/jobs.py:571–582, claim gate :2862). Scarf's
+    /// `withEnabled(true)` must also force `state = "scheduled"` and strip
+    /// `paused_at`/`paused_reason`, not just flip `enabled`, or a
+    /// re-enabled job silently never runs again. This is a patch-level
+    /// floor — v0.20.0 through v0.20.3 hosts still forward the old
+    /// enabled-only semantics, so `isV020OrLater` would light this up too
+    /// early.
+    public var hasCronPauseMarkerGate: Bool { isV0204OrLater }
+
+    /// The 14 inline built-in personalities were removed from
+    /// `config.yaml`'s `agent.personalities` block; canon moved to
+    /// `hermes_cli/personality.py:43` `BUILTIN_PERSONALITIES` in code
+    /// (v0.20.4+). Scarf's personality pickers must hardcode/union the
+    /// built-in list instead of relying solely on the YAML scrape.
+    public var hasBuiltinPersonalitiesInCode: Bool { isV0204OrLater }
+
+    /// `hermes curator ledger [--skill N]` — list the curator's ledger of
+    /// managed entries (v0.20.4+).
+    public var hasCuratorLedger: Bool { isV0204OrLater }
+
+    /// `hermes curator purge [--days] [-y]` — permanently delete archived
+    /// curator entries, distinct from `prune` (archive-only) (v0.20.4+).
+    public var hasCuratorPurge: Bool { isV0204OrLater }
+
+    /// `hermes curator rollback <entry_id>` — revert a single curator
+    /// ledger entry (v0.20.4+).
+    public var hasCuratorEntryRollback: Bool { isV0204OrLater }
+
+    /// `hermes skills trust/untrust` + repo-local project skills under
+    /// `./.hermes/skills` (v0.20.4+). Scarf's `SkillsScanner` only scans
+    /// `~/.hermes/skills` today — this is the largest functional gap on
+    /// the skills surface.
+    public var hasSkillsProjectTrust: Bool { isV0204OrLater }
+
+    /// `hermes skills update --force` — override the "kept your local
+    /// edits" skip and force-overwrite a locally-edited skill (v0.20.4+).
+    /// Do not wire this up as the default; it discards user edits.
+    public var hasSkillsUpdateForce: Bool { isV0204OrLater }
+
+    /// Per-MCP-server `identity_header` (plus `strict_redirect_headers`
+    /// and stdio `cwd`) in the MCP catalog config (v0.20.4+).
+    public var hasMCPIdentityHeader: Bool { isV0204OrLater }
+
     // MARK: Convenience predicates
 
     /// Whether the connected host is on the v0.13 line or newer. Convenience
@@ -706,6 +753,12 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// for UI copy that toggles on the v0.19 → v0.20 boundary without
     /// proxying through a feature-specific flag.
     public var isV020OrLater: Bool { atLeastSemver(0, 20, 0) }
+
+    /// Whether the connected host is on v0.20.4 or newer. Patch-level floor
+    /// — v0.20.0 through v0.20.3 hosts satisfy `isV020OrLater` but lack the
+    /// v0.20.4 surface, so this must be checked with `atLeastSemver(0, 20,
+    /// 4)` rather than the minor-only `isV020OrLater`.
+    public var isV0204OrLater: Bool { atLeastSemver(0, 20, 4) }
 
     private func atLeastSemver(_ major: Int, _ minor: Int, _ patch: Int) -> Bool {
         guard let s = semver else { return false }
