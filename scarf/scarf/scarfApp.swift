@@ -26,7 +26,7 @@ struct ScarfApp: App {
         // Instruments-attached profiling working without users
         // having to opt in. Settings → Diagnostics → Performance
         // flips this between off / signpost-only / full.
-        ScarfMonBoot.configure(mode: ScarfMonBoot.currentMode())
+        AppScarfMonBoot.configure(mode: ScarfMonBoot.currentMode())
 
         // Point ScarfCore's analytics seam at this target's facade. The
         // package itself links no analytics SDK (it's shared verbatim with
@@ -103,6 +103,7 @@ struct ScarfApp: App {
             } catch {
                 Logger(subsystem: "com.scarf", category: "scarfApp")
                     .warning("skill bootstrap failed: \(error.localizedDescription, privacy: .public)")
+                Analytics.record("bootstrap_task_failed", props: ["task": "skills"])
             }
         }
 
@@ -119,6 +120,7 @@ struct ScarfApp: App {
             } catch {
                 Logger(subsystem: "com.scarf", category: "scarfApp")
                     .warning("slash command bootstrap failed: \(error.localizedDescription, privacy: .public)")
+                Analytics.record("bootstrap_task_failed", props: ["task": "slash_commands"])
             }
         }
 
@@ -134,6 +136,7 @@ struct ScarfApp: App {
             } catch {
                 Logger(subsystem: "com.scarf", category: "scarfApp")
                     .warning("env-mirror reconcile failed: \(error.localizedDescription, privacy: .public)")
+                Analytics.record("bootstrap_task_failed", props: ["task": "env_mirror"])
             }
         }
 

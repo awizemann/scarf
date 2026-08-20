@@ -65,7 +65,7 @@ struct ScarfMonDiagnosticsSection: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .onChange(of: mode) { _, newValue in
-                ScarfMonBoot.setMode(newValue)
+                AppScarfMonBoot.setMode(newValue)
             }
         }
     }
