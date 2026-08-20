@@ -449,6 +449,18 @@ private struct ChatSessionRow: View {
                         .truncationMode(.tail)
                         .foregroundStyle(isActive ? ScarfColor.accentActive : ScarfColor.foregroundPrimary)
                     Spacer(minLength: 0)
+                    // v0.20.4: unread indicator — activity postdating
+                    // Hermes's `last_read_at` watermark. Only rendered
+                    // when Hermes actually tracked a read for this
+                    // conversation, so pre-0.20.4 hosts (column absent
+                    // → `lastReadAt` nil → `isUnread` false) and
+                    // never-tracked rows see the exact same row.
+                    if session.isUnread {
+                        Circle()
+                            .fill(ScarfColor.accentActive)
+                            .frame(width: 6, height: 6)
+                            .help("Unread")
+                    }
                     // v0.20: prefer the activity heartbeat when present
                     // — "what happened last" beats "when it started".
                     // Pre-0.20 hosts fall back to startedAt as before.

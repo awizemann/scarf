@@ -41,6 +41,9 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
     private(set) public var hasRewindCountColumn = false
     private(set) public var hasSessionActivityColumns = false
     private(set) public var hasSessionModelUsageTable = false
+    private(set) public var hasHiddenColumn = false
+    private(set) public var hasLastReadAtColumn = false
+    private(set) public var hasListableChildSupport = false
     private(set) public var lastOpenError: String?
     private var isOpen = false
     /// Captured `sqlite3 --version` line from the most recent preflight.
@@ -320,6 +323,23 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         hasSessionActivityColumns = sessionsTable.contains("pinned")
             && sessionsTable.contains("last_activity_at")
             && sessionsTable.contains("last_activity_description")
+        // v0.20.4: additive `sessions` columns.
+        hasHiddenColumn = sessionsTable.contains("hidden")
+        hasLastReadAtColumn = sessionsTable.contains("last_read_at")
+        // v0.20.4: Hermes's listable/ephemeral child predicates. Same
+        // gate as the local backend — v0.20.4 marker columns, the
+        // columns the predicates read, and a JSON1-capable SQLite. The
+        // remote's `json_extract` runs in the REMOTE sqlite3 CLI, so
+        // availability is inferred from the version line the preflight
+        // already captures (JSON1 is built in from 3.38 onward).
+        let predicateColumns = sessionsTable.contains("model_config")
+            && sessionsTable.contains("session_key")
+            && sessionsTable.contains("end_reason")
+            && sessionsTable.contains("started_at")
+            && sessionsTable.contains("ended_at")
+        hasListableChildSupport = hasHiddenColumn && hasLastReadAtColumn
+            && predicateColumns
+            && Self.sqliteHasJSON1(versionLine: sqliteVersion)
         // v0.20: `session_model_usage` table. The preflight's third
         // statement is a COUNT(*) over sqlite_master, so it always
         // emits exactly one array — arrays[2] when present. Older
@@ -333,6 +353,23 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         } else {
             hasSessionModelUsageTable = false
         }
+    }
+
+    /// JSON1 (`json_extract`) is compiled into SQLite by default from
+    /// 3.38.0 onward. Parse the leading `major.minor` out of the
+    /// `sqlite3 --version` line the preflight captured; an
+    /// unparseable line is treated as "no JSON1" so the session list
+    /// falls back to the roots-only query rather than risking a
+    /// "no such function" that would empty it.
+    static func sqliteHasJSON1(versionLine: String?) -> Bool {
+        guard let token = versionLine?
+            .split(separator: " ")
+            .first(where: { $0.first?.isNumber == true }) else { return false }
+        let parts = token.split(separator: ".")
+        guard parts.count >= 2,
+              let major = Int(parts[0]),
+              let minor = Int(parts[1]) else { return false }
+        return (major, minor) >= (3, 38)
     }
 
     /// Extract column names from a `PRAGMA table_info(...)` result set.

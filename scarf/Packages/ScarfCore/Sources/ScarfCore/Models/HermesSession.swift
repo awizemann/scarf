@@ -42,6 +42,16 @@ public struct HermesSession: Identifiable, Sendable {
     /// activity (Hermes v0.20+; `sessions.last_activity_description`).
     /// `nil` on older hosts or when Hermes hasn't recorded one.
     public let lastActivityDescription: String?
+    /// Read watermark for this conversation (Hermes v0.20.4+;
+    /// `sessions.last_read_at`). `nil` on older hosts AND on rows
+    /// Hermes never stamped — both mean "never tracked", which
+    /// `isUnread` treats as read so shipping the column doesn't badge
+    /// a user's entire history at once. `0` is Hermes's explicit
+    /// "mark unread" value.
+    ///
+    /// READ ONLY: Scarf opens state.db read-only and never writes this
+    /// — Hermes owns the watermark (`set_session_read`).
+    public let lastReadAt: Date?
 
 
     public init(
@@ -69,7 +79,8 @@ public struct HermesSession: Identifiable, Sendable {
         rewindCount: Int = 0,
         pinned: Bool = false,
         lastActivityAt: Date? = nil,
-        lastActivityDescription: String? = nil
+        lastActivityDescription: String? = nil,
+        lastReadAt: Date? = nil
     ) {
         self.id = id
         self.source = source
@@ -96,8 +107,31 @@ public struct HermesSession: Identifiable, Sendable {
         self.pinned = pinned
         self.lastActivityAt = lastActivityAt
         self.lastActivityDescription = lastActivityDescription
+        self.lastReadAt = lastReadAt
     }
     public var isSubagent: Bool { parentSessionId != nil }
+
+    /// Whether this conversation has activity the user hasn't seen.
+    ///
+    /// Mirrors Hermes's `HermesState.session_unread`
+    /// (hermes_state.py:8455-8466): a NULL watermark means "never
+    /// tracked" and reads as READ; otherwise the conversation is
+    /// unread when its last activity postdates the watermark. Hermes's
+    /// explicit "mark unread" writes `0`, which any activity postdates.
+    ///
+    /// Hermes computes last-activity as the freshest of
+    /// `last_activity_at` and `MAX(messages.timestamp)`, falling back
+    /// to `started_at`. Scarf's session list doesn't carry the message
+    /// max (it would cost a correlated subquery per row on every
+    /// sidebar load, remote included), so this uses the conservative
+    /// subset — `lastActivityAt ?? startedAt`. Conservative in the
+    /// right direction: it can only ever under-report unread, never
+    /// badge a conversation the user has actually read.
+    public var isUnread: Bool {
+        guard let lastReadAt else { return false }
+        guard let activity = lastActivityAt ?? startedAt else { return false }
+        return activity > lastReadAt
+    }
 
     public var totalTokens: Int { inputTokens + outputTokens + reasoningTokens }
 
@@ -131,7 +165,8 @@ public struct HermesSession: Identifiable, Sendable {
             billingProvider: billingProvider, apiCallCount: apiCallCount,
             rewindCount: rewindCount, pinned: pinned,
             lastActivityAt: lastActivityAt,
-            lastActivityDescription: lastActivityDescription
+            lastActivityDescription: lastActivityDescription,
+            lastReadAt: lastReadAt
         )
     }
 }

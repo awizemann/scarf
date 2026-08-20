@@ -38,6 +38,9 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
     private(set) public var hasRewindCountColumn = false
     private(set) public var hasSessionActivityColumns = false
     private(set) public var hasSessionModelUsageTable = false
+    private(set) public var hasHiddenColumn = false
+    private(set) public var hasLastReadAtColumn = false
+    private(set) public var hasListableChildSupport = false
     private(set) public var lastOpenError: String?
 
     private let context: ServerContext
@@ -124,6 +127,12 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
         var sawPinned = false
         var sawLastActivityAt = false
         var sawLastActivityDescription = false
+        // v0.20.4 listable/ephemeral-child predicate inputs.
+        var sawModelConfig = false
+        var sawSessionKey = false
+        var sawEndReason = false
+        var sawStartedAt = false
+        var sawEndedAt = false
         if sqlite3_prepare_v2(db, "PRAGMA table_info(sessions)", -1, &stmt, nil) == SQLITE_OK {
             defer { sqlite3_finalize(stmt) }
             while sqlite3_step(stmt) == SQLITE_ROW {
@@ -144,6 +153,14 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
                     case "pinned": sawPinned = true
                     case "last_activity_at": sawLastActivityAt = true
                     case "last_activity_description": sawLastActivityDescription = true
+                    // v0.20.4 additive columns.
+                    case "hidden": hasHiddenColumn = true
+                    case "last_read_at": hasLastReadAtColumn = true
+                    case "model_config": sawModelConfig = true
+                    case "session_key": sawSessionKey = true
+                    case "end_reason": sawEndReason = true
+                    case "started_at": sawStartedAt = true
+                    case "ended_at": sawEndedAt = true
                     default: break
                     }
                 }
@@ -152,6 +169,15 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
         // v0.20: ALL three must be present (belt-and-braces against a
         // partially-migrated DB) before the SELECT shape widens.
         hasSessionActivityColumns = sawPinned && sawLastActivityAt && sawLastActivityDescription
+
+        // v0.20.4: Hermes's listable/ephemeral child predicates. Needs
+        // the v0.20.4 marker columns (that release is where Hermes's own
+        // listing started surfacing reset children), the columns the
+        // predicates read, and a JSON1-capable SQLite for `json_extract`.
+        let predicateColumns = sawModelConfig && sawSessionKey
+            && sawEndReason && sawStartedAt && sawEndedAt
+        hasListableChildSupport = hasHiddenColumn && hasLastReadAtColumn
+            && predicateColumns && Self.probeJSON1(db)
 
         // v0.20+ `session_model_usage` table — detect via sqlite_master.
         var usageStmt: OpaquePointer?
@@ -202,6 +228,20 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
                 }
             }
         }
+    }
+
+    /// Does this SQLite build carry the JSON1 extension? Built in by
+    /// default since 3.38, but a `json_extract` call against a build
+    /// without it is a hard "no such function" error that would turn
+    /// the whole session list into zero rows — so probe instead of
+    /// assuming.
+    private static func probeJSON1(_ db: OpaquePointer) -> Bool {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT json_extract('{}', '$.x')", -1, &stmt, nil) == SQLITE_OK else {
+            return false
+        }
+        sqlite3_finalize(stmt)
+        return true
     }
 
     // MARK: - Queries
