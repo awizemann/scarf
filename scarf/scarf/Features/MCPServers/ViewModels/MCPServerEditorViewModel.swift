@@ -149,12 +149,20 @@ final class MCPServerEditorViewModel {
         let originalCert = server.clientCert
         let originalKey = server.clientKey
         let originalVerify = server.sslVerify
-        // v0.20.4 drafts. `identityHeaderValue` is trimmed to nil-name only
-        // when the toggle is off or the name field is blank — a name-less
-        // header is invalid per Hermes's own _resolve_identity_header, so
-        // Scarf refuses to write one rather than round-tripping garbage.
+        // v0.20.4 drafts. Scarf writes an identity_header only in the shapes
+        // Hermes's own `_resolve_identity_header` accepts — a blank `name`,
+        // or `value_from: static` with a blank `value`, are both "warn and
+        // ignore" cases there, so writing one would put a header in the
+        // user's config that never gets sent AND that Scarf's own reader
+        // drops on the next load. Refusing beats round-tripping garbage.
+        // (`profile` mode needs no value: Hermes substitutes the active
+        // profile name at connect time.)
         let trimmedIdentityName = identityHeaderNameDraft.trimmingCharacters(in: .whitespaces)
-        let identityHeaderValue: MCPIdentityHeader? = (identityHeaderEnabled && !trimmedIdentityName.isEmpty)
+        let identityHeaderIsResolvable = identityHeaderEnabled
+            && !trimmedIdentityName.isEmpty
+            && (identityHeaderValueFromDraft == .profile
+                || !identityHeaderValueDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+        let identityHeaderValue: MCPIdentityHeader? = identityHeaderIsResolvable
             ? MCPIdentityHeader(name: trimmedIdentityName, valueFrom: identityHeaderValueFromDraft, value: identityHeaderValueDraft)
             : nil
         let originalIdentityHeader = server.identityHeader

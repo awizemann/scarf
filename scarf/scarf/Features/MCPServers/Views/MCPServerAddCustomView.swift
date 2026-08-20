@@ -34,7 +34,14 @@ struct MCPServerAddCustomView: View {
                 Text("Add Custom MCP Server")
                     .scarfStyle(.headline)
                 Spacer()
-                Button("Browse Catalog…") { showCatalog = true }
+                // The roster is a verbatim v0.20.4 snapshot (20 entries, up
+                // from 6, blender removed). Offering it on an older host
+                // would advertise entries that host's `hermes mcp install`
+                // has never heard of, so it follows the branch's gating
+                // convention and only appears on v0.20.4+.
+                if capabilitiesStore?.capabilities.isV0204OrLater ?? false {
+                    Button("Browse Catalog…") { showCatalog = true }
+                }
                 Button("Cancel") { dismiss() }
                 Button("Add") {
                     submit()
@@ -97,6 +104,12 @@ struct MCPServerAddCustomView: View {
     /// entries (e.g. `n8n`) only carry a name/description in the roster —
     /// Scarf doesn't run the catalog's `install:` bootstrap, so the user
     /// still has to fill in `command`/`args` by hand after picking.
+    ///
+    /// The prefilled transport is the manifest's `transport.type`, which is
+    /// what makes the saved config match what `hermes mcp install` writes:
+    /// `.http` submits through `addMCPServerHTTP`, which emits `url:` with
+    /// no `transport:` key (Hermes's streamable-HTTP default) rather than
+    /// the `transport: sse` line that would route Hermes to `sse_client`.
     private func applyCatalogEntry(_ entry: OptionalMCPCatalogEntry) {
         name = entry.name
         transport = availableTransports.contains(entry.transport) ? entry.transport : .http

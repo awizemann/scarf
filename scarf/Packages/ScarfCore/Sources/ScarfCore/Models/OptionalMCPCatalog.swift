@@ -21,10 +21,13 @@ public struct OptionalMCPCatalogEntry: Identifiable, Sendable, Equatable {
     public let description: String
     public let transport: MCPTransport
     public let authKind: AuthKind
-    /// The env var Hermes prompts for when `authKind == .apiKey` (e.g. the
-    /// n8n bridge's `N8N_API_KEY`). Empty for oauth/none entries — those
-    /// have no required env var in the manifest.
-    public let requiredEnvVar: String
+    /// The env vars Hermes prompts for when `authKind == .apiKey`, in
+    /// manifest order (`auth.env[].name`). A manifest may declare more than
+    /// one — the n8n bridge requires BOTH `N8N_BASE_URL` (non-secret,
+    /// defaulted to `http://127.0.0.1:5678`) and `N8N_API_KEY` (secret) —
+    /// so this is plural. Empty for oauth/none entries, which declare no
+    /// `auth.env` block at all.
+    public let requiredEnvVars: [String]
     /// Populated only for `.http`/`.sse` entries — the hosted MCP endpoint
     /// from the manifest's `transport.url`. `nil` for stdio entries, whose
     /// `transport.command` depends on a local install step Scarf doesn't
@@ -38,14 +41,14 @@ public struct OptionalMCPCatalogEntry: Identifiable, Sendable, Equatable {
         description: String,
         transport: MCPTransport,
         authKind: AuthKind,
-        requiredEnvVar: String = "",
+        requiredEnvVars: [String] = [],
         url: String? = nil
     ) {
         self.name = name
         self.description = description
         self.transport = transport
         self.authKind = authKind
-        self.requiredEnvVar = requiredEnvVar
+        self.requiredEnvVars = requiredEnvVars
         self.url = url
     }
 }
@@ -56,6 +59,16 @@ public struct OptionalMCPCatalogEntry: Identifiable, Sendable, Equatable {
 /// `documents/hermes-v0.20.4-audit-report.md` for the capture session.
 /// Hermes's own catalog can add/remove entries between releases; this list
 /// is a point-in-time snapshot, not a live fetch.
+///
+/// `transport` mirrors the manifest's `transport.type`, NOT the endpoint
+/// path. Four entries (asana / atlassian / paypal / square) declare
+/// `type: http` while their `url` still ends in `/sse` — those are
+/// streamable-HTTP endpoints behind an `/sse`-shaped path. `hermes mcp
+/// install` writes no `transport:` key for them (Hermes's default is
+/// streamable-HTTP), so Scarf must prefill `.http` too: a `transport: sse`
+/// entry routes `tools/mcp_tool.py` down the `sse_client` path, which is a
+/// different protocol and hard-fails outright when combined with
+/// `strict_redirect_headers`.
 public enum OptionalMCPCatalog {
     public static let entries: [OptionalMCPCatalogEntry] = [
         OptionalMCPCatalogEntry(
@@ -68,14 +81,14 @@ public enum OptionalMCPCatalog {
         OptionalMCPCatalogEntry(
             name: "asana",
             description: "Tasks, projects, and goals from your Asana workspace.",
-            transport: .sse,
+            transport: .http,
             authKind: .oauth,
             url: "https://mcp.asana.com/sse"
         ),
         OptionalMCPCatalogEntry(
             name: "atlassian",
             description: "Jira issues and Confluence pages via Atlassian's hosted remote MCP.",
-            transport: .sse,
+            transport: .http,
             authKind: .oauth,
             url: "https://mcp.atlassian.com/v1/sse"
         ),
@@ -95,7 +108,7 @@ public enum OptionalMCPCatalog {
         ),
         OptionalMCPCatalogEntry(
             name: "figma",
-            description: "Official Figma remote MCP — design context, Code Connect, and write-to-canvas.",
+            description: "Official Figma remote MCP — design context, Code Connect, and write-to-canvas via https://mcp.figma.com/mcp (OAuth).",
             transport: .http,
             authKind: .oauth,
             url: "https://mcp.figma.com/mcp"
@@ -126,7 +139,7 @@ public enum OptionalMCPCatalog {
             description: "Manage and inspect n8n workflows from Hermes (stdio bridge, no public port).",
             transport: .stdio,
             authKind: .apiKey,
-            requiredEnvVar: "N8N_API_KEY"
+            requiredEnvVars: ["N8N_BASE_URL", "N8N_API_KEY"]
         ),
         OptionalMCPCatalogEntry(
             name: "netlify",
@@ -145,7 +158,7 @@ public enum OptionalMCPCatalog {
         OptionalMCPCatalogEntry(
             name: "paypal",
             description: "Payments, invoices, and subscriptions via PayPal's hosted MCP.",
-            transport: .sse,
+            transport: .http,
             authKind: .oauth,
             url: "https://mcp.paypal.com/sse"
         ),
@@ -159,7 +172,7 @@ public enum OptionalMCPCatalog {
         OptionalMCPCatalogEntry(
             name: "square",
             description: "Catalog, orders, and payments via Square's hosted MCP.",
-            transport: .sse,
+            transport: .http,
             authKind: .oauth,
             url: "https://mcp.squareup.com/sse"
         ),

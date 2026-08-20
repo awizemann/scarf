@@ -153,3 +153,153 @@ struct HermesMCPServerV0204RegressionTests {
         #expect(service.loadMCPServers().first?.identityHeader == nil)
     }
 }
+
+/// Behavioral cover for the `identity_header` / `strict_redirect_headers`
+/// READ path against malformed or unusual YAML shapes.
+///
+/// The contract these pin is agreement with Hermes's own validation in
+/// `tools/mcp_tool.py` (`_resolve_identity_header`, and the
+/// `bool(config.get("strict_redirect_headers"))` read): what Scarf shows for
+/// a given config must be what Hermes will actually do with it. Hermes never
+/// fails a connection over a bad identity_header — it warns and ignores —
+/// so Scarf models those blocks as absent rather than inventing a plausible
+/// interpretation. Every fixture below stays byte-for-byte on disk either
+/// way; only the modelled value is asserted.
+struct MalformedIdentityHeaderReadTests {
+
+    private func load(_ yaml: String) throws -> (servers: [HermesMCPServer], home: TempHermesHome) {
+        let home = try TempHermesHome()
+        try yaml.write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+        return (HermesFileService(context: home.context).loadMCPServers(), home)
+    }
+
+    private func entry(_ block: String) -> String {
+        """
+        mcp_servers:
+          remote_api:
+            url: https://example.com/mcp
+        \(block)
+        """
+    }
+
+    /// Hermes: `value_from` must be 'static' or 'profile' — anything else
+    /// warns and the header is ignored. Scarf drops it too rather than
+    /// coercing to `.static`, which would show the user a header Hermes is
+    /// not going to send.
+    @Test func unknownValueFromDropsTheHeader() throws {
+        let (servers, home) = try load(entry("""
+            identity_header:
+              name: X-User-Id
+              value_from: profil
+              value: alice
+        """))
+        defer { home.cleanup() }
+        #expect(servers.first?.identityHeader == nil)
+    }
+
+    /// `value_from: static` with a blank value: Hermes requires a non-empty
+    /// string `value` and ignores the block otherwise.
+    @Test func staticWithEmptyValueDropsTheHeader() throws {
+        let (servers, home) = try load(entry("""
+            identity_header:
+              name: X-User-Id
+              value_from: static
+              value: ""
+        """))
+        defer { home.cleanup() }
+        #expect(servers.first?.identityHeader == nil)
+    }
+
+    /// Same rule when `value:` is missing entirely.
+    @Test func staticWithMissingValueDropsTheHeader() throws {
+        let (servers, home) = try load(entry("""
+            identity_header:
+              name: X-User-Id
+              value_from: static
+        """))
+        defer { home.cleanup() }
+        #expect(servers.first?.identityHeader == nil)
+    }
+
+    /// `(raw.get("value_from") or "static")` — an absent `value_from` means
+    /// static, so a name+value pair is a valid header.
+    @Test func absentValueFromDefaultsToStatic() throws {
+        let (servers, home) = try load(entry("""
+            identity_header:
+              name: X-User-Id
+              value: alice
+        """))
+        defer { home.cleanup() }
+        #expect(servers.first?.identityHeader?.valueFrom == .static)
+        #expect(servers.first?.identityHeader?.value == "alice")
+    }
+
+    /// …and so does an EMPTY `value_from`, since `"" or "static"` is
+    /// `"static"` in Python. This is the one blank field that is not a
+    /// rejection.
+    @Test func emptyValueFromAlsoDefaultsToStatic() throws {
+        let (servers, home) = try load(entry("""
+            identity_header:
+              name: X-User-Id
+              value_from: ""
+              value: alice
+        """))
+        defer { home.cleanup() }
+        #expect(servers.first?.identityHeader?.valueFrom == .static)
+    }
+
+    /// A blank `name` is rejected regardless of the rest of the block.
+    @Test func blankNameDropsTheHeader() throws {
+        let (servers, home) = try load(entry("""
+            identity_header:
+              name: ""
+              value_from: static
+              value: alice
+        """))
+        defer { home.cleanup() }
+        #expect(servers.first?.identityHeader == nil)
+    }
+
+    /// `profile` mode never reads `value` — Hermes substitutes the active
+    /// profile name at connect time — so a stale `value:` must not make the
+    /// block look static, and must not block it either.
+    @Test func profileModeIgnoresValue() throws {
+        let (servers, home) = try load(entry("""
+            identity_header:
+              name: X-User-Id
+              value_from: PROFILE
+              value: stale
+        """))
+        defer { home.cleanup() }
+        #expect(servers.first?.identityHeader?.valueFrom == .profile)
+        #expect(servers.first?.identityHeader?.value == "")
+    }
+
+    /// `bool(config.get("strict_redirect_headers"))` is Python truthiness
+    /// over the PyYAML-decoded scalar, so the YAML 1.1 true spellings and a
+    /// bare `1` are all enabled — Scarf must not read them as "unset".
+    @Test func truthyScalarsEnableStrictRedirectHeaders() throws {
+        for spelling in ["true", "True", "yes", "on", "1"] {
+            let (servers, home) = try load(entry("    strict_redirect_headers: \(spelling)"))
+            defer { home.cleanup() }
+            #expect(servers.first?.strictRedirectHeaders == true, "\(spelling) should be truthy")
+        }
+    }
+
+    @Test func falsyScalarsDisableStrictRedirectHeaders() throws {
+        for spelling in ["false", "no", "off", "0"] {
+            let (servers, home) = try load(entry("    strict_redirect_headers: \(spelling)"))
+            defer { home.cleanup() }
+            #expect(servers.first?.strictRedirectHeaders == false, "\(spelling) should be falsy")
+        }
+    }
+
+    /// Absent key stays nil — distinct from an explicit `false`, because the
+    /// writer preserves "unset" as an absent key rather than materializing
+    /// a default into the user's config.
+    @Test func absentStrictRedirectHeadersStaysNil() throws {
+        let (servers, home) = try load(entry("    timeout: 30"))
+        defer { home.cleanup() }
+        #expect(servers.first?.strictRedirectHeaders == nil)
+    }
+}

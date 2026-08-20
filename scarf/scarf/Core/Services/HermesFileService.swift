@@ -667,28 +667,60 @@ struct HermesFileService: Sendable {
             let clientCert = fields["client_cert"].map { Self.firstListElementOrScalar($0) }
             let clientKey = fields["client_key"].map { Self.unquote($0) }
             let sslVerify = fields["ssl_verify"].map { Self.unquote($0) }
-            // v0.20.4 — identity_header requires a non-empty `name` per
-            // mcp_tool.py._resolve_identity_header; a malformed/empty block
-            // is dropped rather than modelled (matches Hermes's own
-            // "invalid configs warn and are ignored" behavior). The raw
-            // YAML lines are untouched either way — this only affects what
-            // the model exposes, not what patchMCPServerField preserves.
+            // v0.20.4 — identity_header. Every rejection below mirrors a
+            // `logger.warning(... "— ignoring")` branch of
+            // `mcp_tool.py._resolve_identity_header`, so what Scarf shows
+            // is what Hermes will actually send:
+            //
+            //   * missing/blank `name`             → dropped
+            //   * `value_from` neither static nor  → dropped (NOT coerced to
+            //     profile (typo, wrong type, …)      static: a typo'd source
+            //                                        sends no header at all,
+            //                                        and showing a static
+            //                                        header would be a lie)
+            //   * static (incl. the absent/empty   → dropped when `value` is
+            //     `value_from` default) …            missing or blank
+            //
+            // `profile` mode ignores `value` entirely (Hermes substitutes
+            // the active profile name at connect time). The raw YAML lines
+            // are untouched in every case — this only affects what the model
+            // exposes, not what patchMCPServerField preserves.
             let identityHeader: MCPIdentityHeader? = {
-                guard let rawName = identityHeaderName,
-                      !rawName.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
-                let valueFrom: MCPIdentityHeader.ValueSource =
-                    (identityHeaderValueFrom?.lowercased() == "profile") ? .profile : .static
-                return MCPIdentityHeader(
-                    name: Self.unquote(rawName),
-                    valueFrom: valueFrom,
-                    value: identityHeaderValue.map { Self.unquote($0) } ?? ""
-                )
+                guard let rawName = identityHeaderName else { return nil }
+                let name = Self.unquote(rawName).trimmingCharacters(in: .whitespaces)
+                guard !name.isEmpty else { return nil }
+                // `(raw.get("value_from") or "static")`: absent OR empty ⇒ static.
+                let rawSource = identityHeaderValueFrom
+                    .map { Self.unquote($0).trimmingCharacters(in: .whitespaces).lowercased() } ?? ""
+                switch rawSource.isEmpty ? "static" : rawSource {
+                case "profile":
+                    return MCPIdentityHeader(name: name, valueFrom: .profile, value: "")
+                case "static":
+                    let value = identityHeaderValue.map { Self.unquote($0) } ?? ""
+                    guard !value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+                    return MCPIdentityHeader(name: name, valueFrom: .static, value: value)
+                default:
+                    return nil
+                }
             }()
+            // v0.20.4 — `strict_redirect_headers` is read by Hermes as
+            // `bool(config.get("strict_redirect_headers"))`, i.e. Python
+            // truthiness over the PyYAML-decoded scalar, not a strict
+            // true/false match. So the YAML 1.1 boolean spellings
+            // (`yes`/`on`/`y`) and any other non-empty scalar (`1`, a
+            // stray string) are all truthy, while the false spellings,
+            // `0`, and the null/empty forms are falsy. Key absent stays
+            // nil — "unset", which Scarf's writer preserves as an absent
+            // key rather than an explicit `false`.
             let strictRedirectHeaders: Bool? = {
-                guard let s = fields["strict_redirect_headers"]?.lowercased() else { return nil }
-                if s == "true" { return true }
-                if s == "false" { return false }
-                return nil
+                guard let raw = fields["strict_redirect_headers"] else { return nil }
+                let s = Self.unquote(raw).trimmingCharacters(in: .whitespaces).lowercased()
+                switch s {
+                case "", "false", "no", "off", "n", "0", "null", "~":
+                    return false
+                default:
+                    return true
+                }
             }()
             let cwd = fields["cwd"].map { Self.unquote($0) }
             let server = HermesMCPServer(

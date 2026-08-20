@@ -418,9 +418,16 @@ public actor CuratorService {
     /// (`hermes_cli/curator.py:539`, `_cmd_ledger`). Fixed-width columns:
     ///
     ///     id             when         actor    action       skill
-    ///     ab12cd34ef56   2026-08-18   curator  archive      old-helper
-    ///     cd34ef56ab12   2026-08-17   agent    absorb       scratch-pad  → absorbed into 'notes'
-    ///     ef56ab12cd34   2026-08-16   user     rollback     old-helper   → rollback of ab12cd34ef56
+    ///     ab12cd34ef56   3d ago       curator  archive      old-helper
+    ///     cd34ef56ab12   5h ago       agent    absorb       scratch-pad  → absorbed into 'notes'
+    ///     ef56ab12cd34   never        user     rollback     old-helper   → rollback of ab12cd34ef56
+    ///
+    /// The `when` column is a RELATIVE age, not a date: `_fmt_ts` renders
+    /// `"{N}s|m|h|d ago"`, `"never"` for a missing timestamp, or the raw
+    /// string when it won't parse as ISO. (The `when:` field of `curator
+    /// rollback <id>` detail output is different — that one IS the raw ISO
+    /// timestamp; see `parseRollbackEntry`.) `whenLabel` is therefore
+    /// carried through verbatim for display and never parsed as a date.
     ///
     /// and the empty-state sentinel `curator: ledger is empty (or
     /// skills.ledger is disabled).`. The header row and the trailing
@@ -435,7 +442,11 @@ public actor CuratorService {
             guard !line.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
             if line.hasPrefix("id") && line.contains("when") && line.contains("actor") { continue }
             if line.contains("ledger is empty") { continue }
-            if line.hasPrefix("Roll back a single mutation") || line.hasPrefix("whole-tree snapshots remain") { continue }
+            // The trailing hint is a single `print` — "Roll back a single
+            // mutation with …; whole-tree snapshots remain available via …"
+            // — so the prefix test covers the whole line. There is no
+            // separate line starting with "whole-tree snapshots remain".
+            if line.hasPrefix("Roll back a single mutation") { continue }
 
             // Fixed column layout: id<14> " " when<12> " " actor<8> " "
             // action<12> " " skill[+suffix]. Guard against a short/odd
@@ -532,12 +543,20 @@ public actor CuratorService {
     /// `days` in the result comes from the request when given, else parsed
     /// out of the header line so a config-default run still reports the
     /// effective threshold.
+    ///
+    /// Note the casing split in `_cmd_purge`: the header is `Archived skills
+    /// older than {N}d:` (capital A) while the no-candidates sentinel is
+    /// `curator: no archived skills older than {N}d.` (lowercase, prefixed).
+    /// The threshold scan is therefore case-insensitive and anchored on the
+    /// shared `archived skills older than ` substring — matching only the
+    /// capitalized header would leave `days` nil on exactly the run where
+    /// Hermes reports the effective TTL and nothing else.
     public nonisolated static func parsePurge(_ stdout: String, days: Int?) -> CuratorPurgeSummary {
         var candidates: [CuratorPurgeCandidate] = []
         var effectiveDays = days
         var purgedCount: Int?
         for raw in stdout.components(separatedBy: .newlines) {
-            if let headerRange = raw.range(of: "Archived skills older than ") {
+            if let headerRange = raw.range(of: "archived skills older than ", options: .caseInsensitive) {
                 let after = raw[headerRange.upperBound...]
                 let digits = after.prefix(while: { $0.isNumber })
                 if let n = Int(digits) { effectiveDays = n }
@@ -549,9 +568,13 @@ public actor CuratorService {
                 purgedCount = Int(digits)
                 continue
             }
+            // Candidate rows are the only indented lines Hermes prints here
+            // (`print(f"  {p.name}")`). Every footer — including the dry-run
+            // marker `(dry run — nothing deleted)` — starts at column 0, so
+            // the indent guard alone separates rows from chrome.
             guard let first = raw.first, first == " " || first == "\t" else { continue }
             let name = raw.trimmingCharacters(in: .whitespaces)
-            guard !name.isEmpty, name != "(dry run — nothing deleted)" else { continue }
+            guard !name.isEmpty else { continue }
             candidates.append(CuratorPurgeCandidate(name: name))
         }
         return CuratorPurgeSummary(candidates: candidates, days: effectiveDays, purgedCount: purgedCount)

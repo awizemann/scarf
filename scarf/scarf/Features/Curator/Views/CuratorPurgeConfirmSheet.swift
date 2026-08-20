@@ -104,7 +104,10 @@ struct CuratorPurgeConfirmSheet: View {
                 onConfirm()
             }
             .buttonStyle(ScarfDestructiveButton())
-            .disabled(isPurging || summary.candidates.isEmpty || summary.disabledReason != nil)
+            // `canPurge` is the model-owned contract (no candidates or a
+            // disabled verb ⇒ never armed); this view adds only the
+            // in-flight guard.
+            .disabled(isPurging || !summary.canPurge)
             .accessibilityIdentifier("curatorPurge.confirm")
         }
     }

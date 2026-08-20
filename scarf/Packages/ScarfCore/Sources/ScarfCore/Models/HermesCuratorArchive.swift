@@ -156,6 +156,17 @@ public struct CuratorPurgeSummary: Sendable, Equatable {
     }
 
     public var count: Int { candidates.count }
+
+    /// Whether a real (destructive) purge may be offered for this summary.
+    ///
+    /// This is the confirm sheet's destructive-button contract, owned here
+    /// rather than in the view so it is testable: purging is offered only
+    /// when Hermes named at least one candidate and did not report the verb
+    /// disabled. A garbled or unrecognized dry-run output parses to zero
+    /// candidates and therefore cannot arm the delete — "we could not read
+    /// the preview" must never present as "there is nothing to delete, go
+    /// ahead".
+    public var canPurge: Bool { !candidates.isEmpty && disabledReason == nil }
 }
 
 /// One row of `hermes curator ledger [--skill N] [--limit N]` — a single
@@ -163,15 +174,18 @@ public struct CuratorPurgeSummary: Sendable, Equatable {
 /// prints a fixed-width table (`hermes_cli/curator.py:539`, `_cmd_ledger`):
 ///
 ///     id             when         actor    action       skill
-///     ab12cd34ef56   2026-08-18   curator  archive      old-helper
-///     …              …            agent    absorb       scratch-pad  → absorbed into 'notes'
-///     …              …            user     rollback     old-helper   → rollback of ab12cd34ef56
+///     ab12cd34ef56   3d ago       curator  archive      old-helper
+///     …              5h ago       agent    absorb       scratch-pad  → absorbed into 'notes'
+///     …              never        user     rollback     old-helper   → rollback of ab12cd34ef56
 ///
 /// `absorbedInto` / `rollbackTarget` are populated only when the row carries
 /// the corresponding `→ …` suffix; both nil is the common case.
 public struct HermesCuratorLedgerEntry: Sendable, Equatable, Identifiable {
     public var id: String { entryID }
     public let entryID: String
+    /// The `when` column verbatim — a RELATIVE age string from `_fmt_ts`
+    /// (`"3d ago"`, `"5h ago"`, `"never"`), NOT an ISO date. Display only;
+    /// nothing parses it back into a `Date`.
     public let whenLabel: String
     public let actor: String
     public let action: String
@@ -214,6 +228,9 @@ public struct CuratorEntryRollbackResult: Sendable, Equatable {
     public let action: String?
     public let skill: String?
     public let actor: String?
+    /// The detail block's `when:` line — unlike the ledger table's relative
+    /// `when` column, this one is the ledger entry's RAW ISO timestamp
+    /// (`entry["ts"]`, printed unformatted by `_cmd_rollback`).
     public let whenLabel: String?
     public let filesTouched: Int?
     /// `true` when Hermes printed "curator: <message>" (success channel);

@@ -6,6 +6,7 @@ struct PersonalitiesView: View {
     @State private var viewModel: PersonalitiesViewModel
     @State private var soulDraft = ""
     @State private var editingSOUL = false
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
 
     init(context: ServerContext) {
         _viewModel = State(initialValue: PersonalitiesViewModel(context: context))
@@ -26,7 +27,12 @@ struct PersonalitiesView: View {
                     }
                     Button("Edit config.yaml") { viewModel.openConfigInEditor() }
                         .buttonStyle(ScarfGhostButton())
-                    Button("Reload") { viewModel.load(); soulDraft = viewModel.soulMarkdown }
+                    Button("Reload") {
+                        viewModel.hasBuiltinPersonalitiesInCode =
+                            capabilitiesStore?.capabilities.hasBuiltinPersonalitiesInCode ?? false
+                        viewModel.load()
+                        soulDraft = viewModel.soulMarkdown
+                    }
                         .buttonStyle(ScarfSecondaryButton())
                 }
                 .fixedSize(horizontal: true, vertical: false)
@@ -44,6 +50,10 @@ struct PersonalitiesView: View {
         .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Personalities")
         .onAppear {
+            // Push the host capability in before the load: it decides whether
+            // Hermes' in-code built-ins are unioned into the list at all.
+            viewModel.hasBuiltinPersonalitiesInCode =
+                capabilitiesStore?.capabilities.hasBuiltinPersonalitiesInCode ?? false
             viewModel.load()
             soulDraft = viewModel.soulMarkdown
         }

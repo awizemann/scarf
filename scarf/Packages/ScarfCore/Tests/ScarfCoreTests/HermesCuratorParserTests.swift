@@ -578,10 +578,68 @@ import Foundation
     /// No-candidates sentinel → empty summary, effective days parsed from
     /// the message even when the caller didn't pass an explicit override.
     @Test func purgeNoCandidatesParsesEffectiveDays() {
+        // The sentinel is lowercase and prefixed ("curator: no archived
+        // skills older than 45d.") while the header is capitalized
+        // ("Archived skills older than 45d:") — the threshold scan has to
+        // match both, or the one run that reports the config-default TTL
+        // and nothing else reports no TTL at all.
         let out = "curator: no archived skills older than 45d."
         let summary = CuratorService.parsePurge(out, days: nil)
         #expect(summary.count == 0)
         #expect(summary.purgedCount == nil)
+        #expect(summary.days == 45)
+        #expect(!summary.canPurge)
+    }
+
+    @Test func purgeNoArchiveDirectorySentinelYieldsNothing() {
+        let summary = CuratorService.parsePurge("curator: no archive directory — nothing to purge.", days: nil)
+        #expect(summary.candidates.isEmpty)
+        #expect(summary.days == nil)
+        #expect(!summary.canPurge)
+    }
+
+    /// Garbled/unexpected stdout (a future Hermes layout change, a wrapper
+    /// banner, a truncated pipe) must parse to ZERO candidates — and the
+    /// destructive-delete gate must stay shut. `CuratorPurgeConfirmSheet`
+    /// disables its "Permanently Delete" button on `!summary.canPurge`, so
+    /// pinning `canPurge` here pins the UI contract: "we could not read the
+    /// preview" can never present as "nothing to delete, go ahead".
+    @Test func purgeGarbledOutputYieldsNoCandidatesAndDisarmsDelete() {
+        let out = """
+        WARNING: something unexpected happened
+        {"unexpected": "json"}
+        ????
+        """
+        let summary = CuratorService.parsePurge(out, days: 90)
+        #expect(summary.candidates.isEmpty)
+        #expect(summary.count == 0)
+        #expect(summary.purgedCount == nil)
+        #expect(!summary.canPurge)
+    }
+
+    @Test func purgeEmptyOutputDisarmsDelete() {
+        #expect(!CuratorService.parsePurge("", days: 90).canPurge)
+    }
+
+    /// A disabled verb is a second, independent reason the gate stays shut
+    /// even if candidates somehow arrived alongside it.
+    @Test func purgeDisabledReasonDisarmsDeleteEvenWithCandidates() {
+        let summary = CuratorPurgeSummary(
+            candidates: [CuratorPurgeCandidate(name: "old-helper")],
+            days: 90,
+            disabledReason: "curator: purge disabled (curator.archive_ttl_days is 0)."
+        )
+        #expect(!summary.canPurge)
+    }
+
+    /// The happy path is the only shape that arms it.
+    @Test func purgeDryRunWithCandidatesArmsDelete() {
+        let out = """
+        Archived skills older than 90d:
+          old-helper
+        (dry run — nothing deleted)
+        """
+        #expect(CuratorService.parsePurge(out, days: 90).canPurge)
     }
 
     // MARK: - Rollback (v0.20.4, hermes_cli/curator.py:660 `_cmd_rollback`, entry_id form)

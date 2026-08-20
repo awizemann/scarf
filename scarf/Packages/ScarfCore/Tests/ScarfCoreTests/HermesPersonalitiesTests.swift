@@ -109,7 +109,8 @@ import Foundation
         """
         let entries = HermesPersonalities.parseUserDefined(yaml: yaml)
         #expect(entries.map(\.name) == ["fancy"])
-        #expect(entries[0].prompt == "Be fancy.")
+        // render_personality_prompt composition: body, then Tone:, then Style:.
+        #expect(entries[0].prompt == "Be fancy.\nTone: warm\nStyle: verbose")
     }
 
     @Test func emptyMappingYieldsNoUserEntries() {
@@ -130,7 +131,7 @@ import Foundation
         display:
           personality: pirate
         """
-        let names = HermesPersonalities.resolvedNames(yaml: yaml)
+        let names = HermesPersonalities.resolvedNames(yaml: yaml, hasBuiltinPersonalitiesInCode: true)
         #expect(names == HermesPersonalities.builtinNames.sorted())
         #expect(names.contains("pirate"))
     }
@@ -142,7 +143,7 @@ import Foundation
             grumpy:
               system_prompt: "You are grumpy."
         """
-        let names = HermesPersonalities.resolvedNames(yaml: yaml)
+        let names = HermesPersonalities.resolvedNames(yaml: yaml, hasBuiltinPersonalitiesInCode: true)
         #expect(names.count == 15)
         #expect(names.contains("grumpy"))
         #expect(names == names.sorted())
@@ -159,7 +160,7 @@ import Foundation
             noir:
               system_prompt: "Rain."
         """
-        let entries = HermesPersonalities.resolve(yaml: yaml)
+        let entries = HermesPersonalities.resolve(yaml: yaml, hasBuiltinPersonalitiesInCode: true)
         #expect(entries.count == 14)
         #expect(entries.map(\.name) == HermesPersonalities.builtinNames.sorted())
         let pirate = entries.first { $0.name == "pirate" }
@@ -171,29 +172,129 @@ import Foundation
     // MARK: - Picker options
 
     @Test func pickerOptionsLeadWithNeutralDefault() {
-        let options = HermesPersonalities.pickerOptions(yaml: "", current: "default")
+        let options = HermesPersonalities.pickerOptions(yaml: "", current: "default", hasBuiltinPersonalitiesInCode: true)
         #expect(options.first == "default")
         #expect(options.count == 15)
         #expect(Set(options).isSuperset(of: HermesPersonalities.builtinNames))
     }
 
     @Test func pickerOptionsKeepUnknownCurrentSelection() {
-        let options = HermesPersonalities.pickerOptions(yaml: "", current: "handwritten")
+        let options = HermesPersonalities.pickerOptions(yaml: "", current: "handwritten", hasBuiltinPersonalitiesInCode: true)
         #expect(options.contains("handwritten"))
         #expect(options[1] == "handwritten")
     }
 
     @Test func pickerOptionsDoNotDuplicateKnownCurrent() {
-        let options = HermesPersonalities.pickerOptions(yaml: "", current: "pirate")
+        let options = HermesPersonalities.pickerOptions(yaml: "", current: "pirate", hasBuiltinPersonalitiesInCode: true)
         #expect(options.filter { $0 == "pirate" }.count == 1)
         #expect(options.count == 15)
     }
 
     @Test func pickerOptionsWithEmptyCurrent() {
-        #expect(HermesPersonalities.pickerOptions(yaml: "", current: "").count == 15)
+        #expect(HermesPersonalities.pickerOptions(yaml: "", current: "", hasBuiltinPersonalitiesInCode: true).count == 15)
+    }
+
+    // MARK: - render_personality_prompt composition
+
+    @Test func toneAndStyleOnlyEntryComposesPromptInsteadOfBlank() {
+        // No system_prompt at all — Hermes still renders "Tone: …\nStyle: …",
+        // so the preview must not be empty.
+        let yaml = """
+        agent:
+          personalities:
+            breezy:
+              tone: casual
+              style: short sentences
+        """
+        let entries = HermesPersonalities.parseUserDefined(yaml: yaml)
+        #expect(entries.map(\.name) == ["breezy"])
+        #expect(entries[0].prompt == "Tone: casual\nStyle: short sentences")
+    }
+
+    @Test func toneOnlyEntryOmitsStyleLine() {
+        let yaml = """
+        agent:
+          personalities:
+            gruff:
+              tone: blunt
+        """
+        #expect(HermesPersonalities.parseUserDefined(yaml: yaml)[0].prompt == "Tone: blunt")
+    }
+
+    @Test func toneStyleOnlyEntryOverlaysBuiltinWithComposedText() {
+        // A tone/style-only entry named after a built-in is a real overlay —
+        // Hermes renders exactly this text in place of the built-in body.
+        let yaml = """
+        agent:
+          personalities:
+            pirate:
+              tone: gruff
+        """
+        let entries = HermesPersonalities.resolve(yaml: yaml, hasBuiltinPersonalitiesInCode: true)
+        let pirate = entries.first { $0.name == "pirate" }
+        #expect(pirate?.prompt == "Tone: gruff")
+        #expect(pirate?.isBuiltin == false)
+        #expect(entries.count == 14)
+    }
+
+    @Test func emptyEntryNamedAfterBuiltinDoesNotBlankIt() {
+        // A bare `pirate:` header (no renderable keys) must not turn the
+        // built-in into an empty-prompt user row — it degrades back to the
+        // built-in instead.
+        let yaml = """
+        agent:
+          personalities:
+            pirate:
+              description: "just a note"
+        """
+        let entries = HermesPersonalities.resolve(yaml: yaml, hasBuiltinPersonalitiesInCode: true)
+        let pirate = entries.first { $0.name == "pirate" }
+        #expect(pirate?.isBuiltin == true)
+        #expect(pirate?.prompt == "")
+        #expect(entries.count == 14)
+    }
+
+    // MARK: - Pre-v0.20.4 hosts (built-ins are editable YAML)
+
+    @Test func preV0204DeletedBuiltinStaysDeleted() {
+        // On a pre-v0.20.4 host the built-ins ship inline in config.yaml. A
+        // user who removed all but one genuinely removed them — the static
+        // list must not resurrect the other 13.
+        let yaml = """
+        agent:
+          personalities:
+            pirate:
+              system_prompt: "Arrr."
+        """
+        let names = HermesPersonalities.resolvedNames(yaml: yaml, hasBuiltinPersonalitiesInCode: false)
+        #expect(names == ["pirate"])
+        #expect(!names.contains("hype"))
+    }
+
+    @Test func preV0204EmptyConfigYieldsNoPersonalities() {
+        #expect(HermesPersonalities.resolvedNames(yaml: "", hasBuiltinPersonalitiesInCode: false).isEmpty)
+        let options = HermesPersonalities.pickerOptions(
+            yaml: "",
+            current: "",
+            hasBuiltinPersonalitiesInCode: false
+        )
+        #expect(options == ["default"])
+    }
+
+    @Test func preV0204UserEntryKeepsItsOwnPromptAndIsNotMarkedBuiltin() {
+        let yaml = """
+        agent:
+          personalities:
+            pirate:
+              tone: gruff
+        """
+        let entries = HermesPersonalities.resolve(yaml: yaml, hasBuiltinPersonalitiesInCode: false)
+        #expect(entries.count == 1)
+        #expect(entries[0].isBuiltin == false)
+        #expect(entries[0].prompt == "Tone: gruff")
     }
 
     @Test func emptyYamlStillYieldsBuiltins() {
-        #expect(HermesPersonalities.resolvedNames(yaml: "") == HermesPersonalities.builtinNames.sorted())
+        #expect(HermesPersonalities.resolvedNames(yaml: "", hasBuiltinPersonalitiesInCode: true) == HermesPersonalities.builtinNames.sorted())
     }
 }

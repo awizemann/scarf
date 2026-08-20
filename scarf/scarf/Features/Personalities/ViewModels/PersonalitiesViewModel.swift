@@ -33,6 +33,13 @@ final class PersonalitiesViewModel {
         self.fileService = HermesFileService(context: context)
     }
 
+    /// Host capability, pushed in by `PersonalitiesView` from
+    /// `\.hermesCapabilities` before `load()`. Decides whether the 14 in-code
+    /// built-ins are unioned into the list — see `HermesPersonalities.resolve`.
+    /// Defaults to `false` (the conservative pre-v0.20.4 reading: show only
+    /// what the config actually contains) until capabilities are known.
+    var hasBuiltinPersonalitiesInCode: Bool = false
+
     var personalities: [HermesPersonality] = []
     var activeName: String = ""
     var soulMarkdown: String = ""
@@ -52,9 +59,13 @@ final class PersonalitiesViewModel {
         let svc = fileService
         let ctx = context
         let path = soulPath
+        let inCodeBuiltins = hasBuiltinPersonalitiesInCode
         Task.detached { [weak self] in
             let config = svc.loadConfig()
-            let parsed = Self.parsePersonalitiesBlock(yaml: ctx.readText(ctx.paths.configYAML) ?? "")
+            let parsed = Self.parsePersonalitiesBlock(
+                yaml: ctx.readText(ctx.paths.configYAML) ?? "",
+                hasBuiltinPersonalitiesInCode: inCodeBuiltins
+            )
             let soul = ctx.readText(path) ?? ""
             await MainActor.run { [weak self] in
                 guard let self else { return }
@@ -65,15 +76,20 @@ final class PersonalitiesViewModel {
         }
     }
 
-    /// Built-ins (hardcoded from Hermes' `BUILTIN_PERSONALITIES`) unioned with
-    /// the user entries under `agent.personalities`. See
-    /// `HermesPersonalities.resolve` for why the union runs on every host
-    /// version rather than only on `hasBuiltinPersonalitiesInCode` ones.
+    /// The user entries under `agent.personalities`, unioned with Hermes'
+    /// in-code `BUILTIN_PERSONALITIES` only on hosts that actually have them
+    /// in code — see `HermesPersonalities.resolve` for why a pre-v0.20.4
+    /// host must not have deleted built-ins resurrected.
     ///
     /// Static form so the detached load can call into it without touching
     /// MainActor-isolated state.
-    nonisolated private static func parsePersonalitiesBlock(yaml: String) -> [HermesPersonality] {
-        HermesPersonalities.resolve(yaml: yaml).map(HermesPersonality.init)
+    nonisolated private static func parsePersonalitiesBlock(
+        yaml: String,
+        hasBuiltinPersonalitiesInCode: Bool
+    ) -> [HermesPersonality] {
+        HermesPersonalities
+            .resolve(yaml: yaml, hasBuiltinPersonalitiesInCode: hasBuiltinPersonalitiesInCode)
+            .map(HermesPersonality.init)
     }
 
     func setActive(_ name: String) {

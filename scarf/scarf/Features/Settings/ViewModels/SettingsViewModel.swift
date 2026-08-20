@@ -87,6 +87,12 @@ final class SettingsViewModel {
     /// Reload and post-save reloads pass `force: true` (t-aud24).
     @ObservationIgnored private var hasLoaded = false
 
+    /// Host capability, pushed in by `SettingsView` from
+    /// `\.hermesCapabilities` before `load()`. See `parsePersonalities()`.
+    /// Defaults to `false` — the conservative reading (show only what the
+    /// config actually contains) until capabilities are known.
+    var hasBuiltinPersonalitiesInCode: Bool = false
+
     func load(force: Bool = false) {
         if !force, hasLoaded || isLoading { return }
         hasLoaded = true
@@ -847,13 +853,18 @@ final class SettingsViewModel {
         context.openInLocalEditor(context.paths.configYAML)
     }
 
-    /// Picker options: Hermes' 14 built-ins (hardcoded — v0.20.4 moved them out
-    /// of config.yaml into `hermes_cli/personality.py`) unioned with any user
-    /// entries under `agent.personalities`. Deduped by name, so pre-v0.20.4
-    /// hosts — whose config.yaml still ships the built-ins inline — render the
-    /// same list they always did.
+    /// Picker options: the user entries under `agent.personalities`, plus
+    /// Hermes' 14 built-ins on hosts that carry them in code (v0.20.4 moved
+    /// them out of config.yaml into `hermes_cli/personality.py`). Pre-v0.20.4
+    /// hosts ship the built-ins as editable YAML, so the config parse is
+    /// authoritative there and a deleted entry stays deleted — see
+    /// `HermesPersonalities.resolve`.
     private func parsePersonalities() -> [String] {
-        HermesPersonalities.pickerOptions(yaml: rawConfigYAML, current: config.personality)
+        HermesPersonalities.pickerOptions(
+            yaml: rawConfigYAML,
+            current: config.personality,
+            hasBuiltinPersonalitiesInCode: hasBuiltinPersonalitiesInCode
+        )
     }
 
     @discardableResult

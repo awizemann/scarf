@@ -5,8 +5,14 @@ import Foundation
 public struct HermesPersonalityEntry: Identifiable, Sendable, Equatable {
     public var id: String { name }
     public let name: String
-    /// Prompt text as written in config.yaml. Empty for built-ins, whose
-    /// prompt text lives in Hermes' own source and is never surfaced here.
+    /// Prompt text as Hermes would render it, composed by the same rules as
+    /// `render_personality_prompt` in `hermes_cli/personality.py`: the
+    /// entry's `system_prompt` body, then a `Tone: …` line, then a
+    /// `Style: …` line, each included only when non-empty and joined with
+    /// newlines. A tone/style-only entry therefore has a non-empty prompt.
+    ///
+    /// Empty for built-ins, whose prompt text lives in Hermes' own source
+    /// and is never surfaced here.
     public let prompt: String
     public let isBuiltin: Bool
 
@@ -114,26 +120,73 @@ public enum HermesPersonalities {
 
         return names.sorted().map { name in
             let subs = subValues[name] ?? [:]
-            let prompt = subs["system_prompt"]
+            let body = subs["system_prompt"]
                 ?? subs["prompt"]
                 ?? bareStrings[name]
                 ?? ""
-            return HermesPersonalityEntry(name: name, prompt: prompt, isBuiltin: false)
+            return HermesPersonalityEntry(
+                name: name,
+                prompt: renderPrompt(systemPrompt: body, tone: subs["tone"], style: subs["style"]),
+                isBuiltin: false
+            )
         }
     }
 
-    /// The full picker list: built-ins unioned with the user-defined entries
-    /// parsed from `yaml`, deduped by name (a user entry overlays the built-in
-    /// of the same name, matching Hermes' own resolution order).
+    /// Port of `render_personality_prompt` (`hermes_cli/personality.py`) for
+    /// the dict entry shape:
     ///
-    /// The union is applied on every host, not just `hasBuiltinPersonalitiesInCode`
-    /// ones. On v0.20.4+ the built-ins exist only in code, so the static list is
-    /// the only source. On older hosts the shipped config.yaml still carries the
-    /// same 14 inline, so parsing finds them and the dedupe collapses the two
-    /// sources back to one list — the rendered names are unchanged for those
-    /// hosts, and any user entry keeps its config-defined prompt either way.
-    public static func resolve(yaml: String) -> [HermesPersonalityEntry] {
-        let userDefined = parseUserDefined(yaml: yaml)
+    ///     parts = [system_prompt]
+    ///     if tone:  parts.append(f"Tone: {tone}")
+    ///     if style: parts.append(f"Style: {style}")
+    ///     "\n".join(stripped parts that are non-empty)
+    ///
+    /// Hermes builds the `Tone:`/`Style:` lines from truthiness of the raw
+    /// value and only drops parts that are empty *after* stripping, which is
+    /// what the two-stage check below reproduces.
+    static func renderPrompt(systemPrompt: String, tone: String?, style: String?) -> String {
+        var parts: [String] = [systemPrompt]
+        if let tone, !tone.isEmpty { parts.append("Tone: \(tone)") }
+        if let style, !style.isEmpty { parts.append("Style: \(style)") }
+        return parts
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    /// The full picker list for a host.
+    ///
+    /// `hasBuiltinPersonalitiesInCode` is the host capability, and it decides
+    /// where the built-ins come from — the union is NOT unconditional:
+    ///
+    /// * `true` (v0.20.4+): the 14 built-ins live only in
+    ///   `hermes_cli/personality.py` and the shipped config carries
+    ///   `agent.personalities: {}`. The static list is the only source, so
+    ///   it is unioned in and a user entry overlays the built-in it names.
+    /// * `false` (pre-v0.20.4): the built-ins are ordinary, editable YAML in
+    ///   the shipped config.yaml. A user who deleted one genuinely removed
+    ///   it from that host, so the config parse is authoritative and the
+    ///   static list must NOT resurrect the deleted entry.
+    ///
+    /// Overlay rule for a user entry that reuses a built-in name: the user
+    /// entry wins (Hermes' own resolution order), but only when it actually
+    /// carries prompt text. An entry that renders to nothing — a bare
+    /// `pirate:` section header, or one holding only keys Hermes doesn't
+    /// render — would otherwise blank a built-in's identity in the picker,
+    /// so on a `hasBuiltinPersonalitiesInCode` host it degrades back to the
+    /// built-in row (`isBuiltin: true`, empty prompt = "text lives in
+    /// Hermes' source"). The name never silently loses its identity, and no
+    /// prompt text is invented. On a pre-v0.20.4 host there is no in-code
+    /// built-in to fall back to, so the parsed entry stands as written.
+    public static func resolve(yaml: String, hasBuiltinPersonalitiesInCode: Bool) -> [HermesPersonalityEntry] {
+        let parsed = parseUserDefined(yaml: yaml)
+        guard hasBuiltinPersonalitiesInCode else {
+            return parsed.sorted { $0.name < $1.name }
+        }
+        let builtinSet = Set(builtinNames)
+        let userDefined = parsed.map { entry -> HermesPersonalityEntry in
+            guard entry.prompt.isEmpty, builtinSet.contains(entry.name) else { return entry }
+            return HermesPersonalityEntry(name: entry.name, prompt: "", isBuiltin: true)
+        }
         let userNames = Set(userDefined.map(\.name))
         let builtins = builtinNames
             .filter { !userNames.contains($0) }
@@ -142,8 +195,8 @@ public enum HermesPersonalities {
     }
 
     /// Name-only convenience.
-    public static func resolvedNames(yaml: String) -> [String] {
-        resolve(yaml: yaml).map(\.name)
+    public static func resolvedNames(yaml: String, hasBuiltinPersonalitiesInCode: Bool) -> [String] {
+        resolve(yaml: yaml, hasBuiltinPersonalitiesInCode: hasBuiltinPersonalitiesInCode).map(\.name)
     }
 
     /// Options for a personality picker: the neutral `default` row (no
@@ -153,8 +206,15 @@ public enum HermesPersonalities {
     /// `current` is appended when the config holds a name no source knows —
     /// a hand-written or since-deleted selection stays visible and selectable
     /// instead of the picker silently showing some other row as active.
-    public static func pickerOptions(yaml: String, current: String = "") -> [String] {
-        var options = ["default"] + resolvedNames(yaml: yaml)
+    public static func pickerOptions(
+        yaml: String,
+        current: String = "",
+        hasBuiltinPersonalitiesInCode: Bool
+    ) -> [String] {
+        var options = ["default"] + resolvedNames(
+            yaml: yaml,
+            hasBuiltinPersonalitiesInCode: hasBuiltinPersonalitiesInCode
+        )
         let trimmed = current.trimmingCharacters(in: .whitespaces)
         if !trimmed.isEmpty, !options.contains(trimmed) {
             options.insert(trimmed, at: 1)
