@@ -104,6 +104,32 @@ import Testing
         ])
     }
 
+    @Test func paddedTaskCheckboxesParseWithCorrectCheckedStateAndText() {
+        // Marker 0.9.0's `MarkdownParser.taskState` is lenient about
+        // whitespace inside the checkbox — "[ x]", "[x ]", "[  ]",
+        // "[ X ]" all parse as task items (checked iff x/X present),
+        // and `contentText` strips the whole padded box span.
+        let blocks = MarkdownContentView.parseBlocks(from: """
+        - [ x] a
+        - [x ] b
+        - [  ] c
+        - [ X ] d
+        """)
+        #expect(blocks == [
+            .taskItem("a", checked: true, indent: 0),
+            .taskItem("b", checked: true, indent: 0),
+            .taskItem("c", checked: false, indent: 0),
+            .taskItem("d", checked: true, indent: 0),
+        ])
+    }
+
+    @Test func bareEmptyBracketsAreNotATaskBox() {
+        // "- []" (no space inside the brackets at all) isn't a task
+        // checkbox per Marker 0.9.0 — it stays a plain bullet.
+        let blocks = MarkdownContentView.parseBlocks(from: "- [] e\n")
+        #expect(blocks == [.bulletItem("[] e", indent: 0)])
+    }
+
     @Test func codeFenceKeepsInteriorVerbatim() {
         let blocks = MarkdownContentView.parseBlocks(from: "```bash\nls -la\n# comment, not heading\n```\n")
         #expect(blocks == [.codeBlock("ls -la\n# comment, not heading", language: "bash")])
