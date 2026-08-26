@@ -88,7 +88,7 @@ struct SettingsView: View {
         }
         .sheet(item: $editingSpec) { spec in
             SettingEditorSheet(
-                spec: spec,
+                spec: spec.resolved(capabilities: caps),
                 currentValue: currentValue(for: spec.key),
                 vm: vm,
                 onDismiss: {}
@@ -169,7 +169,9 @@ struct SettingsView: View {
         case "model.default": return vm.config.model
         case "model.provider": return vm.config.provider
         case "approvals.mode": return vm.config.approvalMode
-        case "agent.max_turns": return String(vm.config.displayMaxTurns(capabilities: caps))
+        // "Unlimited" for the no-ceiling case; the sheet's `Int(...) ?? 0`
+        // priming maps that straight back onto the 0 sentinel.
+        case "agent.max_turns": return vm.config.displayMaxTurnsText(capabilities: caps)
         case "display.show_cost": return vm.config.showCost ? "true" : "false"
         case "display.show_reasoning": return vm.config.showReasoning ? "true" : "false"
         case "display.streaming": return vm.config.streaming ? "true" : "false"
@@ -198,8 +200,9 @@ struct SettingsView: View {
         Section("Agent") {
             LabeledContent("Approval mode", value: vm.config.approvalMode)
             // Sentinel-aware: absent key shows the host's effective default
-            // (500 on v0.20+, 60 before) rather than 0.
-            LabeledContent("Max turns", value: "\(vm.config.displayMaxTurns(capabilities: caps))")
+            // ("Unlimited" on v0.20.5+, 500 on v0.20.0–v0.20.4, 60 before)
+            // rather than 0.
+            LabeledContent("Max turns", value: vm.config.displayMaxTurnsText(capabilities: caps))
             LabeledContent("Service tier", value: vm.config.serviceTier)
             yesNoRow("Verbose logging", vm.config.verbose)
             LabeledContent("Tool use enforcement", value: vm.config.toolUseEnforcement)
@@ -277,7 +280,12 @@ struct SettingsView: View {
             yesNoRow("Auto TTS", vm.config.autoTTS)
             LabeledContent("TTS provider", value: vm.config.voice.ttsProvider)
             yesNoRow("STT enabled", vm.config.voice.sttEnabled)
-            LabeledContent("STT provider", value: vm.config.voice.sttProvider)
+            // Empty = `stt.provider` absent = Hermes decides (autodetect
+            // ladder on v0.20.5+, the seeded `local` default before).
+            LabeledContent(
+                "STT provider",
+                value: vm.config.voice.sttProvider.isEmpty ? "Auto (unset)" : vm.config.voice.sttProvider
+            )
         }
     }
 

@@ -220,20 +220,31 @@ struct StepperRow: View {
     let value: Int
     let range: ClosedRange<Int>
     let step: Int
+    /// Optional override for the rendered number, e.g. showing `0` as
+    /// "Unlimited" for `agent.max_turns`. Nil renders the plain integer.
+    let valueLabel: ((Int) -> String)?
     let onChange: (Int) -> Void
 
-    init(label: String, value: Int, range: ClosedRange<Int>, step: Int = 1, onChange: @escaping (Int) -> Void) {
+    init(
+        label: String,
+        value: Int,
+        range: ClosedRange<Int>,
+        step: Int = 1,
+        valueLabel: ((Int) -> String)? = nil,
+        onChange: @escaping (Int) -> Void
+    ) {
         self.label = label
         self.value = value
         self.range = range
         self.step = step
+        self.valueLabel = valueLabel
         self.onChange = onChange
     }
 
     var body: some View {
         HStack {
             SettingsRowLabel(label: label)
-            Text("\(value)")
+            Text(valueLabel?(value) ?? "\(value)")
                 .font(ScarfFont.monoSmall)
                 .frame(width: 70, alignment: .leading)
             Stepper("", value: Binding(

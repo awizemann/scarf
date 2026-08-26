@@ -86,9 +86,9 @@ struct SettingEditorSheet: View {
                 }
             }
             .pickerStyle(.segmented)
-        case .number(let range):
+        case .number(let range, let zeroLabel):
             Stepper(value: $numberValue, in: range, step: 1) {
-                Text("\(numberValue)")
+                Text(numberValue == 0 ? (zeroLabel ?? "0") : "\(numberValue)")
                     .monospacedDigit()
             }
         case .text:
@@ -157,7 +157,33 @@ struct SettingSpec: Identifiable, Hashable {
         case text
         case toggle
         case enumPicker(options: [String])
-        case number(range: ClosedRange<Int>)
+        /// `zeroLabel` renders 0 as a word instead of the digit — used by
+        /// `agent.max_turns`, where Hermes v0.20.5's `resolve_turn_limit`
+        /// reads 0 as "unlimited".
+        case number(range: ClosedRange<Int>, zeroLabel: String? = nil)
+    }
+
+    /// Capability-adjusted copy of this spec.
+    ///
+    /// `agent.max_turns`: v0.20.5 flipped the default from 500 to unlimited
+    /// and accepts 0 as unlimited, so the stepper's low end opens to 0 on
+    /// those hosts. Pre-v0.20.5 hosts have no unlimited semantics, so the
+    /// floor stays 1 there and Scarf never writes a 0 they cannot resolve.
+    /// The old 500 ceiling was the *default*, not a limit; it is raised to
+    /// 1000 to match the macOS stepper.
+    func resolved(capabilities: HermesCapabilities) -> SettingSpec {
+        guard key == "agent.max_turns" else { return self }
+        return SettingSpec(
+            key: key,
+            displayName: displayName,
+            helpText: capabilities.isV0205OrLater
+                ? "Ceiling on assistant replies per prompt. Higher = agent can chain more tool calls before stopping. 0 = Unlimited, which is the Hermes default from v0.20.5."
+                : helpText,
+            kind: .number(
+                range: capabilities.isV0205OrLater ? 0...1000 : 1...1000,
+                zeroLabel: "Unlimited"
+            )
+        )
     }
 
     /// Curated v1 list. Ordered as it should appear in Settings.
@@ -184,7 +210,7 @@ struct SettingSpec: Identifiable, Hashable {
             key: "agent.max_turns",
             displayName: "Max turns",
             helpText: "Ceiling on assistant replies per prompt. Higher = agent can chain more tool calls before stopping.",
-            kind: .number(range: 1...500)
+            kind: .number(range: 1...1000, zeroLabel: "Unlimited")
         ),
         SettingSpec(
             key: "display.show_cost",

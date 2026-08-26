@@ -286,6 +286,15 @@ public struct VoiceSettings: Sendable, Equatable {
 
     // STT
     public var sttEnabled: Bool
+    /// `stt.provider` — empty means the key is **absent**, not `local`.
+    ///
+    /// Hermes v0.20.5 removed the seeded `stt.provider: local` from
+    /// `config_defaults.py`: an absent key now means "autodetect ladder", and
+    /// any stored value is an explicit pin that disables autodetection. On
+    /// pre-v0.20.5 hosts the key was seeded to `local`, so absent there is
+    /// simply Hermes' own default. Either way the correct rendering for empty
+    /// is "Auto (unset)" — Hermes decides — and the correct write for it is
+    /// `hermes config unset stt.provider`, never an empty scalar.
     public var sttProvider: String
     public var sttLocalModel: String
     public var sttLocalLanguage: String
@@ -427,7 +436,9 @@ public struct VoiceSettings: Sendable, Equatable {
         ttsNeuTTSModel: "neuphonic/neutts-air-q4-gguf",
         ttsNeuTTSDevice: "cpu",
         sttEnabled: true,
-        sttProvider: "local",
+        // Empty = key absent = Hermes decides (autodetect on v0.20.5+, the
+        // seeded `local` default on older hosts). See the field doc.
+        sttProvider: "",
         sttLocalModel: "base",
         sttLocalLanguage: "",
         sttOpenAIModel: "whisper-1",
@@ -1191,13 +1202,45 @@ public struct HermesConfig: Sendable {
     public var maxTurns: Int
     public var personality: String
 
+    /// Sentinel/marker value for "no turn ceiling". Doubles as the parse
+    /// sentinel for an absent `agent.max_turns` key and as the value Scarf
+    /// writes for an explicit unlimited pin — Hermes v0.20.5's
+    /// `resolve_turn_limit` accepts `0` (alongside `none`/`unlimited`/`inf`/
+    /// `-1`) as unlimited, so the two collapse to the same meaning there.
+    public static let maxTurnsUnlimited = 0
+
     /// Capability-appropriate display value for `agent.max_turns`.
-    /// `maxTurns == 0` means the key is absent from config.yaml (parse
-    /// sentinel); the effective server default is then 500 on Hermes
-    /// v0.20+ and 60 on earlier hosts. Display-only — callers must never
-    /// write the resolved value back to config.yaml.
+    ///
+    /// `maxTurns == 0` means either the key is absent from config.yaml (parse
+    /// sentinel) or it is explicitly `0`. The effective server default for an
+    /// absent key is:
+    ///   * v0.20.5+ — **unlimited** (`config_defaults.py` stopped seeding a
+    ///     ceiling; `TURN_LIMIT_UNLIMITED`), reported here as
+    ///     `maxTurnsUnlimited` (0),
+    ///   * v0.20.0–v0.20.4 — 500,
+    ///   * older — 60.
+    ///
+    /// Display-only — callers must never write the resolved value back to
+    /// config.yaml. A returned `0` must be rendered as "Unlimited", never as
+    /// the number zero; use `displayMaxTurnsText(capabilities:)`.
+    ///
+    /// Note the deliberate ambiguity on pre-v0.20.5 hosts: an explicit
+    /// `agent.max_turns: 0` there is indistinguishable from an absent key and
+    /// shows as 500/60. Scarf never writes 0 on those hosts (the steppers cap
+    /// the low end at 1 unless `isV0205OrLater`), so the only way to reach that
+    /// state is a hand-edited config on a host that has no unlimited semantics
+    /// anyway.
     public func displayMaxTurns(capabilities: HermesCapabilities) -> Int {
-        maxTurns > 0 ? maxTurns : (capabilities.isV020OrLater ? 500 : 60)
+        if maxTurns > 0 { return maxTurns }
+        if capabilities.isV0205OrLater { return Self.maxTurnsUnlimited }
+        return capabilities.isV020OrLater ? 500 : 60
+    }
+
+    /// Human-readable form of `displayMaxTurns(capabilities:)` — "Unlimited"
+    /// for the no-ceiling case, the plain number otherwise.
+    public func displayMaxTurnsText(capabilities: HermesCapabilities) -> String {
+        let value = displayMaxTurns(capabilities: capabilities)
+        return value == Self.maxTurnsUnlimited ? "Unlimited" : String(value)
     }
     public var terminalBackend: String
     public var memoryEnabled: Bool

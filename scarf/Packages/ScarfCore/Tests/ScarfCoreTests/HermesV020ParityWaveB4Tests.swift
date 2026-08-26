@@ -103,6 +103,48 @@ struct HermesV020ParityWaveB4Tests {
         #expect(cfg.displayMaxTurns(capabilities: .empty) == 42)
     }
 
+    /// v0.20.5 flipped the server default again — 500 → unlimited
+    /// (`config_defaults.py`, `TURN_LIMIT_UNLIMITED`, which accepts
+    /// `none/unlimited/inf/0/-1`). The absent key must therefore resolve to
+    /// the unlimited sentinel on v0.20.5+, 500 on v0.20.0–v0.20.4 and 60 on
+    /// older hosts.
+    @Test func maxTurnsAbsentKeyResolvesUnlimitedOnV0205Hosts() {
+        let absent = HermesConfig(yaml: "")
+        let v0205 = HermesCapabilities.parseLine("Hermes Agent v0.20.5 (2026.8.19)")
+        let v0204 = HermesCapabilities.parseLine("Hermes Agent v0.20.4 (2026.8.12)")
+        let v0200 = HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)")
+        let v0192 = HermesCapabilities.parseLine("Hermes Agent v0.19.2 (2026.7.20)")
+
+        #expect(absent.displayMaxTurns(capabilities: v0205) == HermesConfig.maxTurnsUnlimited)
+        #expect(absent.displayMaxTurns(capabilities: v0204) == 500)
+        #expect(absent.displayMaxTurns(capabilities: v0200) == 500)
+        #expect(absent.displayMaxTurns(capabilities: v0192) == 60)
+        // A later patch/minor keeps the unlimited default.
+        #expect(absent.displayMaxTurns(capabilities: HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.9.1)")) == HermesConfig.maxTurnsUnlimited)
+
+        // Text form: "Unlimited" only where the resolved value is the
+        // sentinel; every other tier renders the plain number.
+        #expect(absent.displayMaxTurnsText(capabilities: v0205) == "Unlimited")
+        #expect(absent.displayMaxTurnsText(capabilities: v0204) == "500")
+        #expect(absent.displayMaxTurnsText(capabilities: v0192) == "60")
+    }
+
+    /// An explicit `agent.max_turns: 0` is Hermes v0.20.5's own "unlimited"
+    /// spelling; it parses to the same sentinel as an absent key and displays
+    /// as Unlimited there.
+    @Test func maxTurnsExplicitZeroIsUnlimited() {
+        let cfg = HermesConfig(yaml: """
+        agent:
+          max_turns: 0
+        """)
+        #expect(cfg.maxTurns == HermesConfig.maxTurnsUnlimited)
+        let v0205 = HermesCapabilities.parseLine("Hermes Agent v0.20.5 (2026.8.19)")
+        #expect(cfg.displayMaxTurnsText(capabilities: v0205) == "Unlimited")
+        // A positive explicit value is never "Unlimited", on any host.
+        let pinned = HermesConfig(yaml: "agent:\n  max_turns: 250\n")
+        #expect(pinned.displayMaxTurnsText(capabilities: v0205) == "250")
+    }
+
     // MARK: - Skills CLI argv (no --yes; it never existed)
 
     @Test func skillsUninstallArgvHasNoYesFlag() {
