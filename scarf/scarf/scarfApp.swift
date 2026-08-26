@@ -103,7 +103,7 @@ struct ScarfApp: App {
             } catch {
                 Logger(subsystem: "com.scarf", category: "scarfApp")
                     .warning("skill bootstrap failed: \(error.localizedDescription, privacy: .public)")
-                Analytics.record("bootstrap_task_failed", props: ["task": "skills"])
+                Analytics.record(.bootstrapTaskFailed(task: .skills))
             }
         }
 
@@ -120,7 +120,7 @@ struct ScarfApp: App {
             } catch {
                 Logger(subsystem: "com.scarf", category: "scarfApp")
                     .warning("slash command bootstrap failed: \(error.localizedDescription, privacy: .public)")
-                Analytics.record("bootstrap_task_failed", props: ["task": "slash_commands"])
+                Analytics.record(.bootstrapTaskFailed(task: .slashCommands))
             }
         }
 
@@ -136,7 +136,7 @@ struct ScarfApp: App {
             } catch {
                 Logger(subsystem: "com.scarf", category: "scarfApp")
                     .warning("env-mirror reconcile failed: \(error.localizedDescription, privacy: .public)")
-                Analytics.record("bootstrap_task_failed", props: ["task": "env_mirror"])
+                Analytics.record(.bootstrapTaskFailed(task: .envMirror))
             }
         }
 
@@ -157,7 +157,7 @@ struct ScarfApp: App {
             // XCUITest's bypass for the deep-link install flow, not a real
             // `scarf://` open — never the same `kind` the real onOpenURL
             // handler below reports.
-            Analytics.record("deep_link_opened", props: ["kind": "test"])
+            Analytics.record(.deepLinkOpened(kind: .test))
         }
 
         // MARK: - first_run / launch_completed
@@ -172,17 +172,17 @@ struct ScarfApp: App {
             // `platform` is part of `first_run`'s taxonomy shape: the same
             // event name is emitted by the iOS app, and only this prop tells
             // the two installs apart.
-            Analytics.record("first_run", props: ["platform": "macos"])
+            Analytics.record(.firstRun(platform: .macos))
         }
         // `registry` (built above) is already fully loaded from
         // `servers.json` by this point — `entries.count` is free, no
         // additional I/O. `record()` itself is nonisolated fire-and-forget,
         // so nothing here waits on the analytics call.
-        Analytics.record("launch_completed", props: [
-            "duration_bucket": .string(Analytics.durationBucket(since: launchStart)),
-            "server_count_bucket": .string(Analytics.serverCountBucket(registry.entries.count + 1)),
-            "warm": .bool(warm),
-        ])
+        Analytics.record(.launchCompleted(
+            durationBucket: .init(since: launchStart),
+            serverCountBucket: .init(count: registry.entries.count + 1),
+            warm: warm
+        ))
     }
 
     var body: some Scene {
@@ -223,7 +223,7 @@ struct ScarfApp: App {
                         // OS-level deep link (browser click, Finder
                         // double-click, drag-onto-icon) arrived, as
                         // distinct from the XCUITest bypass in `init()`.
-                        Analytics.record("deep_link_opened", props: ["kind": "install_template"])
+                        Analytics.record(.deepLinkOpened(kind: .installTemplate))
                         NSApplication.shared.activate()
                     }
             } else {
@@ -572,11 +572,9 @@ final class ServerLiveStatus: Identifiable {
     func startHermes() {
         Task { [context] in
             let ok = await Task.detached { Self.performStart(context) }.value
-            Analytics.record("hermes_control_action", props: [
-                "action": "start",
-                "source": "menu_bar",
-                "outcome": ok ? "succeeded" : "failed",
-            ])
+            Analytics.record(.hermesControlAction(
+                action: .start, source: .menuBar, outcome: .init(succeeded: ok)
+            ))
         }
         // Refresh after a short delay to pick up the new state.
         Task { [weak self] in
@@ -588,11 +586,9 @@ final class ServerLiveStatus: Identifiable {
     func stopHermes() {
         Task { [fileService] in
             let ok = await Task.detached { fileService.stopHermes() }.value
-            Analytics.record("hermes_control_action", props: [
-                "action": "stop",
-                "source": "menu_bar",
-                "outcome": ok ? "succeeded" : "failed",
-            ])
+            Analytics.record(.hermesControlAction(
+                action: .stop, source: .menuBar, outcome: .init(succeeded: ok)
+            ))
         }
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 2_000_000_000)
@@ -607,11 +603,9 @@ final class ServerLiveStatus: Identifiable {
             let started = await Task.detached { Self.performStart(context) }.value
             // A restart only succeeded if both halves did; a stop that
             // found nothing running still has to bring the gateway back.
-            Analytics.record("hermes_control_action", props: [
-                "action": "restart",
-                "source": "menu_bar",
-                "outcome": stopped && started ? "succeeded" : "failed",
-            ])
+            Analytics.record(.hermesControlAction(
+                action: .restart, source: .menuBar, outcome: .init(succeeded: stopped && started)
+            ))
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             self?.refresh()
         }
@@ -769,7 +763,7 @@ final class ServerLiveStatusRegistry {
                 }
             }
             for event in WakeReconnectMetrics.events(for: outcomes, recoverySeconds: recoverySeconds) {
-                Analytics.record(event.name, props: event.props)
+                Analytics.record(event)
             }
         }
     }
@@ -841,22 +835,17 @@ nonisolated enum WakeReconnectMetrics {
         case recoveryFailed
     }
 
-    struct Event {
-        let name: String
-        let props: [String: String]
-    }
-
     /// - Parameter recoverySeconds: wall time spent on teardown work only —
     ///   not the post-wake settle, and not the probes of healthy hosts.
-    static func events(for outcomes: [HostOutcome], recoverySeconds: TimeInterval) -> [Event] {
+    static func events(for outcomes: [HostOutcome], recoverySeconds: TimeInterval) -> [UsageEvent] {
         let attempted = outcomes.contains { $0 == .recovered || $0 == .recoveryFailed }
         guard attempted else { return [] }
-        var events = [Event(name: "reconnect_attempted", props: ["trigger": "wake"])]
+        var events: [UsageEvent] = [.reconnectAttempted(trigger: .wake)]
         if outcomes.contains(.recovered) {
-            events.append(Event(name: "reconnect_succeeded", props: [
-                "trigger": "wake",
-                "duration_bucket": Analytics.durationBucket(recoverySeconds),
-            ]))
+            events.append(.reconnectSucceeded(
+                trigger: .wake,
+                durationBucket: .init(seconds: recoverySeconds)
+            ))
         }
         return events
     }

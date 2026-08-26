@@ -74,14 +74,14 @@ final class TemplateInstallerViewModel {
     /// entry, so a cancelled or failed install never counts.
     struct PendingInstall {
         var inspection: TemplateInspection
-        var source: String
+        var source: UsageEvent.InstallSource
     }
 
     private var pendingInstall: PendingInstall?
 
     /// Test seam: the source token currently paired with the pending
     /// install, or `nil` when nothing is awaiting confirmation.
-    var pendingInstallSourceForTesting: String? { pendingInstall?.source }
+    var pendingInstallSourceForTesting: String? { pendingInstall?.source.rawValue }
 
     // MARK: - Entry points
 
@@ -93,7 +93,7 @@ final class TemplateInstallerViewModel {
     /// - Parameter source: analytics source token; defaults to `"url"` (the
     ///   local-file case). `openRemoteURL` passes its own token through
     ///   when it delegates here for a catalog pick.
-    func openLocalFile(_ zipPath: String, source: String = "url") {
+    func openLocalFile(_ zipPath: String, source: UsageEvent.InstallSource = .url) {
         resetTempState()
         stage = .inspecting
         let service = templateService
@@ -139,7 +139,7 @@ final class TemplateInstallerViewModel {
     /// transfer responses omit that header. The authoritative check is the
     /// actual on-disk file size after the download completes — it runs
     /// unconditionally and covers the chunked-transfer case.
-    func openRemoteURL(_ url: URL, source: String = "url") {
+    func openRemoteURL(_ url: URL, source: UsageEvent.InstallSource = .url) {
         resetTempState()
         stage = .fetching(sourceDescription: url.host ?? url.absoluteString)
         Task.detached { [weak self] in
@@ -236,7 +236,7 @@ final class TemplateInstallerViewModel {
         guard let plan else { return }
         // Read once, here, so the whole emission below describes the same
         // install even if a new entry point lands mid-flight.
-        let source = pendingInstall?.source ?? "url"
+        let source = pendingInstall?.source ?? .url
         stage = .installing
         let installer = installer
         let service = templateService
@@ -251,7 +251,7 @@ final class TemplateInstallerViewModel {
                     self.plan = nil
                     self.chosenParentDirectory = nil
                     self.readmeBody = nil
-                    Analytics.record("template_installed", props: ["source": source])
+                    Analytics.record(.templateInstalled(source: source))
                     // `manifest.id` is arbitrary author-controlled text
                     // (`TemplateExporterViewModel` seeds it from the
                     // project's own free-typed name), so it can never ride
@@ -260,10 +260,7 @@ final class TemplateInstallerViewModel {
                     // not something Scarf ships or curates, so "custom" is
                     // the honest coarse value rather than inventing a
                     // "builtin" bucket nothing here would ever produce.
-                    Analytics.record("project_created", props: [
-                        "template": "custom",
-                        "method": "import",
-                    ])
+                    Analytics.record(.projectCreated(template: .custom, method: .import))
                     // A template can bundle skills (namespaced under
                     // `templates/<slug>/`); each one installed here arrived
                     // through the same channel as the template itself.
@@ -278,7 +275,7 @@ final class TemplateInstallerViewModel {
                     // every planned copy landed — so the planned set is the
                     // written set.
                     for _ in 0..<Self.installedSkillCount(plan: plan) {
-                        Analytics.record("skill_installed", props: ["source": source])
+                        Analytics.record(.skillInstalled(source: source))
                     }
                 }
             } catch {

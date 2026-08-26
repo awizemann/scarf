@@ -97,7 +97,7 @@ struct AnalyticsChatEventsTests {
     @Test("permission option ids collapse to approve/deny and nothing else")
     func permissionDecisions() {
         func decision(_ id: String) -> String {
-            ChatViewModel.analyticsPermissionDecision(optionId: id)
+            ChatViewModel.analyticsPermissionDecision(optionId: id).rawValue
         }
         #expect(decision("deny") == "deny")
         #expect(decision("reject_once") == "deny")

@@ -89,6 +89,25 @@ require_cmd xcrun
 require_cmd ditto
 require_cmd gh
 
+# Analytics write key must be present, or the release ships with analytics
+# silently off: `Configs/SwiftStatsLocal.xcconfig` is uncommitted and
+# gitignored, `SwiftStats.xcconfig` includes it optionally, and a checkout
+# without it builds fine with an empty SWIFT_STATS_WRITE_KEY that
+# `Analytics.validWriteKey` then rejects at runtime. A debug build degrading
+# to no-op is fine; a signed, notarized release doing it silently is not.
+# The key's value is never printed — only whether one parses.
+STATS_LOCAL_XCCONFIG="$REPO_ROOT/scarf/Configs/SwiftStatsLocal.xcconfig"
+[[ -f "$STATS_LOCAL_XCCONFIG" ]] \
+  || die "scarf/Configs/SwiftStatsLocal.xcconfig missing — releasing now would ship analytics disabled.
+Create it with a single line: SWIFT_STATS_WRITE_KEY = <key from the ScarfMon dashboard>"
+# Split on the FIRST '=' only — a key may itself contain '=' padding.
+STATS_WRITE_KEY="$(sed -n 's/^[[:space:]]*SWIFT_STATS_WRITE_KEY[[:space:]]*=[[:space:]]*//p' "$STATS_LOCAL_XCCONFIG" | head -n1 | sed 's/[[:space:]]*$//')"
+[[ -n "$STATS_WRITE_KEY" ]] \
+  || die "SWIFT_STATS_WRITE_KEY is empty or unset in scarf/Configs/SwiftStatsLocal.xcconfig — releasing now would ship analytics disabled"
+# Don't keep the key in the shell environment for the rest of the run.
+unset STATS_WRITE_KEY
+log "Analytics write key present"
+
 cd "$REPO_ROOT"
 
 # git must be clean and on main. The one exception: the release dir

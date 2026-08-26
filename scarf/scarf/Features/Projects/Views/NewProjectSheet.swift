@@ -225,7 +225,7 @@ struct NewProjectSheet: View {
         // "New Project from Scratch" has no template concept at all — the
         // wizard is name/folder/parent-dir only, so `template` is always
         // this fixed token rather than anything the user typed.
-        Analytics.record("project_created", props: ["template": "custom", "method": "scaffold"])
+        Analytics.record(.projectCreated(template: .custom, method: .scaffold))
         // Stage the chat handoff BEFORE dismissing so SwiftUI's
         // sheet dismissal doesn't preempt the coordinator update.
         let prompt = viewModel.buildInitialPrompt(for: entry)

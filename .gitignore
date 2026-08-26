@@ -74,3 +74,6 @@ crashes/
 # Memophant app-local state (machine-specific, not for git)
 sessions/.raw/
 sessions/.index.json
+
+# Local, uncommitted analytics write key (see scarf/Configs/SwiftStats.xcconfig)
+scarf/Configs/SwiftStatsLocal.xcconfig

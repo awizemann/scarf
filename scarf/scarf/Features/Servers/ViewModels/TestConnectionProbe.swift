@@ -23,7 +23,7 @@ struct TestConnectionProbe {
         // outnumber real attempts by orders of magnitude, and the facts they
         // carry are covered by circuit_breaker_* and connection_degraded.
         let attemptStart = Date()
-        Analytics.record("connect_attempted", props: ["transport": "ssh"])
+        Analytics.record(.connectAttempted(transport: .ssh))
         // The user explicitly asked to try this host — their intent
         // overrides any open circuit breaker (gh#138), and background
         // traffic should resume immediately if the connection is back.
@@ -224,10 +224,10 @@ struct TestConnectionProbe {
             // not found" branch below is a healthy connection to a host
             // without a usable Hermes — a Hermes-compatibility fact, not a
             // transport one — so it is not reported as a connect failure.
-            Analytics.record("connect_succeeded", props: [
-                "transport": "ssh",
-                "duration_bucket": Analytics.durationBucket(since: attemptStart),
-            ])
+            Analytics.record(.connectSucceeded(
+                transport: .ssh,
+                durationBucket: .init(since: attemptStart)
+            ))
             let lines = stdout.split(separator: "\n").map(String.init)
             let hermesPath = lines.first(where: { $0.hasPrefix("HERMES:") })?
                 .dropFirst("HERMES:".count).trimmingCharacters(in: .whitespaces) ?? ""
@@ -244,10 +244,10 @@ struct TestConnectionProbe {
             return .success(hermesPath: String(hermesPath), dbFound: dbFound, suggestedRemoteHome: suggestedHome)
         }
 
-        Analytics.record("connect_failed", props: [
-            "transport": "ssh",
-            "error_kind": Self.analyticsErrorKind(host: host, exitCode: exitCode, stderr: stderr),
-        ])
+        Analytics.record(.connectFailed(
+            transport: .ssh,
+            errorKind: Self.analyticsErrorKind(host: host, exitCode: exitCode, stderr: stderr)
+        ))
 
         // Classify common failures by scanning the stderr trace.
         let lower = stderr.lowercased()
@@ -281,7 +281,7 @@ struct TestConnectionProbe {
     /// function. The two `exitCode == -1` cases are ours, not ssh's: the
     /// detached probe above synthesizes that code (with a prefix it wrote
     /// itself) for a 20s deadline and for a `Process` that wouldn't launch.
-    static func analyticsErrorKind(host: String, exitCode: Int32, stderr: String) -> String {
+    static func analyticsErrorKind(host: String, exitCode: Int32, stderr: String) -> UsageEvent.TransportErrorKind {
         let error: TransportError
         if exitCode == -1 {
             error = stderr.hasPrefix("Timed out after")
@@ -300,7 +300,7 @@ struct TestConnectionProbe {
                 error = classified
             }
         }
-        return error.analyticsErrorKind
+        return UsageEvent.TransportErrorKind(error)
     }
 
     /// Quote an argument for display in a copy-pasteable ssh command. Always

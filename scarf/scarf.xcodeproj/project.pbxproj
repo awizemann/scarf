@@ -59,6 +59,7 @@
 		534959402F7B83B600BD31AD /* scarf.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = scarf.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5349594F2F7B83B700BD31AD /* scarfTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = scarfTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		534959592F7B83B700BD31AD /* scarfUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = scarfUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		53CF9001000000000000A001 /* SwiftStats.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = SwiftStats.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -178,6 +179,7 @@
 		534959372F7B83B600BD31AD = {
 			isa = PBXGroup;
 			children = (
+				53CF9002000000000000A002 /* Configs */,
 				534959422F7B83B600BD31AD /* scarf */,
 				534959522F7B83B700BD31AD /* scarfTests */,
 				5349595C2F7B83B700BD31AD /* scarfUITests */,
@@ -186,6 +188,14 @@
 				4EAC23462F99930100654F42 /* Scarf iOSUITests */,
 				534959412F7B83B600BD31AD /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		53CF9002000000000000A002 /* Configs */ = {
+			isa = PBXGroup;
+			children = (
+				53CF9001000000000000A001 /* SwiftStats.xcconfig */,
+			);
+			path = Configs;
 			sourceTree = "<group>";
 		};
 		534959412F7B83B600BD31AD /* Products */ = {
@@ -846,6 +856,7 @@
 		};
 		534959642F7B83B700BD31AD /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 53CF9001000000000000A001 /* SwiftStats.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -882,6 +893,7 @@
 		};
 		534959652F7B83B700BD31AD /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 53CF9001000000000000A001 /* SwiftStats.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;

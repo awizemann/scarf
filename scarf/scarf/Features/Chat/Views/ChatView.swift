@@ -383,7 +383,7 @@ struct ChatView: View {
                         // `origin: error_retry`, not `chat`: this is a retry
                         // of a session that just errored, not a user opening
                         // one from the list.
-                        viewModel.resumeSession(sid, origin: "error_retry")
+                        viewModel.resumeSession(sid, origin: .errorRetry)
                     }
                     .font(.caption)
                     .buttonStyle(.bordered)

@@ -47,14 +47,14 @@ final class StatsScarfMonBackend: ScarfMonBackend {
     private let lock = OSAllocatedUnfairLock<[ScarfMon.Category: Int]>(initialState: [:])
 
     func record(_ sample: ScarfMon.Sample) {
-        guard let props = Self.decide(sample, cap: Self.perCategoryCap, lock: lock) else { return }
-        Analytics.record("perf_measure", props: props)
+        guard let event = Self.decide(sample, cap: Self.perCategoryCap, lock: lock) else { return }
+        Analytics.record(event)
     }
 
     /// Pure threshold + rate-limit decision, split out of `record(_:)` so
     /// it's testable without a live `Analytics`/`Stats` sink (which no-ops
     /// under XCTest — see `AnalyticsFeatureUsageEventsTests`). Returns the
-    /// exact props `record(_:)` would send, or `nil` if the sample should
+    /// exact `UsageEvent` `record(_:)` would send, or `nil` if the sample should
     /// be dropped (under budget, not a timed interval, or the category's
     /// cap for this process is already spent).
     ///
@@ -65,7 +65,7 @@ final class StatsScarfMonBackend: ScarfMonBackend {
         _ sample: ScarfMon.Sample,
         cap: Int,
         lock: OSAllocatedUnfairLock<[ScarfMon.Category: Int]>
-    ) -> [String: String]? {
+    ) -> UsageEvent? {
         // Events (non-interval samples) carry no duration to threshold
         // against; only timed `measure`/`measureAsync` intervals apply.
         guard sample.kind == .interval else { return nil }
@@ -79,8 +79,10 @@ final class StatsScarfMonBackend: ScarfMonBackend {
         }
         guard allowed else { return nil }
 
-        let bucket = Analytics.durationBucket(TimeInterval(sample.durationNanos) / 1_000_000_000)
-        return ["category": sample.category.rawValue, "duration_bucket": bucket]
+        return .perfMeasure(
+            category: sample.category,
+            durationBucket: .init(seconds: TimeInterval(sample.durationNanos) / 1_000_000_000)
+        )
     }
 }
 

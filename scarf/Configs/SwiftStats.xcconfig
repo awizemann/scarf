@@ -1,0 +1,23 @@
+// SwiftStats.xcconfig — analytics write-key injection for the `scarf` app target.
+//
+// The swift-stats write key must never be committed. It reaches the app as:
+//
+//     SwiftStatsLocal.xcconfig  →  SWIFT_STATS_WRITE_KEY (build setting)
+//                               →  SwiftStatsWriteKey (Info.plist)
+//                               →  read at runtime by Analytics.swift
+//
+// `SwiftStatsLocal.xcconfig` is an UNCOMMITTED sibling of this file
+// (gitignored) that a developer or a CI step creates with a single line:
+//
+//     SWIFT_STATS_WRITE_KEY = sk_stats_…
+//
+// Order matters: the empty default is declared FIRST and the optional include
+// comes after, so a local definition overrides it. The include is optional
+// (`#include?`), so a fresh checkout without that file still builds — the key
+// stays empty and the app degrades to no-op analytics at runtime.
+//
+// Rotation happens in the ScarfMon dashboard; no key ever lands in git.
+
+SWIFT_STATS_WRITE_KEY =
+
+#include? "SwiftStatsLocal.xcconfig"

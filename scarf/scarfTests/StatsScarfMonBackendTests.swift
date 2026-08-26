@@ -4,11 +4,13 @@ import ScarfCore
 import os
 @testable import scarf
 
-/// Phase 6 (ScarfMon → Stats bridge). `Analytics.record` no-ops under
-/// XCTest (`isSyntheticHost`), so — same discipline as
-/// `AnalyticsFeatureUsageEventsTests` — these assert on the pure
-/// threshold + rate-limit decision (`StatsScarfMonBackend.decide`) rather
-/// than on delivered events.
+/// Phase 6 (ScarfMon → Stats bridge). Most of these assert on the pure
+/// threshold + rate-limit decision (`StatsScarfMonBackend.decide`); the
+/// end-to-end suite at the bottom installs a `CapturingUsageTracker` through
+/// the `Analytics` tracker seam and asserts on what `record(_:)` — the real
+/// `ScarfMonBackend` entry point — actually emitted, which was impossible
+/// while `Analytics.record` funnelled into a `StatsClient` that is `nil`
+/// under XCTest.
 @Suite("StatsScarfMonBackend decision logic")
 struct StatsScarfMonBackendTests {
     private func sample(
@@ -35,7 +37,7 @@ struct StatsScarfMonBackendTests {
 
         let first = StatsScarfMonBackend.decide(slow, cap: 30, lock: lock)
         #expect(first != nil)
-        #expect(first?["category"] == "chatRender")
+        #expect(first?.props["category"]?.usageEventToken == "chatRender")
 
         // A second, independent over-budget sample in the SAME category
         // increments the same rate-limit counter but is still its own,
@@ -102,7 +104,76 @@ struct StatsScarfMonBackendTests {
     func propsNeverCarryMeasureName() {
         let lock = OSAllocatedUnfairLock<[ScarfMon.Category: Int]>(initialState: [:])
         let slow = sample(category: .render, durationNanos: 400_000_000)
-        let props = StatsScarfMonBackend.decide(slow, cap: 30, lock: lock)
-        #expect(props?.keys.sorted() == ["category", "duration_bucket"])
+        let event = StatsScarfMonBackend.decide(slow, cap: 30, lock: lock)
+        #expect(event?.name == "perf_measure")
+        #expect(event?.props.keys.sorted() == ["category", "duration_bucket"])
     }
+}
+
+/// The emission path itself, not just the decision behind it.
+///
+/// `.serialized`, and nested inside `AnalyticsConnectionEventsTests` for the
+/// same reason `AnalyticsChatEventsTests` and
+/// `AnalyticsFeatureUsageEventsTests` are: `Analytics.install` writes a
+/// *process-wide* seam, and `.serialized` only serializes a suite and its
+/// subgroups — never siblings. As a file-scope suite this raced
+/// `AnalyticsFeatureUsageEventsTests`, which installs into the same seam and
+/// restores it in a `defer`. One serialized parent for every seam-installing
+/// app-target suite is what makes the seam safe.
+extension AnalyticsConnectionEventsTests {
+
+@Suite("StatsScarfMonBackend emission", .serialized)
+struct StatsScarfMonBackendEmissionTests {
+    private func sample(
+        category: ScarfMon.Category,
+        durationNanos: UInt64,
+        kind: ScarfMon.Sample.Kind = .interval
+    ) -> ScarfMon.Sample {
+        ScarfMon.Sample(
+            category: category,
+            name: "secret-measure-name",
+            kind: kind,
+            timestamp: Date(),
+            durationNanos: durationNanos,
+            count: 1,
+            bytes: nil
+        )
+    }
+
+    @Test("an over-budget sample emits perf_measure; an under-budget one emits nothing")
+    func emitsOnlyOverBudget() {
+        let tracker = CapturingUsageTracker()
+        Analytics.install(tracker)
+        defer { Analytics.install(nil) }
+
+        let backend = StatsScarfMonBackend()
+        backend.record(sample(category: .chatRender, durationNanos: 10_000_000))   // under 100ms
+        #expect(tracker.captured.isEmpty)
+
+        backend.record(sample(category: .chatRender, durationNanos: 2_500_000_000)) // over
+        #expect(tracker.names == ["perf_measure"])
+        // The `StaticString` measure name must never reach a prop.
+        #expect(tracker.props(of: "perf_measure") == [
+            "category": "chatRender",
+            "duration_bucket": "1_5s",
+        ])
+    }
+
+    @Test("the per-category cap bounds what actually reaches the tracker")
+    func capBoundsEmission() {
+        let tracker = CapturingUsageTracker()
+        Analytics.install(tracker)
+        defer { Analytics.install(nil) }
+
+        let backend = StatsScarfMonBackend()
+        let slow = sample(category: .sqlite, durationNanos: 500_000_000)
+        for _ in 0..<(StatsScarfMonBackend.perCategoryCap + 10) { backend.record(slow) }
+        #expect(tracker.captured.count == StatsScarfMonBackend.perCategoryCap)
+
+        // A different category has its own untouched budget.
+        backend.record(sample(category: .transport, durationNanos: 6_000_000_000))
+        #expect(tracker.captured.count == StatsScarfMonBackend.perCategoryCap + 1)
+    }
+}
+
 }

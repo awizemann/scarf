@@ -300,17 +300,15 @@ final class HealthViewModel {
     // `source` — so a restart here likewise reports one `restart`, never a
     // `stop` plus a `start`.
 
-    private static func recordControlAction(_ action: String, succeeded: Bool) {
-        Analytics.record("hermes_control_action", props: [
-            "action": action,
-            "source": "health_panel",
-            "outcome": succeeded ? "succeeded" : "failed",
-        ])
+    private static func recordControlAction(_ action: UsageEvent.ControlAction, succeeded: Bool) {
+        Analytics.record(.hermesControlAction(
+            action: action, source: .healthPanel, outcome: .init(succeeded: succeeded)
+        ))
     }
 
     func stopHermes() {
         let stopped = fileService.stopHermes()
-        Self.recordControlAction("stop", succeeded: stopped)
+        Self.recordControlAction(.stop, succeeded: stopped)
         actionMessage = "Stop signal sent"
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             self?.refreshProcessStatus()
@@ -320,7 +318,7 @@ final class HealthViewModel {
 
     func startHermes() {
         let started = runHermes(["gateway", "start"]).exitCode == 0
-        Self.recordControlAction("start", succeeded: started)
+        Self.recordControlAction(.start, succeeded: started)
         actionMessage = "Start requested"
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             self?.refreshProcessStatus()
@@ -336,7 +334,7 @@ final class HealthViewModel {
             let started = self.runHermes(["gateway", "start"]).exitCode == 0
             // A restart only succeeded if both halves did; a stop that found
             // nothing running still has to bring the gateway back.
-            Self.recordControlAction("restart", succeeded: stopped && started)
+            Self.recordControlAction(.restart, succeeded: stopped && started)
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                 self?.refreshProcessStatus()
                 self?.actionMessage = nil

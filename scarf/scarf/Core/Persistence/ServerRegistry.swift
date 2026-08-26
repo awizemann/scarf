@@ -130,7 +130,7 @@ final class ServerRegistry {
         // which has no macOS analogue (the Mac defers entirely to
         // ssh-agent or an existing on-disk identity file). Emitting a
         // fabricated value would be worse than omitting the prop.
-        Analytics.record("server_added", props: ["transport": "ssh"])
+        Analytics.record(.serverAdded(transport: .ssh))
         return entry
     }
 
@@ -155,9 +155,9 @@ final class ServerRegistry {
         // call with an unknown id (the cache cleanup below still runs), and
         // a no-op removal is not a user-visible event.
         if let removed {
-            let transport: String
-            if case .local = removed.kind { transport = "local" } else { transport = "ssh" }
-            Analytics.record("server_removed", props: ["transport": transport])
+            let transport: UsageEvent.Transport
+            if case .local = removed.kind { transport = .local } else { transport = .ssh }
+            Analytics.record(.serverRemoved(transport: transport))
         }
 
         if let removed, case .ssh(let config) = removed.kind {

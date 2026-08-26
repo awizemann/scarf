@@ -6,13 +6,20 @@ import os
 
 private nonisolated let logger = Logger(subsystem: "com.scarf", category: "Analytics")
 
-/// App-wide analytics facade over a single `StatsClient` (swift-stats).
+/// App-wide analytics facade in front of an injectable ``UsageTracking``.
 ///
-/// Everything here is `nonisolated` and fire-and-forget: `record(_:props:)` is
+/// This type is the *entry point*; ``StatsUsageTracker`` (in
+/// `UsageTracking.swift`) is the production *implementation* that owns the
+/// single `StatsClient`. Call sites keep calling `Analytics.record(...)`;
+/// tests call ``install(_:)`` to swap the tracker underneath.
+///
+/// Everything here is `nonisolated` and fire-and-forget: `record(_ event:)` —
+/// which takes a ``UsageEvent``, the closed set that *is* the taxonomy — is
 /// the one entry point the rest of the app uses, and it never suspends, never
 /// touches disk on the caller's thread and never throws. If the client cannot
-/// be constructed (a malformed endpoint is the only way that can happen) the
-/// facade degrades to a no-op — analytics must never be able to fail a launch.
+/// be constructed — a malformed endpoint, or a missing/unexpanded write key in
+/// the bundle's Info.plist — the facade degrades to a no-op: analytics must
+/// never be able to fail a launch.
 ///
 /// Props discipline (see documents/analytics/swift-stats-adoption-event-taxonomy.md):
 /// snake_case event names, flat props, **no** free text, file paths, URLs,
@@ -22,38 +29,58 @@ private nonisolated let logger = Logger(subsystem: "com.scarf", category: "Analy
 ///
 /// `nonisolated` in full: the app target defaults new declarations to
 /// `@MainActor`, and analytics must be callable from any isolation without a
-/// hop — an inherited `@MainActor` on `sharedClient` makes `record()` from a
+/// hop — an inherited `@MainActor` on the tracker would make `record()` from a
 /// background context a hard error under the Swift 6 language mode.
 nonisolated enum Analytics {
     /// Stable for the lifetime of the install-id scheme — changing it
     /// re-buckets every existing install into a new anonymous identity.
     private static let installIdSalt = "scarf-macos-2026"
 
-    /// Project-scoped, append-only **write** key. It necessarily ships inside
-    /// the binary: it can add events to this one project and can read nothing,
-    /// which is the whole design of the key class (schema §2.4).
-    ///
-    /// Posture (decided deliberately, not an oversight): this literal is
-    /// committed in the clear and always will be. Any client-side hiding
-    /// scheme — Keychain seeding, obfuscation, a fetch-at-launch indirection —
-    /// only moves the same secret into the same binary, so it buys nothing
-    /// against anyone willing to run `strings`. The key's blast radius is
-    /// bounded by its class: append-only, scoped to this one project, no read
-    /// access, so the worst an abuser can do is inject junk events into our
-    /// own metrics. We therefore **rotate on abuse**, not on a schedule: if
-    /// junk traffic shows up, mint a replacement key in the ScarfMon dashboard
-    /// (which is also where rotation/revocation happens), paste it here and
-    /// ship a build. Anything that ever gains read scope must NOT live here.
-    private static let writeKey = "sk_stats_twAbMaSzUKQCa3w4EfgXRV2s6dnUZYVDGKN0mrNK0ks"
+    /// Info.plist key carrying the swift-stats write key.
+    static let writeKeyInfoPlistKey = "SwiftStatsWriteKey"
 
-    private static let endpointString = "https://api.swiftstats.co"
+    /// Project-scoped, append-only **write** key, read at runtime from the
+    /// app bundle's Info.plist.
+    ///
+    /// Posture: the key *ships* in the built Info.plist, and that is fine —
+    /// it is append-only, scoped to this one project and can read nothing
+    /// (schema §2.4), so the worst an abuser can do is inject junk events
+    /// into our own metrics. What is **not** fine is committing it: this repo
+    /// is public, and a key in source control is a leak the moment it lands.
+    /// So the key never appears in source. It reaches the binary through
+    /// `scarf/Configs/SwiftStatsLocal.xcconfig` — an uncommitted, gitignored
+    /// file that defines `SWIFT_STATS_WRITE_KEY`, which the committed
+    /// `SwiftStats.xcconfig` optionally includes and the Info.plist expands
+    /// into `SwiftStatsWriteKey`. A checkout without that local file builds
+    /// fine and simply runs with analytics off. Rotation and revocation both
+    /// happen in the ScarfMon dashboard; anything that ever gains read scope
+    /// must not travel this path at all.
+    static let writeKey: String? = validWriteKey(
+        Bundle.main.object(forInfoDictionaryKey: writeKeyInfoPlistKey) as? String
+    )
+
+    /// Pure validator for the raw Info.plist value, `internal` so tests can
+    /// hit it directly without a bundle.
+    ///
+    /// Rejects `nil`, empty and whitespace-only strings, and anything still
+    /// containing `$(` — an unexpanded build setting, which is exactly what
+    /// a checkout with no `SwiftStatsLocal.xcconfig` would otherwise hand us.
+    /// Returns the trimmed key, or `nil` when analytics must stay off.
+    static func validWriteKey(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains("$(") else { return nil }
+        return trimmed
+    }
+
+    static let endpointString = "https://api.swiftstats.co"
 
     /// Debug builds and the decoupled dev copy installed by
     /// `scripts/build-detached.sh` (a Release build at
     /// `/Applications/scarf-dev.app`) are pre-release traffic and must not
     /// pollute production metrics. Only the bundle's own last path component is
     /// inspected, and only to produce a `Bool` — no path ever reaches a prop.
-    private static var isPreRelease: Bool {
+    static var isPreRelease: Bool {
         #if DEBUG
         return true
         #else
@@ -64,7 +91,7 @@ nonisolated enum Analytics {
     /// The one place the app's stats configuration is defined. Exposed
     /// `internal` (not `private`) purely so tests can build the *same*
     /// configuration around an `InMemorySink` — the shipping call site is
-    /// ``sharedClient`` below and nothing else may call this.
+    /// ``StatsUsageTracker/makeSharedClient()`` and nothing else may call this.
     ///
     /// Note what is *not* here: `screenMetrics` and `colorScheme` are left at
     /// their defaults rather than read from `NSScreen`/`NSApp`, which would
@@ -74,8 +101,8 @@ nonisolated enum Analytics {
     /// are plain `var`s on a value type consumed once by `StatsClient.init`
     /// (`Packages` checkout: `Stats/StatsConfiguration.swift`,
     /// `Stats/StatsClient.swift`) — the actor keeps no public setter to patch
-    /// either field in after construction, and `sharedClient` is a `static
-    /// let` that can legitimately fire first from a background thread (the
+    /// either field in after construction, and the shared client is built
+    /// lazily and can legitimately be built first from a background thread (the
     /// very first `record()` call, before `applicationDidBecomeActive()` ever
     /// runs). Capturing `NSScreen.main`/effective appearance ahead of that
     /// would mean either hopping to the main actor from a `nonisolated`
@@ -124,95 +151,101 @@ nonisolated enum Analytics {
     /// bundle, whose lifecycle observers would otherwise fire `app_open` /
     /// `app_background` at the live endpoint on every `xcodebuild test` — noise
     /// that no `isPreRelease` flag makes worth sending.
-    private static var isSyntheticHost: Bool {
+    static var isSyntheticHost: Bool {
         let environment = ProcessInfo.processInfo.environment
         return environment["XCTestConfigurationFilePath"] != nil
             || environment["XCTestBundlePath"] != nil
             || environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
     }
 
-    /// Lazily built exactly once (static `let` = `swift_once`), on whichever
-    /// thread records first. `StatsClient.init` allocates two actors and does
-    /// no I/O — the queue file is opened on the `EventStore` actor on demand —
-    /// so this is safe to trigger from the launch path.
-    ///
-    /// `nil` means "analytics is off for this process".
-    private static let sharedClient: StatsClient? = {
-        guard !isSyntheticHost else { return nil }
-        do {
-            let sink = CloudflareSink(
-                endpoint: try CloudflareEndpoint(string: endpointString),
-                writeKey: writeKey
-            )
-            return StatsClient(configuration: makeConfiguration(sink: sink, isPreRelease: isPreRelease))
-        } catch {
-            // Deliberately not fatal, and deliberately not logging `error`'s
-            // description with `.public` — degrade to a no-op instead.
-            logger.error("Analytics disabled: the stats client could not be configured")
-            return nil
-        }
-    }()
+    // MARK: - The installed tracker
 
-    /// The client, for Settings (consent toggles, enable/disable UI). `nil`
-    /// when analytics failed to configure.
-    static var client: StatsClient? { sharedClient }
+    /// The process-wide tracker seam — the app's one obvious analytics entry
+    /// point, and the thing tests swap.
+    ///
+    /// **Why a seam and not initializer injection.** Analytics is emitted from
+    /// ~33 call sites spread across SwiftUI views, view models, registries and
+    /// the launch path; threading an `any UsageTracking` through every one of
+    /// those initializers would churn a large amount of unrelated SwiftUI
+    /// plumbing for no behavioral gain. So `Analytics` stays the single
+    /// app-wide façade — every existing `Analytics.record(...)` call site is
+    /// unchanged and simply forwards here — while the *implementation* behind
+    /// it is now injectable. This mirrors `ScarfAnalytics.install` in
+    /// `ScarfCore`, so both halves of the system are swapped the same way.
+    ///
+    /// **Default is production, not "uninstalled".** Unlike `ScarfCore`'s
+    /// seam, which is `nil` until a host installs one, this defaults to
+    /// ``StatsUsageTracker/shared`` so an event recorded before
+    /// `scarfApp.init` runs cannot be silently dropped by install ordering.
+    /// `StatsUsageTracker.shared` is itself inert under XCTest and previews
+    /// (`isSyntheticHost`), so a test that installs nothing still sends
+    /// nothing.
+    ///
+    /// Reads and writes both take `trackerLock`: `install` can legitimately be
+    /// called from a test while another thread records, and an unsynchronized
+    /// `nonisolated(unsafe) var` holding an existential would be a real data
+    /// race, not a theoretical one.
+    private static let trackerLock = NSLock()
+    private nonisolated(unsafe) static var _tracker: any UsageTracking = StatsUsageTracker.shared
+
+    /// The tracker every `Analytics` recording call routes through.
+    ///
+    /// **`private`, deliberately.** ``UsageTracking/record(rawName:props:)`` is
+    /// a protocol requirement, so anything holding an `any UsageTracking` can
+    /// name an event with a raw string. Keeping the *installed* tracker
+    /// unreachable is what makes ``UsageEvent`` the only way an app-target call
+    /// site can spell an event: ``CoreBridge`` is nested inside `Analytics` and
+    /// so may read this, and tests never need it — they install a double with
+    /// ``install(_:)`` and assert on the double itself.
+    private static var tracker: any UsageTracking {
+        trackerLock.lock(); defer { trackerLock.unlock() }
+        return _tracker
+    }
+
+    /// Install a tracker. Called by tests (`CapturingUsageTracker`,
+    /// `NoopUsageTracker`); the app never needs to call it because the default
+    /// is already the production tracker. Pass `nil` to restore that default —
+    /// what a test's `defer` should do.
+    static func install(_ tracker: (any UsageTracking)?) {
+        trackerLock.lock(); defer { trackerLock.unlock() }
+        _tracker = tracker ?? StatsUsageTracker.shared
+    }
+
+    /// The production tracker's client, for Settings (consent toggles,
+    /// enable/disable UI). Deliberately **not** routed through ``tracker``:
+    /// the master switch and its persisted state belong to the real client,
+    /// and a test double has no client to toggle. `nil` when analytics failed
+    /// to configure.
+    static var client: StatsClient? { StatsUsageTracker.shared.client }
 
     // MARK: - Recording
 
     /// The app-wide entry point. Non-suspending and fire-and-forget: the event
     /// is buffered in memory and drained onto the client actor asynchronously.
     ///
-    /// - Parameters:
-    ///   - name: snake_case, `^[a-z][a-z0-9_]*$`, from the taxonomy.
-    ///   - props: flat, bounded-cardinality values only. Never user text,
-    ///     paths, URLs, hostnames or identifiers.
-    nonisolated static func record(_ name: String, props: [String: StatsValue] = [:]) {
-        sharedClient?.record(name, props: props)
+    /// ``UsageEvent`` is the *only* way an app-target call site can name an
+    /// event: the raw string entry point lives on ``UsageTracking`` and is
+    /// reachable only from ``CoreBridge``, so a new event has to be added to
+    /// the closed enum — where the taxonomy, the prop vocabularies and the
+    /// bucketing all live — rather than typed inline at a call site.
+    nonisolated static func record(_ event: UsageEvent) {
+        tracker.record(event)
     }
 
     // MARK: - Once-per-process recording
 
-    /// Keys already reported by ``recordOnce(_:key:props:)`` in this process.
+    /// Record `event` at most once per `key` per app *process*.
     ///
-    /// Guarded by a plain lock rather than an actor or `@MainActor` because
-    /// `record` itself is `nonisolated` and callers must not have to hop to
-    /// report an event. `internal` (via the accessors below) so tests can
-    /// assert on the dedupe without trying to intercept a `record` that is a
-    /// no-op under XCTest (`isSyntheticHost`).
-    private static let onceLock = NSLock()
-    private nonisolated(unsafe) static var recordedOnceKeys: Set<String> = []
-
-    /// Record `name` at most once per `key` per app *process*.
-    ///
-    /// Deliberately process-wide, not per-object: the callers that need this
-    /// (notably `section_viewed`) live on objects that are rebuilt whenever
-    /// the user opens a second window or switches server/profile, so an
-    /// instance-scoped `Set` would re-report the same fact several times per
-    /// session.
+    /// The dedupe state lives on the installed tracker (see
+    /// ``UsageTracking/recordOnce(_:key:)``), so a test that installs a fresh
+    /// `CapturingUsageTracker` starts from a clean slate — which is why the
+    /// old `resetRecordedOnceForTesting()` hook no longer exists.
     ///
     /// - Returns: `true` when the event was newly reported, `false` when the
     ///   key had already fired.
     @discardableResult
-    nonisolated static func recordOnce(_ name: String, key: String, props: [String: String] = [:]) -> Bool {
-        onceLock.lock()
-        let inserted = recordedOnceKeys.insert(key).inserted
-        onceLock.unlock()
-        guard inserted else { return false }
-        record(name, props: props)
-        return true
-    }
-
-    /// Test hook: the keys ``recordOnce(_:key:props:)`` has consumed.
-    nonisolated static var recordedOnceKeysForTesting: Set<String> {
-        onceLock.lock(); defer { onceLock.unlock() }
-        return recordedOnceKeys
-    }
-
-    /// Test hook: forget every `recordOnce` key, so a test can exercise the
-    /// dedupe from a clean slate.
-    nonisolated static func resetRecordedOnceForTesting() {
-        onceLock.lock(); defer { onceLock.unlock() }
-        recordedOnceKeys = []
+    nonisolated static func recordOnce(_ event: UsageEvent, key: String) -> Bool {
+        tracker.recordOnce(event, key: key)
     }
 
     // MARK: - Shared prop helpers
@@ -262,9 +295,32 @@ nonisolated enum Analytics {
     /// `ScarfAnalyticsRecording`. This is the macOS implementation of that
     /// protocol, and the only place the two halves meet. iOS installs nothing,
     /// so every `ScarfAnalytics.record` there stays a nil check.
+    ///
+    /// **Why the seam stays stringly-typed** (the one exception to
+    /// ``UsageEvent``'s closed contract). `ScarfCore` is compiled without any
+    /// knowledge of the app target — the dependency runs app → package, never
+    /// back — so it physically cannot name a `UsageEvent`, and giving the
+    /// package its own parallel closed enum would fork the taxonomy across two
+    /// declarations that can silently drift (the package would own
+    /// `reconnect_succeeded`, the app `reconnect_attempted` for the wake
+    /// sweep — the same event names on both sides of the seam). The package's
+    /// surface is a *fixed, small* set — `connect_attempted`,
+    /// `connection_degraded`, `reconnect_attempted/succeeded`,
+    /// `circuit_breaker_opened/closed`, `agent_turn_completed/failed`,
+    /// `session_resume_fallback`, `hermes_version_detected`,
+    /// `hermes_probe_failed` — all emitted from a handful of call sites inside
+    /// `ScarfCore` itself, none of them reachable from app code, and its
+    /// `[String: String]` prop type already forbids anything but tokens. So the
+    /// closure that matters — "no app-target call site can invent an event" —
+    /// is achieved by keeping the installed ``tracker`` private above — the
+    /// only handle through which the string `record` could be reached; the
+    /// seam itself is left as-is rather than duplicated.
     private struct CoreBridge: ScarfAnalyticsRecording {
         func record(_ name: String, _ props: [String: String]) {
-            Analytics.record(name, props: props.mapValues { StatsValue.string($0) })
+            // Through the installed tracker, not straight to the production
+            // client: that way a test that installs a capture sees the events
+            // `ScarfCore` emits as well as the app's own.
+            Analytics.tracker.record(rawName: name, props: props)
         }
     }
 
@@ -274,19 +330,14 @@ nonisolated enum Analytics {
         ScarfAnalytics.install(CoreBridge())
     }
 
-    /// String-only convenience. Almost every taxonomy prop is a
-    /// bounded-cardinality token, and call sites shouldn't have to `import
-    /// Stats` just to spell `.string(…)`.
-    nonisolated static func record(_ name: String, props: [String: String]) {
-        record(name, props: props.mapValues { StatsValue.string($0) })
-    }
 
     // MARK: - Lifecycle
 
     /// Fire-and-forget passthrough for `NSApplication.didBecomeActive`.
+    /// Lifecycle belongs to the real client (it drives session bookkeeping and
+    /// the auto-events), so it bypasses the injectable tracker.
     nonisolated static func applicationDidBecomeActive() {
-        guard let client = sharedClient else { return }
-        Task { await client.applicationDidBecomeActive() }
+        StatsUsageTracker.shared.applicationDidBecomeActive()
     }
 
     /// Fire-and-forget passthrough for `NSApplication.didResignActive`.
@@ -297,8 +348,7 @@ nonisolated enum Analytics {
     /// rather than ending anything, and `didBecomeActive` resumes the same
     /// session if the user comes back inside the 30-minute macOS gap.
     nonisolated static func applicationDidEnterBackground() {
-        guard let client = sharedClient else { return }
-        Task { await client.applicationDidEnterBackground() }
+        StatsUsageTracker.shared.applicationDidEnterBackground()
     }
 
     // MARK: - first_run / launch_completed warm flag
@@ -330,11 +380,11 @@ nonisolated enum Analytics {
 
     /// Master switch. `false` stops collection and clears the queue.
     static func setEnabled(_ newValue: Bool) async {
-        await sharedClient?.setEnabled(newValue)
+        await StatsUsageTracker.shared.setEnabled(newValue)
     }
 
     /// `false` when analytics is switched off *or* unavailable.
     static var isEnabled: Bool {
-        get async { await sharedClient?.isEnabled ?? false }
+        get async { await StatsUsageTracker.shared.isEnabled }
     }
 }

@@ -144,10 +144,10 @@ final class SettingsViewModel {
 
     private func applyConfigWrite(_ key: String, arguments: [String]) {
         let result = runHermes(arguments)
-        Analytics.record("setting_changed", props: [
-            "key": Self.analyticsSettingKey(key),
-            "outcome": result.exitCode == 0 ? "succeeded" : "failed",
-        ])
+        Analytics.record(.settingChanged(
+            key: .init(rawKey: key),
+            outcome: .init(succeeded: result.exitCode == 0)
+        ))
         if result.exitCode == 0 {
             saveMessage = "Saved \(key)"
             config = fileService.loadConfig()

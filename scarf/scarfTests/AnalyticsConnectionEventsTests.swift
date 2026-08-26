@@ -150,8 +150,8 @@ struct AnalyticsConnectionEventsTests {
     @Test("duration_bucket rides only the success and comes from the recovery work")
     func durationBucketScopedToRecovery() {
         let events = WakeReconnectMetrics.events(for: [.healthy, .recovered], recoverySeconds: 2)
-        #expect(events.first?.props == ["trigger": "wake"])
-        #expect(events.last?.props == [
+        #expect(events.first?.props.mapValues(\.usageEventToken) == ["trigger": "wake"])
+        #expect(events.last?.props.mapValues(\.usageEventToken) == [
             "trigger": "wake",
             "duration_bucket": Analytics.durationBucket(2),
         ])
@@ -162,7 +162,7 @@ struct AnalyticsConnectionEventsTests {
     @Test("the probe's error_kind covers the taxonomy's buckets")
     func probeErrorKinds() {
         func kind(exit: Int32, stderr: String) -> String {
-            TestConnectionProbe.analyticsErrorKind(host: "example.test", exitCode: exit, stderr: stderr)
+            TestConnectionProbe.analyticsErrorKind(host: "example.test", exitCode: exit, stderr: stderr).rawValue
         }
         #expect(kind(exit: 255, stderr: "Permission denied (publickey).") == "auth_failed")
         #expect(kind(exit: 255, stderr: "Host key verification failed.") == "host_key_mismatch")
@@ -180,7 +180,7 @@ struct AnalyticsConnectionEventsTests {
     @Test("no probe stderr or hostname can survive into error_kind")
     func probeErrorKindLeaksNothing() {
         let noisy = "Permission denied for user hunter2 at secret.internal:/Users/someone/.ssh/id_ed25519"
-        let kind = TestConnectionProbe.analyticsErrorKind(host: "secret.internal", exitCode: 255, stderr: noisy)
+        let kind = TestConnectionProbe.analyticsErrorKind(host: "secret.internal", exitCode: 255, stderr: noisy).rawValue
         #expect(kind == "auth_failed")
         for fragment in ["secret.internal", "hunter2", "/Users", "id_ed25519"] {
             #expect(!kind.contains(fragment))

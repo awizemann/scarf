@@ -66,7 +66,7 @@ final class UpdaterService: NSObject {
 final class UpdateCheckAnalyticsDelegate: NSObject, SPUUpdaterDelegate {
     /// Sparkle found a newer version than the one running.
     nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
-        Analytics.record("update_check_completed", props: ["result": "available"])
+        Analytics.record(.updateCheckCompleted(result: .available))
     }
 
     /// Sparkle checked the appcast and the running version is current.
@@ -75,7 +75,7 @@ final class UpdateCheckAnalyticsDelegate: NSObject, SPUUpdaterDelegate {
     /// routed here rather than `updater(_:didAbortWithError:)` — see that
     /// method's comment for how the two are told apart.
     nonisolated func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
-        Analytics.record("update_check_completed", props: ["result": "up_to_date"])
+        Analytics.record(.updateCheckCompleted(result: .upToDate))
     }
 
     /// Sparkle's only failure hook. It also calls this for the "no update
@@ -91,7 +91,7 @@ final class UpdateCheckAnalyticsDelegate: NSObject, SPUUpdaterDelegate {
     nonisolated func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
         let nsError = error as NSError
         guard nsError.domain == "SUSparkleErrorDomain", nsError.code == 1001 else {
-            Analytics.record("update_check_completed", props: ["result": "failed"])
+            Analytics.record(.updateCheckCompleted(result: .failed))
             return
         }
     }

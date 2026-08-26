@@ -604,7 +604,7 @@ final class ChatViewModel {
                 // A one-click banner fix is a `repaired` preflight outcome —
                 // the config was wrong and the app corrected it in place,
                 // without the user picking a model.
-                Analytics.record("model_preflight_result", props: ["outcome": ok ? "repaired" : "failed"])
+                Analytics.record(.modelPreflightResult(outcome: .repairedOrFailed(ok)))
                 if ok {
                     self.modelProviderMismatch = nil
                 } else {
@@ -637,7 +637,7 @@ final class ChatViewModel {
             let ok = !ops.isEmpty && svc.applyModelConfigPlan(ops)
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                Analytics.record("model_preflight_result", props: ["outcome": ok ? "repaired" : "failed"])
+                Analytics.record(.modelPreflightResult(outcome: .repairedOrFailed(ok)))
                 if ok {
                     self.modelProviderMismatch = nil
                 } else {
@@ -789,10 +789,10 @@ final class ChatViewModel {
         // method — Kanban opens the chat window, which lands here as
         // `project` or `chat`, and cron sessions are created by Hermes
         // itself, never by this app.
-        Analytics.record("chat_session_started", props: [
-            "mode": "new",
-            "origin": projectPath == nil ? "chat" : "project",
-        ])
+        Analytics.record(.chatSessionStarted(
+            mode: .new,
+            origin: projectPath == nil ? .chat : .project
+        ))
         // Flip the loading flag synchronously on the user's tap so
         // SwiftUI paints the session-list overlay on the same tick
         // — `startACPSession` won't reach `acpStatus = .spawning`
@@ -841,8 +841,8 @@ final class ChatViewModel {
     /// session's own project scope is only recovered later (asynchronously,
     /// from the attribution sidecar), and would describe the session rather
     /// than where the user was.
-    func resumeSession(_ sessionId: String, origin: String = "chat") {
-        Analytics.record("chat_session_started", props: ["mode": "resume", "origin": origin])
+    func resumeSession(_ sessionId: String, origin: UsageEvent.ChatSessionOrigin = .chat) {
+        Analytics.record(.chatSessionStarted(mode: .resume, origin: origin))
         // Explicit user action: clear any open SSH circuit breaker for
         // this host (gh#138) so the resume gets a real attempt instead of
         // an instant fail-fast from background-poller history.
@@ -887,7 +887,7 @@ final class ChatViewModel {
     }
 
     func continueLastSession() {
-        Analytics.record("chat_session_started", props: ["mode": "continue_last", "origin": "chat"])
+        Analytics.record(.chatSessionStarted(mode: .continueLast, origin: .chat))
         isStartingSession = true
         let intent = beginStartIntent()
         voiceEnabled = false
@@ -975,10 +975,7 @@ final class ChatViewModel {
         //
         // Nothing derived from `text` is recorded: not its length, not its
         // first character, not whether it looked like a slash command.
-        Analytics.record("message_sent", props: [
-            "has_attachment": images.isEmpty ? "false" : "true",
-            "input_mode": inputMode.rawValue,
-        ])
+        Analytics.record(.messageSent(hasAttachment: !images.isEmpty, inputMode: inputMode))
         if displayMode == .richChat {
             if let client = acpClient {
                 sendViaACP(client: client, text: text, images: images)
@@ -1528,7 +1525,7 @@ final class ChatViewModel {
         // silent — its outcome is whatever the user then does with the sheet
         // (`confirmed` / `cancelled` / `failed`).
         if preflight.isConfigured {
-            Analytics.record("model_preflight_result", props: ["outcome": "passed"])
+            Analytics.record(.modelPreflightResult(outcome: .passed))
         } else {
             pendingStartArgs = (sessionId, projectPath, initialPrompt)
             modelPreflightReason = preflight.reason
@@ -1627,7 +1624,7 @@ final class ChatViewModel {
                         // state.db. Worth measuring — it's the difference
                         // between a resume and a new context wearing a
                         // resume's clothes.
-                        Analytics.record("session_resume_fallback", props: ["kind": "new_session_fallback"])
+                        Analytics.record(.sessionResumeFallback(kind: .newSessionFallback))
                         acpStatus = ACPPhase.creatingNewSession
                         resolvedSessionId = try await client.newSession(cwd: cwd)
                     }
@@ -2120,7 +2117,7 @@ final class ChatViewModel {
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                Analytics.record("model_preflight_result", props: ["outcome": ok ? "confirmed" : "failed"])
+                Analytics.record(.modelPreflightResult(outcome: .confirmedOrFailed(ok)))
                 if ok {
                     // The plan wrote a coherent model+provider pair —
                     // when the pick came from the mismatch banner's
@@ -2148,7 +2145,7 @@ final class ChatViewModel {
     /// — no error banner, since this isn't a failure, just a deferral.
     @MainActor
     func cancelModelPreflight() {
-        Analytics.record("model_preflight_result", props: ["outcome": "cancelled"])
+        Analytics.record(.modelPreflightResult(outcome: .cancelled))
         modelPreflightReason = nil
         pendingStartArgs = nil
     }
@@ -2157,23 +2154,23 @@ final class ChatViewModel {
     /// Collapse an agent-supplied permission option id onto the taxonomy's
     /// two-value `decision`. The id itself is never recorded: Hermes picks
     /// those strings and a future one could carry anything.
-    static func analyticsPermissionDecision(optionId: String) -> String {
+    static func analyticsPermissionDecision(optionId: String) -> UsageEvent.PermissionDecision {
         let id = optionId.lowercased()
         // Substring match, not equality: Hermes ships `reject_once` /
         // `reject_always` alongside a bare `deny`. Deliberately no `"no"`
         // marker — it would swallow `allow_now`.
         for marker in ["deny", "reject", "decline", "cancel"] where id.contains(marker) {
-            return "deny"
+            return .deny
         }
-        return "approve"
+        return .approve
     }
 
     func respondToPermission(optionId: String) {
         guard let client = acpClient,
               let permission = richChatViewModel.pendingPermission else { return }
-        Analytics.record("permission_prompt_responded", props: [
-            "decision": Self.analyticsPermissionDecision(optionId: optionId),
-        ])
+        Analytics.record(.permissionPromptResponded(
+            decision: Self.analyticsPermissionDecision(optionId: optionId)
+        ))
         Task {
             await client.respondToPermission(requestId: permission.requestId, optionId: optionId)
         }
@@ -2528,7 +2525,7 @@ final class ChatViewModel {
         // Record only the on transition — `!ttsEnabled` here is "about to
         // become true" since the toggle happens on the next line.
         if !ttsEnabled {
-            Analytics.record("voice_used", props: ["kind": "tts"])
+            Analytics.record(.voiceUsed(kind: .tts))
         }
         ttsEnabled.toggle()
     }
@@ -2539,7 +2536,7 @@ final class ChatViewModel {
         tv.send(source: tv, data: ctrlB[0..<1])
         // Record only when this press starts recording, not when it stops.
         if !isRecording {
-            Analytics.record("voice_used", props: ["kind": "push_to_talk"])
+            Analytics.record(.voiceUsed(kind: .pushToTalk))
         }
         isRecording.toggle()
     }

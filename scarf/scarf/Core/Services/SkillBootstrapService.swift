@@ -82,18 +82,18 @@ struct SkillBootstrapService: Sendable {
         // `skill_installed`'s vocabulary anywhere). A run that wrote nothing
         // — the steady state, every launch after the first — is silent,
         // matching the edge-triggered pattern the rest of the taxonomy uses.
-        if let props = Self.bootstrapEventProps(written: written) {
-            Analytics.record("skills_bootstrapped", props: props)
+        if let event = Self.bootstrapEvent(written: written) {
+            Analytics.record(event)
         }
     }
 
-    /// Props for the one `skills_bootstrapped` event of a bootstrap run, or
+    /// The one `skills_bootstrapped` event of a bootstrap run, or
     /// `nil` when the run wrote nothing and must stay silent. Pure, so the
     /// emit/don't-emit decision is testable — `Analytics.record` itself is a
     /// no-op under XCTest.
-    nonisolated static func bootstrapEventProps(written: Int) -> [String: String]? {
+    nonisolated static func bootstrapEvent(written: Int) -> UsageEvent? {
         guard written > 0 else { return nil }
-        return ["count_bucket": bootstrapCountBucket(written)]
+        return .skillsBootstrapped(countBucket: .init(count: written))
     }
 
     /// Coarse count bucket for `skills_bootstrapped`. Only ever called with

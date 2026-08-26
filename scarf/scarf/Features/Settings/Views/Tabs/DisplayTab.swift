@@ -95,7 +95,7 @@ struct DisplayTab: View {
             ToggleRow(label: "Bell on Complete", isOn: viewModel.config.display.bellOnComplete) { viewModel.setBellOnComplete($0) }
             ToggleRow(label: "Notify when Hermes finishes", isOn: notifyOnComplete) {
                 notifyOnComplete = $0
-                Analytics.record("notification_toggled", props: ["enabled": .bool($0)])
+                Analytics.record(.notificationToggled(enabled: $0))
             }
         }
     }

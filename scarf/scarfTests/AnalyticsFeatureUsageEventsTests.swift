@@ -5,18 +5,21 @@ import StatsTesting
 import ScarfCore
 @testable import scarf
 
-/// Phase 5 (feature usage & lifecycle) instrumentation. Unlike Phases 3/4,
-/// none of these emission sites go through `ScarfCore`'s recorder seam —
-/// they're all app-side calls straight into `Analytics.record`, which is a
-/// no-op under XCTest (`isSyntheticHost`). So rather than reading a sink,
-/// this suite asserts on the pure decision logic and dedupe state the way
-/// `AnalyticsChatEventsTests`/`AnalyticsConnectionEventsTests` already do
-/// for `analyticsPermissionDecision` / `analyticsErrorKind` — testing the
-/// classification, not the delivery.
+/// Phase 5 (feature usage & lifecycle) instrumentation.
+///
+/// The `section_viewed` tests now install a ``CapturingUsageTracker`` through
+/// `Analytics.install(_:)` and assert on the events the app actually emitted —
+/// possible only since `Analytics` grew an injectable ``UsageTracking`` seam
+/// (before that, `Analytics.record` funnelled into a `StatsClient` that is
+/// `nil` under XCTest, so a test could observe the dedupe key set but never
+/// the emission). The remaining tests still assert on pure decision logic,
+/// which is the right level for them.
 ///
 /// Nested inside Phase 3's suite for the same reason Phase 4's is: real
 /// `StatsClient`s share one app-id-keyed `UserDefaults` enabled flag, and
-/// `.serialized` only covers a suite and its subgroups, not siblings.
+/// `.serialized` only covers a suite and its subgroups, not siblings. The
+/// tracker seam is process-wide too, so `.serialized` is load-bearing twice
+/// over.
 extension AnalyticsConnectionEventsTests {
 
 @Suite("Analytics feature usage events", .serialized)
@@ -24,88 +27,117 @@ struct AnalyticsFeatureUsageEventsTests {
 
     // MARK: - section_viewed dedupe
 
-    /// `Analytics.record` is a no-op under XCTest, so these assert on the
-    /// process-wide `recordOnce` key set — which is real — rather than on a
-    /// sink that never receives anything.
-    private static func sectionKeys() -> Set<String> {
-        Set(Analytics.recordedOnceKeysForTesting.filter { $0.hasPrefix("section_viewed:") })
+    /// The `section` tokens of every `section_viewed` event emitted so far,
+    /// in order.
+    private static func sections(_ tracker: CapturingUsageTracker) -> [String] {
+        tracker.captured.filter { $0.name == "section_viewed" }.compactMap { $0.props["section"] }
     }
 
     @Test("visiting the same section twice only records once")
     @MainActor
     func sameSectionDedupes() {
-        Analytics.resetRecordedOnceForTesting()
-        defer { Analytics.resetRecordedOnceForTesting() }
+        let tracker = CapturingUsageTracker()
+        Analytics.install(tracker)
+        defer { Analytics.install(nil) }
 
         let coordinator = AppCoordinator()
         // The initializer itself counts as the first visit (every window
         // starts on .dashboard, and a property initializer's default value
         // never runs `didSet`).
-        #expect(Self.sectionKeys() == ["section_viewed:dashboard"])
+        #expect(Self.sections(tracker) == ["dashboard"])
 
         coordinator.selectedSection = .chat
-        #expect(Self.sectionKeys() == ["section_viewed:dashboard", "section_viewed:chat"])
+        #expect(Self.sections(tracker) == ["dashboard", "chat"])
 
         // Revisit .chat, then re-select .dashboard: neither is a NEW
-        // section, so the set must not grow.
+        // section, so nothing more is emitted.
         coordinator.selectedSection = .settings
         coordinator.selectedSection = .chat
         coordinator.selectedSection = .dashboard
-        #expect(Self.sectionKeys() == [
-            "section_viewed:dashboard", "section_viewed:chat", "section_viewed:settings",
-        ])
+        #expect(Self.sections(tracker) == ["dashboard", "chat", "settings"])
     }
 
     @Test("visiting two different sections records both")
     @MainActor
     func differentSectionsBothRecord() {
-        Analytics.resetRecordedOnceForTesting()
-        defer { Analytics.resetRecordedOnceForTesting() }
+        let tracker = CapturingUsageTracker()
+        Analytics.install(tracker)
+        defer { Analytics.install(nil) }
 
         let coordinator = AppCoordinator()
         coordinator.selectedSection = .insights
         coordinator.selectedSection = .kanban
-        #expect(Self.sectionKeys() == [
-            "section_viewed:dashboard", "section_viewed:insights", "section_viewed:kanban",
-        ])
+        #expect(Self.sections(tracker) == ["dashboard", "insights", "kanban"])
     }
 
     /// The regression the audit caught: the dedupe used to be an instance
     /// property, but `AppCoordinator` is per-window and is rebuilt on every
     /// server/profile switch, and each new one re-reports `.dashboard` from
-    /// `init`. A second coordinator must add nothing it has already seen.
+    /// `init`. A second coordinator must emit nothing it has already seen.
     @Test("a second coordinator (new window or server switch) re-reports nothing")
     @MainActor
     func dedupeIsProcessWideAcrossCoordinators() {
-        Analytics.resetRecordedOnceForTesting()
-        defer { Analytics.resetRecordedOnceForTesting() }
+        let tracker = CapturingUsageTracker()
+        Analytics.install(tracker)
+        defer { Analytics.install(nil) }
 
         let first = AppCoordinator()
         first.selectedSection = .logs
-        #expect(Self.sectionKeys() == ["section_viewed:dashboard", "section_viewed:logs"])
+        #expect(Self.sections(tracker) == ["dashboard", "logs"])
 
         // A brand-new window / post-switch coordinator: its `init` re-selects
         // .dashboard and the user walks back to Logs. Both are already-seen
-        // facts, so the process-wide set is unchanged.
+        // facts, so nothing new is emitted.
         let second = AppCoordinator()
         second.selectedSection = .logs
-        #expect(Self.sectionKeys() == ["section_viewed:dashboard", "section_viewed:logs"])
+        #expect(Self.sections(tracker) == ["dashboard", "logs"])
 
         // A genuinely new section still records, from either coordinator.
         second.selectedSection = .cron
-        #expect(Self.sectionKeys() == [
-            "section_viewed:dashboard", "section_viewed:logs", "section_viewed:cron",
-        ])
+        #expect(Self.sections(tracker) == ["dashboard", "logs", "cron"])
     }
 
     @Test("recordOnce reports the first call for a key and nothing after")
     func recordOnceIsOncePerKey() {
-        Analytics.resetRecordedOnceForTesting()
-        defer { Analytics.resetRecordedOnceForTesting() }
+        let tracker = CapturingUsageTracker()
+        Analytics.install(tracker)
+        defer { Analytics.install(nil) }
 
-        #expect(Analytics.recordOnce("section_viewed", key: "k", props: ["section": "chat"]) == true)
-        #expect(Analytics.recordOnce("section_viewed", key: "k", props: ["section": "chat"]) == false)
-        #expect(Analytics.recordOnce("section_viewed", key: "k2") == true)
+        #expect(Analytics.recordOnce(.sectionViewed(section: .chat), key: "k") == true)
+        #expect(Analytics.recordOnce(.sectionViewed(section: .chat), key: "k") == false)
+        #expect(Analytics.recordOnce(.sectionViewed(section: .logs), key: "k2") == true)
+        // The suppressed call really was suppressed at the sink, not just in
+        // the return value.
+        #expect(Self.sections(tracker) == ["chat", "logs"])
+    }
+
+    /// A fresh tracker is a clean dedupe slate — the property that replaced
+    /// `Analytics.resetRecordedOnceForTesting()`.
+    @Test("a fresh tracker starts with clean recordOnce state")
+    func freshTrackerHasCleanDedupeState() {
+        let first = CapturingUsageTracker()
+        Analytics.install(first)
+        #expect(Analytics.recordOnce(.sectionViewed(section: .chat), key: "k") == true)
+        #expect(Analytics.recordOnce(.sectionViewed(section: .chat), key: "k") == false)
+
+        let second = CapturingUsageTracker()
+        Analytics.install(second)
+        defer { Analytics.install(nil) }
+        #expect(Analytics.recordOnce(.sectionViewed(section: .chat), key: "k") == true)
+        #expect(Self.sections(second) == ["chat"])
+    }
+
+    /// `NoopUsageTracker` swallows the event but keeps the dedupe answer
+    /// honest, so callers that branch on the return value behave identically.
+    @Test("the noop tracker records nothing but still dedupes")
+    func noopTrackerDedupesWithoutRecording() {
+        let noop = NoopUsageTracker()
+        Analytics.install(noop)
+        defer { Analytics.install(nil) }
+
+        #expect(Analytics.recordOnce(.sectionViewed(section: .chat), key: "k") == true)
+        #expect(Analytics.recordOnce(.sectionViewed(section: .chat), key: "k") == false)
+        Analytics.record(.voiceUsed(kind: .tts))
     }
 
     // MARK: - section tokens
@@ -210,10 +242,14 @@ struct AnalyticsFeatureUsageEventsTests {
     /// `Analytics.record` is a no-op under XCTest, so a sink can't be).
     @Test("a bootstrap run that wrote nothing emits no event")
     func bootstrapWithNothingWrittenIsSilent() {
-        #expect(SkillBootstrapService.bootstrapEventProps(written: 0) == nil)
-        #expect(SkillBootstrapService.bootstrapEventProps(written: 1) == ["count_bucket": "1"])
-        #expect(SkillBootstrapService.bootstrapEventProps(written: 4) == ["count_bucket": "2_5"])
-        #expect(SkillBootstrapService.bootstrapEventProps(written: 9) == ["count_bucket": "gt_5"])
+        func props(_ written: Int) -> [String: String]? {
+            SkillBootstrapService.bootstrapEvent(written: written)?.props.mapValues(\.usageEventToken)
+        }
+        #expect(SkillBootstrapService.bootstrapEvent(written: 0) == nil)
+        #expect(props(1) == ["count_bucket": "1"])
+        #expect(props(4) == ["count_bucket": "2_5"])
+        #expect(props(9) == ["count_bucket": "gt_5"])
+        #expect(SkillBootstrapService.bootstrapEvent(written: 1)?.name == "skills_bootstrapped")
     }
 
     // MARK: - template_installed / skill_installed source attribution
@@ -254,13 +290,13 @@ struct AnalyticsFeatureUsageEventsTests {
         defer { vm.cancel() }
 
         // Entry A: a catalog pick.
-        vm.openLocalFile(bundle, source: "hub")
+        vm.openLocalFile(bundle, source: .hub)
         #expect(await Self.awaitPendingSource(vm) == "hub")
 
         // Entry B lands while A is still awaiting confirmation: A's pending
         // state (source included) is dropped wholesale rather than leaving
         // a stale token behind for B — or B's token in front of A's bundle.
-        vm.openLocalFile(bundle, source: "url")
+        vm.openLocalFile(bundle, source: .url)
         #expect(vm.pendingInstallSourceForTesting == nil)
         #expect(await Self.awaitPendingSource(vm) == "url")
     }

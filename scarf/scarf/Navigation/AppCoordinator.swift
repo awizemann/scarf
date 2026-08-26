@@ -79,7 +79,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
     /// would silently split one section's history into two series. This
     /// switch is the analytics vocabulary and is used for nothing else —
     /// changing a case here is a taxonomy change, not a UI change.
-    var analyticsToken: String {
+    nonisolated var analyticsToken: String {
         switch self {
         case .dashboard: return "dashboard"
         case .insights: return "insights"
@@ -171,7 +171,7 @@ final class AppCoordinator {
     /// `selectedSection`.
     static func recordSectionViewed(_ section: SidebarSection) {
         let token = section.analyticsToken
-        Analytics.recordOnce("section_viewed", key: "section_viewed:\(token)", props: ["section": token])
+        Analytics.recordOnce(.sectionViewed(section: section), key: "section_viewed:\(token)")
     }
 
     var selectedSessionId: String?
