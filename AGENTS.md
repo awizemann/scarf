@@ -67,10 +67,12 @@ approves; treat it one-shot (temp file, never echo/log/persist). Found or minted
 Store it immediately with `set_vendor_credential`. (Leave a project's own gitignored
 `.env` where it is.)
 
-**7. Templates (`templates/`) — integration recipes.** Find via
-`search_memories(project: "scarf-templates")`, read the `manifest.md` + its `reference/`
-files, confirm Prerequisites with the user, ADAPT each step to this codebase (never copy
-blind), write the apply plan to `documents/plans/` first, then run the Verification.
+**7. Templates (`templates/`) — integration recipes.** A RAW-FILE tier, outside the memory
+map — `search_memories` cannot see it. Enumerate with `list_tier_files(tier: "templates")`,
+then `read_tier_file(tier: "templates", path: "<slug>/manifest.md")` and the `reference/`
+files its Steps point at. Confirm Prerequisites with the user, ADAPT each step to this
+codebase (never copy blind), write the apply plan to `documents/plans/` first, then run the
+Verification.
 
 **8. Tasks (`TASKS.md`) — the work board.** Read it at the start of work. Prefer the task
 tools — `create_task`, `move_task(id, status)`, `update_task`, `list_tasks` — they own the
