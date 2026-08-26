@@ -9,6 +9,16 @@
       "lineHash" : "sha256:a3cf68c928c99cf466019065196755aa1c1721073aa38865c7d71fc8395c0049",
       "path" : ".memory/operations/scarfgo-app-store-review-submission-requirements-and-access.md",
       "rule" : "Private key header (no key body)"
+    },
+    {
+      "lineHash" : "sha256:03d104c669e3c7b6be7f989db8b12c8b910d3be8c1e2a73c9369d3cc0ba803b5",
+      "path" : "documents/appstore-review/scarfgo-reviewer-access.md",
+      "rule" : "OpenSSH private key (no key body)"
+    },
+    {
+      "lineHash" : "sha256:03d104c669e3c7b6be7f989db8b12c8b910d3be8c1e2a73c9369d3cc0ba803b5",
+      "path" : "documents/appstore-review/scarfgo-reviewer-access.md",
+      "rule" : "Private key header (no key body)"
     }
   ],
   "version" : 1
