@@ -261,13 +261,20 @@ final class ProfilesViewModel {
             }
             // 0.20.5+: a display-name suffix renders as "Display Name (canonical-id)".
             // The canonical id — the only part safe to pass to `profile use`/`show` —
-            // is the parenthesized group, not the leading token. Prefer it when present.
+            // is the *last* parenthesized group on the line, not the first: display
+            // names are free-form text and may themselves contain an id-shaped
+            // parenthesized substring (e.g. "My (test) profile (myid)"). Per the
+            // format_profile_label grammar (display + " (" + id + ")"), the
+            // trailing group is always the real id, so pick the final regex match
+            // rather than the first. `.backwards` doesn't compose with
+            // `.regularExpression` in `range(of:)`, so enumerate all matches with
+            // NSRegularExpression and take the last one.
             var nameStr: String?
-            if let idRange = working.range(
-                of: "\\(([a-z0-9][a-z0-9_-]{0,63})\\)", options: .regularExpression
-            ) {
-                let paren = working[idRange]
-                nameStr = String(paren.dropFirst().dropLast())
+            let idPattern = try! NSRegularExpression(pattern: "\\(([a-z0-9][a-z0-9_-]{0,63})\\)")
+            let nsWorking = working as NSString
+            let matches = idPattern.matches(in: working, range: NSRange(location: 0, length: nsWorking.length))
+            if let lastMatch = matches.last {
+                nameStr = nsWorking.substring(with: lastMatch.range(at: 1))
             } else {
                 let tokens = working.split(whereSeparator: { $0.isWhitespace }).map(String.init)
                 nameStr = tokens.first

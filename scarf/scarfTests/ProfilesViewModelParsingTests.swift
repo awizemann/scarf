@@ -76,4 +76,23 @@ struct ProfilesViewModelParsingTests {
         #expect(profiles.map(\.name) == ["dev"])
         #expect(active == "dev")
     }
+
+    @Test("display name containing an id-shaped paren does not shadow the real id")
+    func displayNameContainingIdShapedParen() {
+        // Display names are free-form text and may themselves contain a
+        // substring that looks like a parenthesized profile id, e.g.
+        // "My (test) profile". Per the format_profile_label grammar
+        // (display + " (" + id + ")"), the canonical id is always the
+        // *last* paren group on the line — parsing must not grab "test".
+        let output = """
+
+         Profile                             Model                        Gateway      Alias        Distribution
+         ────────────────────────────────    ───────────────────────────    ───────────    ───────────    ────────────────────
+         ◆My (test) profile (myid)         deepseek/deepseek-v4-flash   running      —            —
+
+        """
+        let (profiles, active) = ProfilesViewModel.parseProfileList(output)
+        #expect(profiles.map(\.name) == ["myid"])
+        #expect(active == "myid")
+    }
 }
