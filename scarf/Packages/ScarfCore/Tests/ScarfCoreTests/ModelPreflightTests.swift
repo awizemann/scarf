@@ -234,6 +234,31 @@ import Foundation
         }
     }
 
+    @Test func detectMismatchReturnsNilForEveryOpenCodeTier() {
+        // v0.20.5: all three OpenCode tiers are is_aggregator=True in
+        // HERMES_OVERLAYS. The set is keyed on CANONICAL ids, so Zen is
+        // reachable only as bare `opencode` (opencode-zen/zen alias into
+        // it) — that's why the bare entry is correct, not a gap.
+        for provider in ["opencode", "opencode-zen", "zen",
+                         "opencode-go", "opencode-go-sub", "go",
+                         "opencode-free", "opencode_free", "free"] {
+            var cfg = HermesConfig.empty
+            cfg.model = "moonshotai/kimi-k2"
+            cfg.provider = provider
+            #expect(ModelPreflight.detectMismatch(cfg) == nil, "false mismatch for \(provider)")
+        }
+    }
+
+    @Test func aggregatorProvidersAreAllCanonicalIDs() {
+        // A non-canonical entry would be dead weight: the lookup happens
+        // after canonicalProviderID(), so an alias could never match.
+        for provider in ModelPreflight.aggregatorProviders {
+            #expect(ModelCatalogService.canonicalProviderID(provider) == provider,
+                    "\(provider) is an alias, not a canonical provider id")
+        }
+        #expect(ModelPreflight.aggregatorProviders.contains("opencode-free"))
+    }
+
     @Test func detectMismatchReturnsNilForBareOpenAIAlias() {
         // Hermes aliases bare `openai` → `openrouter`, so a config
         // carrying provider `openai` is aggregator-routed too.
