@@ -708,6 +708,25 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// and stdio `cwd`) in the MCP catalog config (v0.20.4+).
     public var hasMCPIdentityHeader: Bool { isV0204OrLater }
 
+    // MARK: v0.20.5 (v2026.8.19) flags
+
+    /// The bare `hermes version` subcommand was removed (dropped from
+    /// `_BUILTIN_SUBCOMMANDS`, `hermes_cli/main.py:11648`; `subcommands/
+    /// version.py` deleted) and `hermes --version` (`main.py:13955`) now
+    /// carries the full output including the `commits behind` line
+    /// (v0.20.5+). Pre-v0.20.5 hosts print only the short banner from
+    /// `--version` and need the `version` subcommand for update status, so
+    /// argv selection must branch on this flag: on a v0.20.5 host `version`
+    /// falls through to plugin discovery and burns an agent turn.
+    public var hasVersionFlagFullOutput: Bool { isV0205OrLater }
+
+    /// `hermes cron create/edit --reasoning-effort <level>` — per-job
+    /// thinking-level override persisted as `reasoning_effort` in
+    /// `jobs.json` (v0.20.5+, `hermes_cli/subcommands/cron.py:108,244`).
+    /// Older hosts reject the unknown argument outright — argparse fails the
+    /// whole `cron create` — so every cron-write path must gate on this.
+    public var hasCronReasoningEffort: Bool { isV0205OrLater }
+
     // MARK: Convenience predicates
 
     /// Whether the connected host is on the v0.13 line or newer. Convenience
@@ -759,6 +778,14 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// v0.20.4 surface, so this must be checked with `atLeastSemver(0, 20,
     /// 4)` rather than the minor-only `isV020OrLater`.
     public var isV0204OrLater: Bool { atLeastSemver(0, 20, 4) }
+
+    /// Whether the connected host is on v0.20.5 or newer. Patch-level floor,
+    /// same rationale as `isV0204OrLater` — v0.20.0 through v0.20.4 hosts
+    /// satisfy `isV020OrLater` but lack the v0.20.5 surface (the `version`
+    /// subcommand removal, `cron --reasoning-effort`), so this must be checked
+    /// with `atLeastSemver(0, 20, 5)` rather than the minor-only
+    /// `isV020OrLater`.
+    public var isV0205OrLater: Bool { atLeastSemver(0, 20, 5) }
 
     private func atLeastSemver(_ major: Int, _ minor: Int, _ patch: Int) -> Bool {
         guard let s = semver else { return false }
