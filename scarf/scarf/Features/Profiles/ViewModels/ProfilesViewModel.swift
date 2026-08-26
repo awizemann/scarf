@@ -231,9 +231,23 @@ final class ProfilesViewModel {
     /// validated against `^[a-z0-9][a-z0-9_-]{0,63}$` (profiles.py
     /// `_PROFILE_ID_RE`) and can never themselves contain a space or a
     /// paren — so a parenthesized id-shaped token in the row is unambiguous.
-    /// We therefore look for the first `(canonical-id)` group on the line
-    /// and prefer it as the argv-bound name; only when none is present do we
-    /// fall back to the first whitespace token (the pre-0.20.5 bare format).
+    /// The row itself is printed as `f"{marker}{name:<15} {model:<28} {gw:<12}
+    /// {alias:<12} {dist}"` (main.py) — fixed-width fields separated by a
+    /// single literal space, so a field shorter than its width leaves a run
+    /// of 2+ spaces before the next field while the label itself (a display
+    /// name) may still contain single spaces that survive. We therefore
+    /// split the row on runs of 2+ spaces to isolate field 0 (the Profile
+    /// label) *before* searching for a `(canonical-id)` group — searching
+    /// the whole line would also match an id-shaped parenthetical that
+    /// happens to appear in the Model column (e.g. `gpt-4o (preview)`).
+    /// Within field 0 we take the *last* such group, since the display name
+    /// itself may contain an id-shaped parenthetical (e.g. "My (test)
+    /// profile (myid)"); when no group is present in field 0 we fall back to
+    /// its first whitespace token — field 0's bare canonical name, matching
+    /// pre-0.20.5 hosts where no display-name suffix is ever rendered.
+    nonisolated private static let profileIDParenPattern =
+        try! NSRegularExpression(pattern: "\\(([a-z0-9][a-z0-9_-]{0,63})\\)")
+
     nonisolated static func parseProfileList(_ output: String) -> (profiles: [HermesProfile], active: String) {
         var results: [HermesProfile] = []
         var active = "default"
@@ -259,24 +273,22 @@ final class ProfilesViewModel {
                 isActive = true
                 working = String(working.dropFirst()).trimmingCharacters(in: .whitespaces)
             }
-            // 0.20.5+: a display-name suffix renders as "Display Name (canonical-id)".
-            // The canonical id — the only part safe to pass to `profile use`/`show` —
-            // is the *last* parenthesized group on the line, not the first: display
-            // names are free-form text and may themselves contain an id-shaped
-            // parenthesized substring (e.g. "My (test) profile (myid)"). Per the
-            // format_profile_label grammar (display + " (" + id + ")"), the
-            // trailing group is always the real id, so pick the final regex match
-            // rather than the first. `.backwards` doesn't compose with
-            // `.regularExpression` in `range(of:)`, so enumerate all matches with
-            // NSRegularExpression and take the last one.
+            // Isolate field 0 (the Profile label) by splitting on runs of 2+
+            // spaces — the fixed-width column padding — so a paren group in
+            // a later column (e.g. the Model field) can't be mistaken for
+            // the canonical id.
+            let fields = working.components(separatedBy: "  ")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            guard let field0 = fields.first else { continue }
             var nameStr: String?
-            let idPattern = try! NSRegularExpression(pattern: "\\(([a-z0-9][a-z0-9_-]{0,63})\\)")
-            let nsWorking = working as NSString
-            let matches = idPattern.matches(in: working, range: NSRange(location: 0, length: nsWorking.length))
+            let nsField0 = field0 as NSString
+            let matches = Self.profileIDParenPattern.matches(
+                in: field0, range: NSRange(location: 0, length: nsField0.length))
             if let lastMatch = matches.last {
-                nameStr = nsWorking.substring(with: lastMatch.range(at: 1))
+                nameStr = nsField0.substring(with: lastMatch.range(at: 1))
             } else {
-                let tokens = working.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+                let tokens = field0.split(whereSeparator: { $0.isWhitespace }).map(String.init)
                 nameStr = tokens.first
             }
             guard let name = nameStr else { continue }
