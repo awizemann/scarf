@@ -713,7 +713,23 @@ final class HealthViewModel {
     ) -> String {
         if let known = cache.cached(for: context), known.detected {
             let args = versionProbeArguments(for: known)
-            return run(context, args)
+            let output = run(context, args)
+            // Self-correct a stale warm cache: `HermesVersionCache` is
+            // trusted for up to 10 minutes (its TTL), and a user can very
+            // plausibly run `hermes update` from 0.20.4 to 0.20.5 with
+            // Scarf still open during that window. If the cache said
+            // "pre-0.20.5" and we issued bare `version`, but the host is
+            // now actually 0.20.5+, `version` has been removed there and
+            // falls through to plugin discovery — the output won't contain
+            // a parseable "Hermes Agent vX.Y.Z" line (it's a chat/plugin
+            // response, not a version banner). Detect that and retry with
+            // `--version`, which is safe on every version, to recover.
+            // The opposite staleness (cache says new, host was actually
+            // downgraded) needs no correction: `--version` works everywhere.
+            if args == ["version"], HermesCapabilities.parse(output).semver == nil {
+                return run(context, ["--version"])
+            }
+            return output
         }
 
         let flagOutput = run(context, ["--version"])
