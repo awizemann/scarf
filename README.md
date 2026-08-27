@@ -75,17 +75,7 @@ Scarf for macOS collects **anonymous usage statistics** (event names + fixed-voc
 - **Auto STT provider** — an "Auto (unset)" option matching Hermes's new autodetect-ladder semantics; the only way back out of a pinned provider.
 - **Profiles list hardened** against v0.20.5's `Display Name (id)` rendering.
 
-Full notes: [v2.21.0](https://github.com/awizemann/scarf/releases/tag/v2.21.0)
-
-## What's New in 2.20.0
-
-- **Hermes v0.20.4 parity** — new target (v2026.8.18), with fixes landed *before* the upgrade can break anything: personalities survive the built-ins move, ScarfGo cron toggles use real pause/resume semantics, and "Update All" skills reports what was actually updated.
-- **Session list upgrades** on v0.20.4 hosts: unread indicators, hidden sessions hidden, post-reset conversations listed.
-- **Curator ledger & purge** — browse the skill-mutation audit trail, roll back a single mutation, purge old archives behind a dry-run preview.
-- **Project skills, MCP catalog picker, and a dozen new settings** (wake-word capture, STT trimming, background-review kill switch, and more).
-- **Anonymous usage analytics (macOS, opt-out)** — content-free, no persistent identifier; see the [Privacy](#privacy) section. iOS sends nothing.
-
-Full notes: [v2.20.0](https://github.com/awizemann/scarf/releases/tag/v2.20.0) · v2.19.2 stopped runaway SSH reconnects behind side-effectful ProxyCommands ([gh#138](https://github.com/awizemann/scarf/issues/138)) · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
+Full notes: [v2.21.0](https://github.com/awizemann/scarf/releases/tag/v2.21.0) · v2.20.0 brought Hermes v0.20.4 parity and anonymous opt-out usage analytics on macOS · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
 
 ## Features
 
