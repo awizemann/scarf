@@ -6,6 +6,106 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.21.0</title>
+      <sparkle:version>63</sparkle:version>
+      <sparkle:shortVersionString>2.21.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Thu, 27 Aug 2026 00:30:30 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.21.0</p>
+<p>This release moves Scarf&#x27;s Hermes target to <strong>v0.20.5</strong> (v2026.8.19) — a one-patch upstream bump that nonetheless rolled up ~800 commits — and lands the one fix that genuinely could not wait: Hermes v0.20.5 removed the <code>hermes version</code> subcommand, and without this release Scarf&#x27;s Health view would silently burn an agent turn on every load against an upgraded host. As always, every host back to v0.6.0 keeps working exactly as before — everything new is capability-gated at the patch level.</p>
+<h2>Fixed ahead of your upgrade</h2>
+<ul>
+  <li><strong>Health view survives the <code>version</code> removal.</strong> Hermes v0.20.5 dropped the bare <code>hermes version</code> subcommand; an unknown token now falls through to plugin discovery and becomes a <em>chat prompt</em> — so Scarf&#x27;s version probe would have spawned a real agent turn (and burned tokens) every time the Health view loaded. The probe now selects <code>--version</code> on v0.20.5+ hosts (where it carries the full update status) and keeps <code>version</code> on older ones. When the host&#x27;s version isn&#x27;t yet known, Scarf probes with <code>--version</code> first — safe on every Hermes version — and it even self-corrects mid-session if you run <code>hermes update</code> while Scarf is open.</li>
+  <li><strong>Profiles list stays correct.</strong> Hermes v0.20.5 renders profiles with display names as <code>Display Name (canonical-id)</code>; Scarf now extracts the canonical id (the only argv-safe form) from the Profile column specifically, so switching, renaming, and deleting profiles keeps working on both old and new hosts — including display names that themselves contain parentheses.</li>
+</ul>
+<h2>New with a v0.20.5 host</h2>
+<ul>
+  <li><strong>OpenCode Free provider</strong> — Hermes&#x27;s new zero-auth OpenCode tier (<code>opencode-free</code>, aliases <code>free</code>/<code>opencode_free</code>) is selectable in the model picker, and Scarf now understands <em>keyless</em> providers: the credential form shows &quot;No API key needed&quot; instead of asking for a key that doesn&#x27;t exist.</li>
+  <li><strong>Unlimited max turns.</strong> Hermes v0.20.5 changed the default turn ceiling from 500 to unlimited. Scarf&#x27;s Max Turns stepper (macOS and iOS) now reflects the real effective default per host version and lets you dial down to 0 = &quot;Unlimited&quot; on hosts that support it — older hosts keep their 1-minimum so Scarf never writes a value they can&#x27;t resolve.</li>
+  <li><strong>Auto speech-to-text provider.</strong> Hermes no longer pre-seeds <code>stt.provider</code>: unset now means &quot;autodetect the best available engine&quot;, and any stored value pins it. Scarf&#x27;s STT picker gains an &quot;Auto (unset)&quot; option — the only way back out of a pin — while keeping the local-whisper tuning fields available either way.</li>
+</ul>
+<h2>Under the hood</h2>
+<ul>
+  <li>New v0.20.5 capability group (<code>isV0205OrLater</code>) with the standard degradation test cluster; <code>hermes cron create/edit --reasoning-effort</code> is capability-flagged for the upcoming cron editor work.</li>
+  <li>Provider-table invariant test that fails loudly if an aggregator entry ever drifts from Hermes&#x27;s canonical ids, plus keyless-flag drift detection across all overlays.</li>
+  <li>Analytics internals hardened: the swift-stats write key moved to a build setting, the <code>UsageEvent</code> vocabulary is now a closed contract, and usage tracking is injected behind a seam for testability. No change to what is (and isn&#x27;t) collected — see the <a href="https://awizemann.github.io/scarf/privacy/">Privacy Policy</a>.</li>
+  <li>60 new tests across capabilities, provider tables, the version probe, settings resolution, and profile parsing (ScarfCore 1351 green; app-target suites green).</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>Updates arrive via Sparkle&#x27;s built-in updater; or grab the zip from this release.</li>
+  <li>macOS 14.6+ (Apple Silicon and Intel). ScarfGo for iOS ships separately via TestFlight; this release requires no iOS-side update.</li>
+  <li>Compatible with Hermes v0.6.0 through v0.20.5. On hosts below v0.20.5, all of the above stays hidden and behavior is byte-identical to v2.20.0.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.21.0/Scarf-v2.21.0-Universal.zip"
+                 sparkle:edSignature="HUd67AEQnVcO5qlnhVhQMxt+jpq8b27i0wkiBFKABdFkuOx/tReux8hhIDsE8lubZyVs8vttS7aF/ti8ltBnCg=="
+                 length="22843471"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.20.0</title>
       <sparkle:version>62</sparkle:version>
       <sparkle:shortVersionString>2.20.0</sparkle:shortVersionString>
