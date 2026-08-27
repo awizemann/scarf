@@ -1,10 +1,45 @@
-# swift-stats adoption — proposed event taxonomy (pre-implementation plan)
+# swift-stats adoption — event taxonomy
 
-Date: 2026-08-20. Backend: SaaS api.swiftstats.co. Package: github.com/awizemann/swift-stats, v0.2.0, macOS 15+/iOS 18+.
+Date: 2026-08-20, updated 2026-08-26 (Phases 1–3 landed). Backend: SaaS api.swiftstats.co. Package: github.com/awizemann/swift-stats, v0.2.0, macOS 15+/iOS 18+.
 
-**Status note (2026-08-20, release audit follow-up):** this file started life as a pre-implementation plan and had drifted from the shipped code. It is now reconciled against the macOS app as of this release. Items the code deliberately does not emit are marked **reserved / not emitted** rather than deleted — the name stays claimed so nothing else takes it, and so a later implementation lands on the documented shape.
+**Status note (2026-08-26):** this file is reconciled against the macOS app as of the analytics refactor (Phases 1–3, working tree). Items the code deliberately does not emit are marked **reserved / not emitted** rather than deleted — the name stays claimed so nothing else takes it, and so a later implementation lands on the documented shape.
 
-**Write key posture:** the project-scoped, append-only write key is a plaintext literal in `Analytics.swift` (it is *not* in the Keychain — an early plan that no longer matches the code). This is deliberate: any client-side hiding scheme still ships the same secret in the same binary, and the key can only append events to this one project and can read nothing. Posture is **rotate-on-abuse**, via the ScarfMon dashboard; nothing with read scope may ever live there.
+## Key management (Phase 1)
+
+The swift-stats write key is **no longer hardcoded in source**. It reaches the running app entirely through build settings:
+
+```
+scarf/Configs/SwiftStatsLocal.xcconfig  (gitignored, developer/CI-created)
+    → SWIFT_STATS_WRITE_KEY (xcconfig build setting)
+    → scarf/Configs/SwiftStats.xcconfig  (committed: empty default, then `#include?` of the local file)
+    → target build configurations
+    → Info.plist "SwiftStatsWriteKey" (build-setting expansion)
+    → runtime read in Analytics.swift (Analytics.writeKey)
+```
+
+`Analytics.validWriteKey` gates the raw Info.plist value: `nil`, empty/whitespace-only, or anything still containing `$(` (an unexpanded build setting — what a checkout with no local xcconfig produces) is treated as invalid, and analytics degrades to a no-op for the whole process. Nothing is logged except the fact that the key was unusable — never its value.
+
+The canonical rotated key lives in the Keychain vendor **`swift-stats-write-key`** (see `vendors/swift-stats-write-key.md`); the previously leaked, hardcoded key is being revoked. **The key must never appear in source, in this document, or in any committed file** — only in the gitignored local xcconfig and the Keychain vendor entry.
+
+Practical consequence: a **release build shipped without `SwiftStatsLocal.xcconfig` present at build time ships with analytics off**, not with a stale/leaked key. CI and any release-signing environment must provision that file (or the equivalent build setting) before archiving. `scripts/release.sh` enforces this in its preflight: a missing local xcconfig, or one whose `SWIFT_STATS_WRITE_KEY` parses to empty, aborts the release before anything is built (the value itself is never printed).
+
+## Enforcement mechanism (Phases 2–3): UsageEvent + UsageTracking
+
+Phase 1 fixed how the key reaches the binary; Phases 2–3 close the other privacy gap — the taxonomy itself used to be enforced only by code review, since `Analytics.record(name:props:)` took a free `String` name and a free `[String: String]` prop dictionary.
+
+- **`scarf/scarf/Core/Services/UsageEvent.swift`** — a closed `nonisolated enum` with one case per event (27 cases as of this refactor). Every associated value is either a closed, `String`-raw-valued prop-vocabulary enum (e.g. `Transport`, `Outcome`, `TransportErrorKind`) or a bucket struct (`DurationBucket`, `ServerCountBucket`, `SkillCountBucket`, `SettingKeyToken`) whose only initializer runs the vetted bucketing/sanitizing helper — there is no `init(token:)` back door. `name` and `props` reproduce the exact wire format the old string call sites sent, byte-for-byte; `UsageEventWireFormatTests` is the acceptance criterion, and adding a case is a taxonomy change while renaming one is a break. `UsageEvent.allEventNames` walks every case through an exhaustive `switch`, so a new case cannot compile until it is listed — which is what makes the parity table's coverage test a real guard rather than a self-referential count.
+- **`scarf/scarf/Core/Services/UsageTracking.swift`** — the `UsageTracking` protocol (`record(_:)`, `recordOnce(_:key:)`, and a `record(rawName:props:)` escape hatch reserved for the ScarfCore bridge only) plus two implementations: `StatsUsageTracker.shared` (production — owns the single `StatsClient`) and `NoopUsageTracker` (reports nothing but still runs real once-per-key dedupe). `UsageOnceKeys` is the shared, lock-guarded dedupe set used by both.
+- **`scarf/scarf/Core/Services/Analytics.swift`** is now a thin, `nonisolated`, lock-guarded forwarder over an installable tracker seam (default: `StatsUsageTracker.shared`). App call sites are unchanged — they still call `Analytics.record(...)` — but the event argument is a `UsageEvent`, so a new event can only be added by editing the closed enum. Tests swap the seam via `Analytics.install(_:)`; `scarfTests/CapturingUsageTracker.swift` is the test double. `Analytics.resetRecordedOnceForTesting()` is gone — dedupe state now lives on the installed tracker instance, so a fresh `CapturingUsageTracker` per test starts clean.
+- **The `ScarfCore` seam (`ScarfAnalyticsRecording` / `Analytics.CoreBridge`) deliberately stays string-based.** `ScarfCore` is compiled without knowledge of the app target (the dependency runs app → package, never back), so it physically cannot name a `UsageEvent`; giving it a second, parallel closed enum would fork the taxonomy across two declarations that could silently drift. Its surface is a small, fixed set of event names emitted from a handful of call sites inside the package itself, none reachable from app code, and its `[String: String]` prop type already forbids anything but tokens — so the closure that matters ("no app-target call site can invent an event") is achieved by keeping the **installed tracker** (`Analytics.tracker`) `private`. `record(rawName:props:)` is still an ordinary requirement on the internal `UsageTracking` protocol, but the only handle on the installed tracker lives inside `Analytics`, and `CoreBridge` is nested there — so no other file can reach the raw entry point. The enum is not duplicated into the package.
+
+## Accepted deviations from cross-app swift-stats conventions
+
+These are deliberate product decisions (Alan), not TODOs to reconcile later:
+
+1. **Keep Scarf's own event name `section_viewed`** rather than the cross-app convention's `view_shown`, and do not add the cross-app `via` prop. Scarf's sidebar-section semantics don't map cleanly onto the generic "view" concept the convention targets, and renaming would break the frozen wire-format/history for no analytical gain.
+2. **No `error_shown` event.** Failures are tracked at the operation layer instead — e.g. `connect_failed`, `agent_turn_failed`, `bootstrap_task_failed`, `model_preflight_result(outcome: .failed)` — which carries the failing operation's own context (transport, error kind, category) that a generic `error_shown` event would lose.
+3. **Keep `autoEvents: [.appOpen, .appBackground, .sessions]`** — in particular, `.appBackground` is retained rather than dropped. macOS has no true "did enter background" (a backgrounded Mac app keeps running), so `.appBackground` is the closest analogue to the session-gap/inactivity-timer behavior the package's session logic expects, and dropping it would silently change session-boundary semantics.
+4. **`perf_measure`'s `category` prop is camelCase** (`chatRender`, `sqlite`, `transport`, `render`), not snake_case like every other prop token. It is `ScarfMon.Category.rawValue` verbatim, and it is what the string call site sent before `UsageEvent` existed — frozen-wire precedent, not a bug. Event *names* are snake_case-enforced; prop values are not.
 
 ## Package facts that shaped the design
 - `autoEvents: [.appOpen, .appBackground, .sessions]` cover launches/foreground/background/session duration — do not duplicate.
@@ -70,7 +105,7 @@ There is **no per-event consent routing** in the package — the groups gate lay
 - hermes_control_action {action: start|stop|restart, source: menu_bar|health_panel, outcome}
 
 ### Feature usage
-- section_viewed {section: stable snake_case token, NOT the display rawValue — see SidebarSection.analyticsToken on macOS; iOS must use the same token vocabulary} — deduped first-visit-per-process
+- section_viewed {section: stable snake_case token, NOT the display rawValue — see SidebarSection.analyticsToken on macOS; iOS must use the same token vocabulary} — deduped first-visit-per-process. Deliberately NOT renamed to the cross-app `view_shown` convention — see "Accepted deviations" above.
 - project_created {template, method: scaffold|import}
 - skill_installed / template_installed {source: hub|url} — **user-driven installs only**. One `skill_installed` per skill directory the installer actually *wrote* (derived from the install plan's file copies), not per skill the manifest declares — installs are all-or-nothing, so a failed install emits neither event. `bundled` is NOT part of this vocabulary: the unattended launch bootstrap reports `skills_bootstrapped` instead (see below), so app-shipped copies can't drown user installs on a shared event name.
 - skills_bootstrapped {count_bucket: 1|2_5|gt_5} — ONE event per `SkillBootstrapService` run that actually wrote ≥1 bundled skill. A run that wrote nothing (the steady state after first launch) is silent, matching `hermes_control_action`'s edge-triggered pattern.
@@ -82,15 +117,16 @@ There is **no per-event consent routing** in the package — the groups gate lay
 
 Named for the *subject matter*, not a consent group: like every other event here these ride `.usage` consent. `.diagnostics` gates only the per-batch context block — see "Consent posture" above.
 
-- perf_measure {category, duration_bucket} — thresholded/over-budget only, via ScarfMon backend
+- perf_measure {category, duration_bucket} — thresholded/over-budget only, via ScarfMon backend. `category` is camelCase (e.g. `chatRender`) — see "Accepted deviations" #4.
 - crash_diagnostic_recorded (iOS) {kind: crash|hang|disk_write} — MetricKit counts only. **Reserved / not emitted**: no MetricKit wiring exists, and iOS emits nothing at all (see Onboarding above).
 - bootstrap_task_failed {task: skills|slash_commands|env_mirror}
 
 ### Never tracked
-Message content/lengths, hostnames, file paths, project/session names, key material, raw error strings. All durations/counts as coarse bucket enums.
+Message content/lengths, hostnames, file paths, project/session names, key material, raw error strings. All durations/counts as coarse bucket enums. **No `error_shown` event** — see "Accepted deviations" above.
 
 ## Ship checklist (from package)
 1. Wire lifecycle calls (macOS AppKit notifications, iOS scenePhase).
 2. Visible opt-out: setEnabled(false) master switch + explicit consent in `makeConfiguration` (`[.usage, .diagnostics]`, never `.identity`).
 3. Privacy manifest + nutrition label: Product Interaction, Other Diagnostic Data (no User ID — no identify()).
 4. Pick installIdSalt once, never change. App supplies screenMetrics/colorScheme/isPreRelease to config.
+5. Release builds must have `scarf/Configs/SwiftStatsLocal.xcconfig` provisioned at archive time — see "Key management" above. `scripts/release.sh` preflight fails the release if it is missing or empty.

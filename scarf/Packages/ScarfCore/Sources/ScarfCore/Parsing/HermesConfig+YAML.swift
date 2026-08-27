@@ -110,7 +110,13 @@ public extension HermesConfig {
             ttsNeuTTSModel: str("tts.neutts.model"),
             ttsNeuTTSDevice: str("tts.neutts.device", default: "cpu"),
             sttEnabled: bool("stt.enabled", default: true),
-            sttProvider: str("stt.provider", default: "local"),
+            // Empty means the key is absent. Hermes v0.20.5 stopped seeding
+            // `stt.provider` in config_defaults.py, so an absent key is the
+            // autodetect ladder rather than `local`; defaulting to "local"
+            // here would render an unset key as a pin. Older hosts seeded
+            // `local`, which the picker surfaces via its "Auto" label — see
+            // `SettingsViewModel.sttProviders`.
+            sttProvider: str("stt.provider"),
             sttLocalModel: str("stt.local.model", default: "base"),
             sttLocalLanguage: str("stt.local.language"),
             sttOpenAIModel: str("stt.openai.model", default: "whisper-1"),

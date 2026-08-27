@@ -452,6 +452,36 @@ import Foundation
         #expect(ModelCatalogService.overlayOnlyProviders["openai"] == nil)
     }
 
+    @Test func openCodeFreeOverlayIsKeylessAggregator() {
+        // v0.20.5 (Hermes v2026.8.19): zero-auth OpenCode tier.
+        // providers.py:160 — base_url_override https://opencode.ai/zen/v1,
+        // is_aggregator, keyless; providers.py:441 label "OpenCode Free".
+        let overlay = ModelCatalogService.overlayOnlyProviders["opencode-free"]
+        #expect(overlay != nil)
+        #expect(overlay?.displayName == "OpenCode Free")
+        #expect(overlay?.baseURL == "https://opencode.ai/zen/v1")
+        #expect(overlay?.authType == .apiKey)
+        #expect(overlay?.subscriptionGated == false)
+        #expect(overlay?.keyless == true)
+        // Every other overlay is credentialed — keyless defaults false.
+        for (id, other) in ModelCatalogService.overlayOnlyProviders where id != "opencode-free" {
+            #expect(other.keyless == false, "\(id) should not be keyless")
+        }
+    }
+
+    @Test func openCodeAliasesResolveToCanonicalTiers() {
+        // providers.py:334-344 ALIASES. Zen's canonical id is bare
+        // `opencode` (opencode-zen/zen alias INTO it); go and free are
+        // canonical in their own right.
+        #expect(ModelCatalogService.canonicalProviderID("free") == "opencode-free")
+        #expect(ModelCatalogService.canonicalProviderID("opencode_free") == "opencode-free")
+        #expect(ModelCatalogService.canonicalProviderID("OPENCODE_FREE") == "opencode-free")
+        #expect(ModelCatalogService.canonicalProviderID("opencode-free") == "opencode-free")
+        #expect(ModelCatalogService.canonicalProviderID("opencode-zen") == "opencode")
+        #expect(ModelCatalogService.canonicalProviderID("zen") == "opencode")
+        #expect(ModelCatalogService.canonicalProviderID("go") == "opencode-go")
+    }
+
     @Test func xaiRetiredModelAliasesResolveToGrok43() {
         let svc = ModelCatalogService(path: "/tmp/scarf-nonexistent-\(UUID().uuidString).json")
         // v0.15 May-15 retirement map → grok-4.3 (xai + xai-oauth prefixes).

@@ -50,6 +50,24 @@ import Testing
         #expect(HermesConfig.empty.voice.sttOpenAILanguage == "")
     }
 
+    // MARK: - stt.provider unset — v0.20.5 (no longer seeded)
+
+    /// v0.20.5 removed the seeded `stt.provider: local` from
+    /// `config_defaults.py`: an absent key means "autodetect ladder" and any
+    /// stored value is an explicit pin. The parser must therefore NOT default
+    /// to `local` — an absent key parses to "" so the UI can render it as
+    /// "Auto (unset)" instead of a pin the user never made.
+    @Test func sttProviderAbsentKeyParsesEmptyRatherThanLocal() {
+        #expect(HermesConfig(yaml: "").voice.sttProvider == "")
+        #expect(HermesConfig(yaml: "stt:\n  enabled: true\n").voice.sttProvider == "")
+        #expect(HermesConfig.empty.voice.sttProvider == "")
+    }
+
+    @Test func sttProviderExplicitValueIsPreservedAsAPin() {
+        #expect(HermesConfig(yaml: "stt:\n  provider: local\n").voice.sttProvider == "local")
+        #expect(HermesConfig(yaml: "stt:\n  provider: groq\n").voice.sttProvider == "groq")
+    }
+
     // MARK: - stt.local.* VAD tuning — v0.20 (hasSTTLocalVADTuning)
 
     @Test func sttLocalVADTuningParses() {

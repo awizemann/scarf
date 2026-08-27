@@ -741,15 +741,44 @@ private struct AddCredentialSheet: View {
             }
 
             if authType == .apiKey {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("API Key").font(.caption).foregroundStyle(.secondary)
-                    SecureField("sk-…", text: $apiKey)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(.caption, design: .monospaced))
+                if isKeylessProvider {
+                    keylessPreamble
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("API Key").font(.caption).foregroundStyle(.secondary)
+                        SecureField("sk-…", text: $apiKey)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.caption, design: .monospaced))
+                    }
                 }
             } else {
                 oauthGuidance
             }
+        }
+    }
+
+    /// True when the typed provider is served anonymously (Hermes overlay
+    /// `keyless`, e.g. `opencode-free`) — there is no credential to store,
+    /// so the key field would be a dead end.
+    private var isKeylessProvider: Bool {
+        let id = ModelCatalogService.canonicalProviderID(providerID)
+        return catalog.overlayMetadata(for: id)?.keyless ?? false
+    }
+
+    /// Stand-in for the API-key row on keyless providers.
+    private var keylessPreamble: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "lock.open")
+                    .foregroundStyle(.secondary)
+                Text("No API key needed.")
+                    .font(.caption)
+            }
+            Text("`\(ModelCatalogService.canonicalProviderID(providerID))` is served anonymously — Hermes needs no credential. Just select it as your model provider in Settings.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -978,7 +1007,12 @@ private struct AddCredentialSheet: View {
                         onDismiss()
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(providerID.trimmingCharacters(in: .whitespaces).isEmpty || apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
+                    // Keyless providers have nothing to store — a stale
+                    // key left in the field from a previous selection
+                    // must not re-enable the save.
+                    .disabled(isKeylessProvider
+                        || providerID.trimmingCharacters(in: .whitespaces).isEmpty
+                        || apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
                 } else {
                     oauthActionButton
                 }

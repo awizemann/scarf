@@ -100,8 +100,16 @@ public enum ModelPreflight: Sendable {
     /// so a slash in `model.default` is part of the model ID — never a
     /// stale provider prefix. Reconcile on every Hermes bump alongside
     /// the ModelCatalogService provider tables (GH issue #121).
+    ///
+    /// Entries are **canonical** IDs as `canonicalProviderID(_:)` returns
+    /// them, not Hermes's display slugs. That's why OpenCode Zen appears
+    /// here as bare `opencode`: `providerAliases` maps `opencode-zen` and
+    /// `zen` → `opencode` (mirroring providers.py ALIASES), so `opencode`
+    /// is the only spelling this lookup can ever see for Zen. `opencode-go`
+    /// and `opencode-free` are canonical in their own right.
     static let aggregatorProviders: Set<String> = [
-        "openrouter", "opencode", "opencode-go", "kilo", "huggingface", "novita", "vercel",
+        "openrouter", "opencode", "opencode-go", "opencode-free",
+        "kilo", "huggingface", "novita", "vercel",
     ]
 
     /// Detect a `model.default` / `model.provider` mismatch. Returns

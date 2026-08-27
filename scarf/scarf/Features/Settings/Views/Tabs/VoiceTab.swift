@@ -7,6 +7,21 @@ struct VoiceTab: View {
     @Bindable var viewModel: SettingsViewModel
     @Environment(\.hermesCapabilities) private var capabilitiesStore
 
+    /// STT providers, with the "Auto (unset)" row dropped on hosts without
+    /// `hermes config unset` (pre-v0.19) — same shape as BrowserTab's
+    /// cloud-provider picker: an unwritable option is hidden rather than
+    /// offered-and-failing, but stays visible when it is the current state so
+    /// an absent key still renders a selected label instead of a blank picker.
+    private var sttProviderOptions: [(id: String, label: String)] {
+        let all = viewModel.sttProviders
+        guard capabilitiesStore?.capabilities.hasConfigUnset == true else {
+            return viewModel.config.voice.sttProvider.isEmpty
+                ? all
+                : all.filter { !$0.id.isEmpty }
+        }
+        return all
+    }
+
     var body: some View {
         SettingsSection(title: "Push-to-Talk", icon: "mic") {
             ToggleRow(label: "Auto TTS", isOn: viewModel.config.autoTTS) { viewModel.setAutoTTS($0) }
@@ -68,7 +83,14 @@ struct VoiceTab: View {
 
         SettingsSection(title: "Speech-to-Text", icon: "waveform") {
             ToggleRow(label: "Enabled", isOn: viewModel.config.voice.sttEnabled) { viewModel.setSTTEnabled($0) }
-            PickerRow(label: "Provider", selection: viewModel.config.voice.sttProvider, options: viewModel.sttProviders) { viewModel.setSTTProvider($0) }
+            PickerRow(
+                label: "Provider",
+                selection: viewModel.config.voice.sttProvider,
+                options: sttProviderOptions.map(\.id),
+                optionLabel: { id in
+                    sttProviderOptions.first { $0.id == id }?.label ?? id
+                }
+            ) { viewModel.setSTTProvider($0) }
             // v0.20: global language hint applied to every provider unless a
             // per-provider language overrides it — hidden on pre-v0.20 hosts
             // (hasSTTUnifiedLanguage). Default "en"; empty restores auto-detect.
@@ -76,7 +98,13 @@ struct VoiceTab: View {
                 EditableTextField(label: "Language (global)", value: viewModel.config.voice.sttLanguage) { viewModel.setSTTLanguage($0) }
             }
             switch viewModel.config.voice.sttProvider {
-            case "local":
+            // "" (key unset / "Auto") shows the local rows too: these are the
+            // `stt.local.*` keys, which apply whenever the autodetect ladder
+            // lands on local — the ladder's always-available last rung — and
+            // on pre-v0.20.5 hosts unset *is* local. Hiding them would force
+            // a user who only wants to tune the whisper model to pin the
+            // provider and lose autodetection.
+            case "local", "":
                 PickerRow(label: "Model", selection: viewModel.config.voice.sttLocalModel, options: ["tiny", "base", "small", "medium", "large-v3"]) { viewModel.setSTTLocalModel($0) }
                 EditableTextField(label: "Language", value: viewModel.config.voice.sttLocalLanguage) { viewModel.setSTTLocalLanguage($0) }
                 // v0.20: faster-whisper anti-hallucination VAD tuning —

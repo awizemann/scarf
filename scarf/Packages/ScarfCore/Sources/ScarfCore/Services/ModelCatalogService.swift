@@ -915,6 +915,21 @@ public struct ModelCatalogService: Sendable {
             subscriptionGated: false,
             docURL: nil
         ),
+        // -- v0.20.5 additions -------------------------------------------
+        // Hermes v2026.8.19 added the zero-auth OpenCode tier as an
+        // overlay-only aggregator. Wire ID `opencode-free` matches
+        // HERMES_OVERLAYS verbatim (aliases `free` / `opencode_free`).
+        // `keyless: true` mirrors the overlay flag: auth.py ships a
+        // deliberately empty `api_key_env_vars` because the tier is
+        // served anonymously, so there is no credential to configure.
+        "opencode-free": HermesProviderOverlay(
+            displayName: "OpenCode Free",
+            baseURL: "https://opencode.ai/zen/v1",
+            authType: .apiKey,
+            subscriptionGated: false,
+            docURL: nil,
+            keyless: true
+        ),
     ]
 
     /// Provider-ID aliases — verbatim mirror of `ALIASES` in
@@ -967,6 +982,9 @@ public struct ModelCatalogService: Sendable {
         // opencode-go
         "go": "opencode-go",
         "opencode-go-sub": "opencode-go",
+        // opencode-free (v0.20.5 — zero-auth OpenCode tier)
+        "free": "opencode-free",
+        "opencode_free": "opencode-free",
         // kilo (models.dev ID for KiloCode)
         "kilocode": "kilo",
         "kilo-code": "kilo",
@@ -1094,19 +1112,26 @@ public struct HermesProviderOverlay: Sendable {
     /// BYO-API-key. Nous Portal is the only `true` entry today.
     public let subscriptionGated: Bool
     public let docURL: String?
+    /// Mirrors `HermesOverlay.keyless` (hermes_cli/providers.py) — the
+    /// provider is served anonymously, so no credential exists to
+    /// configure and the API-key entry row must be suppressed.
+    /// `opencode-free` is the only `true` entry today.
+    public let keyless: Bool
 
     public init(
         displayName: String,
         baseURL: String?,
         authType: AuthType,
         subscriptionGated: Bool,
-        docURL: String?
+        docURL: String?,
+        keyless: Bool = false
     ) {
         self.displayName = displayName
         self.baseURL = baseURL
         self.authType = authType
         self.subscriptionGated = subscriptionGated
         self.docURL = docURL
+        self.keyless = keyless
     }
 
     public enum AuthType: String, Sendable {

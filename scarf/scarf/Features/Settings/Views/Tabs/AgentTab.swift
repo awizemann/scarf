@@ -6,13 +6,25 @@ import ScarfDesign
 struct AgentTab: View {
     @Bindable var viewModel: SettingsViewModel
     @Environment(\.hermesCapabilities) private var capabilitiesStore
+    private var capabilities: HermesCapabilities { capabilitiesStore?.capabilities ?? .empty }
 
     var body: some View {
         SettingsSection(title: "Turns & Reasoning", icon: "arrow.2.circlepath") {
             // When `agent.max_turns` is absent (sentinel 0) show the host's
-            // effective default — 500 on v0.20+, 60 before — without writing
-            // it back. Only a user step writes a value.
-            StepperRow(label: "Max Turns", value: viewModel.config.displayMaxTurns(capabilities: capabilitiesStore?.capabilities ?? .empty), range: 1...1000) { viewModel.setMaxTurns($0) }
+            // effective default — unlimited on v0.20.5+, 500 on v0.20.0–
+            // v0.20.4, 60 before — without writing it back. Only a user step
+            // writes a value.
+            //
+            // v0.20.5 flipped the default to unlimited and its
+            // `resolve_turn_limit` accepts 0 as unlimited, so the stepper's
+            // low end opens up to 0 ("Unlimited") on those hosts only; older
+            // hosts have no unlimited semantics and keep the 1 floor.
+            StepperRow(
+                label: "Max Turns",
+                value: viewModel.config.displayMaxTurns(capabilities: capabilities),
+                range: capabilities.isV0205OrLater ? 0...1000 : 1...1000,
+                valueLabel: { $0 == HermesConfig.maxTurnsUnlimited ? "Unlimited" : "\($0)" }
+            ) { viewModel.setMaxTurns($0) }
             // v0.20 added the `max` and `ultra` tiers (hermes_constants.py
             // VALID_REASONING_EFFORTS); older hosts keep the shorter list.
             PickerRow(label: "Reasoning Effort", selection: viewModel.config.reasoningEffort, options: HermesReasoningEffort.levels(capabilities: capabilitiesStore?.capabilities ?? .empty)) { viewModel.setReasoningEffort($0) }

@@ -59,7 +59,24 @@ final class SettingsViewModel {
     // The provider option itself is ungated so pre-v0.13 hosts with xAI
     // keys can still pick it.
     var ttsProviders = ["edge", "elevenlabs", "openai", "minimax", "mistral", "neutts", "piper", "xai", "deepinfra"]
-    var sttProviders = ["local", "groq", "openai", "mistral"]
+    /// `stt.provider` options. The leading empty row means "key absent —
+    /// Hermes decides".
+    ///
+    /// Hermes v0.20.5 stopped seeding `stt.provider` in `config_defaults.py`:
+    /// an absent key runs the autodetect ladder, and a stored value is an
+    /// explicit pin. On pre-v0.20.5 hosts absent meant the seeded `local`
+    /// default. The row is therefore offered **ungated by host version** —
+    /// "let Hermes choose" is the honest description of an absent key on
+    /// every supported host, and it is the only way back out of a pin — but
+    /// it is gated on `hasConfigUnset` (v0.19+) in the view, because it must
+    /// be written with `hermes config unset` rather than an empty scalar.
+    var sttProviders: [(id: String, label: String)] = [
+        ("",        "Auto (unset)"),
+        ("local",   "Local"),
+        ("groq",    "Groq"),
+        ("openai",  "OpenAI"),
+        ("mistral", "Mistral"),
+    ]
     /// Static-message translation languages honored by Hermes v0.13's
     /// `display.language` key. The first row's empty value writes no
     /// key — equivalent to "Hermes default" — while explicit `en` writes
@@ -399,7 +416,16 @@ final class SettingsViewModel {
     func setTTSDeepInfraModel(_ value: String) { setSetting("tts.deepinfra.model", value: value) }
     func setTTSDeepInfraVoice(_ value: String) { setSetting("tts.deepinfra.voice", value: value) }
     func setSTTEnabled(_ value: Bool) { setSetting("stt.enabled", value: value ? "true" : "false") }
-    func setSTTProvider(_ value: String) { setSetting("stt.provider", value: value) }
+    /// Writes `stt.provider`. The empty selection removes the key rather than
+    /// writing `""` — on v0.20.5+ an absent key is the autodetect ladder while
+    /// a present value (empty included) is an explicit pin.
+    func setSTTProvider(_ value: String) {
+        if value.isEmpty {
+            unsetSetting("stt.provider")
+        } else {
+            setSetting("stt.provider", value: value)
+        }
+    }
     func setSTTLocalModel(_ value: String) { setSetting("stt.local.model", value: value) }
     func setSTTLocalLanguage(_ value: String) { setSetting("stt.local.language", value: value) }
     func setSTTOpenAIModel(_ value: String) { setSetting("stt.openai.model", value: value) }

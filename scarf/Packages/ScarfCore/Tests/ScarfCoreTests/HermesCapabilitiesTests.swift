@@ -786,4 +786,61 @@ import Foundation
     @Test func isV0204OrLater_emptyFalse() {
         #expect(!HermesCapabilities.empty.isV0204OrLater)
     }
+
+    // MARK: - v0.20.5 capability flags
+
+    @Test func parseV0205ReleaseLine() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.5 (2026.8.19)")
+        #expect(caps.semver == HermesCapabilities.SemVer(major: 0, minor: 20, patch: 5))
+        #expect(caps.dateVersion == HermesCapabilities.DateVersion(year: 2026, month: 8, day: 19))
+        #expect(caps.detected)
+    }
+
+    @Test func v0205FlagsAllOnForV0205Host() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.5 (2026.8.19)")
+        #expect(caps.hasVersionFlagFullOutput)
+        #expect(caps.hasCronReasoningEffort)
+        #expect(caps.isV0205OrLater)
+    }
+
+    @Test func v0204HostHidesV0205Flags() {
+        // A v0.20.4 host must not see any v0.20.5 flag — it still has the
+        // `version` subcommand and rejects `cron --reasoning-effort`.
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.4 (2026.8.18)")
+        #expect(!caps.hasVersionFlagFullOutput)
+        #expect(!caps.hasCronReasoningEffort)
+        #expect(!caps.isV0205OrLater)
+        // The v0.20.4 surface stays alive on a v0.20.4 host.
+        #expect(caps.hasCuratorLedger)
+        #expect(caps.isV0204OrLater)
+    }
+
+    @Test func v0_20_6_patchReleaseStillEnablesAllV0205Flags() {
+        // A later patch should still enable every v0.20.5 flag — patches
+        // don't roll back capability gates.
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.6 (2026.8.30)")
+        #expect(caps.hasVersionFlagFullOutput)
+        #expect(caps.hasCronReasoningEffort)
+        #expect(caps.isV0205OrLater)
+    }
+
+    @Test func v021FlagsStillEnableV0205Flags() {
+        // A future minor release must not regress the v0.20.5 surface.
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.9.1)")
+        #expect(caps.hasVersionFlagFullOutput)
+        #expect(caps.hasCronReasoningEffort)
+        #expect(caps.isV0205OrLater)
+    }
+
+    @Test func isV0205OrLater_v0205HostTrue() {
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.5 (2026.8.19)").isV0205OrLater)
+    }
+
+    @Test func isV0205OrLater_v0204HostFalse() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.20.4 (2026.8.18)").isV0205OrLater)
+    }
+
+    @Test func isV0205OrLater_emptyFalse() {
+        #expect(!HermesCapabilities.empty.isV0205OrLater)
+    }
 }

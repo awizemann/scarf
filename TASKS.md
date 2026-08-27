@@ -52,13 +52,23 @@
 - [ ] R3 [iOS]: Resume fallback — typed catch, surfacing, analytics parity (id: t-238d2ab3) (added: 2026-08-20) (priority: high)
 - [ ] R4 [iOS]: Key import gate — reject unusable keys at paste time (id: t-a89ccf7a) (added: 2026-08-20)
 - [ ] R6 [iOS]: Splash — use LaunchIcon asset, drop 1024px main-thread decode (id: t-d8d0f1d3) (added: 2026-08-20) (priority: low)
+- [ ] Hermes v0.20.5 parity: version→--version, opencode-free tables, max_turns/stt defaults, isV0205OrLater gates (id: t-27d34c2d) (added: 2026-08-26)
+- [ ] v0205 P4: max_turns unlimited (stepper allows 0) + stt.provider Auto option (id: t-b8a98055) (added: 2026-08-26)
+- [ ] v0205 P5: parseProfileList display-name suffix hardening (id: t-ea1baa72) (added: 2026-08-26)
 
 ## Doing
 
+- [ ] v0205 P3: Health version probe — capability-gated --version argv (id: t-f23a91e6) (added: 2026-08-26)
 - [ ] Refresh marketing site + README FAQ for v2.15 Projects (supersede PR #109) (id: t-83c4c692) (added: 2026-06-28)
 
 ## Done
 
+- [x] v0205 P2: opencode-free provider tables + keyless overlay flag + opencode aggregator id fix (id: t-f51a7415) (added: 2026-08-26)
+- [x] v0205 P1: HermesCapabilities v0.20.5 flag group + capability test cluster (id: t-94c1dbea) (added: 2026-08-26)
+- [x] Analytics P4: taxonomy doc + memory updates for new analytics setup (id: t-4111ebe3) (added: 2026-08-26)
+- [x] Analytics P3: UsageTracking protocol + injected tracker + NoopUsageTracker (id: t-d9fa2cd3) (added: 2026-08-26)
+- [x] Analytics P2: closed UsageEvent enum as the typed privacy contract (id: t-baaaf89a) (added: 2026-08-26)
+- [x] Analytics P1: write key via build setting → Info.plist, remove hardcoded literal (id: t-f2d47f8a) (added: 2026-08-26)
 - [x] R1: Privacy policy + analytics disclosure (BLOCKING — Alan wording decision) (id: t-da90e83e) (added: 2026-08-20) (priority: high)
 - [x] R5: Analytics accuracy — wake-reconnect inversion + minor event fixes (id: t-4280feb4) (added: 2026-08-20)
 - [x] F3: Audit fixes — MCP catalog data, personalities, curator polish, test honesty (id: t-bf82f45c) (added: 2026-08-20)

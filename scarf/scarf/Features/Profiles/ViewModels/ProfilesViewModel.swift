@@ -218,7 +218,37 @@ final class ProfilesViewModel {
     /// Active profiles are prefixed with `◆` (U+25C6). Columns are separated by
     /// whitespace; there are no vertical bars. We ignore box-drawing lines and
     /// the header row, then extract the name from column 0 of each data row.
-    nonisolated private static func parseProfileList(_ output: String) -> (profiles: [HermesProfile], active: String) {
+    ///
+    /// As of Hermes 0.20.5, the Profile column is rendered via
+    /// `format_profile_label(name, display_name)` (hermes_cli/profiles.py):
+    /// `f"{display_name} ({name})"` when a display name is set and differs
+    /// from the canonical name, else the bare canonical name unchanged
+    /// (byte-for-byte the pre-0.20.5 rendering). Note the display name comes
+    /// *first* and the canonical id is the parenthesized part — the opposite
+    /// order of a naive "name (extra)" read. Display names are free-form
+    /// presentation text (any Unicode, including spaces/parens, up to 64
+    /// chars) and are never argv-safe, whereas canonical profile ids are
+    /// validated against `^[a-z0-9][a-z0-9_-]{0,63}$` (profiles.py
+    /// `_PROFILE_ID_RE`) and can never themselves contain a space or a
+    /// paren — so a parenthesized id-shaped token in the row is unambiguous.
+    /// The row itself is printed as `f"{marker}{name:<15} {model:<28} {gw:<12}
+    /// {alias:<12} {dist}"` (main.py) — fixed-width fields separated by a
+    /// single literal space, so a field shorter than its width leaves a run
+    /// of 2+ spaces before the next field while the label itself (a display
+    /// name) may still contain single spaces that survive. We therefore
+    /// split the row on runs of 2+ spaces to isolate field 0 (the Profile
+    /// label) *before* searching for a `(canonical-id)` group — searching
+    /// the whole line would also match an id-shaped parenthetical that
+    /// happens to appear in the Model column (e.g. `gpt-4o (preview)`).
+    /// Within field 0 we take the *last* such group, since the display name
+    /// itself may contain an id-shaped parenthetical (e.g. "My (test)
+    /// profile (myid)"); when no group is present in field 0 we fall back to
+    /// its first whitespace token — field 0's bare canonical name, matching
+    /// pre-0.20.5 hosts where no display-name suffix is ever rendered.
+    nonisolated private static let profileIDParenPattern =
+        try! NSRegularExpression(pattern: "\\(([a-z0-9][a-z0-9_-]{0,63})\\)")
+
+    nonisolated static func parseProfileList(_ output: String) -> (profiles: [HermesProfile], active: String) {
         var results: [HermesProfile] = []
         var active = "default"
         var sawHeader = false
@@ -243,13 +273,30 @@ final class ProfilesViewModel {
                 isActive = true
                 working = String(working.dropFirst()).trimmingCharacters(in: .whitespaces)
             }
-            let tokens = working.split(whereSeparator: { $0.isWhitespace }).map(String.init)
-            guard let nameStr = tokens.first else { continue }
-            // Reject rows whose first token is something like "Tip:" or a localized
-            // label — real profile names are lowercase alphanumeric with - or _.
-            guard nameStr.range(of: "^[a-zA-Z0-9_-]+$", options: .regularExpression) != nil else { continue }
-            if isActive { active = nameStr }
-            results.append(HermesProfile(name: nameStr, isActive: isActive, path: ""))
+            // Isolate field 0 (the Profile label) by splitting on runs of 2+
+            // spaces — the fixed-width column padding — so a paren group in
+            // a later column (e.g. the Model field) can't be mistaken for
+            // the canonical id.
+            let fields = working.components(separatedBy: "  ")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            guard let field0 = fields.first else { continue }
+            var nameStr: String?
+            let nsField0 = field0 as NSString
+            let matches = Self.profileIDParenPattern.matches(
+                in: field0, range: NSRange(location: 0, length: nsField0.length))
+            if let lastMatch = matches.last {
+                nameStr = nsField0.substring(with: lastMatch.range(at: 1))
+            } else {
+                let tokens = field0.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+                nameStr = tokens.first
+            }
+            guard let name = nameStr else { continue }
+            // Reject rows whose extracted name is something like "Tip:" or a localized
+            // label — real profile names/ids are lowercase alphanumeric with - or _.
+            guard name.range(of: "^[a-zA-Z0-9_-]+$", options: .regularExpression) != nil else { continue }
+            if isActive { active = name }
+            results.append(HermesProfile(name: name, isActive: isActive, path: ""))
         }
         return (results, active)
     }

@@ -161,7 +161,7 @@ final class HealthViewModel {
         loadTask = Task.detached { [weak self] in
             let pid = svc.hermesPID()
             if Task.isCancelled { return }
-            let versionOutput = ctx.runHermes(["version"]).output
+            let versionOutput = Self.probeVersion(ctx)
             if Task.isCancelled { return }
             let statusOutput = ctx.runHermes(["status"]).output
             if Task.isCancelled { return }
@@ -343,7 +343,7 @@ final class HealthViewModel {
     }
 
     private func loadVersion() {
-        let output = runHermes(["version"]).output
+        let output = Self.probeVersion(context)
         let lines = output.components(separatedBy: "\n")
         version = lines.first ?? ""
         if let updateLine = lines.first(where: { $0.contains("commits behind") }) {
@@ -672,6 +672,89 @@ final class HealthViewModel {
     @discardableResult
     private func runHermes(_ arguments: [String]) -> (output: String, exitCode: Int32) {
         context.runHermes(arguments)
+    }
+
+    // MARK: - Version probe (capability-gated argv, Hermes v0.20.5)
+    //
+    // At v0.20.5 the bare `hermes version` subcommand was removed
+    // (`hasVersionFlagFullOutput`, see `HermesCapabilities`): an unknown
+    // token falls through to plugin discovery and spawns a chat-agent turn
+    // instead of printing a version line. `hermes --version` on v0.20.5+
+    // now carries the full banner including the "commits behind" update
+    // line that :164/:346 grep for; below v0.20.5, `--version` prints only
+    // the short banner ("Run 'hermes version' for update status") and the
+    // `commits behind` line is only obtainable via the bare `version`
+    // subcommand.
+    //
+    // Bootstrap problem: Health may run before anything has ever probed
+    // this host's capabilities, so we can't simply read
+    // `HermesCapabilitiesStore` and branch. Strategy:
+    //
+    //   1. Check `HermesVersionCache`'s in-process cache (no subprocess) —
+    //      if another probe (a capabilities store, a template install, a
+    //      fleet apply) already answered for this host, trust it and pick
+    //      argv directly. This is the common case: by the time Health
+    //      loads, the window's own `HermesCapabilitiesStore` has usually
+    //      already probed.
+    //   2. Otherwise, probe with `--version` first — this is safe on EVERY
+    //      Hermes version, old or new, because `--version` has always been
+    //      a real flag and never falls through to a chat prompt.
+    //   3. Only fall back to the bare `version` subcommand when the
+    //      `--version` output lacks the update-status ("commits behind")
+    //      section AND the version line we *did* parse out of it is below
+    //      0.20.5 (or unparseable, i.e. we can't confirm the host is new
+    //      enough to trust `--version` alone). If `--version` already
+    //      yielded a parseable version >= 0.20.5, we never issue bare
+    //      `version` — that host doesn't have it.
+    nonisolated static func probeVersion(
+        _ context: ServerContext,
+        cache: HermesVersionCache = .shared,
+        run: @Sendable (ServerContext, [String]) -> String = { $0.runHermes($1).output }
+    ) -> String {
+        if let known = cache.cached(for: context), known.detected {
+            let args = versionProbeArguments(for: known)
+            let output = run(context, args)
+            // Self-correct a stale warm cache: `HermesVersionCache` is
+            // trusted for up to 10 minutes (its TTL), and a user can very
+            // plausibly run `hermes update` from 0.20.4 to 0.20.5 with
+            // Scarf still open during that window. If the cache said
+            // "pre-0.20.5" and we issued bare `version`, but the host is
+            // now actually 0.20.5+, `version` has been removed there and
+            // falls through to plugin discovery — the output won't contain
+            // a parseable "Hermes Agent vX.Y.Z" line (it's a chat/plugin
+            // response, not a version banner). Detect that and retry with
+            // `--version`, which is safe on every version, to recover.
+            // The opposite staleness (cache says new, host was actually
+            // downgraded) needs no correction: `--version` works everywhere.
+            if args == ["version"], HermesCapabilities.parse(output).semver == nil {
+                return run(context, ["--version"])
+            }
+            return output
+        }
+
+        let flagOutput = run(context, ["--version"])
+        guard shouldFallBackToBareVersionSubcommand(output: flagOutput) else {
+            return flagOutput
+        }
+        return run(context, ["version"])
+    }
+
+    /// Argv to use once the host's capabilities are already known.
+    nonisolated static func versionProbeArguments(for capabilities: HermesCapabilities) -> [String] {
+        capabilities.hasVersionFlagFullOutput ? ["--version"] : ["version"]
+    }
+
+    /// True when `hermes --version` output needs the bare `version`
+    /// fallback to get the update-status ("commits behind") section: the
+    /// output doesn't already carry it, and the version we can parse out of
+    /// it (if any) is below the 0.20.5 floor where `--version` gained that
+    /// section. Unparseable output (no recognizable "Hermes Agent vX.Y.Z"
+    /// line) is treated the same as "below 0.20.5" — we can't confirm the
+    /// host is new enough to trust `--version` alone, so we fall back.
+    nonisolated static func shouldFallBackToBareVersionSubcommand(output: String) -> Bool {
+        guard !output.contains("commits behind") else { return false }
+        guard let semver = HermesCapabilities.parse(output).semver else { return true }
+        return semver < HermesCapabilities.SemVer(major: 0, minor: 20, patch: 5)
     }
 
     // MARK: - Web Dashboard (`hermes dashboard`)
