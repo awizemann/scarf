@@ -284,6 +284,17 @@ struct SkillsView: View {
                     .help("Disabled in skills.disabled — Hermes won't load this one")
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(skillRowLabel(skill))
+    }
+
+    /// Spoken row label: skill name first, then the state the icons and
+    /// badge carry visually (pinned, disabled).
+    private func skillRowLabel(_ skill: HermesSkill) -> String {
+        var parts = [skill.name]
+        if skill.pinned { parts.append(String(localized: "pinned")) }
+        if !skill.enabled { parts.append(String(localized: "disabled")) }
+        return parts.joined(separator: ", ")
     }
 
     @ViewBuilder
@@ -590,6 +601,19 @@ struct SkillsView: View {
         .padding()
     }
 
+    /// Spoken row label for a hub search result: name, registry it came
+    /// from, the fully-qualified identifier used to install it, then the
+    /// description. The description is part of the label because
+    /// `.combine` collapses the row into a single element — leaving it
+    /// out would make it unreachable to VoiceOver.
+    private func hubRowLabel(_ hub: HermesHubSkill) -> String {
+        var parts = [hub.name]
+        if !hub.source.isEmpty { parts.append(String(localized: "from \(hub.source)")) }
+        parts.append(hub.identifier)
+        if !hub.description.isEmpty { parts.append(hub.description) }
+        return parts.joined(separator: ", ")
+    }
+
     private func hubRow(_ hub: HermesHubSkill) -> some View {
         HStack(spacing: 12) {
             Image(systemName: "books.vertical")
@@ -618,6 +642,8 @@ struct SkillsView: View {
                         .lineLimit(3)
                 }
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(hubRowLabel(hub))
             Spacer()
             Button {
                 viewModel.installHubSkill(hub)
@@ -625,6 +651,7 @@ struct SkillsView: View {
                 Label("Install", systemImage: "arrow.down.to.line")
             }
             .controlSize(.small)
+            .accessibilityLabel("Install \(hub.name)")
             .disabled(viewModel.isHubLoading)
         }
         .padding(.horizontal, 12)
@@ -756,6 +783,10 @@ struct SkillsView: View {
                                 }
                                 Spacer()
                             }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel(
+                                "\(update.identifier), update available, \(update.currentVersion) to \(update.availableVersion)"
+                            )
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
                             .background(.quaternary.opacity(0.3))
@@ -784,12 +815,14 @@ struct SkillsView: View {
                 HStack {
                     Text(name)
                         .font(.system(.body, design: .monospaced))
+                        .accessibilityLabel("\(name), local edits kept")
                     Spacer()
                     if capabilitiesStore?.capabilities.hasSkillsUpdateForce ?? false {
                         Button("Update anyway…") {
                             forceUpdateTarget = name
                         }
                         .controlSize(.small)
+                        .accessibilityLabel("Update \(name) anyway, discarding local edits")
                     }
                 }
             }

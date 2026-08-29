@@ -45,6 +45,7 @@ struct CatalogView: View {
             ScarfTextField("Search templates", text: $viewModel.searchText)
                 .frame(maxWidth: 280)
                 .accessibilityIdentifier("catalog.searchField")
+                .accessibilityLabel("Search templates")
             CatalogCategoryFilter(
                 selected: $viewModel.selectedCategory,
                 availableCategories: viewModel.availableCategories

@@ -302,6 +302,7 @@ struct ProjectsView: View {
             TextField("https://example.com/my.scarftemplate", text: $installURLInput)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("templates.installURL.field")
+                .accessibilityLabel("Template URL")
             HStack {
                 Button("Cancel") { showingInstallURLPrompt = false }
                     .keyboardShortcut(.cancelAction)
@@ -551,6 +552,7 @@ struct AddProjectSheet: View {
                 .font(.headline)
             TextField("Project Name", text: $projectName)
                 .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Project Name")
             VStack(alignment: .leading, spacing: 6) {
                 pathInputRow
                 if context.isRemote {
@@ -582,6 +584,7 @@ struct AddProjectSheet: View {
         HStack {
             TextField("Project Path", text: $projectPath)
                 .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Project Path")
                 .onChange(of: projectPath) { _, _ in
                     // Stale verification once the path edits — reset to
                     // idle so users don't see a green check for a path

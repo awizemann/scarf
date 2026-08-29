@@ -167,10 +167,25 @@ struct ProjectsSidebar: View {
                 .truncationMode(.tail)
         }
         .tag(project)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(projectRowLabel(project))
         .accessibilityIdentifier("projects.row.\(project.name)")
         .contextMenu {
             projectContextMenu(project)
         }
+    }
+
+    /// Spoken row label: project name first, then the state a user
+    /// can't see from the name alone (folder, archived).
+    private func projectRowLabel(_ project: ProjectEntry) -> String {
+        var parts = [project.name]
+        if let folder = project.folder, !folder.isEmpty {
+            parts.append(String(localized: "in \(folder)"))
+        }
+        if project.archived {
+            parts.append(String(localized: "archived"))
+        }
+        return parts.joined(separator: ", ")
     }
 
     @ViewBuilder

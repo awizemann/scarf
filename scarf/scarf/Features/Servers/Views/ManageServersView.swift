@@ -221,6 +221,8 @@ struct ManageServersView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Local, this Mac")
                 Spacer()
                 actionsMenu(for: ServerContext.local, removable: false)
             }
@@ -239,6 +241,8 @@ struct ManageServersView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(rowLabel(for: entry))
                     Spacer()
                     actionsMenu(for: entry.context, removable: true)
                 }
@@ -289,6 +293,7 @@ struct ManageServersView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+        .accessibilityLabel("Server actions")
         .help("Backup, restore, or remove this server.")
     }
 
@@ -307,7 +312,16 @@ struct ManageServersView: View {
         }
         .buttonStyle(.borderless)
         .disabled(isDefault)
+        .accessibilityLabel(isDefault ? "Default server" : "Set as default server")
         .help(isDefault ? "Opens on launch" : "Set as default — open this server when Scarf launches.")
+    }
+
+    /// Spoken row label: server name first, then its connection
+    /// summary. The default-server state is carried by the star
+    /// button's own label, so it isn't repeated here.
+    private func rowLabel(for entry: ServerEntry) -> String {
+        guard case .ssh(let config) = entry.kind else { return entry.displayName }
+        return "\(entry.displayName), \(summary(for: config))"
     }
 
     private func summary(for config: SSHConfig) -> String {

@@ -510,6 +510,7 @@ private struct ParentDirectoryStep: View {
                 .textFieldStyle(.roundedBorder)
                 .autocorrectionDisabled()
                 .accessibilityIdentifier("templateInstall.parentDir.field")
+                .accessibilityLabel("Parent directory")
                 .onChange(of: parentPath) { _, _ in
                     if remoteVerification != .idle {
                         remoteVerification = .idle

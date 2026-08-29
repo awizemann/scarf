@@ -80,6 +80,7 @@ struct NewProjectSheet: View {
             TextField("Acme Q3 Review", text: Bindable(viewModel).projectName)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("newProject.name")
+                .accessibilityLabel("Project Name")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -97,6 +98,7 @@ struct NewProjectSheet: View {
             TextField("acme-q3", text: Bindable(viewModel).folderName)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("newProject.folder")
+                .accessibilityLabel("Folder Name")
             if !viewModel.folderName.isEmpty,
                !ProjectScaffolder.isValidSlug(viewModel.folderName) {
                 Label(
@@ -124,6 +126,7 @@ struct NewProjectSheet: View {
                 TextField("~/Projects", text: Bindable(viewModel).parentDirectory)
                     .textFieldStyle(.roundedBorder)
                     .accessibilityIdentifier("newProject.parent")
+                    .accessibilityLabel("Parent Directory")
                 Button("Choose…") {
                     chooseParentDirectory()
                 }
@@ -148,6 +151,7 @@ struct NewProjectSheet: View {
                         .stroke(.secondary.opacity(0.3))
                 )
                 .accessibilityIdentifier("newProject.description")
+                .accessibilityLabel("What's it for?")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

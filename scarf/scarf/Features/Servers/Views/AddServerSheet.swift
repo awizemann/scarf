@@ -53,24 +53,28 @@ struct AddServerSheet: View {
             LabeledField("Name") {
                 TextField("Optional — defaults to hostname", text: $viewModel.displayName)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Name")
             }
 
             LabeledField("Host") {
                 TextField("hermes.example.com or a ~/.ssh/config alias", text: $viewModel.host)
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
+                    .accessibilityLabel("Host")
             }
 
             LabeledField("User") {
                 TextField("Defaults to ~/.ssh/config or current user", text: $viewModel.user)
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
+                    .accessibilityLabel("User")
             }
 
             LabeledField("Port") {
                 TextField("22", text: $viewModel.port)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 100)
+                    .accessibilityLabel("Port")
                 Spacer()
             }
 
@@ -79,6 +83,7 @@ struct AddServerSheet: View {
                     TextField("ssh-agent (leave blank)", text: $viewModel.identityFile)
                         .textFieldStyle(.roundedBorder)
                         .autocorrectionDisabled()
+                        .accessibilityLabel("Identity file")
                     Button("Choose…") { viewModel.pickIdentityFile() }
                 }
             }
@@ -87,6 +92,7 @@ struct AddServerSheet: View {
                 TextField("Default: ~/.hermes", text: $viewModel.remoteHome)
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
+                    .accessibilityLabel("Hermes data directory")
             }
             Text("Leave blank unless Hermes is installed at a non-default path (systemd services often live at /var/lib/hermes/.hermes; Docker sidecars vary). Test Connection auto-suggests a value when it detects one of the known alternates.")
                 .font(.caption)
@@ -97,6 +103,7 @@ struct AddServerSheet: View {
                 TextField("Default: ~/projects", text: $viewModel.projectsRoot)
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
+                    .accessibilityLabel("Projects directory")
             }
             Text("Where Scarf installs new project templates on this host. Created on first install if missing.")
                 .font(.caption)
@@ -117,6 +124,7 @@ struct AddServerSheet: View {
                         TextField("Default: resolved via remote PATH probe", text: $viewModel.hermesBinary)
                             .textFieldStyle(.roundedBorder)
                             .autocorrectionDisabled()
+                            .accessibilityLabel("Hermes binary")
                     }
                     Text("Override the remote command Scarf uses to invoke Hermes. Useful when `hermes` is a shell function (e.g. `docker compose exec hermes hermes`), an alias, or installed at a non-standard path. Anything `/bin/sh -c \"<value> …\"` can run is accepted — absolute paths, bare command names, or short shell fragments. Leave blank to let Test Connection auto-detect.")
                         .font(.caption)

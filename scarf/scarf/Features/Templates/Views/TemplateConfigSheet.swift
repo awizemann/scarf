@@ -171,25 +171,28 @@ struct TemplateConfigSheet: View {
         case .string:
             StringControl(
                 value: stringBinding(for: field),
-                placeholder: field.placeholder
+                placeholder: field.placeholder,
+                label: field.label
             )
         case .text:
-            TextControl(value: stringBinding(for: field))
+            TextControl(value: stringBinding(for: field), label: field.label)
         case .number:
-            NumberControl(value: numberBinding(for: field))
+            NumberControl(value: numberBinding(for: field), label: field.label)
         case .bool:
             BoolControl(label: field.label, value: boolBinding(for: field))
         case .enum:
             EnumControl(
                 options: field.options ?? [],
-                value: stringBinding(for: field)
+                value: stringBinding(for: field),
+                label: field.label
             )
         case .list:
-            ListControl(items: listBinding(for: field))
+            ListControl(items: listBinding(for: field), label: field.label)
         case .secret:
             SecretControl(
                 fieldKey: field.key,
                 placeholder: field.placeholder,
+                label: field.label,
                 viewModel: viewModel
             )
         }
@@ -273,14 +276,17 @@ struct TemplateConfigSheet: View {
 private struct StringControl: View {
     @Binding var value: String
     let placeholder: String?
+    let label: String
     var body: some View {
         TextField(placeholder ?? "", text: $value)
             .textFieldStyle(.roundedBorder)
+            .accessibilityLabel(label)
     }
 }
 
 private struct TextControl: View {
     @Binding var value: String
+    let label: String
     var body: some View {
         TextEditor(text: $value)
             .font(.body.monospaced())
@@ -289,14 +295,17 @@ private struct TextControl: View {
                 RoundedRectangle(cornerRadius: 6)
                     .stroke(.secondary.opacity(0.3))
             )
+            .accessibilityLabel(label)
     }
 }
 
 private struct NumberControl: View {
     @Binding var value: Double
+    let label: String
     var body: some View {
         TextField("", value: $value, format: .number)
             .textFieldStyle(.roundedBorder)
+            .accessibilityLabel(label)
     }
 }
 
@@ -315,6 +324,7 @@ private struct BoolControl: View {
 private struct EnumControl: View {
     let options: [TemplateConfigField.EnumOption]
     @Binding var value: String
+    let label: String
     var body: some View {
         // Always use the default Menu picker (dropdown). An earlier
         // version switched to `.pickerStyle(.segmented)` when
@@ -333,6 +343,7 @@ private struct EnumControl: View {
             }
         }
         .labelsHidden()
+        .accessibilityLabel(label)
     }
 }
 
@@ -340,6 +351,7 @@ private struct EnumControl: View {
 /// with an inline remove button; a + button adds a trailing row.
 private struct ListControl: View {
     @Binding var items: [String]
+    let label: String
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(items.indices, id: \.self) { i in
@@ -352,6 +364,7 @@ private struct ListControl: View {
                         }
                     ))
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("\(label) item \(i + 1)")
                     Button {
                         guard i < items.count else { return }
                         items.remove(at: i)
@@ -380,6 +393,7 @@ private struct ListControl: View {
 private struct SecretControl: View {
     let fieldKey: String
     let placeholder: String?
+    let label: String
     @Bindable var viewModel: TemplateConfigViewModel
 
     @State private var typedValue: String = ""
@@ -401,6 +415,7 @@ private struct SecretControl: View {
                     }
                 }
                 .textFieldStyle(.roundedBorder)
+                .accessibilityLabel(label)
                 .onChange(of: typedValue) { _, new in
                     viewModel.setSecret(fieldKey, new)
                 }
