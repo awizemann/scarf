@@ -77,6 +77,7 @@ struct ProjectsSidebar: View {
                 .foregroundStyle(.secondary)
                 .scarfStyle(.caption)
             TextField("Filter projects", text: $filterText)
+                .accessibilityLabel("Filter projects")
                 .textFieldStyle(.plain)
                 .focused($searchFocused)
                 .scarfStyle(.caption)

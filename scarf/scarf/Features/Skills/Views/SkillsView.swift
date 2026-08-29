@@ -585,6 +585,7 @@ struct SkillsView: View {
     private var hubToolbar: some View {
         HStack(spacing: 8) {
             TextField("Search registries", text: $viewModel.hubQuery)
+                .accessibilityLabel("Search registries")
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { viewModel.searchHub() }
             Picker("Source", selection: $viewModel.hubSource) {
