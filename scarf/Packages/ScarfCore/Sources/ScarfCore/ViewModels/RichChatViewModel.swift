@@ -1170,6 +1170,70 @@ public final class RichChatViewModel {
     private var streamingThinkingText = ""
     private var streamingToolCalls: [HermesToolCall] = []
 
+    // MARK: - Streaming UI coalescing (gh#140)
+    //
+    // ACP chunks can arrive far faster than any display refresh —
+    // the gh#140 perf log shows inter-chunk gaps of ~30 µs (tens of
+    // thousands of events per second during a fast stream or a
+    // buffered burst). Upserting the observable `messages` /
+    // `messageGroups` state once per chunk made every chunk pay an
+    // O(message-length) HermesMessage copy AND invalidate the whole
+    // transcript's observation graph, so the main thread pegged a
+    // core re-running SwiftUI bodies (each of which re-renders the
+    // full streaming markdown — quadratic over the turn). The text
+    // buffers above still accumulate per-chunk (cheap string append);
+    // the OBSERVABLE upsert is throttled to `streamingFlushInterval`
+    // with a trailing flush so the last partial interval always lands.
+    @ObservationIgnored private var streamingFlushTask: Task<Void, Never>?
+    @ObservationIgnored private var lastStreamingUpsert: ContinuousClock.Instant?
+    /// 50 ms ≈ 20 UI updates/sec — indistinguishable from live
+    /// streaming to the eye, ~3 orders of magnitude fewer transcript
+    /// invalidations than chunk-rate during a burst.
+    private static let streamingFlushInterval: Duration = .milliseconds(50)
+
+    /// Throttled path to `upsertStreamingMessage()` for high-frequency
+    /// text chunks. Structural events (tool call start/complete,
+    /// finalize, promptComplete) bypass this and mutate directly —
+    /// group boundaries must land immediately and those events are
+    /// rare. Leading edge flushes immediately (first chunk of a turn
+    /// renders with no added latency); within the interval a single
+    /// trailing task picks up whatever accumulated.
+    private func scheduleStreamingUpsert() {
+        let now = ContinuousClock.now
+        if let last = lastStreamingUpsert, now - last < Self.streamingFlushInterval {
+            guard streamingFlushTask == nil else { return }
+            streamingFlushTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: Self.streamingFlushInterval)
+                guard let self, !Task.isCancelled else { return }
+                self.streamingFlushTask = nil
+                self.flushStreamingUpsertNow()
+            }
+            return
+        }
+        flushStreamingUpsertNow()
+    }
+
+    /// Immediate upsert + throttle-clock stamp. The empty-state guard
+    /// makes a stale trailing flush (one that fires after finalize or
+    /// reset cleared the buffers) a no-op instead of resurrecting an
+    /// empty id=0 placeholder bubble.
+    private func flushStreamingUpsertNow() {
+        guard !streamingAssistantText.isEmpty
+            || !streamingThinkingText.isEmpty
+            || !streamingToolCalls.isEmpty else { return }
+        lastStreamingUpsert = ContinuousClock.now
+        upsertStreamingMessage()
+    }
+
+    /// Cancel any pending trailing flush. Called wherever streaming
+    /// state is torn down (finalize, reset, new-turn start) so a
+    /// buffered flush can't run against the next turn's fresh state.
+    private func cancelStreamingFlush() {
+        streamingFlushTask?.cancel()
+        streamingFlushTask = nil
+        lastStreamingUpsert = nil
+    }
+
     /// True while a turn is in flight, has emitted thought-stream
     /// bytes, but has NOT yet produced any visible assistant text.
     /// Surfaces the user-facing "Thinking…" status promotion (the
@@ -1294,6 +1358,7 @@ public final class RichChatViewModel {
         streamingAssistantText = ""
         streamingThinkingText = ""
         streamingToolCalls = []
+        cancelStreamingFlush()
         acpInputTokens = 0
         acpOutputTokens = 0
         acpThoughtTokens = 0
@@ -1437,6 +1502,7 @@ public final class RichChatViewModel {
         streamingAssistantText = ""
         streamingThinkingText = ""
         streamingToolCalls = []
+        cancelStreamingFlush()
         buildMessageGroups()
         // User just submitted — jump to the bottom so they see their message
         // and the incoming response. `.defaultScrollAnchor(.bottom)` handles
@@ -1745,7 +1811,7 @@ public final class RichChatViewModel {
             ScarfMon.event(.chatStream, "firstByte", count: 1, bytes: text.utf8.count)
         }
         streamingAssistantText += text
-        upsertStreamingMessage()
+        scheduleStreamingUpsert()
     }
 
     private func appendThoughtChunk(text: String) {
@@ -1753,7 +1819,7 @@ public final class RichChatViewModel {
             ScarfMon.event(.chatStream, "firstThoughtByte", count: 1, bytes: text.utf8.count)
         }
         streamingThinkingText += text
-        upsertStreamingMessage()
+        scheduleStreamingUpsert()
     }
 
     private func handleToolCallStart(_ call: ACPToolCallEvent) {
@@ -2091,6 +2157,7 @@ public final class RichChatViewModel {
         streamingAssistantText = ""
         streamingThinkingText = ""
         streamingToolCalls = []
+        cancelStreamingFlush()
     }
 
     // MARK: - Disconnect Recovery
