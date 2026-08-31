@@ -70,7 +70,7 @@ Scarf for macOS collects **anonymous usage statistics** (event names + fixed-voc
 ## What's New in 2.22.0
 
 - **Full accessibility support** — ~120 accessibility labels across every form field and list row in the Mac app. VoiceOver and Voice Control users get real field names ("Host", "Identity file") and readable rows ("my-app, in Tools, archived"); the same labels unblock UI-automation tooling.
-- **Six-language catch-up** — ~240 strings that had accumulated untranslated (including all the new accessibility labels) are now localized in German, Spanish, French, Japanese, Brazilian Portuguese, and Simplified Chinese.
+- **Fully translated** — the entire translation backlog (~940 strings, including all the new accessibility labels) is cleared; the app is now ~93% localized in German, Spanish, French, Japanese, Brazilian Portuguese, and Simplified Chinese, with only proper nouns and code deliberately left in English.
 - **Faster streaming chat** — incremental markdown parsing (only the live tail re-renders) and 50ms-throttled UI updates during streaming (gh#140).
 
 Full notes: [v2.22.0](https://github.com/awizemann/scarf/releases/tag/v2.22.0) · v2.21.0 brought Hermes v0.20.5 parity (OpenCode Free, unlimited max turns, auto STT) · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).

@@ -11,7 +11,7 @@ This release makes Scarf a first-class citizen for VoiceOver, Voice Control, and
 ## Localized, all of it
 
 - The string catalog was overdue for a sync: this release extracts and adds ~240 strings that had accumulated since the last catalog update — the new accessibility labels plus recent features (profile routes, curator adoption, allowlist suggestions, and more).
-- All ~240 new strings are translated in every supported language: German, Spanish, French, Japanese, Brazilian Portuguese, and Simplified Chinese. Proper nouns, technical terms, and code stay in English by design.
+- **The entire app is now translated.** Beyond the new strings, this release clears the whole translation backlog — roughly 940 strings translated in this release alone. Coverage in German, Spanish, French, Japanese, Brazilian Portuguese, and Simplified Chinese now spans ~93% of the catalog; the remainder is proper nouns, code, and placeholders that deliberately stay in English.
 
 ## Faster streaming chat
 
