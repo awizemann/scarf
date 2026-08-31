@@ -53,7 +53,6 @@
 - [ ] R4 [iOS]: Key import gate — reject unusable keys at paste time (id: t-a89ccf7a) (added: 2026-08-20)
 - [ ] R6 [iOS]: Splash — use LaunchIcon asset, drop 1024px main-thread decode (id: t-d8d0f1d3) (added: 2026-08-20) (priority: low)
 - [ ] A11y follow-up: label remaining macOS TextFields sweep (id: t-828b80d4) (added: 2026-08-28) (priority: low)
-- [ ] Translate the 238 new string-catalog keys (6 locales) (id: t-88eec9a9) (added: 2026-08-31)
 
 ## Doing
 
@@ -61,6 +60,7 @@
 
 ## Done
 
+- [x] Translate the 238 new string-catalog keys (6 locales) (id: t-88eec9a9) (added: 2026-08-31)
 - [x] Fix pre-existing SettingsWriteReadParityTests interpolated-shape failure (id: t-62bd4bb2) (added: 2026-08-28)
 - [x] A11y P4: fresh-eye accessibility audit + tests (id: t-3579f688) (added: 2026-08-28)
 - [x] A11y P3: localization/xcstrings audit for a11y strings (id: t-8523a5d5) (added: 2026-08-28)
