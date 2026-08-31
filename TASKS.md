@@ -52,6 +52,8 @@
 - [ ] R3 [iOS]: Resume fallback — typed catch, surfacing, analytics parity (id: t-238d2ab3) (added: 2026-08-20) (priority: high)
 - [ ] R4 [iOS]: Key import gate — reject unusable keys at paste time (id: t-a89ccf7a) (added: 2026-08-20)
 - [ ] R6 [iOS]: Splash — use LaunchIcon asset, drop 1024px main-thread decode (id: t-d8d0f1d3) (added: 2026-08-20) (priority: low)
+- [ ] A11y follow-up: label remaining macOS TextFields sweep (id: t-828b80d4) (added: 2026-08-28) (priority: low)
+- [ ] Translate the 238 new string-catalog keys (6 locales) (id: t-88eec9a9) (added: 2026-08-31)
 
 ## Doing
 
@@ -59,6 +61,11 @@
 
 ## Done
 
+- [x] Fix pre-existing SettingsWriteReadParityTests interpolated-shape failure (id: t-62bd4bb2) (added: 2026-08-28)
+- [x] A11y P4: fresh-eye accessibility audit + tests (id: t-3579f688) (added: 2026-08-28)
+- [x] A11y P3: localization/xcstrings audit for a11y strings (id: t-8523a5d5) (added: 2026-08-28)
+- [x] A11y P1: label AddServerSheet + macOS form fields (id: t-d9298f74) (added: 2026-08-28) (priority: high)
+- [x] A11y P2: label macOS list rows + zoom button check (id: t-698150a5) (added: 2026-08-28) (priority: high)
 - [x] Hermes v0.20.5 parity: version→--version, opencode-free tables, max_turns/stt defaults, isV0205OrLater gates (id: t-27d34c2d) (added: 2026-08-26)
 - [x] v0205 P5: parseProfileList display-name suffix hardening (id: t-ea1baa72) (added: 2026-08-26)
 - [x] v0205 P4: max_turns unlimited (stepper allows 0) + stt.provider Auto option (id: t-b8a98055) (added: 2026-08-26)
