@@ -23,8 +23,17 @@ struct MarkdownContentView: View {
 
     var body: some View {
         if streaming {
-            Text(MarkdownRenderer.inlineAttributedString(content))
-                .textSelection(.enabled)
+            // gh#140 phase 2: the previous single
+            // `Text(inlineAttributedString(content))` re-parsed and
+            // re-laid-out the FULL accumulated reply on every flush —
+            // O(reply length) each time, quadratic over the turn, and
+            // the dominant remaining cost once the flush rate itself
+            // was throttled. `StreamingMarkdownText` splits the reply
+            // at the last completed paragraph: the settled prefix is
+            // parsed once and its `Text` input never changes (SwiftUI
+            // skips its layout), so each flush only re-renders the
+            // small live tail.
+            StreamingMarkdownText(content: content)
                 .font(ChatFontScale.body(chatFontScale))
         } else {
             VStack(alignment: .leading, spacing: 6) {
@@ -366,6 +375,84 @@ struct MarkdownContentView: View {
         }
         flushRun()
         return units
+    }
+}
+
+// MARK: - Streaming renderer (gh#140)
+
+/// Incremental renderer for the in-flight streaming bubble.
+///
+/// The stream is append-only, and everything before the last completed
+/// paragraph boundary (`\n\n`) can never change again. So we keep a
+/// settled prefix — parsed into one `AttributedString` exactly once,
+/// extended only when new paragraphs complete — and a live tail that is
+/// the only part re-parsed and re-laid-out per flush. The settled
+/// `Text`'s input is value-equal between flushes, so SwiftUI skips its
+/// diff and layout entirely; per-flush render cost is O(tail) instead
+/// of O(full reply). On finalize the bubble's id flips off 0 and the
+/// caller switches to the full block pipeline, so this view's output
+/// only needs to match the OLD streaming rendering (inline markdown,
+/// literal newlines), which it does: paragraphs are joined by the same
+/// visual gap the `\n\n` used to produce.
+///
+/// Inline spans (bold/code/links) never legitimately cross a blank
+/// line, so parsing settled paragraphs separately from the tail yields
+/// the same attributed output as one whole-string parse.
+struct StreamingMarkdownText: View {
+    let content: String
+
+    /// Everything up to (and including) the last absorbed `\n\n`.
+    /// Invariant: `content.hasPrefix(settledSource)` — checked each
+    /// absorb; a mismatch (new turn reusing the view, or a reset)
+    /// rebuilds from scratch.
+    @State private var settledSource = ""
+    /// `settledSource` parsed, WITHOUT its trailing paragraph gap —
+    /// the gap between settled and tail comes from the VStack spacing.
+    @State private var settledText = AttributedString()
+
+    var body: some View {
+        // Derive the tail directly from current inputs so the very
+        // first body eval after a flush is correct even before
+        // `.onChange` absorbs the new boundary — the tail is just
+        // briefly longer than optimal, never wrong.
+        let tail = content.hasPrefix(settledSource)
+            ? String(content[settledSource.endIndex...])
+            : content
+        VStack(alignment: .leading, spacing: 6) {
+            if !settledText.characters.isEmpty {
+                Text(settledText)
+                    .textSelection(.enabled)
+            }
+            if !tail.isEmpty {
+                Text(MarkdownRenderer.inlineAttributedString(tail))
+                    .textSelection(.enabled)
+            }
+        }
+        .onAppear { absorbSettledParagraphs() }
+        .onChange(of: content) { absorbSettledParagraphs() }
+    }
+
+    /// Move any newly-completed paragraphs from the tail into the
+    /// settled prefix. The `hasPrefix` guard is a memcmp — cheap
+    /// relative to the parse it saves — and doubles as the reset
+    /// detector for non-append mutations.
+    private func absorbSettledParagraphs() {
+        if !content.hasPrefix(settledSource) {
+            settledSource = ""
+            settledText = AttributedString()
+        }
+        let tail = content[settledSource.endIndex...]
+        guard let gap = tail.range(of: "\n\n", options: .backwards) else { return }
+        let completed = tail[..<gap.lowerBound]
+        if !completed.isEmpty {
+            if !settledText.characters.isEmpty {
+                settledText.append(AttributedString("\n\n"))
+            }
+            settledText.append(MarkdownRenderer.inlineAttributedString(String(completed)))
+        }
+        // Consume the separator too — the settled/tail visual gap is
+        // owned by the VStack spacing from here on.
+        settledSource = String(content[..<gap.upperBound])
     }
 }
 
