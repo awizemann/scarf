@@ -774,6 +774,7 @@
   "Website Blocklist": "Lista de bloqueo de sitios",
   "WhatsApp uses the Baileys library to emulate a WhatsApp Web session. Pair this Mac as a linked device by running the pairing wizard and scanning the QR code with your phone (Settings → Linked Devices → Link a Device).": "WhatsApp usa la biblioteca Baileys para emular una sesión de WhatsApp Web. Empareja este Mac como dispositivo vinculado ejecutando el asistente y escaneando el código QR con tu teléfono (Ajustes → Dispositivos vinculados → Vincular dispositivo).",
   "Working": "Trabajando",
+  "Working directory": "Directorio de trabajo",
   "Working directory the server process launches in. Leave blank for Hermes's own cwd. Requires Hermes v0.20.4+.": "Directorio de trabajo en el que se inicia el proceso del servidor. Déjalo vacío para el cwd propio de Hermes. Requiere Hermes v0.20.4+.",
   "X-User-Id": "X-User-Id",
   "`%@` is served anonymously — Hermes needs no credential. Just select it as your model provider in Settings.": "`%@` se sirve de forma anónima — Hermes no necesita credencial. Solo selecciónalo como tu proveedor de modelo en Ajustes.",

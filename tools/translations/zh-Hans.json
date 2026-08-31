@@ -773,6 +773,7 @@
   "Website Blocklist": "网站黑名单",
   "WhatsApp uses the Baileys library to emulate a WhatsApp Web session. Pair this Mac as a linked device by running the pairing wizard and scanning the QR code with your phone (Settings → Linked Devices → Link a Device).": "WhatsApp 使用 Baileys 库模拟 WhatsApp Web 会话。通过运行配对向导并用手机扫描二维码,将此 Mac 配对为关联设备(设置 → 关联设备 → 关联一台设备)。",
   "Working": "工作中",
+  "Working directory": "工作目录",
   "Working directory the server process launches in. Leave blank for Hermes's own cwd. Requires Hermes v0.20.4+.": "服务器进程启动时所在的工作目录。留空则使用 Hermes 自身的工作目录。需要 Hermes v0.20.4 及以上版本。",
   "`%@` is served anonymously — Hermes needs no credential. Just select it as your model provider in Settings.": "`%@` 是匿名提供的 — Hermes 无需凭证。只需在设置中将其选为模型提供方即可。",
   "`%@` isn't a provider Hermes knows. If this model ID came from an aggregator (e.g. OpenRouter), set `model.provider` to that aggregator instead.": "`%@` 不是 Hermes 已知的提供方。如果此模型 ID 来自聚合服务(例如 OpenRouter),请改为将 `model.provider` 设为该聚合服务。",

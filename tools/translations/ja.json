@@ -773,6 +773,7 @@
   "Website Blocklist": "ウェブサイトブロックリスト",
   "WhatsApp uses the Baileys library to emulate a WhatsApp Web session. Pair this Mac as a linked device by running the pairing wizard and scanning the QR code with your phone (Settings → Linked Devices → Link a Device).": "WhatsApp は Baileys ライブラリで WhatsApp Web セッションをエミュレートします。ペアリングウィザードを実行し、スマートフォンで QR コードをスキャンしてこの Mac をリンク済みデバイスとしてペアリングしてください(設定 → リンク済みデバイス → デバイスをリンク)。",
   "Working": "処理中",
+  "Working directory": "作業ディレクトリ",
   "Working directory the server process launches in. Leave blank for Hermes's own cwd. Requires Hermes v0.20.4+.": "サーバープロセスが起動する作業ディレクトリ。空欄にすると Hermes 自身の cwd を使用します。Hermes v0.20.4 以降が必要です。",
   "`%@` is served anonymously — Hermes needs no credential. Just select it as your model provider in Settings.": "`%@` は匿名で提供されます — Hermes に資格情報は不要です。設定でモデルプロバイダーとして選択するだけです。",
   "`%@` isn't a provider Hermes knows. If this model ID came from an aggregator (e.g. OpenRouter), set `model.provider` to that aggregator instead.": "`%@` は Hermes が認識しているプロバイダーではありません。このモデル ID がアグリゲーター（例: OpenRouter）由来のものであれば、代わりに `model.provider` をそのアグリゲーターに設定してください。",
