@@ -67,15 +67,13 @@ Connecting takes about a minute: add a server (same details as `ssh user@host`),
 
 Scarf for macOS collects **anonymous usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames; no persistent identifier) to guide development. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/).
 
-## What's New in 2.21.0
+## What's New in 2.22.0
 
-- **Hermes v0.20.5 parity** — new target (v2026.8.19). The critical fix: v0.20.5 removed the `hermes version` subcommand, and Scarf's Health probe would have silently spawned a chat-agent turn on every load; it now capability-selects `--version` and self-corrects if the host upgrades mid-session.
-- **OpenCode Free** — Hermes's zero-auth provider tier is selectable, and keyless providers no longer ask for an API key.
-- **Unlimited max turns** — the stepper reflects v0.20.5's new unlimited default and can write 0 = "Unlimited" on hosts that support it.
-- **Auto STT provider** — an "Auto (unset)" option matching Hermes's new autodetect-ladder semantics; the only way back out of a pinned provider.
-- **Profiles list hardened** against v0.20.5's `Display Name (id)` rendering.
+- **Full accessibility support** — ~120 accessibility labels across every form field and list row in the Mac app. VoiceOver and Voice Control users get real field names ("Host", "Identity file") and readable rows ("my-app, in Tools, archived"); the same labels unblock UI-automation tooling.
+- **Six-language catch-up** — ~240 strings that had accumulated untranslated (including all the new accessibility labels) are now localized in German, Spanish, French, Japanese, Brazilian Portuguese, and Simplified Chinese.
+- **Faster streaming chat** — incremental markdown parsing (only the live tail re-renders) and 50ms-throttled UI updates during streaming (gh#140).
 
-Full notes: [v2.21.0](https://github.com/awizemann/scarf/releases/tag/v2.21.0) · v2.20.0 brought Hermes v0.20.4 parity and anonymous opt-out usage analytics on macOS · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
+Full notes: [v2.22.0](https://github.com/awizemann/scarf/releases/tag/v2.22.0) · v2.21.0 brought Hermes v0.20.5 parity (OpenCode Free, unlimited max turns, auto STT) · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
 
 ## Features
 
