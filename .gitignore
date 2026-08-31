@@ -77,3 +77,6 @@ sessions/.index.json
 
 # Local, uncommitted analytics write key (see scarf/Configs/SwiftStats.xcconfig)
 scarf/Configs/SwiftStatsLocal.xcconfig
+
+# Walkabout UI-automation flows/guides (local, uncommitted)
+.walkabout/
