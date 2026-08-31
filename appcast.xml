@@ -6,6 +6,110 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.22.0</title>
+      <sparkle:version>64</sparkle:version>
+      <sparkle:shortVersionString>2.22.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Mon, 31 Aug 2026 23:30:20 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.22.0</p>
+<p>This release makes Scarf a first-class citizen for VoiceOver, Voice Control, and UI automation, and catches the app&#x27;s translations up in all six languages. Until now almost none of the Mac app&#x27;s form fields or list rows carried an accessibility label — a screen reader landing on the Add Remote Server sheet heard seven anonymous &quot;edit text&quot; fields. Every form field and list row now announces itself properly, in your language. Streaming chat also got measurably faster, and the Hermes target is unchanged (v0.20.5) — no host-side behavior changes at all.</p>
+<h2>Accessibility: the whole app now speaks</h2>
+<ul>
+  <li><strong>Every form field announces its label.</strong> SwiftUI never associates a <code>TextField</code> with the visible <code>Text</code> sitting next to it, so assistive tech — and UI automation — saw <code>label: &quot;&quot;</code> on all of them. Roughly 120 explicit accessibility labels landed across the app: the Add Remote Server sheet, project and template sheets, MCP server editors, model pickers, credential pools, kanban, profiles, webhooks, cron, proxy, quick commands, restore sheets, and the search/filter fields. Each label exactly matches the visible text, so Voice Control commands like &quot;click Host&quot; resolve.</li>
+  <li><strong>List rows are no longer anonymous.</strong> Project, server, and skill rows read as one element, name first and state after — &quot;my-app, in Tools, archived&quot;, &quot;ScarfBox, alan@host:22&quot;, &quot;release-prep, pinned, disabled&quot; — while row controls (default-server star, server actions, Install) stay individually reachable with their own labels. Skill hub results include the description; update rows read the version change.</li>
+  <li>These labels double as the hooks UI-automation tools need, so scripted walkthroughs of Scarf work now too. Existing XCUITest identifiers are untouched.</li>
+</ul>
+<h2>Localized, all of it</h2>
+<ul>
+  <li>The string catalog was overdue for a sync: this release extracts and adds ~240 strings that had accumulated since the last catalog update — the new accessibility labels plus recent features (profile routes, curator adoption, allowlist suggestions, and more).</li>
+  <li><strong>The entire app is now translated.</strong> Beyond the new strings, this release clears the whole translation backlog — roughly 940 strings translated in this release alone. Coverage in German, Spanish, French, Japanese, Brazilian Portuguese, and Simplified Chinese now spans ~93% of the catalog; the remainder is proper nouns, code, and placeholders that deliberately stay in English.</li>
+</ul>
+<h2>Faster streaming chat</h2>
+<ul>
+  <li><strong>Markdown is now parsed incrementally while a reply streams</strong> — the settled prefix is parsed once and only the live tail re-renders, instead of re-parsing the whole message on every delta (gh#140).</li>
+  <li><strong>UI upserts during streaming are throttled to 50ms</strong>, so long replies no longer flood the view with per-token updates.</li>
+</ul>
+<h2>Under the hood</h2>
+<ul>
+  <li>The settings write/read parity gate now covers the <code>auxiliary.&lt;task&gt;.max_concurrency</code> keys (a v2.21.0 test-coverage gap) — every written config key is again verified to round-trip through ScarfCore&#x27;s YAML reader.</li>
+  <li>Local Walkabout UI-automation artifacts (<code>.walkabout/</code>) are gitignored.</li>
+  <li>Accessibility and localization conventions are recorded so new UI keeps the bar (labels match visible text; localized fragments in row-label helpers; the two English plural-hack keys deliberately fall back).</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>Updates arrive via Sparkle&#x27;s built-in updater; or grab the zip from this release.</li>
+  <li>macOS 14.6+ (Apple Silicon and Intel). ScarfGo for iOS ships separately via TestFlight; this release requires no iOS-side update.</li>
+  <li>Compatible with Hermes v0.6.0 through v0.20.5 — the Hermes target is unchanged from v2.21.0 and host behavior is identical.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.22.0/Scarf-v2.22.0-Universal.zip"
+                 sparkle:edSignature="d6P6wygGMzhrsrJdfRIcUYo6NCbS1WpmewHV3kREOOIa/5cm8q3tpaG6cj08a/Is6n8XK2QROomZriFbv+fCDQ=="
+                 length="23138068"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.21.0</title>
       <sparkle:version>63</sparkle:version>
       <sparkle:shortVersionString>2.21.0</sparkle:shortVersionString>
