@@ -2,7 +2,7 @@
 title: Home
 type: note
 permalink: scarf-wiki/home
-updated: 2026-08-26
+updated: 2026-08-31
 created: 2026-05-29
 ---
 
@@ -10,7 +10,7 @@ created: 2026-05-29
 
 **The native Mac & iOS app for the [Hermes AI agent](https://github.com/hermes-ai/hermes-agent).** Full visibility into what Hermes is doing, when, and what it creates — on your Mac against one local install or many remote ones, and from your iPhone over SSH with **ScarfGo**.
 
-**Latest release:** [v2.21.0](https://github.com/awizemann/scarf/releases/tag/v2.21.0) — Hermes v0.20.5 parity: the Health view survives v0.20.5's removal of the `hermes version` subcommand (which would otherwise burn a chat-agent turn on every Health load), the Profiles list handles the new `Display Name (id)` rendering, and v0.20.5 hosts gain the zero-auth **OpenCode Free** provider (keyless providers no longer ask for an API key), an **Unlimited** max-turns setting matching the new upstream default, and an **Auto (unset)** STT provider option. Previous: [v2.20.0](https://github.com/awizemann/scarf/releases/tag/v2.20.0) brought Hermes v0.20.4 parity, session-list upgrades, curator ledger & purge, project skills, the MCP catalog picker, and anonymous opt-out usage analytics on macOS ([Privacy Policy](Privacy-Policy); iOS sends nothing). All earlier versions: [Release Notes Index](Release-Notes-Index).
+**Latest release:** [v2.22.0](https://github.com/awizemann/scarf/releases/tag/v2.22.0) — full accessibility support and a six-language catch-up: ~120 accessibility labels across every Mac form field and list row (VoiceOver, Voice Control, and UI automation all get real names), ~240 previously-untranslated strings localized in de/es/fr/ja/pt-BR/zh-Hans, and faster streaming chat via incremental markdown parsing and 50ms-throttled updates (gh#140). Hermes target unchanged (v0.20.5). Previous: [v2.21.0](https://github.com/awizemann/scarf/releases/tag/v2.21.0) brought Hermes v0.20.5 parity — the Health view survives the `hermes version` removal, plus the zero-auth **OpenCode Free** provider, **Unlimited** max turns, and an **Auto (unset)** STT option. Earlier: [v2.20.0](https://github.com/awizemann/scarf/releases/tag/v2.20.0) with Hermes v0.20.4 parity and opt-out usage analytics on macOS ([Privacy Policy](Privacy-Policy); iOS sends nothing). All earlier versions: [Release Notes Index](Release-Notes-Index).
 
 **Mobile:** [Join the ScarfGo public TestFlight](https://testflight.apple.com/join/qCrRpcTz) — see [ScarfGo](ScarfGo) for the feature tour and [ScarfGo Onboarding](ScarfGo-Onboarding) for the one-minute SSH setup.
 
@@ -58,4 +58,4 @@ Scarf 2.0+ is a multi-window app — one window per Hermes server, local or remo
 Open-source (MIT), actively maintained. See [Roadmap](Roadmap) for what's coming.
 
 ---
-_Last updated: 2026-08-26 — Scarf v2.21.0 (Hermes v0.20.5 parity)._
+_Last updated: 2026-08-31 — Scarf v2.22.0 (accessibility + localization)._
