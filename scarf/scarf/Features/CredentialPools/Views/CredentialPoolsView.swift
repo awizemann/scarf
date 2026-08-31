@@ -712,6 +712,7 @@ private struct AddCredentialSheet: View {
                     TextField("e.g. anthropic", text: $providerID)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.caption, design: .monospaced))
+                        .accessibilityLabel("Provider")
                     Menu("Browse") {
                         ForEach(providers) { provider in
                             Button(provider.providerName + " (\(provider.providerID))") {
@@ -738,6 +739,7 @@ private struct AddCredentialSheet: View {
                 Text("Label (optional)").font(.caption).foregroundStyle(.secondary)
                 TextField("e.g. team-prod", text: $label)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Label (optional)")
             }
 
             if authType == .apiKey {
@@ -749,6 +751,7 @@ private struct AddCredentialSheet: View {
                         SecureField("sk-…", text: $apiKey)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(.caption, design: .monospaced))
+                            .accessibilityLabel("API Key")
                     }
                 }
             } else {
@@ -945,6 +948,7 @@ private struct AddCredentialSheet: View {
                 TextField("Paste code here…", text: $authCode)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.caption, design: .monospaced))
+                    .accessibilityLabel("Authorization Code")
                     .disabled(!flow.awaitingCode)
                     .onSubmit { submitCode(flow: flow) }
                 Button("Submit") { submitCode(flow: flow) }

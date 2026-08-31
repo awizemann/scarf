@@ -43,6 +43,7 @@ struct ModelPresetEditSheet: View {
                 VStack(spacing: ScarfSpace.s4) {
                     fieldRow("Name", required: true) {
                         ScarfTextField("e.g. Sonnet (production)", text: $name)
+                            .accessibilityLabel("Name")
                     }
 
                     fieldRow("Model", required: true) {

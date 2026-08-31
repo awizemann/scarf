@@ -360,6 +360,7 @@ struct ProfilesView: View {
                 Text("Name").font(.caption).foregroundStyle(.secondary)
                 TextField("e.g. experimental", text: $createName)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Name")
             }
             Toggle("Clone config, .env, SOUL.md from active profile", isOn: $createCloneConfig)
                 .disabled(createCloneAll)
@@ -401,6 +402,7 @@ struct ProfilesView: View {
                     Text("New name for '\(target.name)'").font(.caption).foregroundStyle(.secondary)
                     TextField("new-name", text: $renameNewName)
                         .textFieldStyle(.roundedBorder)
+                        .accessibilityLabel("New name for '\(target.name)'")
                 }
             }
             HStack {

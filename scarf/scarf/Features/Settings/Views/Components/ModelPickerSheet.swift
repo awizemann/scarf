@@ -552,6 +552,7 @@ struct ModelPickerSheet: View {
             TextField(modelIDPlaceholder(for: provider), text: $overlayModelID)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.caption, design: .monospaced))
+                .accessibilityLabel("Model ID")
             Text("Type a model ID exactly as Nous expects it. Leave blank to use Hermes's default.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -602,6 +603,7 @@ struct ModelPickerSheet: View {
                     TextField(modelIDPlaceholder(for: provider), text: $overlayModelID)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.caption, design: .monospaced))
+                        .accessibilityLabel("Model ID")
                     if provider.subscriptionGated {
                         Text("Leave blank to use Hermes's default Nous model.")
                             .font(.caption2)
@@ -781,6 +783,7 @@ struct ModelPickerSheet: View {
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.caption, design: .monospaced))
                 .autocorrectionDisabled()
+                .accessibilityLabel("Base URL")
             if descriptor.baseURLRequired,
                descriptor.defaultBaseURL == nil,
                localBaseURL.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -806,6 +809,7 @@ struct ModelPickerSheet: View {
                 SecureField("Leave blank for local servers", text: $localAPIKey)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.caption, design: .monospaced))
+                    .accessibilityLabel("API key (optional)")
             }
         }
 
@@ -1104,12 +1108,14 @@ struct ModelPickerSheet: View {
                 TextField("e.g. openai/gpt-4o", text: $customModelID)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.caption, design: .monospaced))
+                    .accessibilityLabel("Model ID")
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text("Provider").font(.caption).foregroundStyle(.secondary)
                 TextField("e.g. openai", text: $customProviderID)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.caption, design: .monospaced))
+                    .accessibilityLabel("Provider")
                 Text("Leave blank to infer from the model ID's prefix (\"openai/...\" → openai).")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)

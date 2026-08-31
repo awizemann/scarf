@@ -259,6 +259,7 @@ struct WebhooksView: View {
             TextField(placeholder, text: text)
                 .textFieldStyle(.roundedBorder)
                 .font(mono ? .system(.caption, design: .monospaced) : .caption)
+                .accessibilityLabel(label)
         }
     }
 

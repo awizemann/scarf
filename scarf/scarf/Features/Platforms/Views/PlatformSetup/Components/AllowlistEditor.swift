@@ -40,6 +40,7 @@ struct AllowlistEditor: View {
                                     items[idx] = newValue
                                 }
                             ),
+                            label: "Allowed \(kind.pluralNoun)",
                             placeholder: kind.inputPlaceholder,
                             onDelete: {
                                 guard idx < items.count else { return }
@@ -75,6 +76,7 @@ struct AllowlistEditor: View {
 
 private struct AllowlistRow: View {
     @Binding var value: String
+    let label: String
     let placeholder: String
     let onDelete: () -> Void
 
@@ -83,6 +85,7 @@ private struct AllowlistRow: View {
             TextField(placeholder, text: $value)
                 .textFieldStyle(.roundedBorder)
                 .font(ScarfFont.monoSmall)
+                .accessibilityLabel(label)
             Button {
                 onDelete()
             } label: {

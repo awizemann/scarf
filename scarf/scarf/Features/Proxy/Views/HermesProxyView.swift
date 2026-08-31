@@ -80,6 +80,7 @@ struct HermesProxyView: View {
                             .foregroundStyle(ScarfColor.foregroundMuted)
                         TextField("8645", text: $viewModel.portText)
                             .textFieldStyle(.roundedBorder)
+                            .accessibilityLabel("Port")
                             .font(ScarfFont.mono)
                             .frame(maxWidth: 120)
                             .disabled(viewModel.service.isRunning)

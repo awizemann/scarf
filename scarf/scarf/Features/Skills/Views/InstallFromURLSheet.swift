@@ -40,6 +40,7 @@ struct InstallFromURLSheet: View {
                     .scarfStyle(.captionUppercase)
                     .foregroundStyle(ScarfColor.foregroundMuted)
                 ScarfTextField("https://example.com/path/to/SKILL.md", text: $url)
+                    .accessibilityLabel("URL")
             }
 
             DisclosureGroup("Optional overrides") {
@@ -49,12 +50,14 @@ struct InstallFromURLSheet: View {
                             .scarfStyle(.captionUppercase)
                             .foregroundStyle(ScarfColor.foregroundMuted)
                         ScarfTextField("e.g. productivity (defaults to `local`)", text: $category)
+                            .accessibilityLabel("Category")
                     }
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Skill name")
                             .scarfStyle(.captionUppercase)
                             .foregroundStyle(ScarfColor.foregroundMuted)
                         ScarfTextField("Override if SKILL.md has no `name:`", text: $nameOverride)
+                            .accessibilityLabel("Skill name")
                     }
                 }
                 .padding(.top, ScarfSpace.s2)

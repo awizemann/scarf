@@ -164,6 +164,7 @@ private struct QuickCommandEditor: View {
                     .foregroundStyle(.secondary)
                 TextField("e.g. deploy", text: $name)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Name (no leading slash)")
                     .disabled(initial != nil)
             }
             VStack(alignment: .leading, spacing: 4) {

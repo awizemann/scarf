@@ -60,6 +60,7 @@ struct MCPServerAddCustomView: View {
                             TextField("my_server", text: $name)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(.body, design: .monospaced))
+                                .accessibilityLabel("Name")
                             Text("Becomes the key under mcp_servers: in config.yaml.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
@@ -130,6 +131,7 @@ struct MCPServerAddCustomView: View {
                     TextField("npx", text: $command)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
+                        .accessibilityLabel("Command")
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Args (one per line)").font(.caption.bold())
@@ -153,6 +155,7 @@ struct MCPServerAddCustomView: View {
                     TextField("https://...", text: $url)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
+                        .accessibilityLabel("URL")
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Auth").font(.caption.bold())
@@ -176,12 +179,14 @@ struct MCPServerAddCustomView: View {
                     TextField("https://.../sse", text: $url)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
+                        .accessibilityLabel("URL")
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("SSE Read Timeout (seconds)").font(.caption.bold())
                     TextField("default 300", text: $sseReadTimeout)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 140)
+                        .accessibilityLabel("SSE Read Timeout (seconds)")
                     Text("Hermes-side keepalive interval. Leave blank to use the default.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)

@@ -315,6 +315,7 @@ struct SlashCommandEditorSheet: View {
                     .foregroundStyle(.secondary)
                 TextField("(empty)", text: $sampleArgument)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Sample argument")
             }
             ScrollView {
                 Text(viewModel.previewExpansion(forArgument: sampleArgument))

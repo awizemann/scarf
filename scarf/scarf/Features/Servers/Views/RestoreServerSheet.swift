@@ -118,6 +118,7 @@ struct RestoreServerSheet: View {
                         TextField("e.g. /home/ubuntu/projects", text: $viewModel.targetProjectsRoot)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(.callout, design: .monospaced))
+                            .accessibilityLabel("Projects landing path")
                     }
                     Text("Each project lands at `<this path>/<project name>`. Existing files at the same path will be overwritten.")
                         .font(.caption)

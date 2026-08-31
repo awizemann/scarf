@@ -148,6 +148,7 @@ struct MCPServerPresetPickerView: View {
             TextField("e.g. github", text: $nameOverride)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.body, design: .monospaced))
+                .accessibilityLabel("Server name")
             Text("Used as the YAML key. Lowercase, no spaces.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -198,9 +199,11 @@ struct MCPServerPresetPickerView: View {
             if showSecrets {
                 TextField("value", text: bindingForEnv(key))
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel(key)
             } else {
                 SecureField("value", text: bindingForEnv(key))
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel(key)
             }
         }
     }

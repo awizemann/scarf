@@ -34,6 +34,7 @@ struct CuratorRestoreSheet: View {
                     .scarfStyle(.captionUppercase)
                     .foregroundStyle(ScarfColor.foregroundMuted)
                 ScarfTextField("e.g. legacy-helper", text: $skillName)
+                    .accessibilityLabel("Skill name")
             }
 
             Text("\(viewModel.status.archivedSkills) archived skill(s) available — list them with `hermes curator status`.")

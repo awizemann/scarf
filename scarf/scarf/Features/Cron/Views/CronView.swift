@@ -951,6 +951,7 @@ struct CronJobEditor: View {
             TextField(placeholder, text: text)
                 .textFieldStyle(.roundedBorder)
                 .font(mono ? ScarfFont.monoSmall : ScarfFont.body)
+                .accessibilityLabel(label)
         }
     }
 }

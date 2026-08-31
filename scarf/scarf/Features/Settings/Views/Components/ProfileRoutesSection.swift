@@ -332,6 +332,7 @@ private struct ProfileRouteEditorSheet: View {
                         TextField("discord", text: $route.platform)
                             .textFieldStyle(.roundedBorder)
                             .font(ScarfFont.monoSmall)
+                            .accessibilityLabel("Platform")
                         Menu {
                             ForEach(knownPlatforms, id: \.self) { platform in
                                 Button(platform) { route.platform = platform }
@@ -404,6 +405,7 @@ private struct ProfileRouteEditorSheet: View {
                 TextField("", text: text)
                     .textFieldStyle(.roundedBorder)
                     .font(ScarfFont.monoSmall)
+                    .accessibilityLabel(label)
                 Text(hint)
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)

@@ -153,6 +153,7 @@ struct KanbanCreateSheet: View {
                     .strokeBorder(ScarfColor.borderStrong, lineWidth: 1)
             )
             .focused($titleFocused)
+            .accessibilityLabel("Title")
         }
     }
 
@@ -291,6 +292,7 @@ struct KanbanCreateSheet: View {
         VStack(alignment: .leading, spacing: 4) {
             ScarfSectionHeader("Skills", subtitle: "Comma-separated names from ~/.hermes/skills/")
             ScarfTextField("e.g. translation, github-code-review", text: $skillsInput)
+                .accessibilityLabel("Skills")
         }
     }
 
@@ -298,6 +300,7 @@ struct KanbanCreateSheet: View {
         VStack(alignment: .leading, spacing: 4) {
             ScarfSectionHeader("Tenant", subtitle: "Optional namespace")
             ScarfTextField("(none)", text: $tenant)
+                .accessibilityLabel("Tenant")
         }
     }
 

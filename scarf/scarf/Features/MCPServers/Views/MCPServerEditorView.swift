@@ -167,6 +167,7 @@ struct MCPServerEditorView: View {
                     TextField("tool_a, tool_b", text: $viewModel.includeDraft)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
+                        .accessibilityLabel("Include (comma-separated — if set, only these are exposed)")
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Exclude")
@@ -175,6 +176,7 @@ struct MCPServerEditorView: View {
                     TextField("tool_c", text: $viewModel.excludeDraft)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
+                        .accessibilityLabel("Exclude")
                 }
                 Toggle("Expose resources", isOn: $viewModel.resourcesEnabled)
                 Toggle("Expose prompts", isOn: $viewModel.promptsEnabled)
@@ -192,6 +194,7 @@ struct MCPServerEditorView: View {
                     TextField("default", text: $viewModel.connectTimeoutDraft)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 140)
+                        .accessibilityLabel("Connect timeout")
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Call timeout")
@@ -200,6 +203,7 @@ struct MCPServerEditorView: View {
                     TextField("default", text: $viewModel.timeoutDraft)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 140)
+                        .accessibilityLabel("Call timeout")
                 }
                 if viewModel.server.transport == .sse {
                     VStack(alignment: .leading, spacing: 4) {
@@ -209,6 +213,7 @@ struct MCPServerEditorView: View {
                         TextField("default 300", text: $viewModel.sseReadTimeoutDraft)
                             .textFieldStyle(.roundedBorder)
                             .frame(maxWidth: 140)
+                            .accessibilityLabel("SSE read timeout")
                     }
                 }
                 Spacer()
@@ -269,6 +274,7 @@ struct MCPServerEditorView: View {
                     TextField("/path/to/client.pem", text: $viewModel.clientCertDraft)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
+                        .accessibilityLabel("Client cert path (combined PEM)")
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Client key path")
@@ -277,6 +283,7 @@ struct MCPServerEditorView: View {
                     TextField("/path/to/client.key", text: $viewModel.clientKeyDraft)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
+                        .accessibilityLabel("Client key path")
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("SSL verify")
@@ -318,6 +325,7 @@ struct MCPServerEditorView: View {
                         TextField("X-User-Id", text: $viewModel.identityHeaderNameDraft)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(.body, design: .monospaced))
+                            .accessibilityLabel("Header name")
                     }
                     Picker("Value from", selection: $viewModel.identityHeaderValueFromDraft) {
                         Text("Static").tag(MCPIdentityHeader.ValueSource.static)
@@ -329,6 +337,7 @@ struct MCPServerEditorView: View {
                             Text("Value").font(.caption).foregroundStyle(.secondary)
                             TextField("alice", text: $viewModel.identityHeaderValueDraft)
                                 .textFieldStyle(.roundedBorder)
+                                .accessibilityLabel("Value")
                         }
                     } else {
                         Text("Resolves to the active Hermes profile name at connect time.")
@@ -360,6 +369,7 @@ struct MCPServerEditorView: View {
                 TextField("/path/to/project", text: $viewModel.cwdDraft)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
+                    .accessibilityLabel("Working directory")
                 Text("Working directory the server process launches in. Leave blank for Hermes's own cwd. Requires Hermes v0.20.4+.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
