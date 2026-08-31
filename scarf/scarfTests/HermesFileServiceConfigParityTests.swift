@@ -227,6 +227,7 @@ struct SettingsWriteReadParityTests {
         #"auxiliary.\(task).\(field)"#,
         #"auxiliary.\(task).timeout"#,
         #"auxiliary.\(task).reasoning_effort"#,
+        #"auxiliary.\(task).max_concurrency"#,
         #"auxiliary.title_generation.\(field)"#,
     ]
 
@@ -237,7 +238,7 @@ struct SettingsWriteReadParityTests {
 
     private static func expandedAuxKeys() -> [String] {
         auxTasks.flatMap { task in
-            (auxFields + ["reasoning_effort"]).map { "auxiliary.\(task).\($0)" }
+            (auxFields + ["reasoning_effort", "max_concurrency"]).map { "auxiliary.\(task).\($0)" }
         } + titleGenerationFields.map { "auxiliary.title_generation.\($0)" }
     }
 
