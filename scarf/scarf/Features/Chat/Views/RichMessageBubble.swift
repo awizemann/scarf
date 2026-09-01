@@ -2,6 +2,27 @@ import SwiftUI
 import ScarfCore
 import ScarfDesign
 
+/// Whether user bubbles in this transcript should be scanned for a Bot Mode
+/// teammate-DM prefix. **False everywhere except the Bots section's own
+/// conversation pane.**
+///
+/// The parse (`BotMessageAttribution.parse`) is strict but it is not free,
+/// and main Chat has no teammate DMs in it: running it on every user message
+/// on every host would spend work on a result that is structurally always
+/// `nil` there — and, worse, would let a human-typed message that happened to
+/// mimic the prefix render as if a bot had sent it. Scoping it to the Bots
+/// context keeps main Chat byte-identical to v2.23.0.
+private struct ShowsBotAttributionKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var showsBotAttribution: Bool {
+        get { self[ShowsBotAttributionKey.self] }
+        set { self[ShowsBotAttributionKey.self] = newValue }
+    }
+}
+
 struct RichMessageBubble: View, Equatable {
     let message: HermesMessage
     let toolResults: [String: HermesMessage]
@@ -18,6 +39,10 @@ struct RichMessageBubble: View, Equatable {
     /// these multiplied sizes (issue #68); other surfaces still see
     /// the static ScarfFont tokens at scale = 1.0.
     @Environment(\.chatFontScale) private var chatFontScale: Double
+
+    /// See ``ShowsBotAttributionKey`` — only the Bots conversation pane sets
+    /// this, so main Chat never runs the teammate-DM parse.
+    @Environment(\.showsBotAttribution) private var showsBotAttribution: Bool
 
     /// Scarf-local chat density preferences (issues #47 / #48). All
     /// three default to today's UI. Read here so the reasoning + tool-
@@ -172,7 +197,10 @@ struct RichMessageBubble: View, Equatable {
     /// no column to read — so the prefix is parsed back off and rendered as
     /// a sender chip instead of being shown as body text. See
     /// `BotMessageAttribution` for why the parse is deliberately strict.
-    private var attribution: BotMessageAttribution? { message.botAttribution }
+    private var attribution: BotMessageAttribution? {
+        guard showsBotAttribution else { return nil }
+        return message.botAttribution
+    }
 
     /// What the user bubble actually shows: the body with the attribution
     /// prefix lifted into the chip, or the message unchanged.
@@ -242,7 +270,7 @@ struct RichMessageBubble: View, Equatable {
                             )
                         }
                         .buttonStyle(.plain)
-                        .help("Open the full message in the inspector pane (\(message.content.count) chars)")
+                        .help("Open the full message in the inspector pane (\(userDisplayContent.count) chars)")
                     } else {
                         Text(userDisplayContent)
                             .font(ChatFontScale.body(chatFontScale))

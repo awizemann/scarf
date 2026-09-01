@@ -101,6 +101,11 @@ struct BotConversationView: View {
         // the bot's name.
         .environment(viewModel.chat)
         .environment(\.serverContext, viewModel.context)
+        // Teammate-DM attribution is a Bot Mode concept and is parsed ONLY
+        // here. Main Chat has no agent-to-agent DMs in it, so leaving the
+        // default (false) there keeps its user bubbles byte-identical to
+        // v2.23.0 and spends no work on a parse that can only return nil.
+        .environment(\.showsBotAttribution, true)
         .frame(height: paneHeight)
         .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.lg))
     }

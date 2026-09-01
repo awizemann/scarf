@@ -154,6 +154,45 @@ import SQLite3
         }
     }
 
+    /// The audit's finding, and the reason the test above is not sufficient
+    /// on its own: it starts from a ROOT home, where "return self" and
+    /// "return the root-normalized copy" are the same answer, so it could
+    /// never have caught the bug.
+    ///
+    /// From a **profile-scoped** base — an SSH window scoped to `work`
+    /// (#126) — they differ completely. Returning `self` would hand the
+    /// `default` bot `work`'s `state.db` and launch its ACP unpinned inside
+    /// `work`'s home: the wrong-profile bleed `pinnedToProfile` exists to
+    /// prevent, arrived at through the one input everybody assumes is inert.
+    @Test func defaultAndInvalidNamesFallBackToTheROOTOfAScopedBase() {
+        let scoped = ServerContext(
+            id: UUID(),
+            displayName: "box",
+            kind: .ssh(SSHConfig(host: "box", remoteHome: "~/.hermes/profiles/work"))
+        )
+        #expect(scoped.paths.stateDB == "~/.hermes/profiles/work/state.db")
+        // NB: "work\n" is deliberately absent — `normalize` TRIMS before it
+        // validates, so that IS a legitimate selection of `work`. The
+        // no-trim path is `isValidName`'s guard (see BotModeFixupTests).
+        for name in [nil, "", "default", "  default  ", "../escape", "Has Spaces", "UPPER"] {
+            let pinned = scoped.pinnedToProfile(name)
+            #expect(pinned.paths.home == "~/.hermes",
+                    "\(name ?? "nil") must fall back to the ROOT home, not to work's")
+            #expect(pinned.paths.stateDB == "~/.hermes/state.db")
+        }
+        // And a real name still retargets rather than nesting.
+        #expect(scoped.pinnedToProfile("scout").paths.home == "~/.hermes/profiles/scout")
+    }
+
+    /// A local context scoped by `localHomeOverride` behaves identically —
+    /// the same fallback, on the transport that has no `remoteHome`.
+    @Test func aScopedLocalBaseAlsoFallsBackToItsRoot() {
+        let scoped = ServerContext.local(home: URL(fileURLWithPath: "/tmp/hermes-root/profiles/work"))
+        #expect(scoped.pinnedToProfile(nil).paths.home == "/tmp/hermes-root")
+        #expect(scoped.pinnedToProfile("default").paths.home == "/tmp/hermes-root")
+        #expect(scoped.pinnedToProfile("scout").paths.home == "/tmp/hermes-root/profiles/scout")
+    }
+
     // MARK: - Canonical Bot Chat lookup
 
     @Test func findsTheHiddenBotChatThatOrdinaryListingsFilterOut() async throws {

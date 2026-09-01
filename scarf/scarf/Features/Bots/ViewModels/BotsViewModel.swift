@@ -126,11 +126,25 @@ struct BotDraft: Equatable {
     /// `write_profile_meta` drops an emptied `display_name` instead of
     /// persisting a blank, and a blank `color`/`shape` must fall back to the
     /// generated avatar rather than pin an empty string.
+    /// Collapse a pasted multi-line value into one line. Applied to the
+    /// fields Hermes and Scarf both treat as single-line labels (title,
+    /// color, shape) — a `TextField` won't produce a newline, but a paste
+    /// will, and a two-line "title" is nonsense in every surface that renders
+    /// it. NOT applied to `description`: Hermes stores that through
+    /// `yaml.safe_dump` and round-trips real newlines, so flattening it would
+    /// destroy user content to work around a writer bug that
+    /// `HermesBotProfileYAML.quoted` now handles correctly at the YAML layer.
+    static func singleLine(_ raw: String) -> String {
+        raw.split(whereSeparator: \.isNewline)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     func apply(to identity: inout HermesBotIdentity) {
-        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTitle = Self.singleLine(title)
         let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedColor = color.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedShape = shape.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedColor = Self.singleLine(color)
+        let trimmedShape = Self.singleLine(shape)
 
         // The editor writes one name and one blurb; they land in both the
         // bot block and the profile's own top-level keys so `hermes profile

@@ -37,9 +37,33 @@ public enum HermesProfileScope {
     }()
 
     /// Whether `name` is a syntactically valid Hermes profile id.
+    ///
+    /// **Two anchors, deliberately.** ICU's `$` matches *before a trailing
+    /// line terminator*, so the plain `^…$` pattern accepted `"work\n"` —
+    /// and every caller that validated first and normalized later then wrote
+    /// into the `work` profile while believing it had rejected the input.
+    /// The full-string match below is the `\A…\z` semantics Python's
+    /// `re.fullmatch` gives Hermes.
+    ///
+    /// The second condition is the belt to that suspenders: a name is only
+    /// valid if it is byte-identical to what ``normalize`` would return for
+    /// it. That closes the whole class of "validated one string, used a
+    /// different one" bugs — leading/trailing whitespace included — without
+    /// depending on any one regex flavor's edge cases.
     public static func isValidName(_ name: String) -> Bool {
         let range = NSRange(name.startIndex..<name.endIndex, in: name)
-        return nameRegex.firstMatch(in: name, range: range) != nil
+        guard let match = nameRegex.firstMatch(in: name, range: range),
+              match.range == range else { return false }
+        // `normalize` maps "default" to nil (it IS the root home, not a named
+        // profile), so exclude it here rather than call it a malformed name.
+        guard name != defaultProfileName else { return true }
+        return normalizedCandidate(name) == name
+    }
+
+    /// The trim-only half of ``normalize``, split out so ``isValidName`` can
+    /// compare against it without recursing back through validation.
+    private static func normalizedCandidate(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Normalize a raw selection to either a valid named profile or `nil`

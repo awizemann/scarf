@@ -106,13 +106,37 @@ struct BotConversationTests {
         func close() async {}
     }
 
-    @MainActor
-    private func stubbedChat(context: ServerContext) -> ChatViewModel {
-        let chat = ChatViewModel(context: context)
-        chat.acpClientFactory = { ctx, _ in
-            ACPClient(context: ctx) { _ in InertACPChannel() }
+    /// Records every profile the view model asks an ACP client to be built
+    /// for, and hands back an inert client. This is what the tests inject
+    /// instead of a pre-wired `ChatViewModel`: the profile pinning lives in
+    /// the factory closure `BotConversationViewModel` assigns, so injecting a
+    /// whole chat view model around it — as these tests used to — skipped the
+    /// only thing worth verifying. (The audit's "test theater" finding.)
+    final class ProfileRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var seen: [String] = []
+        func record(_ profile: String) {
+            lock.lock(); defer { lock.unlock() }
+            seen.append(profile)
         }
-        return chat
+        var profiles: [String] {
+            lock.lock(); defer { lock.unlock() }
+            return seen
+        }
+    }
+
+    /// The production-shaped maker, with the channel swapped for an inert
+    /// one. Everything else — including which profile the client is pinned
+    /// to — flows through `BotConversationViewModel`'s own wiring.
+    @MainActor
+    private func recordingMaker(
+        _ recorder: ProfileRecorder,
+        channel: @escaping @Sendable () -> any ACPChannel = { InertACPChannel() }
+    ) -> BotConversationViewModel.ACPClientMaker {
+        { ctx, _, profile in
+            recorder.record(profile)
+            return ACPClient(context: ctx) { _ in channel() }
+        }
     }
 
     @MainActor
@@ -120,19 +144,21 @@ struct BotConversationTests {
         profile: String = "scout",
         found: HermesDataService.CanonicalBotChat? = nil,
         creationFailure: String? = nil,
-        onCreate: (@Sendable (String) -> Void)? = nil
+        onCreate: (@Sendable (String) -> Void)? = nil,
+        recorder: ProfileRecorder = ProfileRecorder(),
+        home: URL = URL(fileURLWithPath: "/tmp/scarf-b3-home")
     ) -> BotConversationViewModel {
         let result = found
-        let context = ServerContext.local(home: URL(fileURLWithPath: "/tmp/scarf-b3-home"))
+        let context = ServerContext.local(home: home)
         return BotConversationViewModel(
             profileName: profile,
             context: context,
-            chat: stubbedChat(context: context.pinnedToProfile(profile)),
             locator: { _ in result },
             creator: { _, _, text in
                 onCreate?(text)
                 return creationFailure
-            }
+            },
+            acpClientMaker: recordingMaker(recorder)
         )
     }
 
@@ -166,9 +192,9 @@ struct BotConversationTests {
         let vm = BotConversationViewModel(
             profileName: "scout",
             context: context,
-            chat: stubbedChat(context: context.pinnedToProfile("scout")),
             locator: { [box = ResolveBox()] _ in box.next() },
-            creator: { _, _, text in sent = text; return nil }
+            creator: { _, _, text in sent = text; return nil },
+            acpClientMaker: recordingMaker(ProfileRecorder())
         )
         vm.open()
         await settle()
@@ -200,9 +226,9 @@ struct BotConversationTests {
         let vm = BotConversationViewModel(
             profileName: "../escape",
             context: context,
-            chat: stubbedChat(context: context),
             locator: { _ in located = true; return nil },
-            creator: { _, _, _ in nil }
+            creator: { _, _, _ in nil },
+            acpClientMaker: recordingMaker(ProfileRecorder())
         )
         vm.open()
         await settle()
@@ -271,12 +297,12 @@ struct BotConversationTests {
         let vm = BotConversationViewModel(
             profileName: "scout",
             context: context,
-            chat: stubbedChat(context: context.pinnedToProfile("scout")),
             locator: { [canon = canonical("late")] _ in
                 await gate.wait()
                 return canon
             },
-            creator: { _, _, _ in nil }
+            creator: { _, _, _ in nil },
+            acpClientMaker: recordingMaker(ProfileRecorder())
         )
         vm.open()
         vm.close()
@@ -286,6 +312,158 @@ struct BotConversationTests {
         // session and it still must not connect.
         #expect(vm.phase == .idle)
         #expect(vm.canonical == nil)
+    }
+
+    // MARK: - The factory wiring itself (audit fixup #7)
+
+    /// The pinning that makes this a BOT conversation lives in the
+    /// `acpClientFactory` closure the view model assigns to its
+    /// `ChatViewModel`. Assert the closure is assigned AND that it captures
+    /// the bot's profile — the thing the old tests bypassed entirely by
+    /// injecting a chat view model that brought its own factory.
+    @MainActor
+    @Test("the ACP client factory is wired to the BOT's profile, not the window's")
+    func acpFactoryCapturesTheBotProfile() {
+        let recorder = ProfileRecorder()
+        let vm = makeVM(profile: "scout", found: canonical("bot-chat-1"), recorder: recorder)
+        // Invoke the closure the view model installed, exactly as
+        // `ChatViewModel.startACPSession` does.
+        _ = vm.chat.acpClientFactory(vm.context, nil)
+        #expect(recorder.profiles == ["scout"])
+    }
+
+    /// And the context handed to it is the profile-pinned one, so the agent
+    /// and the `state.db` it writes into are the same Hermes install.
+    @MainActor
+    @Test("the pinned context and the pinned agent name the same profile")
+    func factoryContextAndProfileAgree() {
+        let vm = makeVM(profile: "scout")
+        #expect(vm.context.paths.home.hasSuffix("profiles/scout"))
+        #expect(ACPClient.acpArguments(profile: vm.profileName) == ["-p", "scout", "acp"])
+    }
+
+    /// A profile Hermes would reject is never handed to the factory at all —
+    /// the guard runs before any process or path is built.
+    @MainActor
+    @Test("an unaddressable profile never reaches the ACP factory")
+    func unaddressableProfileNeverReachesTheFactory() async {
+        let recorder = ProfileRecorder()
+        let vm = makeVM(profile: "../escape", found: canonical("x"), recorder: recorder)
+        vm.open()
+        await settle()
+        #expect(recorder.profiles.isEmpty)
+    }
+
+    // MARK: - The real session/load failure path (audit fixup #7)
+
+    /// A scripted ACP peer: `initialize` succeeds, **`session/load` fails**,
+    /// and `session/new` mints a different session — the exact sequence
+    /// `ChatViewModel.startACPSession`'s fallback takes on a session ACP
+    /// cannot load (a CLI-only or cron session). Driving the real code path
+    /// is the point: the previous test hand-assigned `sessionId`, which
+    /// proved the verifier's comparison worked but not that the fallback it
+    /// exists to catch actually reaches it.
+    actor ScriptedACPChannel: ACPChannel {
+        static let fallbackSessionId = "new-untitled-session"
+
+        private var continuation: AsyncThrowingStream<String, Error>.Continuation?
+        private let box = Box()
+
+        final class Box: @unchecked Sendable {
+            private let lock = NSLock()
+            private var cont: AsyncThrowingStream<String, Error>.Continuation?
+            private var buffered: [String] = []
+            func attach(_ c: AsyncThrowingStream<String, Error>.Continuation) {
+                lock.lock(); defer { lock.unlock() }
+                cont = c
+                buffered.forEach { c.yield($0) }
+                buffered = []
+            }
+            func emit(_ line: String) {
+                lock.lock(); defer { lock.unlock() }
+                if let cont { cont.yield(line) } else { buffered.append(line) }
+            }
+        }
+
+        nonisolated var diagnosticID: String? { "scripted" }
+        nonisolated var lastExitCode: Int32? { nil }
+
+        nonisolated var incoming: AsyncThrowingStream<String, Error> {
+            AsyncThrowingStream { continuation in box.attach(continuation) }
+        }
+        nonisolated var stderr: AsyncThrowingStream<String, Error> {
+            AsyncThrowingStream { $0.finish() }
+        }
+
+        nonisolated func send(_ line: String) async throws {
+            guard let data = line.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let id = object["id"] as? Int else { return }
+            let method = object["method"] as? String ?? ""
+            let payload: String
+            switch method {
+            case "session/load":
+                // The failure main Chat legitimately falls back from.
+                payload = #"{"jsonrpc":"2.0","id":\#(id),"error":{"code":-32603,"message":"session is not restorable"}}"#
+            case "session/new":
+                payload = #"{"jsonrpc":"2.0","id":\#(id),"result":{"sessionId":"\#(Self.fallbackSessionId)"}}"#
+            default:
+                payload = #"{"jsonrpc":"2.0","id":\#(id),"result":{"protocolVersion":1}}"#
+            }
+            box.emit(payload)
+        }
+
+        nonisolated func close() async {}
+    }
+
+    /// A Hermes home complete enough for `startACPSession` to get past its
+    /// model preflight — otherwise the start returns before ACP is touched
+    /// and the test would pass without exercising anything.
+    private func makeConfiguredHome() throws -> URL {
+        let home = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("scarf-b3-acp-\(UUID().uuidString)")
+        // The BOT's home, not the root: the view model pins the context to
+        // `<root>/profiles/scout`, and that is where the preflight reads its
+        // config from — which is itself the wrong-profile invariant B3 is
+        // built on, visible here as a test setup detail.
+        let profileHome = home.appendingPathComponent("profiles/scout")
+        try FileManager.default.createDirectory(at: profileHome, withIntermediateDirectories: true)
+        let config = "model:\n  default: anthropic/claude-x\n  provider: anthropic\n"
+        try config.write(to: home.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
+        try config.write(to: profileHome.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
+        return home
+    }
+
+    @MainActor
+    @Test("a real session/load failure drives the fallback into verifyCanonicalBinding, which refuses it")
+    func loadFailureFallbackIsCaughtByTheVerifier() async throws {
+        let home = try makeConfiguredHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let context = ServerContext.local(home: home)
+        let vm = BotConversationViewModel(
+            profileName: "scout",
+            context: context,
+            locator: { _ in HermesDataService.CanonicalBotChat(registryId: "bot-chat-1", liveId: "bot-chat-1") },
+            creator: { _, _, _ in nil },
+            acpClientMaker: { ctx, _, _ in ACPClient(context: ctx) { _ in ScriptedACPChannel() } }
+        )
+        vm.open()
+
+        // No hand-set session id anywhere: ACP really answers, really fails
+        // `session/load`, really falls back to `session/new`, and the
+        // verifier really sees the drift.
+        for _ in 0..<200 {
+            if case .failed = vm.phase { break }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        guard case .failed(let message) = vm.phase else {
+            Issue.record("expected .failed after the session/new fallback, got \(vm.phase)")
+            return
+        }
+        #expect(message.contains(BotChatSession.canonicalTitle))
+        #expect(vm.canonical == nil)
+        #expect(!vm.chat.isACPConnected, "the drifted ACP process must be stopped")
+        #expect(vm.chat.richChatViewModel.sessionId != "bot-chat-1")
     }
 
     // MARK: - One live conversation at a time (BotsViewModel)
@@ -301,9 +479,9 @@ struct BotConversationTests {
             return BotConversationViewModel(
                 profileName: name,
                 context: ctx,
-                chat: stubbedChat(context: ctx.pinnedToProfile(name)),
                 locator: { _ in nil },
-                creator: { _, _, _ in nil }
+                creator: { _, _, _ in nil },
+                acpClientMaker: self.recordingMaker(ProfileRecorder())
             )
         }
 
@@ -330,8 +508,8 @@ struct BotConversationTests {
         vm.makeConversation = { ctx, name in
             BotConversationViewModel(
                 profileName: name, context: ctx,
-                chat: stubbedChat(context: ctx.pinnedToProfile(name)),
-                locator: { _ in nil }, creator: { _, _, _ in nil }
+                locator: { _ in nil }, creator: { _, _, _ in nil },
+                acpClientMaker: self.recordingMaker(ProfileRecorder())
             )
         }
         vm.selectedProfileName = "scout"

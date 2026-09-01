@@ -70,30 +70,67 @@ final class BotConversationViewModel {
     @ObservationIgnored
     var creator: @Sendable (ServerContext, String, String) async -> String?
 
+    /// How the bot's ACP client is built. **Always** goes through this — the
+    /// production default and every test alike — so the profile wiring below
+    /// is exercised rather than bypassed. (The audit's "test theater"
+    /// finding: injecting a whole pre-wired `ChatViewModel` skipped the
+    /// factory assignment entirely, so nothing verified that the ACP process
+    /// is pinned to the bot.)
+    typealias ACPClientMaker = @Sendable (ServerContext, String?, String) -> ACPClient
+
+    /// Nonisolated, thread-safe handle on the last ACP client this
+    /// conversation spawned, so ``deinit`` can reap the `hermes acp`
+    /// subprocess. `deinit` cannot hop to `@MainActor` to call
+    /// `chat.stopACP()`, and `AppCoordinator` has no teardown hook, so
+    /// without this a hard dealloc (window closed, coordinator rebuilt on a
+    /// server switch) orphans a live subprocess for the life of the app.
+    /// `ACPClient` is an actor, hence `Sendable`, hence safe to hand to the
+    /// detached task `deinit` starts; `stop()` closes the channel, which
+    /// terminates the process.
+    private final class ACPHandle: @unchecked Sendable {
+        private let lock = NSLock()
+        private var client: ACPClient?
+        func set(_ newClient: ACPClient) {
+            lock.lock(); defer { lock.unlock() }
+            client = newClient
+        }
+        func take() -> ACPClient? {
+            lock.lock(); defer { lock.unlock() }
+            let current = client
+            client = nil
+            return current
+        }
+    }
+
+    @ObservationIgnored private nonisolated let acpHandle = ACPHandle()
+
     init(
         profileName: String,
         context: ServerContext,
         chat: ChatViewModel? = nil,
         locator: (@Sendable (ServerContext) async -> HermesDataService.CanonicalBotChat?)? = nil,
-        creator: (@Sendable (ServerContext, String, String) async -> String?)? = nil
+        creator: (@Sendable (ServerContext, String, String) async -> String?)? = nil,
+        acpClientMaker: ACPClientMaker? = nil
     ) {
         self.profileName = profileName
         let pinned = context.pinnedToProfile(profileName)
         self.context = pinned
-        let vm: ChatViewModel
-        if let chat {
-            // Injected by a test, which brings its own factory.
-            vm = chat
-        } else {
-            vm = ChatViewModel(context: pinned)
-            // Pin the ACP subprocess to the bot's profile. Without this the
-            // context alone would point reads at the bot while the AGENT
-            // ran as the user's active profile — the transcript and the
-            // entity writing into it would be two different Hermes
-            // installs.
-            vm.acpClientFactory = { ctx, projectCwd in
-                ACPClient.forMacApp(context: ctx, projectCwd: projectCwd, profile: profileName)
-            }
+        let vm = chat ?? ChatViewModel(context: pinned)
+        // Pin the ACP subprocess to the bot's profile. Without this the
+        // context alone would point reads at the bot while the AGENT ran as
+        // the user's active profile — the transcript and the entity writing
+        // into it would be two different Hermes installs. Assigned
+        // unconditionally, including over an injected `ChatViewModel`: this
+        // wiring is the whole point of the type, so nothing gets to opt out
+        // of it.
+        let make: ACPClientMaker = acpClientMaker ?? { ctx, projectCwd, profile in
+            ACPClient.forMacApp(context: ctx, projectCwd: projectCwd, profile: profile)
+        }
+        let handle = acpHandle
+        vm.acpClientFactory = { ctx, projectCwd in
+            let client = make(ctx, projectCwd, profileName)
+            handle.set(client)
+            return client
         }
         self.chat = vm
         self.locator = locator ?? { ctx in
@@ -186,6 +223,20 @@ final class BotConversationViewModel {
             }
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
+        // Fell out of the poll loop (~200s) without ACP ever reporting a
+        // session id. Previously this returned silently, leaving the UI in
+        // `.live` with a composer that would send prompts into a session
+        // that was never confirmed to be the Bot Chat — the exact outcome
+        // the verifier exists to prevent, reached by timeout instead of by
+        // drift. Fail the same way, loudly.
+        guard !Task.isCancelled, generation == intent else { return }
+        chat.stopACP()
+        canonical = nil
+        phase = .failed(
+            "Hermes never finished opening this bot’s “\(BotChatSession.canonicalTitle)” session, "
+            + "so Scarf can’t confirm messages would reach the bot. Check that `hermes acp` starts "
+            + "for this profile, then try again."
+        )
     }
 
     /// Tear the conversation down: cancel any in-flight resolve and stop
@@ -198,8 +249,20 @@ final class BotConversationViewModel {
         work?.cancel()
         work = nil
         chat.stopACP()
+        _ = acpHandle.take()
         canonical = nil
         phase = .idle
+    }
+
+    /// Last-resort reaper. `close()` is the intended teardown and does this
+    /// properly (bounded `session/cancel`, transcript finalization); this
+    /// only covers the paths where nothing calls it — the window closing, or
+    /// `AppCoordinator` being rebuilt on a server switch. Kills the process
+    /// and nothing else: no `self` is captured (it is already deallocating),
+    /// and the detached task holds the actor alone.
+    deinit {
+        guard let client = acpHandle.take() else { return }
+        Task.detached { await client.stop() }
     }
 
     // MARK: - Sending
@@ -293,13 +356,33 @@ final class BotConversationViewModel {
             // the remote path runs it through `bash -lc`. This is the same
             // reason Hermes' own tool stopped hand-assembling the command
             // (the quoting traps its docstring cites, #91339/#91304).
-            let path = "/tmp/scarf-bot-chat-\(UUID().uuidString).txt"
-            defer { try? transport.removeFile(path) }
+            //
+            // `/tmp` is world-readable and world-writable, and the message
+            // is the user's private prompt to their agent. Stage it inside a
+            // 0700 directory of our own so it is unreadable to other users
+            // for its whole lifetime — the directory mode is set BEFORE the
+            // file exists, which the file's own 0600 (applied right after,
+            // belt-and-braces) cannot be. Both `chmod`s are best-effort:
+            // failing to tighten permissions must not break the send, but it
+            // must also not be silent about which layer is load-bearing.
+            let dir = "/tmp/scarf-bot-chat-\(UUID().uuidString)"
+            let path = "\(dir)/message.txt"
+            defer {
+                try? transport.removeFile(path)
+                _ = try? transport.runProcess(executable: "/bin/rm", args: ["-rf", dir], stdin: nil, timeout: 15)
+            }
+            do {
+                try transport.createDirectory(dir)
+            } catch {
+                return "Couldn’t stage the message for \(name): \(error.localizedDescription)"
+            }
+            _ = try? transport.runProcess(executable: "/bin/chmod", args: ["700", dir], stdin: nil, timeout: 15)
             do {
                 try transport.writeFile(path, data: Data(text.utf8))
             } catch {
                 return "Couldn’t stage the message for \(name): \(error.localizedDescription)"
             }
+            _ = try? transport.runProcess(executable: "/bin/chmod", args: ["600", path], stdin: nil, timeout: 15)
             let result = context.runHermes(
                 [
                     "-p", name,

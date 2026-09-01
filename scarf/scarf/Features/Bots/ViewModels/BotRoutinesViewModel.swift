@@ -26,8 +26,22 @@ final class BotRoutinesViewModel {
     /// `createRoutineArguments`). This initializer still accepts an
     /// injected `CronViewModel` so a caller sharing one instance across
     /// several bots (unusual, but not precluded) can do so.
+    /// The profile that OWNS the cron store these jobs are created in — the
+    /// window's profile, not the bot's. `hermes cron` has one store per
+    /// profile and runs every job as that profile, so this is the value the
+    /// delegation wrapper is decided against (see ``BotRoutineDelegation``).
+    /// Derived from the context's home the same way every other per-profile
+    /// discriminator is (`HermesProfileScope.profileName(forHome:)`), with a
+    /// root home meaning the `default` profile. This is correct on local
+    /// hosts too: `HermesPathSet.defaultLocalHome` already resolves
+    /// `~/.hermes/active_profile`, so a Mac running under profile `work` has
+    /// a `<root>/profiles/work` home and is identified as such.
+    let storeProfile: String
+
     init(context: ServerContext, botName: String, cron: CronViewModel? = nil) {
         self.botName = botName
+        self.storeProfile = HermesProfileScope.profileName(forHome: context.paths.home)
+            ?? HermesProfileScope.defaultProfileName
         self.cron = cron ?? CronViewModel(context: context)
     }
 
@@ -74,6 +88,15 @@ final class BotRoutinesViewModel {
     /// `cron create --name "[bot:<name>] <title>" <schedule> <prompt>
     /// [--deliver bot-chat:<profile>]`.
     ///
+    /// **The prompt is not the user's instruction verbatim** when the bot
+    /// differs from the cron store's own profile. `hermes cron` runs every
+    /// job as the profile that owns the store, so the raw instruction would
+    /// execute with the *window* profile's memory, skills and credentials
+    /// under the bot's name. ``BotRoutineDelegation`` wraps it in the exact
+    /// `hermes -p <bot> chat …` delegation form Hermes Desktop uses
+    /// (`cron.tsx:270-286`), marker included, so the two clients produce
+    /// interchangeable jobs.
+    ///
     /// Delivery is gated on `hasCronBotChatDelivery` (W7, `isV0206OrLater`):
     /// on a host below that floor `bot-chat:` delivery isn't a Hermes concept
     /// yet, so the sheet falls back to no `--deliver` at all (the job still
@@ -85,37 +108,75 @@ final class BotRoutinesViewModel {
         prompt: String,
         hasCronBotChatDelivery: Bool
     ) {
-        let name = BotRoutinePrefix.routineName(forBot: botName, title: title)
-        let deliver = hasCronBotChatDelivery ? "bot-chat:\(botName)" : ""
+        let fields = Self.routineFields(
+            botName: botName,
+            storeProfile: storeProfile,
+            title: title,
+            instruction: prompt,
+            hasCronBotChatDelivery: hasCronBotChatDelivery
+        )
         cron.createJob(
             schedule: schedule,
-            prompt: prompt,
-            name: name,
-            deliver: deliver,
+            prompt: fields.prompt,
+            name: fields.name,
+            deliver: fields.deliver,
             skills: [],
             script: "",
             repeatCount: ""
         )
     }
 
-    /// Pure argv-shape helper, exposed for tests: what `createRoutine` would
-    /// hand `CronViewModel.createJob` — i.e. the exact `--name`/`--deliver`
-    /// Scarf composes, without needing a live `CronViewModel`/transport to
-    /// observe it. Mirrors `CronViewModel.createJob`'s own flag order.
+    /// The three values `createRoutine` hands `CronViewModel.createJob`.
+    /// Single source of truth for both the live call above and the argv
+    /// helper below — neither re-derives them.
+    nonisolated static func routineFields(
+        botName: String,
+        storeProfile: String,
+        title: String,
+        instruction: String,
+        hasCronBotChatDelivery: Bool
+    ) -> (name: String, prompt: String, deliver: String) {
+        (
+            name: BotRoutinePrefix.routineName(forBot: botName, title: title),
+            prompt: BotRoutineDelegation.prompt(
+                bot: botName,
+                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                instruction: instruction,
+                storeProfile: storeProfile
+            ),
+            deliver: hasCronBotChatDelivery ? "bot-chat:\(botName)" : ""
+        )
+    }
+
+    /// The exact argv `createRoutine` produces, without needing a live
+    /// `CronViewModel`/transport to observe it. Composed by calling the
+    /// PRODUCTION builders — `routineFields` above and
+    /// `CronViewModel.createJobArguments` — so a test asserting this is
+    /// asserting the command line Scarf actually runs, not a parallel
+    /// re-implementation of it.
     nonisolated static func createRoutineArguments(
         botName: String,
+        storeProfile: String,
         title: String,
         schedule: String,
         prompt: String,
         hasCronBotChatDelivery: Bool
     ) -> [String] {
-        let name = BotRoutinePrefix.routineName(forBot: botName, title: title)
-        var args = ["cron", "create", "--name", name]
-        if hasCronBotChatDelivery {
-            args += ["--deliver", "bot-chat:\(botName)"]
-        }
-        args.append(schedule)
-        if !prompt.isEmpty { args.append(prompt) }
-        return args
+        let fields = routineFields(
+            botName: botName,
+            storeProfile: storeProfile,
+            title: title,
+            instruction: prompt,
+            hasCronBotChatDelivery: hasCronBotChatDelivery
+        )
+        return CronViewModel.createJobArguments(
+            schedule: schedule,
+            prompt: fields.prompt,
+            name: fields.name,
+            deliver: fields.deliver,
+            skills: [],
+            script: "",
+            repeatCount: ""
+        )
     }
 }

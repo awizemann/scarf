@@ -49,6 +49,17 @@ import Foundation
 /// than Hermes' own writer, which `safe_load`s and `safe_dump`s the whole file
 /// and drops every comment in it.
 ///
+/// **Two documented exceptions, both confined to the managed block.**
+/// 1. *Blank lines inside `hermes-bots:` are not preserved.* Modeled keys are
+///    re-emitted in a stable order and unknown keys are appended after them,
+///    so a blank line's position no longer means anything once the block is
+///    rewritten; keeping it would move it somewhere it wasn't. Blank lines
+///    everywhere ELSE in the file — including between `ui_meta`'s children —
+///    are untouched, and the block's own trailing blank line is left outside
+///    the replaced range.
+/// 2. *Key order inside `hermes-bots:` is not preserved* (see
+///    ``renderBotMeta`` for why no consumer depends on it).
+///
 /// The writer **refuses** (returns `nil`) rather than guessing whenever the
 /// file is in a shape it cannot edit safely — see ``write(identity:into:)``.
 public enum HermesBotProfileYAML {
@@ -99,9 +110,9 @@ public enum HermesBotProfileYAML {
 
         // Top-level scalars. Hermes strips these on read (`str(...).strip()`),
         // so Scarf compares and renders the stripped form too.
-        identity.displayName = scalar(named: "display_name", in: lines).map(HermesYAML.stripYAMLQuotes)?
+        identity.displayName = scalar(named: "display_name", in: lines).map(unquote)?
             .trimmingCharacters(in: .whitespaces) ?? ""
-        identity.profileDescription = scalar(named: "description", in: lines).map(HermesYAML.stripYAMLQuotes)?
+        identity.profileDescription = scalar(named: "description", in: lines).map(unquote)?
             .trimmingCharacters(in: .whitespaces) ?? ""
         identity.descriptionIsAuto = truthy(scalar(named: "description_auto", in: lines) ?? "") ?? false
 
@@ -168,7 +179,7 @@ public enum HermesBotProfileYAML {
                 continue
             }
 
-            let value = HermesYAML.stripYAMLQuotes(rawValue.hasPrefix("#") ? "" : rawValue)
+            let value = unquote(rawValue.hasPrefix("#") ? "" : rawValue)
             switch key {
             case "title": identity.title = value
             case "description": identity.botDescription = value
@@ -214,6 +225,13 @@ public enum HermesBotProfileYAML {
     ///     without re-emitting a sibling key it does not model;
     ///   - a top-level `display_name` / `description` / `description_auto`
     ///     that carries a nested body instead of a scalar;
+    ///   - a **duplicate `hermes-bots:`** inside `ui_meta` — PyYAML reads the
+    ///     LAST, this writer's locator finds the FIRST, so an edit could be
+    ///     silently invisible to Hermes (same rationale as the top-level
+    ///     duplicate-key refusal);
+    ///   - a **tab-indented** `ui_meta` body, which YAML forbids and this
+    ///     space-counting writer would misread as an empty block (and then
+    ///     append a second `hermes-bots` beside the hidden one);
     ///   - a rendered `hermes-bots` block over ``maxBotMetaBytes``, which the
     ///     gateway would reject anyway.
     ///
@@ -221,10 +239,55 @@ public enum HermesBotProfileYAML {
     ///   read-only rather than fall back to some other write — a partial
     ///   write here is somebody's bot roster.
     public static func write(identity: HermesBotIdentity, into yaml: String) -> String? {
-        let usesCRLF = yaml.contains("\r\n")
         let source = normalized(yaml)
         guard let result = writeLF(identity: identity, into: source) else { return nil }
-        return usesCRLF ? result.replacingOccurrences(of: "\n", with: "\r\n") : result
+        return restoreLineEndings(result, matching: yaml)
+    }
+
+    /// Re-attach the source file's per-line terminators to the rewritten text.
+    ///
+    /// The old code flipped the WHOLE file to CRLF whenever a single `\r\n`
+    /// appeared anywhere, which rewrote every untouched line in a
+    /// mixed-ending file (and showed up as a whole-file diff to anything
+    /// watching it). Lines that survive the edit keep the ending they had;
+    /// lines Scarf actually wrote get the file's dominant ending. A pure-LF
+    /// file — the overwhelmingly common case — takes the fast path and is
+    /// byte-identical to before.
+    private static func restoreLineEndings(_ result: String, matching original: String) -> String {
+        guard original.contains("\r\n") else { return result }
+        let rawLines = original.components(separatedBy: "\n")
+        var content: [String] = []
+        var endings: [String] = []
+        content.reserveCapacity(rawLines.count)
+        for raw in rawLines {
+            if raw.hasSuffix("\r") {
+                content.append(String(raw.dropLast()))
+                endings.append("\r\n")
+            } else {
+                content.append(raw)
+                endings.append("\n")
+            }
+        }
+        let dominant = endings.filter { $0 == "\r\n" }.count * 2 >= endings.count ? "\r\n" : "\n"
+
+        let outLines = result.components(separatedBy: "\n")
+        var out = ""
+        var cursor = 0
+        for (index, line) in outLines.enumerated() {
+            out += line
+            guard index < outLines.count - 1 else { break }
+            // Greedy re-sync: the writer only ever replaces contiguous
+            // regions, so the next occurrence of this line at or after the
+            // cursor is the line it came from.
+            var matched: String?
+            var probe = cursor
+            while probe < content.count {
+                if content[probe] == line { matched = endings[probe]; cursor = probe + 1; break }
+                probe += 1
+            }
+            out += matched ?? dominant
+        }
+        return out
     }
 
     private static func writeLF(identity: HermesBotIdentity, into yaml: String) -> String? {
@@ -268,21 +331,62 @@ public enum HermesBotProfileYAML {
         return setBotBlock(identity: identity, in: lines)
     }
 
+    /// Whether the rendered block fits the gateway's ceiling. Measured on the
+    /// EXACT lines about to be written (audit fix): the previous code sized a
+    /// `keyIndent: 2` rendering and then wrote a differently-indented one, so
+    /// a deeply-indented file could sail past the guard it was supposed to be
+    /// stopped by.
+    private static func fitsSizeLimit(_ rendered: [String]) -> Bool {
+        rendered.isEmpty || rendered.joined(separator: "\n").utf8.count <= maxBotMetaBytes
+    }
+
+    /// Tab-indented body under `ui_meta:`. YAML forbids tabs as indentation
+    /// outright, so PyYAML raises on the file — but this writer's `indentOf`
+    /// counts only spaces, which makes a tab-indented line look like column 0
+    /// and hides the whole body. The block would then be "not found" and a
+    /// SECOND `hermes-bots` appended beside the invisible first one. Refuse
+    /// instead; the file is already unloadable and Scarf must not make it
+    /// worse.
+    private static func hasTabIndentedBody(after keyIndex: Int, in lines: [String]) -> Bool {
+        var i = keyIndex + 1
+        while i < lines.count {
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("\t") { return true }
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { i += 1; continue }
+            // A line at column 0 ends `ui_meta`'s region.
+            guard indentOf(line) > 0 else { return false }
+            i += 1
+        }
+        return false
+    }
+
+    /// Every direct `hermes-bots` child of `ui_meta`, not just the first.
+    /// PyYAML resolves duplicate keys LAST-wins while ``locateBotBlock``
+    /// takes the FIRST, so editing one of several is a coin flip on whether
+    /// Hermes ever sees the edit — the same rationale as the top-level
+    /// duplicate-key refusal in ``setScalar``.
+    private static func botBlockCount(in lines: [String], uiMeta: Block) -> Int {
+        guard let childIndent = uiMeta.bodyIndent else { return 0 }
+        var count = 0
+        for i in uiMeta.bodyRange where indentOf(lines[i]) == childIndent
+            && isKeyLine(lines[i], named: botMetaKey) {
+            count += 1
+        }
+        return count
+    }
+
     private static func setBotBlock(identity: HermesBotIdentity, in input: [String]) -> String? {
         var lines = input
-
-        let body = identity.isBotManaged ? renderBotMeta(identity, keyIndent: 2) : []
-        if !body.isEmpty {
-            let bytes = body.joined(separator: "\n").utf8.count
-            guard bytes <= maxBotMetaBytes else { return nil }
-        }
 
         let uiMeta = locate(key: "ui_meta", indent: 0, in: lines, from: 0, to: lines.count)
 
         guard let uiMeta else {
             // No ui_meta at all. Nothing to remove; nothing to add when the
             // profile isn't bot-managed.
+            let body = identity.isBotManaged ? renderBotMeta(identity, keyIndent: 2) : []
             guard !body.isEmpty else { return lines.joined(separator: "\n") }
+            guard fitsSizeLimit(body) else { return nil }
             return append(block: ["ui_meta:"] + body, to: lines).joined(separator: "\n")
         }
 
@@ -291,17 +395,23 @@ public enum HermesBotProfileYAML {
             // Only `{}` reaches here; a populated flow map was refused above,
             // and any other scalar (`null`, `~`) carries nothing to lose.
             _ = inline
+            let body = identity.isBotManaged ? renderBotMeta(identity, keyIndent: 2) : []
             if body.isEmpty {
                 lines.remove(at: uiMeta.keyIndex)
                 return lines.joined(separator: "\n")
             }
+            guard fitsSizeLimit(body) else { return nil }
             lines.replaceSubrange(uiMeta.keyIndex...uiMeta.keyIndex, with: ["ui_meta:"] + body)
             return lines.joined(separator: "\n")
         }
 
+        if hasTabIndentedBody(after: uiMeta.keyIndex, in: lines) { return nil }
+        guard botBlockCount(in: lines, uiMeta: uiMeta) <= 1 else { return nil }
+
         let existing = locateBotBlock(in: lines, uiMeta: uiMeta)
         let metaIndent = existing?.keyIndent ?? uiMeta.bodyIndent ?? 2
         let rendered = identity.isBotManaged ? renderBotMeta(identity, keyIndent: metaIndent) : []
+        guard fitsSizeLimit(rendered) else { return nil }
 
         if let existing {
             let replaceRange = existing.keyIndex..<max(existing.bodyRange.upperBound, existing.keyIndex + 1)
@@ -511,7 +621,7 @@ public enum HermesBotProfileYAML {
         for idx in range {
             let trimmed = lines[idx].trimmingCharacters(in: .whitespaces)
             guard trimmed.hasPrefix("- ") else { continue }
-            out.append(HermesYAML.stripYAMLQuotes(String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)))
+            out.append(unquote(String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)))
         }
         return out
     }
@@ -562,10 +672,133 @@ public enum HermesBotProfileYAML {
         return !falsyScalars.contains(value)
     }
 
+    /// Characters that a **single-quoted** YAML scalar cannot carry on one
+    /// line: every C0 control (newline included), DEL, and the three extra
+    /// Unicode line breaks YAML 1.1 recognizes (NEL, LS, PS).
+    ///
+    /// This set is the whole reason `quoted` has two arms. A single-quoted
+    /// scalar escapes exactly one thing — `''` for a literal quote — and has
+    /// no escape for a line break at all, so emitting `'line1\nline2'` with a
+    /// REAL newline produces a *multi-line flow scalar*. Verified against
+    /// PyYAML 6.0.3, that fails in two distinct ways, both reachable from the
+    /// editor's multi-line description field:
+    ///
+    /// 1. **Silent value destruction (the common case).** YAML line-folding
+    ///    turns every interior newline into a space and every blank line into
+    ///    a single newline. The user's paragraphs come back as one run-on
+    ///    line — and because Scarf re-reads the file before the next save,
+    ///    the mangled form is what gets persisted. Cumulative, and invisible.
+    /// 2. **Total metadata loss (the sharp case).** A line that is exactly
+    ///    `---` or `...` — ordinary in pasted prose or markdown — terminates
+    ///    the document mid-scalar and PyYAML raises on the whole file.
+    ///    Hermes' `read_profile_meta` swallows any exception and returns
+    ///    empty defaults, and `_is_bot_managed` then returns False: the
+    ///    profile loses `display_name`, `description`, the entire
+    ///    `hermes-bots` block, and drops out of the bot roster entirely.
+    private static func requiresDoubleQuoting(_ raw: String) -> Bool {
+        raw.unicodeScalars.contains { scalar in
+            scalar.value < 0x20 || scalar.value == 0x7F
+                || scalar.value == 0x85 || scalar.value == 0x2028 || scalar.value == 0x2029
+        }
+    }
+
+    /// A YAML **double-quoted** scalar — the one flow style with escapes, and
+    /// therefore the only single-line form that can carry a newline. PyYAML
+    /// decodes `\n` / `\t` / `\xNN` / `\uNNNN` here exactly as written, so a
+    /// value round-trips to the same Swift string it came from. Hermes' own
+    /// writer would have chosen a block or double-quoted scalar for the same
+    /// input (`atomic_yaml_write` → `yaml.safe_dump`), so nothing downstream
+    /// is surprised by the style; this is just the form a line-oriented
+    /// writer can own.
+    private static func doubleQuoted(_ raw: String) -> String {
+        var out = "\""
+        for scalar in raw.unicodeScalars {
+            switch scalar {
+            case "\\": out += "\\\\"
+            case "\"": out += "\\\""
+            case "\n": out += "\\n"
+            case "\r": out += "\\r"
+            case "\t": out += "\\t"
+            default:
+                if scalar.value < 0x20 || scalar.value == 0x7F {
+                    out += String(format: "\\x%02x", scalar.value)
+                } else if scalar.value == 0x85 || scalar.value == 0x2028 || scalar.value == 0x2029 {
+                    out += String(format: "\\u%04x", scalar.value)
+                } else {
+                    out.unicodeScalars.append(scalar)
+                }
+            }
+        }
+        return out + "\""
+    }
+
+    /// The inverse of ``quoted`` — decode a flow scalar the way PyYAML does.
+    ///
+    /// Kept local to this type rather than folded into
+    /// `unquote` (which every other parser shares and
+    /// which only strips the outer pair): `hermes-bots` is the one block
+    /// Scarf both reads AND writes, so it is the one block that has to
+    /// round-trip escapes exactly, and widening the shared helper would
+    /// change the meaning of every unrelated `\` in a Hermes config.
+    static func unquote(_ raw: String) -> String {
+        guard raw.count >= 2 else { return raw }
+        if raw.first == "'" && raw.last == "'" {
+            return String(raw.dropFirst().dropLast()).replacingOccurrences(of: "''", with: "'")
+        }
+        guard raw.first == "\"" && raw.last == "\"" else { return raw }
+        var out = ""
+        var it = Array(raw.dropFirst().dropLast())
+        var i = 0
+        func hex(_ count: Int) -> String? {
+            guard i + count <= it.count else { return nil }
+            let digits = String(it[i..<(i + count)])
+            guard digits.allSatisfy(\.isHexDigit),
+                  let value = UInt32(digits, radix: 16),
+                  let scalar = Unicode.Scalar(value) else { return nil }
+            i += count
+            return String(Character(scalar))
+        }
+        while i < it.count {
+            let c = it[i]
+            i += 1
+            guard c == "\\", i < it.count else { out.append(c); continue }
+            let esc = it[i]
+            i += 1
+            switch esc {
+            case "n": out.append("\n")
+            case "r": out.append("\r")
+            case "t": out.append("\t")
+            case "0": out.append("\0")
+            case "a": out.append("\u{07}")
+            case "b": out.append("\u{08}")
+            case "f": out.append("\u{0C}")
+            case "v": out.append("\u{0B}")
+            case "e": out.append("\u{1B}")
+            case "\\": out.append("\\")
+            case "\"": out.append("\"")
+            case "/": out.append("/")
+            case "x": out.append(hex(2) ?? "\\x")
+            case "u": out.append(hex(4) ?? "\\u")
+            case "U": out.append(hex(8) ?? "\\U")
+            default: out.append(esc)
+            }
+        }
+        it = []
+        return out
+    }
+
     /// Quote only when the value would otherwise change meaning — same rule as
-    /// `ProfileRoutesWriter.quoted`, so ordinary titles stay readable.
+    /// `ProfileRoutesWriter.quoted`, so ordinary titles stay readable — with
+    /// one hard rule layered on top: a value carrying a line break or any
+    /// other control character is emitted as a **double-quoted** scalar,
+    /// never a single-quoted one. See ``requiresDoubleQuoting``.
+    ///
+    /// Post-condition, and the invariant every caller relies on: for ANY
+    /// input string this returns a single line of valid YAML that PyYAML
+    /// loads back as that exact string.
     static func quoted(_ raw: String) -> String {
         if raw.isEmpty { return "''" }
+        if requiresDoubleQuoting(raw) { return doubleQuoted(raw) }
         let needsQuoting = raw.contains(":")
             || raw.contains("#")
             || raw.contains("&")

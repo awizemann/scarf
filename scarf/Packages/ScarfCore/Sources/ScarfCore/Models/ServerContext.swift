@@ -246,11 +246,18 @@ public struct ServerContext: Sendable, Hashable, Identifiable {
     /// chat under the bot's name — the wrong-profile bleed this method
     /// exists to make impossible.
     ///
-    /// `nil`/`"default"`/invalid → returned unchanged (the root home). The
-    /// base is normalized to its root first, so pinning is idempotent and
-    /// never nests `profiles/<a>/profiles/<b>`.
+    /// `nil`/`"default"`/invalid → the **root** home, which is not the same
+    /// thing as "unchanged". A window scoped to the `work` profile (#126) has
+    /// a base home of `<root>/profiles/work`; pinning the *default* bot to it
+    /// by returning `self` would hand the default bot `work`'s `state.db` and
+    /// spawn its ACP unpinned against `work` — precisely the wrong-profile
+    /// bleed this method exists to make impossible. So every path normalizes
+    /// the base to its root first, and the default/invalid case returns that
+    /// root-normalized copy. Pinning is therefore idempotent, never nests
+    /// `profiles/<a>/profiles/<b>`, and always lands where the named profile
+    /// (or the root, for `default`) actually lives.
     public nonisolated func pinnedToProfile(_ profile: String?) -> ServerContext {
-        guard let name = HermesProfileScope.normalize(profile) else { return self }
+        let name = HermesProfileScope.normalize(profile)
         switch kind {
         case .local:
             let base = localHomeOverride ?? HermesPathSet.defaultLocalHome
