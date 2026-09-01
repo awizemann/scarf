@@ -2,7 +2,7 @@
 title: Home
 type: note
 permalink: scarf-wiki/home
-updated: 2026-08-31
+updated: 2026-09-01
 created: 2026-05-29
 ---
 
@@ -10,11 +10,11 @@ created: 2026-05-29
 
 **The native Mac & iOS app for the [Hermes AI agent](https://github.com/hermes-ai/hermes-agent).** Full visibility into what Hermes is doing, when, and what it creates — on your Mac against one local install or many remote ones, and from your iPhone over SSH with **ScarfGo**.
 
-**Latest release:** [v2.22.0](https://github.com/awizemann/scarf/releases/tag/v2.22.0) — full accessibility support and a six-language catch-up: ~120 accessibility labels across every Mac form field and list row (VoiceOver, Voice Control, and UI automation all get real names), ~240 previously-untranslated strings localized in de/es/fr/ja/pt-BR/zh-Hans, and faster streaming chat via incremental markdown parsing and 50ms-throttled updates (gh#140). Hermes target unchanged (v0.20.5). Previous: [v2.21.0](https://github.com/awizemann/scarf/releases/tag/v2.21.0) brought Hermes v0.20.5 parity — the Health view survives the `hermes version` removal, plus the zero-auth **OpenCode Free** provider, **Unlimited** max turns, and an **Auto (unset)** STT option. Earlier: [v2.20.0](https://github.com/awizemann/scarf/releases/tag/v2.20.0) with Hermes v0.20.4 parity and opt-out usage analytics on macOS ([Privacy Policy](Privacy-Policy); iOS sends nothing). All earlier versions: [Release Notes Index](Release-Notes-Index).
+**Latest release:** [v2.23.0](https://github.com/awizemann/scarf/releases/tag/v2.23.0) — Hermes v0.21.0 "Pantheon" parity: a new **Peers** section for agent-to-agent DMs and async runs (`hermes peer`), cron **incidents/doctor/Run Now** and Bot Chat delivery, honest carrier-aware session previews, the optional-MCP catalog tripled (20 → 65, dead Atlassian endpoint fixed), two new providers, and a batch of parsing fixes (offline/singular update checks, real gateway-status markers, dotted names no longer corrupting config.yaml). All new surfaces capability-gated — several to v0.20.6, where they actually shipped. Previous: [v2.22.0](https://github.com/awizemann/scarf/releases/tag/v2.22.0) brought full accessibility support (~120 labels for VoiceOver/Voice Control/UI automation) and complete six-language localization plus faster streaming chat. Earlier: [v2.21.0](https://github.com/awizemann/scarf/releases/tag/v2.21.0) with Hermes v0.20.5 parity (OpenCode Free, unlimited max turns, auto STT). All earlier versions: [Release Notes Index](Release-Notes-Index).
 
 **Mobile:** [Join the ScarfGo public TestFlight](https://testflight.apple.com/join/qCrRpcTz) — see [ScarfGo](ScarfGo) for the feature tour and [ScarfGo Onboarding](ScarfGo-Onboarding) for the one-minute SSH setup.
 
-**Targets Hermes:** v0.20.5 (v2026.8.19). Everything newer than a host's version is capability-gated or schema-detected — Hermes v0.6.0 through v0.20.4 hosts keep working exactly as before, with newer-only surfaces hidden gracefully. History: [Hermes Version Compatibility](Hermes-Version-Compatibility).
+**Targets Hermes:** v0.21.0 (v2026.8.31). Everything newer than a host's version is capability-gated or schema-detected — Hermes v0.6.0 through v0.20.6 hosts keep working exactly as before, with newer-only surfaces hidden gracefully. History: [Hermes Version Compatibility](Hermes-Version-Compatibility).
 
 **Available in:** English, Simplified Chinese (zh-Hans), German (de), French (fr), Spanish (es), Japanese (ja), Brazilian Portuguese (pt-BR). See [Localization](Localization). _ScarfGo is English-only in v1._
 
@@ -58,4 +58,4 @@ Scarf 2.0+ is a multi-window app — one window per Hermes server, local or remo
 Open-source (MIT), actively maintained. See [Roadmap](Roadmap) for what's coming.
 
 ---
-_Last updated: 2026-08-31 — Scarf v2.22.0 (accessibility + localization)._
+_Last updated: 2026-09-01 — Scarf v2.23.0 (Hermes v0.21.0 parity + Peers)._
