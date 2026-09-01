@@ -668,6 +668,43 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// v2026.7.7.2 was 0.18.2), so the true floor is **v0.19**, not v0.20.
     public var hasGatewayProfileRoutes: Bool { isV019OrLater }
 
+    // MARK: v0.20.3 (v2026.8.16.2) flags
+
+    /// Bot Mode's storage format: a profile is a bot when its `profile.yaml`
+    /// carries a `ui_meta['hermes-bots']` **mapping**, with the avatar in
+    /// `<profile_dir>/assets/avatar.{png,jpg,webp}`.
+    ///
+    /// **The floor is v0.20.3, not v0.21** — this is the correction the v0.21
+    /// audit's "gate Bot Mode on `isV021OrLater`" line needed once the tags
+    /// were walked (charter C2: a finding is real only when cited against the
+    /// tagged source). Two independent pieces landed separately:
+    /// - `ui_meta` persistence in `profile.yaml` + `profiles.set_asset` /
+    ///   `get_asset` first appear in `tui_gateway/methods_profiles.py` at tag
+    ///   v2026.8.13 (`pyproject.toml` version `0.20.1`).
+    /// - The `hermes-bots` convention itself — `tools/bot_mode_probe.py`, with
+    ///   `_is_bot_managed` reading `ui_meta['hermes-bots']` and the canonical
+    ///   "Bot Chat" title — first appears at tag **v2026.8.16.2**
+    ///   (`version = "0.20.3"`). Verified with
+    ///   `git ls-tree <tag> -- tools/bot_mode_probe.py` across every tag from
+    ///   v2026.8.3 onward: absent through v2026.8.16, present from
+    ///   v2026.8.16.2.
+    ///
+    /// What v0.21 actually added is the *compare-and-swap* layer
+    /// (`_ui_meta_revisions`, `ui_meta_expected_revisions`), which arrived at
+    /// v2026.8.19 (0.20.5) and which Scarf does not use — it edits
+    /// `profile.yaml` directly, since no `hermes profile` verb touches
+    /// `ui_meta`. So gating the roster on `isV021OrLater` would hide a working
+    /// surface from three releases of hosts that support it.
+    ///
+    /// **Version-only, deliberately not version-plus-data.** Bot Mode is inert
+    /// on a host where no profile is bot-managed, which is tempting to fold
+    /// into the gate — but a data gate makes the feature unbootstrappable: no
+    /// bots means no Bots section means no way to create the first bot. The
+    /// flag answers "can this host store a bot"; the empty roster is an empty
+    /// *state*, not a hidden feature. (Contrast `hasCronIncidents`, where the
+    /// gated thing is a CLI verb that either exists or errors.)
+    public var hasBotMode: Bool { isV0203OrLater }
+
     // MARK: v0.20.4 (v2026.8.18) flags
 
     /// `is_job_runnable()` now blocks a cron job from firing whenever
@@ -904,6 +941,11 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// for UI copy that toggles on the v0.19 → v0.20 boundary without
     /// proxying through a feature-specific flag.
     public var isV020OrLater: Bool { atLeastSemver(0, 20, 0) }
+
+    /// Whether the connected host is on v0.20.3 or newer. Patch-level floor:
+    /// tag v2026.8.16.2 is where `tools/bot_mode_probe.py` — and with it the
+    /// `ui_meta['hermes-bots']` convention — first ships. See `hasBotMode`.
+    public var isV0203OrLater: Bool { atLeastSemver(0, 20, 3) }
 
     /// Whether the connected host is on v0.20.4 or newer. Patch-level floor
     /// — v0.20.0 through v0.20.3 hosts satisfy `isV020OrLater` but lack the

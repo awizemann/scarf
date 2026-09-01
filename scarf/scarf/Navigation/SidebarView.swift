@@ -77,16 +77,32 @@ struct SidebarView: View {
             configure.append(.proxy)
         }
 
-        return [
+        var sections: [Section] = [
             // Projects sits first now — promoting it to a first-class
             // entry point reflects how users actually open Scarf
             // (start with a project, not the dashboard).
             Section(title: "Projects", items: [.projects]),
             Section(title: "Monitor",  items: monitor),
+        ]
+
+        // Bots — its own top-level section immediately above Interact, so
+        // it reads directly above Chat (Interact's first row). A bot is a
+        // whole Hermes profile, so it's a level up from the conversation
+        // you have with one, not another Interact tool.
+        //
+        // Gated on hasBotMode (v0.20.3+, where ui_meta['hermes-bots'] is
+        // read) and NOT on "does any bot exist": a data gate would make
+        // the section — and therefore the first bot — unreachable.
+        if caps?.hasBotMode ?? false {
+            sections.append(Section(title: "Bots", items: [.bots]))
+        }
+
+        sections += [
             Section(title: "Interact", items: interact),
             Section(title: "Configure", items: configure),
             Section(title: "Manage",   items: manage),
         ]
+        return sections
     }
 
     var body: some View {

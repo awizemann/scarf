@@ -379,6 +379,21 @@ final class CronViewModel {
     }
 
     func createJob(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false) {
+        runAndReload(
+            Self.createJobArguments(
+                schedule: schedule, prompt: prompt, name: name, deliver: deliver,
+                skills: skills, script: script, repeatCount: repeatCount,
+                workdir: workdir, noAgent: noAgent
+            ),
+            success: "Job created"
+        )
+    }
+
+    /// The exact argv `createJob` runs. Split out (not duplicated) so callers
+    /// that compose a create — and the tests that pin their composition —
+    /// assert the PRODUCTION command line rather than a parallel builder that
+    /// can drift from it.
+    nonisolated static func createJobArguments(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false) -> [String] {
         var args = ["cron", "create"]
         if !name.isEmpty { args += ["--name", name] }
         if !deliver.isEmpty { args += ["--deliver", deliver] }
@@ -400,7 +415,7 @@ final class CronViewModel {
         } else if !prompt.isEmpty {
             args.append(prompt)
         }
-        runAndReload(args, success: "Job created")
+        return args
     }
 
     func updateJob(id: String, schedule: String?, prompt: String?, name: String?, deliver: String?, repeatCount: String?, newSkills: [String]?, clearSkills: Bool, script: String?, workdir: String? = nil, noAgent: Bool? = nil) {

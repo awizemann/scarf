@@ -343,6 +343,8 @@ nonisolated extension UsageEvent {
         case chat
         case project
         case errorRetry = "error_retry"
+        /// A bot's canonical "Bot Chat", opened from the Bots section.
+        case bots
     }
 
     enum ModelPreflightOutcome: String, CaseIterable, Sendable {

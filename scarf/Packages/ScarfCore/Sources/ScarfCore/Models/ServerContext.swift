@@ -231,6 +231,53 @@ public struct ServerContext: Sendable, Hashable, Identifiable {
         ctx.localHomeOverride = home.path
         return ctx
     }
+
+    /// Return a copy of this context pinned to a specific Hermes profile's
+    /// `HERMES_HOME`, for **both** local and remote servers.
+    ///
+    /// This is the sibling of `scoped(toProfile:)` and deliberately not the
+    /// same thing. `scoped` implements the per-window *viewing profile*
+    /// (#126), where a `.local` context is intentionally a no-op because the
+    /// local profile is whatever `~/.hermes/active_profile` says and
+    /// `HermesProfileResolver` already resolves it. Bot Mode has the
+    /// opposite requirement: a bot IS a named profile, and its `state.db`
+    /// lives at `<root>/profiles/<name>/state.db` on *every* host. Reading a
+    /// bot's conversation out of the root home would show the user their own
+    /// chat under the bot's name — the wrong-profile bleed this method
+    /// exists to make impossible.
+    ///
+    /// `nil`/`"default"`/invalid → the **root** home, which is not the same
+    /// thing as "unchanged". A window scoped to the `work` profile (#126) has
+    /// a base home of `<root>/profiles/work`; pinning the *default* bot to it
+    /// by returning `self` would hand the default bot `work`'s `state.db` and
+    /// spawn its ACP unpinned against `work` — precisely the wrong-profile
+    /// bleed this method exists to make impossible. So every path normalizes
+    /// the base to its root first, and the default/invalid case returns that
+    /// root-normalized copy. Pinning is therefore idempotent, never nests
+    /// `profiles/<a>/profiles/<b>`, and always lands where the named profile
+    /// (or the root, for `default`) actually lives.
+    public nonisolated func pinnedToProfile(_ profile: String?) -> ServerContext {
+        let name = HermesProfileScope.normalize(profile)
+        switch kind {
+        case .local:
+            let base = localHomeOverride ?? HermesPathSet.defaultLocalHome
+            let root = HermesProfileScope.rootHome(forHome: base)
+            let pinned = HermesProfileScope.resolveHome(baseHome: root, profile: name)
+            guard pinned != base else { return self }
+            var copy = self
+            copy.localHomeOverride = pinned
+            return copy
+        case .ssh(var config):
+            let base = config.remoteHome ?? HermesPathSet.defaultRemoteHome
+            let root = HermesProfileScope.rootHome(forHome: base)
+            let pinned = HermesProfileScope.resolveHome(baseHome: root, profile: name)
+            guard pinned != base else { return self }
+            config.remoteHome = pinned
+            var copy = self
+            copy.kind = .ssh(config)
+            return copy
+        }
+    }
 }
 
 // MARK: - Per-window profile scoping (#126)

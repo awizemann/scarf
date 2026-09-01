@@ -2,6 +2,27 @@ import SwiftUI
 import ScarfCore
 import ScarfDesign
 
+/// Whether user bubbles in this transcript should be scanned for a Bot Mode
+/// teammate-DM prefix. **False everywhere except the Bots section's own
+/// conversation pane.**
+///
+/// The parse (`BotMessageAttribution.parse`) is strict but it is not free,
+/// and main Chat has no teammate DMs in it: running it on every user message
+/// on every host would spend work on a result that is structurally always
+/// `nil` there — and, worse, would let a human-typed message that happened to
+/// mimic the prefix render as if a bot had sent it. Scoping it to the Bots
+/// context keeps main Chat byte-identical to v2.23.0.
+private struct ShowsBotAttributionKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var showsBotAttribution: Bool {
+        get { self[ShowsBotAttributionKey.self] }
+        set { self[ShowsBotAttributionKey.self] = newValue }
+    }
+}
+
 struct RichMessageBubble: View, Equatable {
     let message: HermesMessage
     let toolResults: [String: HermesMessage]
@@ -18,6 +39,10 @@ struct RichMessageBubble: View, Equatable {
     /// these multiplied sizes (issue #68); other surfaces still see
     /// the static ScarfFont tokens at scale = 1.0.
     @Environment(\.chatFontScale) private var chatFontScale: Double
+
+    /// See ``ShowsBotAttributionKey`` — only the Bots conversation pane sets
+    /// this, so main Chat never runs the teammate-DM parse.
+    @Environment(\.showsBotAttribution) private var showsBotAttribution: Bool
 
     /// Scarf-local chat density preferences (issues #47 / #48). All
     /// three default to today's UI. Read here so the reasoning + tool-
@@ -166,14 +191,54 @@ struct RichMessageBubble: View, Equatable {
     private static let userBubbleClipThreshold = 600
     private static let userBubbleMaxHeight: CGFloat = 220
 
+    /// Teammate attribution, when this user message is an agent-to-agent DM
+    /// rather than something the human typed. Hermes stamps the sender into
+    /// the message text server-side (`tools/bot_mode_dm.py:292`) — there is
+    /// no column to read — so the prefix is parsed back off and rendered as
+    /// a sender chip instead of being shown as body text. See
+    /// `BotMessageAttribution` for why the parse is deliberately strict.
+    private var attribution: BotMessageAttribution? {
+        guard showsBotAttribution else { return nil }
+        return message.botAttribution
+    }
+
+    /// What the user bubble actually shows: the body with the attribution
+    /// prefix lifted into the chip, or the message unchanged.
+    private var userDisplayContent: String { attribution?.body ?? message.content }
+
+    /// Sender chip for an attributed teammate DM. Uses B1's generated
+    /// avatar, seeded on the handle, so the bot looks the same here as it
+    /// does in the roster even though the transcript has no profile data.
+    @ViewBuilder
+    private var attributionChip: some View {
+        if let attribution {
+            HStack(spacing: 5) {
+                BotAvatarView(
+                    displayName: attribution.handle,
+                    shapeString: nil,
+                    colorHex: nil,
+                    imageData: nil,
+                    size: 14,
+                    cornerStyle: .circle
+                )
+                Text("@\(attribution.handle)")
+                    .scarfStyle(.captionUppercase)
+                    .foregroundStyle(ScarfColor.onAccent.opacity(0.85))
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Message from the bot @\(attribution.handle)")
+        }
+    }
+
     private var userBubble: some View {
-        let isLong = message.content.count > Self.userBubbleClipThreshold
+        let isLong = userDisplayContent.count > Self.userBubbleClipThreshold
         return VStack(alignment: .trailing, spacing: 4) {
             HStack {
                 Spacer(minLength: 80)
                 VStack(alignment: .trailing, spacing: 4) {
+                    attributionChip
                     if isLong {
-                        Text(message.content)
+                        Text(userDisplayContent)
                             .font(ChatFontScale.body(chatFontScale))
                             .foregroundStyle(ScarfColor.onAccent)
                             .textSelection(.enabled)
@@ -205,9 +270,9 @@ struct RichMessageBubble: View, Equatable {
                             )
                         }
                         .buttonStyle(.plain)
-                        .help("Open the full message in the inspector pane (\(message.content.count) chars)")
+                        .help("Open the full message in the inspector pane (\(userDisplayContent.count) chars)")
                     } else {
-                        Text(message.content)
+                        Text(userDisplayContent)
                             .font(ChatFontScale.body(chatFontScale))
                             .foregroundStyle(ScarfColor.onAccent)
                             .textSelection(.enabled)
