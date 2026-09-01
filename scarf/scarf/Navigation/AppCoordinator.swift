@@ -9,6 +9,11 @@ enum SidebarSection: String, CaseIterable, Identifiable {
     case activity = "Activity"
     // Projects
     case projects = "Projects"
+    /// Hermes v0.20.3+ — Bot Mode. Its own top-level sidebar section,
+    /// directly above Interact/Chat: a bot is a whole Hermes profile
+    /// (its own memory, skills, credentials), so it's the thing you pick
+    /// *before* you pick a conversation, not a peer of Chat's tools.
+    case bots = "Bots"
     // Interact
     case chat = "Chat"
     case memory = "Memory"
@@ -53,6 +58,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .sessions: return "Sessions"
         case .activity: return "Activity"
         case .projects: return "Projects"
+        case .bots: return "Bots"
         case .chat: return "Chat"
         case .memory: return "Memory"
         case .curator: return "Curator"
@@ -92,6 +98,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .sessions: return "sessions"
         case .activity: return "activity"
         case .projects: return "projects"
+        case .bots: return "bots"
         case .chat: return "chat"
         case .memory: return "memory"
         case .curator: return "curator"
@@ -124,6 +131,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .sessions: return "bubble.left.and.bubble.right"
         case .activity: return "bolt.horizontal"
         case .projects: return "square.grid.2x2"
+        case .bots: return "face.smiling"
         case .chat: return "text.bubble"
         case .memory: return "brain"
         case .curator: return "sparkles"

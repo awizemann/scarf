@@ -78,6 +78,10 @@ struct ContentView: View {
         case .sessions:         SessionsView(context: serverContext)
         case .activity:         ActivityView(context: serverContext)
         case .projects:         ProjectsView(context: serverContext)
+        // Cached like Cron/Peers: the roster is a per-profile file scan
+        // plus avatar reads, all over the transport — rebuilding it on
+        // every section switch would re-read every profile over SSH.
+        case .bots:             BotsView(viewModel: cachedVM(.bots) { BotsViewModel(context: serverContext) })
         case .chat:             ChatView()
         case .memory:           MemoryView(context: serverContext)
         case .curator:          CuratorView(context: serverContext)
