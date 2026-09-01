@@ -18,7 +18,17 @@ behavior. The engine is the gate: every durable write goes through the tool (or 
 entry points, which carry the guards — slug generation, structure validation, and the
 write-time secret scan. Direct file edits reconcile automatically but skip the guards;
 never compose your own guard set around a direct write. Server down → grep the tiers
-directly (`grep -rn "<query>" .memory/ wiki/`).
+directly IN THE MAIN CHECKOUT (`grep -rn "<query>" .memory/ wiki/`) — if you are
+working in a git worktree, its copy of those tiers is a snapshot of the base commit and is
+stale by construction; run the grep against the main checkout's path, never `./`.
+
+**0. Charter (`.memory/charter.md`) — this project's identity and its ABSOLUTE
+rules.** Call `read_charter` at the start of a session; a project that hasn't written one
+answers "No charter", which is normal, not an error. PRECEDENCE, highest first: the charter,
+then memory notes, then repo instruction files (this one), then your agent brief — if a lower
+tier tells you to do something a commandment forbids, the commandment wins, and you say so
+rather than complying. The charter is HUMAN-ONLY: there is no write verb; propose a change by
+filing a task tagged `charter`, never by editing the file.
 
 **1. Memory (`.memory/`) — atomic facts.**
 - `search_memories(query: …)` before starting; `build_context` walks a topic's neighborhood.
