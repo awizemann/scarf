@@ -727,6 +727,73 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// whole `cron create` — so every cron-write path must gate on this.
     public var hasCronReasoningEffort: Bool { isV0205OrLater }
 
+    // MARK: v0.21 (v2026.8.31) flags
+    //
+    // v0.21 ("Pantheon") is an additive cycle. Note the intermediate
+    // v0.20.6 tag (v2026.8.27) sitting between v0.20.5 and v0.21.0: four
+    // of the surfaces the v0.21 release notes advertise actually landed
+    // there, so they carry the patch-level `isV0206OrLater` floor rather
+    // than `isV021OrLater` — gating them at v0.21 would needlessly hide
+    // working UI from v0.20.6 hosts. Same precedent as
+    // `hasGatewayProfileRoutes` living in the v0.20 group on a v0.19 floor.
+
+    /// `hermes peer run` / `peer status` / `peer stop` — start a long peer
+    /// turn asynchronously (with an `--idempotency-key`), poll its status
+    /// and final output, and stop one run without touching another
+    /// (v0.21+, `hermes_cli/subcommands/peer.py:484-541`). Verified absent
+    /// at both v2026.8.19 (0.20.5) and v2026.8.27 (0.20.6), whose `peer`
+    /// subparser stops at `add`/`list`/`remove`/`dm` — so older hosts fail
+    /// argparse outright on these verbs.
+    public var hasPeerRunCommands: Bool { isV021OrLater }
+
+    /// `hermes cron doctor` — check scheduled jobs for common health
+    /// issues (v0.21+, `hermes_cli/subcommands/cron.py:324`). Unlike its
+    /// `cron incidents` sibling this one is genuinely new at v0.21:
+    /// verified absent from cron.py at v2026.8.27 (0.20.6).
+    public var hasCronDoctor: Bool { isV021OrLater }
+
+    /// `hermes config set` interprets a backslash-escaped dot (`\.`) inside
+    /// a key segment as a literal dot rather than a nesting separator, and
+    /// hard-errors on phantom siblings (v0.21+, hermes-agent commit
+    /// a42aee9585 "fix(config): greedy literal-key matching + loud
+    /// phantom-sibling refusal for dotted key names", contained only in
+    /// v2026.8.31). This is what lets Scarf write keys whose own name
+    /// contains a dot — `quick_commands.v1\.2_deploy.type`,
+    /// `providers.qwen3\.5-397b.api_key`. Pre-v0.21 hosts silently split
+    /// such a key into nested maps and corrupt the config, so escaping must
+    /// be gated on this rather than applied unconditionally.
+    public var hasConfigDottedKeyEscape: Bool { isV021OrLater }
+
+    /// `hermes cron incidents [list|ack]` — durable cron failure incidents
+    /// backed by a `cron_incidents` table in `cron/executions.db`
+    /// (`hermes_cli/subcommands/cron.py:264-282`). Advertised with v0.21
+    /// but present already at v2026.8.27 (0.20.6), hence the patch floor.
+    public var hasCronIncidents: Bool { isV0206OrLater }
+
+    /// `hermes cron resume --run-now` / `--at <ISO-8601>` — re-arm a paused
+    /// job to fire immediately or at a chosen time, i.e. "Trigger now"
+    /// (`cron.py:262-264`). Absent at v2026.8.19 (0.20.5) — where `cron
+    /// resume` takes a bare `job_id` and argparse rejects the flags — but
+    /// present at v2026.8.27 (0.20.6), so the floor is v0.20.6.
+    public var hasCronResumeRunNow: Bool { isV0206OrLater }
+
+    /// `hermes cron create/edit --deliver bot-chat[:profile]` — inject a
+    /// job's output into a local profile's canonical Bot Chat session as a
+    /// message the bot then responds to (`cron.py:36-44`). Like
+    /// `--deliver all` before it (see `supportsCronDeliver(_:)`), an
+    /// unsupported `--deliver` value makes argparse reject the whole
+    /// `cron create`. Absent at v2026.8.19, present at v2026.8.27.
+    public var hasCronBotChatDelivery: Bool { isV0206OrLater }
+
+    /// `hermes browser close-profile` and the rest of the new top-level
+    /// `browser` subcommand (added to `_BUILTIN_SUBCOMMANDS`,
+    /// `hermes_cli/main.py:12420`; the verb itself at `main.py:13343`).
+    /// Destructive — it terminates the browser process tree holding the
+    /// user's real profile — so any Scarf affordance must be
+    /// confirmation-gated on top of this version gate. Absent at
+    /// v2026.8.19, present at v2026.8.27, so the floor is v0.20.6.
+    public var hasBrowserCloseProfile: Bool { isV0206OrLater }
+
     // MARK: Convenience predicates
 
     /// Whether the connected host is on the v0.13 line or newer. Convenience
@@ -786,6 +853,23 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// with `atLeastSemver(0, 20, 5)` rather than the minor-only
     /// `isV020OrLater`.
     public var isV0205OrLater: Bool { atLeastSemver(0, 20, 5) }
+
+    /// Whether the connected host is on v0.20.6 or newer. Patch-level floor,
+    /// same rationale as `isV0204OrLater`/`isV0205OrLater`. v0.20.6
+    /// (v2026.8.27) is the tag that sits between v0.20.5 and v0.21.0 and
+    /// carries several surfaces the v0.21 release notes advertise —
+    /// `cron incidents`, `cron resume --run-now/--at`, `--deliver bot-chat`,
+    /// the `browser` subcommand — so those gate here rather than on
+    /// `isV021OrLater`, which would hide them from v0.20.6 hosts that have
+    /// them.
+    public var isV0206OrLater: Bool { atLeastSemver(0, 20, 6) }
+
+    /// Whether the connected host is on the v0.21 line or newer. Convenience
+    /// for UI copy that toggles on the v0.20 → v0.21 boundary without
+    /// proxying through a feature-specific flag. Minor-level floor, like
+    /// `isV020OrLater` — the v0.21.0 surfaces gated on it are absent from
+    /// every v0.20.x host including v0.20.6.
+    public var isV021OrLater: Bool { atLeastSemver(0, 21, 0) }
 
     private func atLeastSemver(_ major: Int, _ minor: Int, _ patch: Int) -> Bool {
         guard let s = semver else { return false }

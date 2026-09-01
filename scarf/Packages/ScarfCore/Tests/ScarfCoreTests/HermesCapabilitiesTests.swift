@@ -843,4 +843,93 @@ import Foundation
     @Test func isV0205OrLater_emptyFalse() {
         #expect(!HermesCapabilities.empty.isV0205OrLater)
     }
+
+    // MARK: - v0.21 capability flags
+
+    @Test func parseV021ReleaseLine() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)")
+        #expect(caps.semver == HermesCapabilities.SemVer(major: 0, minor: 21, patch: 0))
+        #expect(caps.dateVersion == HermesCapabilities.DateVersion(year: 2026, month: 8, day: 31))
+        #expect(caps.detected)
+    }
+
+    @Test func v021FlagsAllOnForV021Host() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)")
+        #expect(caps.hasPeerRunCommands)
+        #expect(caps.hasCronDoctor)
+        #expect(caps.hasConfigDottedKeyEscape)
+        #expect(caps.hasCronIncidents)
+        #expect(caps.hasCronResumeRunNow)
+        #expect(caps.hasCronBotChatDelivery)
+        #expect(caps.hasBrowserCloseProfile)
+        #expect(caps.isV021OrLater)
+        #expect(caps.isV0206OrLater)
+    }
+
+    @Test func v0205HostHidesEveryV021Flag() {
+        // v0.20.5 predates both the v0.20.6 and the v0.21.0 surface: no
+        // `peer run`, no `cron doctor`/`incidents`, no `cron resume
+        // --run-now`, no `--deliver bot-chat`, no `browser` subcommand, and
+        // no `\.` key escaping (which would corrupt config on this host).
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.5 (2026.8.19)")
+        #expect(!caps.hasPeerRunCommands)
+        #expect(!caps.hasCronDoctor)
+        #expect(!caps.hasConfigDottedKeyEscape)
+        #expect(!caps.hasCronIncidents)
+        #expect(!caps.hasCronResumeRunNow)
+        #expect(!caps.hasCronBotChatDelivery)
+        #expect(!caps.hasBrowserCloseProfile)
+        #expect(!caps.isV021OrLater)
+        #expect(!caps.isV0206OrLater)
+        // The v0.20.5 surface stays alive on a v0.20.5 host.
+        #expect(caps.hasCronReasoningEffort)
+        #expect(caps.isV0205OrLater)
+    }
+
+    @Test func v0206HostSeesOnlyTheV0206Subset() {
+        // v0.20.6 (v2026.8.27) sits between v0.20.5 and v0.21.0 and already
+        // ships `cron incidents`, `cron resume --run-now/--at`, `--deliver
+        // bot-chat`, and the `browser` subcommand — but NOT `peer
+        // run/status/stop`, `cron doctor`, or dotted-key escaping.
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.6 (2026.8.27)")
+        #expect(caps.isV0206OrLater)
+        #expect(!caps.isV021OrLater)
+        #expect(caps.hasCronIncidents)
+        #expect(caps.hasCronResumeRunNow)
+        #expect(caps.hasCronBotChatDelivery)
+        #expect(caps.hasBrowserCloseProfile)
+        #expect(!caps.hasPeerRunCommands)
+        #expect(!caps.hasCronDoctor)
+        #expect(!caps.hasConfigDottedKeyEscape)
+    }
+
+    @Test func v0_21_1_patchReleaseStillEnablesAllV021Flags() {
+        // A later patch should still enable every v0.21 flag — patches
+        // don't roll back capability gates.
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+        #expect(caps.hasPeerRunCommands)
+        #expect(caps.hasCronDoctor)
+        #expect(caps.hasConfigDottedKeyEscape)
+        #expect(caps.hasCronIncidents)
+        #expect(caps.hasCronResumeRunNow)
+        #expect(caps.hasCronBotChatDelivery)
+        #expect(caps.hasBrowserCloseProfile)
+        #expect(caps.isV021OrLater)
+    }
+
+    @Test func isV021OrLater_v021HostTrue() {
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)").isV021OrLater)
+    }
+
+    @Test func isV021OrLater_v0206HostFalse() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.20.6 (2026.8.27)").isV021OrLater)
+    }
+
+    @Test func isV021OrLater_emptyFalse() {
+        #expect(!HermesCapabilities.empty.isV021OrLater)
+    }
+
+    @Test func isV0206OrLater_emptyFalse() {
+        #expect(!HermesCapabilities.empty.isV0206OrLater)
+    }
 }
