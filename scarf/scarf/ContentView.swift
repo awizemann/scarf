@@ -95,6 +95,9 @@ struct ContentView: View {
         case .mcpServers:       MCPServersView(viewModel: cachedVM(.mcpServers) { MCPServersViewModel(context: serverContext) })
         case .gateway:          GatewayView(context: serverContext)
         case .cron:             CronView(viewModel: cachedVM(.cron) { CronViewModel(context: serverContext) })
+        // Cached like Cron: the VM holds peer run handles, and `hermes
+        // peer` has no verb to re-enumerate them after a rebuild.
+        case .peers:            PeersView(viewModel: cachedVM(.peers) { PeersViewModel(context: serverContext) })
         case .kanban:           KanbanView(context: serverContext)
         case .health:           HealthView(context: serverContext)
         case .logs:             LogsView(context: serverContext)
