@@ -794,6 +794,44 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// v2026.8.19, present at v2026.8.27, so the floor is v0.20.6.
     public var hasBrowserCloseProfile: Bool { isV0206OrLater }
 
+    /// Whether the `auxiliary.web_extract.*` config block still exists on the
+    /// host. **Inverse semantics** — `true` means the Auxiliary tab's "Web
+    /// Extract" row should still be shown.
+    ///
+    /// `web_extract` stopped using an auxiliary LLM upstream: pages are now
+    /// truncate-and-stored behind a `read_file` pointer, and the whole block
+    /// was deleted from `hermes_cli/config_defaults.py`, which now carries an
+    /// explicit tombstone comment ("The old ``auxiliary.web_extract.*`` block
+    /// was removed here. Existing values in user config.yaml files are
+    /// harmless leftovers and ignored."). Despite being advertised with
+    /// v0.21, the deletion actually landed at v2026.8.27 (0.20.6) — the block
+    /// is still present at v2026.8.19 (0.20.5) — so the floor is v0.20.6.
+    ///
+    /// Same shape as `hasFlushMemoriesAux`, and the same unknown-version
+    /// policy: an unparseable version hides the row rather than offering a
+    /// control that writes a key the host may ignore.
+    public var hasWebExtractAux: Bool {
+        guard let s = semver else { return false }        // unknown → hide
+        return s < SemVer(major: 0, minor: 20, patch: 6)  // pre-v0.20.6 only
+    }
+
+    /// Whether `tavily` is still a selectable web search/extract backend.
+    /// **Inverse semantics** — `true` means keep it in the pickers.
+    ///
+    /// The whole `plugins/web/tavily/` provider (plus its registry, keyless
+    /// MCP, and `nous_subscription` entries) was deleted at v2026.8.31
+    /// (0.21.0); the keyless free-tier ring comment in `config_defaults.py`
+    /// drops from five vendors to four (exa, parallel, firecrawl, keenable)
+    /// at the same tag. Present and fully wired at v2026.8.27 (0.20.6), so
+    /// this is a genuine v0.21 removal.
+    ///
+    /// Unknown version keeps the option: selecting a backend a host doesn't
+    /// know is recoverable, whereas hiding the row a pre-v0.21 user is
+    /// actively using is not. (This differs deliberately from
+    /// `hasWebExtractAux`, whose row is a whole sub-editor rather than one
+    /// entry in a list.)
+    public var hasTavilyWebBackend: Bool { !isV021OrLater }
+
     // MARK: Convenience predicates
 
     /// Whether the connected host is on the v0.13 line or newer. Convenience

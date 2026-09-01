@@ -1236,6 +1236,28 @@ public struct HermesConfig: Sendable {
         return capabilities.isV020OrLater ? 500 : 60
     }
 
+    /// Lowest `agent.gateway_turn_lease_timeout` any supported host accepts as
+    /// a meaningful value — v0.21's own default. Steppers use it as the floor
+    /// so the v0.21 default is expressible (the old 60-second floor could not
+    /// represent it, which meant a v0.21 host's default silently snapped up to
+    /// 60 the first time the user touched the control).
+    public static let gatewayTurnLeaseTimeoutMinimum = 5
+
+    /// Effective `agent.gateway_turn_lease_timeout` for display: the on-disk
+    /// value when one is set, otherwise the connected host's own default —
+    /// **5** on v0.21.0+ (`config_defaults.py:68` at v2026.8.31), **1800** on
+    /// every older supported host.
+    ///
+    /// Display-only; callers must never write the resolved value back.
+    /// Unknown host version resolves to the older 1800 rather than 5: an
+    /// unknown host is more likely to be an old one, and over-stating the
+    /// wait is the benign direction (under-stating it would suggest turns are
+    /// being rejected far sooner than they are).
+    public func displayGatewayTurnLeaseTimeout(capabilities: HermesCapabilities) -> Int {
+        if gatewayTurnLeaseTimeout > 0 { return gatewayTurnLeaseTimeout }
+        return capabilities.isV021OrLater ? 5 : 1800
+    }
+
     /// Human-readable form of `displayMaxTurns(capabilities:)` — "Unlimited"
     /// for the no-ceiling case, the plain number otherwise.
     public func displayMaxTurnsText(capabilities: HermesCapabilities) -> String {
@@ -1293,8 +1315,19 @@ public struct HermesConfig: Sendable {
     public var cronDrainTimeout: Int
     /// `agent.gateway_turn_lease_timeout` (v0.20.4+) — max seconds an alias
     /// routing key waits for an active turn holding the same resolved
-    /// session lease before Hermes rejects the inbound message. Non-positive
-    /// values fall back to the 1800-second default.
+    /// session lease before Hermes rejects the inbound message (with a
+    /// resend notice) rather than running it unserialized.
+    ///
+    /// `0` here is the **key-absent sentinel**, not a real value, because the
+    /// upstream default changed at v0.21.0 (v2026.8.31): 1800 → 5 seconds,
+    /// with the rationale that Telegram dispatches updates sequentially so an
+    /// inline lease waiter also stalls unrelated topics. Baking either number
+    /// in at parse time would show one host generation's default for the
+    /// other. Non-positive values on disk mean "fall back to the built-in
+    /// default" in Hermes too, so the sentinel and the on-disk semantics
+    /// agree. Display surfaces resolve it via
+    /// `displayGatewayTurnLeaseTimeout(capabilities:)`; nothing writes the
+    /// resolved value back unless the user edits the stepper.
     public var gatewayTurnLeaseTimeout: Int
     public var approvalTimeout: Int
     public var fileReadMaxChars: Int
@@ -1331,9 +1364,12 @@ public struct HermesConfig: Sendable {
     /// `display.runtime_footer.enabled` — opt-in compact footer on the
     /// final reply of a turn (e.g. `model · 68% · ~/projects`). Off by
     /// default; useful for cost auditing and screen-recording demos.
-    /// (Older Scarf builds wrote the nonexistent
-    /// `agent.runtime_metadata_footer`; the YAML reader still accepts it
-    /// as a fallback, but writes target only the real key.)
+    ///
+    /// Read and written under the real key only. A long-dead fallback read of
+    /// `agent.runtime_metadata_footer` was removed here: that key never
+    /// existed in ANY supported Hermes version, so the fallback could only
+    /// ever fire on a config some pre-v0.13 Scarf wrote and nothing has
+    /// written since — while costing a wrong-key read on every parse.
     public var runtimeMetadataFooter: Bool
     /// `display.busy_ack_enabled` — GLOBAL "agent is working…" ack toggle.
     /// Hermes reads only this key (gateway/run.py); there is no working
@@ -1513,7 +1549,7 @@ public struct HermesConfig: Sendable {
         toolUseEnforcement: String,
         gatewayTimeout: Int,
         cronDrainTimeout: Int = 30,
-        gatewayTurnLeaseTimeout: Int = 1800,
+        gatewayTurnLeaseTimeout: Int = 0,
         approvalTimeout: Int,
         fileReadMaxChars: Int,
         cronWrapResponse: Bool,

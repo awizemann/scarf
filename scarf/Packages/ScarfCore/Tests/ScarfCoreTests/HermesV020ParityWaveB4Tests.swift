@@ -45,25 +45,35 @@ struct HermesV020ParityWaveB4Tests {
         #expect(cfg.runtimeMetadataFooter == true)
     }
 
-    @Test func runtimeFooterFallsBackToLegacyScarfKey() {
-        // Older Scarf builds wrote the nonexistent agent.runtime_metadata_footer;
-        // configs Scarf itself wrote must keep their setting on read.
-        let cfg = HermesConfig(yaml: """
+    /// `agent.runtime_metadata_footer` exists in NO supported Hermes version —
+    /// only some long-obsolete Scarf build ever wrote it. The fallback read
+    /// was removed, so the key is now inert: it must not turn the footer on,
+    /// and it must not override the real key.
+    @Test func runtimeFooterIgnoresDeadLegacyScarfKey() {
+        let legacyOnly = HermesConfig(yaml: """
         agent:
           runtime_metadata_footer: true
         """)
-        #expect(cfg.runtimeMetadataFooter == true)
-    }
+        #expect(legacyOnly.runtimeMetadataFooter == false)
 
-    @Test func runtimeFooterRealKeyWinsOverLegacy() {
-        let cfg = HermesConfig(yaml: """
+        let realKeyWins = HermesConfig(yaml: """
         agent:
           runtime_metadata_footer: true
         display:
           runtime_footer:
             enabled: false
         """)
-        #expect(cfg.runtimeMetadataFooter == false)
+        #expect(realKeyWins.runtimeMetadataFooter == false)
+
+        // And the dead key can't suppress a real `true` either.
+        let realKeyOn = HermesConfig(yaml: """
+        agent:
+          runtime_metadata_footer: false
+        display:
+          runtime_footer:
+            enabled: true
+        """)
+        #expect(realKeyOn.runtimeMetadataFooter == true)
     }
 
     @Test func runtimeFooterDefaultsOff() {

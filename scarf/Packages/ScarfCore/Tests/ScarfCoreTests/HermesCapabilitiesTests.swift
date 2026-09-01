@@ -932,4 +932,40 @@ import Foundation
     @Test func isV0206OrLater_emptyFalse() {
         #expect(!HermesCapabilities.empty.isV0206OrLater)
     }
+
+    // MARK: Removal flags (inverse semantics — true means "still show it")
+
+    /// `auxiliary.web_extract.*` was deleted from config_defaults.py at
+    /// v2026.8.27 (0.20.6), NOT at v0.21 as the release notes imply. The
+    /// boundary is what matters: a v0.20.5 host still reads the block.
+    @Test func hasWebExtractAux_dropsAtV0206NotV021() {
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.5 (2026.8.19)").hasWebExtractAux)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.4 (2026.8.16)").hasWebExtractAux)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.19.2 (2026.7.20)").hasWebExtractAux)
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.20.6 (2026.8.27)").hasWebExtractAux)
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)").hasWebExtractAux)
+    }
+
+    /// Unknown version hides the sub-editor, matching `hasFlushMemoriesAux`.
+    @Test func hasWebExtractAux_unknownVersionHides() {
+        #expect(!HermesCapabilities.empty.hasWebExtractAux)
+    }
+
+    /// `plugins/web/tavily/` was deleted at v2026.8.31 (0.21.0) and is fully
+    /// present at v2026.8.27 (0.20.6) — a genuine v0.21 removal, unlike the
+    /// web_extract block above.
+    @Test func hasTavilyWebBackend_dropsAtV021() {
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.6 (2026.8.27)").hasTavilyWebBackend)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.5 (2026.8.19)").hasTavilyWebBackend)
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)").hasTavilyWebBackend)
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasTavilyWebBackend)
+    }
+
+    /// Unknown version KEEPS the picker entry — the opposite policy from
+    /// `hasWebExtractAux`, and deliberately so: hiding a list entry a
+    /// pre-v0.21 user is actively using would strand them on an invisible
+    /// selection, whereas the aux row is a whole sub-editor.
+    @Test func hasTavilyWebBackend_unknownVersionKeeps() {
+        #expect(HermesCapabilities.empty.hasTavilyWebBackend)
+    }
 }

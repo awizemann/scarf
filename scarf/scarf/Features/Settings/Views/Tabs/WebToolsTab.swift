@@ -16,12 +16,21 @@ struct WebToolsTab: View {
         capabilitiesStore?.capabilities.hasWebToolsBackendSplit ?? false
     }
 
-    // Wire-accurate against `tools/web_tools.py` in Hermes v2026.5.16
-    // (line 143/1364 in v0.14: the canonical set is exa, parallel,
-    // firecrawl, tavily, searxng, brave-free, ddgs). `brave-free` and
-    // `ddgs` are v0.14 additions — gated below so pre-v0.14 hosts only
-    // see the older five. Search-only entries (searxng / brave-free /
-    // ddgs) don't appear in the extract picker.
+    // Wire-accurate against `tools/web_tools.py`. Through v0.20.6 the
+    // canonical set is exa, parallel, firecrawl, tavily, searxng,
+    // brave-free, ddgs. `brave-free` and `ddgs` are v0.14 additions and
+    // `xai` a v0.15 one — gated below so older hosts only see what they
+    // have. Search-only entries (searxng / brave-free / ddgs / xai) don't
+    // appear in the extract picker.
+    //
+    // `tavily` is the one REMOVAL: the whole `plugins/web/tavily/` provider
+    // was deleted at v2026.8.31 (0.21.0), and the keyless free-tier ring
+    // comment in `config_defaults.py` narrows from five vendors to four
+    // (exa, parallel, firecrawl, keenable) at the same tag. It is filtered
+    // out on v0.21+ hosts by `hasTavilyWebBackend` — except when the config
+    // still names it, so a user landing on a fresh host can see what they
+    // are on and pick a replacement rather than face a picker whose current
+    // value is invisible.
     private static let v013SearchBackends: [String] = [
         "exa", "parallel", "firecrawl", "tavily", "searxng"
     ]
@@ -44,13 +53,35 @@ struct WebToolsTab: View {
         "exa", "parallel", "firecrawl", "tavily", "searxng"
     ]
 
+    /// Drop `tavily` on hosts that no longer ship the provider — unless the
+    /// config currently selects it, in which case keeping the entry is what
+    /// lets the user migrate off it. `current` is the value the picker is
+    /// bound to.
+    private func pruningTavily(_ list: [String], current: String) -> [String] {
+        let caps = capabilitiesStore?.capabilities ?? .empty
+        guard !caps.hasTavilyWebBackend, current != "tavily" else { return list }
+        return list.filter { $0 != "tavily" }
+    }
+
     private var searchBackends: [String] {
         let caps = capabilitiesStore?.capabilities ?? .empty
         var list = Self.v013SearchBackends
         if caps.hasBraveFreeSearchBackend { list.append("brave-free") }
         if caps.hasDDGSearchBackend { list.append("ddgs") }
         if caps.hasXAIWebSearchBackend { list.append("xai") }
-        return list
+        return pruningTavily(list, current: viewModel.config.webToolsSearchBackend)
+    }
+
+    private var extractBackends: [String] {
+        pruningTavily(Self.extractBackends, current: viewModel.config.webToolsExtractBackend)
+    }
+
+    /// The pre-v0.13 combined picker writes the shared `web.backend` key, so
+    /// it prunes against that value instead. In practice a v0.21 host is
+    /// never on this branch (the split landed in v0.13), but routing it
+    /// through the same helper keeps the two paths from drifting.
+    private var combinedBackends: [String] {
+        pruningTavily(Self.combinedBackends, current: viewModel.config.webToolsBackend)
     }
 
     var body: some View {
@@ -64,7 +95,7 @@ struct WebToolsTab: View {
                 PickerRow(
                     label: "Extract backend",
                     selection: viewModel.config.webToolsExtractBackend,
-                    options: Self.extractBackends
+                    options: extractBackends
                 ) { viewModel.setWebToolsExtractBackend($0) }
             }
             // Footer copy adapts to the connected host — v0.14 adds the
@@ -72,6 +103,9 @@ struct WebToolsTab: View {
             // SearXNG-joined-search-only line.
             let caps = capabilitiesStore?.capabilities ?? .empty
             let footerCopy: String = {
+                if !caps.hasTavilyWebBackend {
+                    return "v0.21 removed the Tavily backend; the keyless free-tier ring is now Exa, Parallel, Firecrawl and Keenable. xAI Web Search, Brave Search and DuckDuckGo (DDGS) are search-only. Backend-specific tuning lives in the raw YAML editor for now."
+                }
                 if caps.hasXAIWebSearchBackend {
                     return "v0.15 added xAI Web Search (reuses your Grok OAuth / XAI_API_KEY). v0.14 added Brave Search (free tier; honors BRAVE_SEARCH_API_KEY) and DuckDuckGo (DDGS). All three are search-only. Backend-specific tuning lives in the raw YAML editor for now."
                 }
@@ -89,7 +123,7 @@ struct WebToolsTab: View {
                 PickerRow(
                     label: "Backend",
                     selection: viewModel.config.webToolsBackend,
-                    options: Self.combinedBackends
+                    options: combinedBackends
                 ) { viewModel.setWebToolsBackend($0) }
             }
             Text("Hermes v0.13 splits search and extract into separate backends. Update Hermes to access the per-capability picker.")

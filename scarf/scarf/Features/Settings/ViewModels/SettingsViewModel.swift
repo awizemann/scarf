@@ -173,19 +173,68 @@ final class SettingsViewModel {
             }
         } else {
             logger.warning("hermes \(arguments.joined(separator: " ")) failed (exit \(result.exitCode)): \(result.output)")
-            // Surface the CLI's reason instead of a generic failure — e.g.
-            // "Cannot set '<key>': it is managed by your administrator" when the
-            // key is pinned under managed scope (/etc/hermes), so the user
-            // understands why the control snapped back. Verbatim CLI tail.
-            let reason = result.output
-                .split(separator: "\n")
-                .last
-                .map { String($0).trimmingCharacters(in: .whitespaces) } ?? ""
-            saveMessage = reason.isEmpty ? "Failed to save \(key)" : "Couldn’t save \(key): \(reason)"
+            saveMessage = Self.saveFailureMessage(key: key, output: result.output)
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
                 self?.saveMessage = nil
             }
         }
+    }
+
+    /// Build the user-visible failure banner for a `hermes config set/unset`
+    /// that exited non-zero, surfacing the CLI's own reason instead of a
+    /// generic failure — e.g. "Cannot set '<key>': it is managed by your
+    /// administrator" when the key is pinned under managed scope
+    /// (`/etc/hermes`), so the user understands why the control snapped back.
+    ///
+    /// Taking the literal last line is not enough on v0.21+. Its new
+    /// phantom-sibling guard (`hermes_cli/config.py:_set_nested`) raises a
+    /// bare `ValueError` that `hermes config set` does NOT catch — its
+    /// handler only catches `RuntimeError` — so the whole thing reaches us as
+    /// a Python traceback. So: scan upward for the last line that isn't blank
+    /// and isn't an indented traceback frame, then strip the leading
+    /// exception-class label and Hermes's own `✗ ` marker.
+    ///
+    /// `static` and `internal` so tests can drive it with fixture output
+    /// without standing up a SettingsViewModel.
+    static func saveFailureMessage(key: String, output: String) -> String {
+        let reason = output
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .last { line in
+                guard !line.isEmpty else { return false }
+                // Traceback scaffolding, never the message itself.
+                if line.hasPrefix("Traceback (most recent call last)") { return false }
+                if line.hasPrefix("File \"") { return false }
+                return true
+            }
+            .map(Self.strippingErrorDecoration) ?? ""
+        return reason.isEmpty ? "Failed to save \(key)" : "Couldn’t save \(key): \(reason)"
+    }
+
+    /// Strip Hermes's `✗ ` CLI marker and any leading `SomeError: ` label
+    /// that a raw Python traceback tail carries, so the banner shows the
+    /// sentence rather than the plumbing.
+    private static func strippingErrorDecoration(_ line: String) -> String {
+        var text = line
+        if text.hasPrefix("✗") {
+            text = String(text.dropFirst()).trimmingCharacters(in: .whitespaces)
+        }
+        // `ValueError: Refusing to create nested key …` → drop the label.
+        // Only for an unspaced CamelCase identifier ending in Error/Exception,
+        // so a legitimate message containing a colon is left intact.
+        if let colon = text.firstIndex(of: ":") {
+            let label = String(text[text.startIndex..<colon])
+            let isErrorLabel = !label.isEmpty
+                && (label.hasSuffix("Error") || label.hasSuffix("Exception"))
+                && label.first?.isUppercase == true
+                && label.allSatisfy { $0.isLetter || $0.isNumber || $0 == "." || $0 == "_" }
+            if isErrorLabel {
+                let rest = text[text.index(after: colon)...]
+                    .trimmingCharacters(in: .whitespaces)
+                if !rest.isEmpty { text = rest }
+            }
+        }
+        return text
     }
 
     // MARK: - Analytics
