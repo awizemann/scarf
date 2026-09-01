@@ -52,13 +52,25 @@
 - [ ] R3 [iOS]: Resume fallback — typed catch, surfacing, analytics parity (id: t-238d2ab3) (added: 2026-08-20) (priority: high)
 - [ ] R4 [iOS]: Key import gate — reject unusable keys at paste time (id: t-a89ccf7a) (added: 2026-08-20)
 - [ ] R6 [iOS]: Splash — use LaunchIcon asset, drop 1024px main-thread decode (id: t-d8d0f1d3) (added: 2026-08-20) (priority: low)
+- [ ] v0.21 W4: MCP catalog regeneration (id: t-f25aa0b3) (added: 2026-09-01) (priority: high)
+- [ ] v0.21 W5: provider tables (id: t-6aca40de) (added: 2026-09-01) (priority: high)
+- [ ] v0.21 W6: data layer — schema detect + previews (id: t-3bd2f50a) (added: 2026-09-01) (priority: high)
+- [ ] v0.21 W7: cron — decoder + incidents + doctor (id: t-90c8afa2) (added: 2026-09-01) (priority: high)
+- [ ] v0.21 W8: dotted-key escaping for quick commands (id: t-01d5c11b) (added: 2026-09-01)
+- [ ] v0.21 W9: peer CLI basics surface (id: t-e81e9f48) (added: 2026-09-01)
+- [ ] v0.21 final audit + memory validation + release handoff (id: t-cd33bd6d) (added: 2026-09-01) (priority: high)
 
 ## Doing
 
+- [ ] v0.21 W3: curator exit codes + essential skill (id: t-624e1d25) (added: 2026-09-01) (priority: high)
 - [ ] Refresh marketing site + README FAQ for v2.15 Projects (supersede PR #109) (id: t-83c4c692) (added: 2026-06-28)
 
 ## Done
 
+- [x] v0.21 W2: Health/version + gateway status parsing (id: t-916abbfe) (added: 2026-09-01) (priority: high)
+- [x] v0.21 W1: config surface — dead keys + defaults (id: t-44837e08) (added: 2026-09-01) (priority: high)
+- [x] Charter-for-users design brief (id: t-94ea4f69) (added: 2026-09-01)
+- [x] v0.21 W0: capability flags + tests foundation (id: t-4cca2fff) (added: 2026-09-01) (priority: urgent)
 - [x] A11y follow-up: label remaining macOS TextFields sweep (id: t-828b80d4) (added: 2026-08-28) (priority: low)
 - [x] Translate the 238 new string-catalog keys (6 locales) (id: t-88eec9a9) (added: 2026-08-31)
 - [x] Fix pre-existing SettingsWriteReadParityTests interpolated-shape failure (id: t-62bd4bb2) (added: 2026-08-28)
