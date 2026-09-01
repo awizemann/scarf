@@ -380,7 +380,9 @@ import Foundation
         #expect(stmts[1].sql.contains("ORDER BY started_at DESC LIMIT ?"))
         // 2: session previews — joins messages with first user message.
         #expect(stmts[2].sql.contains("INNER JOIN"))
-        #expect(stmts[2].sql.contains("MIN(id)"))
+        // (W6: the subquery is now aliased and carrier-aware — see
+        // `SessionPreviewSQL`. The aggregate is still MIN over ids.)
+        #expect(stmts[2].sql.contains("MIN(m.id)"))
         // 3: recent tool calls — selects messages WHERE tool_calls IS NOT NULL.
         #expect(stmts[3].sql.contains("WHERE tool_calls IS NOT NULL"))
     }

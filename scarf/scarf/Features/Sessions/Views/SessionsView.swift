@@ -507,6 +507,14 @@ struct SessionsView: View {
                 .foregroundStyle(ScarfColor.foregroundPrimary)
             ScarfTextField("Session title", text: $viewModel.renameText)
                 .onSubmit { viewModel.confirmRename() }
+            if let renameError = viewModel.renameError {
+                Label(renameError, systemImage: "exclamationmark.triangle")
+                    .scarfStyle(.footnote)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
             HStack {
                 Button("Cancel") { viewModel.showRenameSheet = false }
                     .buttonStyle(ScarfGhostButton())

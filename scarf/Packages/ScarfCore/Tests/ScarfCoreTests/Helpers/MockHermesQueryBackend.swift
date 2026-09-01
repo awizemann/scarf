@@ -21,6 +21,7 @@ final actor MockHermesQueryBackend: HermesQueryBackend {
     var hasV011Schema: Bool = false
     var hasMessagesActiveColumn: Bool = false
     var hasCompactedColumn: Bool = false
+    var hasCompressedSummaryColumn: Bool = false
     var hasRewindCountColumn: Bool = false
     var hasSessionActivityColumns: Bool = false
     var hasSessionModelUsageTable: Bool = false
@@ -60,6 +61,7 @@ final actor MockHermesQueryBackend: HermesQueryBackend {
     func setHasV011Schema(_ value: Bool) { hasV011Schema = value }
     func setHasMessagesActiveColumn(_ value: Bool) { hasMessagesActiveColumn = value }
     func setHasCompactedColumn(_ value: Bool) { hasCompactedColumn = value }
+    func setHasCompressedSummaryColumn(_ value: Bool) { hasCompressedSummaryColumn = value }
     func setHasRewindCountColumn(_ value: Bool) { hasRewindCountColumn = value }
     func setHasSessionActivityColumns(_ value: Bool) { hasSessionActivityColumns = value }
     func setHasSessionModelUsageTable(_ value: Bool) { hasSessionModelUsageTable = value }

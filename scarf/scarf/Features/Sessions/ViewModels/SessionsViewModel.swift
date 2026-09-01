@@ -151,6 +151,12 @@ final class SessionsViewModel {
     var renameSessionId: String?
     var renameText = ""
     var showRenameSheet = false
+    /// Why the last rename attempt failed, `nil` when it succeeded or
+    /// no attempt has been made. Set from `SessionRenameFailure` and
+    /// shown inside the rename sheet, which stays open on failure so
+    /// the user can correct the title (or learn they can't — the
+    /// canonical Bot Chat refuses renames server-side).
+    var renameError: String?
     var showDeleteConfirmation = false
     var deleteSessionId: String?
 
@@ -303,6 +309,7 @@ final class SessionsViewModel {
     func beginRename(_ session: HermesSession) {
         renameSessionId = session.id
         renameText = previewFor(session)
+        renameError = nil
         showRenameSheet = true
     }
 
@@ -311,16 +318,23 @@ final class SessionsViewModel {
         let title = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
         let result = runHermes(["sessions", "rename", sessionId, title])
-        if result.exitCode == 0 {
-            if let idx = sessions.firstIndex(where: { $0.id == sessionId }) {
-                let updated = sessions[idx].withTitle(title)
-                sessions[idx] = updated
-                if selectedSession?.id == sessionId {
-                    selectedSession = updated
-                }
-            }
-            sessionPreviews[sessionId] = title
+        guard result.exitCode == 0 else {
+            // Keep the sheet up so the message lands next to the field
+            // that produced it. The canonical Bot Chat can never be
+            // renamed, so this is also the only place the user is told
+            // why (see `SessionRenameFailure`).
+            renameError = SessionRenameFailure.message(for: result.output)
+            return
         }
+        if let idx = sessions.firstIndex(where: { $0.id == sessionId }) {
+            let updated = sessions[idx].withTitle(title)
+            sessions[idx] = updated
+            if selectedSession?.id == sessionId {
+                selectedSession = updated
+            }
+        }
+        sessionPreviews[sessionId] = title
+        renameError = nil
         showRenameSheet = false
         renameSessionId = nil
     }

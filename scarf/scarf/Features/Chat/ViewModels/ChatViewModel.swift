@@ -2294,16 +2294,30 @@ final class ChatViewModel {
     /// caches in-place on success so the chat sidebar reflects the new
     /// title without a full reload. Same shell command path the
     /// SessionsView feature uses.
-    func renameSession(_ sessionId: String, to newTitle: String) {
+    @discardableResult
+    func renameSession(_ sessionId: String, to newTitle: String) -> Bool {
         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return false }
         let result = context.runHermes(["sessions", "rename", sessionId, trimmed])
-        guard result.exitCode == 0 else { return }
+        guard result.exitCode == 0 else {
+            // Hermes refuses some renames server-side — most notably the
+            // canonical Bot Chat, whose title IS its identity. Surface the
+            // reason instead of silently swallowing the failure, which is
+            // what this path used to do (`SessionRenameFailure`).
+            renameError = SessionRenameFailure.message(for: result.output)
+            return false
+        }
+        renameError = nil
         if let idx = recentSessions.firstIndex(where: { $0.id == sessionId }) {
             recentSessions[idx] = recentSessions[idx].withTitle(trimmed)
         }
         sessionPreviews[sessionId] = trimmed
+        return true
     }
+
+    /// Why the last sidebar rename failed; `nil` once one succeeds or a
+    /// new rename sheet opens. Rendered inside the rename sheet.
+    var renameError: String?
 
     /// Apply a session title from an ACP `session_info_update` event
     /// (Hermes v0.16+). Mirrors `renameSession`'s in-place cache mutation

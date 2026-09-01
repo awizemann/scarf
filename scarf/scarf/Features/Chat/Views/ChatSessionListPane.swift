@@ -49,6 +49,7 @@ struct ChatSessionListPane: View {
                             if chatViewModel.capabilitiesStore?.capabilities.hasSessionsRename ?? false {
                                 Button("Rename…") {
                                     renameText = chatViewModel.previewFor(session)
+                                    chatViewModel.renameError = nil
                                     renameTarget = session
                                 }
                                 Divider()
@@ -125,6 +126,14 @@ struct ChatSessionListPane: View {
                 .foregroundStyle(ScarfColor.foregroundPrimary)
             ScarfTextField("Session title", text: $renameText)
                 .onSubmit { commitRename(session) }
+            if let renameError = chatViewModel.renameError {
+                Label(renameError, systemImage: "exclamationmark.triangle")
+                    .scarfStyle(.footnote)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
             HStack {
                 Button("Cancel") { renameTarget = nil }
                     .buttonStyle(ScarfGhostButton())
@@ -141,8 +150,12 @@ struct ChatSessionListPane: View {
     }
 
     private func commitRename(_ session: HermesSession) {
-        chatViewModel.renameSession(session.id, to: renameText)
-        renameTarget = nil
+        // Keep the sheet open on failure so the reason is visible next
+        // to the field — a rename Hermes refuses (canonical Bot Chat)
+        // would otherwise just appear to do nothing.
+        if chatViewModel.renameSession(session.id, to: renameText) {
+            renameTarget = nil
+        }
     }
 
     // MARK: - Header

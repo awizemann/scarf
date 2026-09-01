@@ -40,6 +40,7 @@ public actor HermesDataService {
     private var hasV011Schema = false
     private var hasMessagesActiveColumn = false
     private var hasCompactedColumn = false
+    private var hasCompressedSummaryColumn = false
     private var hasRewindCountColumn = false
     private var hasSessionActivityColumns = false
     private var hasSessionModelUsageTable = false
@@ -83,6 +84,7 @@ public actor HermesDataService {
         hasV011Schema = await backend.hasV011Schema
         hasMessagesActiveColumn = await backend.hasMessagesActiveColumn
         hasCompactedColumn = await backend.hasCompactedColumn
+        hasCompressedSummaryColumn = await backend.hasCompressedSummaryColumn
         hasRewindCountColumn = await backend.hasRewindCountColumn
         hasSessionActivityColumns = await backend.hasSessionActivityColumns
         hasSessionModelUsageTable = await backend.hasSessionModelUsageTable
@@ -100,6 +102,7 @@ public actor HermesDataService {
         hasV011Schema = await backend.hasV011Schema
         hasMessagesActiveColumn = await backend.hasMessagesActiveColumn
         hasCompactedColumn = await backend.hasCompactedColumn
+        hasCompressedSummaryColumn = await backend.hasCompressedSummaryColumn
         hasRewindCountColumn = await backend.hasRewindCountColumn
         hasSessionActivityColumns = await backend.hasSessionActivityColumns
         hasSessionModelUsageTable = await backend.hasSessionModelUsageTable
@@ -890,6 +893,18 @@ public actor HermesDataService {
         }
     }
 
+    /// Inner "first eligible user row per session" subquery shared by
+    /// `fetchSessionPreviews`, `dashboardSnapshot` and
+    /// `sessionListSnapshot`. Carries the schema gate for
+    /// `messages.active` / `messages.compacted`, so the three call sites
+    /// stay a single string interpolation. See `SessionPreviewSQL`.
+    private var sessionPreviewFirstRowSQL: String {
+        SessionPreviewSQL.firstEligibleUserRowSQL(
+            hasActiveColumn: hasMessagesActiveColumn,
+            hasCompactedColumn: hasCompactedColumn
+        )
+    }
+
     public func fetchSessionPreviews(limit: Int = QueryDefaults.sessionPreviewLimit) async -> [String: String] {
         // Already bounded by `substr(content, 1, previewContentLength)`
         // — wire payload caps at ~limit × 100 bytes. v2.8 added
@@ -900,13 +915,10 @@ public actor HermesDataService {
         // an empty preview map.
         await ScarfMon.measureAsync(.sessionLoad, "mac.fetchSessionPreviews") {
             let sql = """
-                SELECT m.session_id, substr(m.content, 1, \(QueryDefaults.previewContentLength))
+                SELECT m.session_id, \(SessionPreviewSQL.rawSelect())
                 FROM messages m
                 INNER JOIN (
-                    SELECT session_id, MIN(id) as min_id
-                    FROM messages
-                    WHERE role = 'user' AND content <> ''
-                    GROUP BY session_id
+                \(sessionPreviewFirstRowSQL)
                 ) first ON m.id = first.min_id
                 ORDER BY m.timestamp DESC
                 LIMIT ?
@@ -915,7 +927,7 @@ public actor HermesDataService {
                 let rows = try await backend.query(sql, params: [.integer(Int64(limit))])
                 var previews: [String: String] = [:]
                 for row in rows {
-                    previews[row.string(at: 0)] = row.string(at: 1)
+                    previews[row.string(at: 0)] = SessionPreviewSQL.shape(row.string(at: 1))
                 }
                 ScarfMon.event(.sessionLoad, "mac.fetchSessionPreviews.rows", count: previews.count)
                 return previews
@@ -1249,13 +1261,10 @@ public actor HermesDataService {
             ),
             (
                 """
-                SELECT m.session_id, substr(m.content, 1, \(QueryDefaults.previewContentLength))
+                SELECT m.session_id, \(SessionPreviewSQL.rawSelect())
                 FROM messages m
                 INNER JOIN (
-                    SELECT session_id, MIN(id) as min_id
-                    FROM messages
-                    WHERE role = 'user' AND content <> ''
-                    GROUP BY session_id
+                \(sessionPreviewFirstRowSQL)
                 ) first ON m.id = first.min_id
                 ORDER BY m.timestamp DESC
                 LIMIT ?
@@ -1285,7 +1294,7 @@ public actor HermesDataService {
             let sessions = (resultSets.count > 1 ? resultSets[1] : []).map { sessionFromRow($0) }
             var previews: [String: String] = [:]
             for row in (resultSets.count > 2 ? resultSets[2] : []) {
-                previews[row.string(at: 0)] = row.string(at: 1)
+                previews[row.string(at: 0)] = SessionPreviewSQL.shape(row.string(at: 1))
             }
             let toolCalls = (resultSets.count > 3 ? resultSets[3] : []).map { messageFromRow($0) }
             let modelUsage = (resultSets.count > 4 ? resultSets[4] : []).map { modelUsageFromRow($0) }
@@ -1334,13 +1343,10 @@ public actor HermesDataService {
             ),
             (
                 """
-                SELECT m.session_id, substr(m.content, 1, \(QueryDefaults.previewContentLength))
+                SELECT m.session_id, \(SessionPreviewSQL.rawSelect())
                 FROM messages m
                 INNER JOIN (
-                    SELECT session_id, MIN(id) as min_id
-                    FROM messages
-                    WHERE role = 'user' AND content <> ''
-                    GROUP BY session_id
+                \(sessionPreviewFirstRowSQL)
                 ) first ON m.id = first.min_id
                 ORDER BY m.timestamp DESC
                 LIMIT ?
@@ -1353,7 +1359,7 @@ public actor HermesDataService {
             let sessions = (resultSets.first ?? []).map { sessionFromRow($0) }
             var previews: [String: String] = [:]
             for row in (resultSets.count > 1 ? resultSets[1] : []) {
-                previews[row.string(at: 0)] = row.string(at: 1)
+                previews[row.string(at: 0)] = SessionPreviewSQL.shape(row.string(at: 1))
             }
             return SessionListSnapshot(sessions: sessions, previews: previews)
         } catch {

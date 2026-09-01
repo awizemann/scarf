@@ -53,6 +53,27 @@ public protocol HermesQueryBackend: Sendable {
     /// this column exists. Detected one-time at `open()`.
     var hasCompactedColumn: Bool { get async }
 
+    /// True iff the connected DB has the v0.21 `messages._compressed_summary`
+    /// column — the schema-side marker Hermes stamps on rows it wrote as
+    /// context-compaction summaries (`hermes_state_common.py` :475;
+    /// writers `hermes_state.py` :11620, :12065).
+    ///
+    /// Detected one-time at `open()` for the same reason every other flag
+    /// here is: `SCHEMA_VERSION` stayed at 26 across this DDL change, so
+    /// presence — never a version number — is the only sound gate.
+    ///
+    /// **No Scarf query consults it, deliberately.** Hermes' only reader
+    /// (`_rows_to_conversation`, `hermes_state.py` :12899/:12965) uses it
+    /// to tag rows when `include_summary_markers` is set; its own session
+    /// preview and listing queries ignore it entirely. Scarf already
+    /// classifies carriers from content
+    /// (`HermesMessage.classifyCompactionSummary`), which works on every
+    /// supported host including the pre-v0.21 ones where this column does
+    /// not exist — so consulting it would add a schema dependency without
+    /// adding information. Kept detected so a future reader has the gate
+    /// ready. See `SessionPreviewSQL` for the full rationale.
+    var hasCompressedSummaryColumn: Bool { get async }
+
     /// True iff the connected DB has the v0.16 `sessions.rewind_count`
     /// column (count of how many times a session was rewound). Detected
     /// one-time at `open()` — the column only exists in v0.16+, so older
