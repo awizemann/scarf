@@ -16,7 +16,24 @@ struct HealthView: View {
     @Environment(\.hermesCapabilities) private var capabilitiesStore
 
     init(context: ServerContext) {
+        // Capabilities arrive via environment after init runs, so the VM
+        // is constructed with `.empty` and refreshed on first appear via
+        // `attachCapabilitiesIfNeeded()`. Same pattern as
+        // `MessagingGatewayViewModel.capabilities` / `GatewayView`.
         _viewModel = State(initialValue: HealthViewModel(context: context))
+    }
+
+    /// Re-create the VM with the resolved capabilities the first time the
+    /// store hands us non-empty data. Same shape as `GatewayView`'s
+    /// `attachCapabilitiesIfNeeded()`.
+    private func attachCapabilitiesIfNeeded() {
+        guard let store = capabilitiesStore,
+              store.capabilities.detected,
+              !viewModel.capabilities.detected else { return }
+        viewModel = HealthViewModel(
+            context: viewModel.context,
+            capabilities: store.capabilities
+        )
     }
 
 
@@ -148,6 +165,7 @@ struct HealthView: View {
             isEmpty: viewModel.statusSections.isEmpty && viewModel.doctorSections.isEmpty
         )
         .onAppear {
+            attachCapabilitiesIfNeeded()
             viewModel.load()
             viewModel.startDashboardMonitoring()
         }
@@ -330,6 +348,13 @@ struct HealthView: View {
                     Label(viewModel.updateInfo, systemImage: "arrow.triangle.2.circlepath")
                         .scarfStyle(.caption)
                         .foregroundStyle(ScarfColor.warning)
+                } else if viewModel.updateStatusUnknown {
+                    // Offline / fetch failed — Hermes couldn't confirm
+                    // currentness at all. Distinct, muted presentation so
+                    // this never reads as "confirmed up to date".
+                    Label("Update status unknown (offline?)", systemImage: "questionmark.circle")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
                 }
                 if let msg = viewModel.actionMessage {
                     Label(msg, systemImage: "arrow.triangle.2.circlepath")

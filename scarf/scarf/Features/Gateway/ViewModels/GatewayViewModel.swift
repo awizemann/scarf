@@ -14,8 +14,17 @@ struct MessagingGatewayInfo {
     let startTime: String?
     let updatedAt: String?
     let platforms: [PlatformInfo]
+    /// True when `hermes gateway status` shows the gateway is running under a
+    /// system service manager (systemd/launchd/Windows Scheduled Task) rather
+    /// than as a bare foreground/manual process. Derived by exclusion: the
+    /// manual-mode code path (`hermes_cli/gateway.py`'s `status` branch,
+    /// present unchanged at v0.20.5 and v0.21.0) is the *only* path that
+    /// prints "(Running manually, not as a system service)" — every
+    /// service-managed branch (systemd/launchd/Windows) prints something
+    /// else entirely, so its absence (while a PID is known) is a reliable
+    /// signal. There is no "service is loaded" string anywhere in the CLI;
+    /// the previous `contains("service is loaded")` check could never match.
     let isLoaded: Bool
-    let isStale: Bool
 }
 
 struct PlatformInfo: Identifiable {
@@ -57,7 +66,7 @@ final class MessagingGatewayViewModel {
         self.capabilities = capabilities
     }
 
-    var gateway = MessagingGatewayInfo(pid: nil, state: "unknown", exitReason: nil, startTime: nil, updatedAt: nil, platforms: [], isLoaded: false, isStale: false)
+    var gateway = MessagingGatewayInfo(pid: nil, state: "unknown", exitReason: nil, startTime: nil, updatedAt: nil, platforms: [], isLoaded: false)
     var approvedUsers: [PairedUser] = []
     var pendingPairings: [PendingPairing] = []
     var isLoading = false
@@ -121,14 +130,30 @@ final class MessagingGatewayViewModel {
         }
 
         let statusOutput = context.runHermes(["gateway", "status"]).output
-        let isLoaded = statusOutput.contains("service is loaded")
-        let isStale = statusOutput.contains("stale")
+        let isLoaded = isServiceLoaded(pid: pid, statusOutput: statusOutput)
 
         return MessagingGatewayInfo(
             pid: pid, state: state, exitReason: exitReason,
             startTime: startTime, updatedAt: updatedAt,
-            platforms: platforms, isLoaded: isLoaded, isStale: isStale
+            platforms: platforms, isLoaded: isLoaded
         )
+    }
+
+    /// True when `hermes gateway status` shows the gateway running under a
+    /// system service manager rather than as a bare foreground/manual
+    /// process. "(Running manually, not as a system service)" only prints
+    /// from the manual-mode branch of `hermes gateway status`
+    /// (`hermes_cli/gateway.py`'s `status` subcommand, confirmed identical
+    /// at v0.20.5 and v0.21.0). Every service-managed branch (systemd /
+    /// launchd / Windows Scheduled Task) prints entirely different text and
+    /// never this phrase, so a running gateway (a known PID) whose status
+    /// output lacks it is service-managed. There's no cross-platform
+    /// "stale" signal in this output — launchd's "Service definition is
+    /// stale…" and systemd's "…definition is outdated" are two different
+    /// strings, neither reachable from the manual branch — so that concept
+    /// is dropped rather than faked (see the retired `isStale` field).
+    nonisolated static func isServiceLoaded(pid: Int?, statusOutput: String) -> Bool {
+        pid != nil && !statusOutput.contains("(Running manually, not as a system service)")
     }
 
     nonisolated private static func fetchPairing(context: ServerContext) -> (approved: [PairedUser], pending: [PendingPairing]) {

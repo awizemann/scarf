@@ -45,17 +45,32 @@ final class HealthViewModel {
     let context: ServerContext
     private let fileService: HermesFileService
     private let subscriptionService: NousSubscriptionService
+    /// Capability snapshot at view-init time. Environment capabilities
+    /// arrive after `init` runs, so `HealthView` re-creates the VM via
+    /// `attachCapabilitiesIfNeeded()` once the store resolves — same
+    /// pattern as `MessagingGatewayViewModel.capabilities`. Used to gate
+    /// the Tool Gateway section's Web Extract row on `hasWebExtractAux`.
+    let capabilities: HermesCapabilities
 
-    init(context: ServerContext = .local) {
+    init(context: ServerContext = .local, capabilities: HermesCapabilities = .empty) {
         self.context = context
         self.fileService = HermesFileService(context: context)
         self.subscriptionService = NousSubscriptionService(context: context)
+        self.capabilities = capabilities
     }
 
 
     var version = ""
     var updateInfo = ""
     var hasUpdate = false
+    /// True when the update check couldn't reach `origin` (offline / no
+    /// network / fetch timeout) so Hermes printed neither an "Update
+    /// available…" line nor "Up to date" (`banner.py`'s `check_for_updates`
+    /// returns `None` on a failed `git fetch` — `_startup_fast.py` then
+    /// prints nothing at all). Distinct from `hasUpdate == false`, which
+    /// also covers the genuine "confirmed current" case — collapsing the
+    /// two would silently tell an offline user they're up to date.
+    var updateStatusUnknown = false
     var statusSections: [HealthSection] = []
     var doctorSections: [HealthSection] = []
     var issueCount = 0
@@ -153,6 +168,7 @@ final class HealthViewModel {
         let ctx = context
         let svc = fileService
         let subSvc = subscriptionService
+        let caps = capabilities
         // Health runs four sync transport-mediated commands plus a process
         // probe — that's 4-5 ssh round-trips on remote, easily 1-2s. Detach
         // the whole load, store the handle, and bail between round-trips if
@@ -173,12 +189,13 @@ final class HealthViewModel {
 
             let lines = versionOutput.components(separatedBy: "\n")
             let version = lines.first ?? ""
-            let updateLine = lines.first(where: { $0.contains("commits behind") })
-            let hasUpdate = updateLine != nil
-            let updateInfo = updateLine?.trimmingCharacters(in: .whitespaces) ?? ""
+            let updateStatus = Self.parseUpdateStatus(lines: lines)
+            let hasUpdate = updateStatus.hasUpdate
+            let updateInfo = updateStatus.updateInfo
+            let updateStatusUnknown = updateStatus.unknown
 
             let statusSections = Self.parseOutputStatic(statusOutput)
-                + [Self.toolGatewaySection(subscription: subscription, config: config)]
+                + [Self.toolGatewaySection(subscription: subscription, config: config, capabilities: caps)]
             let doctorSections = Self.parseOutputStatic(doctorOutput)
 
             await MainActor.run { [weak self] in
@@ -188,6 +205,7 @@ final class HealthViewModel {
                 self.version = version
                 self.updateInfo = updateInfo
                 self.hasUpdate = hasUpdate
+                self.updateStatusUnknown = updateStatusUnknown
                 self.statusSections = statusSections
                 self.doctorSections = doctorSections
                 self.configuredModel = config.model
@@ -218,7 +236,7 @@ final class HealthViewModel {
     ///
     /// `nonisolated` so `load()` can call it from `Task.detached` alongside
     /// `parseOutputStatic` without hopping back to MainActor.
-    nonisolated private static func toolGatewaySection(subscription: NousSubscriptionState, config: HermesConfig) -> HealthSection {
+    nonisolated private static func toolGatewaySection(subscription: NousSubscriptionState, config: HermesConfig, capabilities: HermesCapabilities) -> HealthSection {
         var checks: [HealthCheck] = []
 
         let subscriptionCheck: HealthCheck = {
@@ -256,7 +274,7 @@ final class HealthViewModel {
             }
         }
 
-        let auxOnNous = [
+        var auxCandidates = [
             ("vision", config.auxiliary.vision.provider),
             ("web_extract", config.auxiliary.webExtract.provider),
             ("compression", config.auxiliary.compression.provider),
@@ -265,7 +283,16 @@ final class HealthViewModel {
             ("approval", config.auxiliary.approval.provider),
             ("mcp", config.auxiliary.mcp.provider),
             ("curator", config.auxiliary.curator.provider),
-        ].filter { $0.1 == "nous" }.map(\.0)
+        ]
+        // `auxiliary.web_extract.*` was deleted from the host's config
+        // schema at v0.20.6+ (`HermesCapabilities.hasWebExtractAux`, an
+        // inverse flag) — `web_extract` no longer routes through an
+        // auxiliary LLM at all, so surfacing it here would report on a
+        // config block the host ignores.
+        if !capabilities.hasWebExtractAux {
+            auxCandidates.removeAll { $0.0 == "web_extract" }
+        }
+        let auxOnNous = auxCandidates.filter { $0.1 == "nous" }.map(\.0)
         if !auxOnNous.isEmpty {
             checks.append(HealthCheck(
                 label: "Auxiliary tasks routed through Nous",
@@ -346,13 +373,10 @@ final class HealthViewModel {
         let output = Self.probeVersion(context)
         let lines = output.components(separatedBy: "\n")
         version = lines.first ?? ""
-        if let updateLine = lines.first(where: { $0.contains("commits behind") }) {
-            updateInfo = updateLine.trimmingCharacters(in: .whitespaces)
-            hasUpdate = true
-        } else {
-            updateInfo = ""
-            hasUpdate = false
-        }
+        let updateStatus = Self.parseUpdateStatus(lines: lines)
+        hasUpdate = updateStatus.hasUpdate
+        updateInfo = updateStatus.updateInfo
+        updateStatusUnknown = updateStatus.unknown
     }
 
     /// Static-callable form for the detached load() task. The instance
@@ -680,11 +704,11 @@ final class HealthViewModel {
     // (`hasVersionFlagFullOutput`, see `HermesCapabilities`): an unknown
     // token falls through to plugin discovery and spawns a chat-agent turn
     // instead of printing a version line. `hermes --version` on v0.20.5+
-    // now carries the full banner including the "commits behind" update
-    // line that :164/:346 grep for; below v0.20.5, `--version` prints only
-    // the short banner ("Run 'hermes version' for update status") and the
-    // `commits behind` line is only obtainable via the bare `version`
-    // subcommand.
+    // now carries the full banner including the "Update available…" (or
+    // "Up to date") line the `load()`/`loadVersion()` update-status parsing
+    // greps for; below v0.20.5, `--version` prints only the short banner
+    // ("Run 'hermes version' for update status") and the update-status line
+    // is only obtainable via the bare `version` subcommand.
     //
     // Bootstrap problem: Health may run before anything has ever probed
     // this host's capabilities, so we can't simply read
@@ -700,8 +724,8 @@ final class HealthViewModel {
     //      Hermes version, old or new, because `--version` has always been
     //      a real flag and never falls through to a chat prompt.
     //   3. Only fall back to the bare `version` subcommand when the
-    //      `--version` output lacks the update-status ("commits behind")
-    //      section AND the version line we *did* parse out of it is below
+    //      `--version` output lacks the update-status ("Update available…"
+    //      or "Up to date") section AND the version line we *did* parse out of it is below
     //      0.20.5 (or unparseable, i.e. we can't confirm the host is new
     //      enough to trust `--version` alone). If `--version` already
     //      yielded a parseable version >= 0.20.5, we never issue bare
@@ -744,15 +768,60 @@ final class HealthViewModel {
         capabilities.hasVersionFlagFullOutput ? ["--version"] : ["version"]
     }
 
+    /// Parsed result of a `--version` / `version` update-status check.
+    struct UpdateStatus: Equatable {
+        /// The raw "Update available…" line, trimmed. Empty when no update.
+        let updateInfo: String
+        var hasUpdate: Bool { !updateInfo.isEmpty }
+        /// True when the check couldn't determine currentness at all — no
+        /// "Update available…" line AND no "Up to date" line (offline / a
+        /// failed `git fetch`; see `parseUpdateStatus(lines:)`).
+        let unknown: Bool
+        /// True when *either* a positive or negative update-status line is
+        /// present — i.e. the output can be trusted as a full "carries the
+        /// update section" banner rather than the old short banner.
+        var hasUpdateStatusSection: Bool { hasUpdate || !unknown }
+    }
+
+    /// Shared update-status parse for both `load()` and `loadVersion()`, and
+    /// for `shouldFallBackToBareVersionSubcommand`'s "does this output
+    /// already carry the section" check.
+    ///
+    /// Hermes prints exactly one of three "Update available" shapes
+    /// (`_startup_fast.py:238-249`): plural "N commits behind", singular "1
+    /// commit behind", or a count-less "Update available — run '…'" when
+    /// the stale local ref only proves *some* update exists. Matching the
+    /// "Update available" prefix (rather than "commits behind") catches all
+    /// three; the old substring match missed the singular and count-less
+    /// forms entirely.
+    ///
+    /// When the update check can't reach `origin` at all (offline / fetch
+    /// timeout), `banner.py`'s `check_for_updates()` returns `None` and
+    /// `_startup_fast.py` prints *neither* an "Update available…" line nor
+    /// "Up to date" (banner.py:344-380, the `if not fetch_ok: … return None`
+    /// path). That's a genuinely different state from "confirmed current"
+    /// and must not collapse into it.
+    nonisolated static func parseUpdateStatus(lines: [String]) -> UpdateStatus {
+        if let updateLine = lines.first(where: { $0.hasPrefix("Update available") }) {
+            return UpdateStatus(updateInfo: updateLine.trimmingCharacters(in: .whitespaces), unknown: false)
+        }
+        let confirmedUpToDate = lines.contains(where: { $0.trimmingCharacters(in: .whitespaces) == "Up to date" })
+        return UpdateStatus(updateInfo: "", unknown: !confirmedUpToDate)
+    }
+
     /// True when `hermes --version` output needs the bare `version`
-    /// fallback to get the update-status ("commits behind") section: the
-    /// output doesn't already carry it, and the version we can parse out of
-    /// it (if any) is below the 0.20.5 floor where `--version` gained that
-    /// section. Unparseable output (no recognizable "Hermes Agent vX.Y.Z"
-    /// line) is treated the same as "below 0.20.5" — we can't confirm the
-    /// host is new enough to trust `--version` alone, so we fall back.
+    /// fallback to get the update-status section: the output doesn't
+    /// already carry one (an "Update available…" line in any of its three
+    /// shapes, or an explicit "Up to date"), and the version we can parse
+    /// out of it (if any) is below the 0.20.5 floor where `--version`
+    /// gained that section. Unparseable output (no recognizable "Hermes
+    /// Agent vX.Y.Z" line) is treated the same as "below 0.20.5" — we can't
+    /// confirm the host is new enough to trust `--version` alone, so we
+    /// fall back.
     nonisolated static func shouldFallBackToBareVersionSubcommand(output: String) -> Bool {
-        guard !output.contains("commits behind") else { return false }
+        guard !parseUpdateStatus(lines: output.components(separatedBy: "\n")).hasUpdateStatusSection else {
+            return false
+        }
         guard let semver = HermesCapabilities.parse(output).semver else { return true }
         return semver < HermesCapabilities.SemVer(major: 0, minor: 20, patch: 5)
     }
