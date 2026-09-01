@@ -930,6 +930,26 @@ public struct ModelCatalogService: Sendable {
             docURL: nil,
             keyless: true
         ),
+        // -- v0.21.0 additions --------------------------------------------
+        // Hermes v2026.8.31 (0.21.0) added Tencent TokenPlan and Nebius
+        // Token Factory, both overlay-only (not in models.dev). Wire IDs
+        // match HERMES_OVERLAYS verbatim.
+        "tencent-tokenplan": HermesProviderOverlay(
+            displayName: "Tencent TokenPlan",
+            // Resolved from TOKENPLAN_BASE_URL at runtime; default matches
+            // providers.py's base_url_override.
+            baseURL: "https://api.lkeap.cloud.tencent.com/plan/anthropic",
+            authType: .apiKey,
+            subscriptionGated: false,
+            docURL: nil
+        ),
+        "nebius-token-factory": HermesProviderOverlay(
+            displayName: "Nebius Token Factory",
+            baseURL: "https://api.tokenfactory.nebius.com/v1",
+            authType: .apiKey,
+            subscriptionGated: false,
+            docURL: nil
+        ),
     ]
 
     /// Provider-ID aliases — verbatim mirror of `ALIASES` in
@@ -1023,6 +1043,8 @@ public struct ModelCatalogService: Sendable {
         "tokenhub": "tencent-tokenhub",
         "tencent-cloud": "tencent-tokenhub",
         "tencentmaas": "tencent-tokenhub",
+        "tokenplan": "tencent-tokenplan",
+        "tencent-lkeap": "tencent-tokenplan",
         // bedrock
         "aws": "bedrock",
         "aws-bedrock": "bedrock",
@@ -1043,6 +1065,12 @@ public struct ModelCatalogService: Sendable {
         "actual-computer": "actual",
         "actualcomputer": "actual",
         "aci": "actual",
+        // Nebius Token Factory
+        "nebius": "nebius-token-factory",
+        "nebius-tokenfactory": "nebius-token-factory",
+        "nebius-tf": "nebius-token-factory",
+        "token-factory": "nebius-token-factory",
+        "tokenfactory": "nebius-token-factory",
         // Local server aliases → virtual "local" concept (resolved via user config)
         "lm-studio": "lmstudio",
         "lm_studio": "lmstudio",

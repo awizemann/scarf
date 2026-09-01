@@ -482,6 +482,46 @@ import Foundation
         #expect(ModelCatalogService.canonicalProviderID("go") == "opencode-go")
     }
 
+    @Test func tencentTokenPlanOverlayPresent() {
+        // v0.21.0 (Hermes v2026.8.31): providers.py:199-203 overlay,
+        // label :455. anthropic_messages transport, api_key auth, not
+        // an aggregator, not keyless.
+        let overlay = ModelCatalogService.overlayOnlyProviders["tencent-tokenplan"]
+        #expect(overlay != nil)
+        #expect(overlay?.displayName == "Tencent TokenPlan")
+        #expect(overlay?.baseURL == "https://api.lkeap.cloud.tencent.com/plan/anthropic")
+        #expect(overlay?.authType == .apiKey)
+        #expect(overlay?.subscriptionGated == false)
+        #expect(overlay?.keyless == false)
+        #expect(ModelCatalogService.canonicalProviderID("tokenplan") == "tencent-tokenplan")
+        #expect(ModelCatalogService.canonicalProviderID("tencent-lkeap") == "tencent-tokenplan")
+    }
+
+    @Test func nebiusTokenFactoryOverlayPresent() {
+        // v0.21.0 (Hermes v2026.8.31): providers.py:232-237 overlay,
+        // label :454. openai_chat transport, api_key auth, not an
+        // aggregator, not keyless.
+        let overlay = ModelCatalogService.overlayOnlyProviders["nebius-token-factory"]
+        #expect(overlay != nil)
+        #expect(overlay?.displayName == "Nebius Token Factory")
+        #expect(overlay?.baseURL == "https://api.tokenfactory.nebius.com/v1")
+        #expect(overlay?.authType == .apiKey)
+        #expect(overlay?.subscriptionGated == false)
+        #expect(overlay?.keyless == false)
+        #expect(ModelCatalogService.canonicalProviderID("nebius") == "nebius-token-factory")
+        #expect(ModelCatalogService.canonicalProviderID("nebius-tokenfactory") == "nebius-token-factory")
+        #expect(ModelCatalogService.canonicalProviderID("nebius-tf") == "nebius-token-factory")
+        #expect(ModelCatalogService.canonicalProviderID("token-factory") == "nebius-token-factory")
+        #expect(ModelCatalogService.canonicalProviderID("tokenfactory") == "nebius-token-factory")
+    }
+
+    @Test func tencentTokenPlanAndNebiusAreNotAggregators() {
+        // Confirmed against providers.py: neither overlay sets
+        // is_aggregator=True.
+        #expect(!ModelPreflight.aggregatorProviders.contains("tencent-tokenplan"))
+        #expect(!ModelPreflight.aggregatorProviders.contains("nebius-token-factory"))
+    }
+
     @Test func xaiRetiredModelAliasesResolveToGrok43() {
         let svc = ModelCatalogService(path: "/tmp/scarf-nonexistent-\(UUID().uuidString).json")
         // v0.15 May-15 retirement map → grok-4.3 (xai + xai-oauth prefixes).
