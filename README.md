@@ -67,13 +67,16 @@ Connecting takes about a minute: add a server (same details as `ssh user@host`),
 
 Scarf for macOS collects **anonymous usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames; no persistent identifier) to guide development. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/).
 
-## What's New in 2.22.0
+## What's New in 2.23.0
 
-- **Full accessibility support** — ~120 accessibility labels across every form field and list row in the Mac app. VoiceOver and Voice Control users get real field names ("Host", "Identity file") and readable rows ("my-app, in Tools, archived"); the same labels unblock UI-automation tooling.
-- **Fully translated** — the entire translation backlog (~940 strings, including all the new accessibility labels) is cleared; the app is now ~93% localized in German, Spanish, French, Japanese, Brazilian Portuguese, and Simplified Chinese, with only proper nouns and code deliberately left in English.
-- **Faster streaming chat** — incremental markdown parsing (only the live tail re-renders) and 50ms-throttled UI updates during streaming (gh#140).
+- **Hermes v0.21.0 "Pantheon" parity** — full compatibility with Hermes's biggest release of the year, capability-gated per feature (several actually landed in v0.20.6, and Scarf gates them where they really shipped). Older hosts render identically.
+- **Peers** ⚙ — a new Manage section for `hermes peer`: DM your other Hermes agents and fire async runs with live status/stop, without Scarf ever touching peer keys.
+- **Cron health** ⚙ — failure incidents with acknowledge, per-job doctor findings, Resume & Run Now, and Bot Chat as a delivery target.
+- **Honest session previews** — compaction summaries and rewound messages no longer masquerade as a session's first message (byte-identical port of Hermes's own preview logic).
+- **MCP catalog ×3** — 20 → 65 optional MCP servers, with the dead Atlassian endpoint fixed and recommended tool exclusions honored on install.
+- Plus: the offline/singular update-check formats Health used to miss, real gateway status markers, two new providers, and dotted names no longer corrupting config.yaml.
 
-Full notes: [v2.22.0](https://github.com/awizemann/scarf/releases/tag/v2.22.0) · v2.21.0 brought Hermes v0.20.5 parity (OpenCode Free, unlimited max turns, auto STT) · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
+Full notes: [v2.23.0](https://github.com/awizemann/scarf/releases/tag/v2.23.0) · v2.22.0 brought full accessibility + complete six-language localization · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
 
 ## Features
 
