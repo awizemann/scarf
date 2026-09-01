@@ -352,7 +352,6 @@ final class SettingsViewModel {
 
     func setMaxTurns(_ value: Int) { setSetting("agent.max_turns", value: String(value)) }
     func setReasoningEffort(_ value: String) { setSetting("agent.reasoning_effort", value: value) }
-    func setVerbose(_ value: Bool) { setSetting("agent.verbose", value: value ? "true" : "false") }
     func setServiceTier(_ value: String) { setSetting("agent.service_tier", value: value) }
     func setGatewayNotifyInterval(_ value: Int) { setSetting("agent.gateway_notify_interval", value: String(value)) }
     func setGatewayTimeout(_ value: Int) { setSetting("agent.gateway_timeout", value: String(value)) }
@@ -452,7 +451,6 @@ final class SettingsViewModel {
     // v0.13: xAI TTS / Custom Voices. TODO(WS-8-Q2): grep-verify key
     // names against `~/.hermes/hermes-agent/hermes_cli/voice/tts.py`.
     func setTTSXAIVoiceID(_ value: String) { setSetting("tts.xai.voice_id", value: value) }
-    func setTTSXAIModel(_ value: String) { setSetting("tts.xai.model", value: value) }
     // v0.15: auto-insert speech-control tags into xAI TTS output.
     func setTTSXAIAutoSpeechTags(_ value: Bool) { setSetting("tts.xai.auto_speech_tags", value: value ? "true" : "false") }
     // -- xAI TTS advanced params (v0.19+, hasXAITTSAdvancedParams).

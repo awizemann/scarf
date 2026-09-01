@@ -183,9 +183,24 @@ struct CronView: View {
             }
             Spacer()
             if let msg = viewModel.message {
-                Text(msg)
-                    .scarfStyle(.caption)
-                    .foregroundStyle(ScarfColor.foregroundMuted)
+                // Failures no longer auto-clear (see CronViewModel.post), so
+                // they get a colour and an explicit dismiss.
+                let failed = viewModel.messageOutcome == .failure
+                HStack(spacing: ScarfSpace.s1) {
+                    Text(msg)
+                        .scarfStyle(.caption)
+                        .foregroundStyle(failed ? ScarfColor.danger : ScarfColor.foregroundMuted)
+                    if failed {
+                        Button {
+                            viewModel.dismissMessage()
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                        .accessibilityLabel("Dismiss this cron error")
+                    }
+                }
             }
             HStack(spacing: ScarfSpace.s2) {
                 Button {
@@ -1069,6 +1084,7 @@ struct CronJobEditor: View {
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)
                 TextEditor(text: $form.prompt)
+                    .accessibilityLabel("Prompt")
                     .font(ScarfFont.mono)
                     .frame(minHeight: 100)
                     .padding(4)

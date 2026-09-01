@@ -15,6 +15,18 @@ struct BotConversationView: View {
     @Bindable var viewModel: BotConversationViewModel
     let botTitle: String
 
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
+
+    /// Whether this host has every CLI flag the creation transport needs.
+    /// `--query-file` is absent below v0.21 (see
+    /// `HermesCapabilities.hasBotChatCreationCLI` for the per-flag
+    /// verification), and argparse rejects the whole invocation on an
+    /// unknown flag — so below the floor the starter is replaced with an
+    /// explicit unsupported note rather than a button that always fails.
+    private var canCreateBotChat: Bool {
+        capabilitiesStore?.capabilities.hasBotChatCreationCLI ?? false
+    }
+
     /// The transcript needs a bounded height: `BotDetailView` lays its
     /// slots out inside a `ScrollView`, and a self-scrolling transcript
     /// nested in one would be unusable. A fixed pane keeps B2's detail
@@ -28,6 +40,16 @@ struct BotConversationView: View {
                 header
                 content
             }
+        }
+        // Exactly what ChatView.swift does for the main chat. Without it the
+        // bot's `RichChatViewModel` never received a capability snapshot, so
+        // every bot conversation's slash menu was permanently degraded to
+        // the `.empty` set — greyed agent commands, no version-gated
+        // surfaces (go/no-go blocking condition 5, A2-F1). The id is the
+        // capabilities-line string, a stable identity that flips exactly
+        // when the detector fires.
+        .task(id: capabilitiesStore?.capabilities.versionLine ?? "") {
+            viewModel.chat.attachCapabilitiesStore(capabilitiesStore)
         }
     }
 
@@ -110,21 +132,37 @@ struct BotConversationView: View {
         .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.lg))
     }
 
+    @ViewBuilder
     private var starter: some View {
         VStack(alignment: .leading, spacing: ScarfSpace.s3) {
             placeholder(
                 icon: "bubble.left.and.bubble.right",
                 title: "No conversation yet",
-                detail: "\(botTitle) doesn’t have a Bot Chat. Send the first message and Hermes creates it."
+                detail: canCreateBotChat
+                    ? "\(botTitle) doesn’t have a Bot Chat. Send the first message and Hermes creates it."
+                    : "\(botTitle) doesn’t have a Bot Chat yet, and this host can’t create one."
             )
-            BotConversationStarter { viewModel.send($0) }
-            // Stated up front rather than discovered later: Scarf can only
-            // create this session through the Hermes CLI, which has no way
-            // to hide it (see BotConversationViewModel.createCanonicalBotChat).
-            Text("Heads up: the chat Scarf creates also shows up in Sessions. Don’t rename it there — its name is how Hermes finds it.")
-                .scarfStyle(.caption)
-                .foregroundStyle(ScarfColor.foregroundMuted)
-                .fixedSize(horizontal: false, vertical: true)
+            if canCreateBotChat {
+                BotConversationStarter { viewModel.send($0) }
+                // Stated up front rather than discovered later: Scarf can only
+                // create this session through the Hermes CLI, which has no way
+                // to hide it (see BotConversationViewModel.createCanonicalBotChat).
+                // The chat lives in the BOT's own state.db, so it appears in
+                // Sessions only while this window is scoped to that profile —
+                // not in the Sessions list of whatever profile you're in now.
+                // (go/no-go blocking condition 3b: the old copy claimed the
+                // former, which is wrong for the common case.)
+                Text("Heads up: the chat Scarf creates isn’t hidden, so it shows up in Sessions whenever you’re viewing this bot’s profile. Don’t rename it there — its name is how Hermes finds it.")
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Starting a bot’s first conversation needs hermes chat --query-file, which arrived in Hermes v0.21. Upgrade the host, or send this bot its first message from Hermes itself — Scarf picks the chat up from there.")
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
         }
     }
 

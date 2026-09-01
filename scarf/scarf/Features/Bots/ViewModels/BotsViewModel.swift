@@ -537,15 +537,58 @@ final class BotsViewModel {
         save(draft)
     }
 
-    /// Stop managing a profile as a bot: hide it from the bot roster without
-    /// touching the profile itself. Deliberately *not* a removal of the
-    /// `hermes-bots` block — B0's writer owns that block's keys, and a user
-    /// asking to "remove from Bots" is not asking to delete their profile.
+    /// Stop managing a profile as a bot: clear the `ui_meta['hermes-bots']`
+    /// block so the profile drops back to "Other profiles". The profile
+    /// directory, its sessions, its memories and its top-level
+    /// `display_name`/`description` are untouched — only the bot-mode block
+    /// Scarf/Hermes Desktop own goes away.
+    ///
+    /// This deliberately does NOT go through ``save(_:)``: `BotDraft.apply`
+    /// stamps `isBotManaged = true` (saving through the editor is what MAKES
+    /// a profile a bot), so routing demote through it produced a write that
+    /// was byte-for-byte "Hide" — the affordance's own label over-promised
+    /// (go/no-go blocking condition 2, A4-C2). `HermesBotProfileYAML.write`
+    /// already implements the removal: an identity with `isBotManaged ==
+    /// false` renders an empty block, which the writer splices out (along
+    /// with a `ui_meta:` header left with no children), preserving every
+    /// sibling namespace and unknown key exactly as the add/edit path does.
     func demote(_ row: BotRow) {
-        var draft = BotDraft(identity: row.identity)
-        draft.hidden = true
-        draft.pinned = false
-        save(draft)
+        guard hasBotMode, !isWorking else { return }
+        isWorking = true
+        errorMessage = nil
+        let backend = self.backend
+        let log = logger
+        let name = row.identity.profileName
+        Task.detached(priority: .userInitiated) { [weak self] in
+            var failure: String?
+            do {
+                // Re-read first, same as `save`: unknown keys, groups and a
+                // concurrent Hermes Desktop edit must be the file's current
+                // values, not this row's snapshot.
+                var identity = backend.identity(forProfile: name)
+                identity.isBotManaged = false
+                // Both live inside the block that is about to be removed;
+                // clearing them keeps the in-memory identity honest for the
+                // reload that follows.
+                identity.pinned = nil
+                identity.hidden = nil
+                try backend.saveIdentity(identity)
+            } catch {
+                failure = Self.saveFailureText(error, profileName: name)
+            }
+            let result = failure
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.isWorking = false
+                if let result {
+                    log.warning("bot demote failed: \(result, privacy: .public)")
+                    self.errorMessage = result
+                } else {
+                    self.flash("Removed \(name) from Bots")
+                }
+                self.load(force: true)
+            }
+        }
     }
 
     /// Flip `pinned` from the roster's context menu without opening the editor.

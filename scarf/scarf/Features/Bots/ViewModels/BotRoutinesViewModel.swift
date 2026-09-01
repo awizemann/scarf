@@ -64,6 +64,16 @@ final class BotRoutinesViewModel {
     var isLoading: Bool { cron.isLoading }
     var message: String? { cron.message }
 
+    /// Typed outcome for ``message``, forwarded from `CronViewModel` rather
+    /// than sniffed out of the string. The pane used to paint every message
+    /// in `ScarfColor.success` — so "Failed: …" and `friendlyCronFailure`
+    /// text, which travel down this same channel, announced a broken routine
+    /// in green and then auto-cleared (go/no-go blocking condition 1).
+    var messageOutcome: CronViewModel.MessageOutcome { cron.messageOutcome }
+    var messageIsFailure: Bool { cron.messageOutcome == .failure }
+
+    func dismissMessage() { cron.dismissMessage() }
+
     func load(force: Bool = false) {
         cron.load(force: force)
     }

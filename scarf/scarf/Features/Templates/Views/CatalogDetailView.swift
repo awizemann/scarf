@@ -26,7 +26,7 @@ struct CatalogDetailView: View {
                 if !entry.tags.isEmpty {
                     HStack(spacing: 4) {
                         ForEach(entry.tags, id: \.self) { tag in
-                            ScarfBadge(tag, kind: .neutral)
+                            ScarfBadge(verbatim: tag, kind: .neutral)
                         }
                     }
                 }

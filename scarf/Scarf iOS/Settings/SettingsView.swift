@@ -204,7 +204,6 @@ struct SettingsView: View {
             // rather than 0.
             LabeledContent("Max turns", value: vm.config.displayMaxTurnsText(capabilities: caps))
             LabeledContent("Service tier", value: vm.config.serviceTier)
-            yesNoRow("Verbose logging", vm.config.verbose)
             LabeledContent("Tool use enforcement", value: vm.config.toolUseEnforcement)
         }
     }

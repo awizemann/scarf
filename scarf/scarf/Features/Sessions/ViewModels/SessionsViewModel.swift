@@ -151,6 +151,16 @@ final class SessionsViewModel {
     var renameSessionId: String?
     var renameText = ""
     var showRenameSheet = false
+
+    /// The title the session had when the rename sheet opened. Captured so
+    /// the Bot Chat guard tests the title on DISK, not whatever the user has
+    /// typed into the field so far.
+    @ObservationIgnored private var renameOriginalTitle: String?
+
+    /// Set when `confirmRename()` is about to detach a bot's conversation
+    /// (see `BotChatSession.renameNeedsConfirmation`). The view presents the
+    /// warning; `confirmRenameAcknowledgingBotChat()` is the "do it anyway".
+    var showBotChatRenameWarning = false
     /// Why the last rename attempt failed, `nil` when it succeeded or
     /// no attempt has been made. Set from `SessionRenameFailure` and
     /// shown inside the rename sheet, which stays open on failure so
@@ -309,11 +319,33 @@ final class SessionsViewModel {
     func beginRename(_ session: HermesSession) {
         renameSessionId = session.id
         renameText = previewFor(session)
+        renameOriginalTitle = session.title
         renameError = nil
+        showBotChatRenameWarning = false
         showRenameSheet = true
     }
 
+    /// Ask first when this would detach a bot's conversation history. Hermes
+    /// refuses the rename server-side only for a HIDDEN "Bot Chat", and a
+    /// Scarf-created one is never hidden — so without this the rename simply
+    /// succeeds and orphans the transcript (go/no-go blocking condition 3).
     func confirmRename() {
+        guard renameSessionId != nil else { return }
+        if BotChatSession.renameNeedsConfirmation(currentTitle: renameOriginalTitle, newTitle: renameText),
+           !renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            showBotChatRenameWarning = true
+            return
+        }
+        performRename()
+    }
+
+    /// The user read the warning and chose to rename anyway.
+    func confirmRenameAcknowledgingBotChat() {
+        showBotChatRenameWarning = false
+        performRename()
+    }
+
+    private func performRename() {
         guard let sessionId = renameSessionId else { return }
         let title = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         // Clear first: an empty title is a no-op, and leaving a previous
@@ -340,6 +372,7 @@ final class SessionsViewModel {
         renameError = nil
         showRenameSheet = false
         renameSessionId = nil
+        renameOriginalTitle = nil
     }
 
     func beginDelete(_ session: HermesSession) {

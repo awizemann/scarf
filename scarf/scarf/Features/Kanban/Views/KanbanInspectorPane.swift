@@ -174,12 +174,12 @@ struct KanbanInspectorPane: View {
                     // available width.
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 4) {
-                            ScarfBadge(task.status.lowercased(), kind: badgeKind(for: task.status))
+                            ScarfBadge(verbatim: task.status.lowercased(), kind: badgeKind(for: task.status))
                                 .fixedSize()
                             assigneeMenu(for: task)
                                 .fixedSize()
                             if let workspace = task.workspaceKind {
-                                ScarfBadge(workspace, kind: .neutral)
+                                ScarfBadge(verbatim: workspace, kind: .neutral)
                                     .fixedSize()
                             }
                             // v0.13: max_retries chip. Read-only — Hermes
@@ -206,7 +206,7 @@ struct KanbanInspectorPane: View {
                                     .help("Git branch the worker is operating on.")
                             }
                             if let tenant = task.tenant, !tenant.isEmpty {
-                                ScarfBadge(tenant, kind: .brand)
+                                ScarfBadge(verbatim: tenant, kind: .brand)
                                     .fixedSize()
                             }
                         }
@@ -249,7 +249,7 @@ struct KanbanInspectorPane: View {
             }
         } label: {
             HStack(spacing: 4) {
-                ScarfBadge(label, kind: kind)
+                ScarfBadge(verbatim: label, kind: kind)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(ScarfColor.foregroundMuted)
@@ -470,7 +470,7 @@ struct KanbanInspectorPane: View {
         // whatever future kinds Hermes ships. The typed mirror picks
         // the badge tint and tooltip glyph; the verbatim wire string
         // is the user-facing label.
-        ScarfBadge(diag.kind, kind: badgeKind)
+        ScarfBadge(verbatim: diag.kind, kind: badgeKind)
             .help(diag.message ?? diag.kind)
     }
 
@@ -728,7 +728,7 @@ struct KanbanInspectorPane: View {
                 // Render the wire-side outcome / status string verbatim so
                 // v0.13's richer outcome strings ("zombied — reclaimed by
                 // reaper", etc.) surface unchanged.
-                ScarfBadge(run.outcome ?? run.status, kind: outcomeKind(run.outcome ?? run.status))
+                ScarfBadge(verbatim: run.outcome ?? run.status, kind: outcomeKind(run.outcome ?? run.status))
                 if let profile = run.profile {
                     Text(profile)
                         .scarfStyle(.captionStrong)

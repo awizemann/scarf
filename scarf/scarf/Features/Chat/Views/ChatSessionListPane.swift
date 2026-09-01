@@ -27,6 +27,9 @@ struct ChatSessionListPane: View {
 
     @State private var renameTarget: HermesSession?
     @State private var renameText: String = ""
+    /// Raised by `commitRename` when the rename would detach a bot's
+    /// conversation history (see `BotChatSession.renameNeedsConfirmation`).
+    @State private var showBotChatRenameWarning = false
     @State private var deleteTarget: HermesSession?
 
     var body: some View {
@@ -147,12 +150,38 @@ struct ChatSessionListPane: View {
         }
         .padding(ScarfSpace.s5)
         .frame(width: 380)
+        .confirmationDialog(
+            "Rename \u{201C}Bot Chat\u{201D}?",
+            isPresented: $showBotChatRenameWarning,
+            titleVisibility: .visible
+        ) {
+            Button("Rename Anyway", role: .destructive) {
+                showBotChatRenameWarning = false
+                performRename(session)
+            }
+            Button("Cancel", role: .cancel) { showBotChatRenameWarning = false }
+        } message: {
+            Text(BotChatSession.renameWarning)
+        }
     }
 
     private func commitRename(_ session: HermesSession) {
+        // Ask before detaching a bot's history. Hermes only refuses the
+        // rename server-side for a HIDDEN "Bot Chat"; a Scarf-created one
+        // is never hidden, so this rename would succeed and orphan the
+        // transcript (go/no-go blocking condition 3).
+        if BotChatSession.renameNeedsConfirmation(currentTitle: session.title, newTitle: renameText),
+           !renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            showBotChatRenameWarning = true
+            return
+        }
+        performRename(session)
+    }
+
+    private func performRename(_ session: HermesSession) {
         // Keep the sheet open on failure so the reason is visible next
-        // to the field — a rename Hermes refuses (canonical Bot Chat)
-        // would otherwise just appear to do nothing.
+        // to the field — a rename Hermes refuses (a hidden canonical Bot
+        // Chat) would otherwise just appear to do nothing.
         if chatViewModel.renameSession(session.id, to: renameText) {
             renameTarget = nil
         }

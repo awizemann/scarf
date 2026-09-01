@@ -162,9 +162,11 @@ struct KanbanBoardView: View {
     // MARK: - Header
 
     private var header: some View {
+        // `subtitle` is composed at runtime (board scope + counts), so it
+        // takes the verbatim path; the title stays a localizable literal.
         ScarfPageHeader(
-            "Kanban",
-            subtitle: subtitle
+            verbatim: String(localized: "Kanban"),
+            verbatimSubtitle: subtitle
         ) {
             HStack(spacing: ScarfSpace.s2) {
                 glanceText

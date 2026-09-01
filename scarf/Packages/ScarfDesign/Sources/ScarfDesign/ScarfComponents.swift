@@ -135,16 +135,29 @@ public enum ScarfBadgeKind {
 }
 
 public struct ScarfBadge: View {
-    let text: String
+    /// Pre-built so the localized and verbatim initializers can share one
+    /// body. A `String` property here bound `Text`'s VERBATIM overload, so
+    /// none of these labels were ever extractable (go/no-go blocking
+    /// condition 6, A2-F2). Literal call sites now take the
+    /// `LocalizedStringKey` init and extract; call sites passing a runtime
+    /// `String` take the explicit `verbatim:` init and keep working.
+    let text: Text
     let kind: ScarfBadgeKind
 
-    public init(_ text: String, kind: ScarfBadgeKind = .neutral) {
-        self.text = text
+    public init(_ text: LocalizedStringKey, kind: ScarfBadgeKind = .neutral) {
+        self.text = Text(text)
+        self.kind = kind
+    }
+
+    /// For text computed at runtime (a job state, a peer name, a count) —
+    /// never a localizable literal.
+    public init(verbatim text: String, kind: ScarfBadgeKind = .neutral) {
+        self.text = Text(verbatim: text)
         self.kind = kind
     }
 
     public var body: some View {
-        Text(text)
+        text
             .scarfStyle(.captionStrong)
             .foregroundStyle(kind.fg)
             .padding(.horizontal, ScarfSpace.s2)
@@ -158,11 +171,18 @@ public struct ScarfBadge: View {
 // MARK: - Inputs
 
 public struct ScarfTextField: View {
-    let placeholder: String
+    let placeholder: LocalizedStringKey
     @Binding var text: String
 
-    public init(_ placeholder: String, text: Binding<String>) {
+    public init(_ placeholder: LocalizedStringKey, text: Binding<String>) {
         self.placeholder = placeholder
+        self._text = text
+    }
+
+    /// For a placeholder computed at runtime — `TextField`'s own
+    /// `StringProtocol` overload, which is not localized.
+    public init(verbatim placeholder: String, text: Binding<String>) {
+        self.placeholder = LocalizedStringKey(placeholder)
         self._text = text
     }
 
@@ -186,21 +206,27 @@ public struct ScarfTextField: View {
 // MARK: - Section header
 
 public struct ScarfSectionHeader: View {
-    let title: String
-    let subtitle: String?
+    let title: Text
+    let subtitle: Text?
 
-    public init(_ title: String, subtitle: String? = nil) {
-        self.title = title
-        self.subtitle = subtitle
+    public init(_ title: LocalizedStringKey, subtitle: LocalizedStringKey? = nil) {
+        self.title = Text(title)
+        self.subtitle = subtitle.map { Text($0) }
+    }
+
+    /// For a header composed at runtime (a profile name, a peer host).
+    public init(verbatim title: String, verbatimSubtitle subtitle: String? = nil) {
+        self.title = Text(verbatim: title)
+        self.subtitle = subtitle.map { Text(verbatim: $0) }
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title)
+            title
                 .scarfStyle(.captionUppercase)
                 .foregroundStyle(ScarfColor.foregroundMuted)
             if let subtitle {
-                Text(subtitle)
+                subtitle
                     .scarfStyle(.footnote)
                     .foregroundStyle(ScarfColor.foregroundFaint)
             }
@@ -226,26 +252,35 @@ public struct ScarfDivider: View {
 /// design system's static-site / ui-kit. Drops a hairline divider at the
 /// bottom so feature content can flush against it.
 public struct ScarfPageHeader<Trailing: View>: View {
-    let title: String
-    let subtitle: String?
+    let title: Text
+    let subtitle: Text?
     let trailing: Trailing
 
-    public init(_ title: String,
-                subtitle: String? = nil,
+    public init(_ title: LocalizedStringKey,
+                subtitle: LocalizedStringKey? = nil,
                 @ViewBuilder trailing: () -> Trailing = { EmptyView() }) {
-        self.title = title
-        self.subtitle = subtitle
+        self.title = Text(title)
+        self.subtitle = subtitle.map { Text($0) }
+        self.trailing = trailing()
+    }
+
+    /// For a page title composed at runtime (a project name, a server host).
+    public init(verbatim title: String,
+                verbatimSubtitle subtitle: String? = nil,
+                @ViewBuilder trailing: () -> Trailing = { EmptyView() }) {
+        self.title = Text(verbatim: title)
+        self.subtitle = subtitle.map { Text(verbatim: $0) }
         self.trailing = trailing()
     }
 
     public var body: some View {
         HStack(alignment: .top, spacing: ScarfSpace.s3) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+                title
                     .scarfStyle(.title2)
                     .foregroundStyle(ScarfColor.foregroundPrimary)
                 if let subtitle {
-                    Text(subtitle)
+                    subtitle
                         .scarfStyle(.footnote)
                         .foregroundStyle(ScarfColor.foregroundMuted)
                 }

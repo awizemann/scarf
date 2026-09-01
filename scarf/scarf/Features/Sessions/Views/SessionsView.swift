@@ -528,6 +528,18 @@ struct SessionsView: View {
         }
         .padding(ScarfSpace.s5)
         .frame(width: 420)
+        .confirmationDialog(
+            "Rename “Bot Chat”?",
+            isPresented: $viewModel.showBotChatRenameWarning,
+            titleVisibility: .visible
+        ) {
+            Button("Rename Anyway", role: .destructive) {
+                viewModel.confirmRenameAcknowledgingBotChat()
+            }
+            Button("Cancel", role: .cancel) { viewModel.showBotChatRenameWarning = false }
+        } message: {
+            Text(BotChatSession.renameWarning)
+        }
     }
 
     /// v0.20+ export format picker, shown instead of jumping straight to

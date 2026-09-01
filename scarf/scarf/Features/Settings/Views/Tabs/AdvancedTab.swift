@@ -323,19 +323,21 @@ struct AdvancedTab: View {
     /// scalars, Hermes validates).
     @ViewBuilder
     private var v012CachingSection: some View {
-        SettingsSection(title: "Caching & Redaction", icon: "lock.shield") {
+        SettingsSection(title: "Caching", icon: "lock.shield") {
             PickerRow(
                 label: "Prompt Cache TTL",
                 selection: viewModel.config.cacheTTL,
                 options: ["5m", "1h"]
             ) { viewModel.setSetting("prompt_caching.cache_ttl", value: $0) }
 
-            ToggleRow(
-                label: "Redact secrets in patches",
-                isOn: viewModel.config.redactionEnabled
-            ) { viewModel.setSetting("redaction.enabled", value: $0 ? "true" : "false") }
-
-            redactionDefaultsHint
+            // `redaction.enabled` had no reader in Hermes at any version
+            // Scarf supports — verified at v0.21: the only redaction switch
+            // is `security.redact_secrets` (config_defaults.py:2660, read at
+            // cli.py:765 / main.py:802), which the Security tab already
+            // surfaces. The row wrote a key nobody reads and its "default
+            // flipped in v0.13" hint described the OTHER key's history
+            // (go/no-go blocking condition 8, A5). Removed with its parse:
+            // there is no real host value left to blank.
 
             ToggleRow(
                 label: "Runtime metadata footer",
@@ -344,29 +346,6 @@ struct AdvancedTab: View {
         }
     }
 
-    /// Inline hint below the redaction toggle. The server-side default
-    /// flipped from OFF (v0.12) to ON (v0.13), but Scarf's parser still
-    /// reads "absent key" as `false` — meaning a v0.13 host with no
-    /// explicit key in `config.yaml` shows the toggle OFF while the
-    /// agent treats redaction as ON. Hint copy disambiguates so users
-    /// can tell what's actually happening server-side.
-    @ViewBuilder
-    private var redactionDefaultsHint: some View {
-        let isV013 = capabilitiesStore?.capabilities.isV013OrLater ?? false
-        HStack {
-            Text("")
-                .font(.caption)
-                .frame(width: 160, alignment: .trailing)
-            Text(isV013
-                 ? "Recommended: ON. Hermes v0.13+ defaults to redacting secrets unless you opt out."
-                 : "Default OFF in Hermes v0.12. Toggle ON to redact secrets in logs and shares.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
-    }
 
     private var backupSection: some View {
         SettingsSection(title: "Backup & Restore", icon: "externaldrive") {

@@ -107,7 +107,7 @@ struct BotDetailView<Conversation: View, Automation: View>: View {
                         if row.isPinned { ScarfBadge("pinned", kind: .info) }
                         if row.isHidden { ScarfBadge("hidden", kind: .warning) }
                         ForEach(row.identity.effectiveGroups, id: \.self) { group in
-                            ScarfBadge(group, kind: .neutral)
+                            ScarfBadge(verbatim: group, kind: .neutral)
                         }
                     }
                 }
@@ -175,7 +175,7 @@ struct BotDetailView<Conversation: View, Automation: View>: View {
                         if row.identity.isBotManaged {
                             Text("Remove from Bots")
                                 .scarfStyle(.bodyEmph)
-                            Text("Hides this profile from the bot roster. The profile, its sessions and its memories are untouched.")
+                            Text("Clears this profile's bot settings — name, blurb, avatar style, pin — so it moves back to Other profiles. The profile itself, its sessions and its memories are untouched.")
                                 .scarfStyle(.footnote)
                                 .foregroundStyle(ScarfColor.foregroundMuted)
                         }
@@ -212,8 +212,10 @@ struct BotDetailView<Conversation: View, Automation: View>: View {
 /// a real, labelled section rather than nothing: it tells the user the
 /// capability is coming and gives B3/B4 a shape to match.
 struct BotDetailPlaceholder: View {
-    let title: String
-    let detail: String
+    // LocalizedStringKey, not String: `ScarfSectionHeader`/`Text` bind the
+    // verbatim overload for a String, so these labels were unextractable.
+    let title: LocalizedStringKey
+    let detail: LocalizedStringKey
     let icon: String
 
     var body: some View {

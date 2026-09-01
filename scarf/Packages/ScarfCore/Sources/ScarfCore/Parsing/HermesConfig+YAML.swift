@@ -122,7 +122,6 @@ public extension HermesConfig {
             sttOpenAIModel: str("stt.openai.model", default: "whisper-1"),
             sttMistralModel: str("stt.mistral.model", default: "voxtral-mini-latest"),
             ttsXAIVoiceID: str("tts.xai.voice_id"),
-            ttsXAIModel: str("tts.xai.model"),
             // v0.15 round-trip — read the auto-speech-tags toggle back.
             ttsXAIAutoSpeechTags: bool("tts.xai.auto_speech_tags", default: false),
             // v0.19 round-trip (hasXAITTSAdvancedParams) — read back even on
@@ -463,7 +462,6 @@ public extension HermesConfig {
             nudgeInterval: int("memory.nudge_interval", default: 0),
             streaming: values["display.streaming"] != "false",
             showReasoning: bool("display.show_reasoning", default: false),
-            verbose: bool("agent.verbose", default: false),
             autoTTS: values["voice.auto_tts"] != "false",
             silenceThreshold: int("voice.silence_threshold", default: QueryDefaults.defaultSilenceThreshold),
             reasoningEffort: str("agent.reasoning_effort", default: "medium"),
@@ -527,7 +525,6 @@ public extension HermesConfig {
             whatsapp: whatsapp,
             homeAssistant: homeAssistant,
             cacheTTL: str("prompt_caching.cache_ttl", default: "5m"),
-            redactionEnabled: bool("redaction.enabled", default: false),
             // `display.runtime_footer.enabled` (nested block,
             // config_defaults.py) is the only key Hermes has ever read for
             // this. A fallback read of `agent.runtime_metadata_footer` used

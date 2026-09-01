@@ -829,6 +829,33 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `cron create`. Absent at v2026.8.19, present at v2026.8.27.
     public var hasCronBotChatDelivery: Bool { isV0206OrLater }
 
+    /// The full argv Scarf needs to CREATE a bot's canonical Bot Chat:
+    /// `hermes -p <bot> chat --in ~ -c "Bot Chat" --create-if-missing -Q
+    /// --query-file <path>` (see
+    /// `BotConversationViewModel.createCanonicalBotChat`).
+    ///
+    /// **Source-verified per flag, at the `hasBotMode` floor tag
+    /// v2026.8.16.2 (0.20.3) and at v2026.8.31 (0.21.0):**
+    /// - `-c/--continue` — present at 0.20.3 (`hermes_cli/_parser.py:401`).
+    /// - `--create-if-missing` — present at 0.20.3 (`_parser.py:410`).
+    /// - `-Q/--quiet` — present at 0.20.3 (`_parser.py:368`).
+    /// - `--in` — present at 0.20.3 (`_parser.py:390`).
+    /// - **`--query-file` — ABSENT at 0.20.3.** `git grep query-file
+    ///   v2026.8.16.2 -- '*.py'` returns nothing; the chat parser there has
+    ///   only `-q/--query` (`_parser.py:304`). It first appears at v0.21
+    ///   (`hermes_cli/_parser.py:362`).
+    ///
+    /// argparse rejects the WHOLE invocation on an unknown flag, so on a
+    /// 0.20.3–0.20.6 host the create would fail with a parser error rather
+    /// than doing anything. The creation path is therefore floored at the
+    /// tag where every flag exists — v0.21 — and the pane says so instead of
+    /// offering a button that cannot work. Reading and messaging an
+    /// EXISTING Bot Chat goes over ACP and stays on the `hasBotMode` floor.
+    ///
+    /// `--query-file` is not substitutable with `-q <text>` here: the body is
+    /// arbitrary user text that would ride a remote `bash -lc` command line.
+    public var hasBotChatCreationCLI: Bool { isV021OrLater }
+
     /// `hermes browser close-profile` and the rest of the new top-level
     /// `browser` subcommand (added to `_BUILTIN_SUBCOMMANDS`,
     /// `hermes_cli/main.py:12420`; the verb itself at `main.py:13343`).

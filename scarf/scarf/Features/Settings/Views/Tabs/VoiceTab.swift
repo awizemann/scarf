@@ -51,7 +51,15 @@ struct VoiceTab: View {
                 // badge is gated on `hasXAIVoiceCloning` so pre-v0.13 hosts
                 // see the input rows but no cloning advertisement.
                 EditableTextField(label: "Voice ID", value: viewModel.config.voice.ttsXAIVoiceID) { viewModel.setTTSXAIVoiceID($0) }
-                EditableTextField(label: "Model", value: viewModel.config.voice.ttsXAIModel) { viewModel.setTTSXAIModel($0) }
+                // No "Model" row: xAI TTS has no `tts.xai.model` key. Its
+                // v0.21 defaults are voice_id/language/speed/auto_speech_tags/
+                // optimize_streaming_latency/sample_rate/bit_rate only
+                // (config_defaults.py), and `_generate_xai_tts`
+                // (tools/tts_tool.py:2100-2170) reads none named "model".
+                // The single reader anywhere is `xai_retirement.py:110`, a
+                // staleness WARNING pass — so writing the key could only
+                // ever produce a spurious retirement notice. Removed with
+                // its parse (go/no-go blocking condition 8, A5).
                 // v0.15: auto-insert speech-control tags — hidden on pre-v0.15 hosts.
                 if capabilitiesStore?.capabilities.hasXAITTSAutoSpeechTags == true {
                     ToggleRow(label: "Auto speech tags", isOn: viewModel.config.voice.ttsXAIAutoSpeechTags) { viewModel.setTTSXAIAutoSpeechTags($0) }

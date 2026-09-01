@@ -259,8 +259,6 @@ public struct VoiceSettings: Sendable, Equatable {
     // host is on hand. The setter / YAML reader follow whatever this
     // field name implies.
     public var ttsXAIVoiceID: String
-    /// xAI TTS model identifier. v0.13+. Mirrors the elevenlabs shape.
-    public var ttsXAIModel: String
     /// xAI TTS `auto_speech_tags`. v0.15+ — when true, xAI auto-inserts
     /// speech-control tags (emotion / emphasis) into synthesized output.
     /// Config key `tts.xai.auto_speech_tags`, default `false`. Pre-v0.15
@@ -359,7 +357,6 @@ public struct VoiceSettings: Sendable, Equatable {
         sttOpenAIModel: String,
         sttMistralModel: String,
         ttsXAIVoiceID: String = "",
-        ttsXAIModel: String = "",
         ttsXAIAutoSpeechTags: Bool = false,
         ttsXAILanguage: String = "en",
         ttsXAISpeed: Double = 1.0,
@@ -394,7 +391,6 @@ public struct VoiceSettings: Sendable, Equatable {
         self.ttsNeuTTSModel = ttsNeuTTSModel
         self.ttsNeuTTSDevice = ttsNeuTTSDevice
         self.ttsXAIVoiceID = ttsXAIVoiceID
-        self.ttsXAIModel = ttsXAIModel
         self.ttsXAIAutoSpeechTags = ttsXAIAutoSpeechTags
         self.ttsXAILanguage = ttsXAILanguage
         self.ttsXAISpeed = ttsXAISpeed
@@ -444,7 +440,6 @@ public struct VoiceSettings: Sendable, Equatable {
         sttOpenAIModel: "whisper-1",
         sttMistralModel: "voxtral-mini-latest",
         ttsXAIVoiceID: "",
-        ttsXAIModel: "",
         ttsXAIAutoSpeechTags: false
     )
 }
@@ -1271,7 +1266,6 @@ public struct HermesConfig: Sendable {
     public var nudgeInterval: Int
     public var streaming: Bool
     public var showReasoning: Bool
-    public var verbose: Bool
     public var autoTTS: Bool
     public var silenceThreshold: Int
     public var reasoningEffort: String
@@ -1356,11 +1350,6 @@ public struct HermesConfig: Sendable {
     /// v0.12 added the 1-hour ceiling for users with prompt-cache-heavy
     /// workloads (long agent loops with stable system prompts).
     public var cacheTTL: String
-    /// `redaction.enabled` — flipped from `true` to `false` as the
-    /// upstream default in v0.12 because the substitution corrupted
-    /// patches and API payloads. Surface a toggle so users with hard
-    /// redaction requirements can opt back in.
-    public var redactionEnabled: Bool
     /// `display.runtime_footer.enabled` — opt-in compact footer on the
     /// final reply of a turn (e.g. `model · 68% · ~/projects`). Off by
     /// default; useful for cost auditing and screen-recording demos.
@@ -1527,7 +1516,6 @@ public struct HermesConfig: Sendable {
         nudgeInterval: Int,
         streaming: Bool,
         showReasoning: Bool,
-        verbose: Bool,
         autoTTS: Bool,
         silenceThreshold: Int,
         reasoningEffort: String,
@@ -1577,7 +1565,6 @@ public struct HermesConfig: Sendable {
         whatsapp: WhatsAppSettings,
         homeAssistant: HomeAssistantSettings,
         cacheTTL: String = "5m",
-        redactionEnabled: Bool = false,
         runtimeMetadataFooter: Bool = false,
         displayBusyAckEnabled: Bool = true,
         gatewayPlatforms: [String: GatewayPlatformSettings] = [:],
@@ -1604,7 +1591,6 @@ public struct HermesConfig: Sendable {
         multiplexProfileAllowlist: [String]? = nil
     ) {
         self.cacheTTL = cacheTTL
-        self.redactionEnabled = redactionEnabled
         self.runtimeMetadataFooter = runtimeMetadataFooter
         self.displayBusyAckEnabled = displayBusyAckEnabled
         self.gatewayPlatforms = gatewayPlatforms
@@ -1624,7 +1610,6 @@ public struct HermesConfig: Sendable {
         self.nudgeInterval = nudgeInterval
         self.streaming = streaming
         self.showReasoning = showReasoning
-        self.verbose = verbose
         self.autoTTS = autoTTS
         self.silenceThreshold = silenceThreshold
         self.reasoningEffort = reasoningEffort
@@ -1702,7 +1687,6 @@ public struct HermesConfig: Sendable {
         nudgeInterval: 0,
         streaming: true,
         showReasoning: false,
-        verbose: false,
         autoTTS: true,
         silenceThreshold: 200,
         reasoningEffort: "medium",

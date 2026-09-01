@@ -107,7 +107,7 @@ private struct LedgerRow: View {
                 .font(ScarfFont.monoSmall)
                 .foregroundStyle(ScarfColor.foregroundFaint)
                 .frame(width: 92, alignment: .leading)
-            ScarfBadge(entry.actor, kind: actorBadgeKind)
+            ScarfBadge(verbatim: entry.actor, kind: actorBadgeKind)
                 .frame(width: 64, alignment: .leading)
             Text(entry.action)
                 .scarfStyle(.caption)

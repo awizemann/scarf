@@ -121,7 +121,7 @@ struct KanbanListView: View {
         case "archived": kind = .neutral
         default:         kind = .neutral
         }
-        return ScarfBadge(status, kind: kind)
+        return ScarfBadge(verbatim: status, kind: kind)
     }
 
     private func metaChip(systemImage: String, value: String) -> some View {

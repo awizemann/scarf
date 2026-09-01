@@ -19,7 +19,37 @@ final class CronViewModel {
     var selectedJob: HermesCronJob?
     var jobOutput: String?
     var availableSkills: [String] = []
-    var message: String?
+    private(set) var message: String?
+
+    /// How ``message`` should be read. The same string channel carries both
+    /// "Resumed" and "Failed: …", and every reader used to paint it one
+    /// colour — the Bots pane painted it `ScarfColor.success`, so a routine
+    /// that failed to run announced itself in green and then auto-cleared
+    /// (go/no-go blocking condition 1, A1-M1/A4-C1). Callers colour by this
+    /// instead of sniffing the string, and failures are never auto-cleared.
+    enum MessageOutcome: Equatable { case success, failure }
+    private(set) var messageOutcome: MessageOutcome = .success
+
+    /// Single write point for the message channel. Success messages keep the
+    /// existing three-second auto-clear; failures stay until the user
+    /// dismisses them or the next action replaces them.
+    func post(_ text: String, outcome: MessageOutcome, autoClearAfter seconds: TimeInterval = 3) {
+        message = text
+        messageOutcome = outcome
+        guard outcome == .success else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            // Only clear the message we posted; a newer one owns the channel.
+            guard let self, self.message == text, self.messageOutcome == .success else { return }
+            self.message = nil
+        }
+    }
+
+    /// Explicit dismissal for a sticky failure message.
+    func dismissMessage() {
+        message = nil
+        messageOutcome = .success
+    }
+
     var showCreateSheet = false
     var editingJob: HermesCronJob?
     var isLoading = false
@@ -184,11 +214,11 @@ final class CronViewModel {
             let result = svc.runHermesCLI(args: HermesCronIncidentsParser.ackArgs(incidentID: incident.id), timeout: 30)
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                self.message = Self.ackOutcomeMessage(exitCode: result.exitCode, output: result.output)
+                self.post(
+                    Self.ackOutcomeMessage(exitCode: result.exitCode, output: result.output),
+                    outcome: result.exitCode == 0 ? .success : .failure
+                )
                 self.loadIncidents(force: true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                    self?.message = nil
-                }
             }
         }
     }
@@ -266,8 +296,7 @@ final class CronViewModel {
         // Catch it before the CLI round-trip so the user gets the
         // actionable sentence instead of a Python ValueError tail.
         if refusesTerminalJobLocally(job) {
-            message = terminalRefusalMessage(job)
-            clearMessageSoon()
+            post(terminalRefusalMessage(job), outcome: .failure)
             return
         }
         runAndReload(["cron", "resume", job.id], success: "Resumed")
@@ -326,8 +355,7 @@ final class CronViewModel {
         // `trigger_job` refuses terminal jobs outright (cron/jobs.py:2760)
         // — but only from v0.20.6 on; see `refusesTerminalJobLocally`.
         if refusesTerminalJobLocally(job) {
-            message = terminalRefusalMessage(job)
-            clearMessageSoon()
+            post(terminalRefusalMessage(job), outcome: .failure)
             return
         }
         let svc = fileService
@@ -337,16 +365,16 @@ final class CronViewModel {
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 if runResult.exitCode != 0 {
-                    self.message = Self.friendlyCronFailure(runResult.output)
-                        ?? "Run failed to queue: \(runResult.output.prefix(200))"
+                    self.post(
+                        Self.friendlyCronFailure(runResult.output)
+                            ?? "Run failed to queue: \(runResult.output.prefix(200))",
+                        outcome: .failure
+                    )
                     self.logger.warning("cron run failed: \(runResult.output)")
                     self.load(force: true)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                        self?.message = nil
-                    }
                     return
                 }
-                self.message = "Agent started — dashboard will update when it finishes"
+                self.post("Agent started — dashboard will update when it finishes", outcome: .success)
                 self.load(force: true)
             }
             // `cron run` is queued; now force the tick. The 300s
@@ -363,9 +391,6 @@ final class CronViewModel {
                     self.logger.warning("cron tick exited non-zero (job may still complete via scheduler): \(tickResult.output)")
                 }
                 self.load(force: true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                    self?.message = nil
-                }
             }
         }
     }
@@ -449,23 +474,17 @@ final class CronViewModel {
             let result = fileService.runHermesCLI(args: arguments, timeout: 60)
             await MainActor.run {
                 if result.exitCode == 0 {
-                    self.message = success
+                    self.post(success, outcome: .success)
                 } else {
-                    self.message = Self.friendlyCronFailure(result.output)
-                        ?? "Failed: \(result.output.prefix(200))"
+                    self.post(
+                        Self.friendlyCronFailure(result.output)
+                            ?? "Failed: \(result.output.prefix(200))",
+                        outcome: .failure
+                    )
                     self.logger.warning("cron command failed: args=\(arguments) output=\(result.output)")
                 }
                 self.load(force: true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                    self?.message = nil
-                }
             }
-        }
-    }
-
-    private func clearMessageSoon() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
-            self?.message = nil
         }
     }
 }

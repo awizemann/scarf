@@ -120,7 +120,20 @@ final class GatewayBehaviorViewModel {
                 PlatformSetupHelpers.envBool(busyAckEnabled)
         }
         if capabilities.hasGatewayRestartNotification {
-            configKV["gateway.platforms.\(platform).gateway_restart_notification"] =
+            // TOP-LEVEL `<platform>.gateway_restart_notification`, not
+            // `gateway.platforms.<platform>.…`. Hermes reads the top-level
+            // path, and so does Scarf's own parser
+            // (`HermesConfig+YAML.swift:422` composes `"\(platform)."` +
+            // the key); `GatewayConfigWriter` documents the same shape.
+            // The old nested key was a silent no-op: the toggle wrote a
+            // path nobody has ever read, and the reader then contradicted
+            // it on the next load (go/no-go blocking condition 7, A5-HIGH).
+            //
+            // No migrate-on-read is needed — the bogus key was never read
+            // by Hermes or by Scarf, so there is no stored value to
+            // rescue; it is left in place as a harmless unknown key rather
+            // than issuing a second `config unset` round-trip on every save.
+            configKV[Self.restartNotificationKey(platform: platform, capabilities: capabilities)] =
                 PlatformSetupHelpers.envBool(gatewayRestartNotification)
         }
 
@@ -134,4 +147,17 @@ final class GatewayBehaviorViewModel {
         )
         message = result
     }
+
+    /// The `hermes config set` key for the restart-notification toggle.
+    /// Factored out so a test can assert the PATH without running the CLI —
+    /// the nested `gateway.platforms.<p>.…` form this replaced was a silent
+    /// no-op that survived precisely because nothing pinned the key.
+    nonisolated static func restartNotificationKey(
+        platform: String,
+        capabilities: HermesCapabilities
+    ) -> String {
+        let segment = ConfigDottedKeySegment.escaped(platform, capabilities: capabilities)
+        return "\(segment).gateway_restart_notification"
+    }
+
 }

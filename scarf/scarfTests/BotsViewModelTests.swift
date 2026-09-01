@@ -440,8 +440,13 @@ struct BotsViewModelTests {
         #expect(backend.savedIdentities.last?.title == "scratch")
     }
 
-    @Test("demoting hides the bot and never deletes anything")
-    func demoteHidesRatherThanDeletes() async {
+    /// Demote used to be byte-identical to Hide — it went through
+    /// `BotDraft.apply`, which stamps `isBotManaged = true` — so the
+    /// affordance's label over-promised (go/no-go blocking condition 2). It
+    /// now clears the `hermes-bots` block, which is what returns the profile
+    /// to "Other profiles"; it still never touches the profile itself.
+    @Test("demoting clears the bot block and never deletes anything")
+    func demoteClearsTheBotBlock() async {
         let identity = Self.bot("research", title: "Research", pinned: true)
         let backend = MockBotsBackend([identity])
         let viewModel = makeViewModel(backend)
@@ -449,10 +454,27 @@ struct BotsViewModelTests {
         await waitForIdle(viewModel)
 
         let saved = try! #require(backend.savedIdentities.last)
+        // The write the YAML layer turns into "remove the block".
+        #expect(!saved.isBotManaged)
+        // Both live inside the block being removed.
+        #expect(saved.pinned == nil)
+        #expect(saved.hidden == nil)
+        // Emphatically NOT `hermes profile delete`.
+        #expect(backend.lifecycleActions.isEmpty)
+    }
+
+    /// Hide is the other, still-distinct verb: it keeps the profile
+    /// bot-managed and only collapses it behind the roster's disclosure.
+    @Test("hiding is still a separate, non-destructive verb")
+    func hideRemainsDistinctFromDemote() async {
+        let identity = Self.bot("research", title: "Research", pinned: true)
+        let backend = MockBotsBackend([identity])
+        let viewModel = makeViewModel(backend)
+        viewModel.toggleHidden(BotRow(identity: identity, avatar: nil))
+        await waitForIdle(viewModel)
+
+        let saved = try! #require(backend.savedIdentities.last)
         #expect(saved.hidden == true)
-        #expect(saved.pinned == false)
-        // Still bot-managed: "remove from Bots" is not "remove the bot
-        // block", and it is emphatically not `hermes profile delete`.
         #expect(saved.isBotManaged)
         #expect(backend.lifecycleActions.isEmpty)
     }

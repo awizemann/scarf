@@ -28,9 +28,34 @@ struct BotRoutinesView: View {
                 .accessibilityLabel("Create a routine for this bot")
             }
             if let message = viewModel.message {
-                Text(message)
-                    .scarfStyle(.caption)
-                    .foregroundStyle(ScarfColor.success)
+                // Colour by the view model's typed outcome, never by the
+                // string: the same channel carries "Resumed" and
+                // "Failed: …". A failure also stays put until dismissed
+                // instead of auto-clearing after three seconds.
+                HStack(alignment: .firstTextBaseline, spacing: ScarfSpace.s2) {
+                    if viewModel.messageIsFailure {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(ScarfColor.danger)
+                            .accessibilityHidden(true)
+                    }
+                    Text(message)
+                        .scarfStyle(.caption)
+                        .foregroundStyle(viewModel.messageIsFailure ? ScarfColor.danger : ScarfColor.success)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                    if viewModel.messageIsFailure {
+                        Spacer(minLength: 0)
+                        Button {
+                            viewModel.dismissMessage()
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                        .accessibilityLabel("Dismiss this routine error")
+                    }
+                }
+                .accessibilityElement(children: .contain)
             }
             if viewModel.routines.isEmpty {
                 ScarfCard(padding: ScarfSpace.s3) {
@@ -86,7 +111,7 @@ struct BotRoutinesView: View {
                 Text(job.schedule.display ?? job.schedule.expression ?? job.schedule.kind)
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)
-                ScarfBadge(job.stateDisplay, kind: badgeKind(for: job.stateDisplay))
+                ScarfBadge(verbatim: job.stateDisplay, kind: badgeKind(for: job.stateDisplay))
             }
             Spacer(minLength: 0)
             HStack(spacing: ScarfSpace.s2) {
@@ -171,6 +196,7 @@ struct CreateRoutineSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Prompt").scarfStyle(.caption).foregroundStyle(ScarfColor.foregroundMuted)
                 TextEditor(text: $prompt)
+                    .accessibilityLabel("Prompt")
                     .font(ScarfFont.mono)
                     .frame(minHeight: 90)
                     .padding(4)

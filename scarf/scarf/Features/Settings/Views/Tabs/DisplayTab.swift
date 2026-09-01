@@ -68,7 +68,14 @@ struct DisplayTab: View {
             ToggleRow(label: "Show Reasoning", isOn: viewModel.config.showReasoning) { viewModel.setShowReasoning($0) }
             ToggleRow(label: "Show Cost", isOn: viewModel.config.showCost) { viewModel.setShowCost($0) }
             ToggleRow(label: "Interim Messages", isOn: viewModel.config.interimAssistantMessages) { viewModel.setInterimAssistantMessages($0) }
-            ToggleRow(label: "Verbose", isOn: viewModel.config.verbose) { viewModel.setVerbose($0) }
+            // No "Verbose" row: `agent.verbose` is not a config key. Verified
+            // at v0.21 — it is absent from the `"agent"` block in
+            // `hermes_cli/config_defaults.py`, and the only thing that sets
+            // the runtime flag is argparse: `main.py:3429` passes
+            // `getattr(args, "verbose", None)` into the CLI, which stores it
+            // at `cli.py:5285` and hands it to the agent as `verbose_logging`
+            // (`cli_agent_setup_mixin.py:534`). Nothing reads config for it.
+            // (go/no-go blocking condition 8, A5.)
             ToggleRow(label: "Inline Diffs", isOn: viewModel.config.display.inlineDiffs) { viewModel.setInlineDiffs($0) }
             // v0.14 — per-message timestamps in TUI output. ACP chat
             // renders timestamps independently (the streaming chip

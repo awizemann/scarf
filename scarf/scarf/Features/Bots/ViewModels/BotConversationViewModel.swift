@@ -340,8 +340,20 @@ final class BotConversationViewModel {
     /// write to `state.db` to close the gap; it is read-only, and this is a
     /// row Hermes owns. The consequence is cosmetic and bounded: the chat
     /// is correctly titled (so the protocol injects and every other surface
-    /// resolves it), but it also appears in the ordinary Sessions list, and
-    /// it is renameable there — which WOULD orphan it, so the UI says so.
+    /// resolves it), but it also appears in the Sessions list *of this bot's
+    /// own profile* (that is where its `state.db` lives — it does NOT appear
+    /// under whatever profile the window is otherwise scoped to), and it is
+    /// renameable there.
+    ///
+    /// A rename WOULD orphan it: `SessionDB._set_session_title` (:10210)
+    /// refuses the rename only for a session that is both titled "Bot Chat"
+    /// AND hidden, so the server-side guard never fires for a Scarf-created
+    /// one. Both of Scarf's rename paths — `SessionsViewModel.confirmRename`
+    /// and `ChatSessionListPane.commitRename` — therefore raise a
+    /// confirmation first, gated on
+    /// ``BotChatSession/renameNeedsConfirmation(currentTitle:newTitle:)``.
+    /// (This docstring previously claimed a warning that did not yet exist;
+    /// go/no-go blocking condition 3c.)
     nonisolated static func createCanonicalBotChat(
         context: ServerContext,
         profile: String,

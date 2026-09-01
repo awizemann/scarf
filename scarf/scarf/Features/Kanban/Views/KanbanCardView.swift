@@ -245,7 +245,7 @@ struct KanbanCardView: View {
                 unassignedChip
             }
             if let workspace = task.workspaceKind {
-                ScarfBadge(workspace, kind: .neutral)
+                ScarfBadge(verbatim: workspace, kind: .neutral)
             }
             // v0.16 goal-mode pill — shows the turn budget when one is set.
             if showsGoalBadge {
@@ -292,7 +292,7 @@ struct KanbanCardView: View {
         HStack(spacing: 4) {
             let visible = task.skills.prefix(2)
             ForEach(Array(visible.enumerated()), id: \.offset) { _, skill in
-                ScarfBadge(skill, kind: .brand)
+                ScarfBadge(verbatim: skill, kind: .brand)
             }
             if task.skills.count > 2 {
                 ScarfBadge("+\(task.skills.count - 2)", kind: .neutral)

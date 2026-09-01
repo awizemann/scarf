@@ -69,6 +69,7 @@ struct RemoteBotDetailView: View {
             ScarfSectionHeader("Message")
             VStack(alignment: .leading, spacing: ScarfSpace.s2) {
                 ScarfTextField("Optional profile on \(peer.name) — leave blank for its default", text: $viewModel.profile)
+                    .accessibilityLabel("Optional profile on \(peer.name) — leave blank for its default")
                 TextEditor(text: $viewModel.composeText)
                     .font(ScarfFont.mono)
                     .frame(minHeight: 90)
@@ -82,6 +83,7 @@ struct RemoteBotDetailView: View {
                             )
                     )
                     .scrollContentBackground(.hidden)
+                    .accessibilityLabel("Message")
                 HStack {
                     if viewModel.isSending { ProgressView().controlSize(.small) }
                     if let message = viewModel.message {

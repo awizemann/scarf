@@ -31,6 +31,39 @@ public enum BotChatSession {
     public static func handle(forProfile profileName: String) -> String {
         profileName == HermesProfileScope.defaultProfileName ? "hermes" : profileName
     }
+
+    /// Whether renaming a session away from `currentTitle` needs a
+    /// confirmation first.
+    ///
+    /// **Why Scarf has to ask, when Hermes already refuses.**
+    /// `SessionDB._set_session_title` (:10210) blocks the rename only for a
+    /// session that is BOTH titled `"Bot Chat"` AND `hidden`. Hermes Desktop
+    /// mints its canonical chats hidden, so the guard always fires there.
+    /// Scarf's can only be created through the CLI, which never sets
+    /// `hidden` (see `BotConversationViewModel.createCanonicalBotChat`) — so
+    /// for a Scarf-created Bot Chat the server-side guard never fires and
+    /// the rename SUCCEEDS, orphaning the bot's whole conversation history:
+    /// every surface re-resolves the chat by exact title, so a renamed one
+    /// is simply gone and the next message mints a fresh empty one.
+    /// (go/no-go blocking condition 3, A2-F8/A3-F1/A4-C3.)
+    ///
+    /// The check is deliberately a plain exact-title comparison and is NOT
+    /// scoped to bot-managed profiles: the caller renaming from a Sessions
+    /// list has no profile context, the title is the identity in every
+    /// profile, and a user who titled an ordinary session `"Bot Chat"` by
+    /// hand is exactly the person who benefits from being told what that
+    /// name means. Renaming to the SAME title is a no-op, so it never asks.
+    public static func renameNeedsConfirmation(currentTitle: String?, newTitle: String) -> Bool {
+        guard currentTitle == canonicalTitle else { return false }
+        return newTitle.trimmingCharacters(in: .whitespacesAndNewlines) != canonicalTitle
+    }
+
+    /// The one sentence shown in that confirmation. Kept next to the rule it
+    /// explains so the two can't drift.
+    public static let renameWarning =
+        "“Bot Chat” is how Hermes finds a bot's conversation — there is no other pointer to it. "
+        + "Renaming it detaches the bot's entire history: the bot's pane will look empty and its "
+        + "next message starts a brand-new chat."
 }
 
 /// A teammate-attributed message: the server-side prefix Hermes stamps on

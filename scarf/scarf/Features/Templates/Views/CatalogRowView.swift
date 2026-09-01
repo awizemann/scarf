@@ -39,7 +39,7 @@ struct CatalogRowView: View {
                 if !entry.tags.isEmpty {
                     HStack(spacing: 4) {
                         ForEach(entry.tags.prefix(4), id: \.self) { tag in
-                            ScarfBadge(tag, kind: .neutral)
+                            ScarfBadge(verbatim: tag, kind: .neutral)
                         }
                     }
                     .padding(.top, 2)

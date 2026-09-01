@@ -263,7 +263,7 @@ struct CuratorView: View {
         case .disabled: kind = .neutral; label = "Disabled"
         case .unknown:  kind = .neutral; label = "Unknown"
         }
-        return ScarfBadge(label, kind: kind)
+        return ScarfBadge(verbatim: label, kind: kind)
     }
 
     private var skillCountsSection: some View {
@@ -399,7 +399,7 @@ struct CuratorView: View {
     private func skillTable(title: String, rows: [HermesCuratorSkillRow]) -> some View {
         ScarfCard {
             VStack(alignment: .leading, spacing: ScarfSpace.s2) {
-                ScarfSectionHeader(title)
+                ScarfSectionHeader(verbatim: title)
                 ForEach(rows) { row in
                     HStack(alignment: .center, spacing: ScarfSpace.s2) {
                         Text(row.name)

@@ -155,6 +155,8 @@ struct PeersView: View {
                         .foregroundStyle(ScarfColor.foregroundFaint)
                         .help("The peer's API key is read from ~/.hermes/.env under this name. Scarf never reads or displays its value.")
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(peer.name), \(peer.url), \(peer.note), key \(peer.keyEnvName), \(isSelected ? "selected" : "not selected")")
             }
         }
         .buttonStyle(.plain)
@@ -178,6 +180,7 @@ struct PeersView: View {
                             .foregroundStyle(ScarfColor.foregroundFaint)
                         ScarfTextField("agent (optional)", text: $viewModel.profile)
                             .frame(maxWidth: 220)
+                            .accessibilityLabel("agent (optional)")
                             .help("Named profile on a multiplexed peer — targets <peer>/<agent>. Leave empty for the peer's own launch profile.")
                     }
                     TextEditor(text: $viewModel.composeText)
@@ -192,6 +195,7 @@ struct PeersView: View {
                             RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
                                 .strokeBorder(ScarfColor.borderStrong, lineWidth: 1)
                         )
+                        .accessibilityLabel("Send")
                     HStack(spacing: ScarfSpace.s2) {
                         if viewModel.isSending { ProgressView().controlSize(.small) }
                         Spacer()
@@ -251,20 +255,23 @@ struct PeersView: View {
                     Text(run.id)
                         .scarfStyle(.code)
                         .textSelection(.enabled)
-                    ScarfBadge(run.status, kind: badgeKind(for: run))
+                    ScarfBadge(verbatim: run.status, kind: badgeKind(for: run))
                     if run.replayed { ScarfBadge("replayed", kind: .info) }
                     Spacer(minLength: 0)
                     if run.isBusy { ProgressView().controlSize(.small) }
                     Button("Refresh") { viewModel.refresh(run) }
                         .buttonStyle(ScarfGhostButton())
                         .disabled(run.isBusy)
+                        .accessibilityLabel("Refresh run \(run.id) on \(run.target)")
                     if !run.isTerminal {
                         Button("Stop") { viewModel.stop(run) }
                             .buttonStyle(ScarfGhostButton())
                             .disabled(run.isBusy)
+                            .accessibilityLabel("Stop run \(run.id) on \(run.target)")
                     }
                     Button("Dismiss") { viewModel.forget(run) }
                         .buttonStyle(ScarfGhostButton())
+                        .accessibilityLabel("Dismiss run \(run.id) on \(run.target)")
                 }
                 Text("\(run.target) · \(run.promptPreview)")
                     .scarfStyle(.footnote)

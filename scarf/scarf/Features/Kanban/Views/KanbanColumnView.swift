@@ -133,7 +133,7 @@ struct KanbanColumnView: View {
             Text(column.displayName.uppercased())
                 .scarfStyle(.captionUppercase)
                 .foregroundStyle(ScarfColor.foregroundMuted)
-            ScarfBadge(String(tasks.count), kind: .neutral)
+            ScarfBadge(verbatim: String(tasks.count), kind: .neutral)
             if column == .upNext, readyPillCount > 0 {
                 Text("ready: \(readyPillCount) →")
                     .scarfStyle(.caption)
