@@ -6,6 +6,119 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 2.23.0</title>
+      <sparkle:version>65</sparkle:version>
+      <sparkle:shortVersionString>2.23.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Tue, 01 Sep 2026 19:57:45 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v2.23.0</p>
+<p>This is the Hermes v0.21.0 (&quot;Pantheon&quot;) parity release. Hermes&#x27;s biggest release of the year shipped Bot Mode, a 3× larger MCP catalog, cron incidents, and bot-to-bot messaging — and this Scarf release makes all of it work correctly from the Mac app, adds a new <strong>Peers</strong> section for messaging your other Hermes agents, and fixes a cluster of long-standing parsing bugs the source audit surfaced. Every new surface is capability-gated: connect to an older Hermes and Scarf behaves exactly as before. Compatibility now spans Hermes v0.6.0 through v0.21.0.</p>
+<h2>Peers — message your other agents ⚙</h2>
+<p>Hermes v0.21 introduced <code>hermes peer</code>: agent-to-agent DMs and async runs between your Hermes installations. Scarf now has a <strong>Peers</strong> section (Manage sidebar, next to Gateway) on v0.21+ hosts: your registered peers listed from config, one-shot DMs, and asynchronous runs with live status, stop, and replay-aware deduplication. Scarf reads the peer registry directly and never touches peer API keys — registration stays a CLI act, and the empty state shows you the exact <code>hermes peer add</code> command. Errors surface Hermes&#x27;s own words verbatim, including the &quot;peer too old&quot; remedy.</p>
+<h2>Cron grew a health system ⚙</h2>
+<ul>
+  <li><strong>Incidents</strong> — Hermes v0.20.6+ records durable failure incidents per job (deduplicated by error signature). Scarf shows an open-incident badge per job and an expandable incident list with one-click acknowledge — including the truthful &quot;already closed&quot; case when a scheduler tick beat you to it.</li>
+  <li><strong>Doctor</strong> — per-job configuration health (missing scripts, overdue schedules) renders as warning indicators on job rows, parsed robustly even when a job&#x27;s last error is a multi-line traceback.</li>
+  <li><strong>Resume &amp; Run Now</strong> — paused or completed jobs can be re-armed and fired immediately on hosts that support it; on older hosts Scarf defers to the CLI&#x27;s own behavior instead of refusing locally.</li>
+  <li><strong>Bot Chat delivery</strong> — cron output can land in a bot&#x27;s canonical Bot Chat (v0.20.6+), now offered as a delivery target — and Scarf no longer forwards that target to hosts that can&#x27;t parse it.</li>
+  <li>Scarf now reads every jobs.json shape Hermes tolerates (ID-keyed maps, bare <code>repeat</code> values), so a store written by a newer Hermes never fails to load.</li>
+</ul>
+<h2>Session previews got honest</h2>
+<p>Since Hermes v0.19, in-place compaction can leave a machine-generated summary as a session&#x27;s earliest message — and Scarf&#x27;s session list happily showed that boilerplate as the preview. Previews now mirror Hermes&#x27;s own carrier-aware logic (ported SQL, verified byte-identical to upstream): you see the first <em>authentic</em> message, with summary scaffolding stripped and rewound messages excluded. Renaming a session also now explains itself when Hermes refuses (canonical &quot;Bot Chat&quot; sessions are rename-protected server-side).</p>
+<h2>The MCP catalog tripled ⚙</h2>
+<p>The optional-MCP catalog jumped from 20 to 65 entries (Algolia, CircleCI, Cloudflare, Grafana, GitLab, Neon, Postman, Railway, Semgrep, Strava, Wolfram, and 34 more) — and the Atlassian entry&#x27;s URL is fixed (the old endpoint has 404&#x27;d since June). Catalog installs now honor each entry&#x27;s recommended tool exclusions, mirroring Hermes&#x27;s own install behavior.</p>
+<h2>Parity fixes the audit forced</h2>
+<ul>
+  <li><strong>Web search/extract settings</strong> track Hermes&#x27;s backend changes: Tavily (removed upstream) is dropped from the pickers unless your config still uses it; the retired Web Extract auxiliary-model row hides on hosts that no longer read it and stays for older hosts that do.</li>
+  <li><strong>Turn lease timeout</strong> displays and accepts the new v0.21 default (5s) instead of silently snapping it to 60.</li>
+  <li><strong>Health&#x27;s update check</strong> now recognizes all three of Hermes&#x27;s &quot;Update available&quot; formats (including &quot;1 commit behind&quot; and the count-less form, previously invisible) and honestly reports &quot;unknown&quot; when an offline host prints nothing, instead of implying you&#x27;re current.</li>
+  <li><strong>Gateway status</strong> stops matching phantom strings: the &quot;Loaded&quot; state is now derived from what <code>hermes gateway status</code> actually prints, and a stale PID file no longer shows a dead gateway as running.</li>
+  <li><strong>Curator pin/unpin</strong> surfaces Hermes&#x27;s new diagnostics, including the &quot;recorded but unmanaged — adopt it&quot; nudge that used to be silently discarded.</li>
+  <li><strong>Two new providers</strong> — Tencent TokenPlan and Nebius Token Factory — appear in the model picker with all their aliases.</li>
+  <li><strong>Dotted names no longer corrupt config</strong>: a quick command named &quot;v1.2 deploy&quot; used to write nested garbage into config.yaml; Scarf now uses Hermes v0.21&#x27;s escape syntax (and safely sanitizes on older hosts), and recovers previously mangled entries on read.</li>
+  <li>The <code>hermes-agent</code> skill (essential and un-disableable since v0.20.6) can no longer show as &quot;OFF&quot; from a stale config entry.</li>
+</ul>
+<h2>Under the hood</h2>
+<ul>
+  <li>New capability groups <code>isV0206OrLater</code> / <code>isV021OrLater</code> with per-flag floors verified against each intervening Hermes tag — several features the v0.21 release notes advertise actually shipped in v0.20.6, and Scarf gates them where they really landed.</li>
+  <li>104 new tests (ScarfCore now at 1474), including fixture-driven parsers for cron incidents/doctor and peer JSON, an end-to-end remote-backend preview test over real SQLite, and a byte-identity check against Hermes&#x27;s preview SQL.</li>
+  <li>The whole cycle ran as audited work packages with an independent fresh-eyes review; its findings (a doctor-parser edge case, two over-eager version gates, several parser hardenings) are fixed in this release.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>Updates arrive via Sparkle&#x27;s built-in updater; or grab the zip from this release.</li>
+  <li>macOS 14.6+ (Apple Silicon and Intel). ScarfGo for iOS ships separately via TestFlight; this release requires no iOS-side update.</li>
+  <li>Compatible with Hermes v0.6.0 through v0.21.0. Sections marked ⚙ appear only when the connected host supports them; older hosts render identically to v2.22.0.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v2.23.0/Scarf-v2.23.0-Universal.zip"
+                 sparkle:edSignature="7py4wJUEZhS4RjLMegBNnzAN0l2zb0VOMkn3sYUmS9em3GRf6sFLJ0sZUVfDfJYUt6ULd9W/vbvxeqiReTJ3AQ=="
+                 length="23392871"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.22.0</title>
       <sparkle:version>64</sparkle:version>
       <sparkle:shortVersionString>2.22.0</sparkle:shortVersionString>
