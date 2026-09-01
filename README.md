@@ -67,16 +67,14 @@ Connecting takes about a minute: add a server (same details as `ssh user@host`),
 
 Scarf for macOS collects **anonymous usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames; no persistent identifier) to guide development. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/).
 
-## What's New in 2.23.0
+## What's New in 2.24.0
 
-- **Hermes v0.21.0 "Pantheon" parity** — full compatibility with Hermes's biggest release of the year, capability-gated per feature (several actually landed in v0.20.6, and Scarf gates them where they really shipped). Older hosts render identically.
-- **Peers** ⚙ — a new Manage section for `hermes peer`: DM your other Hermes agents and fire async runs with live status/stop, without Scarf ever touching peer keys.
-- **Cron health** ⚙ — failure incidents with acknowledge, per-job doctor findings, Resume & Run Now, and Bot Chat as a delivery target.
-- **Honest session previews** — compaction summaries and rewound messages no longer masquerade as a session's first message (byte-identical port of Hermes's own preview logic).
-- **MCP catalog ×3** — 20 → 65 optional MCP servers, with the dead Atlassian endpoint fixed and recommended tool exclusions honored on install.
-- Plus: the offline/singular update-check formats Health used to miss, real gateway status markers, two new providers, and dotted names no longer corrupting config.yaml.
+- **Bots** ⚙ — a new top-level section above Chat for Hermes's Bot Mode: your roster of named agents with native deterministic avatars, full create/edit/delete, and one-click promotion of any profile to a bot. Interops both ways with Hermes's own desktop — same profiles, same chats.
+- **Live bot conversations** ⚙ — each bot's canonical Bot Chat as a real streaming Scarf chat (tokens, thinking, tool cards, inline permissions) over ACP, locally or across plain SSH.
+- **Routines & remote bots** ⚙ — per-bot scheduled jobs that run as the right bot (delegation-wrapped exactly like Hermes desktop's), and your `hermes peer` bots in the roster for DMs and async runs.
+- **Five-audit release pass** — independent audits of Bot Mode, the last two releases, Chat, Bots, and Settings; every blocking finding fixed: bot chats get the full slash menu, failures render as failures, a silent no-op Settings toggle works, three dead Settings rows removed, accessibility gaps closed, and the shared UI components are now localization-ready.
 
-Full notes: [v2.23.0](https://github.com/awizemann/scarf/releases/tag/v2.23.0) · v2.22.0 brought full accessibility + complete six-language localization · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
+Full notes: [v2.24.0](https://github.com/awizemann/scarf/releases/tag/v2.24.0) · v2.23.0 brought Hermes v0.21 "Pantheon" parity (Peers, cron health, tripled MCP catalog) · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
 
 ## Features
 
