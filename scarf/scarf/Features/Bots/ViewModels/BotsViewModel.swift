@@ -270,6 +270,52 @@ final class BotsViewModel {
     /// the section (`hasBotMode` is a version gate, never a data gate).
     var isEmptyRoster: Bool { !rows.contains { $0.identity.isBotManaged } }
 
+    // MARK: - Remote bots (B4)
+
+    /// Backing model for the roster's "Remote" group — reuses W9's
+    /// `PeersViewModel` wholesale (registry read off `config.yaml`'s
+    /// `bot_peers:`, plus the DM/async-run verbs over `hermes peer`) rather
+    /// than re-parsing the registry or re-wrapping `HermesPeerCLI`. Its
+    /// `peers`/`selectedPeerName`/`selectedPeer` are a SEPARATE identity
+    /// space from `rows`/`selectedProfileName` — a peer registered under the
+    /// same name as a local profile is a distinct row with its own selection
+    /// state, never merged into or conflated with the local roster.
+    /// Lazily constructed so a test (or a host with no peers configured)
+    /// never spins up its transport. `@Observable` can't synthesize a
+    /// `lazy var` (it rewrites stored properties into tracked accessors),
+    /// so the laziness is hand-rolled with a backing optional.
+    @ObservationIgnored private var _peers: PeersViewModel?
+    var peers: PeersViewModel {
+        if let existing = _peers { return existing }
+        let vm = PeersViewModel(context: context)
+        _peers = vm
+        return vm
+    }
+
+    /// Gates the "Remote" roster group. Peer registration + `hermes peer`
+    /// both ship at v0.21 (`hasPeerRunCommands` = `isV021OrLater`), so a
+    /// host below that floor never shows the section even if `config.yaml`
+    /// happens to carry a `bot_peers:` block from a newer host's export.
+    var hasPeerRunCommands: Bool { capabilities.hasPeerRunCommands }
+
+    // MARK: - Routines (B4)
+
+    @ObservationIgnored private var routinesCache: [String: BotRoutinesViewModel] = [:]
+
+    /// Memoized per bot, mirroring `conversation`'s reasoning: a
+    /// `BotRoutinesViewModel` wraps a `CronViewModel` (loaded jobs, in-flight
+    /// tasks), and rebuilding one on every SwiftUI body evaluation would
+    /// discard that state and re-issue the cron load on every re-render.
+    /// Never evicted on selection change (unlike `conversation`, which tears
+    /// down a live subprocess) — a `CronViewModel` holds no process, so
+    /// keeping every visited bot's routines cached just saves reloads.
+    func routinesViewModel(for profileName: String) -> BotRoutinesViewModel {
+        if let existing = routinesCache[profileName] { return existing }
+        let vm = BotRoutinesViewModel(context: context, botName: profileName)
+        routinesCache[profileName] = vm
+        return vm
+    }
+
     // MARK: - Conversation (B3)
 
     /// The live conversation, if any. **At most one exists at a time** — a

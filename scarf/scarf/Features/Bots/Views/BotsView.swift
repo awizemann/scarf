@@ -66,12 +66,16 @@ struct BotsView: View {
                 viewModel.capabilities = capabilities
             }
             viewModel.load()
+            if viewModel.hasPeerRunCommands { viewModel.peers.load() }
         }
         .onChange(of: hasBotMode) { _, _ in
             if let capabilities = capabilitiesStore?.capabilities {
                 viewModel.capabilities = capabilities
             }
             viewModel.load(force: true)
+        }
+        .onChange(of: viewModel.hasPeerRunCommands) { _, hasPeers in
+            if hasPeers { viewModel.peers.load() }
         }
         .sheet(item: $editor) { context in
             BotEditorSheet(
@@ -245,6 +249,25 @@ struct BotsView: View {
                     }
                     .accessibilityLabel("Other profiles, \(viewModel.otherProfiles.count)")
                 }
+
+                // Remote group (B4): another host's `bot_peers` registry —
+                // appears only on a host new enough for `hermes peer`
+                // (v0.21+) and only once the registry has entries, matching
+                // the "Hidden bots"/"Other profiles" disclosure pattern
+                // above. Never merged into `viewModel.bots` — a peer named
+                // the same as a local profile stays a distinct row with its
+                // own selection state (`viewModel.peers.selectedPeerName`).
+                if viewModel.hasPeerRunCommands, !viewModel.peers.peers.isEmpty {
+                    VStack(alignment: .leading, spacing: ScarfSpace.s3) {
+                        Text("Remote (\(viewModel.peers.peers.count))")
+                            .scarfStyle(.caption)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
+                        ForEach(viewModel.peers.peers) { peer in
+                            remoteRow(peer)
+                        }
+                    }
+                    .accessibilityLabel("Remote peers, \(viewModel.peers.peers.count)")
+                }
             }
             .padding(ScarfSpace.s4)
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -255,6 +278,10 @@ struct BotsView: View {
     private func rosterRow(_ row: BotRow) -> some View {
         let isSelected = viewModel.selectedProfileName == row.identity.profileName
         return Button {
+            // Selecting a local bot always wins the detail pane — clear any
+            // remote selection so the two identity spaces never both claim
+            // it (see `detail` below).
+            viewModel.peers.selectedPeerName = nil
             viewModel.selectedProfileName = row.identity.profileName
         } label: {
             ScarfCard(padding: ScarfSpace.s3) {
@@ -314,12 +341,73 @@ struct BotsView: View {
         }
     }
 
+    /// A row from the `bot_peers` registry — distinct visual grammar from a
+    /// local bot row (a "remote" badge, no pin/hidden affordances, no
+    /// generated-avatar identity backed by a real profile) so it reads
+    /// immediately as "another host," not a local bot.
+    private func remoteRow(_ peer: HermesBotPeer) -> some View {
+        let isSelected = viewModel.peers.selectedPeerName == peer.name
+        return Button {
+            // Selecting a remote peer clears the local selection so
+            // `detail` doesn't try to render both — see `rosterRow` above
+            // for the mirror-image guard.
+            viewModel.selectedProfileName = nil
+            viewModel.peers.selectedPeerName = peer.name
+        } label: {
+            ScarfCard(padding: ScarfSpace.s3) {
+                HStack(alignment: .top, spacing: ScarfSpace.s3) {
+                    BotAvatarView(displayName: peer.name, shapeString: nil, colorHex: nil, imageData: nil, size: 34)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: ScarfSpace.s2) {
+                            Text(peer.name)
+                                .scarfStyle(.bodyEmph)
+                                .foregroundStyle(ScarfColor.foregroundPrimary)
+                                .lineLimit(1)
+                            ScarfBadge("remote", kind: .info)
+                        }
+                        if !peer.note.isEmpty {
+                            Text(peer.note)
+                                .scarfStyle(.caption)
+                                .foregroundStyle(ScarfColor.foregroundMuted)
+                                .lineLimit(2)
+                        }
+                        Text(peer.url)
+                            .scarfStyle(.footnote)
+                            .foregroundStyle(ScarfColor.foregroundFaint)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .accessibilityLabel("\(peer.name), remote peer at \(peer.url)")
+        .accessibilityIdentifier("bots.remote.\(peer.name)")
+        .overlay(
+            RoundedRectangle(cornerRadius: ScarfRadius.xl, style: .continuous)
+                .strokeBorder(isSelected ? ScarfColor.accent : Color.clear, lineWidth: 1.5)
+        )
+    }
+
     private func rowAccessibilityLabel(_ row: BotRow) -> String {
         var parts = [row.identity.resolvedTitle, "profile \(row.identity.profileName)"]
         if !row.identity.isBotManaged { parts.append("not a bot yet") }
         if row.isPinned { parts.append("pinned") }
         if row.isHidden { parts.append("hidden") }
         return parts.joined(separator: ", ")
+    }
+
+    // MARK: - Routines (B4)
+
+    /// Fetch the cached per-bot routines view model and mirror the current
+    /// capability answer into it — cheap bool assignments, done here (not
+    /// inside the `@ViewBuilder` closure above) so the view model's own
+    /// state never depends on how SwiftUI orders builder statements.
+    private func routinesViewModel(for row: BotRow) -> BotRoutinesViewModel {
+        let vm = viewModel.routinesViewModel(for: row.identity.profileName)
+        vm.isV0206OrLater = capabilitiesStore?.capabilities.isV0206OrLater ?? false
+        return vm
     }
 
     // MARK: - Detail
@@ -358,6 +446,12 @@ struct BotsView: View {
                             icon: "text.bubble"
                         )
                     }
+                },
+                automation: {
+                    BotRoutinesView(
+                        viewModel: routinesViewModel(for: row),
+                        hasCronBotChatDelivery: capabilitiesStore?.capabilities.hasCronBotChatDelivery ?? false
+                    )
                 }
             )
             .id(row.identity.profileName)
@@ -365,6 +459,9 @@ struct BotsView: View {
                 guard row.identity.isBotManaged else { return }
                 viewModel.openConversation(for: row.identity.profileName)
             }
+        } else if viewModel.hasPeerRunCommands, let peer = viewModel.peers.selectedPeer {
+            RemoteBotDetailView(viewModel: viewModel.peers, peer: peer)
+                .id(peer.name)
         } else {
             VStack(spacing: ScarfSpace.s2) {
                 Text("Select a bot")
