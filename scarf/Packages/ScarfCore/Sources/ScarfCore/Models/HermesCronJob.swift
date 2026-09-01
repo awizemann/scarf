@@ -373,6 +373,62 @@ public struct HermesCronJob: Identifiable, Sendable, Codable {
     /// effective state — never the raw stored one.
     public nonisolated var stateDisplay: String { effectiveState }
 
+    /// Terminal per Hermes's `is_terminal_job` — the states from which
+    /// `update_job` refuses re-activation ("Cannot activate terminal cron
+    /// job …", cron/jobs.py:2593/2694). `cron resume --run-now` / `--at`
+    /// is the documented escape hatch.
+    public nonisolated var isTerminal: Bool {
+        let s = effectiveState
+        return s == "completed" || s == "error"
+    }
+
+    // MARK: - repeat (unmodeled; lives in `extra`)
+
+    /// `repeat` normalized to `(times, completed)`.
+    ///
+    /// Hermes persists `{"times": n|null, "completed": n}`, but since
+    /// v0.20.6 every entry point funnels user/agent input through
+    /// `normalize_repeat_value` (cron/jobs.py:798-825), so a hand-edited
+    /// or tool-written `jobs.json` legitimately carries a BARE value:
+    /// `"forever"`/`"infinite"`/`"inf"`/`"none"`/`""` → infinite (nil),
+    /// `"once"`/`"one"`/`"1x"` → 1, a number (or numeric string) → itself,
+    /// with `<= 0` folding to infinite. Scarf keeps `repeat` verbatim in
+    /// `extra` (so a rewrite never normalizes on Hermes's behalf) and
+    /// reads it through here.
+    public nonisolated var repeatSpec: (times: Int?, completed: Int) {
+        guard let raw = extra["repeat"] else { return (nil, 0) }
+        if case .object(let o) = raw {
+            var completed = 0
+            if case .int(let c)? = o["completed"] { completed = c }
+            return (Self.normalizeRepeatValue(o["times"]), completed)
+        }
+        return (Self.normalizeRepeatValue(raw), 0)
+    }
+
+    /// Port of `cron/jobs.py::normalize_repeat_value`. Returns `nil` for
+    /// "run forever" (including unparseable input, matching Hermes's
+    /// `<= 0 -> None` fold rather than raising into a UI read path).
+    public nonisolated static func normalizeRepeatValue(_ value: JSONValue?) -> Int? {
+        guard let value else { return nil }
+        switch value {
+        case .null:
+            return nil
+        case .int(let i):
+            return i <= 0 ? nil : i
+        case .double(let d):
+            let i = Int(d)
+            return i <= 0 ? nil : i
+        case .bool, .array, .object:
+            return nil
+        case .string(let s):
+            let t = s.trimmingCharacters(in: .whitespaces).lowercased()
+            if ["forever", "infinite", "inf", "none", ""].contains(t) { return nil }
+            if ["once", "one", "1x"].contains(t) { return 1 }
+            guard let i = Int(t) else { return nil }
+            return i <= 0 ? nil : i
+        }
+    }
+
     public nonisolated var stateIcon: String {
         switch effectiveState {
         case "scheduled": return "clock"
@@ -495,9 +551,64 @@ public struct CronJobsFile: Sendable, Codable {
     }
 
     public nonisolated init(from decoder: any Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.jobs      = try c.decode([HermesCronJob].self, forKey: .jobs)
-        self.updatedAt = try c.decodeIfPresent(String.self, forKey: .updatedAt)
+        // Hermes v0.20.6+ `load_jobs()` (cron/jobs.py:1648-1727) tolerates
+        // three on-disk shapes and auto-repairs the two odd ones back to
+        // `{"jobs": [...]}` on the next save. Scarf must READ all three or
+        // it renders an empty board (and, worse, its own rewrite would
+        // clobber a store Hermes would have repaired):
+        //
+        //   1. `{"jobs": [ {...}, ... ]}`          — canonical
+        //   2. `{"jobs": {"<id>": {...}, ...}}`    — id-keyed map, written by
+        //      external tools / hand edits. Flattened with an id-preserving
+        //      merge: an inline `"id"` wins, otherwise the map key is adopted.
+        //      Non-dict values are junk and are skipped, not fatal.
+        //   3. `[ {...}, ... ]`                    — bare top-level array.
+        if let c = try? decoder.container(keyedBy: CodingKeys.self), c.contains(.jobs) {
+            do {
+                self.jobs = try c.decode([HermesCronJob].self, forKey: .jobs)
+            } catch {
+                // Only treat this as shape 2 when `jobs` really is a map.
+                // Otherwise rethrow the ARRAY error — a store that's a
+                // list with one bad job must not be reported as "not a
+                // dict", which would send the next reader hunting the
+                // wrong bug.
+                guard let map = try? c.decode([String: JSONValue].self, forKey: .jobs) else {
+                    throw error
+                }
+                self.jobs = try Self.flattenIDKeyedJobs(map)
+            }
+            self.updatedAt = try c.decodeIfPresent(String.self, forKey: .updatedAt)
+            return
+        }
+        // Bare array root.
+        self.jobs = try decoder.singleValueContainer().decode([HermesCronJob].self)
+        self.updatedAt = nil
+    }
+
+    /// Flatten `{"<id>": {job}}` to `[job]`, adopting the map key as `id`
+    /// when the value has no (non-empty) inline `id`. Mirrors
+    /// `cron/jobs.py`'s `{**v, "id": v.get("id") or k}`. Non-object values
+    /// are skipped — a flattened record wouldn't be a job.
+    private nonisolated static func flattenIDKeyedJobs(
+        _ map: [String: JSONValue]
+    ) throws -> [HermesCronJob] {
+        var out: [HermesCronJob] = []
+        // Stable order: the map is unordered, and an arbitrary list order
+        // would make the Cron board shuffle between reloads.
+        for key in map.keys.sorted() {
+            guard case .object(var fields)? = map[key] else { continue }
+            let inlineID: String? = {
+                if case .string(let s)? = fields["id"], !s.isEmpty { return s }
+                return nil
+            }()
+            fields["id"] = .string(inlineID ?? key)
+            let data = try JSONEncoder().encode(JSONValue.object(fields))
+            // A single junk entry shouldn't blank the whole board.
+            if let job = try? JSONDecoder().decode(HermesCronJob.self, from: data) {
+                out.append(job)
+            }
+        }
+        return out
     }
 
     public nonisolated func encode(to encoder: any Encoder) throws {

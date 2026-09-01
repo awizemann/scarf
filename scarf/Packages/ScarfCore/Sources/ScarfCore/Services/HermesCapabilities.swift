@@ -320,9 +320,16 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// argparse reject the whole `cron create`, so every Scarf cron-create path
     /// that copies a job to another host (fleet apply-cron, template install)
     /// gates on this.
+    /// v0.20.6 addendum: `bot-chat` / `bot-chat:<profile>` is the second
+    /// version-gated sentinel. A pre-v0.20.6 Hermes resolves it as a
+    /// platform name and fails the whole `cron create`, so it gets the
+    /// same treatment as `all` — including the `:profile` suffix form,
+    /// which the prefix check below covers.
     public func supportsCronDeliver(_ deliver: String?) -> Bool {
-        guard deliver == "all" else { return true }
-        return hasCronDeliverAll
+        guard let deliver else { return true }
+        if deliver == "all" { return hasCronDeliverAll }
+        if deliver == "bot-chat" || deliver.hasPrefix("bot-chat:") { return hasCronBotChatDelivery }
+        return true
     }
 
     /// Discord plugin reads recent channel history when joining a thread

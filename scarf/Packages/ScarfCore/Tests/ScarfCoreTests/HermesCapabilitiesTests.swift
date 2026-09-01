@@ -268,6 +268,9 @@ import Foundation
 
     /// The cron `--deliver` gate shared by fleet apply-cron and the template
     /// installer: only `all` is version-gated; everything else is baseline.
+    /// Covers the `all` sentinel only. The second gated sentinel,
+    /// `bot-chat[:profile]` (v0.20.6+), is covered in
+    /// `HermesV021CronParityTests.botChatDeliveryIsVersionGated`.
     @Test func supportsCronDeliverGatesOnlyTheAllSentinel() {
         let v14 = HermesCapabilities.parseLine("Hermes Agent v0.14.0 (2026.5.16)")
         let v13 = HermesCapabilities.parseLine("Hermes Agent v0.13.0 (2026.5.7)")

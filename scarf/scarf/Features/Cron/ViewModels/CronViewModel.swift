@@ -120,14 +120,133 @@ final class CronViewModel {
         }
     }
 
+    // MARK: - Failure incidents (Hermes v0.20.6+, `hermes cron incidents`)
+
+    /// Durable failure incidents across all jobs. Only loaded when the
+    /// (capability-gated) INCIDENTS disclosure is expanded — pre-0.20.6
+    /// hosts never issue the call and render the pane byte-identically.
+    var incidents: [HermesCronIncident] = []
+    var isLoadingIncidents = false
+    @ObservationIgnored private var hasLoadedIncidents = false
+
+    /// Open (un-acked) incidents for one job — drives the row badge.
+    func openIncidentCount(jobID: String) -> Int {
+        incidents.filter { $0.jobID == jobID && $0.isOpen }.count
+    }
+
+    func loadIncidents(force: Bool = false) {
+        if !force, hasLoadedIncidents { return }
+        hasLoadedIncidents = true
+        isLoadingIncidents = true
+        let svc = fileService
+        let log = logger
+        Task.detached { [weak self] in
+            let result = svc.runHermesCLISplit(args: HermesCronIncidentsParser.listArgs(), timeout: 30)
+            let parsed = result.exitCode == 0 ? HermesCronIncidentsParser.parse(text: result.stdout) : []
+            if result.exitCode != 0 {
+                log.warning("cron incidents failed (exit \(result.exitCode)): \(result.stderr.prefix(300))")
+            }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.incidents = parsed
+                self.isLoadingIncidents = false
+            }
+        }
+    }
+
+    func ackIncident(_ incident: HermesCronIncident) {
+        let svc = fileService
+        Task.detached { [weak self] in
+            let result = svc.runHermesCLI(args: HermesCronIncidentsParser.ackArgs(incidentID: incident.id), timeout: 30)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.message = result.exitCode == 0
+                    ? "Incident acknowledged"
+                    : "Couldn't acknowledge: \(result.output.prefix(160))"
+                self.loadIncidents(force: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                    self?.message = nil
+                }
+            }
+        }
+    }
+
+    // MARK: - Health check (Hermes v0.21+, `hermes cron doctor`)
+
+    /// `jobID → finding`, so a list/detail row can show a warning inline
+    /// instead of pushing the user into a separate pane.
+    var doctorFindings: [String: HermesCronDoctorFinding] = [:]
+    @ObservationIgnored private var hasLoadedDoctor = false
+
+    func loadDoctor(force: Bool = false) {
+        if !force, hasLoadedDoctor { return }
+        hasLoadedDoctor = true
+        let svc = fileService
+        Task.detached { [weak self] in
+            // `cron doctor` exits 1 when it FINDS issues — that's the
+            // normal path, not a failure. Parse stdout regardless; only
+            // an empty stdout means we learned nothing.
+            let result = svc.runHermesCLISplit(args: HermesCronDoctorParser.args(), timeout: 30)
+            let parsed = HermesCronDoctorParser.parse(text: result.stdout)
+            await MainActor.run { [weak self] in
+                self?.doctorFindings = parsed
+            }
+        }
+    }
+
     // MARK: - CLI wrappers
 
     func pauseJob(_ job: HermesCronJob) {
         runAndReload(["cron", "pause", job.id], success: "Paused")
     }
 
+    /// Set by `CronView` from the capability store — only affects the
+    /// wording of the terminal-job refusal (the VM has no capability
+    /// store of its own).
+    var supportsResumeRunNow = false
+
     func resumeJob(_ job: HermesCronJob) {
+        // Since v0.20.6 `update_job` refuses to re-activate a
+        // completed/error job ("Cannot activate terminal cron job …",
+        // cron/jobs.py:2593/2694), and `resume_job` funnels through it.
+        // Catch it before the CLI round-trip so the user gets the
+        // actionable sentence instead of a Python ValueError tail.
+        if job.isTerminal {
+            message = terminalRefusalMessage(job)
+            clearMessageSoon()
+            return
+        }
         runAndReload(["cron", "resume", job.id], success: "Resumed")
+    }
+
+    /// `hermes cron resume <id> --run-now` (v0.20.6+) — the documented
+    /// escape hatch for a terminal job: re-arms it to fire immediately
+    /// rather than at its (spent) schedule. Callers gate on
+    /// `hasCronResumeRunNow`.
+    func resumeAndRunNow(_ job: HermesCronJob) {
+        runAndReload(["cron", "resume", job.id, "--run-now"], success: "Resumed — running now")
+    }
+
+    private func terminalRefusalMessage(_ job: HermesCronJob) -> String {
+        let state = job.effectiveState == "error" ? "failed" : "finished"
+        return supportsResumeRunNow
+            ? "\"\(job.name)\" has \(state) and can't just be resumed — use Resume & Run Now to re-arm it."
+            : "\"\(job.name)\" has \(state) and can't be resumed. Duplicate it to schedule a new run."
+    }
+
+    /// Translate the Hermes terminal-job refusals into one plain sentence.
+    /// Both `update_job` ("Cannot activate terminal cron job") and
+    /// `trigger_job` ("Cannot run: … is completed (terminal)") land here
+    /// via `runAndReload`/`runNow` when the pre-check above is bypassed
+    /// (e.g. a job that turned terminal between load and click).
+    static func friendlyCronFailure(_ output: String) -> String? {
+        if output.contains("Cannot activate terminal cron job") {
+            return "That job already finished — use Resume & Run Now to re-arm it, or duplicate it."
+        }
+        if output.contains("(terminal)") && output.contains("Cannot run") {
+            return "That job already finished — use Resume & Run Now to re-arm it, or duplicate it."
+        }
+        return nil
     }
 
     func runNow(_ job: HermesCronJob) {
@@ -149,6 +268,12 @@ final class CronViewModel {
         // The app's HermesFileWatcher picks up the dashboard.json
         // rewrite that the agent lands at the end — that's what the
         // user actually watches for, not this toast.
+        // `trigger_job` refuses terminal jobs outright (cron/jobs.py:2760).
+        if job.isTerminal {
+            message = terminalRefusalMessage(job)
+            clearMessageSoon()
+            return
+        }
         let svc = fileService
         let jobID = job.id
         Task.detached { [weak self] in
@@ -156,7 +281,8 @@ final class CronViewModel {
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 if runResult.exitCode != 0 {
-                    self.message = "Run failed to queue: \(runResult.output.prefix(200))"
+                    self.message = Self.friendlyCronFailure(runResult.output)
+                        ?? "Run failed to queue: \(runResult.output.prefix(200))"
                     self.logger.warning("cron run failed: \(runResult.output)")
                     self.load(force: true)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
@@ -254,7 +380,8 @@ final class CronViewModel {
                 if result.exitCode == 0 {
                     self.message = success
                 } else {
-                    self.message = "Failed: \(result.output.prefix(200))"
+                    self.message = Self.friendlyCronFailure(result.output)
+                        ?? "Failed: \(result.output.prefix(200))"
                     self.logger.warning("cron command failed: args=\(arguments) output=\(result.output)")
                 }
                 self.load(force: true)
@@ -262,6 +389,12 @@ final class CronViewModel {
                     self?.message = nil
                 }
             }
+        }
+    }
+
+    private func clearMessageSoon() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            self?.message = nil
         }
     }
 }
