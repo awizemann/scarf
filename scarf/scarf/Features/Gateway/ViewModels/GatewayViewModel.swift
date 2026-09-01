@@ -152,8 +152,23 @@ final class MessagingGatewayViewModel {
     /// stale…" and systemd's "…definition is outdated" are two different
     /// strings, neither reachable from the manual branch — so that concept
     /// is dropped rather than faked (see the retired `isStale` field).
+    ///
+    /// **The `gateway_state.json` pid is not proof of life.** A crash or a
+    /// `kill -9` leaves the last-written pid in the file (nothing rewrites
+    /// it on an unclean exit), so a pid-only test badges a dead gateway as
+    /// "Loaded". `hermes gateway status` is the live probe — it derives
+    /// pids from `get_gateway_runtime_snapshot()` — so its verdict wins:
+    ///  - `✗ Gateway is not running` (manual branch, gateway.py:8958) →
+    ///    never loaded, whatever the stale pid says.
+    ///  - `✓ Gateway is running (PID: …)` + `(Running manually, …)` →
+    ///    running, but not service-managed.
+    ///  - A service-managed branch (systemd/launchd/Windows) prints
+    ///    neither marker; there we still need the pid as the liveness
+    ///    signal, so the original test applies.
     nonisolated static func isServiceLoaded(pid: Int?, statusOutput: String) -> Bool {
-        pid != nil && !statusOutput.contains("(Running manually, not as a system service)")
+        if statusOutput.contains("✗ Gateway is not running") { return false }
+        if statusOutput.contains("(Running manually, not as a system service)") { return false }
+        return pid != nil
     }
 
     nonisolated private static func fetchPairing(context: ServerContext) -> (approved: [PairedUser], pending: [PendingPairing]) {

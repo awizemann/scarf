@@ -86,15 +86,56 @@ import Foundation
 
     @Test func argvMatchesTheArgparseSurface() {
         #expect(HermesPeerCLI.dmArgs(target: "spark", message: "hi")
-            == ["peer", "dm", "spark", "hi", "--json"])
+            == ["peer", "dm", "--json", "--", "spark", "hi"])
         #expect(HermesPeerCLI.runArgs(target: "spark/researcher", message: "hi")
-            == ["peer", "run", "spark/researcher", "hi", "--json"])
+            == ["peer", "run", "--json", "--", "spark/researcher", "hi"])
         #expect(HermesPeerCLI.runArgs(target: "spark", message: "hi", idempotencyKey: "ticket-123")
-            == ["peer", "run", "spark", "hi", "--idempotency-key", "ticket-123", "--json"])
+            == ["peer", "run", "--idempotency-key", "ticket-123", "--json", "--", "spark", "hi"])
         #expect(HermesPeerCLI.statusArgs(target: "spark", runID: "run_abc")
             == ["peer", "status", "spark", "run_abc", "--json"])
         #expect(HermesPeerCLI.stopArgs(target: "spark", runID: "run_abc")
             == ["peer", "stop", "spark", "run_abc", "--json"])
+    }
+
+
+    /// `message` is an argparse positional, so a message that starts with
+    /// a dash is otherwise claimed as an option (exit 2 at best, a
+    /// silently-flipped flag at worst). `--` is argparse's own
+    /// end-of-options marker and needs nothing on the Hermes side.
+    @Test func aMessageStartingWithADashCannotBindToAFlag() {
+        let dm = HermesPeerCLI.dmArgs(target: "spark", message: "--help me read this stack trace")
+        #expect(dm.last == "--help me read this stack trace")
+        // The separator sits immediately before the positionals, and every
+        // option is in front of it — argparse treats EVERYTHING after the
+        // first `--` as positional, so a trailing `--json` would be read as
+        // a third positional and rejected.
+        let sep = dm.firstIndex(of: "--")
+        #expect(sep != nil)
+        #expect(dm.firstIndex(of: "--json")! < sep!)
+        #expect(dm.count == sep! + 3)
+
+        let run = HermesPeerCLI.runArgs(target: "spark", message: "-v", idempotencyKey: "k")
+        #expect(run == ["peer", "run", "--idempotency-key", "k", "--json", "--", "spark", "-v"])
+    }
+
+    /// PyYAML line-folds a long `--note`, and the continuation lines sit
+    /// deeper than the key they belong to. They are NOT sibling keys — but
+    /// a note quoting `url: …` used to parse as one, and because PyYAML
+    /// dumps keys sorted (`note` before `url`) it overwrote the peer's real
+    /// URL in the UI with text the note author chose.
+    @Test func aFoldedNoteCannotForgeASiblingKey() {
+        let yaml = """
+        bot_peers:
+          spark:
+            note: 'ops runbook lives on the wiki; if the box is unreachable check the
+
+              url: http://decoy.invalid/pwn and then page someone'
+            url: http://spark.lan:8377
+        """
+        let peers = HermesBotPeersYAML.parse(yaml: yaml)
+        #expect(peers.count == 1)
+        #expect(peers[0].url == "http://spark.lan:8377")
+        #expect(peers[0].note.hasPrefix("'ops runbook lives on the wiki"))
     }
 
     @Test func targetJoinsAProfileWithASlash() {

@@ -18,7 +18,10 @@ struct CronView: View {
     @State private var pendingDelete: HermesCronJob?
     @State private var showOutputPanel: Bool = false
     @State private var showRunHistory: Bool = false
-    @State private var showIncidents: Bool = false
+    /// Job ids whose INCIDENTS disclosure is open. Per-job, not a single
+    /// shared flag: one `Bool` made expanding on job A silently expand the
+    /// panel for every other job the user then selected.
+    @State private var expandedIncidentJobIDs: Set<String> = []
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     @Environment(AppCoordinator.self) private var coordinator
     @Environment(HermesFileWatcher.self) private var fileWatcher
@@ -88,7 +91,7 @@ struct CronView: View {
         .loadingOverlay(viewModel.isLoading, label: "Loading cron jobs…", isEmpty: viewModel.jobs.isEmpty)
         .onAppear {
             viewModel.load(changeToken: fileWatcher.lastChangeDate)
-            viewModel.supportsResumeRunNow = hasCronResumeRunNow
+            viewModel.isV0206OrLater = hasCronResumeRunNow
             // Both probes are one cheap read-only CLI call each, and both
             // feed always-visible affordances (row badge / warning icon),
             // so they can't be deferred behind a disclosure the way RUN
@@ -107,7 +110,7 @@ struct CronView: View {
         // so `onAppear` can run before the answer lands. Re-run the gated
         // work when it does — otherwise a cold launch shows no incidents,
         // no doctor findings, and the wrong terminal-refusal wording.
-        .onChange(of: hasCronResumeRunNow) { _, newValue in viewModel.supportsResumeRunNow = newValue }
+        .onChange(of: hasCronResumeRunNow) { _, newValue in viewModel.isV0206OrLater = newValue }
         .onChange(of: hasCronIncidents) { _, newValue in if newValue { viewModel.loadIncidents() } }
         .onChange(of: hasCronDoctor) { _, newValue in if newValue { viewModel.loadDoctor() } }
         .sheet(isPresented: $viewModel.showCreateSheet) {
@@ -624,11 +627,13 @@ struct CronView: View {
     private func incidentsPanel(job: HermesCronJob) -> some View {
         let jobIncidents = viewModel.incidents.filter { $0.jobID == job.id }
         VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+            let isExpanded = expandedIncidentJobIDs.contains(job.id)
             Button {
-                showIncidents.toggle()
+                if isExpanded { expandedIncidentJobIDs.remove(job.id) }
+                else { expandedIncidentJobIDs.insert(job.id) }
             } label: {
                 HStack(spacing: ScarfSpace.s2) {
-                    Image(systemName: showIncidents ? "chevron.down" : "chevron.right")
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(ScarfColor.foregroundMuted)
                     Text("INCIDENTS")
@@ -646,7 +651,7 @@ struct CronView: View {
             }
             .buttonStyle(.plain)
 
-            if showIncidents {
+            if isExpanded {
                 Group {
                     if viewModel.isLoadingIncidents && viewModel.incidents.isEmpty {
                         Text("Loading incidents…")

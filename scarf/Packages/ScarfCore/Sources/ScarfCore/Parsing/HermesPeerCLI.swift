@@ -47,19 +47,34 @@ public enum HermesPeerCLI {
 
     // MARK: - Argv
 
+    /// ## The `--` in `dm`/`run`
+    /// `target` and `message` are argparse **positionals**
+    /// (`dm_p.add_argument("message", nargs="?")`), so a message the user
+    /// legitimately starts with a dash — "-v is broken", "--help me
+    /// debug this" — gets claimed as an option and the invocation dies at
+    /// exit 2, or worse, silently flips a flag. `--` is argparse's own
+    /// end-of-options marker: everything after it is a positional, no
+    /// parser change needed on the Hermes side.
+    ///
+    /// It has to come **last**, after `--json` and any `--idempotency-key`
+    /// — argparse treats every token after the first `--` as positional,
+    /// so a flag placed behind it would be consumed as a third positional
+    /// and rejected as "unrecognized arguments".
     public static func dmArgs(target: String, message: String) -> [String] {
-        ["peer", "dm", target, message, "--json"]
+        ["peer", "dm", "--json", "--", target, message]
     }
 
     /// `--idempotency-key` is optional: omitted, the CLI generates
     /// `peer-<uuid>` and echoes it back in the JSON payload, which is
     /// what Scarf stores. Pass one only to make a retry idempotent.
     public static func runArgs(target: String, message: String, idempotencyKey: String? = nil) -> [String] {
-        var args = ["peer", "run", target, message]
+        var args = ["peer", "run"]
         if let idempotencyKey, !idempotencyKey.isEmpty {
             args += ["--idempotency-key", idempotencyKey]
         }
         args.append("--json")
+        // End of options — see `dmArgs`. Must stay last.
+        args += ["--", target, message]
         return args
     }
 
@@ -264,8 +279,8 @@ public enum HermesPeerCLI {
                 profile: string(object["profile"]),
                 runID: string(object["run_id"]),
                 status: string(object["status"]) ?? "unknown",
-                output: nonEmpty(string(object["output"])),
-                error: nonEmpty(string(object["error"]))
+                output: nonEmpty(stringOrJSON(object["output"])),
+                error: nonEmpty(stringOrJSON(object["error"]))
             )
         }
     }
@@ -325,6 +340,24 @@ public enum HermesPeerCLI {
         if let s = value as? String { return s }
         if let n = value as? NSNumber { return n.stringValue }
         return nil
+    }
+
+    /// Like `string`, but keeps structured values instead of discarding
+    /// them. `status`/`stop` merge the peer's own `/v1/runs/<id>` body, and
+    /// a peer is free to answer with `output: {...}` or `error: [...]` —
+    /// the CLI's text mode just `print`s whatever is there. Returning nil
+    /// for those would show "no output" for a run that produced plenty, so
+    /// non-scalars are re-serialized as compact JSON (sorted keys, so the
+    /// same payload always renders the same way).
+    private static func stringOrJSON(_ value: Any?) -> String? {
+        if let scalar = string(value) { return scalar }
+        guard let value, !(value is NSNull) else { return nil }
+        if let b = value as? Bool { return b ? "true" : "false" }
+        guard JSONSerialization.isValidJSONObject(value) else { return nil }
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes]
+        ) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     private static func bool(_ value: Any?) -> Bool {

@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 public struct HermesCronJob: Identifiable, Sendable, Codable {
     public nonisolated let id: String
@@ -386,13 +387,16 @@ public struct HermesCronJob: Identifiable, Sendable, Codable {
 
     /// `repeat` normalized to `(times, completed)`.
     ///
-    /// Hermes persists `{"times": n|null, "completed": n}`, but since
-    /// v0.20.6 every entry point funnels user/agent input through
+    /// Hermes persists `{"times": n|null, "completed": n}`, but as of
+    /// **v0.21.0** every entry point funnels user/agent input through
     /// `normalize_repeat_value` (cron/jobs.py:798-825), so a hand-edited
     /// or tool-written `jobs.json` legitimately carries a BARE value:
     /// `"forever"`/`"infinite"`/`"inf"`/`"none"`/`""` → infinite (nil),
     /// `"once"`/`"one"`/`"1x"` → 1, a number (or numeric string) → itself,
-    /// with `<= 0` folding to infinite. Scarf keeps `repeat` verbatim in
+    /// with `<= 0` folding to infinite. (The normalizer is v0.21.0-only,
+    /// but this reader is version-independent by design: it interprets what
+    /// is already on disk, and a pre-0.21 store can hold exactly the same
+    /// bare values — nothing here needs capability gating.) Scarf keeps `repeat` verbatim in
     /// `extra` (so a rewrite never normalizes on Hermes's behalf) and
     /// reads it through here.
     public nonisolated var repeatSpec: (times: Int?, completed: Int) {
@@ -589,6 +593,20 @@ public struct CronJobsFile: Sendable, Codable {
     /// when the value has no (non-empty) inline `id`. Mirrors
     /// `cron/jobs.py`'s `{**v, "id": v.get("id") or k}`. Non-object values
     /// are skipped — a flattened record wouldn't be a job.
+    ///
+    /// **Asymmetry with the array path, on purpose.** Shape 1
+    /// (`{"jobs": [...]}`) is strict: one undecodable element throws and
+    /// `loadCronJobsOutcome` raises `decodeFailed`, which the Cron view
+    /// surfaces as a banner. This map path is tolerant: a bad entry is
+    /// skipped and the rest of the board still renders. That mirrors
+    /// Hermes itself — `list_jobs` skips malformed id-keyed records with a
+    /// warning rather than failing the read — and reflects who writes the
+    /// two shapes: the array is Hermes's own output (a decode failure there
+    /// is a real schema drift worth shouting about), while the map is
+    /// hand-edited/third-party and partial junk is expected. The skip is
+    /// logged so it is at least observable in Console.
+    private nonisolated static let flattenLogger = Logger(subsystem: "com.scarf", category: "HermesCronJob")
+
     private nonisolated static func flattenIDKeyedJobs(
         _ map: [String: JSONValue]
     ) throws -> [HermesCronJob] {
@@ -603,9 +621,14 @@ public struct CronJobsFile: Sendable, Codable {
             }()
             fields["id"] = .string(inlineID ?? key)
             let data = try JSONEncoder().encode(JSONValue.object(fields))
-            // A single junk entry shouldn't blank the whole board.
-            if let job = try? JSONDecoder().decode(HermesCronJob.self, from: data) {
-                out.append(job)
+            // A single junk entry shouldn't blank the whole board — but a
+            // silent drop is how "my job vanished" bugs get filed, so say so.
+            do {
+                out.append(try JSONDecoder().decode(HermesCronJob.self, from: data))
+            } catch {
+                flattenLogger.warning(
+                    "jobs.json: skipping undecodable id-keyed entry \(key, privacy: .public): \(String(describing: error), privacy: .public)"
+                )
             }
         }
         return out

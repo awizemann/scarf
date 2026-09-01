@@ -20,6 +20,15 @@ import Foundation
 ///
 /// **No key is ever read.** The peer's `API_SERVER_KEY` lives in
 /// `~/.hermes/.env`, not here, and Scarf does not go looking for it.
+///
+/// ## Only `url` and `note` are read
+/// A long `--note` is line-folded by PyYAML on the way out, and its
+/// continuation lines can contain arbitrary text — including something
+/// that reads like `url: http://decoy`. `HermesYAML` now recognizes those
+/// continuations by indent and drops them, but this reader stays narrow as
+/// a second line of defence: it consults exactly the two keys it knows and
+/// ignores every other key under a peer entry, so a note can never
+/// contribute a field it isn't supposed to own.
 public enum HermesBotPeersYAML {
     static let sectionKey = "bot_peers"
 

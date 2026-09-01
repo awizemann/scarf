@@ -80,19 +80,52 @@ import ScarfCore
         #expect(CronViewModel.friendlyCronFailure("") == nil)
     }
 
-    /// The pre-check: resuming a completed/error job never reaches the
-    /// CLI, and the message names the affordance that actually works.
-    @Test @MainActor func resumingATerminalJobIsRefusedLocally() {
+    /// The pre-check: on a v0.20.6+ host, resuming a completed/error job
+    /// never reaches the CLI, and the message names the affordance that
+    /// actually works.
+    @Test @MainActor func resumingATerminalJobIsRefusedLocallyOnV0206Hosts() {
         let vm = CronViewModel()
-        vm.supportsResumeRunNow = true
+        vm.isV0206OrLater = true
         vm.resumeJob(Self.fixtureJob(lastError: nil, state: "completed"))
         #expect(vm.message?.contains("Resume & Run Now") == true)
+    }
 
-        // Pre-0.20.6 host: no run-now escape hatch to point at.
+    /// The refusal is a *mirror* of a host-side guard, not a Scarf policy.
+    /// Those guards (`update_job`'s "Cannot activate terminal cron job",
+    /// `trigger_job`'s "(terminal)") arrived in v0.20.6: verified absent at
+    /// tag `v2026.8.19` and present at `v2026.8.27`. On an older host the
+    /// resume/run would have SUCCEEDED, so refusing client-side would deny
+    /// an operation the host accepts — a worse failure than the raw Python
+    /// tail the pre-check exists to avoid. Asserted on the decision
+    /// function rather than by calling `resumeJob`, which would spawn a
+    /// real CLI invocation.
+    @Test @MainActor func pre0206HostsAreLeftToTheCLI() {
         let old = CronViewModel()
-        old.supportsResumeRunNow = false
-        old.resumeJob(Self.fixtureJob(lastError: "boom", state: "error"))
-        #expect(old.message?.contains("Duplicate it") == true)
+        old.isV0206OrLater = false
+        #expect(old.refusesTerminalJobLocally(Self.fixtureJob(lastError: "boom", state: "error")) == false)
+        #expect(old.refusesTerminalJobLocally(Self.fixtureJob(lastError: nil, state: "completed")) == false)
+
+        let current = CronViewModel()
+        current.isV0206OrLater = true
+        #expect(current.refusesTerminalJobLocally(Self.fixtureJob(lastError: "boom", state: "error")))
+        // Non-terminal states are never short-circuited on either host.
+        #expect(current.refusesTerminalJobLocally(Self.fixtureJob(lastError: nil, state: "scheduled")) == false)
+    }
+
+    /// `hermes cron incidents ack` returns **0** even when it acked
+    /// nothing: `ack_incident` falsy → yellow "not found or already
+    /// closed." → `return 0` (`hermes_cli/cron.py:322-335`). Reporting
+    /// that as "Incident acknowledged" tells the user a lie they can't
+    /// check.
+    @Test func ackMissPathIsNotReportedAsSuccess() {
+        #expect(CronViewModel.ackOutcomeMessage(
+            exitCode: 0, output: "✓ Incident inc_7 acknowledged (closed).") == "Incident acknowledged")
+        #expect(CronViewModel.ackOutcomeMessage(
+            exitCode: 0, output: "Incident inc_7 not found or already closed."
+        ).contains("already closed"))
+        #expect(CronViewModel.ackOutcomeMessage(
+            exitCode: 1, output: "✗ Incident ID required"
+        ).hasPrefix("Couldn't acknowledge"))
     }
 
     /// The inverse of the pre-check, asserted on the model rather than

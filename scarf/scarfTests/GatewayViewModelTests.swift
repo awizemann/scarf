@@ -61,9 +61,30 @@ import ScarfCore
         #expect(MessagingGatewayViewModel.isServiceLoaded(pid: 4821, statusOutput: output) == true)
     }
 
+    /// The pid in `gateway_state.json` is a *last-written* value, not a
+    /// liveness signal: a crash or `kill -9` leaves it behind because
+    /// nothing rewrites the file on an unclean exit. `hermes gateway
+    /// status` derives its answer from `get_gateway_runtime_snapshot()`,
+    /// so when it says "✗ Gateway is not running" (gateway.py:8958) the
+    /// stale pid must lose — otherwise Scarf badges a dead gateway
+    /// "Loaded" and the user has no reason to restart it.
+    @Test func aStalePIDLosesToNotRunningStatusOutput() {
+        let output = """
+        ✗ Gateway is not running
+
+        To start:
+          hermes gateway run      # Run in foreground
+          hermes gateway install  # Install as user service
+        """
+        #expect(MessagingGatewayViewModel.isServiceLoaded(pid: 4821, statusOutput: output) == false)
+        // …and the same output with no pid at all, unchanged.
+        #expect(MessagingGatewayViewModel.isServiceLoaded(pid: nil, statusOutput: output) == false)
+    }
+
     @Test func withoutAKnownPIDNeverReadsAsLoaded() {
-        // Even if the status text doesn't contain the manual-mode phrase,
-        // no PID means we have nothing running to call "loaded".
+        // Service-managed branches print neither marker, so the pid is the
+        // only liveness signal there — and its absence still means "not
+        // loaded".
         #expect(MessagingGatewayViewModel.isServiceLoaded(pid: nil, statusOutput: "✓ Gateway service is running") == false)
     }
 

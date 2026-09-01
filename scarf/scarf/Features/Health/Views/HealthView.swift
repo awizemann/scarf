@@ -25,15 +25,20 @@ struct HealthView: View {
 
     /// Re-create the VM with the resolved capabilities the first time the
     /// store hands us non-empty data. Same shape as `GatewayView`'s
-    /// `attachCapabilitiesIfNeeded()`.
-    private func attachCapabilitiesIfNeeded() {
+    /// `attachCapabilitiesIfNeeded()`. Returns true when it actually
+    /// swapped the VM, so the caller knows to re-run the load.
+    @discardableResult
+    private func attachCapabilitiesIfNeeded() -> Bool {
         guard let store = capabilitiesStore,
               store.capabilities.detected,
-              !viewModel.capabilities.detected else { return }
+              !viewModel.capabilities.detected else { return false }
+        viewModel.cancelLoad()
+        viewModel.stopDashboardMonitoring()
         viewModel = HealthViewModel(
             context: viewModel.context,
             capabilities: store.capabilities
         )
+        return true
     }
 
 
@@ -166,6 +171,18 @@ struct HealthView: View {
         )
         .onAppear {
             attachCapabilitiesIfNeeded()
+            viewModel.load()
+            viewModel.startDashboardMonitoring()
+        }
+        // The capability store probes `hermes --version` asynchronously, so
+        // `onAppear` routinely runs before the answer lands and snapshots
+        // `.empty`. Without this re-attach a cold launch keeps the whole
+        // session's Health pane on default-off capabilities — which on a
+        // pre-0.20.6 host hides the Tool Gateway's Web Extract row that
+        // `hasWebExtractAux` should have shown. Same pattern CronView uses
+        // for its gated probes.
+        .onChange(of: capabilitiesStore?.capabilities.detected ?? false) { _, resolved in
+            guard resolved, attachCapabilitiesIfNeeded() else { return }
             viewModel.load()
             viewModel.startDashboardMonitoring()
         }

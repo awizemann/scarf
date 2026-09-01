@@ -127,6 +127,10 @@ final class CronViewModel {
     /// hosts never issue the call and render the pane byte-identically.
     var incidents: [HermesCronIncident] = []
     var isLoadingIncidents = false
+    /// Set only after a run that actually produced a listing. A failed
+    /// invocation (missing binary, SSH drop, host mid-upgrade) must stay
+    /// retryable — memoizing it would leave the row badges permanently
+    /// blank with no way back short of an app restart.
     @ObservationIgnored private var hasLoadedIncidents = false
 
     /// Open (un-acked) incidents for one job — drives the row badge.
@@ -134,24 +138,44 @@ final class CronViewModel {
         incidents.filter { $0.jobID == jobID && $0.isOpen }.count
     }
 
+    /// Eager (not disclosure-gated) on purpose: the open-incident count
+    /// drives an always-visible per-row badge, so the listing has to be in
+    /// hand before the user expands anything.
     func loadIncidents(force: Bool = false) {
         if !force, hasLoadedIncidents { return }
-        hasLoadedIncidents = true
+        if isLoadingIncidents { return }   // don't stack duplicate in-flight probes
         isLoadingIncidents = true
         let svc = fileService
         let log = logger
         Task.detached { [weak self] in
             let result = svc.runHermesCLISplit(args: HermesCronIncidentsParser.listArgs(), timeout: 30)
-            let parsed = result.exitCode == 0 ? HermesCronIncidentsParser.parse(text: result.stdout) : []
-            if result.exitCode != 0 {
+            let ok = result.exitCode == 0
+            let parsed = ok ? HermesCronIncidentsParser.parse(text: result.stdout) : []
+            if !ok {
                 log.warning("cron incidents failed (exit \(result.exitCode)): \(result.stderr.prefix(300))")
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                self.incidents = parsed
+                if ok {
+                    self.incidents = parsed
+                    self.hasLoadedIncidents = true
+                }
                 self.isLoadingIncidents = false
             }
         }
+    }
+
+    /// `hermes cron incidents ack <id>` **exits 0 on the miss path**: when
+    /// `ack_incident` returns falsy the CLI prints "Incident <id> not found
+    /// or already closed." in yellow and still returns 0
+    /// (`hermes_cli/cron.py:322-335`). Exit code alone would report a
+    /// no-op as a success, so the output text is the discriminator.
+    static func ackOutcomeMessage(exitCode: Int32, output: String) -> String {
+        guard exitCode == 0 else { return "Couldn't acknowledge: \(output.prefix(160))" }
+        if output.contains("not found or already closed") {
+            return "That incident was already closed (or no longer exists)."
+        }
+        return "Incident acknowledged"
     }
 
     func ackIncident(_ incident: HermesCronIncident) {
@@ -160,9 +184,7 @@ final class CronViewModel {
             let result = svc.runHermesCLI(args: HermesCronIncidentsParser.ackArgs(incidentID: incident.id), timeout: 30)
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                self.message = result.exitCode == 0
-                    ? "Incident acknowledged"
-                    : "Couldn't acknowledge: \(result.output.prefix(160))"
+                self.message = Self.ackOutcomeMessage(exitCode: result.exitCode, output: result.output)
                 self.loadIncidents(force: true)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                     self?.message = nil
@@ -177,19 +199,34 @@ final class CronViewModel {
     /// instead of pushing the user into a separate pane.
     var doctorFindings: [String: HermesCronDoctorFinding] = [:]
     @ObservationIgnored private var hasLoadedDoctor = false
+    @ObservationIgnored private var isLoadingDoctor = false
 
     func loadDoctor(force: Bool = false) {
         if !force, hasLoadedDoctor { return }
-        hasLoadedDoctor = true
+        if isLoadingDoctor { return }
+        isLoadingDoctor = true
         let svc = fileService
+        let log = logger
         Task.detached { [weak self] in
             // `cron doctor` exits 1 when it FINDS issues — that's the
-            // normal path, not a failure. Parse stdout regardless; only
-            // an empty stdout means we learned nothing.
+            // normal path, not a failure, so the exit code can't be the
+            // success signal. `looksLikeDoctorOutput` checks for one of
+            // the two sentinels the command always prints; anything else
+            // (argparse error, traceback, empty) is a failed run and stays
+            // retryable rather than being memoized as "no findings".
             let result = svc.runHermesCLISplit(args: HermesCronDoctorParser.args(), timeout: 30)
-            let parsed = HermesCronDoctorParser.parse(text: result.stdout)
+            let ok = HermesCronDoctorParser.looksLikeDoctorOutput(result.stdout)
+            let parsed = ok ? HermesCronDoctorParser.parse(text: result.stdout) : [:]
+            if !ok {
+                log.warning("cron doctor produced unrecognized output (exit \(result.exitCode)): \(result.stderr.prefix(300))")
+            }
             await MainActor.run { [weak self] in
-                self?.doctorFindings = parsed
+                guard let self else { return }
+                if ok {
+                    self.doctorFindings = parsed
+                    self.hasLoadedDoctor = true
+                }
+                self.isLoadingDoctor = false
             }
         }
     }
@@ -200,10 +237,27 @@ final class CronViewModel {
         runAndReload(["cron", "pause", job.id], success: "Paused")
     }
 
-    /// Set by `CronView` from the capability store — only affects the
-    /// wording of the terminal-job refusal (the VM has no capability
-    /// store of its own).
-    var supportsResumeRunNow = false
+    /// Set by `CronView` from the capability store (`hasCronResumeRunNow`
+    /// / `hasCronIncidents` / … all resolve to `isV0206OrLater`). It gates
+    /// the terminal-job pre-check as well as the `--run-now` affordance —
+    /// the VM has no capability store of its own.
+    ///
+    /// **Why the pre-check is gated.** The terminal guards Scarf is
+    /// short-circuiting are a v0.20.6 addition: at tag `v2026.8.19`
+    /// (v0.20.5) neither `update_job` nor `trigger_job` refuses a
+    /// completed/error job, so those hosts happily resume one. Refusing
+    /// client-side there would deny an operation the host would have
+    /// accepted — worse than the Python tail this pre-check exists to
+    /// avoid. On such a host we let the CLI decide.
+    var isV0206OrLater = false
+
+    /// Should Scarf refuse a terminal-job resume/run locally instead of
+    /// round-tripping to the CLI? Only when the host is new enough to
+    /// refuse it too. Factored out so both call sites — and the tests —
+    /// share one contract.
+    func refusesTerminalJobLocally(_ job: HermesCronJob) -> Bool {
+        isV0206OrLater && job.isTerminal
+    }
 
     func resumeJob(_ job: HermesCronJob) {
         // Since v0.20.6 `update_job` refuses to re-activate a
@@ -211,7 +265,7 @@ final class CronViewModel {
         // cron/jobs.py:2593/2694), and `resume_job` funnels through it.
         // Catch it before the CLI round-trip so the user gets the
         // actionable sentence instead of a Python ValueError tail.
-        if job.isTerminal {
+        if refusesTerminalJobLocally(job) {
             message = terminalRefusalMessage(job)
             clearMessageSoon()
             return
@@ -227,11 +281,12 @@ final class CronViewModel {
         runAndReload(["cron", "resume", job.id, "--run-now"], success: "Resumed — running now")
     }
 
+    /// Only reachable when `refusesTerminalJobLocally` said yes, i.e. on a
+    /// v0.20.6+ host — which is exactly the generation that has the
+    /// `--run-now` escape hatch, so the wording can name it outright.
     private func terminalRefusalMessage(_ job: HermesCronJob) -> String {
         let state = job.effectiveState == "error" ? "failed" : "finished"
-        return supportsResumeRunNow
-            ? "\"\(job.name)\" has \(state) and can't just be resumed — use Resume & Run Now to re-arm it."
-            : "\"\(job.name)\" has \(state) and can't be resumed. Duplicate it to schedule a new run."
+        return "\"\(job.name)\" has \(state) and can't just be resumed — use Resume & Run Now to re-arm it."
     }
 
     /// Translate the Hermes terminal-job refusals into one plain sentence.
@@ -268,8 +323,9 @@ final class CronViewModel {
         // The app's HermesFileWatcher picks up the dashboard.json
         // rewrite that the agent lands at the end — that's what the
         // user actually watches for, not this toast.
-        // `trigger_job` refuses terminal jobs outright (cron/jobs.py:2760).
-        if job.isTerminal {
+        // `trigger_job` refuses terminal jobs outright (cron/jobs.py:2760)
+        // — but only from v0.20.6 on; see `refusesTerminalJobLocally`.
+        if refusesTerminalJobLocally(job) {
             message = terminalRefusalMessage(job)
             clearMessageSoon()
             return

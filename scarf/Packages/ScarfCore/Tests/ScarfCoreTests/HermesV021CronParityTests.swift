@@ -275,6 +275,70 @@ import Foundation
         #expect(findings["job-2"]?.issues == ["workdir not found: /gone/away"])
     }
 
+    /// **The one that mattered.** `_cron_doctor_issues_for_job` emits
+    /// `f"last run failed: {last_error}"`, and for a script job the
+    /// scheduler stored `last_error` as `"stderr:\n" + stderr`
+    /// (`cron/scheduler.py:4457-4458`) — a whole Python traceback.
+    /// `cron.py:674` bullets only the FIRST physical line of that string;
+    /// the rest arrive at the traceback's own indentation.
+    ///
+    /// The old prefix-based parse read every one of those lines as a new
+    /// job header, inventing findings keyed `Traceback` / `File` /
+    /// `subprocess.CalledProcessError:` and truncating the real issue to
+    /// "last run failed: stderr:". This fixture is that output.
+    @Test func parsesAMultiLineLastErrorAsOneIssue() {
+        let output = """
+            Cron doctor found 3 issue(s) across 2 job(s):
+
+              4f2a9c1b7e03 Backup snapshot
+                - last run failed: stderr:
+            Traceback (most recent call last):
+              File "/Users/alan/.hermes/cron/scripts/backup.py", line 41, in <module>
+                main()
+              File "/Users/alan/.hermes/cron/scripts/backup.py", line 27, in main
+                subprocess.run(["restic", "backup", target], check=True)
+            subprocess.CalledProcessError: Command '['restic', 'backup', '/srv']' returned non-zero exit status 1.
+                - next_run_at is 6.4h overdue — job is not firing (is the scheduler running?)
+              9b0d1e5af244 (unnamed)
+                - workdir not found: /gone/away
+
+            Next: fix the listed job config, then run `hermes cron doctor` again.
+            """
+        let findings = HermesCronDoctorParser.parse(text: output)
+
+        // Exactly two jobs — no `Traceback`/`File`/`subprocess…` ghosts.
+        #expect(findings.count == 2)
+        #expect(Set(findings.keys) == ["4f2a9c1b7e03", "9b0d1e5af244"])
+
+        let backup = findings["4f2a9c1b7e03"]
+        #expect(backup?.jobName == "Backup snapshot")
+        #expect(backup?.issues.count == 2)
+        // The traceback is retained whole, on the issue it belongs to.
+        let failure = backup?.issues.first ?? ""
+        #expect(failure.hasPrefix("last run failed: stderr:"))
+        #expect(failure.contains("Traceback (most recent call last):"))
+        #expect(failure.contains("line 27, in main"))
+        #expect(failure.hasSuffix("returned non-zero exit status 1."))
+        // The bullet AFTER the traceback is still its own issue.
+        #expect(backup?.issues.last?.hasPrefix("next_run_at is 6.4h overdue") == true)
+
+        // The job header that follows a multi-line issue is still a header.
+        #expect(findings["9b0d1e5af244"]?.jobName == "(unnamed)")
+        #expect(findings["9b0d1e5af244"]?.issues == ["workdir not found: /gone/away"])
+    }
+
+    /// `cron doctor` exits **1** on the normal "found issues" path, so the
+    /// exit code can't tell a real run from a failed invocation. The
+    /// sentinel check is what lets `CronViewModel` memoize a success and
+    /// retry a failure instead of caching "no findings" forever.
+    @Test func doctorOutputIsRecognizableWithoutTheExitCode() {
+        #expect(HermesCronDoctorParser.looksLikeDoctorOutput("✓ Cron doctor found no issues\n  Checked 4 active job(s)."))
+        #expect(HermesCronDoctorParser.looksLikeDoctorOutput("Cron doctor found 1 issue(s) across 1 job(s):"))
+        #expect(HermesCronDoctorParser.looksLikeDoctorOutput("") == false)
+        #expect(HermesCronDoctorParser.looksLikeDoctorOutput(
+            "usage: hermes cron [-h] ...\nhermes cron: error: argument: invalid choice: 'doctor'") == false)
+    }
+
     @Test func parsesCleanDoctorRun() {
         let output = "✓ Cron doctor found no issues\n  Checked 4 active job(s).\n"
         #expect(HermesCronDoctorParser.parse(text: output).isEmpty)

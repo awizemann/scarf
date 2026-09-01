@@ -25,6 +25,21 @@ import Foundation
 /// Space-to-underscore sanitization is folded in here too (previously
 /// duplicated at each call site) since it's applied unconditionally on
 /// both host generations.
+///
+/// ## Cold cache: the pre-v0.21 branch is the safe default, deliberately
+/// `HermesCapabilities` is populated by an async `hermes --version` probe,
+/// so a write issued before that probe lands sees `.empty` and takes the
+/// **strip** branch even on a genuine v0.21 host. That is the intended
+/// failure direction and must not be "fixed":
+///  - Stripping is *lossy but never corrupting* — "v1.2 deploy" becomes
+///    `v12_deploy`, one key, exactly where the user can see it and rename
+///    it.
+///  - Escaping optimistically would be *corrupting* when the guess is
+///    wrong — a pre-v0.21 host has no `_split_key_path` escape handling,
+///    so a literal `\.` splits anyway and scatters bogus nested maps
+///    through `config.yaml` (hermes-agent #84064), the exact bug this
+///    helper exists to prevent.
+/// Unknown capability therefore means "assume the older, stricter host".
 public enum ConfigDottedKeySegment {
     /// Sanitize/escape `segment` for use as one path component passed to
     /// `hermes config set/get/unset`. Byte-identical to the input (modulo
