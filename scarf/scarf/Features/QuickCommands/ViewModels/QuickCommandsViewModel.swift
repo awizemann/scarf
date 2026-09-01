@@ -45,16 +45,35 @@ final class QuickCommandsViewModel {
         guard let yaml = context.readText(context.paths.configYAML) else { return [] }
         let parsed = HermesFileService.parseNestedYAML(yaml)
         var byName: [String: (type: String, command: String)] = [:]
-        for (key, value) in parsed.values where key.hasPrefix("quick_commands.") {
-            let parts = key.split(separator: ".", maxSplits: 2, omittingEmptySubsequences: false)
-            guard parts.count == 3 else { continue }
-            let name = String(parts[1])
-            let field = String(parts[2])
-            var existing = byName[name] ?? (type: "exec", command: "")
+        let prefix = "quick_commands."
+        for (key, value) in parsed.values where key.hasPrefix(prefix) {
+            // Don't naively `split(".", maxSplits: 2)` — a command name that
+            // itself contains a literal dot (e.g. "v1.2_deploy", written via
+            // the escaped-key path in `addOrUpdate`) is stored in config.yaml
+            // as a real dotted YAML key, so `parseNestedYAML`'s flattened
+            // path is "quick_commands.v1.2_deploy.type": a naive 3-way split
+            // would chop it into name="v1" field="2_deploy.type" and both
+            // silently drop the real entry and fabricate a bogus one. Peel
+            // the known ".type"/".command" suffix off instead so everything
+            // in between — dots included — is the name.
+            let remainder = key.dropFirst(prefix.count)
+            let name: Substring
+            let field: String
+            if remainder.hasSuffix(".type") {
+                field = "type"
+                name = remainder.dropLast(".type".count)
+            } else if remainder.hasSuffix(".command") {
+                field = "command"
+                name = remainder.dropLast(".command".count)
+            } else {
+                continue
+            }
+            guard !name.isEmpty else { continue }
+            var existing = byName[String(name)] ?? (type: "exec", command: "")
             let stripped = HermesFileService.stripYAMLQuotes(value)
             if field == "type" { existing.type = stripped }
             if field == "command" { existing.command = stripped }
-            byName[name] = existing
+            byName[String(name)] = existing
         }
         return byName.map { HermesQuickCommand(name: $0.key, type: $0.value.type, command: $0.value.command) }
             .sorted { $0.name < $1.name }
@@ -72,7 +91,13 @@ final class QuickCommandsViewModel {
             message = "Name and command are required"
             return
         }
-        let sanitizedName = name.replacingOccurrences(of: " ", with: "_")
+        // A literal "." in the name (e.g. "v1.2 deploy") would otherwise be
+        // parsed by `hermes config set` as a nesting separator and corrupt
+        // config.yaml — escape it (v0.21+) or strip it (older hosts) via
+        // the shared helper so the write is always safe. Display name keeps
+        // the raw dot; only the interpolated CLI segment is transformed.
+        let caps = HermesVersionCache.shared.cached(for: context) ?? .empty
+        let sanitizedName = ConfigDottedKeySegment.escaped(name, capabilities: caps)
         let typeResult = runHermes(["config", "set", "quick_commands.\(sanitizedName).type", "exec"])
         let cmdResult = runHermes(["config", "set", "quick_commands.\(sanitizedName).command", command])
         if typeResult.exitCode == 0 && cmdResult.exitCode == 0 {

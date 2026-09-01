@@ -135,11 +135,6 @@ struct GatewayView: View {
                         .font(.caption)
                         .foregroundStyle(.green)
                 }
-                if viewModel.gateway.isStale {
-                    Label("Service definition stale", systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
             }
 
             if let reason = viewModel.gateway.exitReason, !reason.isEmpty {

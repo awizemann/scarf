@@ -47,6 +47,22 @@ public enum HermesYAML {
         var maps: [String: [String: String]] = [:]
         // Path stack: each entry is (indent, name). Pop when indent shrinks.
         var stack: [(indent: Int, name: String)] = []
+        // Indent of the most recent scalar `key: value` line at the current
+        // level, or nil right after a section header opened a block.
+        //
+        // PyYAML line-folds long scalars: `hermes peer add --note "<long
+        // text>"` round-trips through `_save_peers` as a quoted scalar
+        // whose continuation lines sit at a DEEPER indent than the key.
+        // Those continuations are not keys, but they can contain `key:
+        // value` text — a note mentioning "url: http://decoy" parsed as a
+        // sibling `url` and (PyYAML sorts keys, so `note` is dumped before
+        // `url`) overwrote the peer's real URL in the UI.
+        //
+        // In real YAML a key line can never be indented deeper than the
+        // sibling scalar before it — that requires a parent with an empty
+        // value, which is a section header, which resets this to nil. So
+        // "deeper than the last scalar" is an unambiguous continuation.
+        var lastScalarIndent: Int?
 
         func currentPath(joinedWith child: String? = nil) -> String {
             var parts = stack.map(\.name)
@@ -62,6 +78,10 @@ public enum HermesYAML {
 
             let indent = line.prefix(while: { $0 == " " }).count
             let isListItem = trimmed.hasPrefix("- ")
+
+            // Folded/continued scalar line (see `lastScalarIndent`) — not a
+            // key, not a list item, and must not touch the stack.
+            if !isListItem, let last = lastScalarIndent, indent > last { continue }
 
             // Pop stack entries with indent >= current indent.
             // Exception: a list item at the same indent as its parent key is
@@ -83,6 +103,7 @@ public enum HermesYAML {
                 let path = currentPath()
                 guard !path.isEmpty else { continue }
                 lists[path, default: []].append(stripped)
+                lastScalarIndent = nil
                 continue
             }
 
@@ -111,13 +132,17 @@ public enum HermesYAML {
             }
 
             let path = currentPath(joinedWith: key)
+            lastScalarIndent = indent
 
             if afterColon.isEmpty || afterColon == "|" || afterColon == ">"
                 || afterColon.hasPrefix("#") {
                 // `#` — a section header carrying only a trailing comment
                 // (`agent:  # note`) still opens a block.
                 // Section header or empty-valued key — push onto stack so children nest.
+                // Children legitimately sit deeper, so the continuation
+                // guard is disarmed until the next scalar.
                 stack.append((indent: indent, name: key))
+                lastScalarIndent = nil
                 continue
             }
 

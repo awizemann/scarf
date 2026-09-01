@@ -2,18 +2,14 @@
 title: Wire standard macOS menu-bar commands (Settings, Help, Find)
 type: note
 permalink: scarf/conventions/wire-standard-macos-menu-bar-commands-settings-help-find
-tags:
-- hig
-- macos
-- conventions
-- audit-2026-06-13
-reviewed: 2026-07-17
+tags: [hig, macos, conventions, audit-2026-06-13]
+source_paths: [scarf/scarf/scarfApp.swift, scarf/scarf/Features/Sessions/Views/SessionsView.swift]
+source_paths_inferred: false
+source_sha: c15060dd23b03692780f5b0002fd47f9660d76ef
 created: 2026-06-13
 updated: 2026-06-15
+reviewed: 2026-09-01
 reviewed_by: audit:claude-code (background)
-source_sha: 741b7a0dff0adf0779bace4eea4ebf0a6b929d9d
-source_paths: scarf/scarf/scarfApp.swift, scarf/scarf/Features/Sessions/Views/SessionsView.swift
-source_paths_inferred: false
 ---
 
 ## Observations

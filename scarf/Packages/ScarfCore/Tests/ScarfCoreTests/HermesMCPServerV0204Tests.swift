@@ -89,13 +89,20 @@ struct HermesMCPServerV0204Tests {
     // (`MalformedIdentityHeaderReadTests`).
 }
 
-/// Roster integrity for the static optional-MCP catalog snapshot (v0.20.4:
-/// 20 entries).
+/// Roster integrity for the static optional-MCP catalog snapshot (v0.21.0:
+/// 65 entries, up from 20 at v0.20.4).
 @Suite("OptionalMCPCatalog roster")
 struct OptionalMCPCatalogTests {
 
-    @Test func hasExactlyTwentyEntries() {
-        #expect(OptionalMCPCatalog.entries.count == 20)
+    @Test func hasExactlySixtyFiveEntries() {
+        #expect(OptionalMCPCatalog.entries.count == 65)
+    }
+
+    /// Blender was removed from the upstream catalog before v0.20.4 and
+    /// stays absent in v0.21.0 — confirmed against the manifest directory
+    /// (no `optional-mcps/blender/` at v2026.8.31).
+    @Test func blenderStaysExcluded() {
+        #expect(!OptionalMCPCatalog.entries.contains { $0.name == "blender" })
     }
 
     @Test func noDuplicateNames() {
@@ -131,23 +138,53 @@ struct OptionalMCPCatalogTests {
         #expect(n8n?.requiredEnvVars == ["N8N_BASE_URL", "N8N_API_KEY"])
     }
 
-    /// The four `/sse`-suffixed endpoints whose manifests declare
+    /// The three `/sse`-suffixed endpoints whose manifests declare
     /// `type: http`. `hermes mcp install` writes no `transport:` key for
     /// them; prefilling `.sse` would route Hermes to `sse_client`, a
     /// different protocol that also hard-fails with
     /// `strict_redirect_headers`.
     @Test func httpManifestsWithSSEShapedURLsStayHTTP() {
-        for name in ["asana", "atlassian", "paypal", "square"] {
+        for name in ["asana", "paypal", "square"] {
             let entry = OptionalMCPCatalog.entries.first { $0.name == name }
             #expect(entry?.transport == .http, "\(name) must mirror its manifest's transport.type (http)")
             #expect(entry?.url?.hasSuffix("/sse") == true, "\(name) fixture assumption: url still ends in /sse")
         }
     }
 
+    /// Atlassian's manifest was fixed to point at `/v1/mcp/authv2` — the old
+    /// `/v1/sse` path 404s (deprecated by Atlassian after June 30, 2026).
+    @Test func atlassianURLIsTheLiveEndpoint() {
+        let atlassian = OptionalMCPCatalog.entries.first { $0.name == "atlassian" }
+        #expect(atlassian?.url == "https://mcp.atlassian.com/v1/mcp/authv2")
+        #expect(atlassian?.transport == .http)
+    }
+
     /// No roster entry may claim SSE unless a manifest actually declares
-    /// `transport.type: sse` — none does at v2026.8.18.
+    /// `transport.type: sse` — none does at v2026.8.31.
     @Test func noEntryDeclaresSSETransport() {
         #expect(!OptionalMCPCatalog.entries.contains { $0.transport == .sse })
+    }
+
+    /// `tools.default_excluded` is new at v0.21.0 (25 manifests declare it)
+    /// and is mutually exclusive with `tools.default_enabled` per the
+    /// manifest schema (mcp_catalog.py `_parse_manifest`).
+    @Test func exactlyTwentyFiveEntriesDeclareDefaultExcludedTools() {
+        let withExcluded = OptionalMCPCatalog.entries.filter { !$0.defaultExcludedTools.isEmpty }
+        #expect(withExcluded.count == 25)
+    }
+
+    @Test func defaultEnabledAndDefaultExcludedAreMutuallyExclusive() {
+        for entry in OptionalMCPCatalog.entries {
+            #expect(entry.defaultEnabledTools.isEmpty || entry.defaultExcludedTools.isEmpty, "\(entry.name) declares both default_enabled and default_excluded")
+        }
+    }
+
+    /// Spot-check one `default_excluded` entry against its manifest
+    /// verbatim (attio: `tools.default_excluded: [whoami, query-particle-sql]`).
+    @Test func attioDefaultExcludedToolsMatchManifest() {
+        let attio = OptionalMCPCatalog.entries.first { $0.name == "attio" }
+        #expect(attio?.defaultExcludedTools == ["whoami", "query-particle-sql"])
+        #expect(attio?.defaultEnabledTools.isEmpty == true)
     }
 
     /// figma's description is the manifest's `description:` verbatim,

@@ -15,6 +15,11 @@ struct MCPServerAddCustomView: View {
     @State private var auth: String = "none"
     @State private var sseReadTimeout: String = ""
     @State private var showCatalog = false
+    /// Manifest `tools.default_excluded` from the picked catalog entry, if
+    /// any — written to `mcp_servers.<name>.tools.exclude` right after the
+    /// server is added, mirroring what `hermes mcp install` does at install
+    /// time (mcp_catalog.py `_apply_tool_selection`/`_write_tools_exclude`).
+    @State private var pendingDefaultExcludedTools: [String] = []
 
     /// `.sse` is a v0.13+ surface; pre-v0.13 hosts only see stdio + http.
     /// Iterating `MCPTransport.allCases` directly would render the SSE
@@ -34,11 +39,14 @@ struct MCPServerAddCustomView: View {
                 Text("Add Custom MCP Server")
                     .scarfStyle(.headline)
                 Spacer()
-                // The roster is a verbatim v0.20.4 snapshot (20 entries, up
-                // from 6, blender removed). Offering it on an older host
-                // would advertise entries that host's `hermes mcp install`
-                // has never heard of, so it follows the branch's gating
-                // convention and only appears on v0.20.4+.
+                // The roster is a verbatim v0.21.0 snapshot (65 entries, up
+                // from 20 in v0.20.4; blender stays removed). Offering it on
+                // an older host would advertise entries that host's
+                // `hermes mcp install` has never heard of, so it follows the
+                // branch's gating convention and only appears on v0.20.4+.
+                // (`tools.default_excluded` needs no extra floor: the
+                // config-side `tools.exclude` consumer Scarf writes to
+                // already existed at v0.20.4 — see OptionalMCPCatalog.swift.)
                 if capabilitiesStore?.capabilities.isV0204OrLater ?? false {
                     Button("Browse Catalog…") { showCatalog = true }
                 }
@@ -121,6 +129,7 @@ struct MCPServerAddCustomView: View {
         case .oauth: auth = "oauth"
         case .apiKey, .none: auth = "none"
         }
+        pendingDefaultExcludedTools = entry.defaultExcludedTools
     }
 
     private var stdioSection: some View {
@@ -223,7 +232,8 @@ struct MCPServerAddCustomView: View {
                 command: command.trimmingCharacters(in: .whitespaces),
                 args: args,
                 url: url.trimmingCharacters(in: .whitespaces),
-                auth: resolvedAuth
+                auth: resolvedAuth,
+                defaultExcludedTools: pendingDefaultExcludedTools
             )
         case .sse:
             let trimmedTimeout = sseReadTimeout.trimmingCharacters(in: .whitespaces)
@@ -231,7 +241,8 @@ struct MCPServerAddCustomView: View {
             viewModel.addCustomSSE(
                 name: trimmedName,
                 url: url.trimmingCharacters(in: .whitespaces),
-                sseReadTimeout: parsedTimeout
+                sseReadTimeout: parsedTimeout,
+                defaultExcludedTools: pendingDefaultExcludedTools
             )
         }
         dismiss()

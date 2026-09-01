@@ -186,6 +186,12 @@ public extension HermesConfig {
         )
         let auxiliary = AuxiliarySettings(
             vision: aux("vision"),
+            // Parsed unconditionally on purpose. The `auxiliary.web_extract.*`
+            // block was deleted upstream at v2026.8.27 (0.20.6) — newer hosts
+            // ignore any leftover values — but pre-v0.20.6 hosts still read
+            // it, and the Auxiliary tab still renders the editor there
+            // (`hasWebExtractAux`). Dropping the parse would blank that row's
+            // real values on exactly the hosts that need them.
             webExtract: aux("web_extract"),
             compression: aux("compression"),
             sessionSearch: aux("session_search"),
@@ -472,6 +478,16 @@ public extension HermesConfig {
             gatewayNotifyInterval: int("agent.gateway_notify_interval", default: 600),
             forceIPv4: bool("network.force_ipv4", default: false),
             contextEngine: str("context.engine", default: "compressor"),
+            // Absent → `true`, matching the Hermes schema default that runtime
+            // merging supplies. Deliberately NOT inferred from absence: the
+            // v14→15 migration that used to materialise
+            // `display.interim_assistant_messages: true` on disk was DELETED
+            // from the migration registry at v2026.8.27 (0.20.6) precisely
+            // because "v15 only added a schema default; runtime merging
+            // supplies it without a write. Registering a migration would
+            // falsely report or materialise it." So on v0.20.6+ hosts an
+            // absent key is the normal, expected state and must still read as
+            // enabled. Only an explicit `false` turns it off.
             interimAssistantMessages: values["display.interim_assistant_messages"] != "false",
             honchoInitOnSessionStart: bool("honcho.initOnSessionStart", default: false),
             timezone: str("timezone"),
@@ -479,7 +495,11 @@ public extension HermesConfig {
             toolUseEnforcement: str("agent.tool_use_enforcement", default: "auto"),
             gatewayTimeout: int("agent.gateway_timeout", default: 1800),
             cronDrainTimeout: int("agent.cron_drain_timeout", default: 30),
-            gatewayTurnLeaseTimeout: int("agent.gateway_turn_lease_timeout", default: 1800),
+            // 0 is the "key absent" sentinel, NOT a real default — the
+            // upstream default changed at v0.21.0 (1800 → 5). Display
+            // surfaces resolve it via
+            // `displayGatewayTurnLeaseTimeout(capabilities:)`.
+            gatewayTurnLeaseTimeout: int("agent.gateway_turn_lease_timeout", default: 0),
             approvalTimeout: int("approvals.timeout", default: 60),
             fileReadMaxChars: int("file_read_max_chars", default: 100_000),
             cronWrapResponse: bool("cron.wrap_response", default: true),
@@ -508,15 +528,13 @@ public extension HermesConfig {
             homeAssistant: homeAssistant,
             cacheTTL: str("prompt_caching.cache_ttl", default: "5m"),
             redactionEnabled: bool("redaction.enabled", default: false),
-            // Real Hermes key is `display.runtime_footer.enabled` (nested
-            // block, config_defaults.py). `agent.runtime_metadata_footer`
-            // never existed in Hermes but older Scarf builds wrote it —
-            // read it as a fallback so those configs keep their setting;
-            // writes go only to the new key.
-            runtimeMetadataFooter: bool(
-                "display.runtime_footer.enabled",
-                default: bool("agent.runtime_metadata_footer", default: false)
-            ),
+            // `display.runtime_footer.enabled` (nested block,
+            // config_defaults.py) is the only key Hermes has ever read for
+            // this. A fallback read of `agent.runtime_metadata_footer` used
+            // to sit here; that key exists in NO supported Hermes version
+            // (only some long-obsolete Scarf build ever wrote it), so it was
+            // removed rather than carried forward.
+            runtimeMetadataFooter: bool("display.runtime_footer.enabled", default: false),
             displayBusyAckEnabled: bool("display.busy_ack_enabled", default: true),
             gatewayPlatforms: gatewayPlatforms,
             // -- v0.13 additions -------------------------------------

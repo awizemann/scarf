@@ -52,8 +52,26 @@ struct AgentTab: View {
             if capabilitiesStore?.capabilities.isV0204OrLater ?? false {
                 StepperRow(label: "Cron Drain Timeout (s)", value: viewModel.config.cronDrainTimeout, range: 0...600, step: 5) { viewModel.setCronDrainTimeout($0) }
                     .help("Cron-only floor under gateway stop/restart drain. Distinct from Restart Drain Timeout. Default 30.")
-                StepperRow(label: "Gateway Turn Lease Timeout (s)", value: viewModel.config.gatewayTurnLeaseTimeout, range: 60...7200, step: 60) { viewModel.setGatewayTurnLeaseTimeout($0) }
-                    .help("Max time an alias routing key waits for an active turn holding the same session lease. Non-positive values fall back to 1800.")
+                // The upstream default flipped 1800 → 5 at v0.21.0, so the
+                // shown value, the range and the step are all host-aware.
+                // On v0.21+ the floor drops to 5 and the step to 5, so the
+                // host's own default is expressible and round-trips instead
+                // of snapping to 60 the first time the stepper is touched
+                // (a 60-second lease is 12x the intended wait). Pre-v0.21
+                // hosts keep the original 60/60 pair verbatim — their
+                // default is still 1800 and 5 is not a value they'd want.
+                let leaseCaps = capabilitiesStore?.capabilities ?? .empty
+                let leaseFloor = leaseCaps.isV021OrLater
+                    ? HermesConfig.gatewayTurnLeaseTimeoutMinimum : 60
+                StepperRow(
+                    label: "Gateway Turn Lease Timeout (s)",
+                    value: viewModel.config.displayGatewayTurnLeaseTimeout(capabilities: leaseCaps),
+                    range: leaseFloor...7200,
+                    step: leaseFloor
+                ) { viewModel.setGatewayTurnLeaseTimeout($0) }
+                    .help(leaseCaps.isV021OrLater
+                          ? "Max time an alias routing key waits for an active turn holding the same session lease. Keep it short — Telegram dispatches updates sequentially, so a waiter also delays unrelated topics. Non-positive values fall back to 5."
+                          : "Max time an alias routing key waits for an active turn holding the same session lease. Non-positive values fall back to 1800.")
             }
         }
 

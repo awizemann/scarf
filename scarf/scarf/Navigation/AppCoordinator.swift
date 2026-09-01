@@ -34,6 +34,11 @@ enum SidebarSection: String, CaseIterable, Identifiable {
     case mcpServers = "MCP Servers"
     case gateway = "Gateway"
     case cron = "Cron"
+    /// Hermes v0.21 — `hermes peer`: other machines' Hermes gateways
+    /// this one can message bot-to-bot. Sits in Manage beside Gateway
+    /// because it configures/operates gateway-to-gateway reach, not
+    /// this machine's own behaviour.
+    case peers = "Peers"
     case kanban = "Kanban"
     case health = "Health"
     case logs = "Logs"
@@ -65,6 +70,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .mcpServers: return "MCP Servers"
         case .gateway: return "Messaging Gateway"
         case .cron: return "Cron"
+        case .peers: return "Peers"
         case .kanban: return "Kanban"
         case .health: return "Health"
         case .logs: return "Logs"
@@ -103,6 +109,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .mcpServers: return "mcp_servers"
         case .gateway: return "gateway"
         case .cron: return "cron"
+        case .peers: return "peers"
         case .kanban: return "kanban"
         case .health: return "health"
         case .logs: return "logs"
@@ -134,6 +141,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .mcpServers: return "puzzlepiece.extension"
         case .gateway: return "antenna.radiowaves.left.and.right"
         case .cron: return "clock.arrow.2.circlepath"
+        case .peers: return "network"
         case .kanban: return "rectangle.split.3x1"
         case .health: return "stethoscope"
         case .logs: return "doc.text"

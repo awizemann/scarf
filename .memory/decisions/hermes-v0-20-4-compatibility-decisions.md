@@ -4,9 +4,11 @@ type: note
 permalink: scarf/decisions/hermes-v0-20-4-compatibility-decisions
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesPersonalities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesCronJob.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/OptionalMCPCatalog.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/CuratorService.swift]
 source_paths_inferred: false
-source_sha: 2430b64c3a51e68d6fccc8671d7efd1e50ce9c11
+source_sha: 163bed3a5ff7754d4e880091af7bfdc98b5da69c
 created: 2026-08-20
 updated: 2026-08-20
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 
 What shipped for the Hermes v0.20.4 (v2026.8.18) cycle and why. Branch feat/hermes-v0204-parity, 12 commits (7181436..2430b64), built 2026-08-20 by 9 phase agents + fresh-eyes audit + 3 fix agents. MERGED to main (08bb30e) and SHIPPED in v2.20.0 (cut 2026-08-20, Sparkle update verified by Alan). Findings basis: [[Hermes v0.20.4 Audit Findings]].

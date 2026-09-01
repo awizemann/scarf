@@ -215,7 +215,7 @@ final class MCPServersViewModel {
         }
     }
 
-    func addCustom(name: String, transport: MCPTransport, command: String, args: [String], url: String, auth: String?) {
+    func addCustom(name: String, transport: MCPTransport, command: String, args: [String], url: String, auth: String?, defaultExcludedTools: [String] = []) {
         let fileService = self.fileService
         Task.detached { [weak self] in
             let result: (exitCode: Int32, output: String)
@@ -229,6 +229,15 @@ final class MCPServersViewModel {
                 // the add-server form (which dispatches per-transport in submit())
                 // but kept so the switch is exhaustive without `@unknown default`.
                 result = (exitCode: 1, output: "SSE servers must be added via addCustomSSE.")
+            }
+            if result.exitCode == 0 && !defaultExcludedTools.isEmpty {
+                // Mirrors mcp_catalog.py's `_write_tools_exclude` at install
+                // time: a catalog entry's `tools.default_excluded` becomes
+                // this server's `tools.exclude`, everything else stays
+                // enabled (resources/prompts untouched — default on).
+                _ = fileService.updateMCPToolFilters(
+                    name: name, include: [], exclude: defaultExcludedTools, resources: true, prompts: true
+                )
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
@@ -249,10 +258,15 @@ final class MCPServersViewModel {
     /// capability-gating; the form filters `.sse` out of `availableTransports`
     /// when `hasMCPSSETransport` is false, so this method is unreachable
     /// from the UI on pre-v0.13 hosts.
-    func addCustomSSE(name: String, url: String, sseReadTimeout: Int?) {
+    func addCustomSSE(name: String, url: String, sseReadTimeout: Int?, defaultExcludedTools: [String] = []) {
         let fileService = self.fileService
         Task.detached { [weak self] in
             let result = fileService.addMCPServerSSE(name: name, url: url, sseReadTimeout: sseReadTimeout)
+            if result.exitCode == 0 && !defaultExcludedTools.isEmpty {
+                _ = fileService.updateMCPToolFilters(
+                    name: name, include: [], exclude: defaultExcludedTools, resources: true, prompts: true
+                )
+            }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 if result.exitCode == 0 {

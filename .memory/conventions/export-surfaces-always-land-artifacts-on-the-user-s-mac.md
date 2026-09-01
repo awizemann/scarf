@@ -2,11 +2,13 @@
 title: Export surfaces always land artifacts on the user's Mac
 type: note
 permalink: scarf/conventions/export-surfaces-always-land-artifacts-on-the-user-s-mac
+source_paths: [scarf/scarf/Features/Profiles/RemoteProfileExport.swift, scarf/scarf/Features/Sessions/ViewModels/SessionsViewModel.swift, scarf/scarf/Features/Profiles/ViewModels/ProfilesViewModel.swift]
+source_paths_inferred: false
+source_sha: c15060dd23b03692780f5b0002fd47f9660d76ef
 created: 2026-07-17
 updated: 2026-07-17
-source_sha: 5119819f25bba1d33cd11d4622ef49e601cb853e
-source_paths: scarf/scarf/Features/Profiles/RemoteProfileExport.swift, scarf/scarf/Features/Sessions/ViewModels/SessionsViewModel.swift, scarf/scarf/Features/Profiles/ViewModels/ProfilesViewModel.swift
-source_paths_inferred: false
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 
 - [convention] Any user-facing "Export…" in the Mac app produces a file on the **user's Mac**, whichever host Hermes runs on. Decided across gh#129/PR#130 (sessions) and gh#132 (profiles). Never hand an `NSSavePanel`/`NSOpenPanel` path to a CLI that may run on a remote host, and never ask the user for a remote destination path for an export. #export #remote

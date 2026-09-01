@@ -111,7 +111,17 @@ struct SkillsView: View {
         // contract (fire-and-forget) keeps working without making
         // the Mac UI care about the new isolation.
         .onAppear {
-            Task { await viewModel.load() }
+            let essential = capabilitiesStore?.capabilities.hasEssentialHermesAgentSkill ?? false
+            Task { await viewModel.load(essentialHermesAgentSkill: essential) }
+        }
+        // The store's `hermes --version` probe is async, so `onAppear` can
+        // (and on a cold launch usually does) read `false` before the real
+        // answer arrives. Re-run the load when it flips, or the pane spends
+        // the session treating `hermes-agent` as a removable skill on a
+        // v0.20.6+ host where it's essential. Mirrors CronView's re-attach.
+        .onChange(of: capabilitiesStore?.capabilities.hasEssentialHermesAgentSkill ?? false) { _, essential in
+            guard essential else { return }
+            Task { await viewModel.load(essentialHermesAgentSkill: true) }
         }
         // v2.5: re-probe `npx` whenever the selected skill changes;
         // only the design-md skill cares about the result, but binding

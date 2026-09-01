@@ -50,7 +50,16 @@ struct SidebarView: View {
             monitor.append(.kanban)
         }
 
-        let manage: [SidebarSection] = [.tools, .mcpServers, .gateway, .cron, .health, .logs, .settings]
+        // v0.21 — `hermes peer` bot-to-bot messaging across gateways.
+        // Sits right after Gateway (this machine's inbound messaging)
+        // since Peers is its outbound, machine-to-machine counterpart.
+        // Hidden entirely pre-v0.21: every verb the surface offers
+        // (`peer run/status/stop`) fails at argparse on an older host.
+        var manage: [SidebarSection] = [.tools, .mcpServers, .gateway]
+        if caps?.hasPeerRunCommands ?? false {
+            manage.append(.peers)
+        }
+        manage += [.cron, .health, .logs, .settings]
 
         // Models entry sits in Configure when the host supports the
         // session/set_model RPC (v0.13+). Pre-v0.13 the binding can be

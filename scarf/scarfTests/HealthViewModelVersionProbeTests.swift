@@ -311,6 +311,77 @@ import ScarfCore
         #expect(HermesCapabilities.parse(output).semver == HermesCapabilities.SemVer(major: 0, minor: 20, patch: 5))
     }
 
+    // MARK: - parseUpdateStatus(lines:) — the three "Update available" shapes
+    // + the offline-unknown state (banner.py:344-380, _startup_fast.py:238-249)
+
+    @Test func pluralCommitsBehindIsDetected() {
+        let status = HealthViewModel.parseUpdateStatus(lines: [
+            "Hermes Agent v0.21.0 (2026.8.27)",
+            "Update available: 3 commits behind — run 'hermes update'",
+        ])
+        #expect(status.hasUpdate)
+        #expect(status.unknown == false)
+        #expect(status.updateInfo == "Update available: 3 commits behind — run 'hermes update'")
+    }
+
+    @Test func singularCommitBehindIsDetected() {
+        // The old `.contains("commits behind")` check missed this shape —
+        // singular "commit" never contains the plural substring.
+        let status = HealthViewModel.parseUpdateStatus(lines: [
+            "Hermes Agent v0.21.0 (2026.8.27)",
+            "Update available: 1 commit behind — run 'hermes update'",
+        ])
+        #expect(status.hasUpdate)
+        #expect(status.unknown == false)
+    }
+
+    @Test func countLessUpdateAvailableIsDetected() {
+        // Stale local ref proves *some* update exists but not how many
+        // commits behind. Also missed by the old "commits behind" check.
+        let status = HealthViewModel.parseUpdateStatus(lines: [
+            "Hermes Agent v0.21.0 (2026.8.27)",
+            "Update available — run 'hermes update'",
+        ])
+        #expect(status.hasUpdate)
+        #expect(status.unknown == false)
+    }
+
+    @Test func upToDateIsConfirmedCurrentNotUnknown() {
+        let status = HealthViewModel.parseUpdateStatus(lines: [
+            "Hermes Agent v0.21.0 (2026.8.27)",
+            "Up to date",
+        ])
+        #expect(status.hasUpdate == false)
+        #expect(status.unknown == false, "A confirmed 'Up to date' line must not read as unknown")
+    }
+
+    @Test func offlineFetchFailureIsUnknownNotUpToDate() {
+        // banner.py: a failed `git fetch` (offline) makes check_for_updates()
+        // return None, and _startup_fast.py prints neither line at all.
+        let status = HealthViewModel.parseUpdateStatus(lines: [
+            "Hermes Agent v0.21.0 (2026.8.27)",
+        ])
+        #expect(status.hasUpdate == false)
+        #expect(status.unknown, "No update line and no 'Up to date' line must read as unknown, not current")
+    }
+
+    @Test func updateStatusSectionDetectionCoversAllShapesForFallbackDecision() {
+        #expect(HealthViewModel.parseUpdateStatus(lines: ["Update available — run 'hermes update'"]).hasUpdateStatusSection)
+        #expect(HealthViewModel.parseUpdateStatus(lines: ["Up to date"]).hasUpdateStatusSection)
+        #expect(HealthViewModel.parseUpdateStatus(lines: ["Hermes Agent v0.21.0 (2026.8.27)"]).hasUpdateStatusSection == false)
+    }
+
+    @Test func shouldFallBackNeverFiresOnSingularOrCountLessShapes() {
+        // Regression for the "commits behind" substring bug: a real
+        // v0.20.5+ host reporting either newer shape must not trigger a
+        // needless (and on some hosts unsafe) bare `version` fallback.
+        let singular = "Hermes Agent v0.20.5 (2026.8.19)\nUpdate available: 1 commit behind — run 'hermes update'\n"
+        #expect(HealthViewModel.shouldFallBackToBareVersionSubcommand(output: singular) == false)
+
+        let countLess = "Hermes Agent v0.20.5 (2026.8.19)\nUpdate available — run 'hermes update'\n"
+        #expect(HealthViewModel.shouldFallBackToBareVersionSubcommand(output: countLess) == false)
+    }
+
     @Test func probeVersionWarmCacheWithParseableVersionOutputDoesNotRetry() async {
         // Sanity check for the non-stale warm path: when the bare `version`
         // response DOES contain a parseable banner (the normal, non-stale

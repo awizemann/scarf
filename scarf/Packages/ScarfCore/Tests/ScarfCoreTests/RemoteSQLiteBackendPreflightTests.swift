@@ -78,6 +78,34 @@ struct RemoteSQLiteBackendPreflightTests {
         #expect(await backend.hasRewindCountColumn)
         #expect(await backend.hasMessagesActiveColumn)
         #expect(await backend.hasCompactedColumn)
+        // v0.21 `_compressed_summary` is absent from the v0.20.4
+        // fixture — detection must stay false rather than ride along
+        // with `compacted`.
+        #expect(await backend.hasCompressedSummaryColumn == false)
+    }
+
+    /// v0.21 `messages._compressed_summary`, derived on its own. Scarf
+    /// emits no SQL that references it (see `SessionPreviewSQL`), but the
+    /// flag must still track the host truthfully — `SCHEMA_VERSION` stayed
+    /// at 26 across this DDL change, so presence is the only sound gate.
+    @Test func compressedSummaryColumnIsDerivedIndependently() async throws {
+        let v021 = Self.backend()
+        try await v021.parsePreflightOutput(
+            Self.preflight(messages: Self.v0204MessageColumns + ["_compressed_summary"])
+        )
+        #expect(await v021.hasCompressedSummaryColumn)
+        #expect(await v021.hasCompactedColumn)
+
+        // A host with the marker column but no `compacted` (hypothetical
+        // partial migration) must not have the two flags bleed together.
+        let markerOnly = Self.backend()
+        try await markerOnly.parsePreflightOutput(
+            Self.preflight(
+                messages: Self.v0204MessageColumns.filter { $0 != "compacted" } + ["_compressed_summary"]
+            )
+        )
+        #expect(await markerOnly.hasCompressedSummaryColumn)
+        #expect(await markerOnly.hasCompactedColumn == false)
     }
 
     // MARK: - The v0.20.4 marker columns

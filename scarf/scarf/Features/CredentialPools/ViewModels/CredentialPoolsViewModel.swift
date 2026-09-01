@@ -255,7 +255,14 @@ final class CredentialPoolsViewModel {
     // MARK: - Mutations (all routed through the hermes CLI so hermes stays authoritative)
 
     func setStrategy(_ strategy: String, for provider: String) {
-        let result = runHermes(["config", "set", "credential_pool_strategies.\(provider)", strategy])
+        // Defensive: `provider` is normally a fixed Hermes provider id with
+        // no dot, but interpolating it unescaped into a dotted config key
+        // would corrupt config.yaml on any host if that ever changes (or a
+        // custom-provider name with a dot reaches this call). Same shared
+        // helper as the quick-commands writer — see ConfigDottedKeySegment.
+        let caps = HermesVersionCache.shared.cached(for: context) ?? .empty
+        let sanitizedProvider = ConfigDottedKeySegment.escaped(provider, capabilities: caps)
+        let result = runHermes(["config", "set", "credential_pool_strategies.\(sanitizedProvider)", strategy])
         if result.exitCode == 0 {
             message = "Strategy updated for \(provider)"
             load()

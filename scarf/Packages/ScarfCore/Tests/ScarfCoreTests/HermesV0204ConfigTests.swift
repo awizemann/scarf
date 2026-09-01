@@ -201,9 +201,61 @@ struct HermesV0204ConfigTests {
         #expect(cfg.cronDrainTimeout == 30)
     }
 
-    @Test func gatewayTurnLeaseTimeoutDefaultsTo1800() {
+    /// An absent key parses to the 0 sentinel, NOT a baked-in default — the
+    /// upstream default changed 1800 → 5 at v0.21.0, so the effective value
+    /// is host-dependent and resolved by
+    /// `displayGatewayTurnLeaseTimeout(capabilities:)`.
+    @Test func gatewayTurnLeaseTimeoutAbsentIsSentinel() {
         let cfg = HermesConfig(yaml: "")
-        #expect(cfg.gatewayTurnLeaseTimeout == 1800)
+        #expect(cfg.gatewayTurnLeaseTimeout == 0)
+    }
+
+    @Test func gatewayTurnLeaseTimeoutParsesExplicitValue() {
+        let cfg = HermesConfig(yaml: """
+        agent:
+          gateway_turn_lease_timeout: 45
+        """)
+        #expect(cfg.gatewayTurnLeaseTimeout == 45)
+    }
+
+    @Test func gatewayTurnLeaseTimeoutDisplayDefaultIsHostAware() {
+        let absent = HermesConfig(yaml: "")
+        let v021 = HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)")
+        let v0206 = HermesCapabilities.parseLine("Hermes Agent v0.20.6 (2026.8.27)")
+        let v0204 = HermesCapabilities.parseLine("Hermes Agent v0.20.4 (2026.8.16)")
+        #expect(absent.displayGatewayTurnLeaseTimeout(capabilities: v021) == 5)
+        #expect(absent.displayGatewayTurnLeaseTimeout(capabilities: v0206) == 1800)
+        #expect(absent.displayGatewayTurnLeaseTimeout(capabilities: v0204) == 1800)
+        // Unknown host resolves to the older, larger default.
+        #expect(absent.displayGatewayTurnLeaseTimeout(capabilities: .empty) == 1800)
+    }
+
+    /// An explicit on-disk value wins on every host — and critically, a
+    /// v0.21 host's own default of 5 round-trips: it is >= the stepper's
+    /// floor (`gatewayTurnLeaseTimeoutMinimum`) and a multiple of its step,
+    /// so displaying it never snaps the value up.
+    @Test func gatewayTurnLeaseTimeoutExplicitValueWinsAndFiveRoundTrips() {
+        let explicit = HermesConfig(yaml: """
+        agent:
+          gateway_turn_lease_timeout: 5
+        """)
+        let v021 = HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)")
+        #expect(explicit.displayGatewayTurnLeaseTimeout(capabilities: v021) == 5)
+        #expect(explicit.displayGatewayTurnLeaseTimeout(capabilities: .empty) == 5)
+        #expect(HermesConfig.gatewayTurnLeaseTimeoutMinimum <= 5)
+        #expect(5 % HermesConfig.gatewayTurnLeaseTimeoutMinimum == 0)
+    }
+
+    /// Hermes treats non-positive as "use the built-in default", and so does
+    /// the display resolver — the sentinel and the on-disk semantics agree.
+    @Test func gatewayTurnLeaseTimeoutNonPositiveResolvesToHostDefault() {
+        let zero = HermesConfig(yaml: """
+        agent:
+          gateway_turn_lease_timeout: 0
+        """)
+        let v021 = HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)")
+        #expect(zero.displayGatewayTurnLeaseTimeout(capabilities: v021) == 5)
+        #expect(zero.displayGatewayTurnLeaseTimeout(capabilities: .empty) == 1800)
     }
 
     // MARK: - auxiliary.*.max_concurrency (true-optional)

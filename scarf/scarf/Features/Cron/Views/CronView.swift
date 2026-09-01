@@ -18,6 +18,10 @@ struct CronView: View {
     @State private var pendingDelete: HermesCronJob?
     @State private var showOutputPanel: Bool = false
     @State private var showRunHistory: Bool = false
+    /// Job ids whose INCIDENTS disclosure is open. Per-job, not a single
+    /// shared flag: one `Bool` made expanding on job A silently expand the
+    /// panel for every other job the user then selected.
+    @State private var expandedIncidentJobIDs: Set<String> = []
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     @Environment(AppCoordinator.self) private var coordinator
     @Environment(HermesFileWatcher.self) private var fileWatcher
@@ -47,6 +51,31 @@ struct CronView: View {
         capabilitiesStore?.capabilities.hasCronRuns ?? false
     }
 
+    /// v0.20.6 — durable failure incidents (`hermes cron incidents`).
+    /// Pre-0.20.6 hosts get no INCIDENTS disclosure, no row badge and
+    /// no CLI probe.
+    private var hasCronIncidents: Bool {
+        capabilitiesStore?.capabilities.hasCronIncidents ?? false
+    }
+
+    /// v0.21 — `hermes cron doctor`. Drives the inline per-job warning
+    /// affordance; absent everywhere below v0.21.
+    private var hasCronDoctor: Bool {
+        capabilitiesStore?.capabilities.hasCronDoctor ?? false
+    }
+
+    /// v0.20.6 — `hermes cron resume <id> --run-now`, the documented way
+    /// to re-arm a completed/error (terminal) job.
+    private var hasCronResumeRunNow: Bool {
+        capabilitiesStore?.capabilities.hasCronResumeRunNow ?? false
+    }
+
+    /// v0.20.6 — `--deliver bot-chat[:profile]`. Placeholder/hint only;
+    /// the strip happens in `supportsCronDeliver`.
+    private var hasCronBotChatDelivery: Bool {
+        capabilitiesStore?.capabilities.hasCronBotChatDelivery ?? false
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             pageHeader
@@ -60,7 +89,16 @@ struct CronView: View {
         .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Cron Jobs")
         .loadingOverlay(viewModel.isLoading, label: "Loading cron jobs…", isEmpty: viewModel.jobs.isEmpty)
-        .onAppear { viewModel.load(changeToken: fileWatcher.lastChangeDate) }
+        .onAppear {
+            viewModel.load(changeToken: fileWatcher.lastChangeDate)
+            viewModel.isV0206OrLater = hasCronResumeRunNow
+            // Both probes are one cheap read-only CLI call each, and both
+            // feed always-visible affordances (row badge / warning icon),
+            // so they can't be deferred behind a disclosure the way RUN
+            // HISTORY is. Gated: a pre-0.20.6 / pre-0.21 host issues neither.
+            if hasCronIncidents { viewModel.loadIncidents() }
+            if hasCronDoctor { viewModel.loadDoctor() }
+        }
         // Reload on Hermes file mutations — Hermes flips `state` between
         // "scheduled" and "running" inside `~/.hermes/cron/jobs.json`
         // when a job starts/finishes, and writes a new run-output file
@@ -68,8 +106,15 @@ struct CronView: View {
         // running indicator + log tail refresh "for free" without a
         // polling timer. Same wiring ActivityView uses.
         .onChange(of: fileWatcher.lastChangeDate) { _, newValue in viewModel.load(changeToken: newValue) }
+        // The capability store probes `hermes --version` asynchronously,
+        // so `onAppear` can run before the answer lands. Re-run the gated
+        // work when it does — otherwise a cold launch shows no incidents,
+        // no doctor findings, and the wrong terminal-refusal wording.
+        .onChange(of: hasCronResumeRunNow) { _, newValue in viewModel.isV0206OrLater = newValue }
+        .onChange(of: hasCronIncidents) { _, newValue in if newValue { viewModel.loadIncidents() } }
+        .onChange(of: hasCronDoctor) { _, newValue in if newValue { viewModel.loadDoctor() } }
         .sheet(isPresented: $viewModel.showCreateSheet) {
-            CronJobEditor(mode: .create, availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll) { form in
+            CronJobEditor(mode: .create, availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery) { form in
                 viewModel.createJob(
                     schedule: form.schedule,
                     prompt: form.prompt,
@@ -91,7 +136,7 @@ struct CronView: View {
             }
         }
         .sheet(item: $viewModel.editingJob) { job in
-            CronJobEditor(mode: .edit(job), availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll) { form in
+            CronJobEditor(mode: .edit(job), availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery) { form in
                 viewModel.updateJob(
                     id: job.id,
                     schedule: form.schedule,
@@ -145,6 +190,8 @@ struct CronView: View {
             HStack(spacing: ScarfSpace.s2) {
                 Button {
                     viewModel.load(force: true)
+                    if hasCronIncidents { viewModel.loadIncidents(force: true) }
+                    if hasCronDoctor { viewModel.loadDoctor(force: true) }
                 } label: {
                     Label("Reload", systemImage: "arrow.clockwise")
                 }
@@ -204,6 +251,23 @@ struct CronView: View {
                         .foregroundStyle(isActive ? ScarfColor.accentActive : ScarfColor.foregroundPrimary)
                         .lineLimit(1)
                     Spacer(minLength: 4)
+                    // v0.21 `cron doctor` finding for this job — a single
+                    // icon with the issues in its tooltip, so the health
+                    // check never costs a pane or a row of its own.
+                    if hasCronDoctor, let finding = viewModel.doctorFindings[job.id] {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(ScarfColor.warning)
+                            .help(doctorTooltip(finding))
+                            .accessibilityLabel("\(finding.issues.count) health issue\(finding.issues.count == 1 ? "" : "s")")
+                    }
+                    // v0.20.6 open failure incidents for this job.
+                    if hasCronIncidents {
+                        let open = viewModel.openIncidentCount(jobID: job.id)
+                        if open > 0 {
+                            ScarfBadge("\(open) incident\(open == 1 ? "" : "s")", kind: .danger)
+                        }
+                    }
                     if !job.enabled {
                         ScarfBadge("paused", kind: .neutral)
                     }
@@ -361,6 +425,23 @@ struct CronView: View {
             .buttonStyle(ScarfSecondaryButton())
             .help(job.enabled ? "Pause" : "Resume")
 
+            // v0.20.6 `cron resume --run-now`. Offered next to Resume
+            // whenever plain Resume isn't the whole story: a paused job
+            // the user wants fired immediately, and — the case Hermes
+            // actually refuses — a terminal (completed/error) job, whose
+            // ONLY re-arm path this is.
+            if hasCronResumeRunNow, !job.enabled || job.isTerminal {
+                Button {
+                    viewModel.resumeAndRunNow(job)
+                } label: {
+                    Label("Resume & Run Now", systemImage: "forward.end.fill")
+                }
+                .buttonStyle(ScarfSecondaryButton())
+                .help(job.isTerminal
+                      ? "This job is \(job.effectiveState) — re-arm it to fire immediately."
+                      : "Resume and fire immediately instead of at the next scheduled time.")
+            }
+
             Button {
                 viewModel.editingJob = job
             } label: {
@@ -482,6 +563,10 @@ struct CronView: View {
             .foregroundStyle(ScarfColor.foregroundMuted)
         }
 
+        if hasCronDoctor, let finding = viewModel.doctorFindings[job.id] {
+            doctorBanner(finding)
+        }
+
         if let error = job.lastError {
             errorBanner(job: job, error: error)
         }
@@ -490,6 +575,159 @@ struct CronView: View {
 
         if hasCronRuns {
             runHistoryPanel(job: job)
+        }
+
+        if hasCronIncidents {
+            incidentsPanel(job: job)
+        }
+    }
+
+    /// Tooltip text for the list-row `cron doctor` warning icon.
+    private func doctorTooltip(_ finding: HermesCronDoctorFinding) -> String {
+        "Health check: " + finding.issues.joined(separator: " · ")
+    }
+
+    /// Inline `cron doctor` findings for the selected job — a warning
+    /// card in the detail flow, not a separate health pane.
+    private func doctorBanner(_ finding: HermesCronDoctorFinding) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "stethoscope")
+                .foregroundStyle(ScarfColor.warning)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Health check found \(finding.issues.count) issue\(finding.issues.count == 1 ? "" : "s")")
+                    .scarfStyle(.bodyEmph)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
+                ForEach(finding.issues, id: \.self) { issue in
+                    Text("• \(issue)")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(ScarfSpace.s3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .fill(ScarfColor.warning.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                .strokeBorder(ScarfColor.warning.opacity(0.25), lineWidth: 1)
+        )
+    }
+
+    /// Per-job durable failure-incident disclosure (v0.20.6+; gated on
+    /// `hasCronIncidents`). Mirrors the RUN HISTORY chrome. The listing
+    /// is fetched once for all jobs (the CLI has no per-job filter), so
+    /// expanding costs nothing beyond the initial probe.
+    @ViewBuilder
+    private func incidentsPanel(job: HermesCronJob) -> some View {
+        let jobIncidents = viewModel.incidents.filter { $0.jobID == job.id }
+        VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+            let isExpanded = expandedIncidentJobIDs.contains(job.id)
+            Button {
+                if isExpanded { expandedIncidentJobIDs.remove(job.id) }
+                else { expandedIncidentJobIDs.insert(job.id) }
+            } label: {
+                HStack(spacing: ScarfSpace.s2) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                    Text("INCIDENTS")
+                        .scarfStyle(.captionUppercase)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                    let open = jobIncidents.filter(\.isOpen).count
+                    Text(jobIncidents.isEmpty
+                         ? "none"
+                         : "\(jobIncidents.count) total · \(open) open")
+                        .font(ScarfFont.monoSmall)
+                        .foregroundStyle(open > 0 ? ScarfColor.danger : ScarfColor.foregroundFaint)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                Group {
+                    if viewModel.isLoadingIncidents && viewModel.incidents.isEmpty {
+                        Text("Loading incidents…")
+                            .scarfStyle(.caption)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
+                            .padding(ScarfSpace.s3)
+                    } else if jobIncidents.isEmpty {
+                        Text("No failure incidents recorded for this job.")
+                            .scarfStyle(.caption)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
+                            .padding(ScarfSpace.s3)
+                    } else {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(jobIncidents) { incident in
+                                incidentRow(incident)
+                                if incident.id != jobIncidents.last?.id {
+                                    Rectangle().fill(ScarfColor.border).frame(height: 1)
+                                }
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                        .fill(ScarfColor.backgroundSecondary)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
+                        .strokeBorder(ScarfColor.border, lineWidth: 1)
+                )
+            }
+        }
+    }
+
+    private func incidentRow(_ incident: HermesCronIncident) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(incidentStateColor(incident.state))
+                    .frame(width: 7, height: 7)
+                Text(incident.state)
+                    .font(ScarfFont.monoSmall)
+                    .foregroundStyle(ScarfColor.foregroundPrimary)
+                Text(incident.failureType)
+                    .font(ScarfFont.monoSmall)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                Text(CronScheduleFormatter.formatNextRun(iso: incident.lastSeenAt))
+                    .font(ScarfFont.monoSmall)
+                    .foregroundStyle(ScarfColor.foregroundFaint)
+                Spacer(minLength: 4)
+                if incident.isOpen {
+                    Button("Ack") { viewModel.ackIncident(incident) }
+                        .buttonStyle(ScarfGhostButton())
+                        .help("Acknowledge — silences this failure signature until the error changes.")
+                }
+            }
+            if !incident.error.isEmpty {
+                Text(incident.error)
+                    .font(ScarfFont.monoSmall)
+                    .foregroundStyle(ScarfColor.danger)
+                    .textSelection(.enabled)
+                    .lineLimit(3)
+                    .padding(.leading, 15)
+            }
+        }
+        .padding(.horizontal, ScarfSpace.s3)
+        .padding(.vertical, 7)
+    }
+
+    private func incidentStateColor(_ state: String) -> Color {
+        switch state {
+        case "detected": return ScarfColor.danger
+        case "alerted": return ScarfColor.warning
+        case "closed": return ScarfColor.success
+        default: return ScarfColor.foregroundFaint
         }
     }
 
@@ -807,6 +1045,12 @@ struct CronJobEditor: View {
     /// the user can always type `all` on any host; the placeholder is
     /// the only behavior change.
     var supportsDeliverAll: Bool = false
+    /// Pass `true` on v0.20.6+ hosts so `bot-chat[:profile]` shows up as
+    /// a delivery target. Same placeholder/hint-only treatment as
+    /// `supportsDeliverAll`: a pre-0.20.6 host would fail the whole
+    /// `cron create` at argparse, which `supportsCronDeliver` guards for
+    /// the copy/fleet paths.
+    var supportsBotChatDelivery: Bool = false
     let onSave: (FormState) -> Void
     let onCancel: () -> Void
 
@@ -843,15 +1087,19 @@ struct CronJobEditor: View {
             formField(
                 "Deliver",
                 text: $form.deliver,
-                placeholder: supportsDeliverAll
-                    ? "origin | local | all | discord:CHANNEL | telegram:CHAT"
-                    : "origin | local | discord:CHANNEL | telegram:CHAT",
+                placeholder: deliverPlaceholder,
                 mono: true
             )
             if supportsDeliverAll {
                 Text("`all` fans out to every connected channel — v0.14+ only.")
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)
+            }
+            if supportsBotChatDelivery {
+                Text("`bot-chat[:profile]` injects the output into a local profile's Bot Chat as a message the bot responds to — v0.20.6+ only.")
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             formField("Repeat", text: $form.repeatCount, placeholder: "Optional count")
             formField("Script path", text: $form.script, placeholder: "Python script whose stdout is injected", mono: true)
@@ -933,6 +1181,16 @@ struct CronJobEditor: View {
                 form.noAgent = job.noAgent ?? false
             }
         }
+    }
+
+    /// Free-form field; the placeholder is the only capability-driven
+    /// difference (the user can always type any value on any host).
+    private var deliverPlaceholder: String {
+        var options = ["origin", "local"]
+        if supportsDeliverAll { options.append("all") }
+        if supportsBotChatDelivery { options.append("bot-chat[:profile]") }
+        options += ["discord:CHANNEL", "telegram:CHAT"]
+        return options.joined(separator: " | ")
     }
 
     private var headerText: String {

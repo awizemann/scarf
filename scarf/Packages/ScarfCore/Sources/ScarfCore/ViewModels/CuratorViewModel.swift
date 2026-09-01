@@ -254,6 +254,7 @@ public final class CuratorViewModel {
         isAdopting = true
         await runWithReload(verb: "adopt", successMessage: "Adopted \(skill)") {
             try await self.service.adopt(name: skill)
+            return nil
         }
         isAdopting = false
         await loadUnmanaged()
@@ -263,6 +264,7 @@ public final class CuratorViewModel {
         isAdopting = true
         await runWithReload(verb: "adopt", successMessage: "Adopted all unmanaged skills") {
             _ = try await self.service.adoptAll(dryRun: false)
+            return nil
         }
         isAdopting = false
         await loadUnmanaged()
@@ -279,27 +281,36 @@ public final class CuratorViewModel {
             successMessage: synchronous ? "Curator run complete" : "Curator run started"
         ) {
             try await self.service.runNow(synchronous: synchronous, timeout: timeout)
+            return nil
         }
     }
 
     public func pause() async {
         await runWithReload(verb: "pause", successMessage: "Curator paused") {
             try await self.service.pause()
+            return nil
         }
     }
 
     public func resume() async {
         await runWithReload(verb: "resume", successMessage: "Curator resumed") {
             try await self.service.resume()
+            return nil
         }
     }
 
+    /// Pinning an eligible-but-unmanaged skill still succeeds, but Hermes
+    /// (v0.20.6+) attaches a note that the pin won't do anything until the
+    /// skill is adopted — `CuratorService.pin(_:)` surfaces that note
+    /// instead of discarding it, so show it in place of the terse default
+    /// message when present, nudging the user toward `curator adopt`.
     public func pin(_ skill: String) async {
         await runWithReload(verb: "pin", successMessage: "Pinned \(skill)") {
             try await self.service.pin(skill)
         }
     }
 
+    /// See `pin(_:)` — `unpin` gets the same unmanaged-skill nudge.
     public func unpin(_ skill: String) async {
         await runWithReload(verb: "unpin", successMessage: "Unpinned \(skill)") {
             try await self.service.unpin(skill)
@@ -309,6 +320,7 @@ public final class CuratorViewModel {
     public func restore(_ skill: String) async {
         await runWithReload(verb: "restore", successMessage: "Restored \(skill)") {
             try await self.service.restore(skill)
+            return nil
         }
         // Restore drops the entry from the archived list — refresh it
         // so the row disappears immediately.
@@ -321,6 +333,7 @@ public final class CuratorViewModel {
         pendingArchiveName = skill
         await runWithReload(verb: "archive", successMessage: "Archived \(skill)") {
             try await self.service.archive(skill)
+            return nil
         }
         pendingArchiveName = nil
         await loadArchive()
@@ -377,15 +390,17 @@ public final class CuratorViewModel {
     /// Run a service call, route success → `transientMessage`, failure
     /// → `errorMessage`, and reload `status` either way. Mirrors the
     /// previous `runAndReload` helper but goes through the typed
-    /// service surface.
+    /// service surface. `body` may return an override message (e.g. the
+    /// pin/unpin "this skill is unmanaged" nudge) to show instead of
+    /// `successMessage`; `nil` uses the default.
     private func runWithReload(
         verb: String,
         successMessage: String,
-        body: @escaping @Sendable () async throws -> Void
+        body: @escaping @Sendable () async throws -> String?
     ) async {
         do {
-            try await body()
-            transientMessage = successMessage
+            let override = try await body()
+            transientMessage = override ?? successMessage
             errorMessage = nil
             await load()
             scheduleTransientClear()

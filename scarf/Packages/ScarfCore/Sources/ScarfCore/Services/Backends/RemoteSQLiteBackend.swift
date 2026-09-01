@@ -38,6 +38,7 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
     private(set) public var hasV011Schema = false
     private(set) public var hasMessagesActiveColumn = false
     private(set) public var hasCompactedColumn = false
+    private(set) public var hasCompressedSummaryColumn = false
     private(set) public var hasRewindCountColumn = false
     private(set) public var hasSessionActivityColumns = false
     private(set) public var hasSessionModelUsageTable = false
@@ -318,6 +319,11 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         // v0.18: messages has `compacted` column (in-place compaction
         // soft-archive marker; search must include compacted=1 rows).
         hasCompactedColumn = messagesTable.contains("compacted")
+        // v0.21: messages has `_compressed_summary` (compaction-carrier
+        // marker Hermes stamps on summary rows). Detected for parity /
+        // future readers; no Scarf query consults it — see
+        // `SessionPreviewSQL`.
+        hasCompressedSummaryColumn = messagesTable.contains("_compressed_summary")
         // v0.16: sessions has `rewind_count` column.
         hasRewindCountColumn = sessionsTable.contains("rewind_count")
         // v0.20: session-activity columns — ALL three must be present

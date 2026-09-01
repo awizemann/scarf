@@ -26,11 +26,18 @@ struct AuxiliaryTab: View {
     @State private var showNousSignIn: Bool = false
 
     // Keyed by the config path name — matches `auxiliary.<task>.*` in config.yaml.
-    // Static base list; the v0.12-only `curator` row is appended at render
-    // time when the target Hermes supports it.
+    // Static base list; version-conditional rows (`web_extract`, `curator`,
+    // `flush_memories`) are spliced in at render time when the target Hermes
+    // supports them.
+    //
+    // `web_extract` is NOT here: the `auxiliary.web_extract.*` block was
+    // deleted upstream at v2026.8.27 (0.20.6) when web_extract stopped using
+    // an auxiliary LLM (pages are truncate-and-stored behind a read_file
+    // pointer). It is re-inserted right after `vision` — its historical
+    // position, so pre-v0.20.6 hosts render exactly as before — when
+    // `hasWebExtractAux` says the host still reads it.
     private let baseTasks: [(key: String, title: LocalizedStringKey, icon: String)] = [
         ("vision", "Vision", "eye"),
-        ("web_extract", "Web Extract", "doc.richtext"),
         ("compression", "Compression", "arrow.down.right.and.arrow.up.left.circle"),
         ("session_search", "Session Search", "magnifyingglass"),
         ("skills_hub", "Skills Hub", "books.vertical"),
@@ -40,6 +47,12 @@ struct AuxiliaryTab: View {
 
     private var tasks: [(key: String, title: LocalizedStringKey, icon: String)] {
         var t = baseTasks
+        // Pre-v0.20.6 hosts only — restored at index 1 (right after Vision),
+        // its position before the upstream block was deleted, so those hosts
+        // render byte-identically to previous Scarf builds.
+        if capabilitiesStore?.capabilities.hasWebExtractAux ?? false {
+            t.insert(("web_extract", "Web Extract", "doc.richtext"), at: 1)
+        }
         if capabilitiesStore?.capabilities.hasFlushMemoriesAux ?? false {
             t.append(("flush_memories", "Flush Memories", "trash.slash"))
         }
