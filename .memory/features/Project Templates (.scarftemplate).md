@@ -2,16 +2,14 @@
 title: Project Templates (.scarftemplate)
 type: note
 permalink: scarf/features/project-templates-.scarftemplate
-tags:
-- templates
-- projects
-- install
-source_sha: 64bb87b88f785636aea2386ba3837723f7b81eec
-source_paths: scarf/scarf/Core/Services/ProjectTemplateService.swift, scarf/scarf/Core/Services/ProjectTemplateInstaller.swift, scarf/scarf/Core/Services/ProjectTemplateExporter.swift, scarf/scarf/Core/Services/ProjectTemplateUninstaller.swift, scarf/scarf/Core/Services/TemplateURLRouter.swift
+tags: [templates, projects, install]
+source_paths: [scarf/scarf/Core/Services/ProjectTemplateService.swift, scarf/scarf/Core/Services/ProjectTemplateInstaller.swift, scarf/scarf/Core/Services/ProjectTemplateExporter.swift, scarf/scarf/Core/Services/ProjectTemplateUninstaller.swift, scarf/scarf/Core/Services/TemplateURLRouter.swift]
+source_paths_inferred: false
+source_sha: 20f286c14389245de47c0c93a461d7bcc3a002d6
 created: 2026-05-29
 updated: 2026-05-29
-reviewed: 2026-06-28
-reviewed_by: audit:claude-code (audit)
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

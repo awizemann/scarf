@@ -5,9 +5,11 @@ permalink: scarf/conventions/macos-accessibility-label-conventions
 tags: [accessibility, voiceover, localization]
 source_paths: [scarf/scarf/Features/Servers/Views/AddServerSheet.swift, scarf/scarf/Features/Servers/Views/ManageServersView.swift, scarf/scarf/Features/Projects/Views/ProjectsSidebar.swift, scarf/scarf/Features/Skills/Views/SkillsView.swift]
 source_paths_inferred: false
-source_sha: 8a7209c069e230e0548892626beb27f2f2e33a8f
+source_sha: 20f286c14389245de47c0c93a461d7bcc3a002d6
 created: 2026-08-28
 updated: 2026-08-28
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 
 Established during the 2026-08-28 accessibility pass driven by the Walkabout macOS shakedown (W19/W22). Form fields and list rows in the macOS target now carry .accessibilityLabel; follow these rules when adding UI.

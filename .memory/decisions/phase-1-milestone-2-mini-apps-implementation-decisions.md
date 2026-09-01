@@ -2,21 +2,14 @@
 title: Phase-1 Milestone 2: Mini-apps — implementation decisions
 type: note
 permalink: scarf/decisions/phase-1-milestone-2-mini-apps-implementation-decisions
-tags:
-- projects
-- phase-1
-- milestone-2
-- miniapps
-- decision
-- security
-- webkit
-- acp
+tags: [projects, phase-1, milestone-2, miniapps, decision, security, webkit, acp]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppBridge.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppAssetResolver.swift, scarf/scarf/Features/Projects/MiniApp/ScarfMiniAppBridge.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppSchemeHandler.swift]
+source_paths_inferred: false
+source_sha: 20f286c14389245de47c0c93a461d7bcc3a002d6
 created: 2026-06-16
 updated: 2026-06-16
-source_sha: 2b9ef15cdddcb1fde12a88556bf755a623ae7758
-reviewed: 2026-07-12
-reviewed_by: audit:claude-code (audit)
-source_paths: scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppBridge.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppAssetResolver.swift, scarf/scarf/Features/Projects/MiniApp/ScarfMiniAppBridge.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppSchemeHandler.swift
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 
 How Milestone 2 (Cowork-style mini-apps) was built, the security posture, and what's deliberately deferred. All bridge surfaces are live; built trust-boundary-first. Branch `feat/projects`.

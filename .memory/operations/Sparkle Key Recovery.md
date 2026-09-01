@@ -2,18 +2,13 @@
 title: Sparkle Key Recovery
 type: note
 permalink: scarf/ops/sparkle-key-recovery
-tags:
-- release
-- sparkle
-- signing
-- gotcha
-- setup
+tags: [release, sparkle, signing, gotcha, setup]
+source_paths: [scripts/release.sh, scarf/scarf/Info.plist]
+source_paths_inferred: false
+source_sha: 20f286c14389245de47c0c93a461d7bcc3a002d6
 created: 2026-06-06
 updated: 2026-06-06
-source_sha: 1599452d48106de9c87bf5286d2b0f6eeee70adb
-source_paths: scripts/release.sh, scarf/scarf/Info.plist
-source_paths_inferred: false
-reviewed: 2026-07-17
+reviewed: 2026-09-01
 reviewed_by: audit:claude-code (background)
 ---
 

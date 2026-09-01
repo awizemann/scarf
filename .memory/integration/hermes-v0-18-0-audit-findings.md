@@ -2,17 +2,14 @@
 title: Hermes v0.18.0 Audit Findings
 type: note
 permalink: scarf/integration/hermes-v0-18-0-audit-findings
+tags: [hermes, v018, audit, verification, wire-format]
+source_paths: [scripts/check-hermes-tables.py]
+source_paths_inferred: true
+source_sha: cc5d3945a2d0813c6559f9a538a83425582641c2
 created: 2026-07-04
 updated: 2026-07-04
-source_sha: cc5d3945a2d0813c6559f9a538a83425582641c2
-source_paths: scripts/check-hermes-tables.py
-source_paths_inferred: true
-tags:
-- hermes
-- v018
-- audit
-- verification
-- wire-format
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 
 Source-verified audit of Hermes v0.18.0 (tag v2026.7.1, semver 0.18.0, commit 7c1a02955) vs Scarf (targets v0.17.0 / v2026.6.19). Audited 2026-07-04 via 8 parallel per-surface agents against a read-only worktree at the tag + hand verification of every high-impact claim. ~1,950 commits between tags.

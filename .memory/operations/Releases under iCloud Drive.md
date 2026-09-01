@@ -2,17 +2,13 @@
 title: Releases under iCloud Drive
 type: note
 permalink: scarf/ops/releases-under-icloud-drive
-tags:
-- release
-- codesign
-- icloud
-- gotcha
+tags: [release, codesign, icloud, gotcha]
+source_paths: [scripts/release.sh, scarf/scarf/Info.plist]
+source_paths_inferred: false
+source_sha: 20f286c14389245de47c0c93a461d7bcc3a002d6
 created: 2026-06-04
 updated: 2026-06-04
-source_sha: 1599452d48106de9c87bf5286d2b0f6eeee70adb
-source_paths: scripts/release.sh, scarf/scarf/Info.plist
-source_paths_inferred: false
-reviewed: 2026-07-17
+reviewed: 2026-09-01
 reviewed_by: audit:claude-code (background)
 ---
 

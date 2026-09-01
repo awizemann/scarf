@@ -5,11 +5,11 @@ permalink: scarf/integration/hermes-version-compatibility-target
 tags: [hermes, compatibility, versioning]
 source_paths: [README.md, scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift]
 source_paths_inferred: false
-source_sha: 8da06bf74aa0b22581939e623f70e5dc0af37ff6
+source_sha: 28d4f8477d145526ed5b38a04ffc199e53d15f52
 created: 2026-05-29
 updated: 2026-09-01
-reviewed: 2026-08-20
-reviewed_by: claude-fable-5
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations
@@ -39,3 +39,7 @@ reviewed_by: claude-fable-5
 
 
 - [fact] 2026-09-01: Hermes v0.21.0 (v2026.8.31, "Pantheon", ~2,287 commits over v0.20.5, incl. intermediate v0.20.6/v2026.8.27) AUDITED — no implementation yet, pending Alan's scope decision. SCHEMA_VERSION still 26 but DDL changed via auto-migrator (messages._compressed_summary, gateway_heartbeats, lazy hosted_room_* tables — detect via PRAGMA/sqlite_master, never version). ACP wire clean. Headline feature: Bot Mode (bots = profiles with ui_meta['hermes-bots']; Bot Chat = hidden session titled "Bot Chat"; new `hermes peer` verbs). See [[Hermes v0.21.0 Audit Findings]] and documents/hermes-v0.21.0-audit-report.md. Scarf's target remains v0.20.5 until the parity branch ships. #current
+
+
+
+- [fact] 2026-09-01 (later): v0.21.0 parity IMPLEMENTED on branch feat/hermes-v021-parity (17 code commits, f865197..28d4f84, ~10 orchestrated work packages + a fresh-eyes-audit fixup commit) — UNMERGED pending Alan's review; on merge it releases as v2.23.0 and the target becomes v0.21.0. Highlights: isV021OrLater + isV0206OrLater flag groups (several release-note "v0.21" features actually shipped at v2026.8.27/0.20.6 — always floor-check intervening tags), carrier-aware session previews (SessionPreviewSQL, byte-identical eligibility SQL), MCP catalog 65 entries, cron incidents/doctor/run-now, Peers sidebar section, dotted-key escaping. All 1474 ScarfCore tests green; check-hermes-tables 0 FAILs. See [[Hermes v0.21 Compatibility Decisions]]. #current

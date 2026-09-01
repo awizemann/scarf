@@ -4,11 +4,11 @@ type: note
 permalink: scarf/architecture/analytics-via-swift-stats-analytics-facade-scarfanalytics
 source_paths: [scarf/scarf/Core/Services/Analytics.swift, scarf/scarf/Core/Services/UsageEvent.swift, scarf/scarf/Core/Services/UsageTracking.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Diagnostics/ScarfAnalytics.swift, scarf/scarf/Core/Services/StatsScarfMonBackend.swift, scarf/scarf/Features/Settings/Views/Tabs/AdvancedTab.swift]
 source_paths_inferred: false
-source_sha: 81abdeba2d69766b1f9148f2be831a418f54f764
+source_sha: 28d4f8477d145526ed5b38a04ffc199e53d15f52
 created: 2026-08-20
 updated: 2026-08-26
-reviewed: 2026-08-26
-reviewed_by: claude-fable-5
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 
 The macOS app ships privacy-first usage analytics via the swift-stats package (github.com/awizemann/swift-stats, SaaS backend api.swiftstats.co). iOS will use a SEPARATE write key, not yet integrated.

@@ -5,10 +5,10 @@ permalink: scarf/decisions/project-context-file-injection-release-note-awareness
 tags: [security, projects, design-decision, hermes-context-files]
 source_paths: [scarf/scarf/Features/Projects/MiniApp/MiniAppAgentSession.swift, wiki/Release-Notes-Index.md]
 source_paths_inferred: false
-source_sha: 8da06bf74aa0b22581939e623f70e5dc0af37ff6
+source_sha: 28d4f8477d145526ed5b38a04ffc199e53d15f52
 created: 2026-06-28
 updated: 2026-06-28
-reviewed: 2026-07-23
+reviewed: 2026-09-01
 reviewed_by: audit:claude-code (background)
 ---
 
