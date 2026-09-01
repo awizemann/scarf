@@ -7,7 +7,7 @@ source_paths: [README.md, scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/
 source_paths_inferred: false
 source_sha: 8da06bf74aa0b22581939e623f70e5dc0af37ff6
 created: 2026-05-29
-updated: 2026-08-26
+updated: 2026-09-01
 reviewed: 2026-08-20
 reviewed_by: claude-fable-5
 ---
@@ -35,3 +35,7 @@ reviewed_by: claude-fable-5
 - [v0204-target] Hermes v0.20.4 (v2026.8.18) audited 2026-08-20 (patch line v0.20.1–v0.20.4, ~3,016 commits); parity implemented on branch feat/hermes-v0204-parity (12 commits), MERGED to main (08bb30e) and SHIPPED in v2.20.0 (2026-08-20; Sparkle-verified). Scarf's Hermes target is now v0.20.4. Schema effectively additive (sessions +hidden/+last_read_at/+title_source/+git_metadata_generation, SCHEMA_VERSION 26); ACP wire clean. New patch-level flag group isV0204OrLater (8 flags). See [[Hermes v0.20.4 Audit Findings]] and [[Hermes v0.20.4 Compatibility Decisions]]. Once merged, Scarf's target becomes v0.20.4; upstream method note: diff _BUILTIN_SUBCOMMANDS in hermes_cli/main.py (cli.py has no argparse). #current
 
 - [fact] 2026-08-26: Hermes v0.20.5 (v2026.8.19, ~804 commits over v0.20.4) audited and Phase 1 parity MERGED to main (99de671, branch feat/hermes-v0205-parity), releasing as **v2.21.0** (release prep done; cut pending maintainer's release.sh run). **Scarf's Hermes target is now v0.20.5.** Schema unchanged (v26), ACP wire unchanged. Flags: isV0205OrLater + hasVersionFlagFullOutput + hasCronReasoningEffort. Key forced fixes: version→--version probe, opencode-free/keyless provider tables, max_turns unlimited default, stt.provider unseeded, profile-list display-name rendering. See [[Hermes v0.20.5 Audit Findings]] and [[Hermes v0.20.5 Compatibility Decisions]]. Phase 2 adoption surfaces deferred. #current
+
+
+
+- [fact] 2026-09-01: Hermes v0.21.0 (v2026.8.31, "Pantheon", ~2,287 commits over v0.20.5, incl. intermediate v0.20.6/v2026.8.27) AUDITED — no implementation yet, pending Alan's scope decision. SCHEMA_VERSION still 26 but DDL changed via auto-migrator (messages._compressed_summary, gateway_heartbeats, lazy hosted_room_* tables — detect via PRAGMA/sqlite_master, never version). ACP wire clean. Headline feature: Bot Mode (bots = profiles with ui_meta['hermes-bots']; Bot Chat = hidden session titled "Bot Chat"; new `hermes peer` verbs). See [[Hermes v0.21.0 Audit Findings]] and documents/hermes-v0.21.0-audit-report.md. Scarf's target remains v0.20.5 until the parity branch ships. #current

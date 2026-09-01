@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabil
 source_paths_inferred: false
 source_sha: 8da06bf74aa0b22581939e623f70e5dc0af37ff6
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-09-01
 reviewed: 2026-08-20
 reviewed_by: claude-fable-5
 ---
@@ -22,3 +22,6 @@ reviewed_by: claude-fable-5
 ## Relations
 - implements [[Hermes v0.15 Capability Gating Decisions]]
 - relates_to [[Hermes Integration]]
+
+
+- [gotcha] Verify a new flag's floor against EVERY intervening tag, not just the previous target. For the v0.21.0 cycle the audit scoped 0.20.5 → 0.21.0, but the intermediate v2026.8.27 (0.20.6) tag already shipped four surfaces the v0.21 release notes advertise — `cron incidents`, `cron resume --run-now/--at`, `--deliver bot-chat`, and the top-level `browser` subcommand — so they gate on a patch-level `isV0206OrLater`, not `isV021OrLater`. Only `peer run/status/stop`, `cron doctor`, and config dotted-key escaping (commit a42aee9585) are genuinely v0.21.0. Check with `git -C ~/.hermes/hermes-agent show <tag>:<file>` plus `git tag --contains <commit>`. #hermes #capabilities

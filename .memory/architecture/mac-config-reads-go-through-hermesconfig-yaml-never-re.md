@@ -2,16 +2,13 @@
 title: Mac config reads go through HermesConfig(yaml:) — never re-duplicate the parser
 type: note
 permalink: scarf/architecture/mac-config-reads-go-through-hermesconfig-yaml-never-re
+tags: [settings, config-parsing, drift]
+source_paths: [scarf/scarf/Core/Services/HermesFileService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift]
+source_paths_inferred: false
+source_sha: c15060dd23b03692780f5b0002fd47f9660d76ef
 created: 2026-07-14
 updated: 2026-07-14
-source_sha: 741b7a0dff0adf0779bace4eea4ebf0a6b929d9d
-source_paths: scarf/scarf/Core/Services/HermesFileService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift
-source_paths_inferred: false
-tags:
-- settings
-- config-parsing
-- drift
-reviewed: 2026-07-17
+reviewed: 2026-09-01
 reviewed_by: audit:claude-code (background)
 ---
 

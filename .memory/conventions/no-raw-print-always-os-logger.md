@@ -2,18 +2,14 @@
 title: No raw print() — always os.Logger
 type: note
 permalink: scarf/conventions/no-raw-print-always-os-logger
-tags:
-- logging
-- conventions
-- rule
-- audit-2026-06-13
+tags: [logging, conventions, rule, audit-2026-06-13]
+source_paths: [scarf/scarf/Core/Services/HermesFileService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesProfileResolver.swift, scarf/scarf/Features/Projects/Views/Widgets/WebviewWidgetView.swift]
+source_paths_inferred: false
+source_sha: c15060dd23b03692780f5b0002fd47f9660d76ef
 created: 2026-06-13
 updated: 2026-06-13
-source_sha: 741b7a0dff0adf0779bace4eea4ebf0a6b929d9d
-reviewed: 2026-07-17
+reviewed: 2026-09-01
 reviewed_by: audit:claude-code (background)
-source_paths: scarf/scarf/Core/Services/HermesFileService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesProfileResolver.swift, scarf/scarf/Features/Projects/Views/Widgets/WebviewWidgetView.swift
-source_paths_inferred: false
 ---
 
 ## Observations
