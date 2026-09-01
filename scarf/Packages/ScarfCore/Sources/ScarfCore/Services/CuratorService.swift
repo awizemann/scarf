@@ -88,14 +88,48 @@ public actor CuratorService {
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "resume")
     }
 
-    public func pin(_ name: String) async throws {
+    /// `hermes curator pin <name>`. A pin on an eligible-but-unmanaged skill
+    /// (no `created_by` provenance marker) still exits 0 — the pin IS
+    /// recorded — but Hermes prints a note that it won't do anything until
+    /// the skill is adopted (v0.20.6+, `hermes_cli/curator.py` `_cmd_pin`):
+    /// "recorded; this skill is unmanaged — auto-transitions never consider
+    /// it. Run `hermes curator adopt <name>` …". That note is real signal,
+    /// not noise — surfaced via the returned value so callers can nudge the
+    /// user toward `curator adopt` instead of silently discarding it as
+    /// `ensureSuccess` would (it only inspects the exit code). `nil` means
+    /// an ordinary pin with nothing extra to say.
+    ///
+    /// A pin that fails eligibility (protected built-in, external, or not
+    /// agent-created) exits 1 with the reason on stdout; `ensureSuccess`
+    /// already carries that into `CuratorError.nonZeroExit` (falling back to
+    /// stdout when stderr is empty), so no extra handling is needed there.
+    @discardableResult
+    public func pin(_ name: String) async throws -> String? {
         let (code, stdout, stderr) = await runHermes(args: ["curator", "pin", name], timeout: 15)
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "pin")
+        return Self.unmanagedNudge(from: stdout)
     }
 
-    public func unpin(_ name: String) async throws {
+    /// `hermes curator unpin <name>`. Mirrors `pin(_:)`: an unpin recorded
+    /// against an unmanaged skill exits 0 with an explanatory note ("it was
+    /// never under auto-transitions to begin with") that is otherwise
+    /// discarded on success. Surfaced the same way.
+    @discardableResult
+    public func unpin(_ name: String) async throws -> String? {
         let (code, stdout, stderr) = await runHermes(args: ["curator", "unpin", name], timeout: 15)
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "unpin")
+        return Self.unmanagedNudge(from: stdout)
+    }
+
+    /// Pulls the "this skill is unmanaged …" note out of a successful
+    /// `pin`/`unpin`'s stdout, if present. Detected by content rather than
+    /// version-gated: pre-v0.20.6 hosts never print this note on success
+    /// (pins on unmanaged skills were simply invisible then), so the check
+    /// is naturally a no-op there — no capability flag needed.
+    private nonisolated static func unmanagedNudge(from stdout: String) -> String? {
+        let trimmed = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.contains("unmanaged") else { return nil }
+        return trimmed
     }
 
     public func restore(_ name: String) async throws {

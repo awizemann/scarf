@@ -126,6 +126,41 @@ import Foundation
         #expect(s.leastRecentlyActive.first?.name == "computer-use")
     }
 
+    /// v0.20.6 (7caa731e80): a pin on an eligible-but-unmanaged skill now
+    /// lands and shows up in `curated_report()`, so it counts toward BOTH
+    /// the managed `active` bucket AND the `unmanaged (…)` summary, and
+    /// its name appears in the `pinned (…)` line — three independent facts
+    /// about the same skill, not a double-count bug. Verify the parser
+    /// keeps all three readable together instead of dropping or merging any.
+    @Test func parsePinnedUnmanagedSkillCountsInBothBuckets() {
+        let text = """
+        curator: ENABLED
+          runs:           9
+          last run:       1d ago
+          last summary:   (none)
+          interval:       every 7d
+          stale after:    30d unused
+          archive after:  90d unused
+
+        curator-managed skills: 19 total  (agent-created=0  bundled=19)
+          active     9
+          stale      10
+          archived   0
+
+        pinned (1): stray-eligible-skill
+
+        unmanaged (no provenance marker): 50 total
+          pre-dates marker    41
+          foreground-created  9
+          never auto-staled or archived — `hermes curator adopt <name>` hands one over
+        """
+        let s = HermesCuratorStatusParser.parse(text: text)
+        #expect(s.totalSkills == 19)
+        #expect(s.activeSkills == 9)
+        #expect(s.pinnedNames == ["stray-eligible-skill"])
+        #expect(s.unmanagedCount == 50)
+    }
+
     /// v0.20 empty sentinel: `no curator-managed skills` (pre-0.20 said
     /// `no agent-created skills`), followed by the unmanaged block when
     /// unmanaged skills exist.

@@ -815,6 +815,26 @@ public struct HermesCapabilities: Sendable, Equatable {
         return s < SemVer(major: 0, minor: 20, patch: 6)  // pre-v0.20.6 only
     }
 
+    /// Whether `hermes-agent` is an essential skill the host will never let
+    /// stay disabled. Landed at v2026.8.27 (0.20.6, commit 3733e4aff5 "fix:
+    /// system prompt no longer references tools/skills the session can't
+    /// use; hermes-agent skill is always kept"): `ESSENTIAL_SKILLS =
+    /// frozenset({"hermes-agent"})` in `agent/skill_utils.py`, and every
+    /// read of `skills.disabled` (`get_disabled_skill_names`,
+    /// `skills_config.get_disabled_skills`) subtracts it before returning,
+    /// while `save_disabled_skills` subtracts it before writing — so a
+    /// disable request for this one name is dropped on both read and write
+    /// paths, on every surface. Absent at v2026.8.19 (0.20.5), where the
+    /// same functions return the raw set unfiltered.
+    ///
+    /// Scarf has no writer for `skills.disabled` today (`SkillsView` only
+    /// renders the raw list Hermes reports), but the raw config.yaml can
+    /// still carry a stale/hand-edited `hermes-agent` entry from before
+    /// this host was upgraded, or from a manual edit — on a v0.20.6+ host
+    /// Hermes ignores that entry entirely, so showing it as "OFF" would be
+    /// actively wrong, not just stale UI.
+    public var hasEssentialHermesAgentSkill: Bool { isV0206OrLater }
+
     /// Whether `tavily` is still a selectable web search/extract backend.
     /// **Inverse semantics** — `true` means keep it in the pickers.
     ///

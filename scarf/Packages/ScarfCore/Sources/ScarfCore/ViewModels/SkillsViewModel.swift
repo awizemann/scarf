@@ -98,19 +98,30 @@ public final class SkillsViewModel {
     /// v0.12+ hosts; callers can override by passing an explicit set
     /// (the Curator screen does this when it has a fresher snapshot in
     /// hand).
+    ///
+    /// `essentialHermesAgentSkill` should be
+    /// `HermesCapabilities.hasEssentialHermesAgentSkill` for the connected
+    /// host (v0.20.6+). Hermes drops `hermes-agent` from every read of
+    /// `skills.disabled` on those hosts even if a stale/hand-edited
+    /// config.yaml still lists it, so it must never render as OFF there —
+    /// doing so would show a skill as disabled when Hermes is loading it
+    /// regardless. Defaults to `false` (pre-v0.20.6 behavior: render the
+    /// raw config value verbatim) so existing callers are unaffected.
     @MainActor
-    public func load(pinnedNames: Set<String>? = nil) async {
+    public func load(pinnedNames: Set<String>? = nil, essentialHermesAgentSkill: Bool = false) async {
         isLoading = true
         lastError = nil
         let ctx = context
         let xport = transport
         let pins = pinnedNames
+        let essentialFloor = essentialHermesAgentSkill
         // v2.8 — instrumented so future captures show how many SSH
         // RTTs the SkillsScanner walk costs on remote (it stats
         // every ~/.hermes/skills/* directory + reads SKILL.md per).
         let cats: [HermesSkillCategory] = await ScarfMon.measureAsync(.diskIO, "skills.load") {
             await Task.detached {
-                let disabled = Self.readDisabledSkillNames(context: ctx)
+                var disabled = Self.readDisabledSkillNames(context: ctx)
+                if essentialFloor { disabled.remove("hermes-agent") }
                 let pinned = pins ?? Self.readPinnedSkillNames(context: ctx)
                 return SkillsScanner.scan(
                     context: ctx,
