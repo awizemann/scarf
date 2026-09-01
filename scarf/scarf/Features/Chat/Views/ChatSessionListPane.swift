@@ -129,7 +129,7 @@ struct ChatSessionListPane: View {
             if let renameError = chatViewModel.renameError {
                 Label(renameError, systemImage: "exclamationmark.triangle")
                     .scarfStyle(.footnote)
-                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .foregroundStyle(ScarfColor.danger)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)

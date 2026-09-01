@@ -2297,6 +2297,9 @@ final class ChatViewModel {
     @discardableResult
     func renameSession(_ sessionId: String, to newTitle: String) -> Bool {
         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Clear first — an empty title is a no-op, and a stale message
+        // would read as a fresh failure.
+        renameError = nil
         guard !trimmed.isEmpty else { return false }
         let result = context.runHermes(["sessions", "rename", sessionId, trimmed])
         guard result.exitCode == 0 else {

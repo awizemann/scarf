@@ -129,13 +129,20 @@ public enum SessionPreviewSQL {
         "TRIM(\(expression), \(whitespaceSet))"
     }
 
-    /// `_sql_starts_with`. Note the length is a **character** count on
-    /// both sides: Swift's `String.count` and SQLite's `SUBSTR` on TEXT
-    /// both count characters, so the em dashes in these prefixes line
-    /// up without a byte-length correction.
+    /// `_sql_starts_with`.
+    ///
+    /// The window length MUST be a **Unicode scalar** count, not
+    /// `String.count`. SQLite's `SUBSTR` on TEXT counts code points and
+    /// so does Python's `len`, but Swift's `String.count` counts
+    /// grapheme clusters — for today's literals all three agree (an em
+    /// dash is one of each), yet a future prefix containing a flag, an
+    /// emoji ZWJ sequence, or a combining mark would make the Swift
+    /// window *shorter* than the literal, and the equality could then
+    /// never match. That failure is silent — carriers would simply stop
+    /// being stripped — so count scalars and keep it impossible.
     private static func startsWith(_ expression: String, _ prefixes: [String]) -> String {
         let checks = prefixes.map { prefix in
-            "SUBSTR(\(ltrimWS(expression)), 1, \(prefix.count)) = \(literal(prefix))"
+            "SUBSTR(\(ltrimWS(expression)), 1, \(prefix.unicodeScalars.count)) = \(literal(prefix))"
         }
         return "(" + checks.joined(separator: " OR ") + ")"
     }
@@ -150,7 +157,7 @@ public enum SessionPreviewSQL {
     /// `_PREVIEW_MERGED_AFTER_SQL`
     private static func mergedAfter(_ alias: String) -> String {
         "SUBSTR(\(content(alias)), INSTR(\(content(alias)), \(literal(mergedSummaryDelimiter)))"
-            + " + \(mergedSummaryDelimiter.count))"
+            + " + \(mergedSummaryDelimiter.unicodeScalars.count))"
     }
 
     /// `_PREVIEW_MERGED_SUMMARY_SQL`
@@ -173,8 +180,9 @@ public enum SessionPreviewSQL {
         let prior = mergedPrior(alias)
         let ltrimmed = ltrimWS(prior)
         let header = mergedPriorContextHeader
-        let stripped = ltrimWS("SUBSTR(\(ltrimmed), \(header.count + 1))")
-        return "CASE WHEN SUBSTR(\(ltrimmed), 1, \(header.count)) = \(literal(header))"
+        let headerLength = header.unicodeScalars.count
+        let stripped = ltrimWS("SUBSTR(\(ltrimmed), \(headerLength + 1))")
+        return "CASE WHEN SUBSTR(\(ltrimmed), 1, \(headerLength)) = \(literal(header))"
             + " THEN \(stripped) ELSE \(prior) END"
     }
 
@@ -182,7 +190,7 @@ public enum SessionPreviewSQL {
     /// marker, i.e. the real user turn that followed the summary.
     private static func forceUserRemainder(_ alias: String) -> String {
         "SUBSTR(\(content(alias)), INSTR(\(content(alias)), \(literal(summaryEndMarker)))"
-            + " + \(summaryEndMarker.count))"
+            + " + \(summaryEndMarker.unicodeScalars.count))"
     }
 
     /// `_PREVIEW_ELIGIBLE_SQL` — may this row be a session's preview?
@@ -237,6 +245,39 @@ public enum SessionPreviewSQL {
             : " AND \(alias).active = 1"
     }
 
+    /// Cheap pre-filter that lets an ordinary row skip the full
+    /// eligibility predicate.
+    ///
+    /// Every carrier shape has to contain the literal `[CONTEXT ` — a
+    /// standalone carrier *starts* with `[CONTEXT COMPACTION …` or
+    /// `[CONTEXT SUMMARY]:`, and a merged carrier must carry one of
+    /// those same prefixes after its delimiter. So a row without that
+    /// substring cannot be a carrier, and `INSTR(…) = 0 OR <eligible>`
+    /// is exactly equivalent to `<eligible>` alone.
+    ///
+    /// It exists purely for cost. `eligiblePredicate()` expands to ~3.2 KB
+    /// and runs ~6 `INSTR` plus a dozen `SUBSTR`/`LTRIM`/`TRIM` calls
+    /// against `content` for EVERY user row in the `MIN(id)` aggregate.
+    /// Measured on a 300k-message / 102k-user-row fixture: the old query
+    /// 0.067 s, W6 without this pre-filter 0.113 s (1.68x), with it
+    /// 0.103 s (1.53x). So it recovers roughly a fifth of the added
+    /// cost, not most of it — the residual is inherent to evaluating any
+    /// content predicate per row. Kept because it is free and provably
+    /// result-identical, not because it makes the query cheap. If
+    /// `mac.fetchSessionPreviews` ever regresses in ScarfMon, the real
+    /// fix is a different query SHAPE (per-session correlated subquery
+    /// with `LIMIT 1`, as Hermes uses), not more predicate tuning.
+    ///
+    /// Hermes has no equivalent because its preview is a per-session
+    /// correlated subquery with `LIMIT 1`, which short-circuits on its
+    /// own; Scarf's aggregate form cannot. Deliberately applied HERE and
+    /// not inside `eligiblePredicate()`, so that expression stays
+    /// byte-identical to Hermes' generated `_PREVIEW_ELIGIBLE_SQL` and
+    /// can keep being diffed against it.
+    private static func carrierPreFilter(alias: String = "m") -> String {
+        "INSTR(\(content(alias)), '[CONTEXT ') = 0"
+    }
+
     /// The inner "first eligible user row per session" subquery, shared
     /// by every preview call site.
     ///
@@ -254,7 +295,7 @@ public enum SessionPreviewSQL {
         FROM messages m
         WHERE m.role = 'user' AND m.content IS NOT NULL AND m.content <> ''\
         \(activeClause(hasActiveColumn: hasActiveColumn, hasCompactedColumn: hasCompactedColumn))
-          AND \(eligiblePredicate())
+          AND (\(carrierPreFilter()) OR \(eligiblePredicate()))
         GROUP BY m.session_id
         """
     }

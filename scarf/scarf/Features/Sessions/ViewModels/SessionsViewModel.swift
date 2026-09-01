@@ -316,6 +316,9 @@ final class SessionsViewModel {
     func confirmRename() {
         guard let sessionId = renameSessionId else { return }
         let title = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Clear first: an empty title is a no-op, and leaving a previous
+        // attempt's message on screen makes it read as a fresh failure.
+        renameError = nil
         guard !title.isEmpty else { return }
         let result = runHermes(["sessions", "rename", sessionId, title])
         guard result.exitCode == 0 else {

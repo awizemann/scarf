@@ -460,7 +460,66 @@ import SQLite3
         #expect(result["s1"] == nil)
     }
 
-    // MARK: - 6. Remote-backend parity
+    // MARK: - 6. Carrier pre-filter equivalence
+
+    /// The `INSTR(content, '[CONTEXT ') = 0 OR …` short-circuit is a pure
+    /// cost optimisation and must never change a result. Every carrier
+    /// shape contains that substring, so a row without it cannot be one —
+    /// these cases would all break if the pre-filter ever swallowed a row
+    /// the full predicate would have judged differently.
+    @Test func carrierPreFilterNeverChangesResults() async throws {
+        // A row containing the marker mid-content (pre-filter passes it
+        // THROUGH to the full predicate, which must judge it ordinary).
+        let midContent = "quoting [CONTEXT SUMMARY]: in a sentence"
+        let a = try await previews(shape: .modern, messages: [
+            Msg(session: "s1", content: midContent, timestamp: 10)
+        ])
+        #expect(a["s1"] == midContent)
+
+        // A row with no marker at all (pre-filter short-circuits it).
+        let b = try await previews(shape: .modern, messages: [
+            Msg(session: "s2", content: "nothing special here", timestamp: 10)
+        ])
+        #expect(b["s2"] == "nothing special here")
+
+        // A real carrier (pre-filter passes through, predicate rejects).
+        let c = try await previews(shape: .modern, messages: [
+            Msg(session: "s3", content: Self.summaryPrefix + " …body…", timestamp: 10),
+            Msg(session: "s3", content: "real turn", timestamp: 20)
+        ])
+        #expect(c["s3"] == "real turn")
+    }
+
+    /// The predicate Scarf hands SQLite must stay byte-identical to
+    /// Hermes' generated `_PREVIEW_ELIGIBLE_SQL`, which is why the
+    /// pre-filter is composed around it rather than folded into it.
+    @Test func eligiblePredicateIsNotPollutedByTheOptimisation() {
+        #expect(!SessionPreviewSQL.eligiblePredicate().contains("[CONTEXT '"))
+        #expect(!SessionPreviewSQL.eligiblePredicate().contains("INSTR(m.content, '[CONTEXT ')"))
+        // …and the inner subquery is where it actually lands.
+        let inner = SessionPreviewSQL.firstEligibleUserRowSQL(
+            hasActiveColumn: true, hasCompactedColumn: true
+        )
+        #expect(inner.contains("INSTR(m.content, '[CONTEXT ') = 0"))
+    }
+
+    /// Prefix windows are sized in Unicode scalars, matching SQLite's
+    /// `SUBSTR` and Python's `len` — not Swift grapheme clusters, which
+    /// would silently under-size a window for any future prefix carrying
+    /// a flag, ZWJ emoji, or combining mark.
+    @Test func prefixWindowsAreSizedInUnicodeScalars() {
+        let sql = SessionPreviewSQL.eligiblePredicate()
+        // The long-form intro is 204 scalars; the legacy prefix 18.
+        #expect(sql.contains("1, 204)"))
+        #expect(sql.contains("1, 18)"))
+        #expect(SessionPreviewSQL.longFormSummaryPrefix.unicodeScalars.count == 204)
+        #expect(SessionPreviewSQL.legacySummaryPrefix.unicodeScalars.count == 18)
+        #expect(SessionPreviewSQL.summaryEndMarker.unicodeScalars.count == 84)
+        #expect(SessionPreviewSQL.mergedSummaryDelimiter.unicodeScalars.count == 49)
+        #expect(SessionPreviewSQL.mergedPriorContextHeader.unicodeScalars.count == 55)
+    }
+
+    // MARK: - 7. Remote-backend parity
 
     /// The remote backend ships this SQL as text through a quoted
     /// heredoc into `sqlite3 -readonly -json` and parses JSON back. The
