@@ -208,7 +208,15 @@ final class BotsViewModel {
 
     /// Selected profile id. A name (not an index) so a rescan that reorders
     /// or drops rows can never silently retarget an edit or a delete.
-    var selectedProfileName: String?
+    var selectedProfileName: String? {
+        didSet {
+            guard selectedProfileName != oldValue else { return }
+            // Switching bots tears the previous conversation down BEFORE
+            // anything else can open a new one — this is the single choke
+            // point that enforces "at most one live ACP subprocess".
+            closeConversation()
+        }
+    }
     var showHiddenBots = false
     var showOtherProfiles = false
 
@@ -261,6 +269,44 @@ final class BotsViewModel {
     /// the bootstrap state, which must offer "Create Bot" rather than hide
     /// the section (`hasBotMode` is a version gate, never a data gate).
     var isEmptyRoster: Bool { !rows.contains { $0.identity.isBotManaged } }
+
+    // MARK: - Conversation (B3)
+
+    /// The live conversation, if any. **At most one exists at a time** — a
+    /// bot conversation owns a `hermes acp` subprocess, and a per-bot cache
+    /// would leave one running for every bot the user had ever clicked,
+    /// none of which anything would ever reap: `AppCoordinator` caches this
+    /// view model for the life of the window and has no teardown hook.
+    private(set) var conversation: BotConversationViewModel?
+
+    /// Test seam: build the conversation VM for a profile. Production makes
+    /// a real one against the profile-pinned context.
+    @ObservationIgnored
+    var makeConversation: (ServerContext, String) -> BotConversationViewModel = { ctx, name in
+        BotConversationViewModel(profileName: name, context: ctx)
+    }
+
+    /// Open (or reuse) the conversation for `profileName`. Idempotent for
+    /// the bot already showing; opening a different bot closes the old one
+    /// first.
+    func openConversation(for profileName: String) {
+        guard hasBotMode, BotsService.isAddressableProfile(profileName) else { return }
+        if let existing = conversation, existing.profileName == profileName {
+            existing.open()
+            return
+        }
+        closeConversation()
+        let vm = makeConversation(context, profileName)
+        conversation = vm
+        vm.open()
+    }
+
+    /// Stop and drop the live conversation. Call on bot switch, on leaving
+    /// the section, and on window teardown.
+    func closeConversation() {
+        conversation?.close()
+        conversation = nil
+    }
 
     // MARK: - Loading
 

@@ -56,6 +56,11 @@ struct BotsView: View {
         }
         .background(ScarfColor.backgroundPrimary)
         .navigationTitle("Bots")
+        // Leaving the section stops the bot's `hermes acp` subprocess.
+        // Nothing else would: the view model is coordinator-cached for the
+        // window's lifetime, so without this the process would outlive the
+        // UI that owns it and keep holding the bot profile's state.db.
+        .onDisappear { viewModel.closeConversation() }
         .onAppear {
             if let capabilities = capabilitiesStore?.capabilities {
                 viewModel.capabilities = capabilities
@@ -333,8 +338,33 @@ struct BotsView: View {
                     renameText = row.identity.profileName
                     renaming = row
                 },
-                onDelete: { pendingDelete = row }
+                onDelete: { pendingDelete = row },
+                conversation: {
+                    // Only bot-managed profiles get a conversation: an
+                    // ordinary profile under "Other profiles" has no bot
+                    // identity and no canonical Bot Chat to open.
+                    if let conversation = viewModel.conversation,
+                       conversation.profileName == row.identity.profileName {
+                        BotConversationView(
+                            viewModel: conversation,
+                            botTitle: row.identity.resolvedTitle
+                        )
+                    } else {
+                        BotDetailPlaceholder(
+                            title: "Chat",
+                            detail: row.identity.isBotManaged
+                                ? "Opening this bot’s conversation…"
+                                : "Only bots have a conversation. Add this profile to Bots to message it.",
+                            icon: "text.bubble"
+                        )
+                    }
+                }
             )
+            .id(row.identity.profileName)
+            .task(id: row.identity.profileName) {
+                guard row.identity.isBotManaged else { return }
+                viewModel.openConversation(for: row.identity.profileName)
+            }
         } else {
             VStack(spacing: ScarfSpace.s2) {
                 Text("Select a bot")

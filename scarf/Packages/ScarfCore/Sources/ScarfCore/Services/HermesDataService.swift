@@ -987,6 +987,168 @@ public actor HermesDataService {
         }
     }
 
+    // MARK: - Canonical Bot Chat resolution (Bot Mode)
+
+    /// A resolved canonical Bot Chat. Two ids, because they are two
+    /// different things and conflating them is a real bug:
+    /// - `registryId` is the row that holds the `"Bot Chat"` title. It is
+    ///   the bot's conversation *identity* and the value to compare against
+    ///   on a later re-resolve.
+    /// - `liveId` is the compression tip — the session to load, replay, and
+    ///   prompt into. On a young chat the two are equal.
+    public struct CanonicalBotChat: Sendable, Equatable {
+        public let registryId: String
+        public let liveId: String
+
+        public init(registryId: String, liveId: String) {
+            self.registryId = registryId
+            self.liveId = liveId
+        }
+    }
+
+    /// Fetch the session whose title is EXACTLY `title`, hidden rows
+    /// included.
+    ///
+    /// Deliberately not routed through `sessionListPredicate`: every other
+    /// session query in this service appends `hidden = 0` when the column
+    /// exists, and Bot Mode's canonical chats are *always* created hidden
+    /// (`apps/desktop/src/plugins/hermes-bots/canonical-chat.ts:334-338`
+    /// passes `hidden: true`; `hermes_cli/subcommands/peer.py:135-144`
+    /// needs `include_hidden=1` for the same reason). Reusing the ordinary
+    /// listing here would report "this bot has no conversation" for every
+    /// correctly-created bot, and the caller would then try to mint a
+    /// duplicate that Hermes' `UNIQUE(title)` guard rejects.
+    ///
+    /// Hermes enforces title uniqueness, so at most one row can match; the
+    /// ordering is a tie-break for a legacy database written before that
+    /// guard existed.
+    public func fetchSessionByExactTitle(_ title: String) async -> HermesSession? {
+        let sql = """
+            SELECT \(sessionColumns) FROM sessions
+            WHERE title = ?
+            ORDER BY started_at DESC
+            LIMIT 1
+            """
+        do {
+            let rows = try await backend.query(sql, params: [.text(title)])
+            return rows.first.map { sessionFromRow($0) }
+        } catch {
+            return nil
+        }
+    }
+
+    /// Project a session id forward through its compression-continuation
+    /// chain and return the live tip, or `sessionId` when there is none.
+    ///
+    /// A long-lived conversation gets compressed: the old session is ended
+    /// with `end_reason = 'compression'` and a child row continues it. The
+    /// canonical Bot Chat is a *forever* chat, so this is not an edge case
+    /// for it — the registry row that holds the title is frequently a dead
+    /// ancestor with the conversation living further down the chain.
+    /// Opening the ancestor would show a truncated transcript and send new
+    /// turns into a closed session.
+    ///
+    /// Ported from `hermes_state.SessionDB.get_compression_tip` (:10754).
+    /// Three properties of that query are load-bearing and kept:
+    /// - only children of a **compression-ended parent** are followed. This
+    ///   is the whole discriminator. `parent_session_id` is also how
+    ///   subagents, branches and delegates hang off a session, so walking
+    ///   children without this gate would happily wander into a subagent
+    ///   transcript and present it as the bot's chat.
+    /// - branch/delegate children (`model_config._branched_from` /
+    ///   `._delegate_from`) and `source = 'tool'` children are excluded even
+    ///   under a compressed parent.
+    /// - a live or still-compressing child outranks a closed sibling (a
+    ///   `ws_orphan_reap` stub), so a stale sibling can't capture the walk.
+    ///
+    /// Hermes' own ordering additionally consults a "last active"
+    /// expression; this uses `COALESCE(ended_at, started_at)`, which agrees
+    /// with it on every ordinary row and only differs among siblings the
+    /// `CASE` has already separated.
+    ///
+    /// The walk is bounded at 100 hops with a seen-set, so a cyclic or
+    /// pathological chain terminates instead of hanging the open.
+    public func compressionTip(for sessionId: String) async -> String {
+        let hasModelConfig = await sessionsTableHasColumn("model_config")
+        // `end_reason` predates every schema Scarf supports, but a database
+        // without it cannot express a compression chain at all — the walk
+        // would then be unbounded-by-predicate rather than empty, so bail.
+        guard await sessionsTableHasColumn("end_reason") else { return sessionId }
+
+        let exclusions = hasModelConfig ? """
+              AND json_extract(COALESCE(child.model_config, '{}'), '$._branched_from') IS NULL
+              AND json_extract(COALESCE(child.model_config, '{}'), '$._delegate_from') IS NULL
+            """ : ""
+        let sql = """
+            SELECT child.id
+            FROM sessions parent
+            JOIN sessions child ON child.parent_session_id = parent.id
+            WHERE parent.id = ?
+              AND parent.end_reason = 'compression'
+            \(exclusions)
+              AND COALESCE(child.source, '') != 'tool'
+            ORDER BY
+              CASE
+                WHEN child.end_reason = 'compression' THEN 0
+                WHEN child.ended_at IS NULL THEN 1
+                ELSE 2
+              END,
+              COALESCE(child.ended_at, child.started_at) DESC,
+              child.started_at DESC,
+              child.id DESC
+            LIMIT 1
+            """
+
+        var current = sessionId
+        var seen: Set<String> = [current]
+        for _ in 0..<100 {
+            let next: String?
+            do {
+                let rows = try await backend.query(sql, params: [.text(current)])
+                next = rows.first?.optionalString(at: 0)
+            } catch {
+                return current
+            }
+            guard let child = next, !child.isEmpty, !seen.contains(child) else { return current }
+            seen.insert(child)
+            current = child
+        }
+        return current
+    }
+
+    /// Resolve a bot profile's canonical "Bot Chat" — the registry row that
+    /// holds the title, plus the live session id to actually open.
+    ///
+    /// Returns `nil` when the profile has no Bot Chat yet. That is a normal
+    /// state, not an error: the conversation is created by the first message
+    /// sent to the bot, never speculatively.
+    ///
+    /// The service must be pointed at THAT PROFILE's `state.db` — construct
+    /// it with `ServerContext.pinnedToProfile(_:)`. Each profile carries its
+    /// own database under `<root>/profiles/<name>/state.db`; running this
+    /// against the root home finds the *user's* session titled "Bot Chat",
+    /// if any, and would render one profile's conversation under another
+    /// bot's name.
+    public func locateCanonicalBotChat() async -> CanonicalBotChat? {
+        guard let registry = await fetchSessionByExactTitle(BotChatSession.canonicalTitle) else {
+            return nil
+        }
+        let tip = await compressionTip(for: registry.id)
+        return CanonicalBotChat(registryId: registry.id, liveId: tip)
+    }
+
+    /// PRAGMA-driven column probe for the `sessions` table. Scarf never
+    /// assumes a schema by Hermes version — the charter is detection, and a
+    /// user can be on any build.
+    private func sessionsTableHasColumn(_ column: String) async -> Bool {
+        do {
+            let rows = try await backend.query("PRAGMA table_info(sessions)", params: [])
+            return rows.contains { $0.optionalString(at: 1) == column }
+        } catch {
+            return false
+        }
+    }
+
     public func fetchMostRecentlyActiveSessionId() async -> String? {
         let sql = "SELECT session_id FROM messages ORDER BY timestamp DESC LIMIT 1"
         do {
