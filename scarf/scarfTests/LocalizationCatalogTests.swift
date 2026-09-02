@@ -83,6 +83,18 @@ struct LocalizationCatalogTests {
         return key.range(of: "[A-Za-z]%@", options: .regularExpression) != nil
     }
 
+    /// True when, once the format specifiers are removed, nothing with a
+    /// Latin letter remains — punctuation, separators, bare counts and
+    /// glyph-only strings (`"—"`, `"%@: %@"`, `"×%lld"`). There is nothing
+    /// in these to translate, so locales legitimately omit them.
+    static func hasNoTranslatableWords(_ key: String) -> Bool {
+        let stripped = key.replacingOccurrences(
+            of: "%(?:[0-9]+\\$)?(@|lld|ld|d|f|lf)",
+            with: "",
+            options: .regularExpression)
+        return stripped.range(of: "[A-Za-z]", options: .regularExpression) == nil
+    }
+
     /// Multiset of conversion specifiers, with positional prefixes stripped
     /// so `%1$@` counts as `%@` — reordering for grammar is legitimate,
     /// changing the *set* of arguments is not.
@@ -170,5 +182,116 @@ struct LocalizationCatalogTests {
             }
         }
         #expect(offenders.isEmpty, "empty translations: \(offenders.sorted())")
+    }
+
+    /// Source strings that deliberately fall back to English in every locale
+    /// that omits them: proper nouns and product names (Docker, OAuth,
+    /// SOUL.md), CLI/config literals the user must type verbatim
+    /// (`npx`, `oauth`, `supports_parallel_tool_calls`), sample values and
+    /// URL placeholders, and bare acronyms.
+    ///
+    /// This is the documented exception list for `everyTranslatableKeyIsLocalized`
+    /// below. Adding a key here is a decision that the string is *not* prose —
+    /// if it is prose, translate it instead.
+    static let englishFallbackKeys: Set<String> = [
+        "#C1502E",
+        "/path/to/client.key",
+        "/path/to/client.pem",
+        "/path/to/project",
+        "Bitwarden Secrets Manager",
+        "CLI",
+        "Camofox",
+        "Daytona",
+        "Docker",
+        "Google Chat",
+        "Hermes",
+        "Kanban",
+        "MCP",
+        "Meta for Developers",
+        "Microsoft Teams",
+        "OAuth",
+        "OAuth 2.1",
+        "OpenRouter",
+        "SOUL.md",
+        "Scarf",
+        "ScarfGo",
+        "Singularity",
+        "URL",
+        "Webhook",
+        "X",
+        "X-User-Id",
+        "Y",
+        "YOLO",
+        "Yuanbao 元宝",
+        "acme-q3",
+        "alice",
+        "discord",
+        "hermes peer add spark --url http://spark.lan:8377 --key <API_SERVER_KEY>",
+        "hermes profile show",
+        "https://...",
+        "https://.../sse",
+        "https://example.com/my.scarftemplate",
+        "https://example.com/path/to/SKILL.md",
+        "https://…",
+        "markdown",
+        "my_server",
+        "new-name",
+        "npx",
+        "oauth",
+        "owner/name",
+        "p%lld",
+        "p50 %@",
+        "p95 %@",
+        "research-bot",
+        "scarf-default",
+        "sk-…",
+        "stderr:",
+        "stdout:",
+        "supports_parallel_tool_calls",
+        "tool-override",
+        "tool_a, tool_b",
+        "tool_c",
+        "v%@",
+        "~/Projects",
+    ]
+
+    /// Every key that is real UI prose carries all six locales.
+    ///
+    /// The catalog is allowed three kinds of hole, and only three: the English
+    /// stem+suffix plural hack, strings with no translatable words at all
+    /// (pure format specifiers and punctuation), and the explicitly listed
+    /// `englishFallbackKeys`. Anything else missing a locale is a gap —
+    /// this is what kept regressing when new features shipped between
+    /// Xcode-side extractions.
+    @Test("every translatable key is localized in all six locales")
+    func everyTranslatableKeyIsLocalized() {
+        var offenders: [String] = []
+        for (key, locales) in Self.catalog.strings {
+            guard !Self.isEnglishPluralHack(key),
+                  !Self.hasNoTranslatableWords(key),
+                  !Self.englishFallbackKeys.contains(key) else { continue }
+            let missing = Self.shippedLocales.subtracting(locales.keys).sorted()
+            if !missing.isEmpty {
+                offenders.append("\(key) → missing \(missing.joined(separator: ","))")
+            }
+        }
+        #expect(offenders.isEmpty, Comment(rawValue: "untranslated keys:\n" + offenders.sorted().joined(separator: "\n")))
+    }
+
+    /// Guards the exception list against rot: a fallback key that has since
+    /// been fully translated (or removed from the catalog) should leave the
+    /// list rather than sit there hiding a future gap.
+    @Test("the English-fallback list has no stale entries")
+    func fallbackListIsCurrent() {
+        var stale: [String] = []
+        for key in Self.englishFallbackKeys {
+            guard let locales = Self.catalog.strings[key] else {
+                stale.append("\(key): not in catalog"); continue
+            }
+            if Self.shippedLocales.subtracting(locales.keys).isEmpty {
+                stale.append("\(key): fully translated, drop it from the list")
+            }
+        }
+        #expect(stale.isEmpty, Comment(rawValue: "stale fallback entries:\n" + stale.sorted().joined(separator: "\n")))
     }
 }
