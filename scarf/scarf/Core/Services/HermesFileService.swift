@@ -486,13 +486,6 @@ struct HermesFileService: Sendable {
     }
 
     @discardableResult
-    nonisolated func setMCPServerArgs(name: String, args: [String]) -> Bool {
-        patchMCPServerField(name: name) { entryLines in
-            Self.replaceOrInsertList(header: "args", items: args, in: &entryLines)
-        }
-    }
-
-    @discardableResult
     nonisolated func removeMCPServer(name: String) -> (exitCode: Int32, output: String) {
         runHermesCLI(args: ["mcp", "remove", name], timeout: 30)
     }
@@ -992,64 +985,6 @@ struct HermesFileService: Sendable {
         }
         if let removeIndex {
             lines.remove(at: removeIndex)
-        }
-    }
-
-    nonisolated private static func replaceOrInsertList(header: String, items: [String], in lines: inout [String]) {
-        var headerIndex: Int?
-        var removeEnd: Int?
-        for index in 1..<lines.count {
-            let line = lines[index]
-            let indent = line.prefix(while: { $0 == " " }).count
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if indent == 4 && trimmed == "\(header):" {
-                headerIndex = index
-                continue
-            }
-            if headerIndex != nil {
-                // List items can appear at indent 4 (as "    - item") OR indent 6 depending on style.
-                if trimmed.hasPrefix("- ") && indent >= 4 {
-                    continue
-                } else if trimmed.isEmpty || trimmed.hasPrefix("#") {
-                    continue
-                } else if indent >= 6 {
-                    continue
-                } else {
-                    removeEnd = index
-                    break
-                }
-            }
-        }
-
-        if items.isEmpty {
-            if let headerIndex, let end = removeEnd {
-                lines.removeSubrange(headerIndex..<end)
-            } else if let headerIndex {
-                lines.removeSubrange(headerIndex..<lines.count)
-            }
-            return
-        }
-
-        var newLines: [String] = ["    \(header):"]
-        for item in items {
-            newLines.append("    - \(yamlScalar(item))")
-        }
-
-        if let headerIndex {
-            let end = removeEnd ?? lines.count
-            lines.replaceSubrange(headerIndex..<end, with: newLines)
-        } else {
-            var insertAt = lines.count
-            for index in 1..<lines.count {
-                let line = lines[index]
-                let indent = line.prefix(while: { $0 == " " }).count
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if indent <= 2 && !trimmed.isEmpty && !trimmed.hasPrefix("#") {
-                    insertAt = index
-                    break
-                }
-            }
-            lines.insert(contentsOf: newLines, at: insertAt)
         }
     }
 
