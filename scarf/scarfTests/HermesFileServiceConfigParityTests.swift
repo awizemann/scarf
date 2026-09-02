@@ -343,9 +343,24 @@ struct SettingsWriteReadParityTests {
         return lines.joined(separator: "\n") + "\n"
     }
 
+    /// `a.b.c` + one entry → nested block YAML whose leaf is a MAP, so
+    /// map-valued keys (`agent.reasoning_overrides`, read into
+    /// `maps[...]`) perturb the parse where neither a scalar nor a bullet
+    /// list would. Needed once the direct-YAML writers came under the
+    /// gate: `hermes config set` cannot express a map, which is exactly
+    /// why those surfaces splice the YAML themselves.
+    private static func mapYAML(key: String, entry: String) -> String {
+        let parts = key.split(separator: ".").map(String.init)
+        var lines = parts.enumerated().map { (i, part) in
+            String(repeating: "  ", count: i) + "\(part):"
+        }
+        lines.append(String(repeating: "  ", count: parts.count) + "\(entry): \(entry)")
+        return lines.joined(separator: "\n") + "\n"
+    }
+
     /// A key is "read" if at least one sentinel shape moves a field off its
     /// default. Covers string, bool (both directions — some defaults are
-    /// `true`), int, and block-list readers.
+    /// `true`), int, block-list, and block-map readers.
     static func isKeyReadable(_ key: String, defaultSignature: [String]) -> Bool {
         let candidates = [
             scalarYAML(key: key, value: sentinel),
@@ -353,6 +368,7 @@ struct SettingsWriteReadParityTests {
             scalarYAML(key: key, value: "false"),
             scalarYAML(key: key, value: "424242"),
             listYAML(key: key, item: sentinel),
+            mapYAML(key: key, entry: sentinel),
         ]
         for yaml in candidates where signature(HermesConfig(yaml: yaml)) != defaultSignature {
             return true
@@ -512,6 +528,17 @@ struct AllConfigWritersParityTests {
     private static let sampleQuickCommand = "deploy"
     private static let sampleProvider = "openai"
 
+    /// Keys `SettingsViewModel` splices straight into `config.yaml` through
+    /// `saveDirectYAML` rather than `hermes config set` — scanned off the
+    /// `label:` argument, which by construction IS the dotted key each
+    /// caller writes. Scanned rather than hard-coded so a fourth
+    /// direct-YAML surface is covered the moment it lands.
+    static var directYAMLKeys: [String] {
+        guard let source = try? read("scarf/Features/Settings/ViewModels/SettingsViewModel.swift")
+        else { return [] }
+        return matches(#"saveDirectYAML\(label:\s*"([^"]+)""#, in: stripComments(source))
+    }
+
     /// Platforms whose gateway-behavior toggles Scarf actually writes —
     /// scanned off the `GatewayBehaviorSection(platform: "…")` call sites so
     /// a newly-wired platform is covered automatically instead of needing a
@@ -543,9 +570,13 @@ struct AllConfigWritersParityTests {
             // `setSetting("auxiliary.\(task)…")` writers, which
             // `SettingsWriteReadParityTests` already pins by template and
             // expands into concrete keys.
+            // …plus 1 direct-YAML site (`saveDirectYAML`'s shared
+            // `context.writeText(path, …)`), whose three callers name the
+            // key they splice in their `label:`.
             Writer(path: "scarf/Features/Settings/ViewModels/SettingsViewModel.swift",
-                   nonLiteralKeySites: 8,
-                   computedKeys: SettingsWriteReadParityTests.expandedAuxKeys()),
+                   nonLiteralKeySites: 9,
+                   computedKeys: SettingsWriteReadParityTests.expandedAuxKeys()
+                    + directYAMLKeys),
             Writer(path: "scarf/Features/Settings/Views/Tabs/AdvancedTab.swift",
                    nonLiteralKeySites: 0, computedKeys: []),
             Writer(path: "scarf/Core/Services/HermesFileService.swift",
@@ -592,6 +623,11 @@ struct AllConfigWritersParityTests {
             // (`model.default`/`provider`/`base_url`/`api_key`/`api_mode`)
             // plus `model.context_length`, cleared through the managed-key
             // list rather than a `.clear(key: "…")` literal.
+            // Shared direct-YAML executor for the gateway allowlists: one
+            // `writeText` site whose `platform` / `key` both arrive as
+            // parameters from `GatewayBehaviorViewModel`.
+            Writer(path: "Packages/ScarfCore/Sources/ScarfCore/Services/GatewayConfigWriter.swift",
+                   nonLiteralKeySites: 1, computedKeys: []),
             Writer(path: "Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelConfigPlan.swift",
                    nonLiteralKeySites: 2,
                    computedKeys: ["model.context_length"]),
@@ -616,6 +652,21 @@ struct AllConfigWritersParityTests {
         #""config",\s*"(?:set|unset)""#,
         #"configKV\s*\[\s*""#,
         #"configKV:\s*\[String:\s*String\]\s*=\s*\[\s*\n"#,
+        // Direct-YAML writers. `hermes config set` stringifies arrays and
+        // can't express a sequence-of-mappings, so the list/map surfaces
+        // (gateway allowlists, agent.reasoning_overrides,
+        // model_catalog.excluded_providers, profile_routes) bypass the CLI
+        // and splice `~/.hermes/config.yaml` themselves. None of the argv
+        // or `setSetting` markers above can see that shape — before this
+        // marker `SettingsViewModel` was only caught INCIDENTALLY, by its
+        // unrelated `setSetting` calls, so a brand-new file whose ONLY
+        // config writes were direct-YAML splices walked straight past
+        // Guard 1. Both orderings are listed because the path constant and
+        // the write can appear either way round in a file; requiring BOTH
+        // tokens keeps non-config `writeText` callers (SOUL.md, the iOS
+        // memory snapshot) out of the discovered set.
+        #"paths\.configYAML[\s\S]*?\.writeText\("#,
+        #"\.writeText\([\s\S]*?paths\.configYAML"#,
     ]
 
     private static func swiftFiles() -> [String] {
@@ -831,7 +882,12 @@ struct AllConfigWritersParityTests {
             let setSettingSites = Self.count(#"(?:un)?setSetting\("#, in: source)
                 - Self.count(#"func\s+(?:un)?setSetting\("#, in: source)
             let configKVSites = Self.count(#"configKV\["#, in: source)
-            let sites = argvSites + setSettingSites + configKVSites
+            // Direct-YAML splice sites. The key is never a literal at the
+            // write itself (it lives in the transform / the caller's
+            // arguments), so each one is by definition a non-literal site
+            // and must be declared.
+            let directYAMLSites = Self.count(#"\.writeText\(\s*path\s*,"#, in: source)
+            let sites = argvSites + setSettingSites + configKVSites + directYAMLSites
             // …minus those whose key the scan captured as a FULLY STATIC
             // literal. An interpolated literal (`"quick_commands.\(name).type"`)
             // is a matched literal but NOT a checkable key, so it counts as

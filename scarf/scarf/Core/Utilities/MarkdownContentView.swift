@@ -409,6 +409,14 @@ struct StreamingMarkdownText: View {
     /// `settledSource` parsed, WITHOUT its trailing paragraph gap —
     /// the gap between settled and tail comes from the VStack spacing.
     @State private var settledText = AttributedString()
+    /// Incremental fence-scan cursor over the CURRENT unsettled tail.
+    /// While a fenced block streams nothing settles, so the tail grows
+    /// without bound and a from-scratch scan per delta is O(n²) on the
+    /// main actor. This carries the scan position and fence state at the
+    /// last scanned prefix so each delta only walks the bytes it added.
+    /// Invalidated whenever the tail's own start moves (a settle) or the
+    /// append invariant breaks (the `hasPrefix` reset path).
+    @State private var scanState = StreamingFenceScanner.ResumeState()
 
     var body: some View {
         // Derive the tail directly from current inputs so the very
@@ -440,6 +448,7 @@ struct StreamingMarkdownText: View {
         if !content.hasPrefix(settledSource) {
             settledSource = ""
             settledText = AttributedString()
+            scanState = StreamingFenceScanner.ResumeState()
         }
         let tail = content[settledSource.endIndex...]
         // Only settle at a blank line that is OUTSIDE a code fence. A
@@ -449,7 +458,10 @@ struct StreamingMarkdownText: View {
         // was then inline-parsed on its own, so the code block rendered
         // as garbled prose (and stayed that way until finalize swapped
         // in the block pipeline). See `StreamingFenceScanner`.
-        guard let boundary = StreamingFenceScanner.lastSettleBoundary(in: tail) else { return }
+        guard let boundary = StreamingFenceScanner.lastSettleBoundary(
+            in: tail,
+            resuming: &scanState
+        ) else { return }
         let completed = tail[..<boundary.completedEnd]
         if !completed.isEmpty {
             if !settledText.characters.isEmpty {
@@ -458,8 +470,11 @@ struct StreamingMarkdownText: View {
             settledText.append(MarkdownRenderer.inlineAttributedString(String(completed)))
         }
         // Consume the separator too — the settled/tail visual gap is
-        // owned by the VStack spacing from here on.
+        // owned by the VStack spacing from here on. The tail's start
+        // index moves with it, so the resume cursor no longer describes
+        // this tail and must be dropped.
         settledSource = String(content[..<boundary.boundaryEnd])
+        scanState = StreamingFenceScanner.ResumeState()
     }
 }
 
@@ -491,27 +506,81 @@ struct StreamingMarkdownText: View {
 /// off to the full block pipeline regardless. That is the intended
 /// trade — correctness over an incremental-render optimization.
 ///
-/// Cost is one linear pass over the (short) unsettled tail per delta,
-/// the same order as the `range(of:options:.backwards)` scan it
-/// replaces.
+/// Cost is one linear pass over the *new* bytes of the unsettled tail
+/// per delta when the caller carries a ``ResumeState`` (see
+/// ``lastSettleBoundary(in:resuming:)``), which matters because an open
+/// fence means nothing settles and the tail grows without bound —
+/// rescanning it whole per delta is O(n²) on the main actor. The
+/// stateless ``lastSettleBoundary(in:)`` overload keeps the original
+/// whole-tail behavior and is the oracle the incremental path is pinned
+/// against.
 enum StreamingFenceScanner {
+    /// Scan position plus fence state at the last scanned prefix of one
+    /// specific unsettled tail.
+    ///
+    /// The stored indices are `String.Index` values into the base string
+    /// the tail slices — valid across deltas for exactly the same reason
+    /// `content[settledSource.endIndex...]` is: the content only ever
+    /// grows by append, and every stored index sits immediately after a
+    /// `\n` (or at the tail start), which is always a scalar *and*
+    /// grapheme boundary that appending cannot move.
+    ///
+    /// A fresh value means "scan from the beginning". The owner must
+    /// reset to a fresh value whenever the tail's own start moves (a
+    /// settle) or the append invariant breaks.
+    struct ResumeState {
+        /// Start of the first not-yet-scanned line; nil = tail start.
+        fileprivate var nextLineStart: Substring.Index?
+        fileprivate var inFence = false
+        fileprivate var fenceChar: Character = "`"
+        fileprivate var fenceLength = 0
+        fileprivate var result: (completedEnd: Substring.Index, boundaryEnd: Substring.Index)?
+
+        init() {}
+    }
+
     /// `completedEnd` is the end of the text to settle (exclusive of
     /// the separator); `boundaryEnd` is the index just past the `\n\n`.
     /// Nil when there is no eligible boundary yet.
+    ///
+    /// Stateless whole-tail scan — behaviorally identical to the
+    /// resuming overload started from a fresh state.
     static func lastSettleBoundary(
         in tail: Substring
     ) -> (completedEnd: Substring.Index, boundaryEnd: Substring.Index)? {
-        var inFence = false
-        var fenceChar: Character = "`"
-        var fenceLength = 0
-        var result: (completedEnd: Substring.Index, boundaryEnd: Substring.Index)?
+        var fresh = ResumeState()
+        return lastSettleBoundary(in: tail, resuming: &fresh)
+    }
 
+    /// Incremental form: resumes at `state`'s cursor and only walks the
+    /// lines appended since the last call, then writes the new cursor
+    /// and fence state back.
+    static func lastSettleBoundary(
+        in tail: Substring,
+        resuming state: inout ResumeState
+    ) -> (completedEnd: Substring.Index, boundaryEnd: Substring.Index)? {
+        // A cursor that no longer addresses this tail means the caller
+        // failed to invalidate; fall back to a full rescan rather than
+        // trusting it.
         var lineStart = tail.startIndex
+        if let saved = state.nextLineStart, saved >= tail.startIndex, saved <= tail.endIndex {
+            lineStart = saved
+        } else if state.nextLineStart != nil {
+            state = ResumeState()
+        }
+
+        var inFence = state.inFence
+        var fenceChar = state.fenceChar
+        var fenceLength = state.fenceLength
+        var result = state.result
+
         // Only fully-terminated lines are considered: an unterminated
         // trailing line can't be half of a `\n\n` separator, and its
         // fence marker may still be mid-delta (` `` ` before the third
         // backtick arrives), so judging it would flip state on a
-        // partial token.
+        // partial token. That is also what makes the cursor safe to
+        // persist: every line it has already consumed was complete, so
+        // no later delta can change how it was classified.
         while let newline = tail[lineStart...].firstIndex(of: "\n") {
             let line = tail[lineStart..<newline]
             if inFence {
@@ -534,6 +603,12 @@ enum StreamingFenceScanner {
             }
             lineStart = tail.index(after: newline)
         }
+
+        state.nextLineStart = lineStart
+        state.inFence = inFence
+        state.fenceChar = fenceChar
+        state.fenceLength = fenceLength
+        state.result = result
         return result
     }
 

@@ -388,7 +388,6 @@
   "Couldn't read cron jobs": "cron ジョブを読み取れませんでした",
   "Couldn't reset memory": "メモリをリセットできませんでした",
   "Couldn't save": "保存できませんでした",
-  "Couldn't save %@: %@": "%1$@ を保存できませんでした: %2$@",
   "Couldn't set up the project's Kanban tenant.": "プロジェクトの Kanban テナントを設定できませんでした。",
   "Couldn't update slash commands": "スラッシュコマンドを更新できませんでした",
   "Couldn’t open this conversation": "この会話を開けませんでした",

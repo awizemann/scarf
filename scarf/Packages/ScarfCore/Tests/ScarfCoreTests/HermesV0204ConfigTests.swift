@@ -10,14 +10,14 @@ struct HermesV0204ConfigTests {
 
     // MARK: - Delegation defaults (HermesConfig+YAML.swift)
 
-    /// The v0.20.4 default (250) is no longer baked into the parse — hosts
-    /// older than v0.20.4 still run 50, so an absent key is a SENTINEL and
+    /// The 250 default (shipped v0.20.2, tag v2026.8.16) is no longer baked into the parse — hosts
+    /// older than v0.20.2 still run 50, so an absent key is a SENTINEL and
     /// the effective value comes from the capability-aware resolver. Full
     /// matrix in `HermesCheckpointDelegationDefaultsTests`.
     @Test func delegationMaxIterationsDefaultsTo250WhenUnset() {
         let cfg = HermesConfig(yaml: "")
         #expect(cfg.delegation.maxIterations == 0)
-        let v0204 = HermesCapabilities.parseLine("Hermes Agent v0.20.4 (2026.8.16)")
+        let v0204 = HermesCapabilities.parseLine("Hermes Agent v0.20.4 (2026.8.18)")
         #expect(cfg.displayDelegationMaxIterations(capabilities: v0204) == 250)
     }
 
@@ -29,12 +29,12 @@ struct HermesV0204ConfigTests {
         #expect(cfg.delegation.maxIterations == 40)
     }
 
-    /// Same sentinel treatment as `max_iterations` — pre-v0.20.4 hosts
+    /// Same sentinel treatment as `max_iterations` — pre-v0.20.2 hosts
     /// default to 3, not 10.
     @Test func delegationMaxConcurrentChildrenDefaultsTo10WhenUnset() {
         let cfg = HermesConfig(yaml: "")
         #expect(cfg.delegation.maxConcurrentChildren == 0)
-        let v0204 = HermesCapabilities.parseLine("Hermes Agent v0.20.4 (2026.8.16)")
+        let v0204 = HermesCapabilities.parseLine("Hermes Agent v0.20.4 (2026.8.18)")
         #expect(cfg.displayDelegationMaxConcurrentChildren(capabilities: v0204) == 10)
     }
 
@@ -232,7 +232,7 @@ struct HermesV0204ConfigTests {
         let absent = HermesConfig(yaml: "")
         let v021 = HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)")
         let v0206 = HermesCapabilities.parseLine("Hermes Agent v0.20.6 (2026.8.27)")
-        let v0204 = HermesCapabilities.parseLine("Hermes Agent v0.20.4 (2026.8.16)")
+        let v0204 = HermesCapabilities.parseLine("Hermes Agent v0.20.4 (2026.8.18)")
         #expect(absent.displayGatewayTurnLeaseTimeout(capabilities: v021) == 5)
         #expect(absent.displayGatewayTurnLeaseTimeout(capabilities: v0206) == 1800)
         #expect(absent.displayGatewayTurnLeaseTimeout(capabilities: v0204) == 1800)

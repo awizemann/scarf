@@ -224,6 +224,89 @@ import Foundation
         #expect(await client.isConnected == false)
         #expect(await client.channelCountForTesting == 0)
     }
+
+    /// One gate per spawn attempt, so a superseded start and its
+    /// successor can be released independently.
+    actor GateBoard {
+        private(set) var spawned: [GatedChannel] = []
+        private var open: Set<Int> = []
+
+        /// Records a channel and blocks until that attempt's gate opens.
+        func arrive(_ channel: GatedChannel) async -> Int {
+            spawned.append(channel)
+            let index = spawned.count - 1
+            while !open.contains(index) {
+                try? await Task.sleep(nanoseconds: 2_000_000)
+            }
+            return index
+        }
+
+        func openGate(_ index: Int) { open.insert(index) }
+        var count: Int { spawned.count }
+    }
+
+    /// THE stop-then-restart race.
+    ///
+    /// Start A is half-open inside the factory. `stop()` supersedes it
+    /// (generation bump) and `start()` B begins, setting `state =
+    /// .starting`. A then fails out of its gated factory. A's `catch`
+    /// used to run `if state == .starting { state = .idle }` — reading
+    /// B's `.starting` as its own and stomping it. B subsequently found
+    /// `state != .starting` and skipped its own `state = .running`, so
+    /// the client reported `.idle` while holding a live, initialized
+    /// channel. The cleanup must be gated on the generation, not on the
+    /// state value.
+    @Test func supersededStartDoesNotStompTheSuccessorsState() async throws {
+        let board = GateBoard()
+        let client = ACPClient(context: .local) { _ in
+            let ch = GatedChannel()
+            _ = await board.arrive(ch)
+            return ch
+        }
+
+        // A: half-open inside the factory.
+        let startA = Task { try? await client.start() }
+        try await waitFor { await board.count == 1 }
+        #expect(await client.state == .starting)
+
+        // stop() supersedes A without awaiting it.
+        await client.stop()
+        #expect(await client.state == .stopped)
+
+        // B: the successor. It owns `.starting` from here on.
+        let startB = Task { try await client.start() }
+        try await waitFor { await board.count == 2 }
+        #expect(await client.state == .starting)
+
+        // Let A fall out of the factory and unwind. Its channel is
+        // closed by the generation guard in `performStart`, and its
+        // `catch` must leave B's `.starting` alone.
+        await board.openGate(0)
+        _ = await startA.value
+        let chA = await board.spawned[0]
+        try await waitFor { await chA.closed }
+        // With the bug this read `.idle`.
+        #expect(await client.state == .starting)
+
+        // B completes normally and reaches `.running`.
+        await board.openGate(1)
+        try await waitFor {
+            guard await board.count >= 2 else { return false }
+            return await board.spawned[1].sent.count >= 1
+        }
+        let chB = await board.spawned[1]
+        let initId = await chB.lastSentId() ?? 1
+        await chB.reply(with: #"{"jsonrpc":"2.0","id":\#(initId),"result":{}}"#)
+        try await startB.value
+
+        // The whole point: no `.idle` with a live channel.
+        #expect(await client.state == .running)
+        #expect(await client.isConnected)
+        #expect(await client.channelCountForTesting == 1)
+        #expect(await chB.closed == false)
+        await client.stop()
+        #expect(await client.state == .stopped)
+    }
 }
 
 extension ACPClient {

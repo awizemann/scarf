@@ -386,7 +386,6 @@
   "Couldn't read cron jobs": "无法读取定时任务",
   "Couldn't reset memory": "无法重置记忆",
   "Couldn't save": "无法保存",
-  "Couldn't save %@: %@": "无法保存 %1$@:%2$@",
   "Couldn't set up the project's Kanban tenant.": "无法为该项目设置看板租户。",
   "Couldn't update slash commands": "无法更新斜杠命令",
   "Couldn’t open this conversation": "无法打开此对话",

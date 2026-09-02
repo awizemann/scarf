@@ -1270,42 +1270,72 @@ public struct HermesConfig: Sendable {
 
     /// Effective `checkpoints.enabled` for display: the on-disk value when
     /// the key is present, otherwise the connected host's own default —
-    /// **false** on v0.21.0+, **true** on every older supported host
-    /// (v0.21 flipped auto-checkpointing to opt-in).
+    /// **false** on every supported host.
     ///
-    /// Display-only; callers must never write the resolved value back. An
-    /// unknown host version resolves to the older `true`, matching the
-    /// `displayGatewayTurnLeaseTimeout` convention (unknown host is more
-    /// likely to be an old one).
+    /// The default is NOT a v0.21 flip. `cli.py` has read
+    /// `cp_cfg.get("enabled", False)` continuously since well before the
+    /// v0.6.0 minimum: v2026.3.30 (v0.6.0) `cli.py:1163`, v2026.5.7
+    /// (v0.13.0) `cli.py:2310`, v2026.8.3 (v0.20.0) `cli.py:4474`,
+    /// v2026.8.31 (v0.21.0) `cli.py:5501` — all `False`. The
+    /// `hermes_cli/config_defaults.py` dict agrees from the moment it exists
+    /// (v2026.7.30 / v0.19.1 `:398`, v2026.8.31 / v0.21.0 `:688`). The
+    /// "v2 flipped True → False" line in the v0.21 `config_defaults.py`
+    /// comment block describes the checkpoint engine's own pre-history, not
+    /// any version Scarf supports, so there is no host-version branch here
+    /// and no capability gate to consult.
+    ///
+    /// Display-only; callers must never write the resolved value back.
     public func displayCheckpointsEnabled(capabilities: HermesCapabilities) -> Bool {
         if let enabled = checkpoints.enabled { return enabled }
-        return !capabilities.isV021OrLater
+        return false
     }
 
     /// Effective `checkpoints.max_snapshots` for display: the on-disk value
-    /// when set, otherwise the host default — **20** on v0.21.0+, **50** on
-    /// older hosts. Display-only.
+    /// when set, otherwise the host default — **20** on v0.13.0+, **50** on
+    /// older supported hosts.
+    ///
+    /// The 50 → 20 change lands at tag v2026.5.7 (v0.13.0) `cli.py:2311`;
+    /// the immediately preceding tag v2026.4.30 (v0.12.0) `cli.py:2070`
+    /// still reads `cp_cfg.get("max_snapshots", 50)`. Every later tag
+    /// through v2026.8.31 (v0.21.0) `cli.py:5502` keeps 20, so this is a
+    /// v0.13 floor, not a v0.21 one. The pre-floor branch stays live because
+    /// the supported minimum is v0.6.0 (v2026.3.30 `cli.py:1164` = 50).
+    ///
+    /// Display-only. An unknown host version resolves to the older 50,
+    /// matching the `displayGatewayTurnLeaseTimeout` convention.
     public func displayCheckpointsMaxSnapshots(capabilities: HermesCapabilities) -> Int {
         if checkpoints.maxSnapshots > 0 { return checkpoints.maxSnapshots }
-        return capabilities.isV021OrLater ? 20 : 50
+        return capabilities.isV013OrLater ? 20 : 50
     }
 
     /// Effective `delegation.max_iterations` for display: the on-disk value
-    /// when set, otherwise the host default — **250** on v0.20.4+ (migration
-    /// 36 raised it), **50** on older hosts. Display-only.
+    /// when set, otherwise the host default — **250** on v0.20.2+, **50** on
+    /// older hosts.
+    ///
+    /// Floor verified against the tagged source, not the release notes:
+    /// v2026.8.16 (v0.20.2) `hermes_cli/config_defaults.py:1821` is the
+    /// first tag reading `"max_iterations": 250`, and the same tag adds
+    /// `hermes_cli/config_migrations.py:757` `_migrate_to_36`. The previous
+    /// tag v2026.8.13 (v0.20.1) `config_defaults.py:1764` still reads 50 and
+    /// has no `_migrate_to_36`. The migration therefore ships in v0.20.2,
+    /// not v0.20.4. Display-only.
     public func displayDelegationMaxIterations(capabilities: HermesCapabilities) -> Int {
         if delegation.maxIterations > 0 { return delegation.maxIterations }
-        return capabilities.isV0204OrLater ? 250 : 50
+        return capabilities.isV0202OrLater ? 250 : 50
     }
 
     /// Effective `delegation.max_concurrent_children` for display: the
     /// on-disk value when set, otherwise the host default — **10** on
-    /// v0.20.4+ (migration 37 raised it), **3** on older hosts. The row is
-    /// itself gated on `isV0204OrLater`, so the pre-v0.20.4 branch only
-    /// matters for non-UI readers. Display-only.
+    /// v0.20.2+, **3** on older hosts.
+    ///
+    /// Same tagged evidence as `displayDelegationMaxIterations`:
+    /// v2026.8.16 (v0.20.2) `hermes_cli/config_defaults.py:1846` is the
+    /// first `"max_concurrent_children": 10` and the same tag adds
+    /// `config_migrations.py:787` `_migrate_to_37`; v2026.8.13 (v0.20.1)
+    /// `config_defaults.py:1789` is still 3. Display-only.
     public func displayDelegationMaxConcurrentChildren(capabilities: HermesCapabilities) -> Int {
         if delegation.maxConcurrentChildren > 0 { return delegation.maxConcurrentChildren }
-        return capabilities.isV0204OrLater ? 10 : 3
+        return capabilities.isV0202OrLater ? 10 : 3
     }
 
     /// Human-readable form of `displayMaxTurns(capabilities:)` — "Unlimited"

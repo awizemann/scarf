@@ -221,13 +221,29 @@ public actor ACPClient {
             // Only clear OUR task: a `stop()` + `start()` pair that
             // landed while we awaited owns `startTask` now (the
             // generation bump in `stop()` is the tell).
-            if startGeneration == generation { startTask = nil }
-            // A `stop()` that landed while we were starting owns the
-            // final state — don't stomp `.stopped` back to `.running`.
-            if state == .starting { state = .running }
+            //
+            // EVERY piece of cleanup here is gated on the GENERATION,
+            // never on the current `state` value. `state == .starting`
+            // is not a sufficient guard: once a `stop()` + `start()`
+            // pair has landed mid-flight, the SUCCESSOR start has set
+            // `state = .starting` itself, so a superseded attempt reads
+            // its own sentinel in someone else's state and stomps it.
+            // The generation is the only thing that distinguishes
+            // "still mine" from "the successor's".
+            guard startGeneration == generation else { return }
+            startTask = nil
+            state = .running
         } catch {
-            if startGeneration == generation { startTask = nil }
-            if state == .starting { state = .idle }
+            // Same rule on the failure path — this is the one that
+            // actually bit. The old `if state == .starting { state =
+            // .idle }` ran unconditionally, so a superseded attempt's
+            // failure knocked the successor's `.starting` down to
+            // `.idle`; the successor then found `state != .starting` on
+            // success and left the client reporting `.idle` while
+            // holding a live channel.
+            guard startGeneration == generation else { throw error }
+            startTask = nil
+            state = .idle
             throw error
         }
     }

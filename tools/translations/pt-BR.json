@@ -390,7 +390,6 @@
   "Couldn't read cron jobs": "Não foi possível ler as tarefas cron",
   "Couldn't reset memory": "Não foi possível redefinir a memória",
   "Couldn't save": "Não foi possível salvar",
-  "Couldn't save %@: %@": "Não foi possível salvar %1$@: %2$@",
   "Couldn't set up the project's Kanban tenant.": "Não foi possível configurar o tenant Kanban do projeto.",
   "Couldn't update slash commands": "Não foi possível atualizar os comandos slash",
   "Couldn’t open this conversation": "Não foi possível abrir esta conversa",

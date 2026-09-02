@@ -386,7 +386,6 @@
   "Couldn't read cron jobs": "Impossible de lire les tâches cron",
   "Couldn't reset memory": "Impossible de réinitialiser la mémoire",
   "Couldn't save": "Impossible d'enregistrer",
-  "Couldn't save %@: %@": "Impossible d'enregistrer %1$@ : %2$@",
   "Couldn't set up the project's Kanban tenant.": "Impossible de configurer le tenant Kanban du projet.",
   "Couldn't update slash commands": "Impossible de mettre à jour les commandes slash",
   "Couldn’t open this conversation": "Impossible d'ouvrir cette conversation",
