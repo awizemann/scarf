@@ -200,7 +200,15 @@ final class FleetApplyViewModel {
         // would let the counter run past its own total.
         applyProgress = (0, plan.targets.count)
         let task = Task.detached(priority: .userInitiated) { [weak self] () -> [FleetApplyExecutor.TargetResult] in
-            await FleetApplyExecutor(contexts: contexts).execute(
+            // Bound to a local `let` BEFORE the `onProgress` closure is formed.
+            // Binding it *inside* that closure (the shape this file carried
+            // until the Release ratchet caught it) does not help: the closure
+            // runs concurrently and the reference it captures is still the
+            // outer weak `self` binding, which Swift 6 treats as a captured
+            // var (SendableClosureCaptures). Capturing `owner` instead gives
+            // the closure an immutable value of its own.
+            let owner = self
+            return await FleetApplyExecutor(contexts: contexts).execute(
                 plan,
                 source: sourceProject,
                 sourceCronJobs: cronJobs,
@@ -209,10 +217,6 @@ final class FleetApplyViewModel {
                     // Hops to the MainActor arrive in arbitrary order, so the
                     // counter is clamped monotonic — a progress bar that goes
                     // backwards reads as a bug in the push itself.
-                    // `owner` is a local `let` copy of the weakly-captured
-                    // optional: a nested `Task` may not capture the outer
-                    // closure's `self` *var* (Swift 6 SendableClosureCaptures).
-                    let owner = self
                     Task { @MainActor [owner] in
                         guard let owner else { return }
                         let previous = owner.applyProgress?.done ?? 0

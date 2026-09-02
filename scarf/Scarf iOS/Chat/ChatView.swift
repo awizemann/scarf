@@ -2158,10 +2158,21 @@ final class ChatController {
                     let added = vm.messages.count - countBefore
                     if added > 0 {
                         vm.transientHint = "Resynced \(added) new message\(added == 1 ? "" : "s")."
-                        Task { @MainActor [weak vm] in
+                        // `vm` is a property of the enclosing view, so naming
+                        // it inside the nested Task would capture `self`
+                        // implicitly and strongly — while a `[weak vm]` list
+                        // would give this one closure an ownership that
+                        // differs from that same implicit strong capture in
+                        // the outer scope (Swift 6 ImplicitStrongCapture).
+                        // Bind the reference to a local BEFORE the closure and
+                        // capture the local: no `self` capture, one unambiguous
+                        // ownership, and the 4-second hop keeps alive only the
+                        // view model it actually touches.
+                        let hinted = vm
+                        Task { @MainActor [hinted] in
                             try? await Task.sleep(nanoseconds: 4_000_000_000)
-                            if vm?.transientHint?.hasPrefix("Resynced") == true {
-                                vm?.transientHint = nil
+                            if hinted.transientHint?.hasPrefix("Resynced") == true {
+                                hinted.transientHint = nil
                             }
                         }
                     }
