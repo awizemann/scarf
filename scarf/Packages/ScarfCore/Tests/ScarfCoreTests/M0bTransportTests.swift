@@ -55,10 +55,17 @@ import Foundation
     }
 
     @Test func serverContextPathsLocalVsRemote() {
-        let local = ServerContext.local
+        // Assert the local path shape through the `.local(home:)` injection
+        // seam — the default `.local` resolves via `HermesProfileResolver`,
+        // which reads the process-wide SCARF_HERMES_HOME env var that the
+        // serialized HermesProfileResolverOverrideTests suite mutates; reading
+        // it here would race that suite under parallel execution. The
+        // env-dependent wiring is pinned deterministically in
+        // serverContextLocalPathsRouteThroughProfileResolver (that suite).
+        let injectedHome = "/tmp/scarf-unit-home/.hermes"
+        let local = ServerContext.local(home: URL(fileURLWithPath: injectedHome))
         #expect(local.paths.isRemote == false)
-        // Local home picks up $HOME or NSHomeDirectory(), then appends /.hermes.
-        #expect(local.paths.home.hasSuffix("/.hermes"))
+        #expect(local.paths.home == injectedHome)
 
         let remote = ServerContext(
             id: UUID(),
