@@ -167,6 +167,7 @@ struct WebhooksView: View {
         HStack(spacing: 12) {
             Image(systemName: "arrow.up.right.square")
                 .foregroundStyle(.blue)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(webhook.name)
                     .font(.system(.body, design: .monospaced, weight: .medium))
@@ -200,11 +201,17 @@ struct WebhooksView: View {
                     }
                 }
             }
+            // Name, description, route, delivery mode and every event chip
+            // read as one announcement instead of a dozen fragments; the
+            // two buttons stay outside it.
+            .accessibilityElement(children: .combine)
             Spacer()
             Button("Test") { viewModel.test(webhook) }
                 .controlSize(.small)
+                .accessibilityLabel(Text("Test \(webhook.name)"))
             Button("Remove", role: .destructive) { pendingRemove = webhook }
                 .controlSize(.small)
+                .accessibilityLabel(Text("Remove \(webhook.name)"))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

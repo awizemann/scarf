@@ -22,6 +22,7 @@ struct CronView: View {
     /// shared flag: one `Bool` made expanding on job A silently expand the
     /// panel for every other job the user then selected.
     @State private var expandedIncidentJobIDs: Set<String> = []
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     @Environment(AppCoordinator.self) private var coordinator
     @Environment(HermesFileWatcher.self) private var fileWatcher
@@ -291,16 +292,24 @@ struct CronView: View {
                     if !job.enabled {
                         ScarfBadge("paused", kind: .neutral)
                     }
+                    // Colour + an indefinite pulse were the ONLY rendering
+                    // of run state. The pulse now stops under Reduce Motion
+                    // (an endlessly repeating animation is exactly what that
+                    // setting exists to suppress), and the state is spoken
+                    // rather than left to hue.
                     Circle()
                         .fill(statusDotColor(job))
                         .frame(width: 7, height: 7)
-                        .opacity(job.effectiveState == "running" ? 0.55 : 1.0)
+                        .opacity(job.effectiveState == "running" && !reduceMotion ? 0.55 : 1.0)
                         .animation(
-                            job.effectiveState == "running"
+                            job.effectiveState == "running" && !reduceMotion
                                 ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true)
                                 : .default,
                             value: job.effectiveState
                         )
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(Text("Status"))
+                        .accessibilityValue(Text(statusDotLabel(job)))
                 }
                 HStack(spacing: 10) {
                     Text(job.schedule.expression ?? job.schedule.display ?? "—")
@@ -356,6 +365,15 @@ struct CronView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(ScarfSpace.s8)
+    }
+
+    /// The dot's meaning in words. Same precedence as `statusDotColor`,
+    /// so the two can never disagree.
+    private func statusDotLabel(_ job: HermesCronJob) -> LocalizedStringKey {
+        if !job.enabled { return "Paused" }
+        if job.effectiveState == "running" { return "Running" }
+        if job.lastError != nil { return "Last run failed" }
+        return "OK"
     }
 
     private func statusDotColor(_ job: HermesCronJob) -> Color {

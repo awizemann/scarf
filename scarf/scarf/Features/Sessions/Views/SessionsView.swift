@@ -609,7 +609,9 @@ private struct SessionTableRow: View {
     /// geometry (fixed 120pt) and the same row-wide hover highlight.
     var body: some View {
         HStack(spacing: 6) {
-            projectCell
+            if hasProject {
+                projectCell
+            }
             rowButton
         }
         .padding(.horizontal, ScarfSpace.s4)
@@ -618,9 +620,23 @@ private struct SessionTableRow: View {
         .onHover { hover = $0 }
     }
 
+    private var hasProject: Bool {
+        if let projectName { return !projectName.isEmpty }
+        return false
+    }
+
     private var rowButton: some View {
         Button(action: onTap) {
             HStack(spacing: 6) {
+                if !hasProject {
+                    // Placeholder for the project column, kept INSIDE the
+                    // button so the empty stretch still opens the session.
+                    Text("—")
+                        .font(ScarfFont.monoSmall)
+                        .foregroundStyle(ScarfColor.foregroundFaint)
+                        .frame(width: 120, alignment: .leading)
+                        .accessibilityHidden(true)
+                }
                 titleCell
                 Text(modelLabel)
                     .font(ScarfFont.monoSmall)
@@ -675,6 +691,10 @@ private struct SessionTableRow: View {
         return parts.joined(separator: ", ")
     }
 
+    /// Only rendered when there IS a project. With no project the 120pt
+    /// column stays inside the row button (see `rowButton`) so clicking
+    /// that empty stretch still opens the session, exactly as it did when
+    /// the whole row was one button.
     private var projectCell: some View {
         Group {
             if let projectName, !projectName.isEmpty {
@@ -695,12 +715,6 @@ private struct SessionTableRow: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text("Project \(projectName)"))
                 .accessibilityHint(Text("Filters the list to this project"))
-            } else {
-                // Decorative placeholder — "dash" is noise in the row.
-                Text("—")
-                    .font(ScarfFont.monoSmall)
-                    .foregroundStyle(ScarfColor.foregroundFaint)
-                    .accessibilityHidden(true)
             }
         }
         .frame(width: 120, alignment: .leading)

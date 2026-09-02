@@ -183,8 +183,11 @@ struct ProfilesView: View {
                 ForEach(viewModel.profiles) { profile in
                     let viewing = isViewing(profile)
                     HStack {
+                        // Redundant with the "viewing"/"active" badge on
+                        // the same row.
                         Image(systemName: viewing ? "eye.fill" : (profile.isActive ? "checkmark.circle.fill" : "person.crop.square"))
                             .foregroundStyle(viewing ? Color.accentColor : (profile.isActive ? .green : .secondary))
+                            .accessibilityHidden(true)
                         Text(profile.name)
                             .font(.system(.body, design: .monospaced))
                         Spacer()
@@ -203,6 +206,8 @@ struct ProfilesView: View {
                         }
                     }
                     .tag(profile.id)
+                    // Name plus state badge as one announcement.
+                    .accessibilityElement(children: .combine)
                     .contextMenu {
                         if viewModel.context.isRemote {
                             Button("View this profile") { profileScope?.select(profile.name) }

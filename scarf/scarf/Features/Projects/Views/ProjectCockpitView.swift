@@ -110,6 +110,7 @@ struct ProjectCockpitView: View {
             }
             .buttonStyle(.borderless)
             .help("Refresh this project")
+            .accessibilityLabel(Text("Refresh this project"))
 
             Button {
                 serverContext.openInLocalEditor(project.path)
@@ -118,6 +119,7 @@ struct ProjectCockpitView: View {
             }
             .buttonStyle(.borderless)
             .help("Reveal in Finder")
+            .accessibilityLabel(Text("Reveal in Finder"))
             .disabled(serverContext.isRemote)
         }
     }
@@ -236,9 +238,14 @@ struct ProjectCockpitView: View {
                     .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md))
                 }
                 .buttonStyle(.plain)
+                // The active tab is tinted and nothing else; without the
+                // trait VoiceOver cannot tell which panel is showing.
+                .accessibilityAddTraits(selectedPanel == panel ? [.isSelected] : [])
             }
             Spacer()
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Project panels"))
     }
 
     // MARK: - Panel content
@@ -675,6 +682,7 @@ struct CockpitEmptyState: View {
             Image(systemName: icon)
                 .font(.system(size: 32))
                 .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
             Text(text)
                 .font(.callout)
                 .foregroundStyle(.secondary)

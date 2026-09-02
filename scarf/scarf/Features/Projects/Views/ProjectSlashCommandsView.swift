@@ -280,10 +280,14 @@ struct SlashCommandEditorSheet: View {
                     Text("Use `{{argument}}` to substitute the user's input. `{{argument | default: \"…\"}}` provides a fallback when the user invokes the command without arguments.")
                         .scarfStyle(.caption)
                         .foregroundStyle(.secondary)
+                    // A TextEditor has no label of its own — the "Prompt
+                    // template" section header is not one, so this was an
+                    // unnamed text area to VoiceOver and Voice Control.
                     TextEditor(text: Binding(
                         get: { viewModel.draft?.body ?? "" },
                         set: { viewModel.draft?.body = $0 }
                     ))
+                    .accessibilityLabel(Text("Prompt template"))
                     .font(.system(.body, design: .monospaced))
                     .frame(minHeight: 220)
                     .border(Color.secondary.opacity(0.3))

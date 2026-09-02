@@ -117,15 +117,21 @@ struct ProjectSessionsView: View {
 
     private func sessionList(_ sessions: [HermesSession]) -> some View {
         List(sessions) { session in
-            ProjectSessionRow(session: session)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    // Route into the Chat feature with this session
-                    // as a resume target. Existing ChatView logic
-                    // handles ACP reconnect.
-                    coordinator.selectedSessionId = session.id
-                    coordinator.selectedSection = .chat
-                }
+            // A real Button, not `.onTapGesture`: a tap gesture gives the
+            // row no button trait, no keyboard activation and nothing for
+            // VoiceOver to activate — it was mouse-only.
+            Button {
+                // Route into the Chat feature with this session
+                // as a resume target. Existing ChatView logic
+                // handles ACP reconnect.
+                coordinator.selectedSessionId = session.id
+                coordinator.selectedSection = .chat
+            } label: {
+                ProjectSessionRow(session: session)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
         .listStyle(.plain)
     }
@@ -144,6 +150,7 @@ private struct ProjectSessionRow: View {
             Image(systemName: iconForSource(session.source))
                 .foregroundStyle(.secondary)
                 .frame(width: 22)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(displayTitle)
                     .font(.callout)
@@ -171,11 +178,27 @@ private struct ProjectSessionRow: View {
             }
         }
         .padding(.vertical, 4)
+        // One name-first announcement instead of five fragments led by a
+        // truncated session id.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: rowLabel))
+    }
+
+    /// Fragments compose through `String(localized:)`; a plain String on
+    /// `.accessibilityLabel` binds the StringProtocol overload and is
+    /// never extracted.
+    private var rowLabel: String {
+        var parts: [String] = [displayTitle]
+        parts.append(String(localized: "^[\(session.messageCount) message](inflect: true)"))
+        if let started = formattedStart {
+            parts.append(String(localized: "started \(started)"))
+        }
+        return parts.joined(separator: ", ")
     }
 
     private var displayTitle: String {
         if let t = session.title, !t.isEmpty { return t }
-        return "Untitled session"
+        return String(localized: "Untitled session")
     }
 
     private static let startFormatter: DateFormatter = {

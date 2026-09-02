@@ -204,8 +204,10 @@ struct PluginsView: View {
 
     private func row(_ plugin: HermesPlugin) -> some View {
         HStack(spacing: 12) {
+            // Redundant with the activation badge in the row text.
             Image(systemName: plugin.activation.isActive ? "app.badge.checkmark.fill" : "app.badge")
                 .foregroundStyle(plugin.activation.isActive ? .green : .secondary)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(plugin.name)
@@ -244,6 +246,9 @@ struct PluginsView: View {
                         .textSelection(.enabled)
                 }
             }
+            // Name, version, activation badge, description and source read
+            // as one announcement; the action buttons stay outside it.
+            .accessibilityElement(children: .combine)
             Spacer()
             Button(plugin.activation.isActive ? "Disable" : "Enable") {
                 if plugin.activation.isActive {
@@ -258,10 +263,19 @@ struct PluginsView: View {
                 }
             }
             .controlSize(.small)
+            // Every row repeats these three verbs; the plugin name is what
+            // makes them distinguishable to Voice Control and VoiceOver.
+            .accessibilityLabel(
+                plugin.activation.isActive
+                    ? Text("Disable \(plugin.name)")
+                    : Text("Enable \(plugin.name)")
+            )
             Button("Update") { viewModel.update(plugin) }
                 .controlSize(.small)
+                .accessibilityLabel(Text("Update \(plugin.name)"))
             Button("Remove", role: .destructive) { pendingRemove = plugin }
                 .controlSize(.small)
+                .accessibilityLabel(Text("Remove \(plugin.name)"))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -300,7 +314,11 @@ struct PluginsView: View {
             Text("Provide a Git URL (https://github.com/...) or a shorthand like `owner/repo`.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            // The placeholder is a format example, not a name — as the
+            // field's only label VoiceOver would read the whole sample URL
+            // and Voice Control would have nothing sayable to target.
             TextField("github.com/owner/plugin-repo  or  owner/repo", text: $installIdentifier)
+                .accessibilityLabel(Text("Plugin repository"))
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.caption, design: .monospaced))
             Toggle("Enable after installing", isOn: $enableOnInstall)

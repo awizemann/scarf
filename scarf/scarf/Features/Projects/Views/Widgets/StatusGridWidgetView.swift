@@ -74,5 +74,11 @@ private struct StatusGridCellView: View {
                 .foregroundStyle(.secondary)
         }
         .help(cell.tooltip ?? cell.label + (cell.status.map { " — \($0)" } ?? ""))
+        // The cell's whole meaning is a coloured bar over a 9pt caption:
+        // the status existed only as hue and as a hover tooltip.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: cell.label))
+        .accessibilityValue(Text(verbatim: cell.status ?? String(localized: "unknown")))
+        .accessibilityHint(cell.tooltip.map { Text(verbatim: $0) } ?? Text(""))
     }
 }

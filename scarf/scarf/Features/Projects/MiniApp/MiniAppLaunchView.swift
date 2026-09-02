@@ -48,8 +48,13 @@ struct CockpitMiniAppsPanel: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            // Every row's button reads "Open"; without the mini-app's name
+            // a list of them is unusable to Voice Control and gives
+            // VoiceOver nothing to distinguish one row's button from the
+            // next. The visible title stays "Open".
             Button("Open") { onOpen(manifest) }
                 .buttonStyle(ScarfSecondaryButton())
+                .accessibilityLabel(Text("Open \(manifest.name)"))
         }
         .padding(.vertical, 2)
     }
