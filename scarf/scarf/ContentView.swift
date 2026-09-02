@@ -81,7 +81,16 @@ struct ContentView: View {
         // Cached like Cron/Peers: the roster is a per-profile file scan
         // plus avatar reads, all over the transport — rebuilding it on
         // every section switch would re-read every profile over SSH.
-        case .bots:             BotsView(viewModel: cachedVM(.bots) { BotsViewModel(context: serverContext) })
+        // Peers is passed in from the coordinator's own cache — same
+        // instance as the standalone Peers section below — so an async-run
+        // handle started in one pane stays visible/stoppable in the other
+        // (queued audit-board item A2-F5).
+        case .bots:             BotsView(viewModel: cachedVM(.bots) {
+                                     BotsViewModel(
+                                         context: serverContext,
+                                         peers: cachedVM(.peers) { PeersViewModel(context: serverContext) }
+                                     )
+                                 })
         case .chat:             ChatView()
         case .memory:           MemoryView(context: serverContext)
         case .curator:          CuratorView(context: serverContext)

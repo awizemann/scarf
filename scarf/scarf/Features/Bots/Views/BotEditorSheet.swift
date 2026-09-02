@@ -65,10 +65,16 @@ struct BotEditorSheet: View {
     private var isCreate: Bool { context.mode == .create }
 
     /// Create needs a valid, addressable, non-`default` profile id. Edit
-    /// already has one.
+    /// already has one. `HermesProfileScope.isValidName` alone accepts
+    /// `"default"` (it IS a valid, addressable name — just not one you can
+    /// create), so `createBot` refuses it separately; mirroring that refusal
+    /// here disables the button instead of letting the user hit Create and
+    /// read a CLI-shaped error for a name the field could have caught
+    /// (A1-L10).
     private var canSave: Bool {
         guard isCreate else { return true }
-        return HermesProfileScope.isValidName(draft.profileName.trimmingCharacters(in: .whitespacesAndNewlines))
+        let name = draft.profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return HermesProfileScope.isValidName(name) && name != HermesProfileScope.defaultProfileName
     }
 
     var body: some View {

@@ -128,6 +128,13 @@ struct BotRow: Identifiable, Equatable {
     var avatarStat: BotAvatarStat? = nil
     /// The bot's Bot Chat activity, filled in asynchronously after paint.
     var activity: BotActivity? = nil
+    /// Set when the async avatar fill hit `BotsError.avatarTooLarge` for this
+    /// profile — a real file exists but Scarf refused to read it (over the
+    /// same size floor `BotsService.loadAvatar` enforces on the save path).
+    /// Surfaced on the row as a small warning rather than swallowed, so the
+    /// generated fallback doesn't quietly masquerade as "no avatar set"
+    /// (audit A1-L9).
+    var avatarTooLarge = false
 
     var id: String { identity.profileName }
     /// The key this row's avatar is cached under, or nil when it has none.
@@ -249,12 +256,14 @@ final class BotsViewModel {
     init(
         context: ServerContext = .local,
         capabilities: HermesCapabilities = .empty,
-        backend: (any BotsBackend)? = nil
+        backend: (any BotsBackend)? = nil,
+        peers: PeersViewModel? = nil
     ) {
         self.context = context
         self.capabilities = capabilities
         self.injectedBackend = backend
         self.backend = backend ?? LiveBotsBackend(context: context, capabilities: capabilities)
+        self._peers = peers
     }
 
     // MARK: - State
@@ -456,6 +465,14 @@ final class BotsViewModel {
     /// never spins up its transport. `@Observable` can't synthesize a
     /// `lazy var` (it rewrites stored properties into tracked accessors),
     /// so the laziness is hand-rolled with a backing optional.
+    ///
+    /// Production callers inject the coordinator-cached instance
+    /// (`AppCoordinator.featureViewModel(for: .peers, …)`, the same one
+    /// `ContentView` hands the standalone Peers section) via `init(peers:)`
+    /// — a peer async-run started from Bots▸Remote must stay visible and
+    /// stoppable from the Peers pane, and vice versa (queued audit-board
+    /// item A2-F5). Only a test (or a build that somehow reaches this
+    /// accessor before injection) falls back to constructing its own.
     @ObservationIgnored private var _peers: PeersViewModel?
     var peers: PeersViewModel {
         if let existing = _peers { return existing }
@@ -686,11 +703,26 @@ final class BotsViewModel {
             guard let stat = entry.avatar else { continue }
             let key = BotAvatarCache.Key(profileName: entry.identity.profileName, stat: stat)
             if avatarCache.avatar(for: key) != nil { continue }
-            let avatar = await Task.detached(priority: .utility) { try? backend.loadAvatar(at: stat) }.value
-            guard let avatar, generation == loadGeneration else { continue }
-            avatarCache.store(avatar, for: key)
-            if let index = rows.firstIndex(where: { $0.id == entry.identity.profileName }) {
-                rows[index].avatar = avatar
+            let outcome = await Task.detached(priority: .utility) { () -> Result<HermesBotAvatar, Error> in
+                Result { try backend.loadAvatar(at: stat) }
+            }.value
+            guard generation == loadGeneration else { continue }
+            switch outcome {
+            case .success(let avatar):
+                avatarCache.store(avatar, for: key)
+                if let index = rows.firstIndex(where: { $0.id == entry.identity.profileName }) {
+                    rows[index].avatar = avatar
+                    rows[index].avatarTooLarge = false
+                }
+            case .failure(BotsError.avatarTooLarge(_, _)):
+                if let index = rows.firstIndex(where: { $0.id == entry.identity.profileName }) {
+                    rows[index].avatarTooLarge = true
+                }
+            case .failure:
+                // Anything else (transient transport hiccup, missing file
+                // between stat and read) — the generated fallback is the
+                // right degrade, same as before this fixup.
+                continue
             }
         }
     }

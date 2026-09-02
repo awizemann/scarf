@@ -12,6 +12,7 @@ struct BotRoutinesView: View {
     let hasCronBotChatDelivery: Bool
 
     @State private var showCreate = false
+    @State private var pendingDelete: HermesCronJob?
 
     var body: some View {
         VStack(alignment: .leading, spacing: ScarfSpace.s2) {
@@ -98,6 +99,16 @@ struct BotRoutinesView: View {
                 onCancel: { showCreate = false }
             )
         }
+        .confirmationDialog(
+            pendingDelete.map { "Delete \(routineTitle($0))?" } ?? "",
+            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })
+        ) {
+            Button("Delete", role: .destructive) {
+                if let job = pendingDelete { viewModel.delete(job) }
+                pendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        }
     }
 
     private func routineRow(_ job: HermesCronJob) -> some View {
@@ -133,6 +144,14 @@ struct BotRoutinesView: View {
                 Button("Run Now") { viewModel.runNow(job) }
                     .buttonStyle(ScarfGhostButton())
                     .disabled(viewModel.refusesTerminalJobLocally(job))
+                Button {
+                    pendingDelete = job
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(ScarfDestructiveButton())
+                .help("Delete this routine")
+                .accessibilityLabel("Delete \(routineTitle(job))")
             }
         }
         .accessibilityElement(children: .combine)
@@ -175,64 +194,80 @@ struct CreateRoutineSheet: View {
     @State private var schedule = ""
     @State private var prompt = ""
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: ScarfSpace.s3) {
-            Text("New routine for \(botName)")
-                .scarfStyle(.title3)
-            Text("Saved as a cron job named \"[bot:\(botName)] \(title.isEmpty ? "…" : title)\". For skills, workdir or run history, use the Cron section instead.")
-                .scarfStyle(.caption)
-                .foregroundStyle(ScarfColor.foregroundMuted)
-                .fixedSize(horizontal: false, vertical: true)
+    /// `nil` when the sheet's fields are ready to submit; otherwise a copy
+    /// naming the offending field. Composes the base required-fields check
+    /// with `BotRoutinesViewModel.routineInputError` (empty-prompt + Hermes
+    /// Desktop's NUL guard) so Create disables instead of failing at submit
+    /// (A1-L7).
+    private var validationError: String? {
+        if title.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "Title can't be empty."
+        }
+        if schedule.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "Schedule can't be empty."
+        }
+        return BotRoutinesViewModel.routineInputError(title: title, instruction: prompt)
+    }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Title").scarfStyle(.caption).foregroundStyle(ScarfColor.foregroundMuted)
-                ScarfTextField("Morning digest", text: $title)
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Schedule").scarfStyle(.caption).foregroundStyle(ScarfColor.foregroundMuted)
-                ScarfTextField("0 9 * * *  or  30m  or  every 2h", text: $schedule)
-                    .font(ScarfFont.mono)
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Prompt").scarfStyle(.caption).foregroundStyle(ScarfColor.foregroundMuted)
-                TextEditor(text: $prompt)
-                    .accessibilityLabel("Prompt")
-                    .font(ScarfFont.mono)
-                    .frame(minHeight: 90)
-                    .padding(4)
-                    .background(
-                        RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
-                            .fill(ScarfColor.backgroundSecondary)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
-                                    .strokeBorder(ScarfColor.borderStrong, lineWidth: 1)
-                            )
-                    )
-                    .scrollContentBackground(.hidden)
-            }
-            if hasCronBotChatDelivery {
-                Text("Output is delivered to \(botName)'s Bot Chat as a message it responds to.")
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: ScarfSpace.s3) {
+                Text("New routine for \(botName)")
+                    .scarfStyle(.title3)
+                Text("Saved as a cron job named \"[bot:\(botName)] \(title.isEmpty ? "…" : title)\". For skills, workdir or run history, use the Cron section instead.")
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)
-            } else {
-                Text("This host is older than v0.20.6, so output isn't routed anywhere automatically. Check results in the Cron section.")
-                    .scarfStyle(.caption)
-                    .foregroundStyle(ScarfColor.warning)
-            }
+                    .fixedSize(horizontal: false, vertical: true)
 
-            HStack {
-                Spacer()
-                Button("Cancel") { onCancel() }
-                    .buttonStyle(ScarfGhostButton())
-                Button("Create") {
-                    onCreate(title, schedule, prompt)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Title").scarfStyle(.caption).foregroundStyle(ScarfColor.foregroundMuted)
+                    ScarfTextField("Morning digest", text: $title)
                 }
-                .buttonStyle(ScarfPrimaryButton())
-                .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty
-                          || schedule.trimmingCharacters(in: .whitespaces).isEmpty)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Schedule").scarfStyle(.caption).foregroundStyle(ScarfColor.foregroundMuted)
+                    ScarfTextField("0 9 * * *  or  30m  or  every 2h", text: $schedule)
+                        .font(ScarfFont.mono)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Prompt").scarfStyle(.caption).foregroundStyle(ScarfColor.foregroundMuted)
+                    TextEditor(text: $prompt)
+                        .accessibilityLabel("Prompt")
+                        .font(ScarfFont.mono)
+                        .frame(minHeight: 90)
+                        .padding(4)
+                        .background(
+                            RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
+                                .fill(ScarfColor.backgroundSecondary)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
+                                        .strokeBorder(ScarfColor.borderStrong, lineWidth: 1)
+                                )
+                        )
+                        .scrollContentBackground(.hidden)
+                }
+                if hasCronBotChatDelivery {
+                    Text("Output is delivered to \(botName)'s Bot Chat as a message it responds to.")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                } else {
+                    Text("This host is older than v0.20.6, so output isn't routed anywhere automatically. Check results in the Cron section.")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.warning)
+                }
+
+                HStack {
+                    Spacer()
+                    Button("Cancel") { onCancel() }
+                        .buttonStyle(ScarfGhostButton())
+                    Button("Create") {
+                        onCreate(title, schedule, prompt)
+                    }
+                    .buttonStyle(ScarfPrimaryButton())
+                    .disabled(validationError != nil)
+                }
             }
+            .padding(ScarfSpace.s5)
         }
-        .padding(ScarfSpace.s5)
         .frame(width: 460)
     }
 }

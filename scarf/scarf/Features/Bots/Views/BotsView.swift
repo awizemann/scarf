@@ -104,6 +104,7 @@ struct BotsView: View {
             viewModel.sortOrder = BotsViewModel.BotRosterSort(rawValue: storedSortOrder) ?? .pinnedThenName
             viewModel.load()
             if viewModel.hasPeerRunCommands { viewModel.peers.load() }
+            mirrorRoutinesCapability(forProfile: viewModel.selectedProfileName)
         }
         .onChange(of: storedSortOrder) { _, raw in
             viewModel.sortOrder = BotsViewModel.BotRosterSort(rawValue: raw) ?? .pinnedThenName
@@ -116,6 +117,16 @@ struct BotsView: View {
         }
         .onChange(of: viewModel.hasPeerRunCommands) { _, hasPeers in
             if hasPeers { viewModel.peers.load() }
+        }
+        // `capabilitiesStore` probes `hermes --version` asynchronously, so
+        // `onAppear` above can fire before the real answer lands; re-run the
+        // mirror when it changes (same reasoning as CronView's own
+        // `.onChange(of: hasCronResumeRunNow)`).
+        .onChange(of: hasCronResumeRunNow) { _, _ in
+            mirrorRoutinesCapability(forProfile: viewModel.selectedProfileName)
+        }
+        .onChange(of: viewModel.selectedProfileName) { _, newValue in
+            mirrorRoutinesCapability(forProfile: newValue)
         }
         .sheet(item: $editor) { context in
             BotEditorSheet(
@@ -399,6 +410,13 @@ struct BotsView: View {
                             if presence.isLive {
                                 presenceDot(presence)
                             }
+                            if row.avatarTooLarge {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(ScarfColor.warning)
+                                    .help("Avatar file is too large to display; showing the generated icon instead.")
+                                    .accessibilityLabel("Avatar too large to display")
+                            }
                         }
                         if !row.identity.resolvedDescription.isEmpty {
                             Text(row.identity.resolvedDescription)
@@ -542,14 +560,37 @@ struct BotsView: View {
 
     // MARK: - Routines (B4)
 
-    /// Fetch the cached per-bot routines view model and mirror the current
-    /// capability answer into it — cheap bool assignments, done here (not
-    /// inside the `@ViewBuilder` closure above) so the view model's own
-    /// state never depends on how SwiftUI orders builder statements.
+    /// The named capability CronView itself gates Resume & Run Now on
+    /// (`hasCronResumeRunNow`, `= isV0206OrLater`), used here in place of the
+    /// raw version check so this pane can't drift from what it actually
+    /// means if the floor for that affordance ever moves independently of
+    /// the raw semver (A2-F7).
+    private var hasCronResumeRunNow: Bool {
+        capabilitiesStore?.capabilities.hasCronResumeRunNow ?? false
+    }
+
+    /// Fetch the cached per-bot routines view model. Pure — no capability
+    /// mirroring here. That write used to happen inline in this accessor,
+    /// which is called from the `@ViewBuilder` `detail` body: a stored
+    /// property assignment during view-builder evaluation runs once per
+    /// body pass (SwiftUI may re-evaluate `detail` for reasons that have
+    /// nothing to do with a capability change), which is fragile action
+    /// placement. `mirrorRoutinesCapability(for:)` below does the write from
+    /// `.onAppear`/`.onChange` instead, mirroring `CronView`'s own pattern
+    /// (A1-M2).
     private func routinesViewModel(for row: BotRow) -> BotRoutinesViewModel {
-        let vm = viewModel.routinesViewModel(for: row.identity.profileName)
-        vm.isV0206OrLater = capabilitiesStore?.capabilities.isV0206OrLater ?? false
-        return vm
+        viewModel.routinesViewModel(for: row.identity.profileName)
+    }
+
+    /// Mirror the current capability answer onto the selected bot's routines
+    /// view model. Only the visible one needs it live — a not-yet-visited
+    /// bot's cached `BotRoutinesViewModel` picks up the current value the
+    /// first time `routinesViewModel(for:)` creates it (via
+    /// `BotsViewModel.capabilities`'s own propagation is unrelated; this is
+    /// the CronViewModel-shaped flag `BotRoutinesView` reads directly).
+    private func mirrorRoutinesCapability(forProfile profileName: String?) {
+        guard let profileName else { return }
+        viewModel.routinesViewModel(for: profileName).isV0206OrLater = hasCronResumeRunNow
     }
 
     // MARK: - Selection
