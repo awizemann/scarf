@@ -80,6 +80,22 @@ nonisolated enum UsageEvent {
     case templateInstalled(source: InstallSource)
     case skillInstalled(source: InstallSource)
 
+    // MARK: - Bots
+
+    /// A bot came into being — a fresh `hermes profile create` through the
+    /// Create Bot sheet, or an existing profile promoted via "Make a Bot".
+    case botCreated(method: BotCreationMethod, outcome: Outcome)
+    /// One edit-save on an existing bot, tagged with which surface saved.
+    case botUpdated(aspect: BotUpdateAspect, outcome: Outcome)
+    /// A bot left the roster. No outcome prop: a failed removal removes
+    /// nothing, so only the removals that actually happened are reported.
+    case botRemoved(kind: BotRemovalKind)
+    /// A per-bot Routine (the `[bot:<name>]`-prefixed cron jobs) changed.
+    case botRoutineAction(action: BotRoutineActionKind, outcome: Outcome)
+    /// A remote-bot (peer) interaction was initiated. Recorded at send time,
+    /// deliberately without an outcome: a peer turn can run for minutes.
+    case botPeerAction(action: BotPeerActionKind)
+
     // MARK: - Diagnostics
 
     case perfMeasure(category: ScarfMon.Category, durationBucket: DurationBucket)
@@ -116,6 +132,11 @@ nonisolated enum UsageEvent {
         case .projectCreated:           return "project_created"
         case .templateInstalled:        return "template_installed"
         case .skillInstalled:           return "skill_installed"
+        case .botCreated:               return "bot_created"
+        case .botUpdated:               return "bot_updated"
+        case .botRemoved:               return "bot_removed"
+        case .botRoutineAction:         return "bot_routine_action"
+        case .botPeerAction:            return "bot_peer_action"
         case .perfMeasure:              return "perf_measure"
         }
     }
@@ -203,6 +224,25 @@ nonisolated enum UsageEvent {
             ]
         case .templateInstalled(let source), .skillInstalled(let source):
             return ["source": .string(source.rawValue)]
+        case .botCreated(let method, let outcome):
+            return [
+                "method": .string(method.rawValue),
+                "outcome": .string(outcome.rawValue),
+            ]
+        case .botUpdated(let aspect, let outcome):
+            return [
+                "aspect": .string(aspect.rawValue),
+                "outcome": .string(outcome.rawValue),
+            ]
+        case .botRemoved(let kind):
+            return ["kind": .string(kind.rawValue)]
+        case .botRoutineAction(let action, let outcome):
+            return [
+                "action": .string(action.rawValue),
+                "outcome": .string(outcome.rawValue),
+            ]
+        case .botPeerAction(let action):
+            return ["action": .string(action.rawValue)]
         case .perfMeasure(let category, let duration):
             return [
                 "category": .string(category.rawValue),
@@ -270,7 +310,12 @@ nonisolated enum UsageEvent {
         case .voiceUsed:                return .projectCreated(template: .custom, method: .scaffold)
         case .projectCreated:           return .templateInstalled(source: .hub)
         case .templateInstalled:        return .skillInstalled(source: .hub)
-        case .skillInstalled:           return .perfMeasure(category: .sqlite,
+        case .skillInstalled:           return .botCreated(method: .created, outcome: .succeeded)
+        case .botCreated:               return .botUpdated(aspect: .identity, outcome: .succeeded)
+        case .botUpdated:               return .botRemoved(kind: .deleted)
+        case .botRemoved:               return .botRoutineAction(action: .created, outcome: .succeeded)
+        case .botRoutineAction:         return .botPeerAction(action: .dmSent)
+        case .botPeerAction:            return .perfMeasure(category: .sqlite,
                                                             durationBucket: .init(seconds: 0))
         case .perfMeasure:              return nil
         }
@@ -388,6 +433,49 @@ nonisolated extension UsageEvent {
     /// deep links, and every local-file entry point.
     enum InstallSource: String, CaseIterable, Sendable {
         case hub, url
+    }
+
+    /// `bot_created`'s `method`: a fresh profile from the Create Bot sheet,
+    /// or an existing profile promoted through "Make a Bot".
+    enum BotCreationMethod: String, CaseIterable, Sendable {
+        case created
+        case madeFromProfile = "made_from_profile"
+    }
+
+    /// `bot_updated`'s `aspect` — which editing surface saved. Deliberately
+    /// no `routine` token: per-bot routines report through
+    /// `bot_routine_action` and must not double-count here.
+    enum BotUpdateAspect: String, CaseIterable, Sendable {
+        /// The editor sheet (title/description/color/shape), pin/hide-off
+        /// toggles, and a rename — everything that edits who the bot *is*.
+        case identity
+        case avatar
+        case modelPin = "model_pin"
+        case toolsets
+        case mcp
+        case soul
+    }
+
+    /// `bot_removed`'s `kind`: `deleted` = `hermes profile delete` (the whole
+    /// profile is gone), `identity_removed` = "Remove from Bots" (the profile
+    /// survives, only the bot block is cleared), `hidden` = the hide toggle.
+    enum BotRemovalKind: String, CaseIterable, Sendable {
+        case deleted
+        case identityRemoved = "identity_removed"
+        case hidden
+    }
+
+    /// `bot_routine_action`'s `action`. No `edited` token: the per-bot
+    /// Routines pane has no edit affordance (create + delete + pause/resume
+    /// only), and a vocabulary token nothing can emit is noise.
+    enum BotRoutineActionKind: String, CaseIterable, Sendable {
+        case created, deleted
+    }
+
+    /// `bot_peer_action`'s `action` — the two `hermes peer` verbs.
+    enum BotPeerActionKind: String, CaseIterable, Sendable {
+        case dmSent = "dm_sent"
+        case asyncRun = "async_run"
     }
 
     /// Case-derived `error_kind` for `connect_failed`, mirroring

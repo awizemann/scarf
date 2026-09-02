@@ -125,6 +125,9 @@ final class PeersViewModel {
         let text = composeText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
+        // At send time, without an outcome: a peer DM is one synchronous
+        // remote agent turn that can legitimately run for minutes.
+        Analytics.record(.botPeerAction(action: .dmSent))
         isSending = true
         errorMessage = nil
         lastReply = nil
@@ -162,6 +165,7 @@ final class PeersViewModel {
         let text = composeText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
+        Analytics.record(.botPeerAction(action: .asyncRun))
         isSending = true
         errorMessage = nil
         durabilityNote = nil

@@ -872,13 +872,18 @@ final class BotsViewModel {
                 self.isWorking = false
                 switch outcome {
                 case .created:
+                    Analytics.record(.botCreated(method: .created, outcome: .succeeded))
                     self.selectedProfileName = name
                     self.flash("Created \(name)")
                 case .createdButUnmanaged(let detail):
+                    // The profile exists but is not a bot — the thing this
+                    // event measures did not happen, so it counts as failed.
+                    Analytics.record(.botCreated(method: .created, outcome: .failed))
                     log.warning("bot identity write failed after create: \(detail, privacy: .public)")
                     self.selectedProfileName = name
                     self.errorMessage = "Profile \"\(name)\" was created, but its bot details couldn't be saved. It's listed under Other profiles — open it and choose Make a Bot to try again. (\(detail))"
                 case .cliRefused(let detail):
+                    Analytics.record(.botCreated(method: .created, outcome: .failed))
                     log.warning("hermes profile create failed: \(detail, privacy: .public)")
                     self.errorMessage = detail
                 }
@@ -895,10 +900,34 @@ final class BotsViewModel {
 
     // MARK: - Save / promote / demote
 
+    /// What a `save(_:)` means for analytics. The write is identical in every
+    /// case — only the event that describes it differs, and the tokens are
+    /// all case-derived here, never caller strings.
+    enum SaveIntent: Sendable {
+        /// The editor sheet, a pin toggle, an un-hide — `bot_updated`.
+        case edit
+        /// "Make a Bot" on an unmanaged profile — `bot_created`.
+        case promote
+        /// The hide toggle turning `hidden` ON — `bot_removed {kind: hidden}`
+        /// on success; a failed hide removed nothing and reports nothing.
+        case hide
+    }
+
+    private static func recordSave(intent: SaveIntent, succeeded: Bool) {
+        switch intent {
+        case .edit:
+            Analytics.record(.botUpdated(aspect: .identity, outcome: .init(succeeded: succeeded)))
+        case .promote:
+            Analytics.record(.botCreated(method: .madeFromProfile, outcome: .init(succeeded: succeeded)))
+        case .hide:
+            if succeeded { Analytics.record(.botRemoved(kind: .hidden)) }
+        }
+    }
+
     /// Persist an edit. Re-reads the profile immediately before writing so
     /// unknown keys, groups, `created`, and anything a concurrent Hermes
     /// Desktop edit added are the file's current values, not the sheet's.
-    func save(_ draft: BotDraft) {
+    func save(_ draft: BotDraft, intent: SaveIntent = .edit) {
         guard hasBotMode, !isWorking else { return }
         isWorking = true
         errorMessage = nil
@@ -917,6 +946,7 @@ final class BotsViewModel {
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isWorking = false
+                Self.recordSave(intent: intent, succeeded: result == nil)
                 if let result {
                     log.warning("bot save failed: \(result, privacy: .public)")
                     self.errorMessage = result
@@ -933,7 +963,7 @@ final class BotsViewModel {
     func promote(_ row: BotRow) {
         var draft = BotDraft(identity: row.identity)
         if draft.title.isEmpty { draft.title = row.identity.profileName }
-        save(draft)
+        save(draft, intent: .promote)
     }
 
     /// Stop managing a profile as a bot: clear the `ui_meta['hermes-bots']`
@@ -983,6 +1013,7 @@ final class BotsViewModel {
                     log.warning("bot demote failed: \(result, privacy: .public)")
                     self.errorMessage = result
                 } else {
+                    Analytics.record(.botRemoved(kind: .identityRemoved))
                     self.flash("Removed \(name) from Bots")
                 }
                 self.load(force: true)
@@ -1001,7 +1032,9 @@ final class BotsViewModel {
     func toggleHidden(_ row: BotRow) {
         var draft = BotDraft(identity: row.identity)
         draft.hidden.toggle()
-        save(draft)
+        // Hiding leaves the roster (`bot_removed {kind: hidden}`); un-hiding
+        // is an ordinary identity edit.
+        save(draft, intent: draft.hidden ? .hide : .edit)
     }
 
     // MARK: - Avatar
@@ -1038,6 +1071,7 @@ final class BotsViewModel {
                 // (path, size, mtime) key is the fast path, not the
                 // correctness argument.
                 self.avatarCache.invalidate(profileName: name)
+                Analytics.record(.botUpdated(aspect: .avatar, outcome: .init(succeeded: result == nil)))
                 if let result {
                     log.warning("avatar write failed: \(result, privacy: .public)")
                     self.errorMessage = result
@@ -1070,7 +1104,13 @@ final class BotsViewModel {
             errorMessage = "\(from) has unsaved SOUL.md changes. Save or discard them before renaming."
             return
         }
-        runLifecycle(.rename(from: from, to: target), success: "Renamed to \(target)") { [weak self] in
+        runLifecycle(
+            .rename(from: from, to: target),
+            success: "Renamed to \(target)",
+            // A rename edits who the bot is; a failed one still reports so
+            // failure rates are visible.
+            analytics: { Analytics.record(.botUpdated(aspect: .identity, outcome: .init(succeeded: $0))) }
+        ) { [weak self] in
             guard let self else { return }
             // The directory moved, so every cached avatar path under the old
             // name is dead. Keys carry the profile name, so nothing would be
@@ -1099,7 +1139,13 @@ final class BotsViewModel {
     func delete(_ row: BotRow) {
         guard hasBotMode, !isWorking else { return }
         let name = row.identity.profileName
-        runLifecycle(.delete(name: name), success: "Deleted \(name)") { [weak self] in
+        runLifecycle(
+            .delete(name: name),
+            success: "Deleted \(name)",
+            // No outcome prop on `bot_removed` — only a delete that actually
+            // removed the profile reports.
+            analytics: { if $0 { Analytics.record(.botRemoved(kind: .deleted)) } }
+        ) { [weak self] in
             self?.avatarCache.invalidate(profileName: name)
             self?.activityCache[name] = nil
             self?.selectedProfileName = nil
@@ -1109,6 +1155,7 @@ final class BotsViewModel {
     private func runLifecycle(
         _ action: BotsService.Lifecycle,
         success: String,
+        analytics: (@MainActor @Sendable (_ succeeded: Bool) -> Void)? = nil,
         then onSuccess: @escaping @MainActor () -> Void
     ) {
         isWorking = true
@@ -1127,6 +1174,7 @@ final class BotsViewModel {
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isWorking = false
+                analytics?(result == nil)
                 if let result {
                     log.warning("hermes profile action failed: \(result, privacy: .public)")
                     self.errorMessage = result

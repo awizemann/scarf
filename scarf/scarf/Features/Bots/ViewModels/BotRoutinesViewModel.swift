@@ -84,7 +84,11 @@ final class BotRoutinesViewModel {
     func resume(_ job: HermesCronJob) { cron.resumeJob(job) }
     func resumeAndRunNow(_ job: HermesCronJob) { cron.resumeAndRunNow(job) }
     func runNow(_ job: HermesCronJob) { cron.runNow(job) }
-    func delete(_ job: HermesCronJob) { cron.deleteJob(job) }
+    func delete(_ job: HermesCronJob) {
+        cron.deleteJob(job) { succeeded in
+            Analytics.record(.botRoutineAction(action: .deleted, outcome: .init(succeeded: succeeded)))
+        }
+    }
 
     /// Same local pre-check `CronView` uses to decide whether to show
     /// Resume vs. Resume & Run Now — delegated straight to `CronViewModel`
@@ -132,7 +136,10 @@ final class BotRoutinesViewModel {
             deliver: fields.deliver,
             skills: [],
             script: "",
-            repeatCount: ""
+            repeatCount: "",
+            onOutcome: { succeeded in
+                Analytics.record(.botRoutineAction(action: .created, outcome: .init(succeeded: succeeded)))
+            }
         )
     }
 

@@ -413,6 +413,7 @@ final class BotAgentViewModel {
             }.value
             guard let self else { return }
             self.isPinBusy = false
+            Analytics.record(.botUpdated(aspect: .modelPin, outcome: .init(succeeded: message == nil)))
             self.errorMessage = message
             // Re-read regardless of outcome: a partial pin (provider written,
             // model refused) must show what actually landed.
@@ -451,6 +452,7 @@ final class BotAgentViewModel {
             }.value
             guard let self else { return }
             self.busyToolsets.remove(name)
+            Analytics.record(.botUpdated(aspect: .toolsets, outcome: .init(succeeded: message == nil)))
             if let message {
                 self.rowErrors[name] = message
                 if let idx = self.toolsets.firstIndex(where: { $0.name == name }) {
@@ -482,6 +484,7 @@ final class BotAgentViewModel {
             }.value
             guard let self else { return }
             self.busyMCPServers.remove(name)
+            Analytics.record(.botUpdated(aspect: .mcp, outcome: .init(succeeded: message == nil)))
             self.rowErrors[name] = message
             // No optimistic flip here: the row's truth is the parsed
             // `enabled:` key (absent ⇒ enabled), which only a re-read knows.
@@ -547,6 +550,13 @@ final class BotAgentViewModel {
             }.value
             guard let self else { return }
             self.isSavingSoul = false
+            // A conflict is a save that did not land — failed, not a third
+            // outcome. The retry (Overwrite / reload-and-redo) reports again.
+            if case .saved = outcome {
+                Analytics.record(.botUpdated(aspect: .soul, outcome: .succeeded))
+            } else {
+                Analytics.record(.botUpdated(aspect: .soul, outcome: .failed))
+            }
             switch outcome {
             case .saved:
                 self.soulBaseline = content

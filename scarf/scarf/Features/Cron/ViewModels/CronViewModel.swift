@@ -395,22 +395,23 @@ final class CronViewModel {
         }
     }
 
-    func deleteJob(_ job: HermesCronJob) {
-        runAndReload(["cron", "remove", job.id], success: "Removed")
+    func deleteJob(_ job: HermesCronJob, onOutcome: (@MainActor @Sendable (Bool) -> Void)? = nil) {
+        runAndReload(["cron", "remove", job.id], success: "Removed", onOutcome: onOutcome)
         if selectedJob?.id == job.id {
             selectedJob = nil
             jobOutput = nil
         }
     }
 
-    func createJob(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false) {
+    func createJob(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, onOutcome: (@MainActor @Sendable (Bool) -> Void)? = nil) {
         runAndReload(
             Self.createJobArguments(
                 schedule: schedule, prompt: prompt, name: name, deliver: deliver,
                 skills: skills, script: script, repeatCount: repeatCount,
                 workdir: workdir, noAgent: noAgent
             ),
-            success: "Job created"
+            success: "Job created",
+            onOutcome: onOutcome
         )
     }
 
@@ -480,10 +481,19 @@ final class CronViewModel {
 
     // MARK: - Private
 
-    private func runAndReload(_ arguments: [String], success: String) {
+    /// `onOutcome` (main-actor, success flag only) exists so a wrapper like
+    /// `BotRoutinesViewModel` can observe whether the verb landed — e.g. to
+    /// record a typed analytics event — without re-running or re-parsing the
+    /// CLI. It carries no CLI text, deliberately.
+    private func runAndReload(
+        _ arguments: [String],
+        success: String,
+        onOutcome: (@MainActor @Sendable (Bool) -> Void)? = nil
+    ) {
         Task.detached { [fileService, self] in
             let result = fileService.runHermesCLI(args: arguments, timeout: 60)
             await MainActor.run {
+                onOutcome?(result.exitCode == 0)
                 if result.exitCode == 0 {
                     self.post(success, outcome: .success)
                 } else {
