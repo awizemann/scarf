@@ -216,7 +216,7 @@ struct MiniAppPermissionPreview: View {
                     ForEach(unknowns, id: \.self) { perm in
                         HStack(spacing: 8) {
                             Image(systemName: "questionmark.circle").foregroundStyle(ScarfColor.warning)
-                            Text(perm.summary).font(.callout).foregroundStyle(.secondary)
+                            Text(verbatim: perm.localizedSummary).font(.callout).foregroundStyle(.secondary)
                             Spacer()
                             Text("denied").font(.caption2).foregroundStyle(.secondary)
                         }
@@ -243,7 +243,7 @@ struct MiniAppPermissionPreview: View {
         HStack(spacing: 8) {
             Image(systemName: perm.isSensitive ? "exclamationmark.triangle.fill" : "checkmark.circle")
                 .foregroundStyle(perm.isSensitive ? ScarfColor.warning : .secondary)
-            Text(perm.summary).font(.callout)
+            Text(verbatim: perm.localizedSummary).font(.callout)
             if perm.isSensitive {
                 Text("sensitive").font(.caption2).foregroundStyle(ScarfColor.warning)
             }
@@ -302,6 +302,30 @@ private struct MiniAppRunner: View {
             // revokes access on the live instance, not just on next launch.
             .id(manifest.id + "|" + granted.map(\.rawValue).sorted().joined(separator: ","))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+
+/// `MiniAppPermission.summary` is an untranslated English token from ScarfCore
+/// (no string catalog there), and this sheet is a SECURITY consent surface —
+/// a user who cannot read the permission cannot meaningfully grant it. One
+/// extractable sentence per case, mirroring the ScarfCore wording.
+extension MiniAppPermission {
+    var localizedSummary: String {
+        switch self {
+        case .prompt: return String(localized: "Send prompts to this chat's agent")
+        case .events: return String(localized: "Read this chat's streamed agent output")
+        case .query(let kind):
+            return kind.isEmpty
+                ? String(localized: "Read data (read-only)")
+                : String(localized: "Read \(kind) (read-only)")
+        case .kanbanWrite: return String(localized: "Create and move kanban tasks")
+        case .fileRead: return String(localized: "Read any file inside the project")
+        case .fileWrite: return String(localized: "Write files inside the project")
+        case .store: return String(localized: "Save its own settings")
+        case .net: return String(localized: "Make outbound network requests")
+        case .unknown(let raw): return String(localized: "Unknown permission \"\(raw)\" (will be denied)")
         }
     }
 }

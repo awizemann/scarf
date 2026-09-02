@@ -80,12 +80,15 @@ enum WidgetPathResolver {
 }
 
 extension WidgetPathResolver.ResolveError {
+    /// Rendered straight into `WidgetErrorCard` (via its `verbatimReason:`
+    /// init), so it must arrive already localized — a plain literal here was
+    /// a permanently-English error message on a user-facing card.
     var userMessage: String {
         switch self {
-        case .noProject:       return "No project selected."
-        case .missingPath:     return "Missing required `path` field."
-        case .absolutePath:    return "Path must be relative to the project root, not absolute."
-        case .escapesProject:  return "Path escapes the project root (`..` segments and symlinks that lead outside are not allowed)."
+        case .noProject:       return String(localized: "No project selected.")
+        case .missingPath:     return String(localized: "Missing required `path` field.")
+        case .absolutePath:    return String(localized: "Path must be relative to the project root, not absolute.")
+        case .escapesProject:  return String(localized: "Path escapes the project root (`..` segments and symlinks that lead outside are not allowed).")
         }
     }
 }

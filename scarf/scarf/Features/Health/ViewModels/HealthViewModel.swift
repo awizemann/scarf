@@ -685,7 +685,7 @@ final class HealthViewModel {
     func runAudit() {
         guard !isRunningAudit else { return }
         isRunningAudit = true
-        auditMessage = "Running supply-chain audit…"
+        auditMessage = String(localized: "Running supply-chain audit…")
         Task.detached { [fileService] in
             let result = fileService.runHermesCLI(args: ["security", "audit"], timeout: 180)
             await MainActor.run {
@@ -695,10 +695,10 @@ final class HealthViewModel {
                     // Prefer a concise tail of the output (the summary line)
                     // over the full report — the panel-less inline strip is short.
                     let tail = trimmed.split(separator: "\n").suffix(2).joined(separator: " · ")
-                    self.auditMessage = tail.isEmpty ? "No known advisories found." : tail
+                    self.auditMessage = tail.isEmpty ? String(localized: "No known advisories found.") : tail
                 } else {
                     let tail = trimmed.split(separator: "\n").suffix(4).joined(separator: " · ")
-                    self.auditMessage = "Audit failed (exit \(result.exitCode)). \(tail)"
+                    self.auditMessage = String(localized: "Audit failed (exit \(result.exitCode)). \(tail)")
                 }
             }
         }
@@ -711,7 +711,7 @@ final class HealthViewModel {
     func runSessionsOptimize() {
         guard !isRunningSessionsOptimize else { return }
         isRunningSessionsOptimize = true
-        sessionsOptimizeMessage = "Optimizing sessions database…"
+        sessionsOptimizeMessage = String(localized: "Optimizing sessions database…")
         Task.detached { [fileService] in
             let result = fileService.runHermesCLI(args: ["sessions", "optimize"], timeout: 120)
             await MainActor.run {
@@ -721,10 +721,10 @@ final class HealthViewModel {
                     // Prefer a concise tail of the output (the summary line)
                     // over the full report — the panel-less inline strip is short.
                     let tail = trimmed.split(separator: "\n").suffix(2).joined(separator: " · ")
-                    self.sessionsOptimizeMessage = tail.isEmpty ? "Sessions database optimized." : tail
+                    self.sessionsOptimizeMessage = tail.isEmpty ? String(localized: "Sessions database optimized.") : tail
                 } else {
                     let tail = trimmed.split(separator: "\n").suffix(4).joined(separator: " · ")
-                    self.sessionsOptimizeMessage = "Optimize failed (exit \(result.exitCode)). \(tail)"
+                    self.sessionsOptimizeMessage = String(localized: "Optimize failed (exit \(result.exitCode)). \(tail)")
                 }
             }
         }
@@ -740,7 +740,7 @@ final class HealthViewModel {
     func migrateXAI() {
         guard !isMigratingXAI else { return }
         isMigratingXAI = true
-        migrateXAIMessage = "Migrating xAI model…"
+        migrateXAIMessage = String(localized: "Migrating xAI model…")
         Task.detached { [fileService] in
             let result = fileService.runHermesCLI(args: ["migrate", "xai", "--apply"], timeout: 120)
             let config = fileService.loadConfig()
@@ -754,13 +754,13 @@ final class HealthViewModel {
                     // migrate / no changes were written — don't claim success.
                     let lower = trimmed.lowercased()
                     if lower.contains("nothing to migrate") || lower.contains("no changes") {
-                        self.migrateXAIMessage = "No retired xAI model to migrate."
+                        self.migrateXAIMessage = String(localized: "No retired xAI model to migrate.")
                     } else {
-                        self.migrateXAIMessage = "Migrated to \(config.model). You may need to restart the gateway."
+                        self.migrateXAIMessage = String(localized: "Migrated to \(config.model). You may need to restart the gateway.")
                     }
                 } else {
                     let tail = trimmed.split(separator: "\n").suffix(3).joined(separator: " · ")
-                    self.migrateXAIMessage = "Migration failed (exit \(result.exitCode)). \(tail)"
+                    self.migrateXAIMessage = String(localized: "Migration failed (exit \(result.exitCode)). \(tail)")
                 }
             }
         }

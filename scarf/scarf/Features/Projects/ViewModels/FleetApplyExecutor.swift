@@ -44,6 +44,9 @@ struct FleetApplyExecutor: Sendable {
     nonisolated struct FieldResult: Sendable, Identifiable {
         let field: FleetApplyField
         let status: Status
+        /// User-facing, and therefore ALREADY LOCALIZED — every producer below
+        /// builds it with `String(localized:)`. The result sheet renders it
+        /// verbatim; a plain literal here was English on screen.
         let message: String
         /// Raw CLI/transport diagnostics for a failure — the `hermes` stderr
         /// (combined output) of the first failing call. Surfaced verbatim in
@@ -147,7 +150,7 @@ struct FleetApplyExecutor: Sendable {
                             serverId: target.serverId,
                             serverDisplayName: target.serverDisplayName,
                             fields: target.actions.map {
-                                FieldResult(field: $0.field, status: .skipped, message: "cancelled before apply")
+                                FieldResult(field: $0.field, status: .skipped, message: String(localized: "cancelled before apply"))
                             }
                         )
                     } else {
@@ -184,7 +187,7 @@ struct FleetApplyExecutor: Sendable {
         guard let ctx = context(for: target.serverId) else {
             // Host is in a record's binding but no longer registered here.
             let fields = target.actions.map {
-                FieldResult(field: $0.field, status: .failed, message: "server not registered on this Mac")
+                FieldResult(field: $0.field, status: .failed, message: String(localized: "server not registered on this Mac"))
             }
             return TargetResult(serverId: target.serverId, serverDisplayName: target.serverDisplayName, fields: fields)
         }
@@ -203,16 +206,16 @@ struct FleetApplyExecutor: Sendable {
             case .modelPreset:
                 do {
                     try ProjectModelPresetBinding(context: ctx).bind(presetID: source.modelPresetId, to: entry)
-                    fieldResults.append(FieldResult(field: .modelPreset, status: .applied, message: "bound model preset"))
+                    fieldResults.append(FieldResult(field: .modelPreset, status: .applied, message: String(localized: "bound model preset")))
                 } catch {
-                    fieldResults.append(FieldResult(field: .modelPreset, status: .failed, message: "couldn't bind model preset", detail: error.localizedDescription))
+                    fieldResults.append(FieldResult(field: .modelPreset, status: .failed, message: String(localized: "couldn’t bind model preset"), detail: error.localizedDescription))
                 }
             case .board:
                 do {
                     try KanbanTenantResolver(context: ctx).setTenant(source.board ?? "", for: entry)
-                    fieldResults.append(FieldResult(field: .board, status: .applied, message: "set board \(source.board ?? "")"))
+                    fieldResults.append(FieldResult(field: .board, status: .applied, message: String(localized: "set board \(source.board ?? "")")))
                 } catch {
-                    fieldResults.append(FieldResult(field: .board, status: .failed, message: "couldn't set board", detail: error.localizedDescription))
+                    fieldResults.append(FieldResult(field: .board, status: .failed, message: String(localized: "couldn’t set board"), detail: error.localizedDescription))
                 }
             case .cron:
                 fieldResults.append(
@@ -249,7 +252,7 @@ struct FleetApplyExecutor: Sendable {
         isCancelled: @Sendable () -> Bool
     ) -> FieldResult {
         guard !sourceJobs.isEmpty else {
-            return FieldResult(field: .cron, status: .skipped, message: "source has no copyable project cron jobs")
+            return FieldResult(field: .cron, status: .skipped, message: String(localized: "source has no copyable project cron jobs"))
         }
         let fileService = HermesFileService(context: ctx)
         let before = fileService.loadCronJobs()
@@ -356,18 +359,18 @@ struct FleetApplyExecutor: Sendable {
         if created > 0 {
             let unpaused = created - paused
             parts.append(unpaused == 0
-                ? "\(created) created (paused)"
-                : "\(created) created, \(unpaused) could NOT be paused — verify on host")
+                ? String(localized: "\(created) created (paused)")
+                : String(localized: "\(created) created, \(unpaused) could NOT be paused — verify on host"))
         }
-        if skipped > 0 { parts.append("\(skipped) already present") }
-        if scriptOnlySkipped > 0 { parts.append("\(scriptOnlySkipped) script-only skipped") }
-        if failed > 0 { parts.append("\(failed) failed") }
-        if cancelledRemaining > 0 { parts.append("\(cancelledRemaining) cancelled") }
+        if skipped > 0 { parts.append(String(localized: "\(skipped) already present")) }
+        if scriptOnlySkipped > 0 { parts.append(String(localized: "\(scriptOnlySkipped) script-only skipped")) }
+        if failed > 0 { parts.append(String(localized: "\(failed) failed")) }
+        if cancelledRemaining > 0 { parts.append(String(localized: "\(cancelledRemaining) cancelled")) }
         // A deliver=all downgrade is a created-but-degraded job (runs with
         // Hermes's default delivery, not fan-out) — the user must SEE it,
         // same rationale as the unpaused-job note above.
         if deliverAllDowngrades > 0 {
-            parts.append("\(deliverAllDowngrades) w/o deliver=all (host < v0.14)")
+            parts.append(String(localized: "\(deliverAllDowngrades) w/o deliver=all (host < v0.14)"))
         }
         // `.failed` only when nothing landed; a created-but-unpaused job
         // still applied (its live state is surfaced in the message above).
@@ -375,7 +378,7 @@ struct FleetApplyExecutor: Sendable {
         return FieldResult(
             field: .cron,
             status: status,
-            message: parts.isEmpty ? "no changes" : parts.joined(separator: ", "),
+            message: parts.isEmpty ? String(localized: "no changes") : parts.joined(separator: ", "),
             detail: firstFailureDetail
         )
     }

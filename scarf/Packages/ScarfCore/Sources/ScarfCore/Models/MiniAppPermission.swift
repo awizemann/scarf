@@ -112,6 +112,10 @@ public enum MiniAppPermission: Codable, Sendable, Hashable {
     }
 
     /// Short human description for the permission-preview sheet.
+    /// ⚠️ ENGLISH TOKEN copy. ScarfCore has no string catalog, so nothing
+    /// returned here is extractable. The consent sheet localizes per case —
+    /// see `MiniAppPermission.localizedSummary` in `MiniAppLaunchView.swift`.
+    /// Keep this for logs and tests; never bind it to a `Text`.
     public var summary: String {
         switch self {
         case .prompt: return "Send prompts to this chat's agent"

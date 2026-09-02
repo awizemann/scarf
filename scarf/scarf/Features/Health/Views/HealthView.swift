@@ -208,7 +208,7 @@ struct HealthView: View {
     private func runBrowserSetup() {
         guard !isSettingUpBrowser else { return }
         isSettingUpBrowser = true
-        browserSetupMessage = "Installing browser tools…"
+        browserSetupMessage = String(localized: "Installing browser tools…")
         let ctx = viewModel.context
         Task.detached(priority: .userInitiated) {
             // `--yes` skips the interactive consent prompt that the setup verb
@@ -220,11 +220,11 @@ struct HealthView: View {
             await MainActor.run {
                 isSettingUpBrowser = false
                 if result.exitCode == 0 {
-                    browserSetupMessage = "Browser tools ready."
+                    browserSetupMessage = String(localized: "Browser tools ready.")
                 } else {
                     let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
                     let tail = trimmed.split(separator: "\n").suffix(2).joined(separator: " · ")
-                    browserSetupMessage = "Browser setup failed (exit \(result.exitCode)). \(tail)"
+                    browserSetupMessage = String(localized: "Browser setup failed (exit \(result.exitCode)). \(tail)")
                 }
             }
         }
