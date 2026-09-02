@@ -1,5 +1,6 @@
 import SwiftUI
 import Foundation
+import ScarfDesign
 
 /// Minimal markdown renderer used by the template install/config UIs.
 ///
@@ -20,8 +21,18 @@ import Foundation
 enum TemplateMarkdown {
 
     /// Render a markdown source string as a SwiftUI view. Preserves
-    /// reading order and approximate visual hierarchy. Safe with
-    /// untrusted input — we never execute HTML or scripts.
+    /// reading order and approximate visual hierarchy.
+    ///
+    /// **Input is untrusted and only partly neutralised.** Template READMEs
+    /// and field descriptions are third-party content. This renderer never
+    /// executes HTML or scripts — but the previous comment stopped there and
+    /// called that "safe with untrusted input", which overclaimed: inline
+    /// markdown is parsed by `AttributedString(markdown:)`, so `[go](…)`
+    /// becomes a live link with an arbitrary scheme, and the default
+    /// `openURL` would hand `file:`, `javascript:`, `data:` or any
+    /// app-registered custom scheme straight to the system. `.scarfSafeLinks()`
+    /// below is what actually closes that; the claim is now scoped to what
+    /// is true. (F9)
     @ViewBuilder
     static func render(_ source: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -30,11 +41,17 @@ enum TemplateMarkdown {
                 block(blocks[i])
             }
         }
+        .scarfSafeLinks()
     }
 
     /// Inline-only markdown (bold/italic/code/links) as a single
     /// `Text`. Use for short strings where block structure doesn't
     /// apply — field labels, one-line descriptions.
+    ///
+    /// Returns a bare `Text`, so it carries no link policy of its own —
+    /// **the caller's container must apply `.scarfSafeLinks()`**. Both
+    /// current callers (`TemplateInstallSheet`, `TemplateConfigSheet`) do.
+    /// Any new caller rendering third-party template text must too. (F9)
     static func inlineText(_ source: String) -> Text {
         if let attr = try? AttributedString(
             markdown: source,

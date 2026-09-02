@@ -18,6 +18,12 @@ struct TextWidgetView: View {
                     // dashboard cases (bold, italic, links, inline code).
                     Text(attributed(content))
                         .font(.callout)
+                        // Widget content is authored on the host, not by
+                        // Scarf, and `AttributedString(markdown:)` makes
+                        // `[go](file:///…)` a live link the system opener
+                        // would follow. Same allowlist the Mac's
+                        // `MarkdownContentView` applies. (F9)
+                        .scarfSafeLinks()
                 } else {
                     Text(content)
                         .font(.callout)

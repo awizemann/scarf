@@ -203,6 +203,10 @@ struct TemplateInstallSheet: View {
             TemplateMarkdown.inlineText(manifest.description)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                // `inlineText` hands back a bare `Text`, so the scheme
+                // allowlist has to be applied here by the caller. The
+                // description is third-party manifest content. (F9)
+                .scarfSafeLinks()
             if let author = manifest.author {
                 HStack(spacing: 4) {
                     Image(systemName: "person.crop.circle")
@@ -211,7 +215,11 @@ struct TemplateInstallSheet: View {
                     Text(author.name)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    if let url = author.url, let parsed = URL(string: url) {
+                    // `author.url` is manifest-supplied too — a `Link` with
+                    // an unvetted scheme is the same hand-off risk as a
+                    // markdown link, so it takes the same policy. (F9)
+                    if let url = author.url, let parsed = URL(string: url),
+                       ScarfLinkPolicy.allows(parsed) {
                         Link(parsed.host ?? url, destination: parsed)
                             .font(.caption)
                     }

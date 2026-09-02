@@ -1,5 +1,6 @@
 import SwiftUI
 import Marker
+import ScarfDesign
 
 struct MarkdownContentView: View {
     let content: String
@@ -21,34 +22,21 @@ struct MarkdownContentView: View {
     /// callers see the un-scaled rendering.
     @Environment(\.chatFontScale) private var chatFontScale: Double
 
-    /// Schemes a link inside rendered markdown is allowed to open.
-    ///
-    /// Everything this view renders is untrusted text — agent replies, files
-    /// out of the project, session transcripts, skill docs. A markdown link
-    /// carries an arbitrary URL, and `Text`'s default link handling hands it
-    /// straight to the system opener, which will happily launch `file:///…`,
-    /// a `x-apple-…`/custom scheme registered by some other installed app,
-    /// or a `javascript:`/`data:` URL. One `[click here](…)` in a summarized
-    /// document is enough. Only the three schemes a document link can
-    /// legitimately mean are forwarded.
-    private static let allowedLinkSchemes: Set<String> = ["http", "https", "mailto"]
-
     var body: some View {
         renderedBody
-            // Applied at THIS container — the one view every markdown link in
-            // the app is rendered through (chat transcript, markdown_file and
-            // text widgets, session detail, activity, skills). Scoping it here
-            // rather than at a screen root is deliberate: it covers both
-            // required surfaces at once and cannot reach the app's own
-            // hardcoded buttons/links elsewhere, which are trusted and
-            // sometimes need other schemes.
-            .environment(\.openURL, OpenURLAction { url in
-                guard let scheme = url.scheme?.lowercased(),
-                      Self.allowedLinkSchemes.contains(scheme) else {
-                    return .discarded
-                }
-                return .systemAction
-            })
+            // Applied at THIS container, which covers the markdown surfaces
+            // rendered through it (chat transcript, markdown_file and text
+            // widgets, session detail, activity, skills). Scoping it here
+            // rather than at a screen root is deliberate: it cannot reach the
+            // app's own hardcoded buttons/links elsewhere, which are trusted
+            // and sometimes need other schemes.
+            //
+            // It is NOT, however, the app's only markdown container — an
+            // earlier comment here claimed it was. `TemplateMarkdown` and the
+            // iOS widget views render markdown through their own containers
+            // and apply `.scarfSafeLinks()` themselves. The policy lives in
+            // ScarfDesign so all of them share one definition. (F9)
+            .scarfSafeLinks()
     }
 
     @ViewBuilder

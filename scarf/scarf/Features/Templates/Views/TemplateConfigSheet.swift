@@ -144,6 +144,9 @@ struct TemplateConfigSheet: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    // Third-party field description; `inlineText` returns a
+                    // bare `Text`, so the caller applies the policy. (F9)
+                    .scarfSafeLinks()
             }
             control(for: field)
             if let err = viewModel.errors[field.key] {
