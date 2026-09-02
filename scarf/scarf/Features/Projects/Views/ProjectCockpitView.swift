@@ -668,7 +668,7 @@ private struct CockpitProjectSkillsPanel: View {
 
 struct CockpitEmptyState: View {
     let icon: String
-    let text: String
+    let text: LocalizedStringKey
 
     var body: some View {
         VStack(spacing: 10) {

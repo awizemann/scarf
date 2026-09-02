@@ -239,7 +239,9 @@ final class SessionsViewModel {
     enum QuickFilter: String, CaseIterable, Identifiable, Sendable {
         case all, today, starred
         var id: String { rawValue }
-        var label: String {
+        /// `LocalizedStringResource`, not `String` — a `String` here bound
+        /// `Text`'s verbatim overload at the pill and was never extractable.
+        var label: LocalizedStringResource {
             switch self {
             case .all: return "All"
             case .today: return "Today"
@@ -655,8 +657,8 @@ final class SessionsViewModel {
             panel.canChooseFiles = false
             panel.canChooseDirectories = true
             panel.canCreateDirectories = true
-            panel.prompt = "Export"
-            panel.message = "Choose a folder for the \(format.displayName) export."
+            panel.prompt = String(localized: "Export")
+            panel.message = String(localized: "Choose a folder for the \(format.displayName) export.")
             guard panel.runModal() == .OK, let url = panel.url else { return }
             performPathExport(to: url, sessionId: sessionId, format: format, redact: redact)
             return

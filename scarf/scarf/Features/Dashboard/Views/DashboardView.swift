@@ -231,7 +231,7 @@ struct DashboardView: View {
         HStack(spacing: ScarfSpace.s3) {
             StatusCard(
                 label: "Hermes",
-                value: viewModel.hermesRunning ? "Running" : "Stopped",
+                value: viewModel.hermesRunning ? String(localized: "Running") : String(localized: "Stopped"),
                 icon: "circle.fill",
                 tone: viewModel.hermesRunning ? .running : .neutral,
                 sub: nil
@@ -252,7 +252,7 @@ struct DashboardView: View {
             )
             StatusCard(
                 label: "Gateway",
-                value: viewModel.gatewayState?.statusText ?? "unknown",
+                value: viewModel.gatewayState?.statusText ?? String(localized: "unknown"),
                 icon: "network",
                 tone: viewModel.gatewayState?.isRunning == true ? .running : .neutral,
                 sub: nil
@@ -278,9 +278,9 @@ struct DashboardView: View {
                 .buttonStyle(ScarfGhostButton())
             }
             HStack(spacing: ScarfSpace.s3) {
-                StatCard(label: "Sessions", value: "\(viewModel.stats.totalSessions)", sub: nil, accent: false)
-                StatCard(label: "Messages", value: "\(viewModel.stats.totalMessages)", sub: nil, accent: false)
-                StatCard(label: "Tool Calls", value: "\(viewModel.stats.totalToolCalls)", sub: nil, accent: false)
+                StatCard(label: "Sessions", value: viewModel.stats.totalSessions.formatted(), sub: nil, accent: false)
+                StatCard(label: "Messages", value: viewModel.stats.totalMessages.formatted(), sub: nil, accent: false)
+                StatCard(label: "Tool Calls", value: viewModel.stats.totalToolCalls.formatted(), sub: nil, accent: false)
                 StatCard(
                     label: "Tokens",
                     value: formatTokens(viewModel.stats.totalInputTokens + viewModel.stats.totalOutputTokens),
@@ -550,7 +550,9 @@ private struct DashActivityRow: View {
 struct StatusCard: View {
     enum Tone { case running, neutral }
 
-    let label: String
+    let label: LocalizedStringKey
+    /// Already-localized runtime text (a model id, a gateway status word) —
+    /// rendered verbatim on purpose.
     let value: String
     let icon: String
     let tone: Tone
@@ -572,13 +574,13 @@ struct StatusCard: View {
                     .scarfStyle(.captionUppercase)
                     .foregroundStyle(ScarfColor.foregroundMuted)
             }
-            Text(value)
+            Text(verbatim: value)
                 .font(ScarfFont.body.monospaced())
                 .foregroundStyle(ScarfColor.foregroundPrimary)
                 .lineLimit(1)
                 .truncationMode(.tail)
             if let sub {
-                Text(sub)
+                Text(verbatim: sub)
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundFaint)
             }
@@ -599,12 +601,12 @@ struct StatusCard: View {
 // MARK: - StatCard
 
 struct StatCard: View {
-    let label: String
+    let label: LocalizedStringKey
     let value: String
     let sub: String?
     let accent: Bool
 
-    init(label: String, value: String, sub: String? = nil, accent: Bool = false) {
+    init(label: LocalizedStringKey, value: String, sub: String? = nil, accent: Bool = false) {
         self.label = label
         self.value = value
         self.sub = sub
@@ -616,13 +618,13 @@ struct StatCard: View {
             Text(label)
                 .scarfStyle(.captionUppercase)
                 .foregroundStyle(ScarfColor.foregroundMuted)
-            Text(value)
+            Text(verbatim: value)
                 .font(.system(size: 22, weight: .semibold, design: .monospaced))
                 .foregroundStyle(accent ? ScarfColor.accent : ScarfColor.foregroundPrimary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             if let sub {
-                Text(sub)
+                Text(verbatim: sub)
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundFaint)
             }
@@ -690,7 +692,7 @@ struct SessionRow: View {
                 }
                 if session.rewindCount > 0 {
                     Label("\(session.rewindCount)", systemImage: "arrow.counterclockwise")
-                        .help("Rewound \(session.rewindCount) time\(session.rewindCount == 1 ? "" : "s") (Hermes v0.16+)")
+                        .help("Rewound ^[\(session.rewindCount) time](inflect: true) (Hermes v0.16+)")
                 }
                 if let cost = session.displayCostUSD, cost > 0 {
                     Label(cost.formatted(.currency(code: "USD").precision(.fractionLength(4))), systemImage: "dollarsign.circle")

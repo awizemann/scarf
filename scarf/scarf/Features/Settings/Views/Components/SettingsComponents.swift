@@ -52,9 +52,11 @@ private extension View {
 }
 
 private struct SettingsRowLabel: View {
-    let label: String
+    let label: Text
+    init(label: LocalizedStringKey) { self.label = Text(label) }
+    init(verbatim: String) { self.label = Text(verbatim: verbatim) }
     var body: some View {
-        Text(label)
+        label
             .scarfStyle(.caption)
             .foregroundStyle(ScarfColor.foregroundMuted)
             .frame(width: settingsRowLabelWidth, alignment: .trailing)
@@ -62,7 +64,7 @@ private struct SettingsRowLabel: View {
 }
 
 struct EditableTextField: View {
-    let label: String
+    let label: LocalizedStringKey
     let value: String
     let onCommit: (String) -> Void
     @State private var text: String = ""
@@ -98,7 +100,7 @@ struct EditableTextField: View {
 
 /// Masked text field for API keys, tokens, etc. Shows ••• until the user taps reveal.
 struct SecretTextField: View {
-    let label: String
+    let label: LocalizedStringKey
     let value: String
     let onCommit: (String) -> Void
     @State private var text: String = ""
@@ -149,14 +151,14 @@ struct SecretTextField: View {
 }
 
 struct PickerRow: View {
-    let label: String
+    let label: LocalizedStringKey
     let selection: String
     let options: [String]
     let optionLabel: ((String) -> String)?
     let onChange: (String) -> Void
 
     init(
-        label: String,
+        label: LocalizedStringKey,
         selection: String,
         options: [String],
         optionLabel: ((String) -> String)? = nil,
@@ -177,7 +179,7 @@ struct PickerRow: View {
                 set: { onChange($0) }
             )) {
                 ForEach(options, id: \.self) { option in
-                    Text(displayLabel(for: option)).tag(option)
+                    Text(verbatim: displayLabel(for: option)).tag(option)
                 }
             }
             .frame(maxWidth: 250)
@@ -190,12 +192,12 @@ struct PickerRow: View {
         if let mapper = optionLabel {
             return mapper(option)
         }
-        return option.isEmpty ? "(none)" : option
+        return option.isEmpty ? String(localized: "(none)") : option
     }
 }
 
 struct ToggleRow: View {
-    let label: String
+    let label: LocalizedStringKey
     let isOn: Bool
     let onChange: (Bool) -> Void
 
@@ -216,7 +218,7 @@ struct ToggleRow: View {
 }
 
 struct StepperRow: View {
-    let label: String
+    let label: LocalizedStringKey
     let value: Int
     let range: ClosedRange<Int>
     let step: Int
@@ -226,7 +228,7 @@ struct StepperRow: View {
     let onChange: (Int) -> Void
 
     init(
-        label: String,
+        label: LocalizedStringKey,
         value: Int,
         range: ClosedRange<Int>,
         step: Int = 1,
@@ -244,7 +246,7 @@ struct StepperRow: View {
     var body: some View {
         HStack {
             SettingsRowLabel(label: label)
-            Text(valueLabel?(value) ?? "\(value)")
+            Text(verbatim: valueLabel?(value) ?? value.formatted())
                 .font(ScarfFont.monoSmall)
                 .frame(width: 70, alignment: .leading)
             Stepper("", value: Binding(
@@ -260,7 +262,7 @@ struct StepperRow: View {
 
 /// Double stepper that increments by a fractional step (e.g. 0.05 for thresholds).
 struct DoubleStepperRow: View {
-    let label: String
+    let label: LocalizedStringKey
     let value: Double
     let range: ClosedRange<Double>
     let step: Double
@@ -284,12 +286,24 @@ struct DoubleStepperRow: View {
 }
 
 struct ReadOnlyRow: View {
-    let label: String
+    private let rowLabel: SettingsRowLabel
     let value: String
+
+    init(label: LocalizedStringKey, value: String) {
+        self.rowLabel = SettingsRowLabel(label: label)
+        self.value = value
+    }
+
+    /// Escape hatch for rows whose label is runtime data (e.g. a Docker
+    /// env-var name) rather than UI copy — those must never be extracted.
+    init(verbatimLabel: String, value: String) {
+        self.rowLabel = SettingsRowLabel(verbatim: verbatimLabel)
+        self.value = value
+    }
 
     var body: some View {
         HStack {
-            SettingsRowLabel(label: label)
+            rowLabel
             Text(value.isEmpty ? "—" : value)
                 .font(ScarfFont.monoSmall)
                 .foregroundStyle(value.isEmpty ? ScarfColor.foregroundFaint : ScarfColor.foregroundPrimary)
@@ -301,7 +315,7 @@ struct ReadOnlyRow: View {
 }
 
 struct PathRow: View {
-    let label: String
+    let label: LocalizedStringKey
     let path: String
 
     var body: some View {

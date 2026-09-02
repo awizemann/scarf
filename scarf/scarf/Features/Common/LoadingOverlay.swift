@@ -18,7 +18,7 @@ import ScarfDesign
 /// (when refreshing existing data).
 struct LoadingOverlay: ViewModifier {
     let isLoading: Bool
-    let label: String
+    let label: LocalizedStringKey
     let isEmpty: Bool
 
     func body(content: Content) -> some View {
@@ -69,7 +69,7 @@ extension View {
     /// also true, the indicator covers the full view; otherwise it shows
     /// as a small refresh pill in the top-trailing corner so existing
     /// content stays visible.
-    func loadingOverlay(_ isLoading: Bool, label: String = "Loading…", isEmpty: Bool = false) -> some View {
+    func loadingOverlay(_ isLoading: Bool, label: LocalizedStringKey = "Loading…", isEmpty: Bool = false) -> some View {
         modifier(LoadingOverlay(isLoading: isLoading, label: label, isEmpty: isEmpty))
     }
 }

@@ -137,7 +137,7 @@ struct ActivityView: View {
                 viewModel.filterKind = nil
             }
             ForEach(ToolKind.allCases, id: \.rawValue) { kind in
-                FilterChip(label: kind.rawValue.capitalized, isSelected: viewModel.filterKind == kind) {
+                FilterChip(label: Text(kind.displayName), isSelected: viewModel.filterKind == kind) {
                     viewModel.filterKind = kind
                 }
             }
@@ -185,9 +185,9 @@ struct ActivityView: View {
         return sortedKeys.map { key in
             let label: String
             if key == today {
-                label = "Today"
+                label = String(localized: "Today")
             } else if let y = yesterday, key == y {
-                label = "Yesterday"
+                label = String(localized: "Yesterday")
             } else if cal.isDate(key, equalTo: today, toGranularity: .weekOfYear) {
                 label = key.formatted(.dateTime.weekday(.wide))
             } else {
@@ -199,7 +199,8 @@ struct ActivityView: View {
 
     private func dayGroup(_ group: DayGroup) -> some View {
         VStack(alignment: .leading, spacing: ScarfSpace.s2) {
-            Text(group.label)
+            // Already localized (and for the date branches, locale-formatted).
+            Text(verbatim: group.label)
                 .scarfStyle(.captionUppercase)
                 .foregroundStyle(ScarfColor.foregroundMuted)
                 .padding(.horizontal, 4)
@@ -347,7 +348,7 @@ struct ActivityView: View {
         }
     }
 
-    private func sectionLabel(_ text: String) -> some View {
+    private func sectionLabel(_ text: LocalizedStringKey) -> some View {
         Text(text)
             .scarfStyle(.captionUppercase)
             .foregroundStyle(ScarfColor.foregroundMuted)
@@ -462,13 +463,25 @@ private struct ActivityRow: View {
 // MARK: - Filter chip
 
 struct FilterChip: View {
-    let label: String
+    private let label: Text
     let isSelected: Bool
     let action: () -> Void
 
+    init(label: LocalizedStringKey, isSelected: Bool, action: @escaping () -> Void) {
+        self.label = Text(label)
+        self.isSelected = isSelected
+        self.action = action
+    }
+
+    init(label: Text, isSelected: Bool, action: @escaping () -> Void) {
+        self.label = label
+        self.isSelected = isSelected
+        self.action = action
+    }
+
     var body: some View {
         Button(action: action) {
-            Text(label)
+            label
                 .scarfStyle(.caption)
                 .foregroundStyle(isSelected ? ScarfColor.onAccent : ScarfColor.foregroundPrimary)
                 .padding(.horizontal, 11)

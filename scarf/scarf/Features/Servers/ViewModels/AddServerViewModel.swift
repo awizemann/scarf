@@ -82,7 +82,7 @@ final class AddServerViewModel {
 
     func pickIdentityFile() {
         let panel = NSOpenPanel()
-        panel.message = "Choose an SSH private key"
+        panel.message = String(localized: "Choose an SSH private key")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false

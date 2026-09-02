@@ -363,7 +363,7 @@ struct InsightsView: View {
 
     @ViewBuilder
     private func sectionHeader<Content: View>(
-        _ title: String,
+        _ title: LocalizedStringKey,
         spacing: CGFloat = ScarfSpace.s2,
         @ViewBuilder content: () -> Content
     ) -> some View {
@@ -389,7 +389,7 @@ struct InsightsView: View {
             )
     }
 
-    private func emptyRow(_ text: String) -> some View {
+    private func emptyRow(_ text: LocalizedStringKey) -> some View {
         Text(text)
             .scarfStyle(.body)
             .foregroundStyle(ScarfColor.foregroundMuted)
@@ -417,11 +417,11 @@ struct InsightsView: View {
 }
 
 struct InsightCard: View {
-    let label: String
+    let label: LocalizedStringKey
     let value: String
     let accent: Bool
 
-    init(label: String, value: String, accent: Bool = false) {
+    init(label: LocalizedStringKey, value: String, accent: Bool = false) {
         self.label = label
         self.value = value
         self.accent = accent
@@ -432,7 +432,7 @@ struct InsightCard: View {
             Text(label)
                 .scarfStyle(.captionUppercase)
                 .foregroundStyle(ScarfColor.foregroundMuted)
-            Text(value)
+            Text(verbatim: value)
                 .font(.system(size: 18, weight: .semibold, design: .monospaced))
                 .foregroundStyle(accent ? ScarfColor.accent : ScarfColor.foregroundPrimary)
                 .lineLimit(1)

@@ -266,7 +266,7 @@ struct AuxiliaryTab: View {
             label: "Reasoning Effort",
             selection: value,
             options: [""] + AuxiliaryReasoningEffort.allCases.map(\.rawValue),
-            optionLabel: { $0.isEmpty ? "Default" : $0.capitalized },
+            optionLabel: { $0.isEmpty ? String(localized: "Default") : $0.capitalized },
             onChange: onChange
         )
     }

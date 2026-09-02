@@ -123,8 +123,8 @@ struct ManageServersView: View {
 
     private func exportServers() {
         let panel = NSSavePanel()
-        panel.title = "Export Servers"
-        panel.prompt = "Export"
+        panel.title = String(localized: "Export Servers")
+        panel.prompt = String(localized: "Export")
         panel.allowedContentTypes = [Self.scarfServersType, .json]
         panel.nameFieldStringValue = "scarf-servers-\(Self.todayStamp()).scarfservers"
         panel.canCreateDirectories = true
@@ -143,8 +143,8 @@ struct ManageServersView: View {
 
     private func importServers() {
         let panel = NSOpenPanel()
-        panel.title = "Import Servers"
-        panel.prompt = "Import"
+        panel.title = String(localized: "Import Servers")
+        panel.prompt = String(localized: "Import")
         panel.allowedContentTypes = [Self.scarfServersType, .json]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false

@@ -22,8 +22,8 @@ struct MarkdownFileWidgetView: View {
             switch WidgetPathResolver.resolve(widget.path, projectRoot: projectRoot) {
             case .failure(let err):
                 WidgetErrorCard(
+                    verbatimReason: err.userMessage,
                     title: widget.title,
-                    reason: err.userMessage,
                     hint: "Set `path` to a markdown file relative to the project root, e.g. `reports/weekly.md`."
                 )
             case .success(let resolved):

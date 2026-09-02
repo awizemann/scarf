@@ -23,7 +23,7 @@ struct AgentTab: View {
                 label: "Max Turns",
                 value: viewModel.config.displayMaxTurns(capabilities: capabilities),
                 range: capabilities.isV0205OrLater ? 0...1000 : 1...1000,
-                valueLabel: { $0 == HermesConfig.maxTurnsUnlimited ? "Unlimited" : "\($0)" }
+                valueLabel: { $0 == HermesConfig.maxTurnsUnlimited ? String(localized: "Unlimited") : $0.formatted() }
             ) { viewModel.setMaxTurns($0) }
             // v0.20 added the `max` and `ultra` tiers (hermes_constants.py
             // VALID_REASONING_EFFORTS); older hosts keep the shorter list.

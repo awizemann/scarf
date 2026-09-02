@@ -279,13 +279,13 @@ struct CronView: View {
                             .font(.system(size: 10))
                             .foregroundStyle(ScarfColor.warning)
                             .help(doctorTooltip(finding))
-                            .accessibilityLabel("\(finding.issues.count) health issue\(finding.issues.count == 1 ? "" : "s")")
+                            .accessibilityLabel("^[\(finding.issues.count) health issue](inflect: true)")
                     }
                     // v0.20.6 open failure incidents for this job.
                     if hasCronIncidents {
                         let open = viewModel.openIncidentCount(jobID: job.id)
                         if open > 0 {
-                            ScarfBadge("\(open) incident\(open == 1 ? "" : "s")", kind: .danger)
+                            ScarfBadge("^[\(open) incident](inflect: true)", kind: .danger)
                         }
                     }
                     if !job.enabled {
@@ -614,7 +614,7 @@ struct CronView: View {
             Image(systemName: "stethoscope")
                 .foregroundStyle(ScarfColor.warning)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Health check found \(finding.issues.count) issue\(finding.issues.count == 1 ? "" : "s")")
+                Text("Health check found ^[\(finding.issues.count) issue](inflect: true)")
                     .scarfStyle(.bodyEmph)
                     .foregroundStyle(ScarfColor.foregroundPrimary)
                 ForEach(finding.issues, id: \.self) { issue in
@@ -1009,7 +1009,7 @@ struct CronView: View {
     }
 
     @ViewBuilder
-    private func sectionBlock<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
+    private func sectionBlock<Content: View>(_ title: LocalizedStringKey, @ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: ScarfSpace.s2) {
             Text(title)
                 .scarfStyle(.captionUppercase)
@@ -1079,7 +1079,7 @@ struct CronJobEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: ScarfSpace.s3) {
-            Text(headerText)
+            headerText
                 .scarfStyle(.headline)
                 .foregroundStyle(ScarfColor.foregroundPrimary)
             formField("Name", text: $form.name, placeholder: "Friendly label")
@@ -1108,7 +1108,7 @@ struct CronJobEditor: View {
             formField(
                 "Deliver",
                 text: $form.deliver,
-                placeholder: deliverPlaceholder,
+                verbatimPlaceholder: deliverPlaceholder,
                 mono: true
             )
             if supportsDeliverAll {
@@ -1219,23 +1219,51 @@ struct CronJobEditor: View {
         return options.joined(separator: " | ")
     }
 
-    private var headerText: String {
+    private var headerText: Text {
         switch mode {
-        case .create: return "Create Cron Job"
-        case .edit(let job): return "Edit \(job.name)"
+        case .create: return Text("Create Cron Job")
+        case .edit(let job): return Text("Edit \(job.name)")
         }
     }
 
     @ViewBuilder
-    private func formField(_ label: String, text: Binding<String>, placeholder: String, mono: Bool = false) -> some View {
+    private func formField(
+        _ label: LocalizedStringKey,
+        text: Binding<String>,
+        placeholder: LocalizedStringKey,
+        mono: Bool = false
+    ) -> some View {
+        formField(label, text: text, placeholderText: Text(placeholder), mono: mono)
+    }
+
+    /// Escape hatch for the Deliver row, whose placeholder is assembled at
+    /// runtime from the host's capability set.
+    @ViewBuilder
+    private func formField(
+        _ label: LocalizedStringKey,
+        text: Binding<String>,
+        verbatimPlaceholder: String,
+        mono: Bool = false
+    ) -> some View {
+        formField(label, text: text, placeholderText: Text(verbatim: verbatimPlaceholder), mono: mono)
+    }
+
+    @ViewBuilder
+    private func formField(
+        _ label: LocalizedStringKey,
+        text: Binding<String>,
+        placeholderText: Text,
+        mono: Bool = false
+    ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .scarfStyle(.caption)
                 .foregroundStyle(ScarfColor.foregroundMuted)
-            TextField(placeholder, text: text)
+            TextField(text: text, prompt: placeholderText) { Text(label) }
+                .labelsHidden()
                 .textFieldStyle(.roundedBorder)
                 .font(mono ? ScarfFont.monoSmall : ScarfFont.body)
-                .accessibilityLabel(label)
+                .accessibilityLabel(Text(label))
         }
     }
 }

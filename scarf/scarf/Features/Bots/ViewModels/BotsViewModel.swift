@@ -320,7 +320,9 @@ final class BotsViewModel {
         /// Bots with no activity (no Bot Chat, or none read yet) sort last.
         case recentActivity
 
-        var label: String {
+        /// `LocalizedStringResource`, not `String` — the picker bound `Text`'s
+        /// verbatim overload and neither option was ever extractable.
+        var label: LocalizedStringResource {
             switch self {
             case .pinnedThenName: return "Pinned, then name"
             case .recentActivity: return "Recent activity"

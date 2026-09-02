@@ -378,7 +378,7 @@ struct BotsView: View {
                 set: { storedSortOrder = $0 }
             )) {
                 ForEach(BotsViewModel.BotRosterSort.allCases, id: \.rawValue) { order in
-                    Text(order.label).tag(order.rawValue)
+                    Text(order.label).tag(order.rawValue)  // LocalizedStringResource
                 }
             }
             .pickerStyle(.segmented)
@@ -551,7 +551,7 @@ struct BotsView: View {
         if row.isPinned { parts.append(String(localized: "pinned")) }
         if row.isHidden { parts.append(String(localized: "hidden")) }
         let presence = viewModel.presence(forProfile: row.identity.profileName)
-        if presence.isLive { parts.append(presence.accessibilityDescription) }
+        if presence.isLive, let spoken = presence.spokenDescription { parts.append(spoken) }
         if let last = row.activity?.lastMessageAt {
             parts.append(String(localized: "last active \(Self.relative(last))"))
         }
@@ -566,7 +566,7 @@ struct BotsView: View {
             Circle()
                 .fill(presence == .streaming ? ScarfColor.accent : ScarfColor.success)
                 .frame(width: 6, height: 6)
-            Text(presence.label)
+            Text(presence.badgeLabel)
                 .scarfStyle(.footnote)
                 .foregroundStyle(presence == .streaming ? ScarfColor.accent : ScarfColor.success)
         }
@@ -783,7 +783,7 @@ struct BotsView: View {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.allowedContentTypes = [.png, .jpeg, .webP, .heic, .tiff, .image]
-        panel.message = "Choose a picture for this bot. Large images are scaled down to fit Hermes' 2 MB avatar limit."
+        panel.message = String(localized: "Choose a picture for this bot. Large images are scaled down to fit Hermes' 2 MB avatar limit.")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             let data = try BotAvatarImport.pngData(fromFileAt: url)
@@ -814,5 +814,30 @@ struct BotsView: View {
                 .fill(ScarfColor.danger.opacity(0.12))
         )
         .accessibilityLabel("Error: \(text)")
+    }
+}
+
+
+/// `BotPresence.label` / `.accessibilityDescription` are English tokens from
+/// ScarfCore, which has no string catalog — binding them to `Text` made the
+/// roster badge permanently English. The localized vocabulary lives here, one
+/// extractable string per case.
+private extension BotPresence {
+    var badgeLabel: LocalizedStringKey {
+        switch self {
+        case .offline: return ""
+        case .connecting: return "connecting"
+        case .connected: return "open"
+        case .streaming: return "replying"
+        }
+    }
+
+    var spokenDescription: String? {
+        switch self {
+        case .offline: return nil
+        case .connecting: return String(localized: "conversation connecting")
+        case .connected: return String(localized: "conversation open")
+        case .streaming: return String(localized: "replying now")
+        }
     }
 }

@@ -146,13 +146,13 @@ struct MCPServerDetailView: View {
         )
     }
 
-    private func summaryRow(label: String, value: String) -> some View {
+    private func summaryRow(label: LocalizedStringKey, value: String) -> some View {
         HStack(alignment: .top) {
             Text(label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(width: 80, alignment: .leading)
-            Text(value)
+            Text(verbatim: value)
                 .font(.system(.caption, design: .monospaced))
                 .textSelection(.enabled)
         }
@@ -231,10 +231,10 @@ struct MCPServerDetailView: View {
             Text("Tool Filters")
                 .scarfStyle(.captionUppercase)
                 .foregroundStyle(ScarfColor.foregroundMuted)
-            summaryRow(label: "Include", value: server.toolsInclude.isEmpty ? "(all)" : server.toolsInclude.joined(separator: ", "))
+            summaryRow(label: "Include", value: server.toolsInclude.isEmpty ? String(localized: "(all)") : server.toolsInclude.joined(separator: ", "))
             summaryRow(label: "Exclude", value: server.toolsExclude.isEmpty ? "—" : server.toolsExclude.joined(separator: ", "))
-            summaryRow(label: "Resources", value: server.resourcesEnabled ? "enabled" : "disabled")
-            summaryRow(label: "Prompts", value: server.promptsEnabled ? "enabled" : "disabled")
+            summaryRow(label: "Resources", value: server.resourcesEnabled ? String(localized: "enabled") : String(localized: "disabled"))
+            summaryRow(label: "Prompts", value: server.promptsEnabled ? String(localized: "enabled") : String(localized: "disabled"))
         }
         .padding(ScarfSpace.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -253,8 +253,8 @@ struct MCPServerDetailView: View {
             Text("Timeouts")
                 .scarfStyle(.captionUppercase)
                 .foregroundStyle(ScarfColor.foregroundMuted)
-            summaryRow(label: "Connect", value: server.connectTimeout.map { "\($0)s" } ?? "default")
-            summaryRow(label: "Call", value: server.timeout.map { "\($0)s" } ?? "default")
+            summaryRow(label: "Connect", value: server.connectTimeout.map { "\($0)s" } ?? String(localized: "default"))
+            summaryRow(label: "Call", value: server.timeout.map { "\($0)s" } ?? String(localized: "default"))
         }
         .padding(ScarfSpace.s3)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -156,7 +156,10 @@ struct PeersView: View {
                         .help("The peer's API key is read from ~/.hermes/.env under this name. Scarf never reads or displays its value.")
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(peer.name), \(peer.url), \(peer.note), key \(peer.keyEnvName), \(isSelected ? "selected" : "not selected")")
+                // Selection is carried by `.isSelected` below — spelling it
+                // out here would double-announce it, and the English ternary
+                // was never extractable anyway.
+                .accessibilityLabel("\(peer.name), \(peer.url), \(peer.note), key \(peer.keyEnvName)")
             }
         }
         .buttonStyle(.plain)
@@ -174,7 +177,7 @@ struct PeersView: View {
             ScarfCard {
                 VStack(alignment: .leading, spacing: ScarfSpace.s3) {
                     HStack(spacing: ScarfSpace.s2) {
-                        Text(viewModel.selectedPeer?.name ?? "—")
+                        Text(verbatim: viewModel.selectedPeer?.name ?? "—")
                             .scarfStyle(.bodyEmph)
                         Text("/")
                             .foregroundStyle(ScarfColor.foregroundFaint)

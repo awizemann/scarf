@@ -8,9 +8,25 @@ import ScarfDesign
 /// Used by the `WidgetView` dispatcher's default branch and (in v2.7+) by
 /// file-reading widgets that can't load their underlying data.
 struct WidgetErrorCard: View {
-    let title: String
-    let reason: String
-    var hint: String? = nil
+    /// Always runtime data (the dashboard author's own widget title), so it
+    /// renders verbatim and is never extracted.
+    private let title: String
+    private let reason: Text
+    private let hint: Text?
+
+    init(title: String, reason: LocalizedStringKey, hint: LocalizedStringKey? = nil) {
+        self.title = title
+        self.reason = Text(reason)
+        self.hint = hint.map { Text($0) }
+    }
+
+    /// Escape hatch for reasons that are already-localized runtime text
+    /// (e.g. `WidgetPathError.userMessage`).
+    init(verbatimReason: String, title: String, hint: LocalizedStringKey? = nil) {
+        self.title = title
+        self.reason = Text(verbatim: verbatimReason)
+        self.hint = hint.map { Text($0) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -18,16 +34,16 @@ struct WidgetErrorCard: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(ScarfColor.warning)
                     .font(.caption)
-                Text(title.isEmpty ? "Widget error" : title)
+                (title.isEmpty ? Text("Widget error") : Text(verbatim: title))
                     .scarfStyle(.caption)
                     .foregroundStyle(.secondary)
             }
-            Text(reason)
+            reason
                 .font(.callout)
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
-            if let hint, !hint.isEmpty {
-                Text(hint)
+            if let hint {
+                hint
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

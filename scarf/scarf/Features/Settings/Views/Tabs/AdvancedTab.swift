@@ -279,6 +279,7 @@ struct AdvancedTab: View {
 
             optionalIntRow(
                 label: "WAL Autocheckpoint (pages)",
+                customLabel: "WAL Autocheckpoint (pages) — Custom",
                 value: viewModel.config.database.walAutocheckpoint,
                 range: 0...1_000_000,
                 step: 100,
@@ -286,6 +287,7 @@ struct AdvancedTab: View {
             )
             optionalIntRow(
                 label: "Journal Size Limit (bytes)",
+                customLabel: "Journal Size Limit (bytes) — Custom",
                 value: viewModel.config.database.journalSizeLimit,
                 range: 0...1_073_741_824,
                 step: 1_048_576,
@@ -312,13 +314,14 @@ struct AdvancedTab: View {
     /// distinct, reachable value from "unset".
     @ViewBuilder
     private func optionalIntRow(
-        label: String,
+        label: LocalizedStringKey,
+        customLabel: LocalizedStringKey,
         value: Int?,
         range: ClosedRange<Int>,
         step: Int,
         onChange: @escaping (Int?) -> Void
     ) -> some View {
-        ToggleRow(label: "\(label) — Custom", isOn: value != nil) { isOn in
+        ToggleRow(label: customLabel, isOn: value != nil) { isOn in
             onChange(isOn ? (value ?? range.lowerBound) : nil)
         }
         if let value {
@@ -431,7 +434,7 @@ struct AdvancedTab: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.message = "Choose a Hermes backup archive to restore"
+        panel.message = String(localized: "Choose a Hermes backup archive to restore")
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         return url.path
     }

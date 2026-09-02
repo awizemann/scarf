@@ -226,8 +226,8 @@ struct BackupServerSheet: View {
 
     private func presentSavePanel(summary: RemoteBackupService.PreflightSummary) {
         let panel = NSSavePanel()
-        panel.title = "Save Backup"
-        panel.prompt = "Back Up"
+        panel.title = String(localized: "Save Backup")
+        panel.prompt = String(localized: "Back Up")
         panel.nameFieldStringValue = viewModel.defaultArchiveName
         if let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
             let backupDir = documentsURL.appendingPathComponent("Scarf Backups", isDirectory: true)

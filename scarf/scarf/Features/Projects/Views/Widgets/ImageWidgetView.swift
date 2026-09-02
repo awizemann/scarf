@@ -57,7 +57,7 @@ struct ImageWidgetView: View {
     private var localContent: some View {
         switch WidgetPathResolver.resolve(widget.path, projectRoot: projectRoot) {
         case .failure(let err):
-            WidgetErrorCard(title: "", reason: err.userMessage)
+            WidgetErrorCard(verbatimReason: err.userMessage, title: "")
         case .success(let resolved):
             Group {
                 if let img = localImage {

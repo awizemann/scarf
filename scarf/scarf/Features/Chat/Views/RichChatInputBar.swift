@@ -703,8 +703,8 @@ struct RichChatInputBar: View {
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowedContentTypes = [.image, .png, .jpeg, .tiff, .heic]
-        panel.message = "Choose images to attach"
-        panel.prompt = "Attach"
+        panel.message = String(localized: "Choose images to attach")
+        panel.prompt = String(localized: "Attach")
         let response = panel.runModal()
         guard response == .OK else { return }
         let urls = Array(panel.urls.prefix(Self.maxAttachments - attachments.count))

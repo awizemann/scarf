@@ -27,8 +27,8 @@ struct LogTailWidgetView: View {
             switch WidgetPathResolver.resolve(widget.path, projectRoot: projectRoot) {
             case .failure(let err):
                 WidgetErrorCard(
+                    verbatimReason: err.userMessage,
                     title: widget.title,
-                    reason: err.userMessage,
                     hint: "Set `path` to a file relative to the project root, e.g. `reports/uptime.log`."
                 )
             case .success(let resolved):

@@ -217,8 +217,8 @@ struct NewProjectSheet: View {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
-        panel.title = "Choose Parent Directory"
-        panel.message = "The new project folder will be created inside this directory."
+        panel.title = String(localized: "Choose Parent Directory")
+        panel.message = String(localized: "The new project folder will be created inside this directory.")
         if panel.runModal() == .OK, let url = panel.url {
             viewModel.parentDirectory = url.path
         }

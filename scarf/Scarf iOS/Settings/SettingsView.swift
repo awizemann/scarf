@@ -430,19 +430,31 @@ struct SettingsView: View {
         if !entries.isEmpty {
             DisclosureGroup {
                 ForEach(entries, id: \.self) { entry in
-                    Text(entry)
+                    Text(verbatim: entry)
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
             } label: {
-                LabeledContent("Allowed \(kind.pluralNoun)") {
-                    Text("\(entries.count)")
+                LabeledContent(allowedHeading(kind)) {
+                    Text(verbatim: entries.count.formatted())
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    /// `GatewayAllowlistKind.pluralNoun` is an English YAML-side token, so
+    /// interpolating it produced the unusable key `"Allowed %@"`. One whole
+    /// extractable sentence per case instead — the Mac side does the same in
+    /// `AllowlistEditor.swift`.
+    private func allowedHeading(_ kind: GatewayAllowlistKind) -> LocalizedStringKey {
+        switch kind {
+        case .channels: return "Allowed channels"
+        case .chats:    return "Allowed chats"
+        case .rooms:    return "Allowed rooms"
         }
     }
 

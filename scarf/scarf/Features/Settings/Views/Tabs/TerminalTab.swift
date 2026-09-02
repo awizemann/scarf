@@ -47,7 +47,7 @@ struct TerminalTab: View {
                 }
                 if !viewModel.config.dockerEnv.isEmpty {
                     ForEach(viewModel.config.dockerEnv.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
-                        ReadOnlyRow(label: key, value: value)
+                        ReadOnlyRow(verbatimLabel: key, value: value)
                     }
                 }
             }

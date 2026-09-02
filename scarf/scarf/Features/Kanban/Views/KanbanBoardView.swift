@@ -321,7 +321,7 @@ struct KanbanBoardView: View {
     }
 
     @ViewBuilder
-    private func sortRowLabel(_ title: String, isSelected: Bool) -> some View {
+    private func sortRowLabel(_ title: LocalizedStringKey, isSelected: Bool) -> some View {
         if isSelected {
             Label(title, systemImage: "checkmark")
         } else {
@@ -329,14 +329,16 @@ struct KanbanBoardView: View {
         }
     }
 
-    private var currentSortLabel: String {
+    private var currentSortLabel: LocalizedStringKey {
         guard let key = viewModel.sortKey else { return "Sort" }
         return Self.sortOptions.first(where: { $0.key == key })?.label ?? "Sort"
     }
 
     /// Sort keys + labels. Keys are passed verbatim to
-    /// `hermes kanban list --sort <key>` (v0.15).
-    private static let sortOptions: [(key: String, label: String)] = [
+    /// `hermes kanban list --sort <key>` (v0.15); the labels are UI copy and
+    /// must be `LocalizedStringKey` — as `String` they bound `Text`'s verbatim
+    /// overload and none of the eight was extractable.
+    private static let sortOptions: [(key: String, label: LocalizedStringKey)] = [
         ("priority", "Priority"),
         ("priority-desc", "Priority ↑"),
         ("created", "Oldest"),

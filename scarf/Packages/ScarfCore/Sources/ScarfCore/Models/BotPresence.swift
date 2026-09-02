@@ -24,6 +24,12 @@ public enum BotPresence: Sendable, Equatable {
     public var isLive: Bool { self != .offline }
 
     /// Short label for the roster badge.
+    ///
+    /// ⚠️ An untranslated ENGLISH TOKEN. ScarfCore has no string catalog, so
+    /// nothing returned here is extractable; the app maps the CASE to
+    /// localized copy (`BotPresence.badgeLabel` / `.spokenDescription` in
+    /// `BotsView.swift`). Keep this for logs/tests only — never bind it to a
+    /// `Text`.
     public var label: String {
         switch self {
         case .offline: return ""
@@ -34,6 +40,8 @@ public enum BotPresence: Sendable, Equatable {
     }
 
     /// Spoken form — VoiceOver reads the row, not the dot.
+    ///
+    /// ⚠️ Same English-token caveat as ``label``; the app localizes per case.
     public var accessibilityDescription: String {
         switch self {
         case .offline: return ""

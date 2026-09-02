@@ -75,10 +75,11 @@ struct ToolsView: View {
                         Task { await viewModel.switchPlatform(platform) }
                     } label: {
                         let status = viewModel.connectivity[platform.name] ?? .notConfigured
-                        Label(
-                            menuLabel(platform: platform, status: status),
-                            systemImage: statusSymbol(status)
-                        )
+                        Label {
+                            Text(verbatim: menuLabel(platform: platform, status: status))
+                        } icon: {
+                            Image(systemName: statusSymbol(status))
+                        }
                     }
                 }
             } label: {
@@ -133,12 +134,14 @@ struct ToolsView: View {
 
     /// Menu-item label with an offline/connected suffix so status is readable even
     /// if the color of the SF Symbol doesn't come through NSMenu tinting.
+    /// The platform name is runtime data; only the status suffix is UI copy,
+    /// so the suffix is localized and the name is interpolated into it.
     private func menuLabel(platform: HermesToolPlatform, status: PlatformConnectivity) -> String {
         switch status {
         case .connected: return platform.displayName
-        case .configured: return "\(platform.displayName) (offline)"
-        case .notConfigured: return "\(platform.displayName) (not configured)"
-        case .error: return "\(platform.displayName) (error)"
+        case .configured: return String(localized: "\(platform.displayName) (offline)")
+        case .notConfigured: return String(localized: "\(platform.displayName) (not configured)")
+        case .error: return String(localized: "\(platform.displayName) (error)")
         }
     }
 

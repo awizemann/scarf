@@ -250,8 +250,8 @@ struct RestoreServerSheet: View {
 
     private func presentOpenPanel() {
         let panel = NSOpenPanel()
-        panel.title = "Choose Backup"
-        panel.prompt = "Inspect"
+        panel.title = String(localized: "Choose Backup")
+        panel.prompt = String(localized: "Inspect")
         panel.allowedContentTypes = [Self.scarfBackupType, .zip]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false

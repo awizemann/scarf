@@ -183,7 +183,7 @@ struct SessionsView: View {
             HStack(spacing: 5) {
                 Text(filter.label)
                     .scarfStyle(.caption)
-                Text("\(viewModel.quickFilterCounts[filter] ?? 0)")
+                Text(verbatim: (viewModel.quickFilterCounts[filter] ?? 0).formatted())
                     .font(ScarfFont.monoSmall)
                     .opacity(0.7)
             }
@@ -226,7 +226,7 @@ struct SessionsView: View {
             HStack(spacing: 6) {
                 Image(systemName: projectFilterIcon)
                     .font(.system(size: 11))
-                Text(projectFilterLabel)
+                projectFilterLabel
                     .scarfStyle(.caption)
                 if viewModel.projectFilter == nil {
                     Image(systemName: "chevron.down")
@@ -261,11 +261,13 @@ struct SessionsView: View {
         }
     }
 
-    private var projectFilterLabel: String {
+    /// `Text`, not `String` — the two literal branches are UI copy and must
+    /// extract, while the third is the user's own project name and must not.
+    private var projectFilterLabel: Text {
         switch viewModel.projectFilter {
-        case .none: return "All projects"
-        case .some(let s) where s.isEmpty: return "Unattributed"
-        case .some(let s): return s
+        case .none: return Text("All projects")
+        case .some(let s) where s.isEmpty: return Text("Unattributed")
+        case .some(let s): return Text(verbatim: s)
         }
     }
 
@@ -301,8 +303,8 @@ struct SessionsView: View {
 
     private var activeFilterSummary: some View {
         HStack(spacing: 4) {
-            Text("Showing \(visibleSessions.count) session\(visibleSessions.count == 1 ? "" : "s") from")
-            Text(projectFilterLabel)
+            Text("Showing ^[\(visibleSessions.count) session](inflect: true) from")
+            projectFilterLabel
                 .scarfStyle(.bodyEmph)
                 .foregroundStyle(ScarfColor.foregroundPrimary)
             Text("·")
@@ -672,7 +674,7 @@ private struct SessionTableRow: View {
                 Label("\(session.rewindCount)", systemImage: "arrow.counterclockwise")
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundFaint)
-                    .help("Rewound \(session.rewindCount) time\(session.rewindCount == 1 ? "" : "s")")
+                    .help("Rewound ^[\(session.rewindCount) time](inflect: true)")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
