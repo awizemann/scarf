@@ -8,6 +8,7 @@ struct RestartGatewayBanner: View {
         HStack(spacing: 10) {
             Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
                 .foregroundStyle(.orange)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Gateway restart required")
                     .font(.caption.bold())
@@ -15,6 +16,9 @@ struct RestartGatewayBanner: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+            // Title + explanation read as one announcement; the two
+            // buttons stay outside it.
+            .accessibilityElement(children: .combine)
             Spacer()
             Button("Restart Now") { onRestart() }
                 .controlSize(.small)
@@ -25,6 +29,8 @@ struct RestartGatewayBanner: View {
                 Image(systemName: "xmark")
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel(Text("Dismiss"))
+            .help("Dismiss")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

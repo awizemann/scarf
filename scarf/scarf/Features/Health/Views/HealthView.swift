@@ -47,10 +47,12 @@ struct HealthView: View {
             pageHeader
             headerBar
             HStack {
-                Picker("", selection: $selectedTab) {
+                // An empty label leaves the segmented control unnamed.
+                Picker("View", selection: $selectedTab) {
                     Text("Status").tag(0)
                     Text("Diagnostics").tag(1)
                 }
+                .labelsHidden()
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 300)
                 Spacer()
@@ -325,9 +327,9 @@ struct HealthView: View {
             }
             Spacer()
             HStack(spacing: 12) {
-                MiniCount(count: viewModel.okCount, color: ScarfColor.success, icon: "checkmark.circle.fill")
-                MiniCount(count: viewModel.warningCount, color: ScarfColor.warning, icon: "exclamationmark.triangle.fill")
-                MiniCount(count: viewModel.issueCount, color: ScarfColor.danger, icon: "xmark.circle.fill")
+                MiniCount(count: viewModel.okCount, label: "Passing", color: ScarfColor.success, icon: "checkmark.circle.fill")
+                MiniCount(count: viewModel.warningCount, label: "Warnings", color: ScarfColor.warning, icon: "exclamationmark.triangle.fill")
+                MiniCount(count: viewModel.issueCount, label: "Failing", color: ScarfColor.danger, icon: "xmark.circle.fill")
             }
             Button("Refresh") { viewModel.load() }
                 .buttonStyle(ScarfSecondaryButton())
@@ -345,9 +347,12 @@ struct HealthView: View {
         VStack(spacing: 0) {
             HStack(spacing: ScarfSpace.s4) {
                 HStack(spacing: 6) {
+                    // Redundant with the "Hermes Running"/"Stopped" text
+                    // right beside it.
                     Circle()
                         .fill(viewModel.hermesRunning ? ScarfColor.success : ScarfColor.danger)
                         .frame(width: 8, height: 8)
+                        .accessibilityHidden(true)
                     (viewModel.hermesRunning ? Text("Hermes Running") : Text("Hermes Stopped"))
                         .scarfStyle(.captionStrong)
                         .foregroundStyle(ScarfColor.foregroundPrimary)
@@ -503,18 +508,30 @@ struct SectionCard: View {
                                     Circle().fill(ScarfColor.success).frame(width: 5, height: 5)
                                     Text("\(okCount)").font(ScarfFont.caption2).foregroundStyle(ScarfColor.foregroundMuted)
                                 }
+                                // Colour is the only thing separating these
+                                // three counts on screen.
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel(Text("\(okCount) passing"))
                             }
                             if warnCount > 0 {
                                 HStack(spacing: 2) {
                                     Circle().fill(ScarfColor.warning).frame(width: 5, height: 5)
                                     Text("\(warnCount)").font(ScarfFont.caption2).foregroundStyle(ScarfColor.foregroundMuted)
                                 }
+                                // Colour is the only thing separating these
+                                // three counts on screen.
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel(Text("\(warnCount) warnings"))
                             }
                             if errorCount > 0 {
                                 HStack(spacing: 2) {
                                     Circle().fill(ScarfColor.danger).frame(width: 5, height: 5)
                                     Text("\(errorCount)").font(ScarfFont.caption2).foregroundStyle(ScarfColor.foregroundMuted)
                                 }
+                                // Colour is the only thing separating these
+                                // three counts on screen.
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel(Text("\(errorCount) failing"))
                             }
                         }
                     }
@@ -571,6 +588,17 @@ struct CheckRow: View {
                 }
             }
         }
+        // The status is an icon+colour pair with no text of its own.
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(Text(statusLabel))
+    }
+
+    private var statusLabel: LocalizedStringKey {
+        switch check.status {
+        case .ok: return "OK"
+        case .warning: return "Warning"
+        case .error: return "Failing"
+        }
     }
 
     private var statusIcon: String {
@@ -594,6 +622,10 @@ struct CheckRow: View {
 
 struct MiniCount: View {
     let count: Int
+    /// What the count is OF. The three of these render as glyph + numeral
+    /// distinguished only by icon and colour, so without this VoiceOver
+    /// read the header as three bare numbers.
+    let label: LocalizedStringKey
     let color: Color
     let icon: String
 
@@ -605,5 +637,8 @@ struct MiniCount: View {
             Text("\(count)")
                 .font(.caption.monospaced().bold())
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(label))
+        .accessibilityValue(Text("\(count)"))
     }
 }

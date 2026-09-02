@@ -83,6 +83,9 @@ struct MCPServerDetailView: View {
                 .buttonStyle(ScarfGhostButton())
                 .disabled(isTesting)
                 .help("Test")
+                // Glyph-only: `.help` is a mouse-hover affordance, not an
+                // accessibility label.
+                .accessibilityLabel(Text("Test connection"))
 
                 Button {
                     onToggleEnabled()
@@ -91,6 +94,7 @@ struct MCPServerDetailView: View {
                 }
                 .buttonStyle(ScarfSecondaryButton())
                 .help(server.enabled ? "Disable" : "Enable")
+                .accessibilityLabel(server.enabled ? Text("Disable server") : Text("Enable server"))
 
                 Button {
                     onEdit()
@@ -106,6 +110,7 @@ struct MCPServerDetailView: View {
                 }
                 .buttonStyle(ScarfDestructiveButton())
                 .help("Remove")
+                .accessibilityLabel(Text("Remove server"))
             }
             .fixedSize(horizontal: true, vertical: false)
         }

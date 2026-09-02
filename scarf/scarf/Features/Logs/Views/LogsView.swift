@@ -170,6 +170,21 @@ struct LogsView: View {
         }
         .padding(.horizontal, ScarfSpace.s6)
         .padding(.vertical, 1)
+        // One element per line instead of five, so VoiceOver walks the log
+        // a line at a time. Deliberately `.combine` with NO explicit label:
+        // an `.accessibilityLabel` here would build a String on every body
+        // evaluation of every one of up to 5,000 rows (F6's cap), whereas
+        // `.combine` costs nothing until accessibility actually asks.
+        // Combining absorbs the session-id button, so its action comes back
+        // as a custom action rather than being lost.
+        .accessibilityElement(children: .combine)
+        .accessibilityActions {
+            if let sessionId = entry.sessionId {
+                Button("Filter to this session") {
+                    viewModel.searchText = sessionId
+                }
+            }
+        }
     }
 
     private func colorForLevel(_ level: LogEntry.LogLevel) -> Color {

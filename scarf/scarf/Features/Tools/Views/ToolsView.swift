@@ -99,6 +99,14 @@ struct ToolsView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
+            .accessibilityLabel(Text("Platform"))
+            // The connectivity dot beside the name is colour-only.
+            .accessibilityValue(
+                Text(verbatim: menuLabel(
+                    platform: viewModel.selectedPlatform,
+                    status: viewModel.connectivity[viewModel.selectedPlatform.name] ?? .notConfigured
+                ))
+            )
 
             if let tooltip = statusDescription(viewModel.connectivity[viewModel.selectedPlatform.name] ?? .notConfigured) {
                 Text(tooltip)
@@ -154,7 +162,9 @@ struct ToolsView: View {
         }
     }
 
-    private func statusDescription(_ status: PlatformConnectivity) -> String? {
+    /// `LocalizedStringResource`, not `String` — `Text(someString)` binds the
+    /// verbatim overload, so as a plain String this copy was never extracted.
+    private func statusDescription(_ status: PlatformConnectivity) -> LocalizedStringResource? {
         switch status {
         case .connected: return "Connected"
         case .configured: return "Configured · not running"
@@ -204,9 +214,12 @@ struct ToolRow: View {
 
     var body: some View {
         HStack(spacing: ScarfSpace.s3) {
+            // Decorative emoji — VoiceOver would otherwise announce its
+            // Unicode name ("hammer and wrench") ahead of the tool's own.
             Text(tool.icon)
                 .font(.system(size: 18))
                 .frame(width: 28)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(tool.name)
                     .font(ScarfFont.body.monospaced())
@@ -216,11 +229,19 @@ struct ToolRow: View {
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)
             }
+            // Static description text is one element; the switch stays
+            // outside it so it remains its own focusable control.
+            .accessibilityElement(children: .combine)
             Spacer()
-            Toggle("", isOn: Binding(
+            // The switch had an empty label: a whole column of anonymous
+            // "on/off" switches, with nothing for Voice Control to target.
+            // `tool.name` is runtime data, hence verbatim.
+            Toggle(isOn: Binding(
                 get: { tool.enabled },
                 set: { _ in Task { await onToggle() } }
-            ))
+            )) {
+                Text(verbatim: tool.name)
+            }
             .toggleStyle(.switch)
             .labelsHidden()
             .tint(ScarfColor.accent)
