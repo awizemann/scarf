@@ -128,37 +128,7 @@ import Foundation
         #expect(task.sessionId == "acp-sess-123")
     }
 
-    // MARK: - Assignee table parsing
-    //
-    // `hermes kanban assignees` prints either a JSON array (when
-    // `--json` is honored) OR a Rich-style human table OR an
-    // empty-state sentinel — "(no assignees — create a profile with
-    // `hermes -p <name> setup`)". The first iteration of the parser
-    // tokenized the sentinel and emitted `(no` as a profile name,
-    // which surfaced in the Mac inspector's assignee dropdown.
-
     // MARK: - LocalTransport subprocess environment
-
-    @Test func parseAssigneeTableSkipsNoAssigneesSentinel() {
-        // Use the same parser via its public stand-in: round-trip
-        // through a fixture that decodes via JSON would skip the
-        // table parser, so we test the fallback indirectly by
-        // constructing the same decoder pipeline. The parser is
-        // private to KanbanService; this test asserts the visible
-        // contract (no garbage profile names appear in the picker)
-        // by verifying the decode path on the real CLI fixture
-        // returns an empty array rather than a `(no` row.
-        let fixture = "(no assignees — create a profile with `hermes -p <name> setup`)"
-        // Through the public surface: we know `KanbanService.assignees`
-        // would consume this stdout when --json fails. The validator
-        // we care about is the regex check; reproduce inline:
-        let pattern = "^[a-zA-Z0-9_-]+$"
-        let firstToken = fixture
-            .split(whereSeparator: { $0 == "\t" || $0 == " " })
-            .first.map(String.init) ?? ""
-        // Confirms the parser's regex would reject "(no".
-        #expect(firstToken.range(of: pattern, options: .regularExpression) == nil)
-    }
 
     @Test func decodeUnixIntegerTimestamps() throws {
         // Real `hermes kanban create --json` output uses Unix integer

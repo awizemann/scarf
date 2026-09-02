@@ -43,6 +43,14 @@ public actor KanbanService {
     /// `--board <slug>` flag when a board slug is set. Keeps the global
     /// flag in one place so all subcommands scope consistently.
     private nonisolated func prefix(_ verbAndArgs: String...) -> [String] {
+        KanbanService.prefix(board: board, verbAndArgs)
+    }
+
+    /// Pure form of `prefix(_:)`. The argv builders below are `static` so
+    /// the exact command line can be asserted in tests without a live
+    /// transport — `KanbanService` has no injection seam, and the argv
+    /// shape is precisely what the F5 audit found wrong.
+    nonisolated static func prefix(board: String?, _ verbAndArgs: [String]) -> [String] {
         var args = ["kanban"]
         if let board, !board.isEmpty {
             args.append(contentsOf: ["--board", board])
@@ -51,11 +59,79 @@ public actor KanbanService {
         return args
     }
 
+    /// argv for `hermes kanban promote`. See `promote(taskIds:…)` for the
+    /// verified argparse shape this encodes.
+    nonisolated static func promoteArgv(
+        board: String? = nil,
+        taskIds: [String],
+        reason: String? = nil,
+        force: Bool = false,
+        dryRun: Bool = false
+    ) -> [String] {
+        guard let first = taskIds.first else { return [] }
+        var args = prefix(board: board, ["promote"])
+        // Flags FIRST, then `--`, then the positionals — argparse consumes
+        // everything after the first `--` as a positional, so `--json` /
+        // `--force` behind it would be rejected as "unrecognized arguments".
+        if force { args.append("--force") }
+        if dryRun { args.append("--dry-run") }
+        args.append("--json")
+        let rest = Array(taskIds.dropFirst())
+        if !rest.isEmpty {
+            // `--ids` is `nargs="+"`; the `--` that follows terminates its
+            // greedy consumption, so the trailing positionals stay
+            // positional. (`--ids` must sit last among the flags for that
+            // reason.)
+            args.append("--ids")
+            args.append(contentsOf: rest)
+        }
+        args.append("--")
+        args.append(first)
+        if let reason, !reason.isEmpty {
+            // ONE argv element. `_cmd_promote` re-joins `reason` with
+            // spaces, so splitting here would only destroy runs of
+            // whitespace and let argparse claim a dash-leading word.
+            args.append(reason)
+        }
+        return args
+    }
+
+    /// argv for `hermes kanban schedule` — same argparse shape as
+    /// `promote` (one positional id, `reason` `nargs="*"`, `--ids`).
+    nonisolated static func scheduleArgv(
+        board: String? = nil,
+        taskIds: [String],
+        reason: String? = nil
+    ) -> [String] {
+        guard let first = taskIds.first else { return [] }
+        var args = prefix(board: board, ["schedule"])
+        let rest = Array(taskIds.dropFirst())
+        if !rest.isEmpty {
+            args.append("--ids")
+            args.append(contentsOf: rest)
+        }
+        args.append("--")
+        args.append(first)
+        if let reason, !reason.isEmpty {
+            args.append(reason)
+        }
+        return args
+    }
+
+    /// argv for `hermes kanban assignees --json`.
+    nonisolated static func assigneesArgv(board: String? = nil) -> [String] {
+        prefix(board: board, ["assignees", "--json"])
+    }
+
+    /// argv for `hermes kanban list` under a given filter.
+    nonisolated static func listArgv(board: String? = nil, filter: KanbanListFilter) -> [String] {
+        prefix(board: board, ["list"]) + filter.argv()
+    }
+
     // MARK: - Reads
 
     public func list(_ filter: KanbanListFilter = .all) async throws -> [HermesKanbanTask] {
-        var args = prefix("list")
-        args.append(contentsOf: filter.argv())
+        let args = KanbanService.listArgv(board: board, filter: filter)
         let (code, stdout, stderr) = await runHermes(args: args, timeout: 20)
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "list")
 
@@ -150,65 +226,35 @@ public actor KanbanService {
         return stdout
     }
 
+    /// Known profiles + per-profile task counts —
+    /// `hermes kanban assignees --json`.
+    ///
+    /// **`--json` needs no capability gate.** `p_asg.add_argument("--json",
+    /// action="store_true")` is present at every tag that ships the
+    /// `assignees` subcommand at all: v2026.5.7 (v0.13.0) through
+    /// v2026.8.31 (v0.21.0). v2026.4.30 (v0.12.0) has no `hermes_cli/
+    /// kanban.py` whatsoever, so a host old enough to reject the flag is
+    /// a host with no kanban CLI at all.
+    ///
+    /// The human table used to be parsed instead, which produced
+    /// all-zero counts (the text row is `name  on-disk  status=n, …`,
+    /// never `name active total`) plus a phantom `NAME` row from the
+    /// header. There is no text fallback any more: `--json` is always
+    /// accepted, so a payload we cannot decode is a real failure and is
+    /// thrown rather than rendered as an empty picker.
     public func assignees() async throws -> [HermesKanbanAssignee] {
-        // The `assignees` verb doesn't take `--json` consistently across
-        // 0.12.x — pass it anyway and fall back to a tab-delimited parse
-        // if Hermes printed a human table.
-        let args = prefix("assignees")
+        let args = KanbanService.assigneesArgv(board: board)
         let (code, stdout, stderr) = await runHermes(args: args, timeout: 15)
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "assignees")
 
-        if let data = stdout.data(using: .utf8),
-           let arr = try? JSONDecoder().decode([HermesKanbanAssignee].self, from: data) {
-            return arr
+        guard let data = stdout.data(using: .utf8) else {
+            throw KanbanError.decoding(message: "non-UTF8 stdout")
         }
-
-        // Fallback: each non-blank line of the form
-        //   "<profile>\t<active>\t<total>"
-        // OR "<profile>     <active>     <total>" (whitespace separated).
-        return parseAssigneeTable(stdout)
-    }
-
-    private nonisolated func parseAssigneeTable(_ text: String) -> [HermesKanbanAssignee] {
-        var result: [HermesKanbanAssignee] = []
-        // Profile names follow the same convention as `hermes -p <name>`
-        // — letters, digits, hyphen, underscore. Anything else is
-        // chrome (header rows, Rich box-drawing, fallback messages
-        // like "(no assignees — create a profile with `hermes -p
-        // <name> setup`)") and gets skipped.
-        for raw in text.split(separator: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty { continue }
-            // Skip the column header row.
-            if line.lowercased().hasPrefix("profile") { continue }
-            // Skip the empty-state sentinel without trying to tokenize
-            // it (used to leak "(no" into the picker).
-            if line.lowercased().contains("no assignees") { continue }
-            // Skip Rich box-drawing separators (only ─ + whitespace).
-            if line.unicodeScalars.allSatisfy({ $0.value == 0x2500 || $0.properties.isWhitespace }) {
-                continue
-            }
-            // Strip the active marker `◆` (U+25C6) some `hermes`
-            // commands prefix to the active profile.
-            var working = line
-            if working.hasPrefix("◆") {
-                working = String(working.dropFirst()).trimmingCharacters(in: .whitespaces)
-            }
-            let parts = working
-                .split(whereSeparator: { $0 == "\t" || $0 == " " })
-                .map { String($0) }
-                .filter { !$0.isEmpty }
-            guard let profile = parts.first else { continue }
-            // Validate: must look like a real profile slug, not a word
-            // out of an English sentence.
-            guard profile.range(of: "^[a-zA-Z0-9_-]+$", options: .regularExpression) != nil else {
-                continue
-            }
-            let active = (parts.count > 1) ? Int(parts[1]) ?? 0 : 0
-            let total = (parts.count > 2) ? Int(parts[2]) ?? 0 : active
-            result.append(HermesKanbanAssignee(profile: profile, activeCount: active, totalCount: total))
+        do {
+            return try JSONDecoder().decode([HermesKanbanAssignee].self, from: data)
+        } catch {
+            throw KanbanError.decoding(message: error.localizedDescription)
         }
-        return result
     }
 
     // MARK: - Writes
@@ -305,7 +351,12 @@ public actor KanbanService {
 
     public func unblock(taskIds: [String]) async throws {
         guard !taskIds.isEmpty else { return }
+        // `unblock` is the one bulk verb whose ids really are one
+        // `nargs="+"` positional (`p_unblock.add_argument("task_ids",
+        // nargs="+")`), so every id goes positionally. `--` still guards
+        // against an id that starts with a dash.
         var args = prefix("unblock")
+        args.append("--")
         args.append(contentsOf: taskIds)
         let (code, _, stderr) = await runHermes(args: args, timeout: 15)
         try ensureSuccess(code: code, stdout: "", stderr: stderr, verb: "unblock")
@@ -332,8 +383,12 @@ public actor KanbanService {
         do {
             return try JSONDecoder().decode(KanbanDispatchSummary.self, from: data)
         } catch {
-            // Older builds may print human output. Return a stub summary.
-            return KanbanDispatchSummary(promoted: 0, failed: 0, dryRun: dryRun, perTask: [])
+            // NO stub summary. `--json` is always on this argv, so a payload
+            // we can't decode means the pass didn't run the way we think it
+            // did — and a zero-everything stub renders identically to a
+            // dispatcher pass that legitimately promoted nothing. Surface
+            // the failure instead; the caller shows an error banner.
+            throw KanbanError.decoding(message: error.localizedDescription)
         }
     }
 
@@ -352,11 +407,27 @@ public actor KanbanService {
     // MARK: - v0.15 verbs
 
     /// Promote `todo`/`blocked` tasks to `ready` so the dispatcher can
-    /// pick them up — `hermes kanban promote <ids…>`. Hermes accepts
-    /// positional ids (the `--ids` flag is the bulk alternative; positional
-    /// is fine). `reason` is appended as a trailing positional word group;
-    /// `--force` overrides guard checks, `--dry-run` previews without
-    /// mutating. `--json` for a machine-readable summary.
+    /// pick them up — `hermes kanban promote`.
+    ///
+    /// **The bulk shape is `--ids`, not extra positionals.** Verified at
+    /// `v2026.8.31`, `hermes_cli/kanban.py`:
+    ///
+    /// ```python
+    /// p_promote.add_argument("task_id")
+    /// p_promote.add_argument("reason", nargs="*", …)
+    /// p_promote.add_argument("--ids", nargs="+", default=None, …)
+    /// ```
+    ///
+    /// There is exactly ONE positional id; everything after it is swept
+    /// into `reason`, which `_cmd_promote` does `" ".join(args.reason)`
+    /// on. Passing `[a, b, c]` positionally therefore promoted only `a`
+    /// and wrote `"b c"` into the audit-trail reason on the
+    /// `task_events` row — silently, exit 0. So: first id positional,
+    /// the rest under `--ids`.
+    ///
+    /// argv order (see the F2 `--` rule): every flag, then `--ids …`,
+    /// then `--`, then the single positional id, then the reason as ONE
+    /// argv element (never space-split — the CLI re-joins it).
     public func promote(
         taskIds: [String],
         reason: String? = nil,
@@ -364,33 +435,24 @@ public actor KanbanService {
         dryRun: Bool = false
     ) async throws {
         guard !taskIds.isEmpty else { return }
-        var args = prefix("promote")
-        // Flags FIRST, then `--`, then the positionals — argparse consumes
-        // everything after the first `--` as a positional, so `--json` /
-        // `--force` behind it would be rejected as "unrecognized arguments".
-        if force { args.append("--force") }
-        if dryRun { args.append("--dry-run") }
-        args.append("--json")
-        args.append("--")
-        args.append(contentsOf: taskIds)
-        if let reason, !reason.isEmpty {
-            args.append(reason)
-        }
+        let args = KanbanService.promoteArgv(
+            board: board, taskIds: taskIds, reason: reason, force: force, dryRun: dryRun
+        )
         let (code, stdout, stderr) = await runHermes(args: args, timeout: 30)
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "promote")
     }
 
-    /// Park tasks in the `scheduled` status — `hermes kanban schedule
-    /// <ids…>`. They await a later trigger (workflow step, manual
-    /// promote, etc.) instead of being eligible for dispatch.
+    /// Park tasks in the `scheduled` status — `hermes kanban schedule`.
+    /// They await a later trigger (workflow step, manual promote, etc.)
+    /// instead of being eligible for dispatch.
+    ///
+    /// Same argparse shape as `promote` (verified at `v2026.8.31`):
+    /// `p_schedule.add_argument("task_id")` + `reason` `nargs="*"` +
+    /// `--ids` `nargs="+"`, so bulk ids go under `--ids` or they land in
+    /// the reason text.
     public func schedule(taskIds: [String], reason: String? = nil) async throws {
         guard !taskIds.isEmpty else { return }
-        var args = prefix("schedule")
-        args.append("--")
-        args.append(contentsOf: taskIds)
-        if let reason, !reason.isEmpty {
-            args.append(reason)
-        }
+        let args = KanbanService.scheduleArgv(board: board, taskIds: taskIds, reason: reason)
         let (code, _, stderr) = await runHermes(args: args, timeout: 15)
         try ensureSuccess(code: code, stdout: "", stderr: stderr, verb: "schedule")
     }
@@ -574,6 +636,21 @@ public actor KanbanService {
             return KanbanTransitionPlan(steps: [.unblock, .dispatch])
         case (.blocked, .done):
             return KanbanTransitionPlan(steps: [.unblock, .complete(resultRequired: false)])
+        // `scheduled` is a SOURCE state for `unblock`, exactly like
+        // `blocked`. Verified at v2026.8.31 — `p_unblock`'s help reads
+        // "Return blocked/scheduled tasks to ready…" and `_cmd_unblock`
+        // fails with "cannot unblock <id> (not blocked/scheduled?)". The
+        // planner omitted it, so dragging a parked card anywhere threw
+        // "No CLI path exists for this transition" even though one does.
+        case (.scheduled, .upNext):
+            return KanbanTransitionPlan(steps: [.unblock])
+        case (.scheduled, .running):
+            return KanbanTransitionPlan(steps: [.unblock, .dispatch])
+        case (.scheduled, .done):
+            return KanbanTransitionPlan(steps: [.unblock, .complete(resultRequired: false)])
+        // No `scheduled → blocked`: `kanban_db.block_task` only updates
+        // rows `WHERE status IN ('running', 'ready')`, so blocking a
+        // parked task returns False and prints "cannot block <id>".
         default:
             throw KanbanError.forbiddenTransition(
                 from: from.displayName,

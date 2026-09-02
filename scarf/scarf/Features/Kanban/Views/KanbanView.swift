@@ -48,7 +48,15 @@ struct KanbanView: View {
                 // cleanly.
                 .id(boardIdentity)
             case .list:
-                KanbanListView(context: context)
+                KanbanListView(
+                    context: context,
+                    tenantFilter: consumedHandoff?.tenant,
+                    sessionScopeId: consumedHandoff?.sessionId
+                )
+                // Same identity key as the board: a fresh hand-off has to
+                // rebuild the list too, or the old scope's view model
+                // (and its poll loop) keeps running under the new route.
+                .id(boardIdentity)
             }
         }
         .background(ScarfColor.backgroundPrimary)

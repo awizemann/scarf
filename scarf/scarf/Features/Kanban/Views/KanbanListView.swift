@@ -9,8 +9,15 @@ import ScarfDesign
 struct KanbanListView: View {
     @State private var viewModel: KanbanViewModel
 
-    init(context: ServerContext) {
-        _viewModel = State(initialValue: KanbanViewModel(context: context))
+    /// Scope is carried in explicitly and mirrors what `KanbanBoardView`
+    /// receives, so flipping the Board/List control never widens a
+    /// project- or chat-scoped route to the whole host.
+    init(context: ServerContext, tenantFilter: String? = nil, sessionScopeId: String? = nil) {
+        _viewModel = State(initialValue: KanbanViewModel(
+            context: context,
+            tenantFilter: tenantFilter,
+            sessionScopeId: sessionScopeId
+        ))
     }
 
     var body: some View {

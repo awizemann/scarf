@@ -17,11 +17,26 @@ final class KanbanViewModel {
     private let logger = Logger(subsystem: "com.scarf", category: "KanbanViewModel")
 
     let context: ServerContext
-    private let fileService: HermesFileService
+    private let service: KanbanService
 
-    init(context: ServerContext = .local) {
+    /// Tenant scope carried in from the route's hand-off, mirroring the
+    /// board's `tenantFilter`. `nil` = every tenant.
+    let tenantFilter: String?
+    /// Originating ACP chat session, mirroring the board's
+    /// `sessionScopeId`. When set, the list is chat-scoped exactly like
+    /// the board's "This chat" view (`--session <id>`; session ids are
+    /// globally unique, so it stands alone without the tenant).
+    let sessionScopeId: String?
+
+    init(
+        context: ServerContext = .local,
+        tenantFilter: String? = nil,
+        sessionScopeId: String? = nil
+    ) {
         self.context = context
-        self.fileService = HermesFileService(context: context)
+        self.service = KanbanService(context: context)
+        self.tenantFilter = tenantFilter
+        self.sessionScopeId = sessionScopeId
     }
 
     var tasks: [HermesKanbanTask] = []
@@ -48,6 +63,11 @@ final class KanbanViewModel {
             default:   return rawValue.capitalized
             }
         }
+
+        /// `nil` for `.all` (the flag is omitted entirely).
+        var kanbanStatus: KanbanStatus? {
+            self == .all ? nil : KanbanStatus(rawValue: rawValue)
+        }
     }
 
     private var pollTask: Task<Void, Never>?
@@ -67,46 +87,38 @@ final class KanbanViewModel {
         pollTask = nil
     }
 
+    /// The scope + status filter for the current list.
+    ///
+    /// **Scope parity with board mode.** The list used to hand-roll
+    /// `["kanban", "list", "--json"]` through `HermesFileService`, so a
+    /// per-project or chat-scoped route silently showed EVERY task on
+    /// the host the moment the user flipped the segmented control from
+    /// Board to List. Scope now rides through `KanbanService` /
+    /// `KanbanListFilter`, the same path the board uses.
+    private var currentFilter: KanbanListFilter {
+        KanbanListFilter(
+            status: statusFilter.kanbanStatus,
+            tenant: tenantFilter,
+            session: sessionScopeId,
+            // `--status archived` alone is not enough: `list_tasks`
+            // gates archived rows on `include_archived`.
+            includeArchived: statusFilter == .archived
+        )
+    }
+
     func load() async {
         isLoading = true
-        let svc = fileService
-        let filter = statusFilter
-        let result = await Task.detached { () -> (exitCode: Int32, stdout: String, stderr: String) in
-            var args = ["kanban", "list", "--json"]
-            if filter != .all {
-                args.append(contentsOf: ["--status", filter.rawValue])
-            }
-            return svc.runHermesCLISplit(args: args, timeout: 15)
-        }.value
-
         defer { isLoading = false }
-
-        guard result.exitCode == 0 else {
-            lastError = result.stderr.isEmpty
-                ? "kanban list failed (\(result.exitCode))"
-                : result.stderr
-            tasks = []
-            return
-        }
-
-        guard let data = result.stdout.data(using: .utf8) else {
-            lastError = "kanban list returned non-UTF8 output"
-            tasks = []
-            return
-        }
-
         do {
-            let decoded = try JSONDecoder().decode([HermesKanbanTask].self, from: data)
-            tasks = decoded
+            tasks = try await service.list(currentFilter)
             lastError = nil
+        } catch let err as KanbanError {
+            logger.warning("kanban list failed: \(err.errorDescription ?? "", privacy: .public)")
+            lastError = err.errorDescription
+            tasks = []
         } catch {
-            // No "(no matching tasks)" fallback: this argv always carries
-            // `--json`, and the CLI returns `[]` before it can print that
-            // line. The check only ever fired on a board whose own task text
-            // contained the phrase — turning a decode failure into a
-            // silently-emptied board.
-            logger.warning("kanban JSON decode failed: \(error.localizedDescription, privacy: .public)")
-            lastError = "Couldn't parse kanban list output"
+            logger.warning("kanban list failed: \(error.localizedDescription, privacy: .public)")
+            lastError = error.localizedDescription
             tasks = []
         }
     }

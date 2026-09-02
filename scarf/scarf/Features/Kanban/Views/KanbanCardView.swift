@@ -290,8 +290,12 @@ struct KanbanCardView: View {
 
     private var skillsRow: some View {
         HStack(spacing: 4) {
-            let visible = task.skills.prefix(2)
-            ForEach(Array(visible.enumerated()), id: \.offset) { _, skill in
+            // Keyed by VALUE, not by array index: with `id: \.offset`
+            // SwiftUI treats "slot 0" as one identity, so when a task's
+            // skills change the badge in that slot animates/reuses as if
+            // the same chip had been renamed. Skill names are unique per
+            // task (Hermes stores a set), so `\.self` is a stable id.
+            ForEach(Array(task.skills.prefix(2)), id: \.self) { skill in
                 ScarfBadge(verbatim: skill, kind: .brand)
             }
             if task.skills.count > 2 {
