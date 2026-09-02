@@ -370,7 +370,21 @@ public extension HermesConfig {
         // (legacy). Prefer the newer path but fall back.
         let slack = SlackSettings(
             replyToMode: values["platforms.slack.reply_to_mode"] ?? values["slack.reply_to_mode"] ?? "first",
-            requireMention: (values["platforms.slack.require_mention"] ?? values["slack.require_mention"]) != "false",
+            // `require_mention` is one of the SHARED keys Hermes bridges from a
+            // platform section's top level into `config.extra`
+            // (gateway/config.py:1719-1720 → `extra.update(bridged)` at :1809),
+            // and the slack plugin's `_apply_yaml_config` hook additionally
+            // exports it as SLACK_REQUIRE_MENTION. So the top-level shape Scarf
+            // writes IS live — but a hand-written `platforms.slack.extra.
+            // require_mention` is the shape the adapter reads directly
+            // (plugins/platforms/slack/adapter.py:9058), and it wins over the
+            // bridge. Precedence mirrors Hermes exactly: the bridge does
+            // `extra.update(bridged)`, so a top-level value OVERWRITES an
+            // `extra:` one — hence top-level first, `extra` only as the
+            // fallback for a config.yaml hand-written in the adapter's shape.
+            requireMention: (values["platforms.slack.require_mention"]
+                             ?? values["slack.require_mention"]
+                             ?? values["platforms.slack.extra.require_mention"]) != "false",
             replyInThread: (values["platforms.slack.extra.reply_in_thread"] ?? "true") != "false",
             replyBroadcast: (values["platforms.slack.extra.reply_broadcast"] ?? "false") == "true"
         )

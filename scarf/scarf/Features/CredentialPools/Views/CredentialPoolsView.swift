@@ -1008,15 +1008,27 @@ private struct AddCredentialSheet: View {
                 if authType == .apiKey {
                     Button("Add") {
                         viewModel.addAPIKey(provider: providerID, apiKey: apiKey, label: label)
+                        // Drop the secret from view state the moment it has
+                        // been handed off. The sheet is about to close and
+                        // SwiftUI will tear this view down anyway, but a
+                        // plaintext API key must not sit in @State waiting
+                        // on that — and the same clear keeps the field from
+                        // carrying over if this button ever stops dismissing.
+                        apiKey = ""
+                        label = ""
                         onDismiss()
                     }
                     .buttonStyle(.borderedProminent)
                     // Keyless providers have nothing to store — a stale
                     // key left in the field from a previous selection
                     // must not re-enable the save.
+                    //
+                    // `.whitespacesAndNewlines`, not `.whitespaces`: the
+                    // latter excludes \n, so a field holding only a pasted
+                    // newline armed the button and shipped it to the CLI.
                     .disabled(isKeylessProvider
-                        || providerID.trimmingCharacters(in: .whitespaces).isEmpty
-                        || apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
+                        || providerID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 } else {
                     oauthActionButton
                 }

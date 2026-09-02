@@ -52,10 +52,31 @@ final class EmailSetupViewModel {
         allowedUsers = env["EMAIL_ALLOWED_USERS"] ?? ""
         homeAddress = env["EMAIL_HOME_ADDRESS"] ?? ""
         allowAllUsers = PlatformSetupHelpers.parseEnvBool(env["EMAIL_ALLOW_ALL_USERS"])
-        // skip_attachments lives in config.yaml.
+        // skip_attachments lives in config.yaml, under the platform's
+        // `extra:` sub-map. Verified against Hermes v2026.8.31:
+        // `plugins/platforms/email/adapter.py:565` does
+        // `self._skip_attachments = extra.get("skip_attachments", False)`,
+        // and `extra` is populated ONLY from the `extra:` sub-key
+        // (`gateway/config.py::PlatformConfig.from_dict`) plus the
+        // hardcoded shared-key bridge list in `load_gateway_config`
+        // (config.py ~1700-1766) — which does NOT include
+        // skip_attachments. The old TOP-LEVEL
+        // `platforms.email.skip_attachments` Scarf used to write was
+        // therefore never read by Hermes; Scarf's own reader read the
+        // same dead key back, so the toggle looked like it worked.
+        //
+        // Back-compat: the legacy top-level key is still read as a
+        // FALLBACK so a user who saved the toggle before this fix keeps
+        // their intent on screen; the next save rewrites it to the
+        // `extra.` path. The stale top-level key is left in place —
+        // Hermes ignores unknown platform keys, and a second
+        // `config unset` round-trip on every save isn't worth it.
         let yaml = context.readText(context.paths.configYAML) ?? ""
         let parsed = HermesFileService.parseNestedYAML(yaml)
-        skipAttachments = (parsed.values["platforms.email.skip_attachments"] ?? "false") == "true"
+        let raw = parsed.values["platforms.email.extra.skip_attachments"]
+            ?? parsed.values["platforms.email.skip_attachments"]
+            ?? "false"
+        skipAttachments = HermesFileService.stripYAMLQuotes(raw) == "true"
     }
 
     func applyPreset(_ preset: Preset) {
@@ -77,7 +98,8 @@ final class EmailSetupViewModel {
             "EMAIL_ALLOW_ALL_USERS": allowAllUsers ? "true" : ""
         ]
         let configKV: [String: String] = [
-            "platforms.email.skip_attachments": PlatformSetupHelpers.envBool(skipAttachments)
+            // `extra.` — the only shape the email adapter reads. See load().
+            "platforms.email.extra.skip_attachments": PlatformSetupHelpers.envBool(skipAttachments)
         ]
         message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in

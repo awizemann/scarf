@@ -101,7 +101,16 @@ final class QuickCommandsViewModel {
         let typeResult = runHermes(["config", "set", "quick_commands.\(sanitizedName).type", "exec"])
         let cmdResult = runHermes(["config", "set", "quick_commands.\(sanitizedName).command", command])
         if typeResult.exitCode == 0 && cmdResult.exitCode == 0 {
-            message = "Saved /\(sanitizedName)"
+            // Toast carries the name the command was actually SAVED under,
+            // never the raw CLI segment. `ConfigDottedKeySegment.escaped`
+            // backslash-escapes dots on v0.21+ hosts, so "v1.2 deploy" used
+            // to toast "Saved /v1\.2_deploy" — a name that exists nowhere:
+            // the backslash is CLI-path syntax, not part of the key, and the
+            // list below renders "v1.2_deploy". Unescaping puts the toast
+            // back in agreement with the list on both host generations (on
+            // pre-0.21 hosts the dot is stripped rather than escaped, and
+            // the stripped form IS the saved name, so it stands).
+            message = "Saved /\(sanitizedName.replacingOccurrences(of: "\\.", with: "."))"
             load(force: true)
         } else {
             logger.warning("Failed to save quick command: type=\(typeResult.output) cmd=\(cmdResult.output)")

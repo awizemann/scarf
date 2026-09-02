@@ -298,9 +298,26 @@ final class CredentialPoolsViewModel {
     /// Keeping argv is the deliberate choice: a wedged credential dialog is
     /// a certainty, the /proc read needs an already-present local attacker
     /// on the host. Revisit if the CLI grows `--api-key-stdin`.
+    /// The provider id and the key itself are trimmed of surrounding
+    /// WHITESPACE AND NEWLINES here rather than at the call site: a key
+    /// pasted from a provider dashboard or a `cat`-ed file routinely carries
+    /// a trailing newline, and the Add button's own `.disabled` check only
+    /// trimmed `.whitespaces` (which excludes `\n`), so a newline-only field
+    /// still armed the button and the newline went straight into argv —
+    /// Hermes then stored a credential that fails every request with an
+    /// opaque 401. Trimming in the VM covers every present and future caller.
     func addAPIKey(provider: String, apiKey: String, label: String) {
+        let provider = provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        let apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !provider.isEmpty, !apiKey.isEmpty else {
+            message = "Provider and API key are required"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                self?.message = nil
+            }
+            return
+        }
         var args = ["auth", "add", provider, "--type", "api-key", "--api-key", apiKey]
-        let trimmedLabel = label.trimmingCharacters(in: .whitespaces)
+        let trimmedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedLabel.isEmpty {
             args += ["--label", trimmedLabel]
         }
