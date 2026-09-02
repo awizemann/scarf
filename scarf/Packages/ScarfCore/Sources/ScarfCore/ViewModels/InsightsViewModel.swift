@@ -306,22 +306,26 @@ public final class InsightsViewModel {
     }
 }
 
+/// Locale-aware duration rendering. `Duration.UnitsFormatStyle` supplies the
+/// unit names and the digit/grouping conventions for the current locale, so
+/// "2h 5m" is not hardcoded English (nor hardcoded Latin digits).
 public func formatDuration(_ interval: TimeInterval) -> String {
-    let hours = Int(interval) / 3600
-    let minutes = (Int(interval) % 3600) / 60
-    if hours > 0 {
-        return "\(hours)h \(minutes)m"
-    }
-    return "\(minutes)m"
+    Duration.seconds(max(0, interval.rounded(.down)))
+        .formatted(
+            .units(
+                allowed: [.hours, .minutes],
+                width: .narrow,
+                maximumUnitCount: 2,
+                zeroValueUnits: .hide,
+                fractionalPart: .hide
+            )
+        )
 }
 
+/// Locale-aware compact token count — same style the Chat session bar
+/// already used, hoisted here so both surfaces agree.
 public func formatTokens(_ count: Int) -> String {
-    if count >= 1_000_000 {
-        return String(format: "%.1fM", Double(count) / 1_000_000)
-    } else if count >= 1_000 {
-        return String(format: "%.1fK", Double(count) / 1_000)
-    }
-    return "\(count)"
+    count.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
 }
 
 #endif // canImport(SQLite3)

@@ -301,7 +301,7 @@ struct SessionInfoBar: View {
                     )
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)
-                    .help("Hermes auto-compacted this session's context \(acpCompressionCount) time\(acpCompressionCount == 1 ? "" : "s")")
+                    .help("Hermes auto-compacted this session's context ^[\(acpCompressionCount) time](inflect: true)")
                 }
 
                 if let cost = session.displayCostUSD {

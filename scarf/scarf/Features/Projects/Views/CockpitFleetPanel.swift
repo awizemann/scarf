@@ -94,8 +94,7 @@ struct CockpitFleetPanel: View {
     private func summaryRow(_ fleet: FleetProject, source: ScarfProject) -> some View {
         HStack(spacing: 10) {
             Label(
-                "Materialized on \(fleet.materializations.count) "
-                    + (fleet.materializations.count == 1 ? "host" : "hosts"),
+                "Materialized on ^[\(fleet.materializations.count) host](inflect: true)",
                 systemImage: "square.stack.3d.up"
             )
             .font(.subheadline.weight(.medium))

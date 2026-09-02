@@ -538,7 +538,7 @@ private struct ChatSessionRow: View {
                     if session.rewindCount > 0 {
                         Label("\(session.rewindCount)", systemImage: "arrow.counterclockwise")
                             .scarfStyle(.caption)
-                            .help("Rewound \(session.rewindCount) time\(session.rewindCount == 1 ? "" : "s")")
+                            .help("Rewound ^[\(session.rewindCount) time](inflect: true)")
                     }
                     Spacer(minLength: 0)
                 }

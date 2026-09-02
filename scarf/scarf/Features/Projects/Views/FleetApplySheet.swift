@@ -252,7 +252,7 @@ struct FleetApplySheet: View {
                         "Partly failed — \(failed) of \(total) hosts had errors")
             case .allFailed(let total):
                 return ("xmark.octagon.fill", ScarfColor.danger,
-                        "Failed on all \(total) host\(total == 1 ? "" : "s")")
+                        "Failed on all ^[\(total) host](inflect: true)")
             case .nothingApplied:
                 return ("minus.circle", ScarfColor.foregroundMuted,
                         "Nothing was applied")

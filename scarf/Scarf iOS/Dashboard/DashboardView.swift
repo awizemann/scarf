@@ -369,11 +369,6 @@ struct DashboardView: View {
     }
 
     private func formatTokens(_ count: Int) -> String {
-        if count >= 1_000_000 {
-            return String(format: "%.1fM", Double(count) / 1_000_000)
-        } else if count >= 1_000 {
-            return String(format: "%.1fK", Double(count) / 1_000)
-        }
-        return "\(count)"
+        count.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
     }
 }
