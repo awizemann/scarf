@@ -42,22 +42,17 @@ struct ProjectsView: View {
     /// item only routes the user intent up via `onSetModel`.
     @State private var modelPresetTarget: ProjectEntry?
 
-    private let uninstaller: ProjectTemplateUninstaller
+    /// Answers the context menu's two file-existence questions from a cache
+    /// probed off-main, instead of two blocking transport stats per menu
+    /// evaluation. See `ProjectMenuProbeCache`.
+    @State private var menuProbes = ProjectMenuProbeCache()
 
     init(context: ServerContext) {
         _viewModel = State(initialValue: ProjectsViewModel(context: context))
         _installerViewModel = State(initialValue: TemplateInstallerViewModel(context: context))
         _uninstallerViewModel = State(initialValue: TemplateUninstallerViewModel(context: context))
-        self.uninstaller = ProjectTemplateUninstaller(context: context)
     }
 
-    /// True when the given project has a cached manifest (i.e. was
-    /// installed from a schemaful template). Cheap — just a file
-    /// existence check via the transport.
-    private func isConfigurable(_ project: ProjectEntry) -> Bool {
-        let path = ProjectConfigService.manifestCachePath(for: project)
-        return serverContext.makeTransport().fileExists(path)
-    }
 
     var body: some View {
         // ScarfMon — counts each ProjectsView body evaluation. Pair with
@@ -88,6 +83,7 @@ struct ProjectsView: View {
                 viewModel.selectProject(project)
             }
             fileWatcher.updateProjectWatches(dashboardPaths: viewModel.dashboardPaths, scarfDirs: viewModel.projectScarfDirs)
+            menuProbes.refresh(projects: viewModel.projects, context: serverContext)
             // Cold-launch deep link or Finder double-click: the router may
             // have a URL staged before this view installed the onChange
             // observer below. Without this first-appearance check,
@@ -106,6 +102,7 @@ struct ProjectsView: View {
             Task {
                 await viewModel.reload()
                 fileWatcher.updateProjectWatches(dashboardPaths: viewModel.dashboardPaths, scarfDirs: viewModel.projectScarfDirs)
+                menuProbes.refresh(projects: viewModel.projects, context: serverContext)
             }
         }
         .onChange(of: TemplateURLRouter.shared.pendingInstallURL) { _, new in
@@ -368,8 +365,8 @@ struct ProjectsView: View {
         // list confirmation) and routes intents down as closures.
         ProjectsSidebar(
             viewModel: viewModel,
-            canConfigureProject: { isConfigurable($0) },
-            isTemplateInstalled: { uninstaller.isTemplateInstalled(project: $0) },
+            canConfigureProject: { menuProbes.isConfigurable($0) },
+            isTemplateInstalled: { menuProbes.hasInstalledTemplate($0) },
             onConfigure: { configEditorProject = $0 },
             onUpgrade: { project in
                 let hasKanban = capabilitiesStore?.capabilities.hasKanban ?? false

@@ -57,8 +57,31 @@ final class ProjectCockpitViewModel {
         self.project = project
     }
 
+    /// Single in-flight load handle. The cockpit reloads from
+    /// `.onChange(fileWatcher.lastChangeDate)`, which fires per persisted
+    /// message during an active stream — far faster than this load (a project
+    /// store read, an AGENTS.md read and a full cron-jobs read) completes.
+    /// Overlapping passes committed in completion order rather than issue
+    /// order. `force` only decides whether to SKIP, never what gets loaded,
+    /// so joining an in-flight pass is correct for `force: true` too — an
+    /// in-flight load is already a fresh one.
+    @ObservationIgnored private var inFlightLoad: Task<Void, Never>?
+
     func load(force: Bool = false) async {
         if hasLoaded && !force { return }
+        if let existing = inFlightLoad {
+            await existing.value
+            return
+        }
+        let task: Task<Void, Never> = Task { @MainActor [weak self] in
+            await self?.loadImpl()
+        }
+        inFlightLoad = task
+        await task.value
+        inFlightLoad = nil
+    }
+
+    private func loadImpl() async {
         hasLoaded = true
         isLoading = true
 

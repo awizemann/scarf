@@ -44,11 +44,42 @@ public final class ProjectSessionsViewModel {
     /// Refresh the session list. Safe to call repeatedly; the data
     /// service reconnects to state.db on demand and the attribution
     /// service reads the sidecar afresh each call.
+    /// Single in-flight load handle — the coalescing guard `load()` needs
+    /// because `ProjectSessionsView` drives it from `.task` AND from
+    /// `.onChange(fileWatcher.lastChangeDate)`, which during an active stream
+    /// fires far faster than a full attribution read + 200-row query
+    /// completes. Without this, overlapping loads walked over `sessions` in
+    /// completion order rather than issue order. Same shape as
+    /// `DashboardViewModel` / `SessionsViewModel` (F4): correct here because
+    /// `load()` takes no parameters, so joining an in-flight pass gives the
+    /// caller exactly what it asked for.
+    @ObservationIgnored private var inFlightLoad: Task<Void, Never>?
+
     public func load() async {
+        if let existing = inFlightLoad {
+            await existing.value
+            return
+        }
+        let task: Task<Void, Never> = Task { @MainActor [weak self] in
+            await self?.loadImpl()
+        }
+        inFlightLoad = task
+        await task.value
+        inFlightLoad = nil
+    }
+
+    private func loadImpl() async {
         isLoading = true
         defer { isLoading = false }
 
-        let attributed = attribution.sessionIDs(forProject: project.path)
+        // The attribution sidecar read is synchronous transport I/O — an SFTP
+        // round-trip on a remote project — and ran on the MainActor on every
+        // watcher tick.
+        let attribution = self.attribution
+        let projectPath = project.path
+        let attributed = await Task.detached {
+            attribution.sessionIDs(forProject: projectPath)
+        }.value
         if attributed.isEmpty {
             sessions = []
             emptyStateHint = "No chats have been started in this project yet. Click New Chat to begin."

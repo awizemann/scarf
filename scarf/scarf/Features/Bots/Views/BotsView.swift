@@ -275,7 +275,10 @@ struct BotsView: View {
 
     private var roster: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: ScarfSpace.s3) {
+            // LAZY: every roster group's rows were built and laid out on
+            // first paint regardless of how many were on screen, and each row
+            // carries an avatar (C10).
+            LazyVStack(alignment: .leading, spacing: ScarfSpace.s3) {
                 if let errorMessage = viewModel.errorMessage {
                     banner(errorMessage)
                 }

@@ -268,7 +268,7 @@ final class BotsViewModel {
 
     // MARK: - State
 
-    private(set) var rows: [BotRow] = []
+    private(set) var rows: [BotRow] = [] { didSet { recomputeRoster() } }
     var isLoading = false
     var isWorking = false
     /// Transient success line in the header.
@@ -302,13 +302,13 @@ final class BotsViewModel {
     /// the single choke point that holds a switch when the bot being left has
     /// unsaved `SOUL.md` edits (P1). A filter is a view of the roster, not a
     /// navigation.
-    var searchText = ""
+    var searchText = "" { didSet { recomputeRoster() } }
 
     /// Roster ordering. Not persisted by this type — the view mirrors it from
     /// `@AppStorage`, the same shape `ChatSessionListPane` uses for its own
     /// list preference (there is no `@SceneStorage` precedent in Scarf, so
     /// this is app-wide rather than per-window; documented, not accidental).
-    var sortOrder: BotRosterSort = .pinnedThenName
+    var sortOrder: BotRosterSort = .pinnedThenName { didSet { recomputeRoster() } }
 
     /// How the roster is ordered.
     enum BotRosterSort: String, CaseIterable, Sendable {
@@ -340,35 +340,61 @@ final class BotsViewModel {
 
     // MARK: - Derived roster
 
+    // The five roster projections below are MEMOIZED, not computed.
+    //
+    // As computed properties each one re-ran a filter whose predicate is
+    // `String.range(of:options:[.caseInsensitive, .diacriticInsensitive])` —
+    // an ICU collation search, not a byte compare — over every profile, plus
+    // a sort; `visibleRows` re-ran all three; and `searchFoundNothing` re-ran
+    // `visibleRows`. A single body evaluation of `BotsView` touches all of
+    // them, and the filter field bound to `searchText` invalidates that body
+    // on every keystroke. Their three inputs (`rows`, `searchText`,
+    // `sortOrder`) each recompute the set on `didSet`, so the memo cannot go
+    // stale without a fourth input appearing — which the compiler would show
+    // as an unread property here.
+
     /// Bot-managed, not hidden, matching the filter, in the chosen order.
-    var bots: [BotRow] {
-        sorted(matching(rows.filter { $0.identity.isBotManaged && !$0.isHidden }))
-    }
+    private(set) var bots: [BotRow] = []
 
     /// Bot-managed but flagged `hidden` — collapsed behind a disclosure
     /// rather than dropped: Scarf can un-hide them, so hiding them
     /// irrecoverably would be a one-way door.
-    var hiddenBots: [BotRow] {
-        sorted(matching(rows.filter { $0.identity.isBotManaged && $0.isHidden }))
-    }
+    private(set) var hiddenBots: [BotRow] = []
 
     /// Profiles with no `hermes-bots` block. Kept in scan order (`default`
     /// first, then sorted ids) — these are candidates to promote, not a
     /// roster to rank. Filtered, never re-sorted.
-    var otherProfiles: [BotRow] { matching(rows.filter { !$0.identity.isBotManaged }) }
+    private(set) var otherProfiles: [BotRow] = []
 
     /// Every row the roster is currently showing, in display order.
-    var visibleRows: [BotRow] { bots + hiddenBots + otherProfiles }
+    private(set) var visibleRows: [BotRow] = []
 
     /// True when a filter is on and it matched nothing anywhere.
-    var searchFoundNothing: Bool {
-        !searchText.trimmingCharacters(in: .whitespaces).isEmpty && visibleRows.isEmpty
-    }
+    private(set) var searchFoundNothing: Bool = false
 
-    private func matching(_ input: [BotRow]) -> [BotRow] {
+    private func recomputeRoster() {
+        // ONE filter pass over `rows`, whose per-row cost is the expensive
+        // part, then bucket — rather than three passes that each re-test
+        // every row.
+        var managedVisible: [BotRow] = []
+        var managedHidden: [BotRow] = []
+        var unmanaged: [BotRow] = []
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return input }
-        return input.filter { Self.matches($0.identity, query: query) }
+        for row in rows {
+            if !query.isEmpty, !Self.matches(row.identity, query: query) { continue }
+            if !row.identity.isBotManaged {
+                unmanaged.append(row)
+            } else if row.isHidden {
+                managedHidden.append(row)
+            } else {
+                managedVisible.append(row)
+            }
+        }
+        bots = sorted(managedVisible)
+        hiddenBots = sorted(managedHidden)
+        otherProfiles = unmanaged
+        visibleRows = bots + hiddenBots + otherProfiles
+        searchFoundNothing = !query.isEmpty && visibleRows.isEmpty
     }
 
     /// Does this identity match the roster filter?
