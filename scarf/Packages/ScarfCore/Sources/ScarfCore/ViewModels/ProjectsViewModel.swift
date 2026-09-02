@@ -128,11 +128,19 @@ public final class ProjectsViewModel {
         guard !registry.projects.contains(where: { $0.name == trimmed }) else { return false }
         guard let index = registry.projects.firstIndex(where: { $0.name == project.name }) else { return false }
         let old = registry.projects[index]
+        // `uuid` is CARRIED OVER, never re-derived. It is the project's stable
+        // identity — the key of `<path>/.scarf/project.json`, the fleet
+        // grouping key, and the `[proj:<uuid>]` cron tag. Dropping it here (as
+        // this did) left the registry row id-less, so the next `ProjectStore`
+        // pass minted a FRESH random UUID: the renamed project silently
+        // detached from its own record, its cron jobs, and its fleet siblings.
+        // A rename changes the label; it must never change the identifier.
         registry.projects[index] = ProjectEntry(
             name: trimmed,
             path: old.path,
             folder: old.folder,
-            archived: old.archived
+            archived: old.archived,
+            uuid: old.uuid
         )
         do {
             try service.saveRegistry(registry)

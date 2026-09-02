@@ -154,7 +154,7 @@ import Foundation
         let job = Self.cronJob(deliver: "all")
         for caps in [HermesCapabilities.parse("Hermes Agent v0.13.0 (2026.5.7)"), .empty] {
             let (args, dropped) = FleetApplyPlan.cronCreateArgs(
-                copying: job, schedule: "0 9 * * *", caps: caps, sourceRoot: "/s", targetRoot: "/t")
+                copying: job, schedule: .cronExpression("0 9 * * *"), caps: caps, sourceRoot: "/s", targetRoot: "/t")
             #expect(!args.contains("--deliver"))
             #expect(!args.contains("all"))
             #expect(dropped)
@@ -169,7 +169,7 @@ import Foundation
         let job = Self.cronJob(deliver: "all")
         let caps = HermesCapabilities.parse("Hermes Agent v0.14.0 (2026.5.16)")
         let (args, dropped) = FleetApplyPlan.cronCreateArgs(
-            copying: job, schedule: "0 9 * * *", caps: caps, sourceRoot: "/s", targetRoot: "/t")
+            copying: job, schedule: .cronExpression("0 9 * * *"), caps: caps, sourceRoot: "/s", targetRoot: "/t")
         #expect(args.contains("--deliver"))
         let i = args.firstIndex(of: "--deliver")!
         #expect(args[args.index(after: i)] == "all")
@@ -183,7 +183,7 @@ import Foundation
             let job = Self.cronJob(deliver: value)
             for caps in [HermesCapabilities.parse("Hermes Agent v0.14.0"), .empty] {
                 let (args, dropped) = FleetApplyPlan.cronCreateArgs(
-                    copying: job, schedule: "@daily", caps: caps, sourceRoot: "/s", targetRoot: "/t")
+                    copying: job, schedule: .cronExpression("@daily"), caps: caps, sourceRoot: "/s", targetRoot: "/t")
                 #expect(args.contains("--deliver"))
                 let i = args.firstIndex(of: "--deliver")!
                 #expect(args[args.index(after: i)] == value)
@@ -197,14 +197,14 @@ import Foundation
         let caps = HermesCapabilities.parse("Hermes Agent v0.12.0 (2026.4.30)")
         // Subpath under the project root.
         let sub = FleetApplyPlan.cronCreateArgs(
-            copying: Self.cronJob(workdir: "/src/proj/sub"), schedule: "@daily",
+            copying: Self.cronJob(workdir: "/src/proj/sub"), schedule: .cronExpression("@daily"),
             caps: caps, sourceRoot: "/src/proj", targetRoot: "/tgt/proj").args
         #expect(sub.contains("--workdir"))
         #expect(sub[sub.index(after: sub.firstIndex(of: "--workdir")!)] == "/tgt/proj/sub")
         // The most common case: workdir == the project root itself (end-of-
         // string boundary in the rewriter).
         let root = FleetApplyPlan.cronCreateArgs(
-            copying: Self.cronJob(workdir: "/src/proj"), schedule: "@daily",
+            copying: Self.cronJob(workdir: "/src/proj"), schedule: .cronExpression("@daily"),
             caps: caps, sourceRoot: "/src/proj", targetRoot: "/tgt/proj").args
         #expect(root[root.index(after: root.firstIndex(of: "--workdir")!)] == "/tgt/proj")
     }
@@ -213,7 +213,7 @@ import Foundation
         let job = Self.cronJob(workdir: "/src/proj/sub")
         for caps in [HermesCapabilities.parse("Hermes Agent v0.11.0"), .empty] {
             let (args, _) = FleetApplyPlan.cronCreateArgs(
-                copying: job, schedule: "@daily", caps: caps, sourceRoot: "/src/proj", targetRoot: "/tgt/proj")
+                copying: job, schedule: .cronExpression("@daily"), caps: caps, sourceRoot: "/src/proj", targetRoot: "/tgt/proj")
             #expect(!args.contains("--workdir"))
         }
     }
@@ -222,7 +222,7 @@ import Foundation
         let job = Self.cronJob(prompt: "summarize /src/proj/notes.md", skills: ["research", "writing"])
         let caps = HermesCapabilities.parse("Hermes Agent v0.14.0")
         let (args, _) = FleetApplyPlan.cronCreateArgs(
-            copying: job, schedule: "@daily", caps: caps, sourceRoot: "/src/proj", targetRoot: "/tgt/proj")
+            copying: job, schedule: .cronExpression("@daily"), caps: caps, sourceRoot: "/src/proj", targetRoot: "/tgt/proj")
         #expect(args.filter { $0 == "--skill" }.count == 2)
         #expect(args.contains("research"))
         #expect(args.contains("writing"))

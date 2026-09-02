@@ -121,17 +121,39 @@ public struct FleetApplyPlan: Sendable, Equatable {
     /// disposition. Pure — decides from the records alone. (The executor
     /// does the finer-grained per-cron-job idempotency at write time; the
     /// plan's cron line is the intent.)
+    ///
+    /// `presetHosts` is the set of `serverId`s on which the SOURCE's model
+    /// preset UUID actually resolves to a preset (see `Disposition` below);
+    /// `nil` means the caller couldn't probe and availability is treated as
+    /// unknown-but-present. `copyableCronCount` is the count from
+    /// `copyableCronJobs` — the SAME set the executor iterates — so the
+    /// preview can never advertise jobs the executor won't touch; `nil`
+    /// falls back to the record's coarse `cronJobIds` count.
     public static func make(
         source: FleetMaterialization,
         targets: [FleetMaterialization],
-        fields: Set<FleetApplyField>
+        fields: Set<FleetApplyField>,
+        presetHosts: Set<String>? = nil,
+        copyableCronCount: Int? = nil
     ) -> FleetApplyPlan {
         let src = source.project
         let planTargets: [Target] = targets.map { t in
             // Stable field order via allCases.
             let actions: [Action] = FleetApplyField.allCases
                 .filter { fields.contains($0) }
-                .map { Action(field: $0, disposition: disposition($0, source: src, target: t.project)) }
+                .map {
+                    Action(
+                        field: $0,
+                        disposition: disposition(
+                            $0,
+                            source: src,
+                            target: t.project,
+                            targetServerId: t.serverId,
+                            presetHosts: presetHosts,
+                            copyableCronCount: copyableCronCount
+                        )
+                    )
+                }
             return Target(
                 serverId: t.serverId,
                 serverDisplayName: t.serverDisplayName,
@@ -152,13 +174,35 @@ public struct FleetApplyPlan: Sendable, Equatable {
     /// kept as-is — overwriting would orphan its existing board tasks.
     /// Model is overwrite-safe (reversible re-bind). Cron is recreate-on-
     /// target (the executor skips by name for idempotency).
-    static func disposition(_ field: FleetApplyField, source: ScarfProject, target: ScarfProject) -> Disposition {
+    ///
+    /// **Model presets are per-host records, not portable values.** A
+    /// `modelPresetId` is a UUID minted into THIS host's
+    /// `~/.hermes/scarf/model_presets.json` (`ModelPresetService`); the same
+    /// UUID means nothing on another host's store. Pushing it would bind the
+    /// target project to a preset that doesn't exist there — a dangling
+    /// reference that reads as "configured" in every UI and silently resolves
+    /// to the global default at run time. So the preset is applied ONLY to
+    /// hosts whose store actually holds that id (`presetHosts`), and every
+    /// other host gets an explicit, explained `.skip` — never a silent drop
+    /// and never a silent "success".
+    static func disposition(
+        _ field: FleetApplyField,
+        source: ScarfProject,
+        target: ScarfProject,
+        targetServerId: String,
+        presetHosts: Set<String>? = nil,
+        copyableCronCount: Int? = nil
+    ) -> Disposition {
         switch field {
         case .modelPreset:
             guard let preset = source.modelPresetId, !preset.isEmpty else {
                 return .skip("source has no model preset bound")
             }
             if target.modelPresetId == preset { return .skip("already matches") }
+            if let presetHosts, !presetHosts.contains(targetServerId) {
+                return .skip("preset \(String(preset.prefix(8))) doesn't exist on this host "
+                    + "(model presets are per-host) — create it there, then apply")
+            }
             return .apply("set model preset")
 
         case .board:
@@ -173,10 +217,63 @@ public struct FleetApplyPlan: Sendable, Equatable {
             return .apply("set board \(board)")
 
         case .cron:
-            let count = source.cronJobIds.count
-            guard count > 0 else { return .skip("source has no project cron jobs") }
+            // The count MUST come from the same `copyableCronJobs` set the
+            // executor iterates; `cronJobIds` is the record's broader
+            // attribution (it also indexes legacy `[tmpl:<id>]` jobs, which
+            // fleet-apply does not copy), so previewing from it describes
+            // jobs the executor will never touch.
+            let count = copyableCronCount ?? source.cronJobIds.count
+            guard count > 0 else { return .skip("source has no copyable project cron jobs") }
             return .apply("recreate up to \(count) cron job\(count == 1 ? "" : "s")")
         }
+    }
+
+    // MARK: - Cron copy set (single source of truth)
+
+    /// The `[proj:<id>]` name tag a project's cron jobs carry. Both the
+    /// preview and the executor derive the copy set from this one function.
+    public static func projectCronTag(_ projectID: UUID) -> String {
+        "[proj:\(projectID.uuidString)]"
+    }
+
+    /// Which of a host's cron jobs fleet-apply can actually recreate
+    /// elsewhere, plus the reasons the rest were left out.
+    ///
+    /// **This is the single source of truth for "which jobs".** The plan
+    /// preview counts `copyable` and the executor iterates `copyable`, so the
+    /// number the user approves is the number the executor acts on.
+    public struct CronCopySet: Sendable, Equatable {
+        /// Jobs that will be recreated on each target, in source order.
+        public var copyable: [HermesCronJob]
+        /// Script-only (`no_agent`) jobs — their behavior is a `script` FILE
+        /// on the source host that fleet-apply doesn't replicate.
+        public var scriptOnly: [HermesCronJob]
+        /// Jobs whose schedule carries no field we can rebuild a `cron
+        /// create` argument from.
+        public var unsupportedSchedule: [HermesCronJob]
+
+        public init(copyable: [HermesCronJob] = [], scriptOnly: [HermesCronJob] = [], unsupportedSchedule: [HermesCronJob] = []) {
+            self.copyable = copyable
+            self.scriptOnly = scriptOnly
+            self.unsupportedSchedule = unsupportedSchedule
+        }
+    }
+
+    /// Partition `jobs` (a host's full `jobs.json`) into the fleet-copy set
+    /// for `projectID`. Pure.
+    public static func copyableCronJobs(from jobs: [HermesCronJob], projectID: UUID) -> CronCopySet {
+        let tag = projectCronTag(projectID)
+        var set = CronCopySet()
+        for job in jobs where job.name.hasPrefix(tag) {
+            if job.noAgent == true {
+                set.scriptOnly.append(job)
+            } else if CronScheduleArgument.resolve(job.schedule) == nil {
+                set.unsupportedSchedule.append(job)
+            } else {
+                set.copyable.append(job)
+            }
+        }
+        return set
     }
 
     // MARK: - Cron prompt path rewriting (pure)
@@ -260,11 +357,12 @@ public struct FleetApplyPlan: Sendable, Equatable {
     /// - `model` — the source's model reference may not be configured on the
     ///   target (would error at create or first run).
     /// - `silent` — JSON-only field; `cron create` has no flag for it.
-    /// `schedule` is passed in resolved (the caller owns the
-    /// cron-expr/run-at/display fallback).
+    /// `schedule` is a STRUCTURED `CronScheduleArgument` (cron expression /
+    /// interval minutes / one-shot timestamp), not a free-text string — see
+    /// that type for why the job's human `display` is never round-tripped.
     public static func cronCreateArgs(
         copying job: HermesCronJob,
-        schedule: String,
+        schedule: CronScheduleArgument,
         caps: HermesCapabilities,
         sourceRoot: String,
         targetRoot: String
@@ -283,7 +381,7 @@ public struct FleetApplyPlan: Sendable, Equatable {
         if let workdir = job.workdir, !workdir.isEmpty, caps.hasCronWorkdir {
             args += ["--workdir", rewriteCronPrompt(workdir, sourceRoot: sourceRoot, targetRoot: targetRoot)]
         }
-        args.append(schedule)  // positional schedule
+        args.append(schedule.argumentValue)  // positional schedule
         args.append(rewriteCronPrompt(job.prompt, sourceRoot: sourceRoot, targetRoot: targetRoot))  // positional prompt
         return (args, droppedDeliverAll)
     }

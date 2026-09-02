@@ -43,6 +43,7 @@ struct FleetApplySheet: View {
             footer
         }
         .frame(width: 540, height: 560)
+        .task { await viewModel.prepare() }
     }
 
     // MARK: - Header
@@ -79,6 +80,19 @@ struct FleetApplySheet: View {
         VStack(alignment: .leading, spacing: 18) {
             fieldsSection
             hostsSection
+            // What this apply will NOT do (per-host presets, script-only
+            // cron, unrecreatable schedules) — stated before the user
+            // commits, never dropped silently.
+            if !viewModel.caveats.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(viewModel.caveats, id: \.self) { caveat in
+                        Label(caveat, systemImage: "exclamationmark.circle")
+                            .font(.caption2)
+                            .foregroundStyle(ScarfColor.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
             if viewModel.selectedFields.contains(.cron) {
                 Label(
                     "Cron jobs are recreated **paused** on each host, with their prompts rewritten to that host's project path. Enable them per host afterward.",
@@ -95,12 +109,12 @@ struct FleetApplySheet: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Apply which config")
                 .font(.subheadline.weight(.semibold))
-            if viewModel.applicableFields.isEmpty {
+            if viewModel.offeredFields.isEmpty {
                 Text("This host has no model preset, board, or cron config to push.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(FleetApplyField.allCases.filter { viewModel.applicableFields.contains($0) }, id: \.self) { field in
+                ForEach(FleetApplyField.allCases.filter { viewModel.offeredFields.contains($0) }, id: \.self) { field in
                     Toggle(isOn: Binding(
                         get: { viewModel.isFieldSelected(field) },
                         set: { viewModel.toggleField(field, $0) }
@@ -182,8 +196,7 @@ struct FleetApplySheet: View {
 
     private func resultsView(_ results: [FleetApplyExecutor.TargetResult]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Applied to \(results.count) host\(results.count == 1 ? "" : "s")")
-                .font(.subheadline.weight(.semibold))
+            outcomeBanner(results)
             ForEach(results) { result in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
@@ -202,6 +215,16 @@ struct FleetApplySheet: View {
                                 .foregroundStyle(.secondary)
                         }
                         .padding(.leading, 20)
+                        // The actual reason, straight from hermes's stderr /
+                        // the thrown error — "1 failed" is not actionable.
+                        if let detail = field.detail, !detail.isEmpty {
+                            Text(detail)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(ScarfColor.danger)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.leading, 40)
+                        }
                     }
                 }
                 .padding(8)
@@ -210,6 +233,45 @@ struct FleetApplySheet: View {
                 .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md))
             }
         }
+    }
+
+    /// Fleet-level outcome line. A push that failed on any host must NOT
+    /// read as success — this replaces the old unconditional "Applied to N
+    /// hosts" heading, which stayed neutral-to-green through a half-failed
+    /// fleet apply.
+    @ViewBuilder
+    private func outcomeBanner(_ results: [FleetApplyExecutor.TargetResult]) -> some View {
+        let outcome = FleetApplyViewModel.outcome(for: results)
+        let (icon, color, text): (String, Color, String) = {
+            switch outcome {
+            case .allApplied:
+                return ("checkmark.circle.fill", ScarfColor.success,
+                        "Applied to \(results.count) host\(results.count == 1 ? "" : "s")")
+            case .partialFailure(let failed, let total):
+                return ("exclamationmark.triangle.fill", ScarfColor.danger,
+                        "Partly failed — \(failed) of \(total) hosts had errors")
+            case .allFailed(let total):
+                return ("xmark.octagon.fill", ScarfColor.danger,
+                        "Failed on all \(total) host\(total == 1 ? "" : "s")")
+            case .nothingApplied:
+                return ("minus.circle", ScarfColor.foregroundMuted,
+                        "Nothing was applied")
+            }
+        }()
+        VStack(alignment: .leading, spacing: 4) {
+            Label(text, systemImage: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(color)
+            if viewModel.didCancel {
+                Text("Cancelled — hosts below that show \"cancelled\" were never touched.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md))
     }
 
     // MARK: - Footer
@@ -229,9 +291,12 @@ struct FleetApplySheet: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!viewModel.canApply)
             case .applying:
+                Button("Stop") { viewModel.cancel() }
+                    .disabled(viewModel.didCancel)
                 Spacer()
                 ProgressView().controlSize(.small)
-                Text("Applying…").font(.caption).foregroundStyle(.secondary)
+                Text(viewModel.didCancel ? "Stopping…" : "Applying…")
+                    .font(.caption).foregroundStyle(.secondary)
                 Spacer()
             case .done:
                 Spacer()

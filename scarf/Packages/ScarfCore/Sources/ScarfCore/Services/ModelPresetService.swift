@@ -121,6 +121,39 @@ public actor ModelPresetService {
     }
 }
 
+/// Blocking, read-only view of one host's preset store — for callers that
+/// are already off the main actor inside a synchronous fan-out (the fleet
+/// gather / apply path) and can't await an actor per host.
+///
+/// **Why the fleet needs this.** A `modelPresetId` is a UUID minted into
+/// ONE host's `~/.hermes/scarf/model_presets.json`; it is meaningless on
+/// another host. Before "apply to fleet" pushes that id onto a target, it
+/// asks this reader whether the id resolves there — an id that doesn't is
+/// skipped and explained, never written as a dangling binding.
+public struct ModelPresetStoreReader: Sendable {
+    public let context: ServerContext
+
+    public nonisolated init(context: ServerContext) {
+        self.context = context
+    }
+
+    /// Every preset id present on this host. Empty on a missing/corrupt
+    /// store — the caller treats "not listed" as "not available", which is
+    /// the safe direction (skip, don't dangle).
+    public nonisolated func presetIDs() -> Set<UUID> {
+        let transport = context.makeTransport()
+        let path = context.paths.modelPresetsJSON
+        guard transport.fileExists(path), let data = try? transport.readFile(path) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let store = try? decoder.decode(ModelPresetStore.self, from: data) else { return [] }
+        return Set(store.presets.map(\.id))
+    }
+
+    /// Whether `id` resolves to a preset on this host.
+    public nonisolated func contains(_ id: UUID) -> Bool { presetIDs().contains(id) }
+}
+
 /// Errors raised by `ModelPresetService`. Missing file is *not* an error
 /// — see `list()`. Only conditions that need user attention surface here.
 public enum ModelPresetServiceError: Error, Sendable, Equatable {

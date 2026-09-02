@@ -28,6 +28,21 @@ struct CockpitFleetPanel: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Presented on the panel ROOT, not inside `content`'s loaded branch:
+        // that branch is torn down whenever the gather goes back to loading
+        // (the `onApplied` reload does exactly that), which takes the sheet's
+        // presenter out of the hierarchy and dismisses the results the user
+        // is reading — or drops the sheet before it ever appears.
+        .sheet(isPresented: $showingApplySheet) {
+            if let vm = viewModel, let sourceMaterialization = vm.sourceMaterialization {
+                FleetApplySheet(
+                    source: sourceMaterialization,
+                    candidates: vm.otherMaterializations,
+                    contexts: contexts,
+                    onApplied: { Task { await vm.load(force: true) } }
+                )
+            }
+        }
         .task(id: sourceProject?.id) {
             // Drop the prior project's VM first so a project switch never
             // renders stale materializations under the new header during
@@ -63,16 +78,6 @@ struct CockpitFleetPanel: View {
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .topLeading)
-            }
-            .sheet(isPresented: $showingApplySheet) {
-                if let vm = viewModel, let sourceMaterialization = vm.sourceMaterialization {
-                    FleetApplySheet(
-                        source: sourceMaterialization,
-                        candidates: vm.otherMaterializations,
-                        contexts: contexts,
-                        onApplied: { Task { await vm.load(force: true) } }
-                    )
-                }
             }
         } else if viewModel?.isLoading ?? true {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
