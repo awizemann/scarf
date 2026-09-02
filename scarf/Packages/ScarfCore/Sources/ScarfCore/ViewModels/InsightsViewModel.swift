@@ -106,45 +106,79 @@ public final class InsightsViewModel {
     public var dailyActivity: [Int: Int] = [:]
     public var notableSessions: [NotableSession] = []
 
+    /// Load-race guard. `InsightsView` drives `load()` from `.task`, from
+    /// the period picker's `onChange`, AND from the file watcher, so
+    /// several passes are routinely in flight at once — and pre-fix the
+    /// one that finished last won, regardless of which period the user
+    /// was actually looking at. Flipping 7 Days → All Time → 7 Days on a
+    /// remote host reliably left the 7-day picker showing all-time
+    /// numbers.
+    ///
+    /// This is a GENERATION counter rather than `DashboardViewModel`'s
+    /// in-flight-task coalescing, and the difference is load-bearing: the
+    /// Dashboard's load takes no parameters, so joining an in-flight pass
+    /// gives the caller exactly what it asked for. This one is
+    /// parameterised by `period` — joining a pass started for a different
+    /// period would answer the wrong question. Newest request wins; older
+    /// passes drop their results on the floor instead of publishing them.
+    @ObservationIgnored
+    private var loadGeneration = 0
+
     public func load() async {
+        loadGeneration &+= 1
+        await loadImpl(generation: loadGeneration)
+    }
+
+    /// True while `generation` is still the newest request. Checked after
+    /// every await, before anything is published.
+    private func isCurrent(_ generation: Int) -> Bool { generation == loadGeneration }
+
+    private func loadImpl(generation: Int) async {
         isLoading = true
         // refresh() forces a fresh remote snapshot each load. On local it's
         // a cheap reopen of the live DB.
         let opened = await dataService.refresh()
+        guard isCurrent(generation) else { return }
         guard opened else {
             isLoading = false
             return
         }
 
         let since = period.sinceDate
-        // The four insights queries (user-message count, tool usage,
-        // hourly + daily activity histograms) batch through one
-        // `insightsSnapshot` round-trip. Sessions and session-previews
-        // stay separate — they're large result sets and stay on their
-        // own calls. For remote contexts this turns ~5 SSH round-trips
-        // into 3.
-        sessions = await dataService.fetchSessionsInPeriod(since: since)
-        sessionPreviews = await dataService.fetchSessionPreviews(limit: 500)
+        // The insights queries (user-message count, tool usage, hourly +
+        // daily activity histograms) batch through one `insightsSnapshot`
+        // round-trip. The session list stays on its own call — it's the
+        // large result set. Both are bounded by the SAME
+        // `QueryDefaults.periodSessionLimit` over the SAME
+        // `sessionListPredicate` population, so every number on the page
+        // describes one set of sessions.
+        let periodSessions = await dataService.fetchSessionsInPeriod(since: since)
+        guard isCurrent(generation) else { return }
         let snapshot = await dataService.insightsSnapshot(since: since)
+        guard isCurrent(generation) else { return }
+        sessions = periodSessions
         userMessageCount = snapshot.userMessageCount
         let tools = snapshot.toolUsage
         hourlyActivity = snapshot.startHours
         dailyActivity = snapshot.daysOfWeek
 
-        await dataService.close()
+        // NOT closed here. `close()` per load is the gh#102 regression:
+        // it forces the next `refresh()` to reopen a state.db that can be
+        // hundreds of MB with an uncheckpointed WAL, on every watcher
+        // tick. SQLite read-only sees Hermes' writes without reopening;
+        // the backend's `deinit` releases the handle.
 
         computeAggregates()
         computeModelBreakdown()
         computePlatformBreakdown()
         computeToolBreakdown(tools)
-        computeNotableSessions()
+        await computeNotableSessions(generation: generation)
+        guard isCurrent(generation) else { return }
         isLoading = false
     }
 
     public func previewFor(_ session: HermesSession) -> String {
-        if let title = session.title, !title.isEmpty { return title }
-        if let preview = sessionPreviews[session.id], !preview.isEmpty { return preview }
-        return session.id
+        session.displayLabel(preview: sessionPreviews[session.id])
     }
 
     private func computeAggregates() {
@@ -212,8 +246,27 @@ public final class InsightsViewModel {
         }
     }
 
-    private func computeNotableSessions() {
+    /// Notable Sessions needs a preview for at most FOUR sessions — the
+    /// longest, the wordiest, the priciest, the busiest. It used to get
+    /// them from `fetchSessionPreviews(limit: 500)`, a `GROUP BY` over
+    /// every user row in the database whose 500-row result was then
+    /// discarded except for those four lookups (nothing else on the
+    /// Insights page reads `sessionPreviews`), and which could easily miss
+    /// them anyway — it returns the 500 most recently started
+    /// conversations, not the four this card names. Ask for exactly the
+    /// ids we need, through the same `SessionPreviewSQL` machinery.
+    private func computeNotableSessions(generation: Int) async {
         notableSessions = []
+
+        let candidates = [
+            sessions.filter({ $0.duration != nil }).max(by: { ($0.duration ?? 0) < ($1.duration ?? 0) }),
+            sessions.max(by: { $0.messageCount < $1.messageCount }),
+            sessions.max(by: { $0.totalTokens < $1.totalTokens }),
+            sessions.max(by: { $0.toolCallCount < $1.toolCallCount })
+        ].compactMap(\.self).map(\.id)
+        let previews = await dataService.fetchSessionPreviews(sessionIds: candidates)
+        guard isCurrent(generation) else { return }
+        sessionPreviews = previews
 
         if let longest = sessions.filter({ $0.duration != nil }).max(by: { ($0.duration ?? 0) < ($1.duration ?? 0) }) {
             notableSessions.append(NotableSession(

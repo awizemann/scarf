@@ -10,6 +10,13 @@ struct SessionDetailView: View {
     var onExport: (() -> Void)?
     var onDelete: (() -> Void)?
     var onSelectSubagent: ((HermesSession) -> Void)?
+    /// Lazy loader for a message's `reasoning_content`, wired to
+    /// `SessionsViewModel.reasoningContent(for:)`. The bulk message fetch
+    /// NULLs that blob (`messageColumnsLight`), so without this the
+    /// REASONING disclosure opened empty for every v0.16+ thinking-model
+    /// message. `nil` (previews, callers with no data service) simply
+    /// leaves the disclosure showing whatever the row already carries.
+    var loadReasoningContent: ((Int) async -> String?)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -26,7 +33,7 @@ struct SessionDetailView: View {
     private var sessionHeader: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(preview ?? session.displayTitle)
+                Text(session.displayLabel(preview: preview))
                     .font(.title3.bold())
                 Spacer()
                 if onRename != nil || onExport != nil || onDelete != nil {
@@ -119,7 +126,7 @@ struct SessionDetailView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
                 ForEach(messages) { message in
-                    MessageBubble(message: message)
+                    MessageBubble(message: message, loadReasoningContent: loadReasoningContent)
                 }
             }
             .padding()
@@ -129,6 +136,32 @@ struct SessionDetailView: View {
 
 struct MessageBubble: View {
     let message: HermesMessage
+    var loadReasoningContent: ((Int) async -> String?)?
+
+    @State private var reasoningExpanded = false
+    /// `reasoning_content` pulled on first disclosure-open, when the
+    /// bulk-loaded row didn't carry it. Mirrors `RichMessageBubble`'s
+    /// `lazyReasoningContent` (t-aud21).
+    @State private var lazyReasoningContent: String?
+
+    /// Whatever reasoning we can actually show: the lazily fetched blob
+    /// first, then whichever channel the row arrived with.
+    private var reasoningText: String {
+        lazyReasoningContent ?? message.preferredReasoning ?? ""
+    }
+
+    /// Fetch the richer `reasoning_content` the first time the user opens
+    /// the disclosure. No-op when the row already has it, when it's
+    /// already been fetched, or on a pre-v0.11 host (the fetch returns nil).
+    private func loadFullReasoningIfNeeded() async {
+        guard let loadReasoningContent,
+              message.id > 0,
+              (message.reasoningContent ?? "").isEmpty,
+              lazyReasoningContent == nil else { return }
+        if let full = await loadReasoningContent(message.id), !full.isEmpty {
+            lazyReasoningContent = full
+        }
+    }
 
     var body: some View {
         VStack(alignment: message.isUser ? .trailing : .leading, spacing: 4) {
@@ -136,14 +169,18 @@ struct MessageBubble: View {
                 if message.isUser { Spacer(minLength: 60) }
                 VStack(alignment: .leading, spacing: 6) {
                     if message.hasReasoning {
-                        DisclosureGroup("Reasoning") {
-                            Text(message.reasoning ?? "")
+                        DisclosureGroup("Reasoning", isExpanded: $reasoningExpanded) {
+                            Text(reasoningText)
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
                         }
                         .font(.caption.bold())
                         .foregroundStyle(.orange)
+                        .onChange(of: reasoningExpanded) { _, expanded in
+                            guard expanded else { return }
+                            Task { await loadFullReasoningIfNeeded() }
+                        }
                     }
                     if !message.content.isEmpty {
                         if message.isAssistant {

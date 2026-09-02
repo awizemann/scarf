@@ -78,6 +78,14 @@ final class DashboardViewModel {
         inFlightLoad = nil
     }
 
+    /// Start of the window the stat cards are labelled with ("Last 7
+    /// days" in `DashboardView`). Change both together — the label is the
+    /// contract, and shipping it over an unbounded aggregate is the bug
+    /// this replaced.
+    static func statsWindowStart(now: Date = Date()) -> Date {
+        Calendar.current.date(byAdding: .day, value: -7, to: now) ?? now
+    }
+
     private func loadImpl() async {
         isLoading = true
         // `refresh()` is a no-op for the streaming remote backend (every
@@ -89,12 +97,19 @@ final class DashboardViewModel {
         // remote load is one SSH round-trip instead of four.
         let opened = await dataService.refresh()
         var collectedErrors: [String] = []
+        /// A failed state.db read is surfaced on LOCAL contexts too,
+        /// unlike the config/gateway/pgrep misses below: an empty
+        /// Dashboard is the same pixels as a brand-new install, so
+        /// swallowing this one leaves the user reading zeros as fact.
+        var snapshotError: String?
         if opened {
             let snapshot = await dataService.dashboardSnapshot(
                 sessionLimit: 5,
                 previewLimit: 5,
-                toolCallLimit: 8
+                toolCallLimit: 8,
+                statsSince: Self.statsWindowStart()
             )
+            snapshotError = snapshot.queryError
             stats = snapshot.stats
             recentSessions = snapshot.recentSessions
             sessionPreviews = snapshot.sessionPreviews
@@ -165,11 +180,9 @@ final class DashboardViewModel {
         // context. Local contexts rarely hit these paths (live DB, local
         // filesystem), and a transient "file doesn't exist yet" on fresh
         // installs shouldn't scare users.
-        if context.isRemote, !collectedErrors.isEmpty {
-            lastReadError = collectedErrors.joined(separator: "\n")
-        } else {
-            lastReadError = nil
-        }
+        let surfaced = (snapshotError.map { ["state.db — \($0)"] } ?? [])
+            + (context.isRemote ? collectedErrors : [])
+        lastReadError = surfaced.isEmpty ? nil : surfaced.joined(separator: "\n")
 
         // Probe for projects with shadow `.hermes/` directories. Read-only
         // — we just stat each registered project's path. Detached so the

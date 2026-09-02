@@ -22,6 +22,10 @@ public enum QueryDefaults: Sendable {
     public nonisolated static let messageSearchLimit = 50
     public nonisolated static let toolCallLimit = 50
     public nonisolated static let sessionPreviewLimit = 10
+    /// Row cap for the Insights period query (`fetchSessionsInPeriod`).
+    /// "All Time" passes epoch zero, so without a cap that SELECT
+    /// materialises the whole `sessions` table on a long-lived store.
+    public nonisolated static let periodSessionLimit = 2000
     public nonisolated static let previewContentLength = 100
     public nonisolated static let logLineLimit = 200
     public nonisolated static let defaultSilenceThreshold = 200

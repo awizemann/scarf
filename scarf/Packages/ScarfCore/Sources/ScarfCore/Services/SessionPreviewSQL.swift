@@ -336,6 +336,43 @@ public enum SessionPreviewSQL {
         """
     }
 
+    /// The **id-set** entry point: the first eligible user row of each of
+    /// `count` known session ids, bound by `count` `?` parameters.
+    ///
+    /// Added for the Activity feed, whose session-filter labels must come from
+    /// the sessions its own rows belong to. The list entry point can't answer
+    /// that: it returns the previews of the N most recently *started*
+    /// conversations, which is a different set from "the sessions that appear
+    /// in the last 50 tool-call messages" — so most labels fell back to raw
+    /// UUIDs while the query still paid for a full-table `GROUP BY`.
+    ///
+    /// Like `sessionScoped:`, this is a narrow entry point over the SAME
+    /// builders, not a second port: eligibility, extraction, the active-row
+    /// clause and the carrier pre-filter are the identical expressions. The
+    /// only difference from the list form is the `session_id IN (…)`
+    /// predicate, which also lets SQLite use the `messages.session_id` index
+    /// instead of scanning every user row in the database.
+    ///
+    /// `count` must be > 0 — an empty `IN ()` is not valid SQLite. Callers
+    /// return an empty map without querying.
+    public static func firstEligibleUserRowSQL(
+        sessionIdCount count: Int,
+        hasActiveColumn: Bool,
+        hasCompactedColumn: Bool
+    ) -> String {
+        precondition(count > 0, "firstEligibleUserRowSQL(sessionIdCount:) needs at least one id")
+        let placeholders = Array(repeating: "?", count: count).joined(separator: ",")
+        return """
+        SELECT m.session_id, MIN(m.id) AS min_id
+        FROM messages m
+        WHERE m.role = 'user' AND m.content IS NOT NULL AND m.content <> ''\
+        \(activeClause(hasActiveColumn: hasActiveColumn, hasCompactedColumn: hasCompactedColumn))
+          AND m.session_id IN (\(placeholders))
+          AND (\(carrierPreFilter()) OR \(eligiblePredicate()))
+        GROUP BY m.session_id
+        """
+    }
+
     // MARK: - Swift-side shaping
 
     /// `_shape_preview` — trim, then flatten CR/LF to spaces.

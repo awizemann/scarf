@@ -169,6 +169,11 @@ final class SessionsViewModel {
     var renameError: String?
     var showDeleteConfirmation = false
     var deleteSessionId: String?
+    /// Why the last delete attempt failed; `nil` when it succeeded or none
+    /// has been made. Rendered as a banner in the page header — the
+    /// confirmation dialog is already gone by the time the CLI answers,
+    /// so there is nowhere else to put it.
+    var deleteError: String?
 
     /// Result banner for the last export. Successes clear themselves;
     /// failures stay until the next attempt, because an export that
@@ -230,7 +235,29 @@ final class SessionsViewModel {
         sessionProjectNames[session.id]
     }
 
+    /// Single in-flight load handle — the coalescing guard
+    /// `DashboardViewModel` uses. `SessionsView` drives `load()` from
+    /// `.task` and from `.onChange(fileWatcher.lastChangeDate)`, which
+    /// during an active stream fires far faster than a 500-row snapshot
+    /// completes; without this, overlapping loads walked over `sessions`
+    /// and `storeStats` in completion order rather than issue order.
+    @ObservationIgnored
+    private var inFlightLoad: Task<Void, Never>?
+
     func load() async {
+        if let existing = inFlightLoad {
+            await existing.value
+            return
+        }
+        let task: Task<Void, Never> = Task { @MainActor [weak self] in
+            await self?.loadImpl()
+        }
+        inFlightLoad = task
+        await task.value
+        inFlightLoad = nil
+    }
+
+    private func loadImpl() async {
         isLoading = true
         defer { isLoading = false }
         // refresh() forces a fresh snapshot on remote contexts. The DB stays
@@ -242,7 +269,13 @@ final class SessionsViewModel {
         // trip via sessionListSnapshot. Pre-fix this paid the 420 ms
         // SSH RTT twice on every Sessions tab open (~840 ms minimum
         // for the two queries alone over remote).
-        let snapshot = await dataService.sessionListSnapshot(limit: 500)
+        // `includeUnreadActivity: false` — this tab renders no unread
+        // indicator, and the `last_active` expression that feeds
+        // `HermesSession.isUnread` is a correlated MAX(messages.timestamp)
+        // subquery per row. At 500 rows per watcher tick that is 500
+        // subqueries bought for a value nothing on this screen reads. The
+        // chat sidebar, which does badge unread, keeps it.
+        let snapshot = await dataService.sessionListSnapshot(limit: 500, includeUnreadActivity: false)
         sessions = snapshot.sessions
         sessionPreviews = snapshot.previews
 
@@ -282,9 +315,17 @@ final class SessionsViewModel {
     }
 
     func previewFor(_ session: HermesSession) -> String {
-        if let title = session.title, !title.isEmpty { return title }
-        if let preview = sessionPreviews[session.id], !preview.isEmpty { return preview }
-        return session.id
+        session.displayLabel(preview: sessionPreviews[session.id])
+    }
+
+    /// Lazy-load a message's `reasoning_content` for the detail sheet's
+    /// REASONING disclosure. The bulk fetch uses `messageColumnsLight`,
+    /// which NULLs that blob, so v0.16+ thinking-model rows (legacy
+    /// `reasoning` column empty, everything in `reasoning_content`) opened
+    /// to a blank disclosure here. Same seam the chat bubble already uses
+    /// (`RichChatViewModel.reasoningContent(for:)`, t-aud21).
+    func reasoningContent(for messageId: Int) async -> String? {
+        await dataService.fetchReasoningContent(for: messageId)
     }
 
     func selectSession(_ session: HermesSession) async {
@@ -391,22 +432,32 @@ final class SessionsViewModel {
     /// same teardown. A failed CLI delete posts nothing.
     func confirmDelete() {
         guard let sessionId = deleteSessionId else { return }
-        if sessionDeleteRunner(context, sessionId) == 0 {
-            sessions.removeAll { $0.id == sessionId }
-            if selectedSession?.id == sessionId {
-                selectedSession = nil
-                messages = []
-            }
-            computeStats()
-            NotificationCenter.default.post(
-                name: SessionDeletedSignal.name,
-                object: nil,
-                userInfo: [
-                    SessionDeletedSignal.sessionIdKey: sessionId,
-                    SessionDeletedSignal.contextKey: context,
-                ]
-            )
+        deleteError = nil
+        let exitCode = sessionDeleteRunner(context, sessionId)
+        guard exitCode == 0 else {
+            // Pre-fix this branch was an implicit no-op: the dialog
+            // dismissed, the row stayed, and nothing said why. The row
+            // staying put IS the correct outcome for a failed delete —
+            // it's the silence that made it read as a UI glitch.
+            deleteError = "Couldn't delete that session on \(context.displayName) (hermes sessions delete exited \(exitCode))."
+            showDeleteConfirmation = false
+            deleteSessionId = nil
+            return
         }
+        sessions.removeAll { $0.id == sessionId }
+        if selectedSession?.id == sessionId {
+            selectedSession = nil
+            messages = []
+        }
+        computeStats()
+        NotificationCenter.default.post(
+            name: SessionDeletedSignal.name,
+            object: nil,
+            userInfo: [
+                SessionDeletedSignal.sessionIdKey: sessionId,
+                SessionDeletedSignal.contextKey: context,
+            ]
+        )
         showDeleteConfirmation = false
         deleteSessionId = nil
     }

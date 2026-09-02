@@ -93,7 +93,28 @@ public final class ActivityViewModel {
     /// reach the host"). v2.8.
     public var loadError: String?
 
+    /// Single in-flight load handle — the coalescing guard
+    /// `DashboardViewModel` uses. `ActivityView` drives `load()` from
+    /// `.task` and from the file watcher, and a watcher tick landing
+    /// mid-load used to start a second pass that replaced `toolMessages`
+    /// under the first one's hydration bookkeeping.
+    @ObservationIgnored
+    private var inFlightLoad: Task<Void, Never>?
+
     public func load() async {
+        if let existing = inFlightLoad {
+            await existing.value
+            return
+        }
+        let task: Task<Void, Never> = Task { [weak self] in
+            await self?.loadImpl()
+        }
+        inFlightLoad = task
+        await task.value
+        inFlightLoad = nil
+    }
+
+    private func loadImpl() async {
         // Cancel any in-flight hydration from a prior load (e.g. a
         // file-watcher delta firing while the prior pass was still
         // paging). The new skeleton replaces the message set, so
@@ -131,7 +152,15 @@ public final class ActivityViewModel {
             isLoading = false
             return
         }
-        sessionPreviews = await dataService.fetchSessionPreviews(limit: 50)
+        // Previews for exactly the sessions THESE rows belong to. The old
+        // `fetchSessionPreviews(limit: 50)` answered a different question
+        // — the 50 most recently started conversations — so the session
+        // filter's labels were mostly raw UUIDs whenever the recent tool
+        // calls came from older sessions, which is the normal case for a
+        // long-running one.
+        sessionPreviews = await dataService.fetchSessionPreviews(
+            sessionIds: toolMessages.map(\.sessionId)
+        )
         isLoading = false
 
         // Phase 2 — background hydrate. Mirrors the chat path's

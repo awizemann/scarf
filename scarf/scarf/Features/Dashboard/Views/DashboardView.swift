@@ -654,7 +654,12 @@ struct SessionRow: View {
                 .foregroundStyle(ScarfColor.foregroundMuted)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
-                Text(preview ?? session.displayTitle)
+                // `displayLabel` — title first, then the first-message
+                // preview. This row used to do `preview ?? displayTitle`,
+                // preferring the preview, so a session renamed in the
+                // Sessions tab kept showing its opening line here while
+                // every other surface showed the new name.
+                Text(session.displayLabel(preview: preview))
                     .scarfStyle(.body)
                     .foregroundStyle(ScarfColor.foregroundPrimary)
                     .lineLimit(1)

@@ -35,10 +35,14 @@ struct SessionsView: View {
     }
 
     /// Top-of-list filter pills. `today` filters by `startedAt` falling
-    /// within the current calendar day; `starred` is a placeholder —
-    /// `HermesSession.pinned` exists as of v0.20 (the Chat sidebar floats
-    /// pinned sessions with it), but this tab hasn't been wired to it yet,
-    /// so the count reads 0 and the filter is a no-op here.
+    /// within the current calendar day; `starred` filters on
+    /// `HermesSession.pinned` — Hermes v0.20's `sessions.pinned` column,
+    /// the same flag the Chat sidebar floats pinned sessions with. It was
+    /// a hardcoded `return 0` / no-op placeholder: the pill showed a
+    /// permanent zero and selecting it changed nothing, which reads as a
+    /// broken filter rather than an unwired one. On a pre-v0.20 host the
+    /// column is absent, `pinned` is false for every row, and a truthful
+    /// zero is exactly what the pill should show.
     enum QuickFilter: String, CaseIterable, Identifiable {
         case all, today, starred
         var id: String { rawValue }
@@ -121,6 +125,15 @@ struct SessionsView: View {
                 }
             }
             Spacer()
+            if let deleteError = viewModel.deleteError {
+                Label(deleteError, systemImage: "exclamationmark.triangle.fill")
+                    .scarfStyle(.footnote)
+                    .foregroundStyle(ScarfColor.danger)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 320, alignment: .trailing)
+                    .textSelection(.enabled)
+            }
             if let message = viewModel.exportMessage {
                 Label(message, systemImage: "info.circle")
                     .scarfStyle(.footnote)
@@ -195,7 +208,7 @@ struct SessionsView: View {
         switch filter {
         case .all:     return viewModel.sessions.count
         case .today:   return viewModel.sessions.filter { Self.isToday($0.startedAt) }.count
-        case .starred: return 0  // No starred field on HermesSession yet.
+        case .starred: return viewModel.sessions.filter(\.pinned).count
         }
     }
 
@@ -205,16 +218,14 @@ struct SessionsView: View {
     }
 
     /// Apply `quickFilter` on top of the project-filter slice the view
-    /// model owns. `starred` remains a no-op even though
-    /// `HermesSession.pinned` exists (v0.20, used by the Chat sidebar) —
-    /// this tab isn't wired to it yet, so counts read 0 in
-    /// `quickFilterCount`.
+    /// model owns. Each case must agree with `quickFilterCount` — the pill
+    /// promises a row count and then has to deliver those rows.
     private var visibleSessions: [HermesSession] {
         let base = viewModel.filteredSessions
         switch quickFilter {
         case .all:     return base
         case .today:   return base.filter { Self.isToday($0.startedAt) }
-        case .starred: return base
+        case .starred: return base.filter(\.pinned)
         }
     }
 
@@ -493,7 +504,8 @@ struct SessionsView: View {
                     onDelete: { viewModel.beginDelete(session) },
                     onSelectSubagent: { sub in
                         Task { await viewModel.selectSession(sub) }
-                    }
+                    },
+                    loadReasoningContent: { await viewModel.reasoningContent(for: $0) }
                 )
             }
             .frame(minWidth: 720, idealWidth: 880, minHeight: 520, idealHeight: 700)
@@ -668,7 +680,7 @@ private struct SessionTableRow: View {
     private var titleCell: some View {
         HStack(spacing: 6) {
             statusDot
-            Text(preview ?? session.displayTitle)
+            Text(session.displayLabel(preview: preview))
                 .scarfStyle(.body)
                 .foregroundStyle(ScarfColor.foregroundPrimary)
                 .lineLimit(1)
@@ -696,11 +708,13 @@ private struct SessionTableRow: View {
         }
     }
 
+    /// `sessions.model` — fetched by `sessionColumns` since the first
+    /// schema Scarf supported and carried on `HermesSession` all along.
+    /// This cell used to read a private `lastModel` extension that was
+    /// hardcoded to `nil`, so the Model column rendered blank on every
+    /// row while the value sat in the struct being displayed.
     private var modelLabel: String {
-        // Prefer the most-recent model used; HermesSession doesn't
-        // expose a direct field today, so fall back to a stable
-        // placeholder that doesn't mislead.
-        session.lastModel ?? ""
+        session.model ?? "—"
     }
 
     private var costLabel: String {
@@ -716,15 +730,18 @@ private struct SessionTableRow: View {
         return f
     }()
 
+    /// The column is headed "Updated", so it must not show `startedAt` —
+    /// a month-old conversation that took a turn this morning was
+    /// reporting "1 month ago" under that heading.
+    ///
+    /// `lastActivityAt` is Hermes v0.20's durable activity heartbeat;
+    /// `endedAt` covers a closed session on a host too old to have it; and
+    /// `startedAt` remains the floor. This list's query deliberately does
+    /// NOT select the correlated `last_active` recency expression (see
+    /// `sessionListSnapshot(includeUnreadActivity:)`), so this is the
+    /// freshest signal available here without paying a per-row subquery.
     private var updatedLabel: String {
-        guard let date = session.startedAt else { return "—" }
+        guard let date = session.lastActivityAt ?? session.endedAt ?? session.startedAt else { return "—" }
         return Self.updatedFormatter.localizedString(for: date, relativeTo: Date())
     }
-}
-
-private extension HermesSession {
-    /// HermesSession exposes no model field at the session level (model
-    /// lives per-message in v0.11). Returning nil keeps the table cell
-    /// empty rather than fabricating a value.
-    var lastModel: String? { nil }
 }

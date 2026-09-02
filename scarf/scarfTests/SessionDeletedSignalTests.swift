@@ -344,4 +344,42 @@ import ScarfCore
         #expect(svm.showDeleteConfirmation == false)
         #expect(svm.deleteSessionId == nil)
     }
+
+    /// A failed delete must also SAY so (section audit F4). Pre-fix the
+    /// non-zero branch was an implicit no-op: the dialog dismissed, the
+    /// row stayed, and nothing on screen distinguished "Hermes refused"
+    /// from "the click didn't register". The row staying is correct — the
+    /// silence was not.
+    @Test @MainActor func failedDeleteSurfacesAnError() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let deletes = Lifecycle.DeleteRecorder()
+
+        let svm = Self.sessionsVM(
+            context: home.context, deleting: "sess-X", exitCode: 1, deletes: deletes)
+        svm.sessions = [Self.stubSession(id: "sess-X")]
+        svm.confirmDelete()
+
+        let message = try #require(svm.deleteError, "a failed delete left no message on screen")
+        #expect(message.contains("1"), "the exit code is the only diagnostic the CLI gave us")
+        // The row must survive — it still exists server-side.
+        #expect(svm.sessions.map(\.id) == ["sess-X"])
+
+        // A later success clears the banner and removes the row.
+        svm.sessionDeleteRunner = { _, sid in deletes.record(sid); return 0 }
+        svm.deleteSessionId = "sess-X"
+        svm.confirmDelete()
+        #expect(svm.deleteError == nil)
+        #expect(svm.sessions.isEmpty)
+    }
+
+    private static func stubSession(id: String) -> HermesSession {
+        HermesSession(
+            id: id, source: "acp", userId: nil, model: nil, title: nil,
+            parentSessionId: nil, startedAt: Date(), endedAt: nil, endReason: nil,
+            messageCount: 1, toolCallCount: 0, inputTokens: 0, outputTokens: 0,
+            cacheReadTokens: 0, cacheWriteTokens: 0, estimatedCostUSD: nil,
+            reasoningTokens: 0, actualCostUSD: nil, costStatus: nil, billingProvider: nil
+        )
+    }
 }

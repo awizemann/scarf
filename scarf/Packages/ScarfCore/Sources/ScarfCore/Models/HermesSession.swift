@@ -164,6 +164,24 @@ public struct HermesSession: Identifiable, Sendable {
         title ?? id
     }
 
+    /// The one name a session is shown under, anywhere in Scarf.
+    ///
+    /// Precedence: the Hermes-side **title** (what the user or the agent
+    /// deliberately named the conversation), then the first-user-message
+    /// **preview**, then the id. Chat, Sessions and Insights all spelled
+    /// this out separately and agreed; the Dashboard did `preview ??
+    /// displayTitle` and so preferred the preview — which meant renaming a
+    /// session in Sessions left the Dashboard still calling it by its
+    /// opening line. Every surface now calls this instead of re-deriving it.
+    ///
+    /// An empty title or empty preview counts as absent — Hermes writes
+    /// `''`, not NULL, for a cleared title.
+    public func displayLabel(preview: String?) -> String {
+        if let title, !title.isEmpty { return title }
+        if let preview, !preview.isEmpty { return preview }
+        return id
+    }
+
     public var sourceIcon: String {
         KnownPlatforms.icon(for: source)
     }

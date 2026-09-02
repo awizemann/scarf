@@ -387,10 +387,26 @@ public actor HermesDataService {
         }
     }
 
-    public func fetchSessionsInPeriod(since: Date) async -> [HermesSession] {
-        let sql = "SELECT \(sessionColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) AND started_at >= ? ORDER BY started_at DESC"
+    /// Every listable session started at or after `since`, newest first,
+    /// capped at `limit` rows.
+    ///
+    /// The cap is not cosmetic: Insights' "All Time" period passes epoch
+    /// zero, so on a long-lived store this SELECT materialised the entire
+    /// `sessions` table — 20+ columns per row — into one wire payload and
+    /// one array. `QueryDefaults.periodSessionLimit` bounds it to the most
+    /// recent window; the aggregates it feeds are then honestly "over the
+    /// most recent N sessions in the period" rather than an unbounded
+    /// query that times out on the hosts that need it most.
+    public func fetchSessionsInPeriod(
+        since: Date,
+        limit: Int = QueryDefaults.periodSessionLimit
+    ) async -> [HermesSession] {
+        let sql = "SELECT \(sessionColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) AND started_at >= ? ORDER BY started_at DESC LIMIT ?"
         do {
-            let rows = try await backend.query(sql, params: [.real(since.timeIntervalSince1970)])
+            let rows = try await backend.query(
+                sql,
+                params: [.real(since.timeIntervalSince1970), .integer(Int64(limit))]
+            )
             return rows.map { sessionFromRow($0) }
         } catch {
             return []
@@ -942,6 +958,45 @@ public actor HermesDataService {
         }
     }
 
+    /// Carrier-aware previews for a KNOWN set of session ids.
+    ///
+    /// Same machinery as `fetchSessionPreviews`, through
+    /// `SessionPreviewSQL.firstEligibleUserRowSQL(sessionIdCount:…)`.
+    /// Exists for the surfaces whose rows come from `messages` rather than
+    /// from a session list — Activity above all, whose filter labels have
+    /// to name the sessions ITS rows belong to. Asking the list form for
+    /// "the 50 newest previews" answers a different question and left most
+    /// labels as bare UUIDs.
+    ///
+    /// Returns `[:]` for an empty id set without touching the backend.
+    public func fetchSessionPreviews(sessionIds: [String]) async -> [String: String] {
+        let ids = Array(Set(sessionIds)).filter { !$0.isEmpty }
+        guard !ids.isEmpty else { return [:] }
+        let sql = """
+            SELECT m.session_id, \(SessionPreviewSQL.rawSelect())
+            FROM messages m
+            INNER JOIN (
+            \(SessionPreviewSQL.firstEligibleUserRowSQL(
+                sessionIdCount: ids.count,
+                hasActiveColumn: hasMessagesActiveColumn,
+                hasCompactedColumn: hasCompactedColumn
+            ))
+            ) first ON m.id = first.min_id
+            """
+        do {
+            let rows = try await backend.query(sql, params: ids.map { .text($0) })
+            var previews: [String: String] = [:]
+            for row in rows {
+                let shaped = SessionPreviewSQL.shape(row.string(at: 1))
+                if !shaped.isEmpty { previews[row.string(at: 0)] = shaped }
+            }
+            return previews
+        } catch {
+            Self.logger.warning("fetchSessionPreviews(sessionIds:) failed: \(error.localizedDescription, privacy: .public)")
+            return [:]
+        }
+    }
+
     /// The carrier-aware preview of ONE session.
     ///
     /// Same machinery as `fetchSessionPreviews`, through
@@ -1291,31 +1346,61 @@ public actor HermesDataService {
         )
     }
 
-    public func fetchStats() async -> SessionStats {
-        let sql = statsSQL()
+    /// Store-wide totals. `since` bounds them to sessions STARTED at or
+    /// after that instant; `nil` (the default) keeps the all-time shape
+    /// every existing caller had.
+    public func fetchStats(since: Date? = nil) async -> SessionStats {
+        let sql = statsSQL(since: since)
         do {
-            let rows = try await backend.query(sql, params: [])
+            let rows = try await backend.query(sql, params: Self.statsParams(since: since))
             return rows.first.map { statsFromRow($0) } ?? .empty
         } catch {
             return .empty
         }
     }
 
-    private func statsSQL() -> String {
+    private static func statsParams(since: Date?) -> [SQLValue] {
+        guard let since else { return [] }
+        return [.real(since.timeIntervalSince1970)]
+    }
+
+    /// Aggregate SQL for the stat cards.
+    ///
+    /// Two things this query used NOT to do, both of which made it lie:
+    ///
+    /// * **`since`.** The Dashboard has always labelled these cards "Last
+    ///   7 days" while the query had no `WHERE` at all, so every number
+    ///   was an all-time total. The bound is on `started_at`, matching
+    ///   `fetchSessionsInPeriod` — the per-session counters it sums are
+    ///   lifetime counters for the session, so a long-running session
+    ///   started inside the window contributes all of itself, exactly as
+    ///   the Insights period aggregates already do.
+    /// * **Population.** It counted EVERY row in `sessions` — subagent
+    ///   runs, compression continuations and hidden rows included — while
+    ///   the session list beneath it shows only `sessionListPredicate`
+    ///   rows. "Sessions: 412" over a list of 96 is not a rounding
+    ///   difference, it is a different question. Both now ask the same one.
+    private func statsSQL(since: Date? = nil) -> String {
+        let cols: String
         if hasV07Schema {
-            return """
+            cols = """
                 SELECT COUNT(*), COALESCE(SUM(message_count),0), COALESCE(SUM(tool_call_count),0),
                        COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
                        COALESCE(SUM(estimated_cost_usd),0),
                        COALESCE(SUM(reasoning_tokens),0), COALESCE(SUM(actual_cost_usd),0)
-                FROM sessions
+                """
+        } else {
+            cols = """
+                SELECT COUNT(*), COALESCE(SUM(message_count),0), COALESCE(SUM(tool_call_count),0),
+                       COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+                       COALESCE(SUM(estimated_cost_usd),0)
                 """
         }
+        let startedAt = hasListableChildSupport ? "s.started_at" : "started_at"
+        let sinceClause = since == nil ? "" : " AND \(startedAt) >= ?"
         return """
-            SELECT COUNT(*), COALESCE(SUM(message_count),0), COALESCE(SUM(tool_call_count),0),
-                   COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
-                   COALESCE(SUM(estimated_cost_usd),0)
-            FROM sessions
+            \(cols)
+            FROM \(sessionListFrom) WHERE \(sessionListPredicate)\(sinceClause)
             """
     }
 
@@ -1483,15 +1568,44 @@ public actor HermesDataService {
         /// Per-model token/cost breakdown (v0.20+). Empty when the
         /// `session_model_usage` table is absent.
         public let modelUsage: [ModelUsageStat]
+        /// Why the batch failed, when it did. `nil` on success —
+        /// including a successful load of a genuinely empty store.
+        ///
+        /// The failure path returns all-zero stats and empty lists, which
+        /// on screen is indistinguishable from a fresh Hermes install. So
+        /// a dropped SSH channel used to render as "you have done nothing
+        /// this week" with no banner and no retry affordance. The
+        /// Dashboard surfaces this string instead.
+        public let queryError: String?
+
+        public init(
+            stats: SessionStats,
+            recentSessions: [HermesSession],
+            sessionPreviews: [String: String],
+            recentToolCalls: [HermesMessage],
+            modelUsage: [ModelUsageStat],
+            queryError: String? = nil
+        ) {
+            self.stats = stats
+            self.recentSessions = recentSessions
+            self.sessionPreviews = sessionPreviews
+            self.recentToolCalls = recentToolCalls
+            self.modelUsage = modelUsage
+            self.queryError = queryError
+        }
     }
 
+    /// - Parameter statsSince: bounds the stat-card totals to sessions
+    ///   started at or after this instant. The Dashboard passes its
+    ///   "Last 7 days" window; `nil` keeps the all-time totals.
     public func dashboardSnapshot(
         sessionLimit: Int = 5,
         previewLimit: Int = 5,
-        toolCallLimit: Int = 8
+        toolCallLimit: Int = 8,
+        statsSince: Date? = nil
     ) async -> DashboardSnapshot {
         var statements: [(sql: String, params: [SQLValue])] = [
-            (statsSQL(), []),
+            (statsSQL(since: statsSince), Self.statsParams(since: statsSince)),
             (
                 "SELECT \(sessionColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?",
                 [.integer(Int64(sessionLimit))]
@@ -1509,10 +1623,19 @@ public actor HermesDataService {
                 [.integer(Int64(previewLimit))]
             ),
             (
+                // `messageColumnsLight`, not `messageColumns`: the
+                // Dashboard's "Recent activity" card renders a tool NAME
+                // and an argument summary, and never the chain-of-thought
+                // — but the heavy `reasoning_content` blob (20+ KB per
+                // thinking-model row) was travelling with every one of
+                // these rows on every watcher tick. `active = 1` matches
+                // what `fetchRecentToolCallsOutcome` and the Activity feed
+                // already filter on, so a rewound tool call stops
+                // resurfacing on the Dashboard after the user undid it.
                 """
-                SELECT \(messageColumns)
+                SELECT \(messageColumnsLight)
                 FROM messages
-                WHERE tool_calls IS NOT NULL AND tool_calls != '[]' AND tool_calls != ''
+                WHERE tool_calls IS NOT NULL AND tool_calls != '[]' AND tool_calls != ''\(hasMessagesActiveColumn ? " AND active = 1" : "")
                 ORDER BY timestamp DESC
                 LIMIT ?
                 """,
@@ -1549,7 +1672,8 @@ public actor HermesDataService {
                 recentSessions: [],
                 sessionPreviews: [:],
                 recentToolCalls: [],
-                modelUsage: []
+                modelUsage: [],
+                queryError: humanize(error)
             )
         }
     }
@@ -1571,11 +1695,26 @@ public actor HermesDataService {
         public let previews: [String: String]
     }
 
-    public func sessionListSnapshot(limit: Int = QueryDefaults.sessionLimit) async -> SessionListSnapshot {
+    /// - Parameter includeUnreadActivity: selects Hermes's `last_active`
+    ///   recency expression alongside the session columns. It is a
+    ///   correlated `MAX(messages.timestamp)` subquery **per row**, and the
+    ///   ONLY thing that reads it is `HermesSession.isUnread` — whose only
+    ///   consumer in the app is the chat sidebar's unread dot
+    ///   (`ChatSessionListPane`). The Sessions tab renders no unread
+    ///   indicator and asks for 500 rows (ten times the sidebar's 50), so
+    ///   it was paying 500 correlated subqueries per watcher tick for a
+    ///   column nothing on that screen reads. Pass `false` there.
+    ///   `sessionListColumns` is itself gated on `last_read_at` existing,
+    ///   so on a pre-v0.20.4 host both settings emit identical SQL.
+    public func sessionListSnapshot(
+        limit: Int = QueryDefaults.sessionLimit,
+        includeUnreadActivity: Bool = true
+    ) async -> SessionListSnapshot {
         let previewLimit = limit
+        let columns = includeUnreadActivity ? sessionListColumns : sessionColumns
         let statements: [(sql: String, params: [SQLValue])] = [
             (
-                "SELECT \(sessionListColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?",
+                "SELECT \(columns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC LIMIT ?",
                 [.integer(Int64(limit))]
             ),
             (
@@ -1614,14 +1753,36 @@ public actor HermesDataService {
         public let daysOfWeek: [Int: Int]
     }
 
-    public func insightsSnapshot(since: Date) async -> InsightsSnapshot {
+    /// - Parameter limit: row cap for the histogram query, which returns
+    ///   one row per session in the period. Pass the SAME value the caller
+    ///   passes `fetchSessionsInPeriod` so both halves of the Insights page
+    ///   describe the same set of sessions.
+    ///
+    /// **Population.** All three statements below run over
+    /// `sessionListPredicate` — the identical predicate
+    /// `fetchSessionsInPeriod` uses. Pre-fix they filtered on a hand-rolled
+    /// `parent_session_id IS NULL`, which is neither the same thing (it
+    /// drops the branch/reset children the list keeps and keeps the hidden
+    /// rows the list drops) nor stable across schema versions. Insights
+    /// then showed a tool histogram and a session table that disagreed
+    /// about which sessions exist, on one page, with no way to tell which
+    /// was right.
+    public func insightsSnapshot(
+        since: Date,
+        limit: Int = QueryDefaults.periodSessionLimit
+    ) async -> InsightsSnapshot {
         let sinceTs = since.timeIntervalSince1970
+        // The predicate is written against `s`, which the JOINs below
+        // already alias `sessions` to — and `sessionListFrom` supplies the
+        // alias for the standalone histogram query.
+        let joinPredicate = sessionListPredicate
+        let outerStartedAt = hasListableChildSupport ? "s.started_at" : "started_at"
         let statements: [(sql: String, params: [SQLValue])] = [
             (
                 """
                 SELECT COUNT(*) FROM messages m
-                JOIN sessions s ON m.session_id = s.id
-                WHERE m.role = 'user' AND s.parent_session_id IS NULL AND s.started_at >= ?
+                JOIN \(sessionListFrom) ON m.session_id = \(hasListableChildSupport ? "s" : "sessions").id
+                WHERE m.role = 'user' AND \(joinPredicate) AND \(outerStartedAt) >= ?
                 """,
                 [.real(sinceTs)]
             ),
@@ -1629,16 +1790,20 @@ public actor HermesDataService {
                 """
                 SELECT m.tool_name, COUNT(*) as cnt
                 FROM messages m
-                JOIN sessions s ON m.session_id = s.id
-                WHERE m.tool_name IS NOT NULL AND m.tool_name <> '' AND s.parent_session_id IS NULL AND s.started_at >= ?
+                JOIN \(sessionListFrom) ON m.session_id = \(hasListableChildSupport ? "s" : "sessions").id
+                WHERE m.tool_name IS NOT NULL AND m.tool_name <> '' AND \(joinPredicate) AND \(outerStartedAt) >= ?
                 GROUP BY m.tool_name
                 ORDER BY cnt DESC
                 """,
                 [.real(sinceTs)]
             ),
             (
-                "SELECT started_at FROM sessions WHERE parent_session_id IS NULL AND started_at >= ?",
-                [.real(sinceTs)]
+                """
+                SELECT \(outerStartedAt) FROM \(sessionListFrom)
+                WHERE \(joinPredicate) AND \(outerStartedAt) >= ?
+                ORDER BY \(outerStartedAt) DESC LIMIT ?
+                """,
+                [.real(sinceTs), .integer(Int64(limit))]
             )
         ]
         do {
