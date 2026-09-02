@@ -4,9 +4,11 @@ type: note
 permalink: scarf/integration/hermes-v0-20-4-audit-findings
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesCronJob.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift]
 source_paths_inferred: false
-source_sha: 6a4e87bbc982d020cfdea31b2dfc5cec9413393c
+source_sha: cc42250a7195da79d17ebe0e2d8351d5ea93c384
 created: 2026-08-20
 updated: 2026-08-20
+reviewed: 2026-09-02
+reviewed_by: audit:claude-code (background)
 ---
 
 Source-verified audit of Hermes v0.20.1–v0.20.4 (v2026.8.3..v2026.8.18, ~3,016 commits) against Scarf's v0.20.0 target, run 2026-08-20. Full report: documents/hermes-v0.20.4-audit-report.md. No implementation yet — pending Alan's scope decision.

@@ -5,10 +5,10 @@ permalink: scarf/integration/hermes-v0-17-0-audit-findings
 tags: [hermes, v017, audit, verification, wire-format]
 source_paths: [scarf/scarf/Features/Health/ViewModels/HealthViewModel.swift, scarf/scarf/Features/Health/Views/HealthView.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/CuratorService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/GatewayAllowlistKind.swift, wiki/Hermes-Version-Compatibility.md]
 source_paths_inferred: false
-source_sha: 466bb7f11b7652ac99876183d0968269cddcac38
+source_sha: 676f7d8dffc2c34a567124e08b36d30c650ca587
 created: 2026-06-21
 updated: 2026-06-21
-reviewed: 2026-09-01
+reviewed: 2026-09-02
 reviewed_by: audit:claude-code (background)
 ---
 

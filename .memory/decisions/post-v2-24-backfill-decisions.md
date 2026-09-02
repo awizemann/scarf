@@ -5,9 +5,11 @@ permalink: scarf/decisions/post-v2-24-backfill-decisions
 tags: [i18n, settings, chat, config-parity, backfill]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesConfig.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ACPClient.swift, scarf/scarfTests/HermesFileServiceConfigParityTests.swift, scarf/scarf/Core/Utilities/MarkdownContentView.swift, tools/merge-translations.py]
 source_paths_inferred: false
-source_sha: f5b18d494f956578e678accb6d7185187ce29791
+source_sha: d8fabdec350f7e2752a6f928a7bd9454230421a0
 created: 2026-09-01
 updated: 2026-09-01
+reviewed: 2026-09-02
+reviewed_by: audit:claude-code (background)
 ---
 
 Durable decisions/gotchas from the post-v2.24.0 backfill cycle (branch feat/post-v2.24-backfill, worktree build). Covers the Settings follow-ups, Chat follow-ups, and the l10n backfill (+489 catalog keys, six locales).

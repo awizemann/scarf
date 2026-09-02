@@ -4,9 +4,11 @@ type: note
 permalink: scarf/decisions/hermes-v0-20-compatibility-decisions
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesMessage.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/CuratorService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesTool.swift]
 source_paths_inferred: false
-source_sha: dbb5d6212a1e38529bdf3e6b1caeac7f8b81f41c
+source_sha: 676f7d8dffc2c34a567124e08b36d30c650ca587
 created: 2026-08-03
 updated: 2026-08-12
+reviewed: 2026-09-02
+reviewed_by: audit:claude-code (background)
 ---
 
 What shipped for the Hermes v0.20.0 (v2026.8.3) cycle and why (branch feat/hermes-v020-parity, built 2026-08-03 by orchestrated sub-agents in three waves + a fresh-eyes fix round; full findings: [[Hermes v0.20.0 Audit Findings]]).

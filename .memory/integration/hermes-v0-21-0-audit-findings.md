@@ -5,7 +5,7 @@ permalink: scarf/integration/hermes-v0-21-0-audit-findings
 tags: [hermes, audit, compatibility, v0.21.0, bot-mode]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/BotsService.swift, documents/hermes-v0.21.0-audit-report.md]
 source_paths_inferred: false
-source_sha: 5ba704c22e0558122a7ab9e26806bd21a9473031
+source_sha: 676f7d8dffc2c34a567124e08b36d30c650ca587
 created: 2026-09-01
 updated: 2026-09-01
 reviewed: 2026-09-02

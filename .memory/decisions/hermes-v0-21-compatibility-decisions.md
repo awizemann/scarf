@@ -5,9 +5,11 @@ permalink: scarf/decisions/hermes-v0-21-compatibility-decisions
 tags: [hermes, capability-gating, config, versioning, settings]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesConfig.swift, scarf/scarf/Features/Settings/Views/Tabs/WebToolsTab.swift, scarf/scarf/Features/Settings/Views/Tabs/AuxiliaryTab.swift]
 source_paths_inferred: false
-source_sha: 07620fa86c785262ff7ebef43f12a48bb732b957
+source_sha: 676f7d8dffc2c34a567124e08b36d30c650ca587
 created: 2026-09-01
-updated: 2026-09-01
+updated: 2026-09-02
+reviewed: 2026-09-02
+reviewed_by: audit:claude-code (background)
 ---
 
 Forced config-parity decisions for the v0.21.0 ("Pantheon", v2026.8.31) cycle, work package W1. Tag map: v2026.8.19 = 0.20.5, v2026.8.27 = 0.20.6, v2026.8.31 = 0.21.0.
@@ -94,7 +96,7 @@ Removal flags use INVERSE semantics (`true` = still show it) and differ delibera
 - [gotcha] A terminal job can still have `enabled == true`, so the detail pane offers "Pause" for it — and pausing a completed job ALSO trips the terminal guard (the merged record's state leaves `{completed, error}`). That is why the friendly-message translation exists on the generic `runAndReload` path and not only on the two pre-checked verbs.
 - [gotcha] `CronView` reads capabilities from an async-probing store, so `onAppear` can run before the version answer lands. The gated probes (`loadIncidents`/`loadDoctor`) and `viewModel.supportsResumeRunNow` are re-run from `.onChange` on each capability — without that, a cold launch shows no incidents, no doctor findings, and the wrong terminal-refusal wording.
 - [fact] `hermes cron runs` output format is UNCHANGED at v0.21.0 (same f-string in `cron_runs`), so `HermesCronRunsParser` needed no edit; `cronRunsFormatUnchangedAtV021` is the drift alarm. Neither `cron incidents` nor `cron doctor` has a `--json` flag, so both are text parsers. ANSI is stripped defensively even though `hermes_cli/colors.py::should_use_color` requires a tty (always false for Scarf's piped runs).
-- [convention] Cron UI strings remain plain Swift literals — the Cron feature has never used the localization catalogs, and W7 matched that precedent rather than introducing a split.
+- [convention] Cron UI strings were plain Swift literals when W7 shipped (matching the then-precedent). SUPERSEDED 2026-09-01: the post-v2.24 backfill (bb9dc7c-era work, commit e8c58ae) converted Cron's view-layer literals into the catalog; remaining String-typed component params were the extraction leak fixed in the 2026-09-02 section-audit cycle.
 
 
 ## W8 — dotted-key escaping for interpolated config-key segments (t-01d5c11b)
