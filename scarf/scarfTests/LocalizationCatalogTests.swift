@@ -68,6 +68,10 @@ struct LocalizationCatalogTests {
     /// Two plural-hack keys were translated before this rule was written and
     /// are kept deliberately (the pre-release audit board signed them off);
     /// everything else must fall back to English. Do not grow this list.
+    ///
+    /// F7 retired seven hack keys outright by moving their call sites to
+    /// automatic grammar agreement (`^[\(n) session](inflect: true)`), which
+    /// IS translatable — 18 hack keys became 11. These two stay as they are.
     static let pluralHackExceptions: Set<String> = [
         "%lld delivery failure%@",
         "Applied to %lld host%@",
@@ -209,6 +213,7 @@ struct LocalizationCatalogTests {
         "MCP",
         "Meta for Developers",
         "Microsoft Teams",
+        "Nous Portal",
         "OAuth",
         "OAuth 2.1",
         "OpenRouter",
@@ -293,5 +298,107 @@ struct LocalizationCatalogTests {
             }
         }
         #expect(stale.isEmpty, Comment(rawValue: "stale fallback entries:\n" + stale.sorted().joined(separator: "\n")))
+    }
+}
+
+// MARK: - F7: component-parameter recovery
+
+/// Section-audit fix package F7 converted `String`-typed display parameters on
+/// shared components to `LocalizedStringKey`. A `String` binds `Text`'s
+/// VERBATIM overload, so those call sites were never extracted — and several of
+/// their keys were *already sitting translated in the catalog*, reachable only
+/// through a code path that no longer existed. The conversion is what makes
+/// them reachable again; the runtime lookup itself is `Text`'s job, so what a
+/// test can pin is that the key the converted call site now passes still exists
+/// in the catalog, translated, under exactly that spelling.
+///
+/// A rename or a re-worded literal at any of these call sites breaks this test
+/// rather than silently going back to English.
+@Suite("F7 localization recovery")
+struct LocalizationF7RecoveryTests {
+
+    /// Keys whose call sites were dead before F7, sampled across the packages
+    /// the fix touched. Spelling here must match the source literal EXACTLY.
+    static let recoveredKeys: [String] = [
+        "Overview",                                        // InsightsView.sectionHeader
+        "Top Tools",                                       // InsightsView.sectionHeader
+        "Unknown widget type: \"%@\"",                     // WidgetErrorCard.reason
+        "0 9 * * *  or  30m  or  every 2h",                // CronJobEditor placeholder
+        "Edit %@",                                         // CronJobEditor.headerText
+        "Loading cron jobs…",                              // loadingOverlay(label:)
+        "No site widget in this project's dashboard.",     // CockpitEmptyState.text
+        "Journal Mode",                                    // PickerRow.label
+        "Max Turns",                                       // StepperRow.label
+        "Mount CWD",                                       // ToggleRow.label
+        "Pinned, then name",                               // BotRosterSort.label
+        "Recently updated",                                // Kanban sortOptions
+        "Today",                                           // SessionsViewModel.QuickFilter
+        "Allowed channels",                                // GatewayAllowlistKind vocabulary
+        "Send prompts to this chat's agent",               // MiniAppPermission consent sheet
+        "Path must be relative to the project root, not absolute.",  // WidgetPathResolver
+        "server not registered on this Mac",               // FleetApplyExecutor.FieldResult
+    ]
+
+    @Test("every key recovered by the LocalizedStringKey conversion is in the catalog")
+    func recoveredKeysArePresent() {
+        let catalog = LocalizationCatalogTests.catalog
+        let absent = Self.recoveredKeys.filter { catalog.strings[$0] == nil }
+        #expect(absent.isEmpty, Comment(rawValue: "unreachable keys:\n" + absent.joined(separator: "\n")))
+    }
+
+    @Test("every recovered key carries all six locales")
+    func recoveredKeysAreTranslated() {
+        let catalog = LocalizationCatalogTests.catalog
+        var offenders: [String] = []
+        for key in Self.recoveredKeys {
+            guard let locales = catalog.strings[key] else { continue }
+            let missing = LocalizationCatalogTests.shippedLocales.subtracting(locales.keys).sorted()
+            if !missing.isEmpty { offenders.append("\(key) → missing \(missing.joined(separator: ","))") }
+        }
+        #expect(offenders.isEmpty, Comment(rawValue: "partly-translated recovered keys:\n" + offenders.sorted().joined(separator: "\n")))
+    }
+
+    /// The seven plural-hack keys F7 retired must be GONE, not merely unused:
+    /// a stale key sits in the catalog looking translated while the live call
+    /// site renders the new inflected one.
+    @Test("retired plural-hack keys are removed from the catalog")
+    func retiredPluralHacksAreGone() {
+        let catalog = LocalizationCatalogTests.catalog
+        let retired = [
+            "%lld health issue%@",
+            "%lld incident%@",
+            "Health check found %lld issue%@",
+            "Showing %lld session%@ from",
+            "Rewound %lld time%@",
+            "Rewound %lld time%@ (Hermes v0.16+)",
+            "Hermes auto-compacted this session's context %lld time%@",
+        ]
+        let lingering = retired.filter { catalog.strings[$0] != nil }
+        #expect(lingering.isEmpty, Comment(rawValue: "stale hack keys:\n" + lingering.joined(separator: "\n")))
+    }
+
+    /// Their inflected replacements must exist and be translated — otherwise
+    /// the retirement above just deleted six languages' worth of copy.
+    @Test("the inflected replacements exist and are translated")
+    func inflectedReplacementsAreTranslated() {
+        let catalog = LocalizationCatalogTests.catalog
+        let replacements = [
+            "^[%lld health issue](inflect: true)",
+            "^[%lld incident](inflect: true)",
+            "Health check found ^[%lld issue](inflect: true)",
+            "Showing ^[%lld session](inflect: true) from",
+            "Rewound ^[%lld time](inflect: true)",
+            "Rewound ^[%lld time](inflect: true) (Hermes v0.16+)",
+            "Hermes auto-compacted this session's context ^[%lld time](inflect: true)",
+        ]
+        var offenders: [String] = []
+        for key in replacements {
+            guard let locales = catalog.strings[key] else {
+                offenders.append("\(key): not in catalog"); continue
+            }
+            let missing = LocalizationCatalogTests.shippedLocales.subtracting(locales.keys).sorted()
+            if !missing.isEmpty { offenders.append("\(key) → missing \(missing.joined(separator: ","))") }
+        }
+        #expect(offenders.isEmpty, Comment(rawValue: offenders.sorted().joined(separator: "\n")))
     }
 }
