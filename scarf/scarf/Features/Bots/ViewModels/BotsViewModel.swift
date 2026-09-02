@@ -330,6 +330,34 @@ final class BotsViewModel {
         return vm
     }
 
+    // MARK: - Agent configuration (Phase B P1)
+
+    @ObservationIgnored private var agentCache: [String: BotAgentViewModel] = [:]
+
+    /// Memoized per bot for the same reason routines are — and one more:
+    /// the `SOUL.md` editor buffer lives in this view model and exists
+    /// nowhere else until it is saved. Rebuilding the view model on a
+    /// selection change (or a body evaluation) would silently throw away the
+    /// user's unsaved identity prompt. Never evicted; it holds no process.
+    func agentViewModel(for profileName: String) -> BotAgentViewModel {
+        if let existing = agentCache[profileName] { return existing }
+        let vm = BotAgentViewModel(
+            context: context,
+            profileName: profileName,
+            capabilities: capabilities
+        )
+        agentCache[profileName] = vm
+        return vm
+    }
+
+    /// The bot currently being edited, if its `SOUL.md` buffer is dirty. The
+    /// roster's navigation guard asks this before switching selection —
+    /// nothing else in Bots holds unsaved text.
+    func unsavedAgentEdits(forProfile profileName: String?) -> Bool {
+        guard let profileName, let vm = agentCache[profileName] else { return false }
+        return vm.isSoulDirty
+    }
+
     // MARK: - Conversation (B3)
 
     /// The live conversation, if any. **At most one exists at a time** — a

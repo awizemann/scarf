@@ -27,6 +27,31 @@ struct BotsView: View {
     @State private var pendingDelete: BotRow?
     @State private var renaming: BotRow?
     @State private var renameText = ""
+    /// A selection change held back because the bot being left has unsaved
+    /// `SOUL.md` edits. See ``PendingSelection``.
+    @State private var pendingSelection: PendingSelection?
+
+    /// The roster is the only way out of a bot's Agent pane, and the
+    /// `SOUL.md` buffer is the only unsaved state in Bots that exists nowhere
+    /// else. The per-bot view model is cached, so switching away does not by
+    /// itself lose the text — but the user has no way to know that, and a
+    /// buffer they believe is gone is as good as gone. So the switch is held
+    /// until they say which they meant.
+    private struct PendingSelection: Identifiable, Equatable {
+        enum Target: Equatable {
+            case bot(String)
+            case peer(String)
+        }
+        /// The profile whose buffer is dirty — the one being left.
+        let outgoing: String
+        let target: Target
+        var id: String {
+            switch target {
+            case .bot(let name):  return "bot:\(name)"
+            case .peer(let name): return "peer:\(name)"
+            }
+        }
+    }
 
     init(viewModel: BotsViewModel) {
         self.viewModel = viewModel
@@ -107,6 +132,24 @@ struct BotsView: View {
         }
         .sheet(item: $renaming) { row in
             renameSheet(row)
+        }
+        .confirmationDialog(
+            pendingSelection.map { "Leave \($0.outgoing) with unsaved SOUL.md changes?" } ?? "",
+            isPresented: Binding(
+                get: { pendingSelection != nil },
+                set: { if !$0 { pendingSelection = nil } }
+            )
+        ) {
+            Button("Discard Changes", role: .destructive) {
+                if let pending = pendingSelection {
+                    viewModel.agentViewModel(for: pending.outgoing).revertSoul()
+                    apply(pending.target)
+                }
+                pendingSelection = nil
+            }
+            Button("Keep Editing", role: .cancel) { pendingSelection = nil }
+        } message: {
+            Text("This bot's identity prompt has edits you haven't saved. Discarding throws them away.")
         }
     }
 
@@ -278,11 +321,7 @@ struct BotsView: View {
     private func rosterRow(_ row: BotRow) -> some View {
         let isSelected = viewModel.selectedProfileName == row.identity.profileName
         return Button {
-            // Selecting a local bot always wins the detail pane — clear any
-            // remote selection so the two identity spaces never both claim
-            // it (see `detail` below).
-            viewModel.peers.selectedPeerName = nil
-            viewModel.selectedProfileName = row.identity.profileName
+            requestSelection(.bot(row.identity.profileName))
         } label: {
             ScarfCard(padding: ScarfSpace.s3) {
                 HStack(alignment: .top, spacing: ScarfSpace.s3) {
@@ -348,11 +387,7 @@ struct BotsView: View {
     private func remoteRow(_ peer: HermesBotPeer) -> some View {
         let isSelected = viewModel.peers.selectedPeerName == peer.name
         return Button {
-            // Selecting a remote peer clears the local selection so
-            // `detail` doesn't try to render both — see `rosterRow` above
-            // for the mirror-image guard.
-            viewModel.selectedProfileName = nil
-            viewModel.peers.selectedPeerName = peer.name
+            requestSelection(.peer(peer.name))
         } label: {
             ScarfCard(padding: ScarfSpace.s3) {
                 HStack(alignment: .top, spacing: ScarfSpace.s3) {
@@ -410,6 +445,47 @@ struct BotsView: View {
         return vm
     }
 
+    // MARK: - Selection
+
+    /// Route every roster selection through the unsaved-changes guard.
+    ///
+    /// A local bot and a remote peer are separate identity spaces: whichever
+    /// is selected clears the other, so the detail pane never has two
+    /// claimants (see `detail`).
+    private func requestSelection(_ target: PendingSelection.Target) {
+        if case .bot(let name) = target, name == viewModel.selectedProfileName { return }
+        if let outgoing = viewModel.selectedProfileName,
+           viewModel.unsavedAgentEdits(forProfile: outgoing) {
+            pendingSelection = PendingSelection(outgoing: outgoing, target: target)
+            return
+        }
+        apply(target)
+    }
+
+    private func apply(_ target: PendingSelection.Target) {
+        switch target {
+        case .bot(let name):
+            viewModel.peers.selectedPeerName = nil
+            viewModel.selectedProfileName = name
+        case .peer(let name):
+            viewModel.selectedProfileName = nil
+            viewModel.peers.selectedPeerName = name
+        }
+    }
+
+    // MARK: - Agent configuration (Phase B P1)
+
+    /// Fetch the cached per-bot agent view model and mirror the current
+    /// capability answer into it — outside the `@ViewBuilder` closure, for
+    /// the same reason `routinesViewModel(for:)` is.
+    private func agentViewModel(for row: BotRow) -> BotAgentViewModel {
+        let vm = viewModel.agentViewModel(for: row.identity.profileName)
+        if let capabilities = capabilitiesStore?.capabilities {
+            vm.capabilities = capabilities
+        }
+        return vm
+    }
+
     // MARK: - Detail
 
     @ViewBuilder
@@ -452,6 +528,9 @@ struct BotsView: View {
                         viewModel: routinesViewModel(for: row),
                         hasCronBotChatDelivery: capabilitiesStore?.capabilities.hasCronBotChatDelivery ?? false
                     )
+                },
+                agent: {
+                    BotAgentView(viewModel: agentViewModel(for: row))
                 }
             )
             .id(row.identity.profileName)

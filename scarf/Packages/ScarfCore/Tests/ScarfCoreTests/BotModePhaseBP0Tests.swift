@@ -483,3 +483,44 @@ import Foundation
         #expect(try old.readAgentConfig(forProfile: "scout").configExists == false)
     }
 }
+
+/// Phase B P1 — the shared `hermes tools list` parse.
+///
+/// The per-bot Agent surface reads a bot's toolsets with the SAME parser the
+/// root Tools screen uses (`HermesToolsList`, lifted out of `ToolsViewModel`),
+/// because the bot's `config.yaml` only pins `platform_toolsets.<platform>`
+/// when something was changed — the effective set is computed by Hermes at
+/// read time, so the file alone can never enumerate it.
+@Suite("Hermes tools list parser (P1)")
+struct HermesToolsListTests {
+
+    @Test("✓/✗ rows carry name, description and enablement")
+    func parsesRows() {
+        let output = """
+        Toolsets for platform cli:
+        ✓ enabled  web  🌐 search and fetch pages
+        ✗ disabled  shell  🖥 run shell commands
+
+        2 toolsets
+        """
+        let tools = HermesToolsList.parse(output)
+        #expect(tools.map(\.name) == ["web", "shell"])
+        #expect(tools[0].enabled)
+        #expect(!tools[1].enabled)
+        #expect(tools[0].description == "search and fetch pages")
+        #expect(tools[0].icon == "🌐")
+    }
+
+    @Test("lines that aren't toolset rows are skipped, never guessed at")
+    func skipsNonRows() {
+        #expect(HermesToolsList.parse("no toolsets configured\n\n").isEmpty)
+    }
+
+    @Test("a row with no description falls back to its own name")
+    func bareRow() {
+        let tools = HermesToolsList.parse("✓ enabled  memory")
+        #expect(tools.count == 1)
+        #expect(tools[0].name == "memory")
+        #expect(tools[0].icon == "🔧")
+    }
+}
