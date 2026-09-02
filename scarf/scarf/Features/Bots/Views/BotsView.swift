@@ -30,6 +30,12 @@ struct BotsView: View {
     /// A selection change held back because the bot being left has unsaved
     /// `SOUL.md` edits. See ``PendingSelection``.
     @State private var pendingSelection: PendingSelection?
+    /// Roster ordering, persisted the way `ChatSessionListPane` persists its
+    /// own list preference. `@AppStorage` is app-wide rather than per-window;
+    /// Scarf has no `@SceneStorage` precedent to borrow, and inventing a
+    /// per-window store for one enum is not worth a new mechanism.
+    @AppStorage("scarf.bots.sortOrder") private var storedSortOrder: String =
+        BotsViewModel.BotRosterSort.pinnedThenName.rawValue
 
     /// The roster is the only way out of a bot's Agent pane, and the
     /// `SOUL.md` buffer is the only unsaved state in Bots that exists nowhere
@@ -85,13 +91,22 @@ struct BotsView: View {
         // Nothing else would: the view model is coordinator-cached for the
         // window's lifetime, so without this the process would outlive the
         // UI that owns it and keep holding the bot profile's state.db.
-        .onDisappear { viewModel.closeConversation() }
+        .onDisappear {
+            viewModel.closeConversation()
+            // A filter that survived the section switch would read, on the way
+            // back in, as a roster that had lost most of its bots.
+            viewModel.clearSearch()
+        }
         .onAppear {
             if let capabilities = capabilitiesStore?.capabilities {
                 viewModel.capabilities = capabilities
             }
+            viewModel.sortOrder = BotsViewModel.BotRosterSort(rawValue: storedSortOrder) ?? .pinnedThenName
             viewModel.load()
             if viewModel.hasPeerRunCommands { viewModel.peers.load() }
+        }
+        .onChange(of: storedSortOrder) { _, raw in
+            viewModel.sortOrder = BotsViewModel.BotRosterSort(rawValue: raw) ?? .pinnedThenName
         }
         .onChange(of: hasBotMode) { _, _ in
             if let capabilities = capabilitiesStore?.capabilities {
@@ -167,7 +182,11 @@ struct BotsView: View {
                         .scarfStyle(.caption)
                         .foregroundStyle(ScarfColor.success)
                 }
-                Button("Reload") { viewModel.load(force: true) }
+                // The only place that re-reads activity: an explicit reload.
+                // Every mutation's own `load(force: true)` leaves the per-bot
+                // database opens alone, so pinning a bot doesn't re-open
+                // twelve `state.db` files.
+                Button("Reload") { viewModel.load(force: true, refreshActivity: true) }
                     .buttonStyle(ScarfGhostButton())
                     .accessibilityLabel("Reload the bot roster")
                 Button {
@@ -246,10 +265,18 @@ struct BotsView: View {
                 if let errorMessage = viewModel.errorMessage {
                     banner(errorMessage)
                 }
+                rosterControls
                 if viewModel.isLoading && viewModel.rows.isEmpty {
                     ProgressView()
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, ScarfSpace.s6)
+                } else if viewModel.searchFoundNothing {
+                    Text("No bots match “\(viewModel.searchText)”.")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, ScarfSpace.s4)
+                        .accessibilityLabel("No bots match \(viewModel.searchText)")
                 } else if viewModel.isEmptyRoster {
                     emptyState
                 } else {
@@ -318,14 +345,45 @@ struct BotsView: View {
         .background(ScarfColor.backgroundPrimary)
     }
 
+    /// Filter + ordering, above every roster group so it reads as scoping all
+    /// of them (it does — hidden bots and unmanaged profiles are filtered too).
+    private var rosterControls: some View {
+        VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+            ScarfTextField("Filter bots", text: $viewModel.searchText)
+                .accessibilityLabel("Filter bots by name, role or profile id")
+                .accessibilityIdentifier("bots.search")
+            Picker("Order", selection: Binding(
+                get: { storedSortOrder },
+                set: { storedSortOrder = $0 }
+            )) {
+                ForEach(BotsViewModel.BotRosterSort.allCases, id: \.rawValue) { order in
+                    Text(order.label).tag(order.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .accessibilityLabel("Roster order")
+            .accessibilityIdentifier("bots.sort")
+        }
+    }
+
     private func rosterRow(_ row: BotRow) -> some View {
         let isSelected = viewModel.selectedProfileName == row.identity.profileName
+        let presence = viewModel.presence(forProfile: row.identity.profileName)
         return Button {
             requestSelection(.bot(row.identity.profileName))
         } label: {
             ScarfCard(padding: ScarfSpace.s3) {
                 HStack(alignment: .top, spacing: ScarfSpace.s3) {
-                    BotAvatarView(identity: row.identity, avatar: row.avatar, size: 34)
+                    // The photo comes from the cache, already decoded — no
+                    // `NSImage(data:)` in a row body (audit A1-M4). Nil until
+                    // the async fill lands, which paints the generated
+                    // fallback: correct, and instant.
+                    BotAvatarView(
+                        identity: row.identity,
+                        image: viewModel.avatarImage(for: row),
+                        size: 34
+                    )
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: ScarfSpace.s2) {
                             Text(row.identity.resolvedTitle)
@@ -338,6 +396,9 @@ struct BotsView: View {
                                     .foregroundStyle(ScarfColor.accent)
                                     .accessibilityLabel("Pinned")
                             }
+                            if presence.isLive {
+                                presenceDot(presence)
+                            }
                         }
                         if !row.identity.resolvedDescription.isEmpty {
                             Text(row.identity.resolvedDescription)
@@ -345,10 +406,21 @@ struct BotsView: View {
                                 .foregroundStyle(ScarfColor.foregroundMuted)
                                 .lineLimit(2)
                         }
+                        if let activity = row.activity, !activity.preview.isEmpty {
+                            Text(activity.preview)
+                                .scarfStyle(.footnote)
+                                .foregroundStyle(ScarfColor.foregroundFaint)
+                                .lineLimit(1)
+                        }
                         HStack(spacing: ScarfSpace.s1) {
                             Text(row.identity.profileName)
                                 .scarfStyle(.footnote)
                                 .foregroundStyle(ScarfColor.foregroundFaint)
+                            if let last = row.activity?.lastMessageAt {
+                                Text(Self.relative(last))
+                                    .scarfStyle(.footnote)
+                                    .foregroundStyle(ScarfColor.foregroundFaint)
+                            }
                             if !row.identity.isBotManaged {
                                 ScarfBadge("profile", kind: .neutral)
                             }
@@ -430,7 +502,42 @@ struct BotsView: View {
         if !row.identity.isBotManaged { parts.append("not a bot yet") }
         if row.isPinned { parts.append("pinned") }
         if row.isHidden { parts.append("hidden") }
+        let presence = viewModel.presence(forProfile: row.identity.profileName)
+        if presence.isLive { parts.append(presence.accessibilityDescription) }
+        if let last = row.activity?.lastMessageAt {
+            parts.append("last active \(Self.relative(last))")
+        }
         return parts.joined(separator: ", ")
+    }
+
+    /// The live indicator. A dot plus a word — colour alone would carry the
+    /// whole meaning otherwise, and "replying" vs "open" is exactly the
+    /// distinction someone who can't tell the two hues apart needs.
+    private func presenceDot(_ presence: BotPresence) -> some View {
+        HStack(spacing: 3) {
+            Circle()
+                .fill(presence == .streaming ? ScarfColor.accent : ScarfColor.success)
+                .frame(width: 6, height: 6)
+            Text(presence.label)
+                .scarfStyle(.footnote)
+                .foregroundStyle(presence == .streaming ? ScarfColor.accent : ScarfColor.success)
+        }
+        // The row's own label already speaks the presence; a second
+        // announcement between the title and the role would just be noise.
+        .accessibilityHidden(true)
+    }
+
+    /// Relative timestamps: "2 minutes ago" reads as activity, an absolute
+    /// clock time reads as a log. Same formatter configuration the Sessions
+    /// and Kanban lists use, so the roster doesn't invent a third dialect.
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
+
+    private static func relative(_ date: Date) -> String {
+        relativeFormatter.localizedString(for: date, relativeTo: Date())
     }
 
     // MARK: - Routines (B4)

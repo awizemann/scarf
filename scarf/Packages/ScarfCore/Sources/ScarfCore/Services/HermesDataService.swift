@@ -942,6 +942,81 @@ public actor HermesDataService {
         }
     }
 
+    /// The carrier-aware preview of ONE session.
+    ///
+    /// Same machinery as `fetchSessionPreviews`, through
+    /// `SessionPreviewSQL.firstEligibleUserRowSQL(sessionScoped:…)` — carrier
+    /// stripping, the schema-gated active-row clause and the pre-filter are
+    /// the shared expressions, not a re-derivation. Exists because the Bots
+    /// roster asks for one bot's preview at a time: running the list
+    /// aggregate per bot would `GROUP BY` the whole `messages` table N times
+    /// and discard all but one row of each result.
+    ///
+    /// Returns `nil` when the session has no eligible user message (a brand
+    /// new chat, or one whose only user rows are pure compaction carriers) and
+    /// on any query failure — a roster line is not worth an error banner.
+    public func fetchSessionPreview(sessionId: String) async -> String? {
+        let sql = """
+            SELECT m.session_id, \(SessionPreviewSQL.rawSelect())
+            FROM messages m
+            INNER JOIN (
+            \(SessionPreviewSQL.firstEligibleUserRowSQL(
+                sessionScoped: true,
+                hasActiveColumn: hasMessagesActiveColumn,
+                hasCompactedColumn: hasCompactedColumn
+            ))
+            ) first ON m.id = first.min_id
+            LIMIT 1
+            """
+        do {
+            let rows = try await backend.query(sql, params: [.text(sessionId)])
+            guard let row = rows.first else { return nil }
+            let shaped = SessionPreviewSQL.shape(row.string(at: 1))
+            return shaped.isEmpty ? nil : shaped
+        } catch {
+            Self.logger.warning("fetchSessionPreview failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// When a session last moved. `nil` for a session with no messages.
+    public func fetchLastMessageDate(sessionId: String) async -> Date? {
+        do {
+            let rows = try await backend.query(
+                "SELECT MAX(timestamp) FROM messages WHERE session_id = ?",
+                params: [.text(sessionId)]
+            )
+            guard let row = rows.first, let value = row.optionalDouble(at: 0), value > 0 else { return nil }
+            return Date(timeIntervalSince1970: value)
+        } catch {
+            return nil
+        }
+    }
+
+    /// The roster's activity line for the bot this service is pinned to.
+    ///
+    /// The service MUST be built from `ServerContext.pinnedToProfile(_:)` —
+    /// every bot profile carries its own `state.db`, migrated independently,
+    /// which is why `open()` (and its per-database schema probe) has to run
+    /// per profile rather than once for the host.
+    ///
+    /// Returns `nil` when the profile has no canonical Bot Chat. That is the
+    /// resting state of a bot nobody has messaged, and of a database whose
+    /// schema is too old to answer — neither is an error, and neither may
+    /// produce a fabricated preview.
+    ///
+    /// The two halves are read from the two ends of the compression chain on
+    /// purpose: **activity** comes from the live tip (where new turns land),
+    /// **preview** from the registry row (which holds the conversation's first
+    /// message — on a compressed chat the tip's earliest rows are carriers or
+    /// mid-conversation turns, and would read as a preview of nothing).
+    public func fetchBotChatActivity() async -> BotActivity? {
+        guard let canonical = await locateCanonicalBotChat() else { return nil }
+        let lastMessageAt = await fetchLastMessageDate(sessionId: canonical.liveId)
+        let preview = await fetchSessionPreview(sessionId: canonical.registryId)
+        return BotActivity(lastMessageAt: lastMessageAt, preview: preview ?? "")
+    }
+
     // MARK: - Single-Row Queries
 
     public struct MessageFingerprint: Equatable, Sendable {

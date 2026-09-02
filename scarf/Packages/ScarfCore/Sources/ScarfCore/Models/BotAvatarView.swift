@@ -15,6 +15,11 @@ public struct BotAvatarView: View {
     private let shapeString: String?
     private let colorHex: String?
     private let imageData: Data?
+    /// A pre-decoded photo, supplied by ``BotAvatarCache``. When present it
+    /// wins over `imageData` and no decoding happens in `body` — the roster
+    /// path (A1-M4), where `NSImage(data:)` per row per SwiftUI evaluation was
+    /// the cost.
+    private let resolvedImage: Image?
     private let size: CGFloat
     private let cornerStyle: CornerStyle
 
@@ -49,6 +54,26 @@ public struct BotAvatarView: View {
         self.shapeString = shapeString
         self.colorHex = colorHex
         self.imageData = imageData
+        self.resolvedImage = nil
+        self.size = size
+        self.cornerStyle = cornerStyle
+    }
+
+    /// Render a photo that has already been decoded — the roster's path, where
+    /// ``BotAvatarCache`` owns the decode. `nil` renders the generated
+    /// fallback, which is also the correct first-paint state while the bytes
+    /// are still being fetched.
+    public init(
+        identity: HermesBotIdentity,
+        image: Image?,
+        size: CGFloat = 36,
+        cornerStyle: CornerStyle = .rounded
+    ) {
+        self.displayName = identity.resolvedTitle
+        self.shapeString = identity.shape
+        self.colorHex = identity.color
+        self.imageData = nil
+        self.resolvedImage = image
         self.size = size
         self.cornerStyle = cornerStyle
     }
@@ -72,7 +97,7 @@ public struct BotAvatarView: View {
 
     public var body: some View {
         Group {
-            if let imageData, let platformImage = Self.image(from: imageData) {
+            if let platformImage = resolvedImage ?? imageData.flatMap(Self.image(from:)) {
                 platformImage
                     .resizable()
                     .aspectRatio(contentMode: .fill)

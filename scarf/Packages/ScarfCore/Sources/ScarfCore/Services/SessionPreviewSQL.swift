@@ -300,6 +300,42 @@ public enum SessionPreviewSQL {
         """
     }
 
+    /// The **single-session** entry point: the first eligible user row of one
+    /// session, bound by a `?` parameter.
+    ///
+    /// Added for the Bot Mode roster (Phase B P2), which wants one preview for
+    /// one known session id and would otherwise have to run the session-list
+    /// aggregate — a `GROUP BY` over every user row in the database — and
+    /// throw all of it away but one entry, once per bot.
+    ///
+    /// This is deliberately a narrow *entry point over the same builders*, not
+    /// a second port: eligibility, extraction, the active-row clause and the
+    /// carrier pre-filter are the identical expressions the list query uses.
+    /// The only differences are the `session_id = ?` predicate (which turns
+    /// the aggregate from "one row per session" into "one row") and dropping
+    /// the now-redundant `GROUP BY`. If the carrier semantics ever change,
+    /// they change in one place and both call sites move together.
+    public static func firstEligibleUserRowSQL(
+        sessionScoped: Bool,
+        hasActiveColumn: Bool,
+        hasCompactedColumn: Bool
+    ) -> String {
+        guard sessionScoped else {
+            return firstEligibleUserRowSQL(
+                hasActiveColumn: hasActiveColumn,
+                hasCompactedColumn: hasCompactedColumn
+            )
+        }
+        return """
+        SELECT m.session_id, MIN(m.id) AS min_id
+        FROM messages m
+        WHERE m.role = 'user' AND m.content IS NOT NULL AND m.content <> ''\
+        \(activeClause(hasActiveColumn: hasActiveColumn, hasCompactedColumn: hasCompactedColumn))
+          AND m.session_id = ?
+          AND (\(carrierPreFilter()) OR \(eligiblePredicate()))
+        """
+    }
+
     // MARK: - Swift-side shaping
 
     /// `_shape_preview` — trim, then flatten CR/LF to spaces.

@@ -586,6 +586,11 @@ private struct NoopBotsBackend: BotsBackend {
         HermesBotIdentity(profileName: name, profileDirectory: "/tmp/\(name)")
     }
     func loadAvatar(forProfile name: String) throws -> HermesBotAvatar? { nil }
+    func scanRoster() async -> [BotRosterEntry] { [] }
+    func loadAvatar(at stat: BotAvatarStat) throws -> HermesBotAvatar {
+        throw BotsError.profileMissing(name: stat.path)
+    }
+    func activity(forProfile name: String) async -> BotActivity? { nil }
     func saveIdentity(_ identity: HermesBotIdentity) throws {}
     func writeAvatar(_ data: Data, forProfile name: String) throws {}
     func run(_ action: BotsService.Lifecycle) throws -> ProcessResult {

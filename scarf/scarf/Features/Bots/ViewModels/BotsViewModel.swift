@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import ScarfCore
 import os
 
@@ -14,10 +15,19 @@ import os
 protocol BotsBackend: Sendable {
     /// Every profile on the host, in `_roster` order.
     func scan() -> [HermesBotIdentity]
+    /// Every profile plus its avatar's *stat* — one round trip where the
+    /// transport supports it. What the roster paints from (Phase B P2).
+    func scanRoster() async -> [BotRosterEntry]
     /// One profile's identity, re-read from disk.
     func identity(forProfile name: String) -> HermesBotIdentity
     /// Avatar bytes, or nil when the profile has none.
     func loadAvatar(forProfile name: String) throws -> HermesBotAvatar?
+    /// Avatar bytes behind a stat the roster scan already produced — no
+    /// extension re-probe, and only ever called on a cache miss.
+    func loadAvatar(at stat: BotAvatarStat) throws -> HermesBotAvatar
+    /// The bot's Bot Chat activity from ITS OWN profile database, or nil when
+    /// there is no Bot Chat (or no readable database).
+    func activity(forProfile name: String) async -> BotActivity?
     /// Read-merge-write of the three regions Scarf owns in `profile.yaml`.
     func saveIdentity(_ identity: HermesBotIdentity) throws
     /// Store avatar bytes at `<profile_dir>/assets/avatar.png`.
@@ -31,18 +41,45 @@ struct LiveBotsBackend: BotsBackend {
     let transport: any ServerTransport
     let paths: HermesPathSet
     let capabilities: HermesCapabilities
+    let context: ServerContext
 
     private var service: BotsService {
-        BotsService(transport: transport, paths: paths, capabilities: capabilities)
+        BotsService(
+            transport: transport,
+            paths: paths,
+            capabilities: capabilities,
+            // Only a remote host pays per-file round trips; see
+            // `BotsService.init(…prefersBatchedScan:)`.
+            prefersBatchedScan: context.isRemote
+        )
     }
 
     init(context: ServerContext, capabilities: HermesCapabilities) {
         self.transport = context.makeTransport()
         self.paths = context.paths
         self.capabilities = capabilities
+        self.context = context
     }
 
     func scan() -> [HermesBotIdentity] { service.scan() }
+    func scanRoster() async -> [BotRosterEntry] { await service.rosterEntries() }
+    func loadAvatar(at stat: BotAvatarStat) throws -> HermesBotAvatar { try service.loadAvatar(at: stat) }
+
+    /// Open the BOT's own `state.db` — never the window's. Each profile
+    /// carries its own database, migrated independently, so `open()` runs per
+    /// profile and the schema flags it caches are that database's.
+    func activity(forProfile name: String) async -> BotActivity? {
+        guard BotsService.isAddressableProfile(name) else { return nil }
+        let service = HermesDataService(context: context.pinnedToProfile(name))
+        guard await service.open() else {
+            await service.close()
+            return nil
+        }
+        let activity = await service.fetchBotChatActivity()
+        await service.close()
+        return activity
+    }
+
     func identity(forProfile name: String) -> HermesBotIdentity { service.identity(forProfile: name) }
     func loadAvatar(forProfile name: String) throws -> HermesBotAvatar? { try service.loadAvatar(forProfile: name) }
     func saveIdentity(_ identity: HermesBotIdentity) throws { try service.saveIdentity(identity) }
@@ -84,8 +121,19 @@ struct BotRow: Identifiable, Equatable {
     /// Nil when the profile has no stored avatar (the generated fallback
     /// renders) *or* when its bytes haven't been loaded yet.
     var avatar: HermesBotAvatar?
+    /// Where the avatar is and what it looked like at scan time — the cache
+    /// key. Present as soon as the roster scan lands, i.e. before the bytes:
+    /// the row paints the generated fallback first and swaps in the photo when
+    /// it arrives (charter C10 — nothing heavy on first paint).
+    var avatarStat: BotAvatarStat? = nil
+    /// The bot's Bot Chat activity, filled in asynchronously after paint.
+    var activity: BotActivity? = nil
 
     var id: String { identity.profileName }
+    /// The key this row's avatar is cached under, or nil when it has none.
+    var avatarCacheKey: BotAvatarCache.Key? {
+        avatarStat.map { BotAvatarCache.Key(profileName: identity.profileName, stat: $0) }
+    }
     var isPinned: Bool { identity.pinned == true }
     var isHidden: Bool { identity.hidden == true }
 }
@@ -234,6 +282,43 @@ final class BotsViewModel {
     var showHiddenBots = false
     var showOtherProfiles = false
 
+    /// Roster filter text. Applies to every group (bots, hidden, other
+    /// profiles) — a search that silently skipped a collapsed group would
+    /// report "no results" for a profile that is right there.
+    /// **Never touches the selection.** Filtering a bot out of view leaves the
+    /// detail pane on it, deliberately: `selectedProfileName`'s `didSet` tears
+    /// down the live `hermes acp` subprocess, so retargeting the selection
+    /// from here would kill and respawn a conversation on individual
+    /// keystrokes — and it would do so *behind* `BotsView.requestSelection`,
+    /// the single choke point that holds a switch when the bot being left has
+    /// unsaved `SOUL.md` edits (P1). A filter is a view of the roster, not a
+    /// navigation.
+    var searchText = ""
+
+    /// Roster ordering. Not persisted by this type — the view mirrors it from
+    /// `@AppStorage`, the same shape `ChatSessionListPane` uses for its own
+    /// list preference (there is no `@SceneStorage` precedent in Scarf, so
+    /// this is app-wide rather than per-window; documented, not accidental).
+    var sortOrder: BotRosterSort = .pinnedThenName
+
+    /// How the roster is ordered.
+    enum BotRosterSort: String, CaseIterable, Sendable {
+        /// The original order: pinned bots first, then by title.
+        case pinnedThenName
+        /// Most recently active Bot Chat first. Pins are NOT hoisted here —
+        /// the whole point of the mode is "who moved last", and a pinned but
+        /// silent bot sitting above a bot that just replied would defeat it.
+        /// Bots with no activity (no Bot Chat, or none read yet) sort last.
+        case recentActivity
+
+        var label: String {
+            switch self {
+            case .pinnedThenName: return "Pinned, then name"
+            case .recentActivity: return "Recent activity"
+            }
+        }
+    }
+
     @ObservationIgnored private var hasLoaded = false
 
     /// Guards against an older in-flight scan clobbering a newer one's
@@ -246,18 +331,66 @@ final class BotsViewModel {
 
     // MARK: - Derived roster
 
-    /// Bot-managed, not hidden. Pinned first, then by display name.
-    var bots: [BotRow] { Self.sortBots(rows.filter { $0.identity.isBotManaged && !$0.isHidden }) }
+    /// Bot-managed, not hidden, matching the filter, in the chosen order.
+    var bots: [BotRow] {
+        sorted(matching(rows.filter { $0.identity.isBotManaged && !$0.isHidden }))
+    }
 
     /// Bot-managed but flagged `hidden` — collapsed behind a disclosure
     /// rather than dropped: Scarf can un-hide them, so hiding them
     /// irrecoverably would be a one-way door.
-    var hiddenBots: [BotRow] { Self.sortBots(rows.filter { $0.identity.isBotManaged && $0.isHidden }) }
+    var hiddenBots: [BotRow] {
+        sorted(matching(rows.filter { $0.identity.isBotManaged && $0.isHidden }))
+    }
 
     /// Profiles with no `hermes-bots` block. Kept in scan order (`default`
     /// first, then sorted ids) — these are candidates to promote, not a
-    /// roster to rank.
-    var otherProfiles: [BotRow] { rows.filter { !$0.identity.isBotManaged } }
+    /// roster to rank. Filtered, never re-sorted.
+    var otherProfiles: [BotRow] { matching(rows.filter { !$0.identity.isBotManaged }) }
+
+    /// Every row the roster is currently showing, in display order.
+    var visibleRows: [BotRow] { bots + hiddenBots + otherProfiles }
+
+    /// True when a filter is on and it matched nothing anywhere.
+    var searchFoundNothing: Bool {
+        !searchText.trimmingCharacters(in: .whitespaces).isEmpty && visibleRows.isEmpty
+    }
+
+    private func matching(_ input: [BotRow]) -> [BotRow] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return input }
+        return input.filter { Self.matches($0.identity, query: query) }
+    }
+
+    /// Does this identity match the roster filter?
+    ///
+    /// Case- AND diacritic-insensitive, against the three things a user would
+    /// type: the title they see, the blurb under it, and the profile id the
+    /// row shows (which is what `hermes -p` takes, so it is the name people
+    /// who live in the CLI actually remember). Substring, not prefix — a bot
+    /// called "Deploy Bot" has to be findable by "bot".
+    nonisolated static func matches(_ identity: HermesBotIdentity, query: String) -> Bool {
+        let haystacks = [
+            identity.resolvedTitle,
+            identity.resolvedDescription,
+            identity.profileName
+        ]
+        return haystacks.contains { field in
+            field.range(
+                of: query,
+                options: [.caseInsensitive, .diacriticInsensitive],
+                range: nil,
+                locale: .current
+            ) != nil
+        }
+    }
+
+    private func sorted(_ input: [BotRow]) -> [BotRow] {
+        switch sortOrder {
+        case .pinnedThenName: return Self.sortBots(input)
+        case .recentActivity: return Self.sortBotsByActivity(input)
+        }
+    }
 
     /// The roster ordering, in one place so tests can pin it:
     /// pinned bots first, then case-insensitive by resolved title, with the
@@ -271,6 +404,31 @@ final class BotsViewModel {
             let comparison = l.localizedCaseInsensitiveCompare(r)
             if comparison != .orderedSame { return comparison == .orderedAscending }
             return lhs.identity.profileName < rhs.identity.profileName
+        }
+    }
+
+    /// Most recent Bot Chat first; no-activity rows last.
+    ///
+    /// **Ties fall through to `sortBots`**, which is total. That matters more
+    /// than it looks: until the async activity pass lands, *every* row has
+    /// `nil` activity, so a roster sorted by activity is initially one giant
+    /// tie — and without a total tie-break it would reshuffle on every fill-in
+    /// and every re-render. Two bots with the same timestamp (a routine that
+    /// fanned out to several bots at once) are the same case.
+    static func sortBotsByActivity(_ input: [BotRow]) -> [BotRow] {
+        let fallback = sortBots(input)
+        let rank = Dictionary(uniqueKeysWithValues: fallback.enumerated().map { ($0.element.id, $0.offset) })
+        return fallback.sorted { lhs, rhs in
+            let l = lhs.activity?.lastMessageAt
+            let r = rhs.activity?.lastMessageAt
+            switch (l, r) {
+            case (nil, nil): break
+            case (_?, nil): return true
+            case (nil, _?): return false
+            case (let l?, let r?):
+                if l != r { return l > r }
+            }
+            return (rank[lhs.id] ?? 0) < (rank[rhs.id] ?? 0)
         }
     }
 
@@ -396,47 +554,188 @@ final class BotsViewModel {
         conversation = nil
     }
 
+    // MARK: - Presence (Phase B P2)
+
+    /// Whether this bot's ACP conversation is open in THIS window, and whether
+    /// it is mid-reply. Purely a projection of `conversation` — see
+    /// ``BotPresence``. At most one row is ever non-`offline`, because
+    /// `openConversation` enforces one live subprocess.
+    func presence(forProfile name: String) -> BotPresence {
+        guard let conversation, conversation.profileName == name else { return .offline }
+        var isFailed = false
+        var isResolving = false
+        switch conversation.phase {
+        case .failed: isFailed = true
+        case .resolving, .creating: isResolving = true
+        case .idle, .noConversationYet, .live: break
+        }
+        return BotPresence.resolve(
+            isCurrentConversation: true,
+            isResolving: isResolving,
+            isFailed: isFailed,
+            isConnected: conversation.chat.isACPConnected,
+            isAgentWorking: conversation.chat.richChatViewModel.isAgentWorking
+        )
+    }
+
+    // MARK: - Avatar cache (Phase B P2 / audit A1-M4)
+
+    /// Per-connection, never static: avatar paths are absolute and collide
+    /// across hosts. See ``BotAvatarCache``.
+    @ObservationIgnored let avatarCache = BotAvatarCache()
+
+    /// The decoded photo for a row, or nil to render the generated fallback.
+    /// Decodes at most once per (profile, path, size, mtime).
+    func avatarImage(for row: BotRow) -> Image? {
+        guard let key = row.avatarCacheKey else { return nil }
+        return avatarCache.image(for: key)
+    }
+
     // MARK: - Loading
 
-    func load(force: Bool = false) {
+    /// Load the roster.
+    ///
+    /// Three phases, deliberately separated (charter C10 — nothing heavy on
+    /// first paint, and the acceptance bar is an instant roster on a
+    /// 12-profile SSH host):
+    ///
+    /// 1. **Identities.** One batched round trip on a remote host
+    ///    (`BotsService.rosterEntries()`), carrying each avatar's stat but not
+    ///    its bytes. Published immediately — this is what paints.
+    /// 2. **Avatar bytes**, per profile, only on a cache miss. A metadata save
+    ///    ends in a reload whose stats are unchanged, so every key hits and
+    ///    nothing crosses the transport (the "metadata-only saves must not
+    ///    re-read avatar bytes" requirement is a *consequence* of the key, not
+    ///    a special case in the save path).
+    /// 3. **Activity + previews**, per bot, each against that bot's own
+    ///    `state.db`. The most expensive phase by far — N database opens — so
+    ///    it runs last, only for bot-managed profiles, and only when
+    ///    `refreshActivity` is set: a pin toggle must not re-open twelve
+    ///    databases.
+    ///
+    /// Every phase re-checks `loadGeneration` before publishing, so a scan the
+    /// user has already superseded can't land avatars or previews on top of a
+    /// newer roster.
+    func load(force: Bool = false, refreshActivity: Bool = false) {
         guard hasBotMode else {
             rows = []
             hasLoaded = false
             return
         }
         if !force, hasLoaded || isLoading { return }
+        let isFirstLoad = !hasLoaded
         hasLoaded = true
         isLoading = true
         loadGeneration += 1
         let generation = loadGeneration
         let backend = self.backend
-        Task.detached(priority: .userInitiated) { [weak self] in
-            let identities = backend.scan()
-            // Avatar bytes are read here, off the main actor, and only for
-            // profiles that actually have a file — `loadAvatar` returns nil
-            // without a read otherwise, and refuses anything over 2MB before
-            // it crosses the transport.
-            var loaded: [BotRow] = []
-            for identity in identities {
-                let avatar = try? backend.loadAvatar(forProfile: identity.profileName)
-                loaded.append(BotRow(identity: identity, avatar: avatar))
-            }
-            let rows = loaded
-            await MainActor.run { [weak self] in
-                guard let self, generation == self.loadGeneration else { return }
-                self.isLoading = false
-                self.rows = rows
-                // A selection that no longer exists (deleted, renamed) must
-                // not linger and retarget the detail pane at nothing.
-                if let selected = self.selectedProfileName,
-                   !rows.contains(where: { $0.identity.profileName == selected }) {
-                    self.selectedProfileName = nil
-                }
-                if self.selectedProfileName == nil {
-                    self.selectedProfileName = self.bots.first?.identity.profileName
-                }
+        let wantsActivity = refreshActivity || isFirstLoad
+        Task { [weak self] in
+            let entries = await backend.scanRoster()
+            guard let self, generation == self.loadGeneration else { return }
+            self.publish(entries, generation: generation)
+            await self.fillAvatars(entries, generation: generation, backend: backend)
+            guard wantsActivity else { return }
+            await self.fillActivity(generation: generation, backend: backend)
+        }
+    }
+
+    /// Phase 1 — paint. Rows carry whatever bytes the cache already holds, so
+    /// a re-scan of an unchanged avatar shows the photo with no flicker back
+    /// to the generated fallback.
+    private func publish(_ entries: [BotRosterEntry], generation: Int) {
+        guard generation == loadGeneration else { return }
+        isLoading = false
+        rows = entries.map { entry in
+            let stat = entry.avatar
+            let cached = stat.map { BotAvatarCache.Key(profileName: entry.identity.profileName, stat: $0) }
+                .flatMap { avatarCache.avatar(for: $0) }
+            return BotRow(
+                identity: entry.identity,
+                avatar: cached,
+                avatarStat: stat,
+                // Activity survives a re-scan: it is about the bot's chat, not
+                // about `profile.yaml`, and dropping it would blank every
+                // preview on a pin toggle.
+                activity: activityCache[entry.identity.profileName]
+            )
+        }
+        // A selection that no longer exists (deleted, renamed) must not linger
+        // and retarget the detail pane at nothing.
+        if let selected = selectedProfileName,
+           !rows.contains(where: { $0.identity.profileName == selected }) {
+            selectedProfileName = nil
+        }
+        if selectedProfileName == nil {
+            selectedProfileName = bots.first?.identity.profileName
+        }
+    }
+
+    /// Phase 2 — avatar bytes, one profile at a time, off the main actor.
+    ///
+    /// Sequential on purpose: over SSH these are N reads on one ControlMaster
+    /// channel, and firing them concurrently would contend for it while
+    /// starving the (more important) activity pass behind them.
+    private func fillAvatars(
+        _ entries: [BotRosterEntry],
+        generation: Int,
+        backend: any BotsBackend
+    ) async {
+        for entry in entries {
+            guard generation == loadGeneration else { return }
+            guard let stat = entry.avatar else { continue }
+            let key = BotAvatarCache.Key(profileName: entry.identity.profileName, stat: stat)
+            if avatarCache.avatar(for: key) != nil { continue }
+            let avatar = await Task.detached(priority: .utility) { try? backend.loadAvatar(at: stat) }.value
+            guard let avatar, generation == loadGeneration else { continue }
+            avatarCache.store(avatar, for: key)
+            if let index = rows.firstIndex(where: { $0.id == entry.identity.profileName }) {
+                rows[index].avatar = avatar
             }
         }
+    }
+
+    /// Phase 3 — activity + previews, per bot, against each bot's own
+    /// `state.db`.
+    ///
+    /// **This is the expensive one, and it is priced honestly.** Per bot on a
+    /// remote host: one preflight round trip (`RemoteSQLiteBackend.open`
+    /// batches sqlite3's version and both `PRAGMA table_info`s into one
+    /// script), then the title lookup, the compression-tip walk, the
+    /// last-message read and the preview — call it six or seven round trips,
+    /// so roughly half a second per bot at typical SSH latency. Twelve bots is
+    /// therefore seconds, which is exactly why it runs after paint, only for
+    /// bot-managed profiles, only on a first load or an explicit reload, and
+    /// sequentially rather than fanning twelve concurrent sqlite3 invocations
+    /// at one ControlMaster channel. Each database must be opened separately
+    /// regardless: profiles migrate independently, so the schema flags are
+    /// per-database and cannot be probed once for the host.
+    private func fillActivity(generation: Int, backend: any BotsBackend) async {
+        let names = rows.filter { $0.identity.isBotManaged }.map(\.id)
+        for name in names {
+            guard generation == loadGeneration else { return }
+            let activity = await backend.activity(forProfile: name)
+            guard generation == loadGeneration else { return }
+            // A bot with no Bot Chat yet keeps no entry — nil is a real
+            // answer ("nothing to show"), not a failure to record, and
+            // caching it would only make the next reload skip a chat the
+            // user has since started.
+            guard let activity else { continue }
+            activityCache[name] = activity
+            if let index = rows.firstIndex(where: { $0.id == name }) {
+                rows[index].activity = activity
+            }
+        }
+    }
+
+    /// Activity by profile, kept across re-scans (see ``publish(_:generation:)``).
+    @ObservationIgnored private var activityCache: [String: BotActivity] = [:]
+
+    /// Leaving the Bots section: drop the filter so returning shows the whole
+    /// roster. A filter that survived would look like a roster that had lost
+    /// its bots.
+    func clearSearch() {
+        searchText = ""
     }
 
     // MARK: - Create
@@ -659,6 +958,14 @@ final class BotsViewModel {
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isWorking = false
+                // Invalidate on BOTH outcomes. A remote `stat` reports mtime
+                // in whole seconds, so a second write inside the same second
+                // with the same byte count would reuse the previous key and
+                // render the OLD picture; and a failed write may still have
+                // landed the bytes before failing on the identity save. The
+                // (path, size, mtime) key is the fast path, not the
+                // correctness argument.
+                self.avatarCache.invalidate(profileName: name)
                 if let result {
                     log.warning("avatar write failed: \(result, privacy: .public)")
                     self.errorMessage = result
@@ -681,7 +988,13 @@ final class BotsViewModel {
             errorMessage = "Profile names must be lowercase letters, digits, dashes or underscores (max 64)."
             return
         }
-        runLifecycle(.rename(from: row.identity.profileName, to: target), success: "Renamed to \(target)") { [weak self] in
+        let from = row.identity.profileName
+        runLifecycle(.rename(from: from, to: target), success: "Renamed to \(target)") { [weak self] in
+            // The directory moved, so every cached avatar path under the old
+            // name is dead. Keys carry the profile name, so nothing would be
+            // mis-served — this just stops a window accumulating them.
+            self?.avatarCache.invalidate(profileName: from)
+            self?.activityCache[from] = nil
             self?.selectedProfileName = target
         }
     }
@@ -694,6 +1007,8 @@ final class BotsViewModel {
         guard hasBotMode, !isWorking else { return }
         let name = row.identity.profileName
         runLifecycle(.delete(name: name), success: "Deleted \(name)") { [weak self] in
+            self?.avatarCache.invalidate(profileName: name)
+            self?.activityCache[name] = nil
             self?.selectedProfileName = nil
         }
     }
