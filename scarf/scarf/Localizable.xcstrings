@@ -579,7 +579,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$@, um %2$@"
+            "value": "%1$@, unter %2$@"
           }
         },
         "es": {
@@ -808,7 +808,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$@ : %2$@ jusqu’ici"
+            "value": "%1$@ : %2$@ jusqu'ici"
           }
         },
         "ja": {
@@ -1801,19 +1801,19 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "スラッシュ %lld 件"
+            "value": "スラッシュコマンド %lld 件"
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld de barra"
+            "value": "%lld comandos"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 个斜杠命令"
+            "value": "%lld 个命令"
           }
         }
       }
@@ -1946,7 +1946,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$lld au total · %2$lld ouvertes"
+            "value": "%1$lld au total · %2$lld ouverts"
           }
         },
         "ja": {
@@ -1958,7 +1958,7 @@
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$lld no total · %2$lld abertas"
+            "value": "%1$lld no total · %2$lld abertos"
           }
         },
         "zh-Hans": {
@@ -2131,13 +2131,13 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "**シグンポストのみ** がデフォルトです — Instruments は他のオーバーヘッドなしにアタッチして Points of Interest トラックを読み取れます。**フル** では、下で閲覧したり JSON としてコピーしたりできる 4096 エントリのインメモリリングも保持します。"
+            "value": "**Signpost のみ** がデフォルトです — Instruments は他のオーバーヘッドなしにアタッチして Points of Interest トラックを読み取れます。**フル** では、下で閲覧したり JSON としてコピーしたりできる 4096 エントリのインメモリリングも保持します。"
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "**Somente signpost** é o padrão — o Instruments consegue anexar e ler a trilha Points of Interest sem nenhuma sobrecarga adicional. **Completo** também mantém um anel em memória de 4096 entradas que você pode navegar abaixo e copiar como JSON."
+            "value": "**Somente signpost** é o padrão — o Instruments consegue anexar e ler a trilha Points of Interest sem nenhuma sobrecarga adicional. **Completo** também mantém um buffer circular em memória de 4096 entradas que você pode percorrer abaixo e copiar como JSON."
           }
         },
         "zh-Hans": {
@@ -2513,7 +2513,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "0–100; höher läuft zuerst"
+            "value": "0–100; höhere Werte laufen zuerst"
           }
         },
         "es": {
@@ -3300,25 +3300,25 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Confirmar"
+            "value": "Visto"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Acquitter"
+            "value": "Acq."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "確認"
+            "value": "了解"
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Confirmar"
+            "value": "Ciente"
           }
         },
         "zh-Hans": {
@@ -5058,7 +5058,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Permission de l'agent"
+            "value": "Autorisation de l'agent"
           }
         },
         "ja": {
@@ -6876,7 +6876,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Archivado"
+            "value": "Archivadas"
           }
         },
         "fr": {
@@ -6894,7 +6894,7 @@
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Arquivada"
+            "value": "Arquivadas"
           }
         },
         "zh-Hans": {
@@ -7157,19 +7157,19 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Zuständig"
+            "value": "Zuständigkeit"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Asignado a"
+            "value": "Responsable"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Responsable"
+            "value": "Assigné à"
           }
         },
         "ja": {
@@ -7940,19 +7940,19 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automatisch blockiert"
+            "value": "Auto-blockiert"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Bloqueado automáticamente"
+            "value": "Bloqueada auto."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Bloqué automatiquement"
+            "value": "Bloqué auto."
           }
         },
         "ja": {
@@ -7964,7 +7964,7 @@
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Bloqueado automaticamente"
+            "value": "Bloq. automático"
           }
         },
         "zh-Hans": {
@@ -9348,7 +9348,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Le mode Bot requiert Hermes version 0.20.3 ou plus récente"
+            "value": "Le mode Bot requiert la version 0.20.3 de Hermes ou plus récente"
           }
         },
         "ja": {
@@ -9514,7 +9514,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ のボット画像。アクティブにすると画像ファイルを選択できます。"
+            "value": "%@ のボット画像。実行すると画像ファイルを選択できます。"
           }
         },
         "pt-BR": {
@@ -9866,13 +9866,13 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "Hub タブを開いてインストールするか、リモートで `hermes skills install <name>` を実行してください。"
+            "value": "ハブタブを開いてインストールするか、リモートで `hermes skills install <name>` を実行してください。"
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Navegue pela aba Hub para instalar uma, ou execute `hermes skills install <name>` no remoto."
+            "value": "Abra a aba Explorar hub para instalar uma, ou execute `hermes skills install <name>` no remoto."
           }
         },
         "zh-Hans": {
@@ -9912,7 +9912,7 @@
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ver principais habilidades"
+            "value": "Explorar principais habilidades"
           }
         },
         "zh-Hans": {
@@ -10138,7 +10138,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ensembles"
+            "value": "Bundles"
           }
         },
         "ja": {
@@ -11366,7 +11366,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ここから開始したチャットは自動的に帰属付けされます。"
+            "value": "ここで開始したチャットは自動的に紐付けられます。"
           }
         },
         "pt-BR": {
@@ -11378,7 +11378,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "你在此处发起的聊天会自动归属。"
+            "value": "你在此处发起的聊天会自动归属到此项目。"
           }
         }
       }
@@ -16696,7 +16696,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "为此机器人创建例程"
+            "value": "为此机器人创建例行任务"
           }
         }
       }
@@ -17006,7 +17006,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Créez votre premier bot"
+            "value": "Créer votre premier bot"
           }
         },
         "ja": {
@@ -17484,7 +17484,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Trabajos cron con espacio de nombres para este bot"
+            "value": "Tareas cron con espacio de nombres para este bot"
           }
         },
         "fr": {
@@ -17502,13 +17502,13 @@
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tarefas cron com namespace deste bot"
+            "value": "Tarefas cron no namespace deste bot"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "为此机器人划定命名空间的定时任务"
+            "value": "限定到此机器人的定时任务"
           }
         }
       }
@@ -17892,7 +17892,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "DESACTIVADA"
+            "value": "INACTIVA"
           }
         },
         "fr": {
@@ -18348,7 +18348,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "デフォルトモードは Instruments のシグンポストのみを発行します — アクティブなプロファイリングセッション外では測定可能なコストはありません。フルに切り替えると、下で検査したり JSON としてコピーしたりできるインメモリのリングバッファ(4096 エントリ)を保持します。"
+            "value": "デフォルトモードは Instruments のサインポストのみを発行します — アクティブなプロファイリングセッション外では測定可能なコストはありません。フルに切り替えると、下で検査したり JSON としてコピーしたりできるインメモリのリングバッファ(4096 エントリ)を保持します。"
           }
         },
         "pt-BR": {
@@ -19221,7 +19221,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Zustellen"
+            "value": "Zustellung"
           }
         },
         "es": {
@@ -19233,7 +19233,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Livrer"
+            "value": "Livraison"
           }
         },
         "ja": {
@@ -19245,7 +19245,7 @@
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Entregar"
+            "value": "Entrega"
           }
         },
         "zh-Hans": {
@@ -19261,7 +19261,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Zustellen (z. B. discord:channel)"
+            "value": "Zustellung (z. B. discord:channel)"
           }
         },
         "es": {
@@ -19273,7 +19273,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Livrer (par ex. discord:channel)"
+            "value": "Livraison (par ex. discord:channel)"
           }
         },
         "ja": {
@@ -19285,7 +19285,7 @@
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Entregar (ex.: discord:channel)"
+            "value": "Entrega (ex.: discord:channel)"
           }
         },
         "zh-Hans": {
@@ -19381,7 +19381,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Wird in die kanonische Bot-Chat-Sitzung des Remote-Agents zugestellt."
+            "value": "Wird in die kanonische „Bot Chat“-Sitzung des Remote-Agents zugestellt."
           }
         },
         "es": {
@@ -20231,7 +20231,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Verbindung trennen"
+            "value": "Trennen"
           }
         },
         "es": {
@@ -20503,7 +20503,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "忽略此例程错误"
+            "value": "忽略此例行任务错误"
           }
         }
       }
@@ -20599,7 +20599,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Mostrar (p. ej. \"9:00 entre semana\")"
+            "value": "Texto visible (p. ej. \"9:00 entre semana\")"
           }
         },
         "fr": {
@@ -22344,7 +22344,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ende-zu-Ende-verschlüsselt über iCloud Keychain. Mit aktiviertem Advanced Data Protection verlassen die Schlüssel nie deine Geräte. Schalte aus, um den Schlüssel nur auf diesem Gerät zu halten — jedes neue Gerät muss dann separat eingerichtet werden."
+            "value": "Ende-zu-Ende-verschlüsselt über iCloud Keychain. Mit aktiviertem Advanced Data Protection verlassen die Schlüssel nie deine Geräte. Deaktiviere die Option, um den Schlüssel nur auf diesem Gerät zu halten — jedes neue Gerät muss dann separat eingerichtet werden."
           }
         },
         "es": {
@@ -22356,7 +22356,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Chiffré de bout en bout via iCloud Keychain. Avec la Protection avancée des données activée, les clés de chiffrement ne quittent jamais vos appareils. Désactivez pour garder la clé sur cet appareil uniquement — chaque nouvel appareil devra être configuré séparément."
+            "value": "Chiffré de bout en bout via le trousseau iCloud. Avec la Protection avancée des données activée, les clés de chiffrement ne quittent jamais vos appareils. Désactivez pour garder la clé sur cet appareil uniquement — chaque nouvel appareil devra être configuré séparément."
           }
         },
         "ja": {
@@ -23200,7 +23200,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "展開"
+            "value": "展開する"
           }
         },
         "pt-BR": {
@@ -24996,7 +24996,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "削除"
+            "value": "登録を解除"
           }
         },
         "pt-BR": {
@@ -25036,7 +25036,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ を削除"
+            "value": "%@ の登録を解除"
           }
         },
         "pt-BR": {
@@ -25076,7 +25076,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "このサーバーを削除"
+            "value": "このサーバーの登録を解除"
           }
         },
         "pt-BR": {
@@ -25116,7 +25116,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "このサーバーを削除しますか?"
+            "value": "このサーバーの登録を解除しますか?"
           }
         },
         "pt-BR": {
@@ -25643,13 +25643,13 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Gateway : accusé d'occupation"
+            "value": "Passerelle : accusé d'occupation"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ゲートウェイ: ビジー確認"
+            "value": "ゲートウェイ: ビジー時の確認応答"
           }
         },
         "pt-BR": {
@@ -25661,7 +25661,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Gateway:忙碌确认"
+            "value": "网关:忙碌确认"
           }
         }
       }
@@ -25683,7 +25683,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Gateway : notification de redémarrage"
+            "value": "Passerelle : notification de redémarrage"
           }
         },
         "ja": {
@@ -25701,7 +25701,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Gateway:重启通知"
+            "value": "网关:重启通知"
           }
         }
       }
@@ -26524,7 +26524,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "健康检查：%@"
+            "value": "健康检查:%@"
           }
         }
       }
@@ -27972,7 +27972,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ocultar el teclado"
+            "value": "Ocultar teclado"
           }
         },
         "fr": {
@@ -29626,7 +29626,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Untersuchen"
+            "value": "Prüfen"
           }
         },
         "es": {
@@ -30599,7 +30599,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Trabajo"
+            "value": "Tarea"
           }
         },
         "fr": {
@@ -30663,7 +30663,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "密钥"
+            "value": "键名"
           }
         }
       }
@@ -31230,7 +31230,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Dernière exécution"
+            "value": "Dern. exécution"
           }
         },
         "ja": {
@@ -31473,19 +31473,19 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Moins actifs"
+            "value": "Les moins actives"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "アクティブでない順"
+            "value": "アクティビティが少ない順"
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Menos ativos"
+            "value": "Menos ativas"
           }
         },
         "zh-Hans": {
@@ -31507,25 +31507,25 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Activo menos recientemente"
+            "value": "Menor actividad reciente"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Actifs le moins récemment"
+            "value": "Activité la plus ancienne"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "最終アクティブが古い順"
+            "value": "最終利用が古い順"
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ativos há mais tempo"
+            "value": "Inativas há mais tempo"
           }
         },
         "zh-Hans": {
@@ -32603,7 +32603,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cargando trabajos…"
+            "value": "Cargando tareas…"
           }
         },
         "fr": {
@@ -34665,7 +34665,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "最大大小"
+            "value": "大小上限"
           }
         }
       }
@@ -34681,7 +34681,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tiempo máximo que una clave de enrutamiento de alias espera a un turno activo que retiene el mismo lease de sesión. Mantenlo corto — Telegram despacha las actualizaciones de forma secuencial, así que un esperador también retrasa temas no relacionados. Los valores no positivos vuelven a 5."
+            "value": "Tiempo máximo que una clave de enrutamiento de alias espera a un turno activo que retiene el mismo arrendamiento de sesión. Mantenlo corto — Telegram despacha las actualizaciones de forma secuencial, así que un esperador también retrasa temas no relacionados. Los valores no positivos vuelven a 5."
           }
         },
         "fr": {
@@ -35041,7 +35041,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Speicher zurücksetzen"
+            "value": "Speicher zurückgesetzt"
           }
         },
         "es": {
@@ -36429,19 +36429,19 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Plus actifs"
+            "value": "Les plus actives"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "アクティブな順"
+            "value": "アクティビティが多い順"
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Mais ativos"
+            "value": "Mais ativas"
           }
         },
         "zh-Hans": {
@@ -36715,7 +36715,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ensembles de configuration nommés entre lesquels vous pouvez basculer."
+            "value": "Bundles de configuration nommés entre lesquels vous pouvez basculer."
           }
         },
         "ja": {
@@ -37141,7 +37141,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "新建例程"
+            "value": "新建例行任务"
           }
         }
       }
@@ -37587,7 +37587,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ 的新例程"
+            "value": "%@ 的新例行任务"
           }
         }
       }
@@ -37733,7 +37733,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Prochaine exécution"
+            "value": "Proch. exécution"
           }
         },
         "ja": {
@@ -38571,7 +38571,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Keine archivierten Skills — Curator verschiebt veraltete Skills nach dem nächsten Review-Zyklus hierher."
+            "value": "Keine archivierten Skills — der Kurator verschiebt veraltete Skills nach dem nächsten Review-Zyklus hierher."
           }
         },
         "es": {
@@ -38589,13 +38589,13 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "アーカイブ済みスキルはありません — 次のレビューサイクルの後、Curator が失効したスキルをここに移動します。"
+            "value": "アーカイブ済みスキルはありません — 次のレビューサイクルの後、キュレーターが失効したスキルをここに移動します。"
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nenhuma habilidade arquivada — o Curator moverá habilidades obsoletas para cá após o próximo ciclo de revisão."
+            "value": "Nenhuma habilidade arquivada — o curador moverá habilidades obsoletas para cá após o próximo ciclo de revisão."
           }
         },
         "zh-Hans": {
@@ -39053,7 +39053,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "尚无定时任务"
+            "value": "暂无定时任务"
           }
         }
       }
@@ -39069,7 +39069,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Aún no hay trabajos cron."
+            "value": "Aún no hay tareas cron."
           }
         },
         "fr": {
@@ -39352,7 +39352,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "No hay incidencias de fallo registradas para este trabajo."
+            "value": "No hay incidencias de fallo registradas para esta tarea."
           }
         },
         "fr": {
@@ -40724,7 +40724,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "暂无例程。将定时任务命名为 \"[bot:%@] …\" 即可将其限定到此机器人,或在下方创建一个。"
+            "value": "暂无例行任务。将定时任务命名为 \"[bot:%@] …\" 即可将其限定到此机器人,或在下方创建一个。"
           }
         }
       }
@@ -43356,7 +43356,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Öffne diese Aufgabe in der Mac-App, um die Angabe des Workers zu prüfen oder abzulehnen."
+            "value": "Öffne diese Aufgabe in der Mac-App, um die Angabe des Workers zu bestätigen oder abzulehnen."
           }
         },
         "es": {
@@ -45732,13 +45732,13 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "パフォーマンス計測です。デフォルトモードは Instruments のシグンポストのみを発行します。フルモードでは、JSON としてコピーできる 4096 エントリのインメモリリングも保持します。MetricKit によるクラッシュとハングの診断はローカルに保存され、Apple から配信され次第(クラッシュ後およそ 1 日に 1 回)、共有用にここに表示されます。"
+            "value": "パフォーマンス計測です。デフォルトモードは Instruments のサインポストのみを発行します。フルモードでは、JSON としてコピーできる 4096 エントリのインメモリリングも保持します。MetricKit によるクラッシュとハングの診断はローカルに保存され、Apple から配信され次第(クラッシュ後およそ 1 日に 1 回)、共有用にここに表示されます。"
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Instrumentação de desempenho. O modo padrão emite apenas signposts do Instruments; o modo Completo também mantém um anel em memória de 4096 entradas que você pode copiar como JSON. Diagnósticos de travamento e falha do MetricKit são persistidos localmente e aparecem aqui para compartilhamento quando a Apple os entrega (~uma vez por dia após uma falha)."
+            "value": "Instrumentação de desempenho. O modo padrão emite apenas signposts do Instruments; o modo Completo também mantém um buffer circular em memória de 4096 entradas que você pode copiar como JSON. Diagnósticos de travamento e falha do MetricKit são persistidos localmente e aparecem aqui para compartilhamento quando a Apple os entrega (~uma vez por dia após uma falha)."
           }
         },
         "zh-Hans": {
@@ -50037,7 +50037,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Raison (optionnel)"
+            "value": "Motif (optionnel)"
           }
         },
         "ja": {
@@ -50105,7 +50105,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Reasoning-Aufwand"
+            "value": "Reasoning Effort"
           }
         },
         "es": {
@@ -50646,7 +50646,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Wiederherstellungsaktionen findest du in der Mac-App — öffne diese Aufgabe dort, um zu prüfen, abzulehnen oder zu entsperren."
+            "value": "Wiederherstellungsaktionen findest du in der Mac-App — öffne diese Aufgabe dort, um zu bestätigen, abzulehnen oder freizugeben."
           }
         },
         "es": {
@@ -51432,7 +51432,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Distant (%lld)"
+            "value": "Distants (%lld)"
           }
         },
         "ja": {
@@ -52807,7 +52807,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Renombrar de todos modos"
+            "value": "Renombrar igualmente"
           }
         },
         "fr": {
@@ -53329,7 +53329,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Configuración requerida sin establecer"
+            "value": "Falta configuración obligatoria"
           }
         },
         "fr": {
@@ -53341,7 +53341,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "必須の設定が未設定です"
+            "value": "必要な設定が未完了です"
           }
         },
         "pt-BR": {
@@ -54760,7 +54760,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Fortsetzen & jetzt ausführen"
+            "value": "Fortsetzen & ausführen"
           }
         },
         "es": {
@@ -54772,7 +54772,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Reprendre et exécuter maintenant"
+            "value": "Reprendre et exécuter"
           }
         },
         "ja": {
@@ -55166,7 +55166,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Zurücksetzen"
+            "value": "Verwerfen"
           }
         },
         "es": {
@@ -55178,7 +55178,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Rétablir"
+            "value": "Annuler les modifications"
           }
         },
         "ja": {
@@ -55692,7 +55692,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "例程"
+            "value": "例行任务"
           }
         }
       }
@@ -55732,7 +55732,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "例程与对端"
+            "value": "例行任务与对端"
           }
         }
       }
@@ -55828,13 +55828,13 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ejecutar en asíncrono"
+            "value": "Ejecutar async"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Exécuter en asynchrone"
+            "value": "Exécution async"
           }
         },
         "ja": {
@@ -55846,7 +55846,7 @@
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Executar em modo assíncrono"
+            "value": "Executar async"
           }
         },
         "zh-Hans": {
@@ -56116,7 +56116,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Exécutez `hermes auth spotify` depuis l'app Scarf sur macOS ou un shell — cela ouvre votre navigateur pour terminer le flux OAuth. Une fois autorisée, cette compétence récupère automatiquement les identifiants depuis `~/.hermes/auth.json`."
+            "value": "Exécutez `hermes auth spotify` depuis l'app Scarf sur macOS ou un shell — cela ouvre votre navigateur pour terminer le flux OAuth. Une fois l'autorisation accordée, cette compétence récupère automatiquement les identifiants depuis `~/.hermes/auth.json`."
           }
         },
         "ja": {
@@ -58617,13 +58617,13 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "スキルを検索するか、Browse をタップして各レジストリ(skills.sh、公式など)の上位の結果を表示してください。"
+            "value": "スキルを検索するか、「参照」をタップして各レジストリ(skills.sh、公式など)の上位の結果を表示してください。"
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Pesquise uma habilidade ou toque em Navegar para ver os principais resultados nos registros (skills.sh, oficial, etc.)."
+            "value": "Pesquise uma habilidade ou toque em Explorar para ver os principais resultados nos registros (skills.sh, oficial, etc.)."
           }
         },
         "zh-Hans": {
@@ -59062,7 +59062,7 @@
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ver tudo"
+            "value": "Ver todas"
           }
         },
         "zh-Hans": {
@@ -59108,7 +59108,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已查看"
+            "value": "标记已读"
           }
         }
       }
@@ -61220,7 +61220,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "严重级别"
+            "value": "严重程度"
           }
         }
       }
@@ -63426,7 +63426,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Apariencia"
+            "value": "Skin"
           }
         },
         "fr": {
@@ -64008,7 +64008,7 @@
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Obsoleto"
+            "value": "Obsoletas"
           }
         },
         "zh-Hans": {
@@ -65780,7 +65780,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ライブ統計を表示して JSON ダンプをコピーするには、上で **フル** に切り替えてください。オフとシグンポストのみのモードではインメモリのリングバッファを保持しません。"
+            "value": "ライブ統計を表示して JSON ダンプをコピーするには、上で **フル** に切り替えてください。オフと「Signpost のみ」のモードではインメモリのリングバッファを保持しません。"
           }
         },
         "pt-BR": {
@@ -65976,7 +65976,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Synchroniser la clé SSH avec iCloud Keychain"
+            "value": "Synchroniser la clé SSH avec le trousseau iCloud"
           }
         },
         "ja": {
@@ -66298,7 +66298,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ここからこのボットと会話する機能は今後のアップデートで対応予定です。今のところは hermes profile use で切り替えてから Chat を開いてください。"
+            "value": "ここからこのボットと会話する機能は今後のアップデートで対応予定です。今のところは hermes profile use で切り替えてから「チャット」を開いてください。"
           }
         },
         "pt-BR": {
@@ -66378,7 +66378,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "「更新を確認」をタップすると、インストール済みの各スキルをソースのレジストリに照会します。"
+            "value": "「アップデートを確認」をタップすると、インストール済みの各スキルをソースのレジストリに照会します。"
           }
         },
         "pt-BR": {
@@ -66892,7 +66892,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Inquilino"
+            "value": "Tenant"
           }
         },
         "fr": {
@@ -66910,7 +66910,7 @@
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Locatário"
+            "value": "Tenant"
           }
         },
         "zh-Hans": {
@@ -67413,7 +67413,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Der autonome Kurator archiviert oder überschreibt diesen Skill nicht automatisch. Löse die Anheftung im Curator-Bildschirm."
+            "value": "Der autonome Kurator archiviert oder überschreibt diesen Skill nicht automatisch. Löse die Anheftung im Kurator-Bildschirm."
           }
         },
         "es": {
@@ -67431,13 +67431,13 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "自律キュレーターはこのスキルを自動アーカイブしたり書き換えたりしません。ピン留めの解除は Curator 画面から行えます。"
+            "value": "自律キュレーターはこのスキルを自動アーカイブしたり書き換えたりしません。ピン留めの解除は「キュレーター」画面から行えます。"
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "O curador autônomo não arquivará nem reescreverá esta habilidade automaticamente. Desafixe pela tela do Curator."
+            "value": "O curador autônomo não arquivará nem reescreverá esta habilidade automaticamente. Desafixe pela tela do Curador."
           }
         },
         "zh-Hans": {
@@ -70399,19 +70399,19 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tool-Nutzung erzwingen"
+            "value": "Erzwingung der Tool-Nutzung"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Obligatoriedad de uso de herramientas"
+            "value": "Uso obligatorio de herramientas"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Imposition de l'usage des outils"
+            "value": "Forçage de l'utilisation des outils"
           }
         },
         "ja": {
@@ -70429,7 +70429,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "工具使用强制"
+            "value": "工具调用强制策略"
           }
         }
       }
@@ -71743,7 +71743,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "未托管的技能"
+            "value": "未纳管的技能"
           }
         }
       }
@@ -72167,7 +72167,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Mettre à jour vers la v%@"
+            "value": "Passer à la v%@"
           }
         },
         "ja": {
@@ -72330,7 +72330,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Mise à jour du Keychain…"
+            "value": "Mise à jour du trousseau…"
           }
         },
         "ja": {
@@ -73226,7 +73226,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "画像がない場合に使用されます — 画像がなければ名前から生成されます。"
+            "value": "画像がない場合に使用されます — 未指定の場合は名前から自動生成されます。"
           }
         },
         "pt-BR": {
@@ -75777,7 +75777,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ワーカーが作成 — Mac で確認してください"
+            "value": "ワーカー作成 — Mac で確認"
           }
         },
         "pt-BR": {
@@ -75949,7 +75949,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "工作中…"
+            "value": "处理中…"
           }
         }
       }
@@ -81267,7 +81267,7 @@
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "uso %1$lld · visualização %2$lld · patch %3$lld"
+            "value": "uso %1$lld · leitura %2$lld · patch %3$lld"
           }
         },
         "zh-Hans": {
@@ -81731,7 +81731,7 @@
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "~/Projetos"
+            "value": "~/Projects"
           }
         }
       }
@@ -81804,7 +81804,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "· %lld jet."
+            "value": "· %lld tok"
           }
         },
         "ja": {
