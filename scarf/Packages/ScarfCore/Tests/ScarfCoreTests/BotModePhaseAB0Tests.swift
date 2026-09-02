@@ -526,3 +526,270 @@ import Foundation
         #expect(!service.identity(forProfile: "huge").isBotManaged)
     }
 }
+
+/// Regression cover for the "created, but its bot details couldn't be saved"
+/// bug: `hermes profile create --description "<a sentence>"` produces a
+/// `profile.yaml` the writer refused to touch, so EVERY bot created with a
+/// role longer than `safe_dump`'s 80-column wrap width failed its identity
+/// write and landed in "Other profiles".
+@Suite struct BotModeCreatedProfileWriteTests {
+
+    /// Byte-for-byte what `hermes profile create seo-research-bot
+    /// --description "…"` wrote on the reporting machine (Hermes 0.21.0).
+    /// The description is a single logical line that `yaml.safe_dump` wrapped
+    /// at width 80 into a multi-line PLAIN scalar — note there is no
+    /// `display_name`, no `ui_meta`, and no quoting.
+    static let freshlyCreatedYAML = """
+    description: You are an SEO analyst that will keep an eye on a website (https://shabubox.com)
+      as well as search terms that are used to find or potentially find the site through
+      search, and make recommendations on changes, additions, etc for the site.
+    description_auto: false
+
+    """
+
+    static let foldedDescription =
+        "You are an SEO analyst that will keep an eye on a website (https://shabubox.com) "
+        + "as well as search terms that are used to find or potentially find the site through "
+        + "search, and make recommendations on changes, additions, etc for the site."
+
+    private func makeService() throws -> (service: BotsService, root: String) {
+        let root = NSTemporaryDirectory() + "scarf-bots-\(UUID().uuidString)/.hermes"
+        try FileManager.default.createDirectory(atPath: root + "/profiles", withIntermediateDirectories: true)
+        return (
+            BotsService(
+                transport: LocalTransport(),
+                paths: HermesPathSet(home: root, isRemote: false, binaryHint: nil),
+                capabilities: HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)")
+            ),
+            root
+        )
+    }
+
+    private func write(_ contents: String, to path: String) throws {
+        try FileManager.default.createDirectory(
+            atPath: (path as NSString).deletingLastPathComponent,
+            withIntermediateDirectories: true
+        )
+        try contents.write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
+    // MARK: - The reported bug
+
+    @Test func aWrappedDescriptionReadsBackAsOneFoldedLine() {
+        // Before the fix the reader saw only the key's own line and silently
+        // truncated the role at the wrap point — which would have made the
+        // writer fix a data-loss bug instead of a save.
+        let id = HermesBotProfileYAML.parse(
+            Self.freshlyCreatedYAML, profileName: "seo-research-bot", profileDirectory: "/x"
+        )
+        #expect(id.profileDescription == Self.foldedDescription)
+        #expect(id.descriptionIsAuto == false)
+        #expect(id.isBotManaged == false)
+    }
+
+    @Test func makeABotSucceedsOnAFreshlyCreatedProfile() throws {
+        let (service, root) = try makeService()
+        defer { try? FileManager.default.removeItem(atPath: (root as NSString).deletingLastPathComponent) }
+        let path = root + "/profiles/seo-research-bot/profile.yaml"
+        try write(Self.freshlyCreatedYAML, to: path)
+
+        var id = service.identity(forProfile: "seo-research-bot")
+        id.isBotManaged = true
+        id.title = "seo-research-bot"
+        // This threw `unsafeToWrite` before the fix.
+        try service.saveIdentity(id)
+
+        let round = HermesBotProfileYAML.parse(
+            try String(contentsOfFile: path, encoding: .utf8),
+            profileName: "seo-research-bot", profileDirectory: "/x"
+        )
+        #expect(round.isBotManaged)
+        #expect(round.title == "seo-research-bot")
+        // The wrapped role survives the rewrite intact.
+        #expect(round.profileDescription == Self.foldedDescription)
+    }
+
+    @Test func createWithAnEmptyOptionalNameWritesIdentity() throws {
+        let (service, root) = try makeService()
+        defer { try? FileManager.default.removeItem(atPath: (root as NSString).deletingLastPathComponent) }
+        let path = root + "/profiles/seo-research-bot/profile.yaml"
+        try write(Self.freshlyCreatedYAML, to: path)
+
+        // An empty optional profile-name field means "no display_name" — the
+        // key is POPPED, exactly as Hermes' own writer does, not written as "".
+        var id = service.identity(forProfile: "seo-research-bot")
+        id.isBotManaged = true
+        id.displayName = ""
+        id.title = "seo-research-bot"
+        try service.saveIdentity(id)
+
+        let text = try String(contentsOfFile: path, encoding: .utf8)
+        #expect(!text.contains("display_name"))
+        #expect(HermesBotProfileYAML.parse(text, profileName: "seo-research-bot", profileDirectory: "/x").isBotManaged)
+    }
+
+    // MARK: - The two states the create flow can also land in
+
+    @Test func createWithAnAbsentProfileYAMLWritesFromEmpty() throws {
+        let (service, root) = try makeService()
+        defer { try? FileManager.default.removeItem(atPath: (root as NSString).deletingLastPathComponent) }
+        let dir = root + "/profiles/no-yaml"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+
+        var id = service.identity(forProfile: "no-yaml")
+        id.isBotManaged = true
+        id.title = "Fresh"
+        try service.saveIdentity(id)
+
+        let text = try String(contentsOfFile: dir + "/profile.yaml", encoding: .utf8)
+        #expect(HermesBotProfileYAML.parse(text, profileName: "no-yaml", profileDirectory: dir).title == "Fresh")
+    }
+
+    @Test func createWithAZeroByteProfileYAMLWritesFromEmpty() throws {
+        let (service, root) = try makeService()
+        defer { try? FileManager.default.removeItem(atPath: (root as NSString).deletingLastPathComponent) }
+        let path = root + "/profiles/empty-yaml/profile.yaml"
+        try write("", to: path)
+
+        var id = service.identity(forProfile: "empty-yaml")
+        id.isBotManaged = true
+        id.title = "Fresh"
+        // An EMPTY file is not a degraded file — there is nothing to lose by
+        // merging into it.
+        try service.saveIdentity(id)
+        #expect(HermesBotProfileYAML.parse(
+            try String(contentsOfFile: path, encoding: .utf8),
+            profileName: "empty-yaml", profileDirectory: "/x"
+        ).title == "Fresh")
+    }
+
+    // MARK: - The refusals must survive the fix
+
+    @Test func aBareKeyWithANestedBodyIsStillRefused() {
+        // `description:` with no inline value and a mapping under it is a
+        // genuine block body, NOT a wrapped scalar — still ambiguous.
+        let yaml = """
+        description:
+          nested: mapping
+        description_auto: false
+
+        """
+        var id = HermesBotProfileYAML.parse(yaml, profileName: "p", profileDirectory: "/x")
+        id.isBotManaged = true
+        id.title = "T"
+        #expect(HermesBotProfileYAML.write(identity: id, into: yaml) == nil)
+    }
+
+    @Test func aDuplicateTopLevelScalarIsStillRefused() {
+        let yaml = """
+        description: one
+        description: two
+
+        """
+        var id = HermesBotProfileYAML.parse(yaml, profileName: "p", profileDirectory: "/x")
+        id.isBotManaged = true
+        id.title = "T"
+        #expect(HermesBotProfileYAML.write(identity: id, into: yaml) == nil)
+        // …and the LAST one is what the reader reports, as PyYAML does.
+        #expect(id.profileDescription == "two")
+    }
+
+    @Test func aPopulatedInlineUIMetaIsStillRefused() {
+        let yaml = "ui_meta: {a: 1}\n"
+        var id = HermesBotProfileYAML.parse(yaml, profileName: "p", profileDirectory: "/x")
+        id.isBotManaged = true
+        id.title = "T"
+        #expect(HermesBotProfileYAML.write(identity: id, into: yaml) == nil)
+    }
+
+    @Test func aBlockScalarDescriptionRoundTrips() {
+        // `|` and `>` are scalars too — a value, not a body.
+        let literal = "description: |\n  line one\n  line two\ndescription_auto: false\n"
+        #expect(
+            HermesBotProfileYAML.parse(literal, profileName: "p", profileDirectory: "/x")
+                .profileDescription == "line one\nline two"
+        )
+        let folded = "description: >\n  line one\n  line two\ndescription_auto: false\n"
+        #expect(
+            HermesBotProfileYAML.parse(folded, profileName: "p", profileDirectory: "/x")
+                .profileDescription == "line one line two"
+        )
+    }
+}
+
+/// The same 80-column wrap, one level down: the gateway persists the
+/// `ui_meta` → `hermes-bots` block through `yaml.safe_dump` as well, so a bot
+/// description long enough to wrap arrived truncated at the wrap point and
+/// its tail was re-emitted as bogus sibling keys on the next save.
+@Suite struct BotModeFoldedBotBlockTests {
+
+    /// GENERATED, not hand-typed: this is verbatim
+    /// `yaml.safe_dump(doc, default_flow_style=False, sort_keys=False,
+    /// allow_unicode=True)` — the option set Hermes' `atomic_yaml_write` uses.
+    static let dumped = """
+    description: You are an SEO analyst that will keep an eye on a website (https://shabubox.com)
+      as well as search terms that are used to find or potentially find the site through
+      search, and make recommendations on changes, additions, etc for the site.
+    description_auto: false
+    ui_meta:
+      hermes-bots:
+        title: SEO Research Bot
+        description: You are an SEO analyst that will keep an eye on a website (https://shabubox.com)
+          as well as search terms that are used to find or potentially find the site through
+          search, and make recommendations on changes, additions, etc for the site.
+        color: blue
+        groups:
+        - research
+        - seo
+
+    """
+
+    /// The value PyYAML's own `safe_load` returns for both description keys.
+    static let role =
+        "You are an SEO analyst that will keep an eye on a website (https://shabubox.com) "
+        + "as well as search terms that are used to find or potentially find the site through "
+        + "search, and make recommendations on changes, additions, etc for the site."
+
+    @Test func aWrappedBotDescriptionIsReadWhole() {
+        let id = HermesBotProfileYAML.parse(Self.dumped, profileName: "seo-research-bot", profileDirectory: "/x")
+        #expect(id.isBotManaged)
+        #expect(id.title == "SEO Research Bot")
+        #expect(id.botDescription == Self.role)
+        #expect(id.profileDescription == Self.role)
+        #expect(id.color == "blue")
+        #expect(id.groups == ["research", "seo"])
+        // The wrap tail must NOT have been swept into the verbatim bucket —
+        // that is what re-emitted it as junk sibling keys.
+        #expect(id.unknownMetaLines.isEmpty)
+    }
+
+    @Test func rewritingAWrappedBotBlockPreservesEveryValue() throws {
+        let id = HermesBotProfileYAML.parse(Self.dumped, profileName: "seo-research-bot", profileDirectory: "/x")
+        let out = try #require(HermesBotProfileYAML.write(identity: id, into: Self.dumped))
+        let round = HermesBotProfileYAML.parse(out, profileName: "seo-research-bot", profileDirectory: "/x")
+        #expect(round.botDescription == Self.role)
+        #expect(round.profileDescription == Self.role)
+        #expect(round.title == "SEO Research Bot")
+        #expect(round.color == "blue")
+        #expect(round.groups == ["research", "seo"])
+        #expect(round.unknownMetaLines.isEmpty)
+        // Idempotent: a second save changes nothing further.
+        let again = try #require(HermesBotProfileYAML.write(identity: round, into: out))
+        #expect(again == out)
+    }
+
+    @Test func aWrappedUnknownKeyRidesAlongWhole() throws {
+        let yaml = """
+        ui_meta:
+          hermes-bots:
+            title: T
+            futureKey: some very long unmodeled value that pyyaml wrapped across
+              two separate lines here
+
+        """
+        let id = HermesBotProfileYAML.parse(yaml, profileName: "p", profileDirectory: "/x")
+        let out = try #require(HermesBotProfileYAML.write(identity: id, into: yaml))
+        #expect(out.contains("futureKey:"))
+        #expect(out.contains("two separate lines here"))
+    }
+}

@@ -179,7 +179,18 @@ public enum HermesBotProfileYAML {
                 continue
             }
 
-            let value = unquote(rawValue.hasPrefix("#") ? "" : rawValue)
+            // Keys inside `hermes-bots` wrap exactly like the top-level ones:
+            // the gateway persists this block through `yaml.safe_dump` too, so
+            // a bot `description:` longer than 80 columns arrives as a
+            // multi-line plain scalar. Reading only `rawValue` truncated it at
+            // the wrap point and swept the remainder into `unknownMetaLines`,
+            // which then re-emitted the tail as bogus sibling keys. A key that
+            // carries an inline value cannot also have a block body, so the
+            // continuation lines are unambiguously part of the scalar.
+            let folded = rawValue.isEmpty
+                ? rawValue
+                : fold(head: rawValue, continuation: Array(lines[(i + 1)..<bodyEnd]))
+            let value = unquote(folded.hasPrefix("#") ? "" : folded)
             switch key {
             case "title": identity.title = value
             case "description": identity.botDescription = value
@@ -483,23 +494,31 @@ public enum HermesBotProfileYAML {
     /// this writer will not silently flatten.
     private static func setScalar(_ key: String, to value: String?, in lines: [String]) -> [String]? {
         var out = lines
-        let matches = out.indices.filter { indentOf(out[$0]) == 0 && isKeyLine(out[$0], named: key) }
+        let runs = scalarRuns(named: key, in: out)
         // Duplicate top-level keys: PyYAML takes the last one. Editing one of
         // several is a coin flip on whether Hermes sees the edit.
-        if matches.count > 1 { return nil }
+        if runs.count > 1 { return nil }
 
-        guard let idx = matches.first else {
+        guard let run = runs.first else {
             guard let value else { return out }
             return append(block: ["\(key): \(value)"], to: out)
         }
-        // Nested body under a key Scarf expects to be a scalar.
-        let bodyEnd = continuationEnd(from: idx + 1, limit: out.count, baseIndent: 0, lines: out)
-        if bodyEnd > idx + 1 { return nil }
+        // A BARE `key:` with indented lines under it is a genuine nested
+        // block body — a mapping or sequence where Scarf expects a scalar,
+        // and not something to flatten silently. Still refused.
+        //
+        // A key that carries a value on its own line CANNOT also have a
+        // block body: YAML forbids it. So indented lines beneath such a key
+        // are unambiguously continuation lines of a multi-line scalar (a
+        // `safe_dump` width-80 wrap, or a `|`/`>` block), and replacing the
+        // whole run with the new one-line scalar replaces exactly the value
+        // and nothing else.
+        if run.head == nil && run.end > run.keyIndex + 1 { return nil }
 
         if let value {
-            out[idx] = "\(key): \(value)"
+            out.replaceSubrange(run.keyIndex..<run.end, with: ["\(key): \(value)"])
         } else {
-            out.remove(at: idx)
+            out.removeSubrange(run.keyIndex..<run.end)
         }
         return out
     }
@@ -655,14 +674,101 @@ public enum HermesBotProfileYAML {
         return rest
     }
 
-    /// A top-level scalar's raw value, or nil when the key is absent.
+    /// One top-level scalar key together with every line its value spans.
+    ///
+    /// A scalar is NOT always one line. `hermes profile create --description`
+    /// persists through `yaml.safe_dump`, whose default `width=80` wraps any
+    /// longer value into a **multi-line plain scalar**: the value starts on
+    /// the key's line and continues on indented lines beneath it. That is the
+    /// shape every real Hermes-created profile with a sentence-length role
+    /// carries, and treating those continuation lines as a nested block body
+    /// is what made the file unwritable.
+    struct ScalarRun {
+        let keyIndex: Int
+        /// One past the last line belonging to this scalar.
+        let end: Int
+        /// The value written on the key's own line — `nil` for a bare `key:`,
+        /// which is a block BODY (or null), not a scalar.
+        let head: String?
+        /// The value with YAML's folding applied.
+        let folded: String
+    }
+
+    /// Every top-level occurrence of `key`, with its full line span.
+    static func scalarRuns(named key: String, in lines: [String]) -> [ScalarRun] {
+        var runs: [ScalarRun] = []
+        var i = 0
+        while i < lines.count {
+            guard indentOf(lines[i]) == 0, isKeyLine(lines[i], named: key) else { i += 1; continue }
+            let head = inlineValue(of: lines[i], key: key)
+            var end = i + 1
+            while end < lines.count {
+                let trimmed = lines[end].trimmingCharacters(in: .whitespaces)
+                if trimmed.isEmpty { end += 1; continue }
+                // A line back at column 0 is the next top-level key.
+                guard indentOf(lines[end]) > 0 else { break }
+                end += 1
+            }
+            // Blank lines trailing the run belong to the file, not the value.
+            while end > i + 1, lines[end - 1].trimmingCharacters(in: .whitespaces).isEmpty { end -= 1 }
+            runs.append(
+                ScalarRun(
+                    keyIndex: i,
+                    end: end,
+                    head: head,
+                    folded: fold(head: head, continuation: Array(lines[(i + 1)..<end]))
+                )
+            )
+            i = max(end, i + 1)
+        }
+        return runs
+    }
+
+    /// Reconstruct a multi-line scalar's value the way PyYAML loads it.
+    private static func fold(head: String?, continuation: [String]) -> String {
+        guard let head else { return "" }
+        // Block scalars (`|` literal, `>` folded) keep their body's relative
+        // indentation, measured from the least-indented content line.
+        if head.hasPrefix("|") || head.hasPrefix(">") {
+            let contentIndents = continuation
+                .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                .map { indentOf($0) }
+            let base = contentIndents.min() ?? 0
+            let body = continuation.map { line -> String in
+                line.trimmingCharacters(in: .whitespaces).isEmpty
+                    ? "" : String(line.dropFirst(min(indentOf(line), base)))
+            }
+            return head.hasPrefix("|") ? body.joined(separator: "\n") : foldLines(body)
+        }
+        guard !continuation.isEmpty else { return head }
+        return foldLines([head] + continuation.map { $0.trimmingCharacters(in: .whitespaces) })
+    }
+
+    /// YAML line folding: a single line break becomes a space, and each
+    /// additional consecutive break survives as a newline.
+    private static func foldLines(_ parts: [String]) -> String {
+        var out = ""
+        var started = false
+        var pendingBreaks = 0
+        for part in parts {
+            if part.isEmpty {
+                if started { pendingBreaks += 1 }
+                continue
+            }
+            if started {
+                out += pendingBreaks > 0 ? String(repeating: "\n", count: pendingBreaks) : " "
+            }
+            pendingBreaks = 0
+            started = true
+            out += part
+        }
+        return out
+    }
+
+    /// A top-level scalar's value, or nil when the key is absent.
     private static func scalar(named key: String, in lines: [String]) -> String? {
         // Last one wins, matching PyYAML's duplicate-key rule.
-        var value: String?
-        for line in lines where indentOf(line) == 0 && isKeyLine(line, named: key) {
-            value = inlineValue(of: line, key: key) ?? ""
-        }
-        return value
+        scalarRuns(named: key, in: lines).last.map { $0.head == nil ? "" : $0.folded }
     }
 
     /// PyYAML/Python truthiness of an unquoted scalar. `nil` when the key was
