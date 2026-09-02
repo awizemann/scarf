@@ -317,7 +317,15 @@ final class BotAgentViewModel {
         // INVARIANT 2: never overwrite unsaved work. The buffer stays, and so
         // does its merge base — `saveSoul` re-reads and reports the conflict
         // rather than this load silently rebasing onto someone else's edit.
-        guard !isSoulDirty else { return }
+        // But `soulUnreadable` above already greys out Save (`canSaveSoul`)
+        // with no reason shown, so surface one even though the buffer itself
+        // is left alone.
+        guard !isSoulDirty else {
+            if snapshot.soulUnreadable {
+                soulError = "Couldn't read \(soulPath). It may be too large, or not text. Editing is disabled so a save can't replace it with an empty file."
+            }
+            return
+        }
         soulBaseline = snapshot.soul ?? ""
         soulText = soulBaseline
         hasLoadedSoul = true
@@ -333,6 +341,14 @@ final class BotAgentViewModel {
     func setModelPin(model: String, provider: String) {
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         let provider = provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Both empty means P0's `setModelPin` writes neither key — an
+        // explicit no-op, not a silent round trip through `perform` (a busy
+        // flag flip and a full reload for zero effect, with nothing telling
+        // the user why the picker appeared to do nothing).
+        guard !model.isEmpty || !provider.isEmpty else {
+            errorMessage = "Choose a model or a provider to pin — leaving both blank makes no change."
+            return
+        }
         // The picker can legitimately return an empty model (a subscription
         // overlay letting Hermes choose). Pass nil rather than "" — P0 refuses
         // empty values because `config set k ""` pins an empty string, which
@@ -359,10 +375,17 @@ final class BotAgentViewModel {
     }
 
     /// `hermes config unset` on an unpinned key. Not a failure to report.
+    ///
+    /// Matches the CLI's exact stderr shape — `"Config key not set: {key}"`
+    /// (`hermes_cli/config.py:6009,6041,6059`) — rather than the bare
+    /// substring `"not set"`, which also appears in unrelated display
+    /// placeholders like `"(not set)"` used for masked/empty values
+    /// elsewhere in the same file; a broad match there could swallow a real
+    /// failure whose text happened to echo one of those placeholders.
     nonisolated static func isBenignUnset(_ result: ProcessResult) -> Bool {
         guard result.exitCode != 0 else { return true }
         let text = (result.stderrString + result.stdoutString).lowercased()
-        return text.contains("not set")
+        return text.contains("config key not set")
     }
 
     private func perform(
@@ -487,8 +510,20 @@ final class BotAgentViewModel {
         // `force` skips the conflict re-read, never the safety floor: an
         // unreadable file must not be replaced, and an oversized buffer would
         // be refused by P0's writer anyway (over-limit AND conflicted is a
-        // reachable pair, so the Overwrite button has to honour both).
-        guard !soulUnreadable, !soulOverLimit, !isSavingSoul else { return }
+        // reachable pair, so the Overwrite button has to honour both). The
+        // view disables Overwrite in that pair too, but a forced call could
+        // still race a length edit, so this guard must explain itself rather
+        // than silently no-op — nothing else will tell the user why an
+        // enabled-looking action did nothing.
+        guard !isSavingSoul else { return }
+        guard !soulUnreadable else {
+            soulError = "Couldn't read \(soulPath). It may be too large, or not text. Editing is disabled so a save can't replace it with an empty file."
+            return
+        }
+        guard !soulOverLimit else {
+            soulError = "This SOUL.md buffer is \(soulByteCount) bytes, over the \(soulByteLimit)-byte limit. Trim it before saving."
+            return
+        }
         isSavingSoul = true
         soulError = nil
         generation += 1

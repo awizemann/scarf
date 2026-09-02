@@ -641,6 +641,70 @@ struct BotsViewModelTests {
         #expect(backend.lifecycleActions == [.rename(from: "scratch", to: "scratch-2")])
     }
 
+    @Test("rename is blocked while the outgoing name has an unsaved SOUL.md buffer, and clears once saved")
+    func renameBlockedByUnsavedSoulEdits() async throws {
+        // A real temp home: `agentViewModel(for:)` always builds a *live*
+        // `BotAgentViewModel` (`BotsViewModel.context`, not the injected
+        // roster `backend`), so dirtying its buffer for real needs an actual
+        // `SOUL.md` on disk under `<home>/profiles/scratch/SOUL.md`.
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let profileDir = home.url
+            .appendingPathComponent("profiles", isDirectory: true)
+            .appendingPathComponent("scratch", isDirectory: true)
+        try FileManager.default.createDirectory(at: profileDir, withIntermediateDirectories: true)
+        try "You are Scratch.".write(
+            to: profileDir.appendingPathComponent("SOUL.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let identity = Self.bot("scratch", title: "Scratch")
+        let backend = MockBotsBackend([identity])
+        let viewModel = BotsViewModel(
+            context: home.context,
+            capabilities: Self.botCapableCapabilities,
+            backend: backend
+        )
+
+        let agentVM = viewModel.agentViewModel(for: "scratch")
+        agentVM.load()
+        await Self.settle { agentVM.hasLoadedSoul }
+        agentVM.soulText = "dirty edits, not saved"
+        #expect(agentVM.isSoulDirty)
+        #expect(viewModel.unsavedAgentEdits(forProfile: "scratch"))
+
+        // Blocked while dirty: the same floor `BotsView.requestSelection`
+        // enforces for a roster switch, since a rename would otherwise
+        // strand the dirty buffer under a name `agentCache` can no longer
+        // address.
+        viewModel.rename(BotRow(identity: identity, avatar: nil), to: "scratch-2")
+        await waitForIdle(viewModel)
+        #expect(backend.lifecycleActions.isEmpty)
+        #expect(viewModel.errorMessage != nil)
+
+        // Save, then retry: now it must go through, and the agent cache
+        // must not leave a reusable entry keyed on the pre-rename name —
+        // `unsavedAgentEdits` (which reads that cache) has to report
+        // nothing outstanding for a name the roster no longer has.
+        agentVM.saveSoul()
+        await Self.settle { !agentVM.isSoulDirty }
+        viewModel.errorMessage = nil
+        viewModel.rename(BotRow(identity: identity, avatar: nil), to: "scratch-2")
+        await waitForIdle(viewModel)
+        #expect(backend.lifecycleActions == [.rename(from: "scratch", to: "scratch-2")])
+        #expect(viewModel.unsavedAgentEdits(forProfile: "scratch") == false)
+    }
+
+    private static func settle(
+        _ condition: () -> Bool
+    ) async {
+        for _ in 0..<400 {
+            if condition() { return }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+    }
+
     // MARK: - Avatar
 
     @Test("storing an avatar marks the identity as carrying a photo")
@@ -924,6 +988,36 @@ struct BotsViewModelTests {
             #expect(seen.insert(section.analyticsToken).inserted, "duplicate token \(section.analyticsToken)")
         }
         #expect(seen.contains("bots"))
+    }
+
+    // MARK: - Injected PeersViewModel (A2-F5)
+
+    @Test("an injected PeersViewModel is the one `peers` returns, not a private fallback")
+    func peersUsesTheInjectedInstance() {
+        // A2-F5: `BotsViewModel` used to build its own private `PeersViewModel`
+        // rather than sharing the coordinator-cached one `ContentView` also
+        // hands the standalone Peers section — a peer async-run started from
+        // Bots▸Remote would then be invisible/unstoppable from the Peers pane.
+        // `ContentView` itself isn't unit-testable (it resolves through
+        // `AppCoordinator.featureViewModel`, a live `@Environment`), so this
+        // pins the identity contract one level down: given *some* injected
+        // instance, `peers` must return that exact object, never a
+        // lazily-constructed substitute.
+        let injected = PeersViewModel(context: .local)
+        let backend = MockBotsBackend([])
+        let viewModel = BotsViewModel(
+            context: .local,
+            capabilities: Self.botCapableCapabilities,
+            backend: backend,
+            peers: injected
+        )
+        #expect(viewModel.peers === injected)
+
+        // And the no-injection path (every existing test in this file) must
+        // keep building its own isolated instance — no fixture drift from
+        // this fixup.
+        let uninjected = makeViewModel(backend)
+        #expect(uninjected.peers !== injected)
     }
 
     @Test("Bots is ordered immediately before Chat")

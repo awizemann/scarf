@@ -215,6 +215,7 @@ struct BotAgentView: View {
                             .accessibilityLabel("Discard your edits and reload SOUL.md from disk")
                         Button("Overwrite") { viewModel.saveSoul(force: true) }
                             .buttonStyle(ScarfDestructiveButton())
+                            .disabled(viewModel.soulOverLimit || viewModel.isSavingSoul)
                             .accessibilityLabel("Overwrite the changed SOUL.md with your edits")
                     } else {
                         Button("Revert") { viewModel.revertSoul() }

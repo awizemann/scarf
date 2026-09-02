@@ -684,7 +684,13 @@ final class BotsViewModel {
             selectedProfileName = nil
         }
         if selectedProfileName == nil {
-            selectedProfileName = bots.first?.identity.profileName
+            // Deliberately the unfiltered roster, not `bots` (which is
+            // narrowed by `searchText`): autoselecting the first *search
+            // match* would mean typing into the roster filter with nothing
+            // selected silently picks whatever the query happens to match,
+            // rather than the same default bot regardless of what's typed.
+            selectedProfileName = sorted(rows.filter { $0.identity.isBotManaged && !$0.isHidden })
+                .first?.identity.profileName
         }
     }
 
@@ -721,7 +727,13 @@ final class BotsViewModel {
             case .failure:
                 // Anything else (transient transport hiccup, missing file
                 // between stat and read) — the generated fallback is the
-                // right degrade, same as before this fixup.
+                // right degrade, same as before this fixup. But clear a
+                // stale `avatarTooLarge` triangle from an earlier stat: this
+                // failure means something else entirely, and leaving the old
+                // warning up would misreport why the avatar isn't showing.
+                if let index = rows.firstIndex(where: { $0.id == entry.identity.profileName }) {
+                    rows[index].avatarTooLarge = false
+                }
                 continue
             }
         }
@@ -1021,13 +1033,34 @@ final class BotsViewModel {
             return
         }
         let from = row.identity.profileName
+        // Same unsaved-edits floor `BotsView.requestSelection` enforces for a
+        // roster switch: `agentCache` is keyed by profile name, so a rename
+        // would otherwise leave a dirty SOUL.md buffer cached under a name
+        // nothing addresses any more — `unsavedAgentEdits` (which reads that
+        // very cache) would go blind to it from that point on.
+        guard !unsavedAgentEdits(forProfile: from) else {
+            errorMessage = "\(from) has unsaved SOUL.md changes. Save or discard them before renaming."
+            return
+        }
         runLifecycle(.rename(from: from, to: target), success: "Renamed to \(target)") { [weak self] in
+            guard let self else { return }
             // The directory moved, so every cached avatar path under the old
             // name is dead. Keys carry the profile name, so nothing would be
             // mis-served — this just stops a window accumulating them.
-            self?.avatarCache.invalidate(profileName: from)
-            self?.activityCache[from] = nil
-            self?.selectedProfileName = target
+            self.avatarCache.invalidate(profileName: from)
+            self.activityCache[from] = nil
+            // Invalidate rather than re-key: both cached view models capture
+            // their profile name in an immutable `let` used on every backend
+            // call, so moving the existing instance to the new dictionary
+            // key would leave it silently addressing the now-renamed-away
+            // profile directory. Dropping them lets the next
+            // `agentViewModel(for:)`/`routinesViewModel(for:)` build a fresh
+            // instance under the new name instead. Safe to drop here
+            // specifically because the guard above already confirmed there
+            // is no unsaved SOUL.md buffer to lose.
+            self.agentCache[from] = nil
+            self.routinesCache[from] = nil
+            self.selectedProfileName = target
         }
     }
 

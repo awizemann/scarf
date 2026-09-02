@@ -105,6 +105,7 @@ struct BotsView: View {
             viewModel.load()
             if viewModel.hasPeerRunCommands { viewModel.peers.load() }
             mirrorRoutinesCapability(forProfile: viewModel.selectedProfileName)
+            mirrorAgentCapability(forProfile: viewModel.selectedProfileName)
         }
         .onChange(of: storedSortOrder) { _, raw in
             viewModel.sortOrder = BotsViewModel.BotRosterSort(rawValue: raw) ?? .pinnedThenName
@@ -124,9 +125,11 @@ struct BotsView: View {
         // `.onChange(of: hasCronResumeRunNow)`).
         .onChange(of: hasCronResumeRunNow) { _, _ in
             mirrorRoutinesCapability(forProfile: viewModel.selectedProfileName)
+            mirrorAgentCapability(forProfile: viewModel.selectedProfileName)
         }
         .onChange(of: viewModel.selectedProfileName) { _, newValue in
             mirrorRoutinesCapability(forProfile: newValue)
+            mirrorAgentCapability(forProfile: newValue)
         }
         .sheet(item: $editor) { context in
             BotEditorSheet(
@@ -338,16 +341,20 @@ struct BotsView: View {
                 // above. Never merged into `viewModel.bots` — a peer named
                 // the same as a local profile stays a distinct row with its
                 // own selection state (`viewModel.peers.selectedPeerName`).
-                if viewModel.hasPeerRunCommands, !viewModel.peers.peers.isEmpty {
+                // Filtered by the roster search text (name/url), for the same
+                // reason every other group is: a search that silently skipped
+                // this group would report "no results" for a peer that is
+                // right there.
+                if viewModel.hasPeerRunCommands, !filteredPeers.isEmpty {
                     VStack(alignment: .leading, spacing: ScarfSpace.s3) {
-                        Text("Remote (\(viewModel.peers.peers.count))")
+                        Text("Remote (\(filteredPeers.count))")
                             .scarfStyle(.caption)
                             .foregroundStyle(ScarfColor.foregroundMuted)
-                        ForEach(viewModel.peers.peers) { peer in
+                        ForEach(filteredPeers) { peer in
                             remoteRow(peer)
                         }
                     }
-                    .accessibilityLabel("Remote peers, \(viewModel.peers.peers.count)")
+                    .accessibilityLabel("Remote peers, \(filteredPeers.count)")
                 }
             }
             .padding(ScarfSpace.s4)
@@ -470,6 +477,25 @@ struct BotsView: View {
         }
     }
 
+    /// Remote peers matching the roster search text — same substring,
+    /// case- and diacritic-insensitive match `BotsViewModel.matches` uses for
+    /// local rows, against the two things a user would type for a peer: its
+    /// name and its gateway URL.
+    private var filteredPeers: [HermesBotPeer] {
+        let query = viewModel.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return viewModel.peers.peers }
+        return viewModel.peers.peers.filter { peer in
+            [peer.name, peer.url].contains { field in
+                field.range(
+                    of: query,
+                    options: [.caseInsensitive, .diacriticInsensitive],
+                    range: nil,
+                    locale: .current
+                ) != nil
+            }
+        }
+    }
+
     /// A row from the `bot_peers` registry — distinct visual grammar from a
     /// local bot row (a "remote" badge, no pin/hidden affordances, no
     /// generated-avatar identity backed by a real profile) so it reads
@@ -575,9 +601,10 @@ struct BotsView: View {
     /// property assignment during view-builder evaluation runs once per
     /// body pass (SwiftUI may re-evaluate `detail` for reasons that have
     /// nothing to do with a capability change), which is fragile action
-    /// placement. `mirrorRoutinesCapability(for:)` below does the write from
-    /// `.onAppear`/`.onChange` instead, mirroring `CronView`'s own pattern
-    /// (A1-M2).
+    /// placement — the same anti-pattern `agentViewModel(for:)` below was
+    /// also fixed to avoid. `mirrorRoutinesCapability(for:)` below does the
+    /// write from `.onAppear`/`.onChange` instead, mirroring `CronView`'s own
+    /// pattern (A1-M2).
     private func routinesViewModel(for row: BotRow) -> BotRoutinesViewModel {
         viewModel.routinesViewModel(for: row.identity.profileName)
     }
@@ -623,15 +650,23 @@ struct BotsView: View {
 
     // MARK: - Agent configuration (Phase B P1)
 
-    /// Fetch the cached per-bot agent view model and mirror the current
-    /// capability answer into it — outside the `@ViewBuilder` closure, for
-    /// the same reason `routinesViewModel(for:)` is.
+    /// Fetch the cached per-bot agent view model. Pure — no capability
+    /// mirroring here, for the same reason `routinesViewModel(for:)` isn't:
+    /// this is called from the `@ViewBuilder` `detail` body, and a stored
+    /// property write during view-builder evaluation is fragile action
+    /// placement. `mirrorAgentCapability(forProfile:)` below does the write
+    /// from `.onAppear`/`.onChange` instead.
     private func agentViewModel(for row: BotRow) -> BotAgentViewModel {
-        let vm = viewModel.agentViewModel(for: row.identity.profileName)
-        if let capabilities = capabilitiesStore?.capabilities {
-            vm.capabilities = capabilities
-        }
-        return vm
+        viewModel.agentViewModel(for: row.identity.profileName)
+    }
+
+    /// Mirror the current capability answer onto the selected bot's agent
+    /// view model. Only the visible one needs it live — a not-yet-visited
+    /// bot's cached `BotAgentViewModel` picks up the current value the first
+    /// time `agentViewModel(for:)` creates it.
+    private func mirrorAgentCapability(forProfile profileName: String?) {
+        guard let profileName, let capabilities = capabilitiesStore?.capabilities else { return }
+        viewModel.agentViewModel(for: profileName).capabilities = capabilities
     }
 
     // MARK: - Detail
