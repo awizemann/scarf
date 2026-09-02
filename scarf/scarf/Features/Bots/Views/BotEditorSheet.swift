@@ -48,6 +48,12 @@ struct BotEditorSheet: View {
     @State private var draft: BotDraft
     /// Optional `--clone-from` source, create-only.
     @State private var cloneFrom: String = ""
+    /// While true (create-only), the profile id tracks the Name field as a
+    /// derived slug. Hand-editing the id to anything other than the current
+    /// derivation turns it off; restoring the match turns it back on. This
+    /// exists because the id field can sit above the fold in the scrolling
+    /// sheet — a required-but-unseen field left Create silently disabled.
+    @State private var autoProfileId = true
 
     init(
         context: BotEditorContext,
@@ -95,6 +101,37 @@ struct BotEditorSheet: View {
         }
         .frame(width: 520, height: 620)
         .background(ScarfColor.backgroundPrimary)
+        .onChange(of: draft.title) { _, newTitle in
+            guard isCreate, autoProfileId else { return }
+            draft.profileName = Self.derivedProfileId(from: newTitle)
+        }
+        .onChange(of: draft.profileName) { _, newId in
+            guard isCreate else { return }
+            autoProfileId = newId == Self.derivedProfileId(from: draft.title)
+        }
+    }
+
+    /// Slug a roster name into a valid profile id: lowercased, runs of
+    /// anything outside `[a-z0-9_-]` collapse to a single dash, trimmed of
+    /// leading/trailing dashes, capped at Hermes's 64-character limit.
+    /// "SEO Research Bot" → "seo-research-bot".
+    static func derivedProfileId(from title: String) -> String {
+        var slug = ""
+        var pendingDash = false
+        for scalar in title.lowercased().unicodeScalars {
+            let isAllowed = (scalar >= "a" && scalar <= "z") || (scalar >= "0" && scalar <= "9")
+                || scalar == "_" || scalar == "-"
+            if isAllowed {
+                if pendingDash, !slug.isEmpty { slug.append("-") }
+                pendingDash = false
+                slug.unicodeScalars.append(scalar)
+            } else {
+                pendingDash = true
+            }
+            if slug.count >= 64 { break }
+        }
+        while slug.hasSuffix("-") { slug.removeLast() }
+        return String(slug.prefix(64))
     }
 
     // MARK: - Sections
@@ -223,8 +260,24 @@ struct BotEditorSheet: View {
         .accessibilityLabel("Note: saving rewrites this profile's profile.yaml. If Hermes Desktop is editing the same bot at the same time, the last save wins.")
     }
 
+    /// Why Create is disabled, or `nil` when it isn't. Shown beside the
+    /// button so a dead primary button always says what it wants (the id
+    /// field itself may be scrolled out of view).
+    private var cannotSaveReason: LocalizedStringKey? {
+        guard isCreate, !canSave else { return nil }
+        let name = draft.profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty { return "Enter a profile id (or a name to derive one)." }
+        if name == HermesProfileScope.defaultProfileName { return "The profile id can't be \"default\"." }
+        return "Profile ids use lowercase letters, digits, dashes and underscores."
+    }
+
     private var actions: some View {
         HStack(spacing: ScarfSpace.s2) {
+            if let reason = cannotSaveReason {
+                Text(reason)
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+            }
             Spacer()
             Button("Cancel") { onCancel() }
                 .buttonStyle(ScarfGhostButton())

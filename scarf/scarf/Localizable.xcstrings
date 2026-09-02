@@ -93179,6 +93179,126 @@
           }
         }
       }
+    },
+    "Enter a profile id (or a name to derive one).": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gib eine Profil-ID ein (oder einen Namen, aus dem sie abgeleitet wird)."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Introduce un id de perfil (o un nombre del que derivarlo)."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saisissez un id de profil (ou un nom dont il sera dérivé)."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "プロファイルIDを入力してください（名前から自動生成もできます）。"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Insira um id de perfil (ou um nome para derivá-lo)."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请输入配置文件 ID（或输入名称自动生成）。"
+          }
+        }
+      }
+    },
+    "The profile id can't be \"default\".": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Profil-ID darf nicht „default“ sein."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El id de perfil no puede ser «default»."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L'id de profil ne peut pas être « default »."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "プロファイルIDに「default」は使えません。"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O id de perfil não pode ser \"default\"."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置文件 ID 不能为“default”。"
+          }
+        }
+      }
+    },
+    "Profile ids use lowercase letters, digits, dashes and underscores.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profil-IDs bestehen aus Kleinbuchstaben, Ziffern, Bindestrichen und Unterstrichen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Los id de perfil usan minúsculas, dígitos, guiones y guiones bajos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les id de profil utilisent des minuscules, des chiffres, des tirets et des tirets bas."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "プロファイルIDには小文字・数字・ハイフン・アンダースコアが使えます。"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ids de perfil usam letras minúsculas, dígitos, hífens e sublinhados."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置文件 ID 只能包含小写字母、数字、连字符和下划线。"
+          }
+        }
+      }
     }
   },
   "version": "1.1"
