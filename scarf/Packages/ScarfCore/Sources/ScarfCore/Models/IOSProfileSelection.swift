@@ -73,7 +73,10 @@ public struct UserDefaultsProfileSelectionStore: IOSProfileSelectionStore {
     /// the Mac app passes its own key).
     public static let defaultDefaultsKey = "com.scarf.ios.profile-selections.v1"
 
-    private let defaults: UserDefaults
+    /// `UserDefaults` is thread-safe but not formally `Sendable`; this store
+    /// only ever reads/writes through it, so the unchecked hop is stated here
+    /// rather than dropping the struct's `Sendable` conformance.
+    nonisolated(unsafe) private let defaults: UserDefaults
     private let key: String
 
     public init(

@@ -18,7 +18,7 @@ import os
 /// - **Atomic write**: write to `.env.tmp`, then rename. Avoids a partially
 ///   written file if Scarf crashes mid-write.
 /// - **Never logs values**: secrets flow through this service.
-struct HermesEnvService: Sendable {
+nonisolated struct HermesEnvService: Sendable {
     private let logger = Logger(subsystem: "com.scarf", category: "HermesEnvService")
 
     /// Path to `~/.hermes/.env`. Kept configurable for tests.

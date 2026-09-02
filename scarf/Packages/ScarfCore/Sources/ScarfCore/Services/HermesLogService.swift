@@ -230,7 +230,7 @@ public actor HermesLogService {
     /// Format (v0.9.0+): `YYYY-MM-DD HH:MM:SS,MMM LEVEL [session_id] logger: message`.
     /// The session tag is optional — earlier Hermes releases and
     /// out-of-session lines omit it.
-    nonisolated(unsafe) private static let lineRegex = try? NSRegularExpression(
+    private static let lineRegex = try? NSRegularExpression(
         pattern: #"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})\s+(DEBUG|INFO|WARNING|ERROR|CRITICAL)\s+(?:\[([^\]]+)\]\s+)?(\S+?):\s+(.*)$"#
     )
 

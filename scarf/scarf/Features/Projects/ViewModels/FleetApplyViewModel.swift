@@ -209,10 +209,14 @@ final class FleetApplyViewModel {
                     // Hops to the MainActor arrive in arbitrary order, so the
                     // counter is clamped monotonic — a progress bar that goes
                     // backwards reads as a bug in the push itself.
-                    Task { @MainActor in
-                        guard let self else { return }
-                        let previous = self.applyProgress?.done ?? 0
-                        self.applyProgress = (max(previous, done), total)
+                    // `owner` is a local `let` copy of the weakly-captured
+                    // optional: a nested `Task` may not capture the outer
+                    // closure's `self` *var* (Swift 6 SendableClosureCaptures).
+                    let owner = self
+                    Task { @MainActor [owner] in
+                        guard let owner else { return }
+                        let previous = owner.applyProgress?.done ?? 0
+                        owner.applyProgress = (max(previous, done), total)
                     }
                 }
             )

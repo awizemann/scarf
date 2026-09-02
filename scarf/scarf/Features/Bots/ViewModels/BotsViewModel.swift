@@ -14,30 +14,30 @@ import os
 /// transport, or a `hermes` binary on PATH.
 protocol BotsBackend: Sendable {
     /// Every profile on the host, in `_roster` order.
-    func scan() -> [HermesBotIdentity]
+    nonisolated func scan() -> [HermesBotIdentity]
     /// Every profile plus its avatar's *stat* — one round trip where the
     /// transport supports it. What the roster paints from (Phase B P2).
-    func scanRoster() async -> [BotRosterEntry]
+    nonisolated func scanRoster() async -> [BotRosterEntry]
     /// One profile's identity, re-read from disk.
-    func identity(forProfile name: String) -> HermesBotIdentity
+    nonisolated func identity(forProfile name: String) -> HermesBotIdentity
     /// Avatar bytes, or nil when the profile has none.
-    func loadAvatar(forProfile name: String) throws -> HermesBotAvatar?
+    nonisolated func loadAvatar(forProfile name: String) throws -> HermesBotAvatar?
     /// Avatar bytes behind a stat the roster scan already produced — no
     /// extension re-probe, and only ever called on a cache miss.
-    func loadAvatar(at stat: BotAvatarStat) throws -> HermesBotAvatar
+    nonisolated func loadAvatar(at stat: BotAvatarStat) throws -> HermesBotAvatar
     /// The bot's Bot Chat activity from ITS OWN profile database, or nil when
     /// there is no Bot Chat (or no readable database).
-    func activity(forProfile name: String) async -> BotActivity?
+    nonisolated func activity(forProfile name: String) async -> BotActivity?
     /// Read-merge-write of the three regions Scarf owns in `profile.yaml`.
-    func saveIdentity(_ identity: HermesBotIdentity) throws
+    nonisolated func saveIdentity(_ identity: HermesBotIdentity) throws
     /// Store avatar bytes at `<profile_dir>/assets/avatar.png`.
-    func writeAvatar(_ data: Data, forProfile name: String) throws
+    nonisolated func writeAvatar(_ data: Data, forProfile name: String) throws
     /// Run a `hermes profile …` lifecycle verb.
-    func run(_ action: BotsService.Lifecycle) throws -> ProcessResult
+    nonisolated func run(_ action: BotsService.Lifecycle) throws -> ProcessResult
 }
 
 /// `BotsBackend` over a real host.
-struct LiveBotsBackend: BotsBackend {
+nonisolated struct LiveBotsBackend: BotsBackend {
     let transport: any ServerTransport
     let paths: HermesPathSet
     let capabilities: HermesCapabilities
@@ -156,7 +156,7 @@ struct BotRow: Identifiable, Equatable {
 /// back over whatever landed in the file meanwhile. ``apply(to:)`` instead
 /// stamps these seven fields onto an identity re-read at save time, so
 /// everything else in the file is whatever the file currently says.
-struct BotDraft: Equatable {
+nonisolated struct BotDraft: Equatable {
     var profileName: String
     var title: String
     var description: String

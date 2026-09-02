@@ -2,7 +2,7 @@ import Foundation
 import ScarfCore
 import os
 
-struct HermesWebhook: Identifiable, Sendable, Equatable {
+nonisolated struct HermesWebhook: Identifiable, Sendable, Equatable {
     var id: String { name }
     let name: String
     let description: String
@@ -153,7 +153,7 @@ final class WebhooksViewModel {
         let storedName = name.trimmingCharacters(in: .whitespaces)
             .lowercased()
             .replacingOccurrences(of: " ", with: "-")
-        Task.detached { [fileService] in
+        Task.detached { [fileService, self] in
             let result = fileService.runHermesCLI(args: args, timeout: 60)
             // `_cmd_subscribe` exits 0 on EVERY failure path — an invalid
             // name, `--deliver-only` without a real target, a bad script —

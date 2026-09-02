@@ -27,7 +27,7 @@ final class WindowProfileScope {
     /// Mac-specific `UserDefaults` key — kept distinct from iOS's default so
     /// the two apps' selections stay independent even though they share the
     /// store type.
-    static let macDefaultsKey = "com.scarf.mac.profile-selections.v1"
+    nonisolated static let macDefaultsKey = "com.scarf.mac.profile-selections.v1"
 
     private let serverID: ServerID
     private let store: any IOSProfileSelectionStore

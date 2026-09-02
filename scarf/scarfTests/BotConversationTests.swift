@@ -580,7 +580,7 @@ struct BotConversationTests {
 
 /// A backend that does nothing — these tests exercise conversation
 /// lifecycle, not the roster.
-private struct NoopBotsBackend: BotsBackend {
+private nonisolated struct NoopBotsBackend: BotsBackend {
     func scan() -> [HermesBotIdentity] { [] }
     func identity(forProfile name: String) -> HermesBotIdentity {
         HermesBotIdentity(profileName: name, profileDirectory: "/tmp/\(name)")

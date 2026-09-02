@@ -87,7 +87,7 @@ final class BotConversationViewModel {
     /// `ACPClient` is an actor, hence `Sendable`, hence safe to hand to the
     /// detached task `deinit` starts; `stop()` closes the channel, which
     /// terminates the process.
-    private final class ACPHandle: @unchecked Sendable {
+    private nonisolated final class ACPHandle: @unchecked Sendable {
         private let lock = NSLock()
         private var client: ACPClient?
         func set(_ newClient: ACPClient) {

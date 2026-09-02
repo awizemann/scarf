@@ -24,7 +24,7 @@ final class MessageSpeechService: NSObject {
     /// COMPILED ONCE — this was rebuilt from its pattern on every spoken
     /// message. `NSRegularExpression` is thread-safe once constructed.
     /// Link syntax: `[text](url)` → `text`.
-    nonisolated(unsafe) private static let markdownLinkRegex = try? NSRegularExpression(
+    private static let markdownLinkRegex = try? NSRegularExpression(
         pattern: #"\[([^\]]+)\]\([^)]+\)"#, options: []
     )
 

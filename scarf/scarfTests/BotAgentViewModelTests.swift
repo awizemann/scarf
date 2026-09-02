@@ -19,7 +19,7 @@ struct BotAgentViewModelTests {
     /// Sync + `Sendable` because the protocol is called from a detached task.
     /// A lock rather than an actor: the methods are synchronous by design
     /// (they model blocking transport I/O).
-    final class MockBackend: BotAgentBackend, @unchecked Sendable {
+    nonisolated final class MockBackend: BotAgentBackend, @unchecked Sendable {
         private let lock = NSLock()
         private var _model: String?
         private var _provider: String?

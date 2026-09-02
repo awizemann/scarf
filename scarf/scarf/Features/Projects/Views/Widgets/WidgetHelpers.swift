@@ -33,7 +33,7 @@ enum AnsiStripper {
     /// the widgets use; `nonisolated(unsafe)` states that for Swift 6.
     ///
     /// ESC = \u{1B}; CSI = ESC `[`; final byte is in 0x40..0x7E.
-    nonisolated(unsafe) private static let ansiPattern = try? NSRegularExpression(
+    nonisolated private static let ansiPattern = try? NSRegularExpression(
         pattern: "\u{1B}\\[[0-?]*[ -/]*[@-~]", options: []
     )
 

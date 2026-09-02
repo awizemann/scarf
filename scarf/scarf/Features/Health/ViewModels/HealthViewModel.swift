@@ -842,7 +842,7 @@ final class HealthViewModel {
     }
 
     /// Parsed result of a `--version` / `version` update-status check.
-    struct UpdateStatus: Equatable {
+    nonisolated struct UpdateStatus: Equatable {
         /// The raw "Update available…" line, trimmed. Empty when no update.
         let updateInfo: String
         var hasUpdate: Bool { !updateInfo.isEmpty }

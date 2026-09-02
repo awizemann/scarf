@@ -13,20 +13,20 @@ import os
 /// Every method is a thin forward to P1's `BotAgentConfigService` (P0). No
 /// argv, no key names and no capability gate is re-derived here.
 protocol BotAgentBackend: Sendable {
-    var canWriteSkillEnablement: Bool { get }
-    func soulPath(forProfile name: String) -> String
-    func readAgentConfig(forProfile name: String) throws -> BotAgentConfig
-    func listToolsets(forProfile name: String, platform: String) throws -> ProcessResult
-    func readSoul(forProfile name: String) throws -> String?
-    func writeSoul(forProfile name: String, content: String) throws
-    func setModelPin(forProfile name: String, provider: String?, model: String?) throws -> [ProcessResult]
-    func clearModelPin(forProfile name: String) throws -> [ProcessResult]
-    func setToolsetEnabled(forProfile name: String, toolset: String, platform: String, enabled: Bool) throws -> ProcessResult
-    func setMCPServerEnabled(forProfile name: String, server: String, enabled: Bool) throws -> ProcessResult
+    nonisolated var canWriteSkillEnablement: Bool { get }
+    nonisolated func soulPath(forProfile name: String) -> String
+    nonisolated func readAgentConfig(forProfile name: String) throws -> BotAgentConfig
+    nonisolated func listToolsets(forProfile name: String, platform: String) throws -> ProcessResult
+    nonisolated func readSoul(forProfile name: String) throws -> String?
+    nonisolated func writeSoul(forProfile name: String, content: String) throws
+    nonisolated func setModelPin(forProfile name: String, provider: String?, model: String?) throws -> [ProcessResult]
+    nonisolated func clearModelPin(forProfile name: String) throws -> [ProcessResult]
+    nonisolated func setToolsetEnabled(forProfile name: String, toolset: String, platform: String, enabled: Bool) throws -> ProcessResult
+    nonisolated func setMCPServerEnabled(forProfile name: String, server: String, enabled: Bool) throws -> ProcessResult
 }
 
 /// `BotAgentBackend` over a real host.
-struct LiveBotAgentBackend: BotAgentBackend {
+nonisolated struct LiveBotAgentBackend: BotAgentBackend {
     private let service: BotAgentConfigService
 
     init(context: ServerContext, capabilities: HermesCapabilities) {
@@ -107,7 +107,7 @@ final class BotAgentViewModel {
     /// The platform the toolset toggles act on. Only `cli` is offered: the
     /// other platforms are gateway surfaces whose per-bot enablement Scarf
     /// has no verified read for, and a bot is a CLI/ACP agent.
-    static let toolsetPlatform = "cli"
+    nonisolated static let toolsetPlatform = "cli"
 
     /// Mirrored from the environment capability store by the view (the same
     /// async-probe race `BotsView` already handles). Rebuilds the live

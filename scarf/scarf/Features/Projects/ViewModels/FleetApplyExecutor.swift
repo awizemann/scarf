@@ -175,7 +175,7 @@ struct FleetApplyExecutor: Sendable {
     }
 
     /// How many hosts a fleet push writes to at once.
-    static let maxConcurrentHosts = 4
+    nonisolated static let maxConcurrentHosts = 4
 
     private nonisolated func execute(
         target: FleetApplyPlan.Target,

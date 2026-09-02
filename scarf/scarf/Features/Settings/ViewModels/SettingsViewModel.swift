@@ -235,7 +235,7 @@ final class SettingsViewModel {
     /// Strip Hermes's `✗ ` CLI marker and any leading `SomeError: ` label
     /// that a raw Python traceback tail carries, so the banner shows the
     /// sentence rather than the plumbing.
-    private static func strippingErrorDecoration(_ line: String) -> String {
+    nonisolated private static func strippingErrorDecoration(_ line: String) -> String {
         var text = line
         if text.hasPrefix("✗") {
             text = String(text.dropFirst()).trimmingCharacters(in: .whitespaces)

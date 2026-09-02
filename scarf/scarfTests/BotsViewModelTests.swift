@@ -73,7 +73,7 @@ struct BotsViewModelTests {
     /// A scriptable `BotsBackend`. Reference type behind a `Sendable` shell
     /// so the detached work in the view model can call it and the test can
     /// still read what happened afterwards.
-    final class MockBotsBackend: BotsBackend, @unchecked Sendable {
+    nonisolated final class MockBotsBackend: BotsBackend, @unchecked Sendable {
         private let lock = NSLock()
         private var _identities: [String: HermesBotIdentity] = [:]
         private var _avatars: [String: HermesBotAvatar] = [:]

@@ -244,6 +244,6 @@ struct BotDetailPlaceholder: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title). \(detail)")
+        .accessibilityLabel(Text(title) + Text(verbatim: ". ") + Text(detail))
     }
 }

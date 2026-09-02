@@ -139,25 +139,37 @@ public final class HermesVersionCache: @unchecked Sendable {
     /// Cached-or-probe, async. Concurrent callers for the same server share
     /// one subprocess. Returns `.empty` if the probe fails (not cached).
     public func capabilities(for context: ServerContext) async -> HermesCapabilities {
-        let key = Self.key(for: context)
+        switch lookupOrStartProbe(for: context) {
+        case .hit(let caps): return caps
+        case .inFlight(let task): return await task.value
+        }
+    }
 
+    /// Result of the one locked decision `capabilities(for:)` makes.
+    private enum ProbeLookup {
+        case hit(HermesCapabilities)
+        case inFlight(Task<HermesCapabilities, Never>)
+    }
+
+    /// The whole critical section of `capabilities(for:)`, hoisted into a
+    /// SYNCHRONOUS method: `NSLock.lock()`/`unlock()` are unavailable from an
+    /// async context (a suspension between them would move the unlock to a
+    /// different thread), and an `async` function may not take one even when
+    /// it never awaits inside. Behavior is unchanged — cache hit, join an
+    /// existing probe, or start one — the `await` simply moved out.
+    private func lookupOrStartProbe(for context: ServerContext) -> ProbeLookup {
+        let key = Self.key(for: context)
         lock.lock()
-        if let hit = unexpiredLocked(key) {
-            lock.unlock()
-            return hit
-        }
-        if let existing = inFlight[key] {
-            lock.unlock()
-            return await existing.value
-        }
+        defer { lock.unlock() }
+        if let hit = unexpiredLocked(key) { return .hit(hit) }
+        if let existing = inFlight[key] { return .inFlight(existing) }
         let task = Task.detached(priority: .utility) { [self] () -> HermesCapabilities in
             let result = probe(context)
             record(result, key: key, context: context)
             return result
         }
         inFlight[key] = task
-        lock.unlock()
-        return await task.value
+        return .inFlight(task)
     }
 
     /// Cached-or-probe, synchronous. For `nonisolated` call sites that build

@@ -717,7 +717,7 @@ final class ChatViewModel {
         let ctx = context
         guard ctx.isRemote else { return }
         await Task.detached(priority: .utility) {
-            (ctx.makeTransport() as? SSHTransport)?.recoverControlMasterIfDead()
+            _ = (ctx.makeTransport() as? SSHTransport)?.recoverControlMasterIfDead()
         }.value
     }
 
