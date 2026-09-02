@@ -32,6 +32,7 @@ struct KanbanInspectorPane: View {
     let onRejectHallucination: () -> Void
 
     @State private var selectedTab: DetailTab = .comments
+    @Environment(\.scenePhase) private var scenePhase
 
     enum DetailTab: String, CaseIterable, Identifiable {
         case comments = "Comments"
@@ -136,6 +137,18 @@ struct KanbanInspectorPane: View {
         .onDisappear {
             viewModel.stopLogPolling()
             viewModel.stopDetailPolling()
+        }
+        // The inspector's two loops (detail every 5s, log every 2s) are the
+        // other half of the board's polling cost. Pause both when the window
+        // is not the active scene, and resume whichever the open tab wants.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                viewModel.startDetailPolling()
+                handleTabChange(selectedTab)
+            } else {
+                viewModel.stopLogPolling()
+                viewModel.stopDetailPolling()
+            }
         }
     }
 
@@ -680,6 +693,15 @@ struct KanbanInspectorPane: View {
                     .foregroundStyle(ScarfColor.foregroundFaint)
                     .padding(.vertical, ScarfSpace.s2)
             } else {
+                if viewModel.logWasTruncated {
+                    Label(
+                        "Showing the last 256 KB of this log — earlier output isn't loaded.",
+                        systemImage: "scissors"
+                    )
+                    .scarfStyle(.footnote)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .padding(.horizontal, ScarfSpace.s2)
+                }
                 ScrollViewReader { proxy in
                     ScrollView {
                         Text(viewModel.log)

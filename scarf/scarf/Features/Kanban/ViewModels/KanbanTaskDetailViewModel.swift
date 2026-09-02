@@ -27,6 +27,10 @@ final class KanbanTaskDetailViewModel {
     /// Empty until the first poll completes; updates every ~2s while
     /// the task is running.
     var log: String = ""
+    /// True when the log view is showing only the tail of a larger file.
+    /// A cap that degrades silently is indistinguishable from a short log,
+    /// so the Log tab renders a banner off this.
+    var logWasTruncated: Bool = false
     var isLogStreaming: Bool = false
 
     private var logPollTask: Task<Void, Never>?
@@ -51,10 +55,15 @@ final class KanbanTaskDetailViewModel {
     func startDetailPolling() {
         guard detailPollTask == nil else { return }
         detailPollTask = Task { [weak self] in
+            var interval = KanbanPollBackoff.boardBase
             while !Task.isCancelled {
                 guard let self else { return }
                 await self.load()
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                interval = KanbanPollBackoff.nextInterval(
+                    current: interval, base: KanbanPollBackoff.boardBase,
+                    succeeded: self.lastError == nil
+                )
+                try? await Task.sleep(nanoseconds: interval)
             }
         }
     }
@@ -84,7 +93,17 @@ final class KanbanTaskDetailViewModel {
     /// the task isn't running (so we don't want to start a poll loop).
     func refreshLogOnce() async {
         do {
-            let text = try await service.log(taskId: taskId, tailBytes: nil)
+            // BOUNDED. `tailBytes: nil` pulled the entire worker log over the
+            // transport on every 2-second tick, so the cost of a tick grew
+            // with the length of the run. `KanbanService.log` has always
+            // supported `--tail`; it just was never passed.
+            let text = try await service.log(
+                taskId: taskId, tailBytes: KanbanPollBackoff.logTailBytes
+            )
+            // Announce the cap rather than silently showing a decapitated
+            // log: at exactly the tail size we cannot tell a log that fits
+            // from one that was cut, so say so either way.
+            logWasTruncated = text.utf8.count >= KanbanPollBackoff.logTailBytes
             self.log = text
         } catch let err as KanbanError {
             lastError = err.errorDescription
@@ -100,10 +119,15 @@ final class KanbanTaskDetailViewModel {
         guard logPollTask == nil else { return }
         isLogStreaming = true
         logPollTask = Task { [weak self] in
+            var interval = KanbanPollBackoff.logBase
             while !Task.isCancelled {
                 guard let self else { return }
                 await self.refreshLogOnce()
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                interval = KanbanPollBackoff.nextInterval(
+                    current: interval, base: KanbanPollBackoff.logBase,
+                    succeeded: self.lastError == nil
+                )
+                try? await Task.sleep(nanoseconds: interval)
                 // Auto-stop when the task transitions out of running.
                 if let status = self.detail?.task.status,
                    KanbanStatus.from(status) != .running {

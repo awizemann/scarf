@@ -13,6 +13,7 @@ import ScarfDesign
 ///   tenant.
 struct KanbanBoardView: View {
     @State private var viewModel: KanbanBoardViewModel
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.hermesCapabilities) private var capabilitiesStore
 
     /// When non-nil, a project board hosts this view. Drives header
@@ -108,6 +109,17 @@ struct KanbanBoardView: View {
             Task { await refreshToolsetState() }
         }
         .onDisappear { viewModel.stopPolling() }
+        // Pause every poll loop while the window is not the active scene.
+        // A backgrounded Scarf window kept spawning `hermes kanban list`
+        // (plus `stats`) every five seconds against a possibly-remote host,
+        // for a board nobody was looking at (C10).
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                viewModel.startPolling()
+            } else {
+                viewModel.stopPolling()
+            }
+        }
         .sheet(isPresented: $showingCreateSheet) {
             KanbanCreateSheet(
                 assignees: viewModel.assignees,

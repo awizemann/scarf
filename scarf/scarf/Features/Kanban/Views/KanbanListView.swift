@@ -8,6 +8,7 @@ import ScarfDesign
 /// independent of the board's optimistic-merge state.
 struct KanbanListView: View {
     @State private var viewModel: KanbanViewModel
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Scope is carried in explicitly and mirrors what `KanbanBoardView`
     /// receives, so flipping the Board/List control never widens a
@@ -62,6 +63,17 @@ struct KanbanListView: View {
         }
         .onAppear { viewModel.startPolling() }
         .onDisappear { viewModel.stopPolling() }
+        // Pause every poll loop while the window is not the active scene.
+        // A backgrounded Scarf window kept spawning `hermes kanban list`
+        // (plus `stats`) every five seconds against a possibly-remote host,
+        // for a board nobody was looking at (C10).
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                viewModel.startPolling()
+            } else {
+                viewModel.stopPolling()
+            }
+        }
     }
 
     private var taskTable: some View {

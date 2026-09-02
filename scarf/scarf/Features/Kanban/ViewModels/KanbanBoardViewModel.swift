@@ -108,9 +108,15 @@ final class KanbanBoardViewModel {
     func startPolling() {
         stopPolling()
         pollTask = Task { [weak self] in
+            var interval = KanbanPollBackoff.boardBase
             while !Task.isCancelled {
                 await self?.refresh()
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard let self else { return }
+                interval = KanbanPollBackoff.nextInterval(
+                    current: interval, base: KanbanPollBackoff.boardBase,
+                    succeeded: self.lastError == nil
+                )
+                try? await Task.sleep(nanoseconds: interval)
             }
         }
     }

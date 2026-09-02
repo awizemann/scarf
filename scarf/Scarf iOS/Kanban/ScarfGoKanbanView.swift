@@ -24,9 +24,27 @@ struct ScarfGoKanbanView: View {
     @State private var selectedColumn: KanbanBoardColumn = .upNext
     @State private var inspectorTaskId: String?
     @State private var pollTask: Task<Void, Never>?
+    @Environment(\.scenePhase) private var scenePhase
 
-    private var resolvedTenant: String? {
-        KanbanTenantReader(context: context).tenant(forProjectPath: project.path)
+    /// Resolved ONCE and cached. `KanbanTenantReader.tenant(forProjectPath:)`
+    /// is two synchronous transport calls (`fileExists` + `readFile`), i.e.
+    /// two SFTP round-trips on the MainActor — and as a computed property it
+    /// ran them on every `refresh()`, which the poll loop below fires every
+    /// five seconds for as long as the board is open. The manifest's tenant
+    /// does not change under a running board; read it off-main on the first
+    /// refresh and keep it.
+    @State private var resolvedTenant: String?
+    @State private var didResolveTenant = false
+
+    private func resolveTenantIfNeeded() async {
+        guard !didResolveTenant else { return }
+        let ctx = context
+        let path = project.path
+        let tenant = await Task.detached {
+            KanbanTenantReader(context: ctx).tenant(forProjectPath: path)
+        }.value
+        resolvedTenant = tenant
+        didResolveTenant = true
     }
 
     var body: some View {
@@ -48,7 +66,17 @@ struct ScarfGoKanbanView: View {
             await refresh()
             startPolling()
         }
-        .onDisappear { pollTask?.cancel() }
+        .onDisappear { stopPolling() }
+        // Nothing polls a backgrounded app's board: the ticks would queue up
+        // and all fire on foreground, and on a phone each one is an SSH
+        // round-trip paid on the user's battery.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                startPolling()
+            } else {
+                stopPolling()
+            }
+        }
         .sheet(item: Binding(
             get: { inspectorTaskId.map { TaskIDBox(id: $0) } },
             set: { inspectorTaskId = $0?.id }
@@ -152,20 +180,36 @@ struct ScarfGoKanbanView: View {
 
     // MARK: - Loading
 
+    /// Poll interval, with exponential backoff on failure. A board pointed at
+    /// an unreachable host used to retry every five seconds forever; it now
+    /// backs off to a minute, and one success resets it.
+    private static let basePollInterval: UInt64 = 5_000_000_000
+    private static let maxPollInterval: UInt64 = 60_000_000_000
+
     private func startPolling() {
         pollTask?.cancel()
         pollTask = Task {
+            var interval = Self.basePollInterval
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                try? await Task.sleep(nanoseconds: interval)
                 if Task.isCancelled { break }
                 await refresh()
+                interval = error == nil
+                    ? Self.basePollInterval
+                    : min(interval * 2, Self.maxPollInterval)
             }
         }
+    }
+
+    private func stopPolling() {
+        pollTask?.cancel()
+        pollTask = nil
     }
 
     private func refresh() async {
         isLoading = true
         defer { isLoading = false }
+        await resolveTenantIfNeeded()
         guard let tenant = resolvedTenant, !tenant.isEmpty else {
             tasks = []
             error = "No Kanban tenant has been minted for this project yet. Open the Kanban tab on the Mac app to mint one."
