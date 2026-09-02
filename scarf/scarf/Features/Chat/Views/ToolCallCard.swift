@@ -76,6 +76,16 @@ struct ToolCallCard: View {
                 )
             }
             .buttonStyle(.plain)
+            // The header button merges to "READ, read_file, path/to/x" and
+            // then stops: the completion checkmark / spinner and the
+            // disclosure chevron are glyphs with no spoken form.
+            .accessibilityLabel(Text("Tool call \(call.functionName), \(call.argumentsSummary)"))
+            .accessibilityValue(
+                result != nil
+                    ? Text(expanded ? "Finished, expanded" : "Finished, collapsed")
+                    : Text(expanded ? "Running, expanded" : "Running, collapsed")
+            )
+            .accessibilityAddTraits(isFocused ? [.isSelected] : [])
 
             if expanded {
                 VStack(alignment: .leading, spacing: 6) {

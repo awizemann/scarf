@@ -142,6 +142,10 @@ struct MemoryView: View {
                 }
                 .buttonStyle(ScarfGhostButton())
                 .help("Reset MEMORY.md and USER.md to empty (Hermes v2026.4.23+)")
+                // Glyph-only, and destructive with no undo — it must not
+                // be an anonymous arrow.
+                .accessibilityLabel(Text("Reset memory"))
+                .accessibilityHint(Text("Wipes MEMORY.md and USER.md. There is no undo"))
 
                 if viewModel.isSaving {
                     ProgressView().controlSize(.small)
@@ -198,6 +202,7 @@ struct MemoryView: View {
         HStack(spacing: ScarfSpace.s2) {
             Image(systemName: "info.circle")
                 .foregroundStyle(ScarfColor.warning)
+                .accessibilityHidden(true)
             Text("Memory is managed by \(viewModel.memoryProvider). File contents shown here may be stale.")
                 .scarfStyle(.caption)
                 .foregroundStyle(ScarfColor.foregroundMuted)
@@ -230,6 +235,7 @@ struct MemoryView: View {
             HStack(spacing: 4) {
                 Image(systemName: "info.circle")
                     .font(.system(size: 10))
+                    .accessibilityHidden(true)
                 Text("Files load top to bottom. Agent memory is checked first.")
                     .scarfStyle(.caption)
                     .lineLimit(2)

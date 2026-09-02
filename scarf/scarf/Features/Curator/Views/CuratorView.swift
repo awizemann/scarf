@@ -229,6 +229,7 @@ struct CuratorView: View {
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
+            .accessibilityLabel(Text("Curator actions"))
         }
     }
 
@@ -357,6 +358,7 @@ struct CuratorView: View {
                             HStack(spacing: 4) {
                                 Image(systemName: "pin.fill")
                                     .font(.system(size: 10))
+                                    .accessibilityHidden(true)
                                 Text(name)
                                     .scarfStyle(.caption)
                                 Button {
@@ -368,6 +370,10 @@ struct CuratorView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .help("Unpin")
+                                // Every pinned chip carries an identical X;
+                                // the bare "Unpin" is ambiguous with more
+                                // than one pin on screen.
+                                .accessibilityLabel(Text("Unpin \(name)"))
                             }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
@@ -423,6 +429,11 @@ struct CuratorView: View {
                         }
                         .buttonStyle(.plain)
                         .help(viewModel.status.pinnedNames.contains(row.name) ? "Pinned" : "Pin skill")
+                        .accessibilityLabel(
+                            viewModel.status.pinnedNames.contains(row.name)
+                                ? Text("Unpin \(row.name)")
+                                : Text("Pin \(row.name)")
+                        )
 
                         if archiveAvailable {
                             archiveButton(for: row.name)
@@ -449,6 +460,7 @@ struct CuratorView: View {
             }
             .buttonStyle(.plain)
             .help("Archive (move out of active set)")
+            .accessibilityLabel(Text("Archive \(name)"))
             .disabled(viewModel.pendingArchiveName != nil)
         }
     }
@@ -507,6 +519,7 @@ struct CuratorView: View {
         HStack(spacing: 6) {
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(ScarfColor.success)
+                .accessibilityHidden(true)
             Text(text)
                 .scarfStyle(.caption)
                 .foregroundStyle(ScarfColor.foregroundPrimary)
@@ -526,6 +539,7 @@ struct CuratorView: View {
         HStack(alignment: .top, spacing: ScarfSpace.s2) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(ScarfColor.warning)
+                .accessibilityHidden(true)
             Text(message)
                 .scarfStyle(.caption)
                 .foregroundStyle(ScarfColor.foregroundPrimary)
@@ -538,6 +552,7 @@ struct CuratorView: View {
             }
             .buttonStyle(.plain)
             .help("Dismiss")
+            .accessibilityLabel(Text("Dismiss error"))
         }
         .padding(.horizontal, ScarfSpace.s3)
         .padding(.vertical, ScarfSpace.s2)

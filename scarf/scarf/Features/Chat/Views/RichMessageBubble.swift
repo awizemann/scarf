@@ -114,9 +114,19 @@ struct RichMessageBubble: View, Equatable {
             // actually wrote or read.
             compactionSummaryRow
         } else if message.isUser {
+            // Role is conveyed only by alignment and bubble colour, so
+            // VoiceOver had no way to tell who said what. `.contain` names
+            // the group while leaving the content, the copy button and any
+            // disclosures individually reachable — and the label is a
+            // static literal, so it adds no work to the per-token
+            // streaming update path.
             userBubble
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(Text("You"))
         } else if message.isAssistant {
             assistantBubble
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(Text("Assistant"))
         }
         // Tool result messages are rendered inline in ToolCallCard, not as standalone bubbles
     }
