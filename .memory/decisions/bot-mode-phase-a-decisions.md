@@ -5,9 +5,11 @@ permalink: scarf/decisions/bot-mode-phase-a-decisions
 tags: [bot-mode, phase-a, hermes, profiles, decisions]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/BotRoutinePrefix.swift, scarf/scarf/Features/Bots/ViewModels/BotRoutinesViewModel.swift, scarf/scarf/Features/Bots/ViewModels/BotsViewModel.swift, scarf/scarf/Features/Bots/Views/BotRoutinesView.swift, scarf/scarf/Features/Bots/Views/RemoteBotDetailView.swift, scarf/scarf/Features/Bots/Views/BotsView.swift]
 source_paths_inferred: false
-source_sha: 5c26a90dc59e2f94bc6cf335672d06d1c39d19a1
+source_sha: 466bb7f11b7652ac99876183d0968269cddcac38
 created: 2026-09-01
 updated: 2026-09-01
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 B4 filled BotDetailView's `automation` slot (commit 5c26a90): per-bot Routines + a Remote peer roster group.
 

@@ -2,19 +2,14 @@
 title: Hermes v0.17.0 Audit Findings
 type: note
 permalink: scarf/integration/hermes-v0-17-0-audit-findings
-tags:
-- hermes
-- v017
-- audit
-- verification
-- wire-format
+tags: [hermes, v017, audit, verification, wire-format]
+source_paths: [scarf/scarf/Features/Health/ViewModels/HealthViewModel.swift, scarf/scarf/Features/Health/Views/HealthView.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/CuratorService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/GatewayAllowlistKind.swift, wiki/Hermes-Version-Compatibility.md]
+source_paths_inferred: false
+source_sha: 466bb7f11b7652ac99876183d0968269cddcac38
 created: 2026-06-21
 updated: 2026-06-21
-source_sha: 2b9ef15cdddcb1fde12a88556bf755a623ae7758
-source_paths: scarf/scarf/Features/Health/ViewModels/HealthViewModel.swift, scarf/scarf/Features/Health/Views/HealthView.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/CuratorService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/GatewayAllowlistKind.swift, wiki/Hermes-Version-Compatibility.md
-source_paths_inferred: false
-reviewed: 2026-07-12
-reviewed_by: audit:claude-code (audit)
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 
 Source-verified audit of Hermes v0.17.0 (tag v2026.6.19, semver 0.17.0, commit 2bd1977d8) vs Scarf (currently targets v0.16.0). Audited 2026-06-21 against a read-only worktree at the tag, via 8 parallel per-surface investigators + live `--help` probes. Recorded so the next cycle doesn't re-litigate the NO-OPs. NOTE: implementation NOT yet decided/shipped — this is the findings record, not a decisions note.

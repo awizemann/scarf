@@ -2,16 +2,13 @@
 title: Kanban Board Architecture (v2.7.5)
 type: note
 permalink: scarf/features/kanban-board-architecture-v2.7.5
-tags:
-- kanban
-- drag-drop
-- tenants
-source_sha: 64bb87b88f785636aea2386ba3837723f7b81eec
-source_paths: scarf/Packages/ScarfCore/Sources/ScarfCore/Services/KanbanService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/KanbanError.swift, scarf/scarf/Core/Services/KanbanTenantResolver.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/KanbanTenantReader.swift, scarf/scarf/Features/Kanban/ViewModels/KanbanBoardViewModel.swift, scarf/scarf/Features/Kanban/Views/KanbanBoardView.swift
+tags: [kanban, drag-drop, tenants]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/KanbanService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/KanbanError.swift, scarf/scarf/Core/Services/KanbanTenantResolver.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/KanbanTenantReader.swift, scarf/scarf/Features/Kanban/ViewModels/KanbanBoardViewModel.swift, scarf/scarf/Features/Kanban/Views/KanbanBoardView.swift]
+source_sha: 466bb7f11b7652ac99876183d0968269cddcac38
 created: 2026-05-29
 updated: 2026-05-29
-reviewed: 2026-06-28
-reviewed_by: audit:claude-code (audit)
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

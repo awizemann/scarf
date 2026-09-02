@@ -5,9 +5,11 @@ permalink: scarf/decisions/hermes-v0-20-5-compatibility-decisions
 tags: [hermes, compatibility, v0.20.5, decisions]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/scarf/Features/Health/ViewModels/HealthViewModel.swift, scarf/scarf/Features/Profiles/ViewModels/ProfilesViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesConfig.swift, scarf/scarf/Features/Settings/Views/Tabs/VoiceTab.swift]
 source_paths_inferred: false
-source_sha: 09da74dd81ab093bd5c0f9bb387497a06f09a921
+source_sha: c09ee3811bd75bae2d7416178d880f5d5b8c64b6
 created: 2026-08-26
 updated: 2026-08-26
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

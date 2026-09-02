@@ -5,9 +5,11 @@ permalink: scarf/integration/hermes-v0-20-5-audit-findings
 tags: [hermes, audit, compatibility, v0.20.5]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/scarf/Features/Health/ViewModels/HealthViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift]
 source_paths_inferred: false
-source_sha: 81abdeba2d69766b1f9148f2be831a418f54f764
+source_sha: 5ba704c22e0558122a7ab9e26806bd21a9473031
 created: 2026-08-26
 updated: 2026-08-26
+reviewed: 2026-09-02
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

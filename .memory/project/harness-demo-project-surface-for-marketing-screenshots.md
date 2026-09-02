@@ -4,9 +4,11 @@ type: note
 permalink: scarf/project/harness-demo-project-surface-for-marketing-screenshots
 source_paths: [documents/demo-shoot/p1-recon-brief.md, documents/demo-shoot/p5-capture-guide.md]
 source_paths_inferred: false
-source_sha: 951ac39575c173950a1b989b29d5d689b19616ae
+source_sha: 7f68d5296a4f01dd95b4aa3dcfa3d971370fd97e
 created: 2026-08-13
 updated: 2026-08-13
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

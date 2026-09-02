@@ -2,19 +2,13 @@
 title: Phase-1 Milestone 1: First-Class Project Object — implementation decisions
 type: note
 permalink: scarf/decisions/phase-1-milestone-1-first-class-project-object-implementation-decisions
-tags:
-- projects
-- phase-1
-- milestone-1
-- decision
-- scarfproject
-- architecture
+tags: [projects, phase-1, milestone-1, decision, scarfproject, architecture]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ScarfProject.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectDashboard.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift]
+source_sha: c09ee3811bd75bae2d7416178d880f5d5b8c64b6
 created: 2026-06-15
 updated: 2026-06-15
-source_sha: 2b9ef15cdddcb1fde12a88556bf755a623ae7758
-reviewed: 2026-07-12
-reviewed_by: audit:claude-code (audit)
-source_paths: scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ScarfProject.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectDashboard.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 
 How Milestone 1 (the first-class `ScarfProject`) was actually built, and the non-obvious calls a future agent must know before touching the model, the registry, or the fleet/portfolio work. Built on `feat/projects` per the impl spec.

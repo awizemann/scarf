@@ -3,11 +3,13 @@ title: Hermes v0.21.0 Audit Findings
 type: note
 permalink: scarf/integration/hermes-v0-21-0-audit-findings
 tags: [hermes, audit, compatibility, v0.21.0, bot-mode]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/OptionalMCPCatalog.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/CuratorService.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/BotsService.swift, documents/hermes-v0.21.0-audit-report.md]
 source_paths_inferred: false
-source_sha: c15060dd23b03692780f5b0002fd47f9660d76ef
+source_sha: 5ba704c22e0558122a7ab9e26806bd21a9473031
 created: 2026-09-01
 updated: 2026-09-01
+reviewed: 2026-09-02
+reviewed_by: audit:claude-code (background)
 ---
 
 Source-verified audit of Hermes v0.21.0 vs Scarf's v0.20.5 target, run 2026-09-01 via 8 fan-out surface agents. NO implementation yet — pending Alan's scope decision. Deliberate NO-OPs recorded in the full report so the next audit doesn't re-litigate: ACP clean, gateway list output byte-identical, platform roster unchanged at 22, aggregator set unchanged, delegation defaults already matched, cron runs format unchanged, skills-hub columns unchanged.

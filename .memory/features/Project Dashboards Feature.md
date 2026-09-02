@@ -2,15 +2,13 @@
 title: Project Dashboards Feature
 type: note
 permalink: scarf/features/project-dashboards-feature
-tags:
-- dashboards
-- feature
-source_sha: 64bb87b88f785636aea2386ba3837723f7b81eec
-source_paths: scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectDashboard.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDashboardService.swift, scarf/docs/DASHBOARD_SCHEMA.md
+tags: [dashboards, feature]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectDashboard.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDashboardService.swift, scarf/docs/DASHBOARD_SCHEMA.md]
+source_sha: 466bb7f11b7652ac99876183d0968269cddcac38
 created: 2026-05-29
 updated: 2026-05-29
-reviewed: 2026-06-28
-reviewed_by: audit:claude-code (audit)
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

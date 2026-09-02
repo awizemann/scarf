@@ -2,13 +2,13 @@
 title: Local model providers — what exists below the UI and what filters them out
 type: note
 permalink: scarf/architecture/local-model-providers-what-exists-below-the-ui-and-what
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelProviders.swift]
+source_paths_inferred: false
+source_sha: 32c1e2aea156bf7aadb04b1565e2fd2a029a9f9e
 created: 2026-07-13
 updated: 2026-07-13
-source_sha: 1d075b7d4c3e8904c9eeaed03de35d70db6b0d72
-source_paths: scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelProviders.swift
-source_paths_inferred: false
-reviewed: 2026-07-14
-reviewed_by: claude-opus-4-8
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 
 Investigation 2026-07-13 (pre-design for the local/remote model toggle). Source-verified against main @ v2.16.2.

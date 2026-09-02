@@ -4,10 +4,10 @@ type: note
 permalink: scarf/architecture/analytics-via-swift-stats-analytics-facade-scarfanalytics
 source_paths: [scarf/scarf/Core/Services/Analytics.swift, scarf/scarf/Core/Services/UsageEvent.swift, scarf/scarf/Core/Services/UsageTracking.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Diagnostics/ScarfAnalytics.swift, scarf/scarf/Core/Services/StatsScarfMonBackend.swift, scarf/scarf/Features/Settings/Views/Tabs/AdvancedTab.swift]
 source_paths_inferred: false
-source_sha: 28d4f8477d145526ed5b38a04ffc199e53d15f52
+source_sha: 5ba704c22e0558122a7ab9e26806bd21a9473031
 created: 2026-08-20
 updated: 2026-08-26
-reviewed: 2026-09-01
+reviewed: 2026-09-02
 reviewed_by: audit:claude-code (background)
 ---
 

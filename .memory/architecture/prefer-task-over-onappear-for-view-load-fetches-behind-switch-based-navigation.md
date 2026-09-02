@@ -2,17 +2,14 @@
 title: Prefer .task over .onAppear for view-load fetches behind switch-based navigation
 type: note
 permalink: scarf/architecture/prefer-task-over-onappear-for-view-load-fetches-behind-switch-based-navigation
-tags:
-- performance
-- swiftui
-- navigation
-- architecture
-- audit-2026-06-13
+tags: [performance, swiftui, navigation, architecture, audit-2026-06-13]
+source_paths: [scarf/scarf/ContentView.swift, scarf/scarf/Features/Health/Views/HealthView.swift, scarf/scarf/Features/Projects/Views/ProjectsView.swift]
+source_paths_inferred: true
+source_sha: 6a12139b218190d8a99ba679bd1a191c0bc13396
 created: 2026-06-13
 updated: 2026-06-13
-source_sha: 6a12139b218190d8a99ba679bd1a191c0bc13396
-source_paths: scarf/scarf/ContentView.swift, scarf/scarf/Features/Health/Views/HealthView.swift, scarf/scarf/Features/Projects/Views/ProjectsView.swift
-source_paths_inferred: true
+reviewed: 2026-09-02
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

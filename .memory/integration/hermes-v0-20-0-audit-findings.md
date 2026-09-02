@@ -4,9 +4,11 @@ type: note
 permalink: scarf/integration/hermes-v0-20-0-audit-findings
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesCuratorReport.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesTool.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/SkillsViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift]
 source_paths_inferred: false
-source_sha: 3d892907bf3209f28934541943ef9dd75aa1308a
+source_sha: c09ee3811bd75bae2d7416178d880f5d5b8c64b6
 created: 2026-08-03
 updated: 2026-08-03
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 
 Source-verified audit of the Hermes v0.18.2 → v0.20.0 delta (v2026.7.7.2 → v2026.8.3, ~5,719 commits spanning v0.19.0 "Quicksilver", v0.19.1 rollup, v0.20.0 "Herald") vs Scarf v2.17.2. Audited 2026-08-03 via 8 parallel per-surface agents against a detached worktree at the tag, CLI pass executed against the real v2026.8.3 argparse. Full report: documents/hermes-v0.20.0-audit-report.md.

@@ -3,11 +3,13 @@ title: Hermes Peer CLI Surface
 type: note
 permalink: scarf/architecture/hermes-peer-cli-surface
 tags: [hermes, peer, bot-mode, cli, wire-format]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesPeerCLI.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesBotPeersYAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesBotPeer.swift, scarf/scarf/Features/Peers/ViewModels/PeersViewModel.swift, scarf/scarf/Features/Peers/Views/PeersView.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesPeerCLI.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesBotPeersYAML.swift]
 source_paths_inferred: false
-source_sha: d15a8827b4b6e90f3a9df03d319b45de4d5e720f
+source_sha: 7f68d5296a4f01dd95b4aa3dcfa3d971370fd97e
 created: 2026-09-01
 updated: 2026-09-01
+reviewed: 2026-09-01
+reviewed_by: audit:claude-code (background)
 ---
 
 Wire shapes of `hermes peer` (Hermes v0.21+, `hermes_cli/subcommands/peer.py`), as ported by `HermesPeerCLI`. A peer is another Hermes gateway running the `api_server` platform; the CLI adds no server surface of its own — it drives the peer's stock REST API. Targets are `<peer>` or `<peer>/<agent>`, the latter hitting the peer's `/p/<profile>/` multiplex mirror.
