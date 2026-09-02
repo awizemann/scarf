@@ -106,12 +106,13 @@ public struct ProjectHermesShadowDetector: Sendable {
     /// refresh. Two ordered steps:
     ///
     /// 1. Copy `auth.json` into the global home (only when present)
-    ///    **without clobbering an existing one** (`cp -n`). Hermes
+    ///    **without clobbering an existing one** (`[ -e dest ] || cp`).
+    ///    Hermes
     ///    credentials live in this single file; preserving them is the
     ///    load-bearing part of "consolidate" — every other project-local
     ///    file is either replaceable or scoped to the project anyway.
     ///
-    ///    **Why `-n` and not a plain `cp`.** A plain `cp` overwrites
+    ///    **Why guarded and not a plain `cp`.** A plain `cp` overwrites
     ///    `~/.hermes/auth.json` — the user's PRIMARY, possibly
     ///    differently-scoped credential — with a project-local one, from a
     ///    button labelled "copy fix command". That is a destructive,
@@ -146,11 +147,25 @@ public struct ProjectHermesShadowDetector: Sendable {
         var parts: [String] = []
         if shadow.hasAuthJSON {
             parts.append("mkdir -p \(shellQuote(hermesHome))")
-            // `-n`: never overwrite an existing global auth.json. See the
-            // doc comment — clobbering the user's primary credential from a
+            // Copy ONLY when the destination doesn't exist. See the doc
+            // comment — clobbering the user's primary credential from a
             // "copy fix command" button is not a fix.
-            parts.append("cp -n \(shellQuote(shadow.shadowPath + "/auth.json")) \(shellQuote(hermesHome + "/auth.json"))")
-            parts.append("chmod 600 \(shellQuote(hermesHome + "/auth.json"))")
+            //
+            // `[ -f dest ] || cp …` rather than `cp -n`: BSD `cp` (macOS,
+            // and the remote host is frequently a Mac) exits **1** when
+            // `-n` skips an existing file, which aborts the `&&` chain —
+            // so on exactly the has-existing-auth case the `mv` and
+            // `chmod` never ran and the shadow was left in place. The
+            // test-then-copy form keeps the identical no-clobber
+            // guarantee while always yielding exit 0 on the skip path,
+            // and is portable across BSD/GNU (GNU `cp -n` exits 0).
+            let dest = shellQuote(hermesHome + "/auth.json")
+            parts.append("{ [ -e \(dest) ] || cp \(shellQuote(shadow.shadowPath + "/auth.json")) \(dest); }")
+            // Applies to whichever file ends up at the destination — the
+            // freshly-copied one, or the pre-existing one we preserved.
+            // Tightening the mode on the user's own credential file is
+            // safe and desirable either way.
+            parts.append("chmod 600 \(dest)")
         }
         // The rename is unconditional: even shadows without auth.json
         // still bind as $HERMES_HOME and need to move out of the way.
