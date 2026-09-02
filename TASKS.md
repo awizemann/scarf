@@ -52,6 +52,7 @@
 - [ ] R3 [iOS]: Resume fallback — typed catch, surfacing, analytics parity (id: t-238d2ab3) (added: 2026-08-20) (priority: high)
 - [ ] R4 [iOS]: Key import gate — reject unusable keys at paste time (id: t-a89ccf7a) (added: 2026-08-20)
 - [ ] R6 [iOS]: Splash — use LaunchIcon asset, drop 1024px main-thread decode (id: t-d8d0f1d3) (added: 2026-08-20) (priority: low)
+- [ ] Fix charter.md guardrail indent (human edit) (id: t-00f9972e) (added: 2026-09-01) (priority: high)
 
 ## Doing
 
@@ -59,6 +60,12 @@
 
 ## Done
 
+- [x] Bots final audit + memory validation (id: t-1e44c785) (added: 2026-09-01) (priority: high)
+- [x] Bots B4: routines + remote bots (peers) (id: t-556e3704) (added: 2026-09-01)
+- [x] Bots B3: live bot chat over ACP (id: t-461ac94b) (added: 2026-09-01) (priority: high)
+- [x] Bots B2: Bots section UI + create/edit (id: t-93c97c5e) (added: 2026-09-01) (priority: high)
+- [x] Bots B1: native avatar rendering (id: t-fc5a44b2) (added: 2026-09-01) (priority: high)
+- [x] Bots B0: domain foundation + profile IO (id: t-06ab36a1) (added: 2026-09-01) (priority: urgent)
 - [x] v0.21 final audit + memory validation + release handoff (id: t-cd33bd6d) (added: 2026-09-01) (priority: high)
 - [x] v0.21 W9: peer CLI basics surface (id: t-e81e9f48) (added: 2026-09-01)
 - [x] v0.21 W8: dotted-key escaping for quick commands (id: t-01d5c11b) (added: 2026-09-01)
