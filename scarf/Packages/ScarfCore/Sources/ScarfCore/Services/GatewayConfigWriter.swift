@@ -98,10 +98,14 @@ public enum GatewayConfigWriter {
                 keyIndent: keyIndent,
                 itemIndent: itemIndent
             )
-        case .platformPresentKeyMissing(let insertAfter):
+        case .platformPresentKeyMissing(let insertAfter, let rewriteHeaderAt):
             if trimmedItems.isEmpty {
                 // No-op: empty target, no existing block.
                 return yaml
+            }
+            var lines = lines
+            if let rewriteHeaderAt {
+                lines[rewriteHeaderAt] = rewriteFlowEmptyHeaderToBlock(lines[rewriteHeaderAt])
             }
             return spliceNewKey(
                 lines: lines,
@@ -179,8 +183,12 @@ public enum GatewayConfigWriter {
                 newLines.append(contentsOf: lines.suffix(from: tailStart))
             }
             return newLines.joined(separator: "\n")
-        case .platformPresentKeyMissing(let insertAfter):
+        case .platformPresentKeyMissing(let insertAfter, let rewriteHeaderAt):
             if trimmedPairs.isEmpty { return yaml }
+            var lines = lines
+            if let rewriteHeaderAt {
+                lines[rewriteHeaderAt] = rewriteFlowEmptyHeaderToBlock(lines[rewriteHeaderAt])
+            }
             var newLines = Array(lines.prefix(insertAfter + 1))
             newLines.append("\(spaces(keyIndent))\(key):")
             newLines.append(contentsOf: entryRows())
@@ -237,7 +245,7 @@ public enum GatewayConfigWriter {
         /// which the new key should be inserted (last line in the platform's
         /// block, or the platform header itself if the platform's body is
         /// empty).
-        case platformPresentKeyMissing(insertAfter: Int)
+        case platformPresentKeyMissing(insertAfter: Int, rewriteHeaderAt: Int?)
         /// The top-level `<platform>:` section is missing entirely. The whole
         /// scaffold needs to be appended.
         case platformMissing
@@ -254,6 +262,16 @@ public enum GatewayConfigWriter {
             headerLineEqualTo: "\(platform):",
             indent: 0
         ) else {
+            // Hermes emits a preserved-but-empty section flow-style:
+            // `slack: {}` (`_strip_default_values` preserve_keys). That IS
+            // the section — missing it here used to append a DUPLICATE
+            // top-level `slack:` block, which PyYAML resolves last-wins but
+            // leaves the file malformed for stricter parsers. Treat it as
+            // an existing empty section; the write replaces the inline `{}`
+            // with a block body (see `rewriteFlowEmptyHeaderToBlock`).
+            if let flowIdx = firstIndex(of: lines, flowEmptyHeaderFor: platform) {
+                return .platformPresentKeyMissing(insertAfter: flowIdx, rewriteHeaderAt: flowIdx)
+            }
             return .platformMissing
         }
 
@@ -293,7 +311,7 @@ public enum GatewayConfigWriter {
         }
 
         guard let keyIdx else {
-            return .platformPresentKeyMissing(insertAfter: lastBodyIdx)
+            return .platformPresentKeyMissing(insertAfter: lastBodyIdx, rewriteHeaderAt: nil)
         }
 
         // Walk down the bullet rows until we leave the block (indent shrinks
@@ -456,6 +474,39 @@ public enum GatewayConfigWriter {
             }
         }
         return nil
+    }
+
+    /// Find the first top-level line of the form `<platform>: {}` (an empty
+    /// flow mapping, optionally followed only by a `# comment`). Hermes
+    /// emits this shape for a preserved-but-empty section; it is the section
+    /// header + an empty body in one line.
+    private static func firstIndex(
+        of lines: [String],
+        flowEmptyHeaderFor platform: String
+    ) -> Int? {
+        let header = "\(platform):"
+        for (i, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            guard leadingSpaces(line) == 0, trimmed.hasPrefix(header) else { continue }
+            let rest = trimmed.dropFirst(header.count)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard rest.hasPrefix("{}") else { continue }
+            let after = rest.dropFirst(2).trimmingCharacters(in: .whitespacesAndNewlines)
+            if after.isEmpty || after.hasPrefix("#") { return i }
+        }
+        return nil
+    }
+
+    /// Turn `platform: {}` (possibly with a trailing comment) into a bare
+    /// `platform:` block header so child rows can be spliced beneath it.
+    /// The comment, if any, is preserved.
+    private static func rewriteFlowEmptyHeaderToBlock(_ line: String) -> String {
+        guard let range = line.range(of: "{}") else { return line }
+        var rewritten = line
+        rewritten.removeSubrange(range)
+        while rewritten.hasSuffix(" ") { rewritten.removeLast() }
+        return rewritten
     }
 
     private static func spaces(_ n: Int) -> String {
