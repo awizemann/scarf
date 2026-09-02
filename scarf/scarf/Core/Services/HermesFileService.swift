@@ -250,30 +250,60 @@ struct HermesFileService: Sendable {
         }
     }
 
-    /// Creates the server entry via `hermes mcp add` with only the command (no args).
-    /// Args are written separately via `setMCPServerArgs` to avoid argparse issues with `-`-prefixed args like `-y`.
-    /// Pipes `y\n` because the CLI prompts to save even when the initial connection check fails (which it will, since we intentionally add no args first).
-    @discardableResult
-    nonisolated func addMCPServerStdio(name: String, command: String, args: [String]) -> (exitCode: Int32, output: String) {
-        let addResult = runHermesCLI(
-            args: ["mcp", "add", name, "--command", command],
-            timeout: 45,
-            stdinInput: "y\ny\ny\n"
-        )
-        guard addResult.exitCode == 0 else { return addResult }
-        if !args.isEmpty {
-            _ = setMCPServerArgs(name: name, args: args)
-        }
-        return addResult
+    /// Runs one `hermes mcp add` plan and reports what the CLI actually did.
+    ///
+    /// `cmd_mcp_add` **never exits nonzero** — every failure path is a bare
+    /// `return` — so the outcome has to be read out of stdout. See
+    /// `HermesMCPAdd` for the prompt-by-prompt derivation of each plan and
+    /// for why the old blanket `"y\ny\ny\n"` wrote a literal `y` into
+    /// `~/.hermes/.env` as an API key.
+    nonisolated func runMCPAdd(_ plan: HermesMCPAdd.Plan, name: String) -> (outcome: HermesMCPAddOutcome, output: String) {
+        let result = runHermesCLI(args: plan.arguments, timeout: 90, stdinInput: plan.stdin)
+        // A nonzero exit only happens on an argparse rejection, and it is
+        // still a not-saved outcome — parse either way so the CLI's own
+        // message reaches the user.
+        return (HermesMCPAdd.parseOutcome(result.output, name: name), result.output)
     }
 
+    /// Creates a stdio MCP server entry, passing the command's arguments
+    /// **at add time** so the CLI's discovery probe launches the real
+    /// server and the entry lands enabled.
+    ///
+    /// Scarf used to withhold the args deliberately and patch them into
+    /// config.yaml afterwards. That guaranteed a probe failure (a bare
+    /// `npx` with no server package), and the piped `y` then accepted
+    /// "Save config anyway (you can test later)?", which writes
+    /// `enabled: false`. There is no probe-skipping flag on `mcp add` at
+    /// any shipped version — passing the args is the fix.
     @discardableResult
-    nonisolated func addMCPServerHTTP(name: String, url: String, auth: String?) -> (exitCode: Int32, output: String) {
-        var cliArgs: [String] = ["mcp", "add", name, "--url", url]
-        if let auth, !auth.isEmpty {
-            cliArgs.append(contentsOf: ["--auth", auth])
+    nonisolated func addMCPServerStdio(
+        name: String,
+        command: String,
+        args: [String],
+        env: [String: String] = [:]
+    ) -> (exitCode: Int32, output: String) {
+        let plan = HermesMCPAdd.stdioPlan(name: name, command: command, args: args, env: env)
+        let run = runMCPAdd(plan, name: name)
+        return (run.outcome.isLive ? 0 : 1, run.output)
+    }
+
+    /// Creates an HTTP MCP server entry, answering only the prompts the
+    /// chosen auth mode actually triggers.
+    @discardableResult
+    nonisolated func addMCPServerHTTP(
+        name: String,
+        url: String,
+        auth: String?,
+        apiKey: String = ""
+    ) -> (exitCode: Int32, output: String) {
+        let mode: HermesMCPAddAuthMode
+        switch auth?.lowercased() {
+        case "oauth": mode = .oauth
+        case "header": mode = apiKey.isEmpty ? .none : .header(token: apiKey)
+        default: mode = .none
         }
-        return runHermesCLI(args: cliArgs, timeout: 45, stdinInput: "y\ny\ny\n")
+        let run = runMCPAdd(HermesMCPAdd.urlPlan(name: name, url: url, auth: mode), name: name)
+        return (run.outcome.isLive ? 0 : 1, run.output)
     }
 
     /// Adds an SSE-transport MCP server. v0.13+ only — caller is responsible
@@ -288,12 +318,21 @@ struct HermesFileService: Sendable {
     /// MCP YAML surface uses. The `transport: sse` scalar is what the
     /// reader keys on to discriminate SSE from HTTP.
     @discardableResult
-    nonisolated func addMCPServerSSE(name: String, url: String, sseReadTimeout: Int?) -> (exitCode: Int32, output: String) {
-        let addResult = runHermesCLI(
-            args: ["mcp", "add", name, "--url", url],
-            timeout: 45,
-            stdinInput: "y\ny\ny\n"
-        )
+    nonisolated func addMCPServerSSE(
+        name: String,
+        url: String,
+        sseReadTimeout: Int?,
+        auth: String? = nil,
+        apiKey: String = ""
+    ) -> (exitCode: Int32, output: String) {
+        let mode: HermesMCPAddAuthMode
+        switch auth?.lowercased() {
+        case "oauth": mode = .oauth
+        case "header": mode = apiKey.isEmpty ? .none : .header(token: apiKey)
+        default: mode = .none
+        }
+        let run = runMCPAdd(HermesMCPAdd.urlPlan(name: name, url: url, auth: mode), name: name)
+        let addResult = (exitCode: Int32(run.outcome.isLive ? 0 : 1), output: run.output)
         guard addResult.exitCode == 0 else { return addResult }
         // Stamp the SSE transport discriminator (+ optional read timeout)
         // into the freshly-written entry's YAML block.

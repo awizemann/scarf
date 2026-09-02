@@ -1,10 +1,11 @@
 import Foundation
+import ScarfCore
 
 /// Remote profile export that lands on **this Mac** (gh#132).
 ///
 /// `hermes profile export` has no stdout mode (only `--output <path>`),
 /// so the sessions-export trick (gh#129/PR#130) isn't available. Instead:
-/// export to a scratch path on the host, stream the zip down chunk-by-
+/// export to a scratch path on the host, stream the archive down chunk-by-
 /// chunk, move it into the `NSSavePanel` destination, delete the scratch.
 /// Same shape as `RemoteBackupService` — a ~300 MB profile never lands in
 /// memory (`transport.readFile` is a fully-buffered `cat`, scoped by its
@@ -17,8 +18,14 @@ enum RemoteProfileExport {
     /// Host-side scratch path. `/tmp` so it exists and is writable for
     /// any SSH user; UUID so concurrent exports can't collide; generated
     /// (never user input) so it needs no shell quoting.
+    ///
+    /// The extension must be `.tar.gz`: `export_profile` strips exactly
+    /// `.tar.gz`/`.tgz` and re-appends `.tar.gz`, so the old `.zip`
+    /// scratch path made the CLI write `…​.zip.tar.gz` while the download
+    /// step went looking for `….zip`. That file never existed, so remote
+    /// profile export failed every single time.
     static func remoteTempPath(uuid: UUID = UUID()) -> String {
-        "/tmp/scarf-profile-export-\(uuid.uuidString).zip"
+        HermesProfileArchive.remoteScratchPath(uuid: uuid)
     }
 
     /// Report progress every 16 MiB — often enough to show life on a
@@ -34,16 +41,16 @@ enum RemoteProfileExport {
         onProgress: (Int64) -> Void = { _ in }
     ) async -> (succeeded: Bool, message: String) {
         let remoteTemp = remoteTempPath()
-        let export = runCLI(["profile", "export", profileName, "--output", remoteTemp], 300)
+        let export = runCLI(["profile", "export", "--output", remoteTemp, "--", profileName], 300)
         guard export.exitCode == 0 else {
             return (false, ProfilesViewModel.failureMessage(export.output))
         }
-        // From here the zip exists on the host — clean it up on every path.
+        // From here the archive exists on the host — clean it up on every path.
         defer { removeRemote(remoteTemp) }
 
         // Download into a hidden sibling of the destination (same volume,
         // so the final move is atomic) and only move into place on
-        // success — a failed stream must not leave a truncated zip where
+        // success — a failed stream must not leave a truncated archive where
         // the user chose to save.
         let partial = destination.deletingLastPathComponent()
             .appendingPathComponent(".\(destination.lastPathComponent).partial")

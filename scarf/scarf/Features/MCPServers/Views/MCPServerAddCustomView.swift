@@ -20,6 +20,17 @@ struct MCPServerAddCustomView: View {
     /// server is added, mirroring what `hermes mcp install` does at install
     /// time (mcp_catalog.py `_apply_tool_selection`/`_write_tools_exclude`).
     @State private var pendingDefaultExcludedTools: [String] = []
+    /// Manifest `tools.default_enabled` — an allow-list written to
+    /// `mcp_servers.<name>.tools.include`. Mutually exclusive with the
+    /// exclude list above; Scarf previously dropped this half entirely.
+    @State private var pendingDefaultEnabledTools: [String] = []
+    /// Bearer token for `Header` auth. Typed here so the CLI's masked
+    /// value read gets a real key — the old blind `y` pipe answered that
+    /// prompt with the literal string `y` and Hermes wrote it into
+    /// `~/.hermes/.env` as this server's API key.
+    @State private var apiKey: String = ""
+    /// See `clearCatalogDefaultsIfRetargeted`.
+    @State private var appliedCatalogIdentity: String?
 
     /// `.sse` is a v0.13+ surface; pre-v0.13 hosts only see stdio + http.
     /// Iterating `MCPTransport.allCases` directly would render the SSE
@@ -107,6 +118,14 @@ struct MCPServerAddCustomView: View {
                 showCatalog = false
             }
         }
+        // The pending tool lists belong to the catalog entry the user
+        // picked. Once they retarget the form at a different server, those
+        // tool names no longer describe it — keeping them would filter
+        // tools on a server the user hand-wrote.
+        .onChange(of: name) { _, _ in clearCatalogDefaultsIfRetargeted() }
+        .onChange(of: url) { _, _ in clearCatalogDefaultsIfRetargeted() }
+        .onChange(of: command) { _, _ in clearCatalogDefaultsIfRetargeted() }
+        .onChange(of: transport) { _, _ in clearCatalogDefaultsIfRetargeted() }
     }
 
     /// Prefills the add-form fields from a picked catalog entry. Stdio
@@ -130,6 +149,33 @@ struct MCPServerAddCustomView: View {
         case .apiKey, .none: auth = "none"
         }
         pendingDefaultExcludedTools = entry.defaultExcludedTools
+        pendingDefaultEnabledTools = entry.defaultEnabledTools
+        appliedCatalogIdentity = currentIdentity
+    }
+
+    /// Identity of the server the pending tool lists describe, captured
+    /// when a catalog entry is applied. Comparing against it is what lets
+    /// `clearCatalogDefaultsIfRetargeted` distinguish "the user edited the
+    /// form away from the entry" from "`applyCatalogEntry` is mid-write" —
+    /// its own field writes fire `onChange` too.
+    private var currentIdentity: String {
+        "\(transport.rawValue)|\(name)|\(url)|\(command)"
+    }
+
+    /// Drops catalog-derived tool defaults once the form no longer
+    /// describes the picked entry. The pending lists name *that* entry's
+    /// tools; carrying them onto a hand-written server silently filters
+    /// tools the user never chose to filter. Previously they were set once
+    /// and never cleared at all.
+    private func clearCatalogDefaultsIfRetargeted() {
+        guard appliedCatalogIdentity != nil, currentIdentity != appliedCatalogIdentity else { return }
+        clearCatalogDefaults()
+    }
+
+    private func clearCatalogDefaults() {
+        pendingDefaultExcludedTools = []
+        pendingDefaultEnabledTools = []
+        appliedCatalogIdentity = nil
     }
 
     private var stdioSection: some View {
@@ -175,6 +221,19 @@ struct MCPServerAddCustomView: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
+                    .accessibilityLabel("Authentication")
+                }
+                if auth == "header" {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("API key / Bearer token").font(.caption.bold())
+                        SecureField("sk-…", text: $apiKey)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .accessibilityLabel("API key or Bearer token")
+                        Text("Hermes stores this in `~/.hermes/.env` and references it from config.yaml — the key itself is never written into config.yaml.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -233,6 +292,8 @@ struct MCPServerAddCustomView: View {
                 args: args,
                 url: url.trimmingCharacters(in: .whitespaces),
                 auth: resolvedAuth,
+                apiKey: apiKey,
+                defaultEnabledTools: pendingDefaultEnabledTools,
                 defaultExcludedTools: pendingDefaultExcludedTools
             )
         case .sse:
@@ -242,9 +303,15 @@ struct MCPServerAddCustomView: View {
                 name: trimmedName,
                 url: url.trimmingCharacters(in: .whitespaces),
                 sseReadTimeout: parsedTimeout,
+                auth: resolvedAuth,
+                apiKey: apiKey,
+                defaultEnabledTools: pendingDefaultEnabledTools,
                 defaultExcludedTools: pendingDefaultExcludedTools
             )
         }
+        // Consumed — never leave them set for a subsequent add.
+        clearCatalogDefaults()
+        apiKey = ""
         dismiss()
     }
 

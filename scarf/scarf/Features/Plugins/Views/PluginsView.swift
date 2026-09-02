@@ -9,6 +9,14 @@ struct PluginsView: View {
     @State private var installIdentifier = ""
     @State private var showInstall = false
     @State private var pendingRemove: HermesPlugin?
+    /// Enable-on-install choice, surfaced in the install sheet so the CLI
+    /// gets an explicit `--enable` / `--no-enable` instead of a prompt it
+    /// answers "no" to on a non-tty.
+    @State private var enableOnInstall = true
+    /// Set when the user asks to enable a plugin that declares
+    /// `tool_override` — the grant is confirmed explicitly before any
+    /// `--allow-tool-override` reaches the CLI.
+    @State private var pendingToolOverride: HermesPlugin?
     /// v0.16 Spotify sign-in sheet state. Only rendered when the spotify
     /// plugin is present and isV016OrLater is true.
     @State private var showSpotifySignIn = false
@@ -56,6 +64,74 @@ struct PluginsView: View {
             }
             Button("Cancel", role: .cancel) { pendingRemove = nil }
         }
+        .confirmationDialog(
+            pendingToolOverride.map { "Let \($0.name) replace built-in tools?" } ?? "",
+            isPresented: Binding(get: { pendingToolOverride != nil }, set: { if !$0 { pendingToolOverride = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Enable and Grant Override", role: .destructive) {
+                if let plugin = pendingToolOverride { viewModel.enable(plugin, allowToolOverride: true) }
+                pendingToolOverride = nil
+            }
+            Button("Enable Without Override") {
+                if let plugin = pendingToolOverride { viewModel.enable(plugin, allowToolOverride: false) }
+                pendingToolOverride = nil
+            }
+            Button("Cancel", role: .cancel) { pendingToolOverride = nil }
+        } message: {
+            Text("This plugin declares `tool_override`. Granting it lets the plugin take over built-in tools such as `shell_exec` and `write_file` for every session on this host.")
+        }
+        .sheet(item: Binding(
+            get: { viewModel.installReport },
+            set: { if $0 == nil { viewModel.installReport = nil } }
+        )) { report in
+            installReportSheet(report)
+        }
+    }
+
+    /// Shows what `plugins install` actually said. Previously discarded:
+    /// the after-install notes, the unset `requires_env` names, and the
+    /// gateway-restart instruction.
+    private func installReportSheet(_ report: PluginsViewModel.InstallReport) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(
+                report.failed ? "Install failed"
+                    : (report.outcome.enabled ? "Installed and enabled" : "Installed — not enabled"),
+                systemImage: report.failed ? "xmark.octagon.fill"
+                    : (report.outcome.enabled ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+            )
+            .font(.headline)
+            .foregroundStyle(report.failed ? ScarfColor.danger : (report.outcome.enabled ? ScarfColor.success : ScarfColor.warning))
+
+            if !report.outcome.missingEnvVars.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Set these in `~/.hermes/.env` before the plugin will work:")
+                        .font(.caption.bold())
+                    ForEach(report.outcome.missingEnvVars, id: \.self) { name in
+                        Text(name).font(.caption.monospaced()).textSelection(.enabled)
+                    }
+                }
+            }
+            if report.outcome.needsGatewayRestart {
+                Label("Restart the gateway for this plugin to take effect.", systemImage: "arrow.clockwise")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            ScrollView {
+                Text(report.outcome.notes)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(minHeight: 160)
+            HStack {
+                Spacer()
+                Button("Done") { viewModel.installReport = nil }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding()
+        .frame(minWidth: 560, minHeight: 380)
     }
 
     private var header: some View {
@@ -128,8 +204,8 @@ struct PluginsView: View {
 
     private func row(_ plugin: HermesPlugin) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: plugin.enabled ? "app.badge.checkmark.fill" : "app.badge")
-                .foregroundStyle(plugin.enabled ? .green : .secondary)
+            Image(systemName: plugin.activation.isActive ? "app.badge.checkmark.fill" : "app.badge")
+                .foregroundStyle(plugin.activation.isActive ? .green : .secondary)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(plugin.name)
@@ -139,6 +215,15 @@ struct PluginsView: View {
                             .font(.caption2.monospaced())
                             .foregroundStyle(.secondary)
                     }
+                    // "not enabled" is its own state: installed on disk but
+                    // in neither config list, so the runtime never loads it.
+                    // Showing it as plain "disabled" (or, as before, as
+                    // enabled) misreports what Hermes will do.
+                    switch plugin.activation {
+                    case .enabled: EmptyView()
+                    case .disabled: ScarfBadge("disabled", kind: .danger)
+                    case .notEnabled: ScarfBadge("not enabled", kind: .warning)
+                    }
                     // v0.14 — surface plugins that replace a built-in
                     // tool with a visible badge so users notice
                     // overridden behavior. The flag comes from the
@@ -146,6 +231,11 @@ struct PluginsView: View {
                     if plugin.toolOverride {
                         ScarfBadge("tool-override", kind: .info)
                     }
+                }
+                if !plugin.description.isEmpty {
+                    Text(plugin.description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 if !plugin.source.isEmpty {
                     Text(plugin.source)
@@ -155,8 +245,17 @@ struct PluginsView: View {
                 }
             }
             Spacer()
-            Button(plugin.enabled ? "Disable" : "Enable") {
-                if plugin.enabled { viewModel.disable(plugin) } else { viewModel.enable(plugin) }
+            Button(plugin.activation.isActive ? "Disable" : "Enable") {
+                if plugin.activation.isActive {
+                    viewModel.disable(plugin)
+                } else if plugin.toolOverride && viewModel.supportsToolOverrideFlags {
+                    // The grant is a real privilege escalation, so it goes
+                    // through an explicit confirmation rather than riding
+                    // along with the enable.
+                    pendingToolOverride = plugin
+                } else {
+                    viewModel.enable(plugin)
+                }
             }
             .controlSize(.small)
             Button("Update") { viewModel.update(plugin) }
@@ -204,11 +303,16 @@ struct PluginsView: View {
             TextField("github.com/owner/plugin-repo  or  owner/repo", text: $installIdentifier)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.caption, design: .monospaced))
+            Toggle("Enable after installing", isOn: $enableOnInstall)
+                .accessibilityHint("Passes --enable to hermes plugins install. Turn off to install the plugin without activating it.")
+            Text("Hermes installs plugins disabled unless told otherwise. Portable Agent Plugin packages always install disabled.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             HStack {
                 Spacer()
                 Button("Cancel") { showInstall = false }
                 Button("Install") {
-                    viewModel.install(installIdentifier)
+                    viewModel.install(installIdentifier, enable: enableOnInstall)
                     showInstall = false
                 }
                 .buttonStyle(.borderedProminent)

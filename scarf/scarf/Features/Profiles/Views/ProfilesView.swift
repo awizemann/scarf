@@ -28,6 +28,24 @@ struct ProfilesView: View {
         _viewModel = State(initialValue: ProfilesViewModel(context: context))
     }
 
+    /// Content types for profile archives. `hermes profile export` writes
+    /// gzipped tars only, so the panels must offer those — `.zip` made the
+    /// save panel promise a file the CLI never wrote.
+    ///
+    /// `.gzip` covers `.gz`; the explicit `tar.gz` / `tgz` types are added
+    /// when the system can resolve them so the panel accepts the double
+    /// extension without the user fighting it.
+    static let profileArchiveContentTypes: [UTType] = {
+        var types: [UTType] = [.gzip]
+        for identifier in ["org.gnu.gnu-zip-tar-archive"] {
+            if let type = UTType(identifier) { types.append(type) }
+        }
+        for ext in HermesProfileArchive.recognizedExtensions {
+            if let type = UTType(filenameExtension: ext), !types.contains(type) { types.append(type) }
+        }
+        return types
+    }()
+
     /// Whether this window is currently *viewing* `profile` (remote only —
     /// distinct from `profile.isActive`, which is the server's active profile).
     private func isViewing(_ profile: HermesProfile) -> Bool {
@@ -98,8 +116,8 @@ struct ProfilesView: View {
             RemoteProfilePathSheet(
                 context: viewModel.context,
                 title: "Import profile",
-                prompt: "Enter the path to a profile `.zip` on \(viewModel.context.displayName).",
-                placeholder: "e.g. ~/profiles/my-profile.zip",
+                prompt: "Enter the path to a profile `.tar.gz` on \(viewModel.context.displayName).",
+                placeholder: "e.g. ~/profiles/my-profile.tar.gz",
                 confirmLabel: "Import",
                 onCancel: { showRemoteImportSheet = false },
                 onConfirm: { path in
@@ -128,14 +146,16 @@ struct ProfilesView: View {
                 .controlSize(.small)
                 Button {
                     if viewModel.context.isRemote {
-                        // The zip lives on the remote (where `hermes profile
-                        // export` produced it). NSOpenPanel can only browse
-                        // the user's Mac, so route through a remote-path
-                        // input sheet instead.
+                        // The archive lives on the remote (where `hermes
+                        // profile export` produced it). NSOpenPanel can only
+                        // browse the user's Mac, so route through a
+                        // remote-path input sheet instead.
                         showRemoteImportSheet = true
                     } else {
                         let panel = NSOpenPanel()
-                        panel.allowedContentTypes = [.zip]
+                        // `import_profile` opens the path with `tarfile` —
+                        // .zip was never a shape Hermes could read.
+                        panel.allowedContentTypes = Self.profileArchiveContentTypes
                         panel.canChooseFiles = true
                         panel.canChooseDirectories = false
                         panel.allowsMultipleSelection = false
@@ -203,11 +223,16 @@ struct ProfilesView: View {
                         Button("Export…") {
                             // The export lands on this Mac whichever host
                             // Hermes runs on (gh#132) — remote contexts
-                            // stream the zip down from a host-side scratch
-                            // path. See RemoteProfileExport.
+                            // stream the archive down from a host-side
+                            // scratch path. See RemoteProfileExport.
+                            //
+                            // `.tar.gz`, not `.zip`: `export_profile` always
+                            // writes a gzipped tar and appends `.tar.gz` to
+                            // whatever base it is given, so a `.zip`
+                            // destination silently produced `….zip.tar.gz`.
                             let panel = NSSavePanel()
-                            panel.allowedContentTypes = [.zip]
-                            panel.nameFieldStringValue = "\(profile.name)-profile.zip"
+                            panel.allowedContentTypes = Self.profileArchiveContentTypes
+                            panel.nameFieldStringValue = HermesProfileArchive.suggestedFilename(for: profile.name)
                             if panel.runModal() == .OK, let url = panel.url {
                                 viewModel.export(profile, to: url)
                             }
@@ -529,8 +554,8 @@ private struct RemoteProfilePathSheet: View {
             if stat.isDirectory {
                 return .warn("Path is a directory, not a file.")
             }
-            if !trimmed.lowercased().hasSuffix(".zip") {
-                return .warn("File found, but extension isn't `.zip`. Profile import expects a zip archive.")
+            if HermesProfileArchive.validateImportPath(trimmed) != .ok {
+                return .warn("File found, but the extension isn't `.tar.gz` or `.tgz`. `hermes profile import` reads the archive with `tarfile`.")
             }
             return .ok("File found on \(snapshot.displayName).")
         }.value

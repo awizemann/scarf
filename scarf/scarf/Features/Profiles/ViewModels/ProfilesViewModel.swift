@@ -130,17 +130,37 @@ final class ProfilesViewModel {
         runAndReload(["profile", "rename", profile.name, newName], success: "Renamed")
     }
 
+    /// Deletes a profile.
+    ///
+    /// `-y` is required, not optional: without it `profile delete` blocks
+    /// on its own stdin confirmation, and on Scarf's non-tty pipe the read
+    /// hits EOF, the CLI takes the safe default (don't delete), and exits
+    /// **0** — so Scarf reported "Deleted <name>" for a profile that is
+    /// still there. The flag has been on the `profile delete` parser since
+    /// at least v0.12.0 (verified present at v2026.4.30 and every tag
+    /// since), so it needs no capability gate.
+    ///
+    /// Callers must put this behind `ProfilesView`'s existing destructive
+    /// confirmation dialog — `-y` skips Hermes's prompt, so Scarf's own
+    /// prompt becomes the only one the user ever sees.
     func delete(_ profile: HermesProfile) {
-        runAndReload(["profile", "delete", profile.name], success: "Deleted \(profile.name)")
+        runAndReload(["profile", "delete", "-y", "--", profile.name], success: "Deleted \(profile.name)")
     }
 
     /// Export always lands on **this Mac**, whichever host Hermes runs on
     /// (gh#132) — matching Sessions export. Local contexts hand the panel
     /// path straight to the CLI (it runs here). Remote contexts export to
-    /// a host-side scratch path, stream the zip down, and clean up.
+    /// a host-side scratch path, stream the archive down, and clean up.
+    ///
+    /// The destination is normalised to `.tar.gz` first. `export_profile`
+    /// strips only `.tar.gz` / `.tgz` from `--output` and then has
+    /// `make_targz` append `.tar.gz` — so a `foo.zip` destination makes
+    /// the CLI write `foo.zip.tar.gz` and leave the requested path empty,
+    /// while still exiting 0.
     func export(_ profile: HermesProfile, to url: URL) {
+        let outputPath = HermesProfileArchive.normalizedOutputPath(url.path)
         guard context.isRemote else {
-            runAndReload(["profile", "export", profile.name, "--output", url.path], success: "Exported")
+            runAndReload(["profile", "export", "--output", outputPath, "--", profile.name], success: "Exported")
             return
         }
         message = "Exporting \(profile.name)…"
@@ -149,7 +169,7 @@ final class ProfilesViewModel {
             let transport = context.makeTransport()
             let result = await RemoteProfileExport.run(
                 profileName: name,
-                destination: url,
+                destination: URL(fileURLWithPath: outputPath),
                 runCLI: { args, timeout in fileService.runHermesCLI(args: args, timeout: timeout) },
                 streamFile: { path in
                     // Login shell for PATH parity with the rest of the

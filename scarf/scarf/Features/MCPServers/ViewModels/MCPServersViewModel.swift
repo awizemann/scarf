@@ -94,7 +94,11 @@ final class MCPServersViewModel {
     func finishEdit(reload: Bool) {
         editingServer = nil
         if reload {
-            load()
+            // `force: true` is required, not cosmetic: `hasLoaded` is
+            // already true by the time anyone can open the editor, so a
+            // plain `load()` returns immediately and the list keeps
+            // rendering the pre-edit values until the next section switch.
+            load(force: true)
             showRestartBanner = true
         }
     }
@@ -178,10 +182,15 @@ final class MCPServersViewModel {
             let addResult: (exitCode: Int32, output: String)
             switch preset.transport {
             case .stdio:
+                // Env goes in at add time too: many stdio servers refuse to
+                // start (and so fail the CLI's discovery probe) without
+                // their token, and a failed probe is what used to leave the
+                // entry disabled.
                 addResult = fileService.addMCPServerStdio(
                     name: name,
                     command: preset.command ?? "",
-                    args: allArgs
+                    args: allArgs,
+                    env: envValues
                 )
             case .http:
                 addResult = fileService.addMCPServerHTTP(
@@ -201,6 +210,8 @@ final class MCPServersViewModel {
                 }
                 return
             }
+            // Re-assert env on the saved entry: the stdio path already
+            // passed it via `--env`, but the HTTP path has no such flag.
             if !envValues.isEmpty {
                 _ = fileService.setMCPServerEnv(name: name, env: envValues)
             }
@@ -215,7 +226,43 @@ final class MCPServersViewModel {
         }
     }
 
-    func addCustom(name: String, transport: MCPTransport, command: String, args: [String], url: String, auth: String?, defaultExcludedTools: [String] = []) {
+    /// Writes a catalog entry's tool defaults into the freshly-added
+    /// server, mirroring `mcp_catalog.py` at install time.
+    ///
+    /// Both halves of the manifest matter and they are mutually exclusive:
+    /// `tools.default_excluded` becomes `tools.exclude`, and
+    /// `tools.default_enabled` becomes `tools.include` — an allow-list, so
+    /// everything the server adds later stays off until the user opts in.
+    /// Scarf carried only the exclude half, so entries that ship an
+    /// allow-list (n8n, databricks, comfy, kiwi) installed with **every**
+    /// tool live, which is the opposite of what the catalog asked for.
+    nonisolated private static func applyCatalogToolDefaults(
+        fileService: HermesFileService,
+        name: String,
+        defaultEnabledTools: [String],
+        defaultExcludedTools: [String]
+    ) {
+        guard !defaultEnabledTools.isEmpty || !defaultExcludedTools.isEmpty else { return }
+        _ = fileService.updateMCPToolFilters(
+            name: name,
+            include: defaultEnabledTools,
+            exclude: defaultExcludedTools,
+            resources: true,
+            prompts: true
+        )
+    }
+
+    func addCustom(
+        name: String,
+        transport: MCPTransport,
+        command: String,
+        args: [String],
+        url: String,
+        auth: String?,
+        apiKey: String = "",
+        defaultEnabledTools: [String] = [],
+        defaultExcludedTools: [String] = []
+    ) {
         let fileService = self.fileService
         Task.detached { [weak self] in
             let result: (exitCode: Int32, output: String)
@@ -223,20 +270,19 @@ final class MCPServersViewModel {
             case .stdio:
                 result = fileService.addMCPServerStdio(name: name, command: command, args: args)
             case .http:
-                result = fileService.addMCPServerHTTP(name: name, url: url, auth: auth)
+                result = fileService.addMCPServerHTTP(name: name, url: url, auth: auth, apiKey: apiKey)
             case .sse:
                 // Routed through addCustomSSE; this branch is unreachable from
                 // the add-server form (which dispatches per-transport in submit())
                 // but kept so the switch is exhaustive without `@unknown default`.
                 result = (exitCode: 1, output: "SSE servers must be added via addCustomSSE.")
             }
-            if result.exitCode == 0 && !defaultExcludedTools.isEmpty {
-                // Mirrors mcp_catalog.py's `_write_tools_exclude` at install
-                // time: a catalog entry's `tools.default_excluded` becomes
-                // this server's `tools.exclude`, everything else stays
-                // enabled (resources/prompts untouched — default on).
-                _ = fileService.updateMCPToolFilters(
-                    name: name, include: [], exclude: defaultExcludedTools, resources: true, prompts: true
+            if result.exitCode == 0 {
+                Self.applyCatalogToolDefaults(
+                    fileService: fileService,
+                    name: name,
+                    defaultEnabledTools: defaultEnabledTools,
+                    defaultExcludedTools: defaultExcludedTools
                 )
             }
             await MainActor.run { [weak self] in
@@ -258,13 +304,26 @@ final class MCPServersViewModel {
     /// capability-gating; the form filters `.sse` out of `availableTransports`
     /// when `hasMCPSSETransport` is false, so this method is unreachable
     /// from the UI on pre-v0.13 hosts.
-    func addCustomSSE(name: String, url: String, sseReadTimeout: Int?, defaultExcludedTools: [String] = []) {
+    func addCustomSSE(
+        name: String,
+        url: String,
+        sseReadTimeout: Int?,
+        auth: String? = nil,
+        apiKey: String = "",
+        defaultEnabledTools: [String] = [],
+        defaultExcludedTools: [String] = []
+    ) {
         let fileService = self.fileService
         Task.detached { [weak self] in
-            let result = fileService.addMCPServerSSE(name: name, url: url, sseReadTimeout: sseReadTimeout)
-            if result.exitCode == 0 && !defaultExcludedTools.isEmpty {
-                _ = fileService.updateMCPToolFilters(
-                    name: name, include: [], exclude: defaultExcludedTools, resources: true, prompts: true
+            let result = fileService.addMCPServerSSE(
+                name: name, url: url, sseReadTimeout: sseReadTimeout, auth: auth, apiKey: apiKey
+            )
+            if result.exitCode == 0 {
+                Self.applyCatalogToolDefaults(
+                    fileService: fileService,
+                    name: name,
+                    defaultEnabledTools: defaultEnabledTools,
+                    defaultExcludedTools: defaultExcludedTools
                 )
             }
             await MainActor.run { [weak self] in

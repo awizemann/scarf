@@ -62,7 +62,11 @@ struct MCPServersView: View {
         )) {
             if let server = viewModel.editingServer {
                 MCPServerEditorView(
-                    viewModel: MCPServerEditorViewModel(server: server),
+                    // Without the context the editor defaults to `.local`
+                    // and reads/writes **this Mac's** config.yaml while the
+                    // user is looking at a remote host's servers — silently
+                    // editing the wrong machine.
+                    viewModel: MCPServerEditorViewModel(server: server, context: viewModel.context),
                     onSave: { changed in viewModel.finishEdit(reload: changed) },
                     onCancel: { viewModel.finishEdit(reload: false) }
                 )

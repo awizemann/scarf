@@ -9,6 +9,29 @@ struct HermesWebhook: Identifiable, Sendable, Equatable {
     let deliver: String
     let events: [String]
     let routeSuffix: String    // The URL suffix shown by hermes after subscription
+    /// `--deliver-only` route: the rendered prompt is delivered directly,
+    /// the agent never runs. The CLI marks these `(direct — no agent)`.
+    let deliverOnly: Bool
+
+    init(name: String, description: String, deliver: String, events: [String], routeSuffix: String, deliverOnly: Bool = false) {
+        self.name = name
+        self.description = description
+        self.deliver = deliver
+        self.events = events
+        self.routeSuffix = routeSuffix
+        self.deliverOnly = deliverOnly
+    }
+
+    init(_ entry: HermesWebhookEntry) {
+        self.init(
+            name: entry.name,
+            description: entry.description,
+            deliver: entry.deliver,
+            events: entry.events,
+            routeSuffix: entry.url.isEmpty ? "/webhooks/\(entry.name)" : entry.url,
+            deliverOnly: entry.deliverOnly
+        )
+    }
 }
 
 @Observable
@@ -45,7 +68,7 @@ final class WebhooksViewModel {
         Task.detached { [fileService] in
             let result = fileService.runHermesCLI(args: ["webhook", "list"], timeout: 30)
             let notEnabled = Self.detectNotEnabled(result.output)
-            let parsed = notEnabled ? [] : Self.parseWebhookList(result.output)
+            let parsed = notEnabled ? [] : HermesWebhookList.parse(result.output).map(HermesWebhook.init)
             await MainActor.run {
                 self.isLoading = false
                 self.webhookPlatformNotEnabled = notEnabled
@@ -161,56 +184,11 @@ final class WebhooksViewModel {
         }
     }
 
-    /// Tolerant parser for `hermes webhook list`. The CLI output format is evolving,
-    /// so we extract what we can and degrade gracefully for unknown shapes.
-    /// `nonisolated` so it can be invoked from `Task.detached`.
-    nonisolated private static func parseWebhookList(_ output: String) -> [HermesWebhook] {
-        var results: [HermesWebhook] = []
-        var currentName = ""
-        var currentDesc = ""
-        var currentDeliver = ""
-        var currentEvents: [String] = []
-        var currentRoute = ""
-
-        func flush() {
-            if !currentName.isEmpty {
-                results.append(HermesWebhook(
-                    name: currentName,
-                    description: currentDesc,
-                    deliver: currentDeliver,
-                    events: currentEvents,
-                    routeSuffix: currentRoute.isEmpty ? "/webhooks/\(currentName)" : currentRoute
-                ))
-            }
-            currentName = ""; currentDesc = ""; currentDeliver = ""
-            currentEvents = []; currentRoute = ""
-        }
-
-        for raw in output.components(separatedBy: "\n") {
-            let line = raw
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty { continue }
-            // New webhook block: non-indented, alphanumeric/underscore.
-            if !line.hasPrefix(" ") && !line.hasPrefix("\t") {
-                flush()
-                let candidate = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: ":"))
-                if candidate.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil {
-                    currentName = candidate
-                }
-                continue
-            }
-            if trimmed.lowercased().hasPrefix("description:") {
-                currentDesc = String(trimmed.dropFirst("description:".count)).trimmingCharacters(in: .whitespaces)
-            } else if trimmed.lowercased().hasPrefix("deliver:") {
-                currentDeliver = String(trimmed.dropFirst("deliver:".count)).trimmingCharacters(in: .whitespaces)
-            } else if trimmed.lowercased().hasPrefix("events:") {
-                let list = String(trimmed.dropFirst("events:".count)).trimmingCharacters(in: .whitespaces)
-                currentEvents = list.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-            } else if trimmed.lowercased().hasPrefix("url:") || trimmed.lowercased().hasPrefix("route:") {
-                currentRoute = trimmed.components(separatedBy: ":").dropFirst().joined(separator: ":").trimmingCharacters(in: .whitespaces)
-            }
-        }
-        flush()
-        return results
-    }
+    // The old `parseWebhookList` lived here. It opened a new record only
+    // on a line with no leading whitespace — a line `webhook.py::_cmd_list`
+    // never prints, since every row it emits is indented under a `  ◆ name`
+    // bullet. It therefore matched nothing and the section rendered empty
+    // regardless of how many subscriptions existed. Parsing now lives in
+    // `ScarfCore.HermesWebhookList`, against fixtures transcribed from that
+    // emitter.
 }

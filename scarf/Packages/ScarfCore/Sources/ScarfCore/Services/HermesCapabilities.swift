@@ -353,6 +353,34 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `PluginsView`.
     public var hasPluginToolOverride: Bool { atLeastSemver(0, 14, 0) }
 
+    /// `hermes plugins enable <name> --allow-tool-override` /
+    /// `--no-allow-tool-override` — the non-interactive consent pair that
+    /// grants (or refuses) a plugin permission to replace built-in tools
+    /// like `shell_exec` / `write_file`.
+    ///
+    /// **Distinct from `hasPluginToolOverride` (v0.14), and later:** the
+    /// v0.14 flag is about the plugin *manifest* field Scarf renders as a
+    /// badge. The CLI flags that let Scarf answer the consent prompt
+    /// without a tty first appear in the `plugins enable` parser at
+    /// v2026.7.1 = **v0.18.0** — verified absent at v2026.6.19 (v0.17.0)
+    /// and present at v2026.7.1 (`git grep allow-tool-override` over
+    /// `hermes_cli/`). On older hosts `plugins enable` prompts on stdin
+    /// and Scarf must not offer the grant affordance at all.
+    public var hasPluginEnableToolOverrideFlag: Bool { atLeastSemver(0, 18, 0) }
+
+    /// `hermes plugins list --json` — machine-readable activation state
+    /// (`[{name, status, version, description, source}]`, where `status`
+    /// is `enabled` / `disabled` / `not enabled`).
+    ///
+    /// Version floor verified by walking the `plugins list` subparser
+    /// across tags: the `--json` argument is absent at v2026.5.29.2
+    /// (v0.15.2) and present at v2026.6.5 (**v0.16.0**). Pre-v0.16 hosts
+    /// reject the flag at argparse time and the whole command exits
+    /// nonzero, so callers must fall back to reading `plugins.enabled` /
+    /// `plugins.disabled` out of config.yaml — which is the same source
+    /// `_plugin_status` reads, so both paths agree exactly.
+    public var hasPluginsListJSON: Bool { atLeastSemver(0, 16, 0) }
+
     /// `hermes proxy` CLI verb — OpenAI-compatible local proxy that
     /// attaches OAuth-authenticated provider credentials to outbound
     /// requests (v0.14+). Default port 8645, default adapter `nous`.

@@ -3,7 +3,7 @@ import Foundation
 @testable import scarf
 
 /// gh#132: profile export lands on this Mac, whichever host Hermes runs
-/// on. The pipeline exports to a host-side scratch path, streams the zip
+/// on. The pipeline exports to a host-side scratch path, streams the archive
 /// down, and moves it into the chosen destination. All steps are stubbed
 /// closures — no SSH, no subprocess.
 @Suite struct RemoteProfileExportPipelineTests {
@@ -30,7 +30,7 @@ import Foundation
         }
     }
 
-    @Test("Happy path: CLI targets a /tmp scratch zip, bytes land verbatim, scratch is removed")
+    @Test("Happy path: CLI targets a /tmp scratch tar.gz, bytes land verbatim, scratch is removed")
     func happyPath() async {
         let recorder = Recorder()
         let dest = Self.tempDestination()
@@ -54,10 +54,17 @@ import Foundation
         // never at the Mac-side destination (the gh#129 bug class).
         #expect(recorder.cliArgs.count == 1)
         let args = recorder.cliArgs[0]
-        #expect(args.prefix(4) == ["profile", "export", "alpha", "--output"])
-        let scratch = args.last ?? ""
+        // `--` before the profile name so a name can never be read as a flag.
+        #expect(args.prefix(2) == ["profile", "export"])
+        #expect(args.suffix(2) == ["--", "alpha"])
+        let outputIndex = args.firstIndex(of: "--output")!
+        let scratch = args[outputIndex + 1]
         #expect(scratch.hasPrefix("/tmp/scarf-profile-export-"))
-        #expect(scratch.hasSuffix(".zip"))
+        // `.tar.gz`, not `.zip`: `export_profile` strips only .tar.gz/.tgz
+        // and then re-appends .tar.gz, so a `.zip` scratch path made the
+        // CLI write `….zip.tar.gz` and the download look for a file that
+        // never existed — remote export could not succeed at all.
+        #expect(scratch.hasSuffix(".tar.gz"))
         #expect(scratch != dest.path)
         #expect(recorder.removed == [scratch])
     }
