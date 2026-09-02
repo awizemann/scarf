@@ -4,7 +4,7 @@ type: note
 permalink: scarf/ops/localization-workflow
 tags: [i18n, localization]
 created: 2026-05-29
-updated: 2026-08-31
+updated: 2026-09-01
 ---
 
 ## Observations
@@ -15,3 +15,6 @@ updated: 2026-08-31
 - [gotcha] English stem+suffix plural-hack keys (any key with a letter directly before %@, e.g. "%lld skill%@", "%lld entr%@" — code substitutes English suffixes like "s"/"y"/"ies" into %@; 10 such keys as of v2.22.0) must NOT be translated; leave them out of the locale JSONs so they fall back to English #rule
 - [gotcha] Headless xcodebuild never merges newly extracted keys into Localizable.xcstrings — only an interactive Xcode IDE build does; run one before translating new strings #tooling
 - [reference] Deeper context: scarf/docs/I18N.md #docs
+
+- [rule] **Shared components must take `LocalizedStringKey`, never `String`.** A `String` property binds `Text`'s VERBATIM overload, so nothing routed through the component is ever extracted — that silently made ~146 call sites of `ScarfPageHeader`/`ScarfSectionHeader`/`ScarfTextField`/`ScarfBadge` unlocalizable (go/no-go blocking condition 6, fixed in be4f27d). Take `LocalizedStringKey` and add an explicit `verbatim:` initializer for runtime-computed text (`init(verbatim:)`, `init(verbatim:verbatimSubtitle:)`); literal call sites are source-compatible, and only genuinely dynamic ones need the label. Same trap as `.accessibilityLabel(someStringVariable)` #rule #i18n
+- [gotcha] `subtitle.map(Text.init)` does NOT compile for a `LocalizedStringKey?` — overload resolution picks `Text.init<S: StringProtocol>`. Write `subtitle.map { Text($0) }` #gotcha

@@ -2,12 +2,12 @@
 title: Aggregator providers must skip the model/provider mismatch preflight
 type: note
 permalink: scarf/decisions/aggregator-providers-must-skip-the-model-provider-mismatch
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scripts/check-hermes-tables.py]
+source_paths_inferred: false
+source_sha: 6f67608679153925b5c6d55816c917ddd76bc3a2
 created: 2026-07-03
 updated: 2026-07-04
-source_sha: 741b7a0dff0adf0779bace4eea4ebf0a6b929d9d
-source_paths: scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scripts/check-hermes-tables.py
-source_paths_inferred: false
-reviewed: 2026-07-17
+reviewed: 2026-09-01
 reviewed_by: audit:claude-code (background)
 ---
 
