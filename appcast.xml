@@ -6,6 +6,111 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 3.0.0</title>
+      <sparkle:version>67</sparkle:version>
+      <sparkle:shortVersionString>3.0.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Wed, 02 Sep 2026 19:27:01 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf 3.0.0</p>
+<p>Scarf 3.0 is two releases&#x27; worth of ambition landing at once: <strong>Bot Mode grows up</strong>, and <strong>the entire application went through a full audit and came out harder, faster, more honest, and more accessible</strong>. There are no breaking changes — 3.0 marks a milestone, not a migration. Compatibility spans Hermes v0.6.0 through v0.21.0, unchanged.</p>
+<h2>Bots, complete</h2>
+<p>The Bots section introduced in v2.24 now configures the <em>agent</em>, not just its face — closing the gap with (and in places passing) Hermes&#x27;s own desktop:</p>
+<ul>
+  <li><strong>Per-bot model pins</strong> with honest provenance: an unpinned bot says &quot;Hermes default&quot; — because profiles genuinely don&#x27;t inherit your main profile&#x27;s model, and now the UI tells the truth about it.</li>
+  <li><strong>SOUL.md editing</strong> with a real conflict guard: external edits are detected, and you choose reload or overwrite — never a silent clobber.</li>
+  <li><strong>Per-bot toolsets and MCP servers</strong>, toggled from the bot&#x27;s Agent pane; skills shown honestly read-only (the CLI offers no write path, and we don&#x27;t fake one).</li>
+  <li><strong>A roster that scales</strong>: search, recent-activity ordering with carrier-aware last-message previews, live presence, custom avatars with graceful fallbacks — and a rebuilt scanner that paints a 12-profile SSH roster in <strong>one</strong> round-trip instead of sixty.</li>
+  <li>Routines gained delete, input validation, and delegation parity with Hermes desktop; remote bots share async-run state with the Peers section instead of drifting.</li>
+</ul>
+<h2>The 3.0 audit</h2>
+<p>Every sidebar section was independently audited across five lenses — correctness, security, performance, translation, accessibility — and everything blocking was fixed:</p>
+<p><strong>Security.</strong> Dashboard widgets can no longer be tricked into reading files outside the project via symlinks; mini-app permission grants are fingerprinted, so an app that widens its permissions must be re-approved, and agent-generated apps no longer arrive with file access pre-ticked; webview widgets are pinned to their declared https host (Mac <em>and</em> iOS); links in agent-authored markdown pass a scheme allowlist everywhere; a remote-shell escape through tool-call metadata is closed with encoding, not hope; secrets moved out of process argv where an env path exists; remote <code>.env</code> writes are now private-mode; and every place user or agent text meets a command line got an end-of-options guard.</p>
+<p><strong>Repaired surfaces.</strong> Five sections were quietly lying and now aren&#x27;t: <strong>Plugins</strong> showed fabricated enable state (it read a marker file Hermes never writes) and reported installs that landed disabled; <strong>Webhooks</strong> listed nothing because its parser predated the CLI&#x27;s format — and the auto-generated signing secret it used to discard is now shown once, copyable; <strong>Profiles</strong> export produced <code>.tar.gz</code> while promising <code>.zip</code> (remote export literally could not work) and delete claimed success without deleting; <strong>MCP</strong> server adds piped blind confirmations that could write a junk credential — replaced with state-aware plans and honest outcome parsing, and the editor now edits the <em>remote</em> host&#x27;s config when you&#x27;re on one; <strong>one-shot cron jobs</strong> can be edited again.</p>
+<p><strong>Honest numbers.</strong> The Dashboard&#x27;s &quot;Last 7 days&quot; now means seven days; Insights computes every card from one session population; Sessions&#x27; Model column has data, &quot;Updated&quot; reflects activity, deletes report failures, and the Memory editor <strong>never discards your unsaved text</strong> because the agent happened to write a file.</p>
+<p><strong>Performance.</strong> Mutation actions across a dozen surfaces moved off the main thread (no more beachballs pressing Start on a remote gateway); Logs reads are bounded and capped; the sessions table is lazy; Kanban&#x27;s polling pauses with the window and backs off on failure; Health probes run concurrently.</p>
+<p><strong>Fully localized, for real this time.</strong> An entire class of UI chrome — settings rows, section headers, empty states, loading overlays — was structurally invisible to the translation catalog; translations we&#x27;d already paid for were unreachable at runtime. The components were fixed, 216 keys added, and the catalog now stands at <strong>2,374 keys across six languages</strong> with plural forms that use real grammar agreement, guarded by tests that make silent regressions fail the build.</p>
+<p><strong>Accessible throughout.</strong> VoiceOver and Voice Control coverage extended to the surfaces the earlier pass missed: sessions tables (with a structural fix — the project chip is now genuinely focusable), Kanban cards (the &quot;this task will never run&quot; warning is finally audible), tools, logs, health, curator, and chat transcripts; animations respect Reduce Motion.</p>
+<h2>Under the hood</h2>
+<ul>
+  <li>561 tests added since v2.24.0 (ScarfCore at 1,818, app suites at 607); Mac and iOS both green.</li>
+  <li>The audit itself was adversarial: findings were verified before fixing (six were refuted with evidence), the security and contract fixes were independently re-audited, and that re-audit caught three regressions in the fixes themselves — including a BSD/GNU <code>cp -n</code> divergence — all closed before this cut.</li>
+  <li>Known edges, documented not hidden: remote-project symlink containment is best-effort (the guarantee is verified locally); view-model status banners remain English pending an app-wide policy pass; group chats between bots remain deliberately out of scope.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>Updates arrive via Sparkle&#x27;s built-in updater; or grab the zip from this release. Nothing to migrate.</li>
+  <li>macOS 14.6+ (Apple Silicon and Intel). ScarfGo for iOS ships separately via TestFlight.</li>
+  <li>Compatible with Hermes v0.6.0 through v0.21.0. Capability-gated surfaces appear only when the connected host supports them; older hosts render exactly as before.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v3.0.0/Scarf-v3.0.0-Universal.zip"
+                 sparkle:edSignature="RrGF0clZ9oR2cvpuoMm4lXeYiNGxh+AoIyxpPjrWFSx3zKdxJAxUKnD8dek37qRAG6tCfGhwmbNhWx0UlaPnCg=="
+                 length="24979589"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 2.24.0</title>
       <sparkle:version>66</sparkle:version>
       <sparkle:shortVersionString>2.24.0</sparkle:shortVersionString>
