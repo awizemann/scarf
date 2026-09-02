@@ -22,9 +22,9 @@ import Foundation
 /// * `.null` → `NULL`
 /// * `.integer(n)` → `<n>` (no quoting)
 /// * `.real(d)` → `%.17g`-formatted (round-trips Double via decimal)
-/// * `.text(s)` → `'<s with single-quotes doubled>'`, with newlines split
-///   out into `char(10)`/`char(13)` concatenation so a value can never
-///   terminate the remote heredoc (see ``encodeText(_:)``)
+/// * `.text(s)` → `'<s with single-quotes doubled>'`, with newlines and the
+///   other C0 controls split out into `char(<n>)` concatenation so a value
+///   can never terminate the remote heredoc (see ``encodeText(_:)``)
 /// * `.blob(d)` → `X'<hex>'`
 public enum SQLValueInliner {
 
@@ -138,28 +138,52 @@ public enum SQLValueInliner {
     /// multi-line search query is the real one). The result is an
     /// expression, not a bare literal — valid everywhere a literal is, in
     /// every SQL we build.
+    ///
+    /// **Why this iterates `unicodeScalars` and not `Characters`.** Swift's
+    /// `Character` is an extended grapheme cluster, and CRLF (`"\r\n"`) is
+    /// ONE grapheme — it equals neither `"\n"` nor `"\r"`. A
+    /// `Character`-based loop (and a `String.contains("\n")` fast-path,
+    /// which compares graphemes too) therefore let a CRLF sequence through
+    /// **completely unencoded**, re-opening the exact heredoc escape this
+    /// function exists to close: `"\r\n__SCARF_SQL__\r\n<command>"` is
+    /// accepted by the shell's heredoc terminator matching on hosts where
+    /// the trailing `\r` lands outside the delimiter, and in any case a raw
+    /// newline reaches the remote SQL. Scalars have no such clustering, so
+    /// every `\n` and `\r` is seen individually. (Verified by execution:
+    /// `"a\r\nb".contains("\n")` is `false`.)
+    ///
+    /// **Other C0 controls.** SQLite text accepts any byte except NUL, and
+    /// `sqlite3_prepare` truncates at an embedded NUL — a value carrying one
+    /// would silently lose its tail (and, more importantly, would truncate
+    /// the *statement* if it survived into the shipped SQL). NUL and the
+    /// remaining C0 controls are therefore encoded as `char(<n>)` too, on
+    /// the same concatenation mechanism: lossless, no rejection, and no
+    /// control byte ever appears raw in the transported SQL.
     static func encodeText(_ s: String) -> String {
-        func quoted(_ part: Substring) -> String {
+        func quoted(_ part: String) -> String {
             "'" + part.replacingOccurrences(of: "'", with: "''") + "'"
         }
-        guard s.contains("\n") || s.contains("\r") else {
-            return quoted(s[...])
+        // A scalar needing `char(n)` encoding: every C0 control (0x00–0x1F)
+        // plus DEL (0x7F). Newlines are the load-bearing case; the rest ride
+        // along so nothing raw and unprintable reaches the remote shell.
+        func needsEscape(_ v: UInt32) -> Bool { v < 0x20 || v == 0x7F }
+
+        let scalars = s.unicodeScalars
+        guard scalars.contains(where: { needsEscape($0.value) }) else {
+            return quoted(s)
         }
         var pieces: [String] = []
-        var current = s.startIndex
-        var i = s.startIndex
-        while i < s.endIndex {
-            let c = s[i]
-            if c == "\n" || c == "\r" {
-                pieces.append(quoted(s[current..<i]))
-                pieces.append(c == "\n" ? "char(10)" : "char(13)")
-                i = s.index(after: i)
-                current = i
-                continue
+        var current = String.UnicodeScalarView()
+        for scalar in scalars {
+            if needsEscape(scalar.value) {
+                pieces.append(quoted(String(current)))
+                pieces.append("char(\(scalar.value))")
+                current = String.UnicodeScalarView()
+            } else {
+                current.append(scalar)
             }
-            i = s.index(after: i)
         }
-        pieces.append(quoted(s[current...]))
+        pieces.append(quoted(String(current)))
         return "(" + pieces.joined(separator: " || ") + ")"
     }
 }
