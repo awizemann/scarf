@@ -41,6 +41,12 @@ final class FleetApplyViewModel {
     private(set) var cronCopySet: FleetApplyPlan.CronCopySet?
 
     private(set) var isPreparing = false
+    /// (completed, total) while a push is running, else nil. A fleet apply is
+    /// a minutes-long operation against remote machines; before this the
+    /// sheet showed nothing between "applying" and "done", so a slow push and
+    /// a wedged one looked identical.
+    private(set) var applyProgress: (done: Int, total: Int)?
+
     /// Live apply task, so the user can cancel a long fleet push.
     @ObservationIgnored private var applyTask: Task<[FleetApplyExecutor.TargetResult], Never>?
     private(set) var didCancel = false
@@ -188,17 +194,22 @@ final class FleetApplyViewModel {
         // A DETACHED task doesn't inherit cancellation from its parent, so
         // the handle is retained and cancelled explicitly by `cancel()`;
         // `Task.isCancelled` inside the body then reads THIS task's flag.
-        let task = Task.detached(priority: .userInitiated) { () -> [FleetApplyExecutor.TargetResult] in
-            FleetApplyExecutor(contexts: contexts).execute(
+        applyProgress = (0, plan.effectiveTargets.count)
+        let task = Task.detached(priority: .userInitiated) { [weak self] () -> [FleetApplyExecutor.TargetResult] in
+            await FleetApplyExecutor(contexts: contexts).execute(
                 plan,
                 source: sourceProject,
                 sourceCronJobs: cronJobs,
-                isCancelled: { Task.isCancelled }
+                isCancelled: { Task.isCancelled },
+                onProgress: { done, total in
+                    Task { @MainActor in self?.applyProgress = (done, total) }
+                }
             )
         }
         applyTask = task
         let results = await task.value
         applyTask = nil
+        applyProgress = nil
         phase = .done(results)
     }
 

@@ -115,6 +115,10 @@ struct ImageWidgetView: View {
                 return .failure("Could not read file: \(error.localizedDescription)")
             }
         }.value
+        // GENERATION GUARD — see `LogTailWidgetView.reload`. `.task(id:)`
+        // cancellation does not stop a suspended `await` from resuming, and
+        // the detached read does not inherit cancellation at all.
+        guard !Task.isCancelled else { return }
         switch outcome {
         case .success(let img):
             self.localImage = img

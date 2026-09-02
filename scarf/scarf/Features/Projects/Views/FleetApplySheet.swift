@@ -276,6 +276,17 @@ struct FleetApplySheet: View {
 
     // MARK: - Footer
 
+    /// "Applying… 2 of 5" while a push is running. A fleet apply touches
+    /// remote machines for minutes; a bare "Applying…" made a slow push
+    /// indistinguishable from a wedged one.
+    private var applyingLabel: String {
+        if viewModel.didCancel { return "Stopping…" }
+        guard let progress = viewModel.applyProgress, progress.total > 0 else {
+            return "Applying…"
+        }
+        return "Applying… \(progress.done) of \(progress.total)"
+    }
+
     @ViewBuilder
     private var footer: some View {
         HStack {
@@ -295,7 +306,7 @@ struct FleetApplySheet: View {
                     .disabled(viewModel.didCancel)
                 Spacer()
                 ProgressView().controlSize(.small)
-                Text(viewModel.didCancel ? "Stopping…" : "Applying…")
+                Text(applyingLabel)
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
             case .done:

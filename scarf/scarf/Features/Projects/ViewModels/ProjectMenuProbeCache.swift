@@ -16,8 +16,13 @@ import ScarfCore
 /// removed at uninstall time), so they are probed off-main once per registry
 /// reload and read from a dictionary thereafter.
 ///
-/// **Unknown reads as false.** A menu item that appears a moment late is a
-/// smaller lie than "Uninstall Template" offered for a project that has none.
+/// **A cache miss falls back to a live probe on LOCAL contexts only.** The
+/// asynchronous refresh leaves a window right after an install in which the
+/// menu would still answer "no template here" — and on a local context the
+/// stat that closes that window is a plain filesystem `stat`, which was never
+/// the cost this class exists to remove. Remote contexts — where a miss would
+/// mean a blocking SSH round-trip on the actor drawing the menu — answer
+/// `false` and correct themselves on the next refresh.
 @Observable
 @MainActor
 final class ProjectMenuProbeCache {
@@ -32,16 +37,26 @@ final class ProjectMenuProbeCache {
     /// must not publish its stale map over a later one.
     @ObservationIgnored private var generation = 0
 
+    /// The context these answers describe. Set by `refresh`; nil until the
+    /// first one, which is also when there is nothing cached to fall back on.
+    @ObservationIgnored private var probedContext: ServerContext?
+
     func isConfigurable(_ project: ProjectEntry) -> Bool {
-        answers[project.path]?.isConfigurable ?? false
+        if let cached = answers[project.path] { return cached.isConfigurable }
+        guard let context = probedContext, !context.isRemote else { return false }
+        return context.makeTransport()
+            .fileExists(ProjectConfigService.manifestCachePath(for: project))
     }
 
     func hasInstalledTemplate(_ project: ProjectEntry) -> Bool {
-        answers[project.path]?.hasInstalledTemplate ?? false
+        if let cached = answers[project.path] { return cached.hasInstalledTemplate }
+        guard let context = probedContext, !context.isRemote else { return false }
+        return ProjectTemplateUninstaller(context: context).isTemplateInstalled(project: project)
     }
 
     /// Re-probe every project. Call after the registry loads or changes.
     func refresh(projects: [ProjectEntry], context: ServerContext) {
+        probedContext = context
         generation &+= 1
         let generation = self.generation
         let paths = projects.map(\.path)

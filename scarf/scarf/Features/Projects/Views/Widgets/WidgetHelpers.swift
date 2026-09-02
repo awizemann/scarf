@@ -25,14 +25,20 @@ extension Result where Failure == WidgetIOError {
 }
 
 enum AnsiStripper {
-    /// Single-call regex strip. Compiles per call — log windows are small,
-    /// the cost is negligible, and skipping a `static let` cache means
-    /// callers from `Task.detached` don't fight the Swift 6 actor checker.
+    /// COMPILED ONCE. The previous comment claimed a per-call compile was
+    /// negligible "because log windows are small" — but the log_tail widget
+    /// strips a whole N-line window on every watcher tick, so this ran on the
+    /// dashboard's hot path. `NSRegularExpression` is documented thread-safe
+    /// once constructed, so a shared instance is safe from the detached tasks
+    /// the widgets use; `nonisolated(unsafe)` states that for Swift 6.
+    ///
+    /// ESC = \u{1B}; CSI = ESC `[`; final byte is in 0x40..0x7E.
+    nonisolated(unsafe) private static let ansiPattern = try? NSRegularExpression(
+        pattern: "\u{1B}\\[[0-?]*[ -/]*[@-~]", options: []
+    )
+
     nonisolated static func strip(_ s: String) -> String {
-        // ESC = \u{1B}; CSI = ESC [ ; final byte is in 0x40..0x7E.
-        guard let pattern = try? NSRegularExpression(
-            pattern: "\u{1B}\\[[0-?]*[ -/]*[@-~]", options: []
-        ) else { return s }
+        guard let pattern = ansiPattern else { return s }
         let range = NSRange(s.startIndex..., in: s)
         return pattern.stringByReplacingMatches(
             in: s, options: [], range: range, withTemplate: ""

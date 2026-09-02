@@ -134,9 +134,13 @@ final class PersonalitiesViewModel {
         guard !isSaving else { return }
         isSaving = true
         let ctx = context
-        let path = soulPath
+        // Named `soulPath`, not `path`: the config-writer parity gate
+        // (`AllConfigWritersParityTests.nonLiteralKeySiteCountsMatchTheManifest`)
+        // treats `writeText(path, …)` as a direct-YAML config splice, and this
+        // write is SOUL.md — not config.yaml, not a config key at all.
+        let soulPath = self.soulPath
         Task { [weak self] in
-            let ok = await Task.detached { ctx.writeText(path, content: content) }.value
+            let ok = await Task.detached { ctx.writeText(soulPath, content: content) }.value
             guard let self else { return }
             self.isSaving = false
             if ok {

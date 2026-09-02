@@ -21,6 +21,13 @@ import Observation
 @MainActor
 @Observable
 final class MessageSpeechService: NSObject {
+    /// COMPILED ONCE — this was rebuilt from its pattern on every spoken
+    /// message. `NSRegularExpression` is thread-safe once constructed.
+    /// Link syntax: `[text](url)` → `text`.
+    nonisolated(unsafe) private static let markdownLinkRegex = try? NSRegularExpression(
+        pattern: #"\[([^\]]+)\]\([^)]+\)"#, options: []
+    )
+
     static let shared = MessageSpeechService()
 
     /// The message id currently being spoken, or `nil` when idle.
@@ -79,10 +86,7 @@ final class MessageSpeechService: NSObject {
         out = out.replacingOccurrences(of: "**", with: "")
         out = out.replacingOccurrences(of: "__", with: "")
         // Link syntax: [text](url) → text
-        if let regex = try? NSRegularExpression(
-            pattern: #"\[([^\]]+)\]\([^)]+\)"#,
-            options: []
-        ) {
+        if let regex = Self.markdownLinkRegex {
             let range = NSRange(out.startIndex..., in: out)
             out = regex.stringByReplacingMatches(
                 in: out,

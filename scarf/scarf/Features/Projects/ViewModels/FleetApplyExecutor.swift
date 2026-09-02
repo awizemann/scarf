@@ -93,12 +93,18 @@ struct FleetApplyExecutor: Sendable {
     /// `isCancelled` is polled between targets and between cron creates so a
     /// long fleet push can be stopped; already-written targets keep their
     /// results and the rest come back explicitly `.skipped` "cancelled".
+    /// `onProgress(completed, total)` fires on each target as it finishes, in
+    /// completion order. Added because a fleet push against several remote
+    /// hosts is a minutes-long operation that previously reported nothing at
+    /// all between "applying" and "done" — the user could not tell a slow
+    /// push from a wedged one, which is exactly when they reach for Cancel.
     nonisolated func execute(
         _ plan: FleetApplyPlan,
         source: ScarfProject,
         sourceCronJobs: [HermesCronJob]? = nil,
-        isCancelled: @Sendable () -> Bool = { false }
-    ) -> [TargetResult] {
+        isCancelled: @Sendable @escaping () -> Bool = { false },
+        onProgress: @Sendable @escaping (Int, Int) -> Void = { _, _ in }
+    ) async -> [TargetResult] {
         // Read the source host's project cron jobs once, only if some
         // target actually applies cron.
         let appliesCron = plan.targets.contains { t in
@@ -112,25 +118,61 @@ struct FleetApplyExecutor: Sendable {
             ).copyable
         }
 
-        var results: [TargetResult] = []
-        results.reserveCapacity(plan.targets.count)
-        for target in plan.targets {
-            if isCancelled() {
-                results.append(TargetResult(
-                    serverId: target.serverId,
-                    serverDisplayName: target.serverDisplayName,
-                    fields: target.actions.map {
-                        FieldResult(field: $0.field, status: .skipped, message: "cancelled before apply")
+        // CONCURRENT across targets. Each target is a different host with its
+        // own manifest and its own cron list — no target reads anything
+        // another writes — so the serial loop this replaced simply paid every
+        // host's SSH latency end to end, one after another. Bounded at
+        // `maxConcurrentHosts`: a fleet is a handful of machines, and an
+        // unbounded group would open an SSH channel to every one of them at
+        // once.
+        //
+        // Cancellation keeps its honesty (F5): a target that has NOT started
+        // when cancel lands reports "cancelled before apply", and one already
+        // in flight runs to completion and reports what it actually did.
+        // Results are re-sorted into PLAN ORDER, not completion order, so the
+        // result sheet reads the same way the preview did.
+        let total = plan.targets.count
+        let indexed = Array(plan.targets.enumerated())
+        let completed = ProgressCounter()
+
+        var byIndex: [Int: TargetResult] = [:]
+        await withTaskGroup(of: (Int, TargetResult).self) { group in
+            var next = 0
+            func addTask(_ item: (offset: Int, element: FleetApplyPlan.Target)) {
+                group.addTask {
+                    let target = item.element
+                    let result: TargetResult
+                    if isCancelled() {
+                        result = TargetResult(
+                            serverId: target.serverId,
+                            serverDisplayName: target.serverDisplayName,
+                            fields: target.actions.map {
+                                FieldResult(field: $0.field, status: .skipped, message: "cancelled before apply")
+                            }
+                        )
+                    } else {
+                        result = self.execute(
+                            target: target, plan: plan, source: source,
+                            sourceCronJobs: cronJobs, isCancelled: isCancelled
+                        )
                     }
-                ))
-                continue
+                    onProgress(await completed.increment(), total)
+                    return (item.offset, result)
+                }
             }
-            results.append(
-                execute(target: target, plan: plan, source: source, sourceCronJobs: cronJobs, isCancelled: isCancelled)
-            )
+            while next < indexed.count, next < Self.maxConcurrentHosts {
+                addTask(indexed[next]); next += 1
+            }
+            while let (offset, result) = await group.next() {
+                byIndex[offset] = result
+                if next < indexed.count { addTask(indexed[next]); next += 1 }
+            }
         }
-        return results
+        return (0..<total).compactMap { byIndex[$0] }
     }
+
+    /// How many hosts a fleet push writes to at once.
+    static let maxConcurrentHosts = 4
 
     private nonisolated func execute(
         target: FleetApplyPlan.Target,
@@ -354,5 +396,16 @@ struct FleetApplyExecutor: Sendable {
 
     private nonisolated func context(for serverId: String) -> ServerContext? {
         contexts.first { $0.id.uuidString == serverId }
+    }
+}
+
+/// Completion tally for `FleetApplyExecutor.execute`'s progress callback.
+/// An actor rather than a lock because the group's children report from
+/// arbitrary threads and the count must be monotonic for the UI to read.
+private actor ProgressCounter {
+    private var value = 0
+    func increment() -> Int {
+        value += 1
+        return value
     }
 }

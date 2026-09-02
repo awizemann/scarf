@@ -157,18 +157,63 @@ final class MCPServersViewModel {
         }
     }
 
+    /// How many servers "Test All" probes at once. Each probe launches the
+    /// real MCP server and waits on its handshake, so serialising them made
+    /// the wall time the SUM of every server's start-up; unbounded would
+    /// launch every configured server simultaneously.
+    static let maxConcurrentTests = 4
+
+    /// Live "Test All" handle, so a run against a wedged server can be
+    /// stopped. Before F6 the loop had no cancellation at all — starting it
+    /// committed the user to every remaining probe's timeout.
+    @ObservationIgnored private var testAllTask: Task<Void, Never>?
+
+    var isTestingAll: Bool { testAllTask != nil }
+
     func testAll() {
-        let targets = servers.map(\.name)
+        guard testAllTask == nil else { return }
+        // Skip servers already being probed individually rather than
+        // double-launching them.
+        let targets = servers.map(\.name).filter { !testingNames.contains($0) }
+        guard !targets.isEmpty else { return }
         let fileService = self.fileService
-        Task.detached { [weak self] in
-            for name in targets {
-                let result = await fileService.testMCPServer(name: name)
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    self.testResults[name] = result
+        // Every target enters the spinner set UP FRONT: previously `testAll`
+        // never touched `testingNames`, so the rows showed no busy state at
+        // all and results simply appeared one at a time out of nowhere.
+        for name in targets { testingNames.insert(name) }
+
+        testAllTask = Task { [weak self] in
+            await withTaskGroup(of: (String, MCPTestResult).self) { group in
+                var next = 0
+                func addTask() {
+                    let name = targets[next]
+                    next += 1
+                    group.addTask { (name, await fileService.testMCPServer(name: name)) }
                 }
+                while next < targets.count, next < Self.maxConcurrentTests { addTask() }
+                while let (name, result) = await group.next() {
+                    guard let self else { break }
+                    self.testingNames.remove(name)
+                    self.testResults[name] = result
+                    // Cancelled: stop launching more, and clear the spinner
+                    // on the ones that never ran so no row is left spinning
+                    // forever.
+                    if Task.isCancelled { break }
+                    if next < targets.count { addTask() }
+                }
+                group.cancelAll()
             }
+            guard let self else { return }
+            for name in targets { self.testingNames.remove(name) }
+            self.testAllTask = nil
         }
+    }
+
+    /// Stop a "Test All" in progress. Results already collected are kept —
+    /// a probe that ran and answered is information, whether or not the rest
+    /// of the sweep finished.
+    func cancelTestAll() {
+        testAllTask?.cancel()
     }
 
     func addFromPreset(preset: MCPServerPreset, name: String, pathArg: String?, envValues: [String: String]) {

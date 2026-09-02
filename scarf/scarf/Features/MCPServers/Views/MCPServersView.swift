@@ -94,13 +94,26 @@ struct MCPServersView: View {
             }
             Spacer()
             HStack(spacing: ScarfSpace.s2) {
-                Button {
-                    viewModel.testAll()
-                } label: {
-                    Label("Test all", systemImage: "bolt.horizontal")
+                // The button becomes Stop while a sweep runs: each probe
+                // launches a real MCP server and waits on its handshake, so
+                // a wedged one used to hold the whole sweep hostage with no
+                // way out.
+                if viewModel.isTestingAll {
+                    Button {
+                        viewModel.cancelTestAll()
+                    } label: {
+                        Label("Stop testing", systemImage: "stop.circle")
+                    }
+                    .buttonStyle(ScarfGhostButton())
+                } else {
+                    Button {
+                        viewModel.testAll()
+                    } label: {
+                        Label("Test all", systemImage: "bolt.horizontal")
+                    }
+                    .buttonStyle(ScarfGhostButton())
+                    .disabled(viewModel.servers.isEmpty)
                 }
-                .buttonStyle(ScarfGhostButton())
-                .disabled(viewModel.servers.isEmpty)
 
                 if capabilitiesStore?.capabilities.hasMCPCatalog == true {
                     Button {

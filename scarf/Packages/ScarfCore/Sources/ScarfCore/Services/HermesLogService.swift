@@ -222,12 +222,21 @@ public actor HermesLogService {
         remoteTailBuffer.append(parseLine(line))
     }
 
+    /// COMPILED ONCE. This was built from its pattern string on every call —
+    /// i.e. 500 times to load a log window, then once per new line on every
+    /// 2-second tail tick. `NSRegularExpression` is documented thread-safe
+    /// once constructed, hence `nonisolated(unsafe)`.
+    ///
+    /// Format (v0.9.0+): `YYYY-MM-DD HH:MM:SS,MMM LEVEL [session_id] logger: message`.
+    /// The session tag is optional — earlier Hermes releases and
+    /// out-of-session lines omit it.
+    nonisolated(unsafe) private static let lineRegex = try? NSRegularExpression(
+        pattern: #"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})\s+(DEBUG|INFO|WARNING|ERROR|CRITICAL)\s+(?:\[([^\]]+)\]\s+)?(\S+?):\s+(.*)$"#
+    )
+
     private func parseLine(_ line: String) -> LogEntry {
         entryCounter += 1
-        // Format (v0.9.0+): YYYY-MM-DD HH:MM:SS,MMM LEVEL [session_id] logger: message
-        // Session tag is optional — earlier Hermes releases and out-of-session lines omit it.
-        let pattern = #"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})\s+(DEBUG|INFO|WARNING|ERROR|CRITICAL)\s+(?:\[([^\]]+)\]\s+)?(\S+?):\s+(.*)$"#
-        if let regex = try? NSRegularExpression(pattern: pattern),
+        if let regex = Self.lineRegex,
            let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) {
             let timestamp = String(line[Range(match.range(at: 1), in: line)!])
             let levelStr = String(line[Range(match.range(at: 2), in: line)!])

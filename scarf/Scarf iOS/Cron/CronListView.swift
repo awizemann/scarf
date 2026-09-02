@@ -197,6 +197,16 @@ struct CronEditorView: View {
         _skills = State(initialValue: (initial?.skills ?? []).joined(separator: ", "))
         _deliver = State(initialValue: initial?.deliver ?? "")
         _enabled = State(initialValue: initial?.enabled ?? true)
+        // NOT the F5 seed-from-display bug. F5 fixed a Mac editor that
+        // collapsed a schedule into ONE free-text field seeded from
+        // `schedule.display` and then posted it to `hermes cron edit
+        // --schedule`, where `parse_schedule` cannot read "once at 2026-02-03
+        // 14:00" back. This editor has separate `run_at` / `expr` fields —
+        // already exactly what `CronSchedule.editValue` would select — and
+        // iOS persists by rewriting `jobs.json` directly (see
+        // `IOSCronViewModel.saveJobs`), so `parse_schedule` is never invoked
+        // and `display` round-trips as the label it is. Verified before
+        // changing anything; `editValue` would be a no-op here.
         _scheduleKind = State(initialValue: initial?.schedule.kind ?? "cron")
         _scheduleDisplay = State(initialValue: initial?.schedule.display ?? "")
         _scheduleRunAt = State(initialValue: initial?.schedule.runAt ?? "")
@@ -288,12 +298,21 @@ struct CronEditorView: View {
         // Carry the existing schedule's unedited machine fields (interval
         // minutes, unmodeled keys) only while the kind is unchanged — after
         // a kind switch they describe a schedule that no longer exists.
+        // The REAL defect here, found while checking the reported one: the
+        // `sameKind` guard covered `minutes` and `extra` but not the three
+        // fields above them. `run_at` and `expr` are hidden by the form once
+        // the kind changes, yet their `@State` keeps the old value and was
+        // written unconditionally — so switching a job from "once" to "cron"
+        // saved the new expression alongside the dead one-shot timestamp and
+        // a `display` label reading "once at …". Every field that describes
+        // the OLD schedule must go when the kind changes, not just the two
+        // that happened to be guarded.
         let sameKind = existing?.schedule.kind == scheduleKind
         let schedule = CronSchedule(
             kind: scheduleKind,
-            runAt: emptyToNil(scheduleRunAt),
-            display: emptyToNil(scheduleDisplay),
-            expression: emptyToNil(scheduleExpression),
+            runAt: scheduleKind == "once" ? emptyToNil(scheduleRunAt) : nil,
+            display: sameKind ? emptyToNil(scheduleDisplay) : nil,
+            expression: scheduleKind == "cron" ? emptyToNil(scheduleExpression) : nil,
             minutes: sameKind ? existing?.schedule.minutes : nil,
             extra: sameKind ? (existing?.schedule.extra ?? [:]) : [:]
         )

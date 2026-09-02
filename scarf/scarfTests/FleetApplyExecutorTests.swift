@@ -20,13 +20,15 @@ import ScarfCore
 
     // MARK: - Temp home / fixtures
 
-    static func withTempHome(_ body: (ServerContext, _ projectsRoot: String) throws -> Void) throws {
+    static func withTempHome(
+        _ body: (ServerContext, _ projectsRoot: String) async throws -> Void
+    ) async throws {
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent("scarf-fleetapply-test-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: home) }
         let projectsRoot = home.appendingPathComponent("projects", isDirectory: true)
         try FileManager.default.createDirectory(at: projectsRoot, withIntermediateDirectories: true)
-        try body(ServerContext.local(home: home), projectsRoot.path)
+        try await body(ServerContext.local(home: home), projectsRoot.path)
     }
 
     static func makeProjectDir(_ projectsRoot: String, slug: String) throws -> String {
@@ -62,15 +64,15 @@ import ScarfCore
 
     // MARK: - Executor: model + board
 
-    @Test func appliesModelAndBoardToBareTarget() throws {
-        try Self.withTempHome { ctx, projectsRoot in
+    @Test func appliesModelAndBoardToBareTarget() async throws {
+        try await Self.withTempHome { ctx, projectsRoot in
             let id = UUID()
             let dir = try Self.makeProjectDir(projectsRoot, slug: "target")
             let src = Self.source(id: id, modelPresetId: "preset-x", board: "scarf:src")
             let tgt = Self.target(id: id, rootPath: dir)
 
             let plan = FleetApplyPlan.make(source: src, targets: [tgt], fields: [.modelPreset, .board])
-            let results = FleetApplyExecutor(contexts: [ctx]).execute(plan, source: src.project)
+            let results = await FleetApplyExecutor(contexts: [ctx]).execute(plan, source: src.project)
 
             #expect(results.count == 1)
             #expect(results[0].hadFailure == false)
@@ -89,8 +91,8 @@ import ScarfCore
         }
     }
 
-    @Test func boardNotClobberedWhenTargetAlreadyHasOne() throws {
-        try Self.withTempHome { ctx, projectsRoot in
+    @Test func boardNotClobberedWhenTargetAlreadyHasOne() async throws {
+        try await Self.withTempHome { ctx, projectsRoot in
             let id = UUID()
             let dir = try Self.makeProjectDir(projectsRoot, slug: "hasboard")
             // Seed the target with an existing board (and persist it to the
@@ -101,7 +103,7 @@ import ScarfCore
             let tgt = Self.target(id: id, rootPath: dir, board: "scarf:existing")
 
             let plan = FleetApplyPlan.make(source: src, targets: [tgt], fields: [.board])
-            let results = FleetApplyExecutor(contexts: [ctx]).execute(plan, source: src.project)
+            let results = await FleetApplyExecutor(contexts: [ctx]).execute(plan, source: src.project)
 
             // Board action was skipped (additive: protect existing tasks).
             let boardField = results[0].fields.first { $0.field == .board }
@@ -111,7 +113,7 @@ import ScarfCore
         }
     }
 
-    @Test func unregisteredServerYieldsFailureNotCrash() throws {
+    @Test func unregisteredServerYieldsFailureNotCrash() async throws {
         let id = UUID()
         let src = Self.source(id: id, modelPresetId: "preset-x", board: nil)
         // Target on a server id that isn't in `contexts` at all.
@@ -121,7 +123,7 @@ import ScarfCore
             project: ScarfProject(id: id, name: "Repo", rootPath: "/ghost/repo")
         )
         let plan = FleetApplyPlan.make(source: src, targets: [ghost], fields: [.modelPreset])
-        let results = FleetApplyExecutor(contexts: []).execute(plan, source: src.project)
+        let results = await FleetApplyExecutor(contexts: []).execute(plan, source: src.project)
 
         #expect(results.count == 1)
         #expect(results[0].hadFailure == true)
@@ -139,7 +141,7 @@ import ScarfCore
         return dir
     }
 
-    @Test func setsExactSlugOnBareProject() throws {
+    @Test func setsExactSlugOnBareProject() async throws {
         let dir = try Self.makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: dir) }
         let project = ProjectEntry(name: "Bare", path: dir)
@@ -151,7 +153,7 @@ import ScarfCore
         #expect(FileManager.default.fileExists(atPath: dir + "/.scarf/manifest.json"))
     }
 
-    @Test func setTenantIsIdempotent() throws {
+    @Test func setTenantIsIdempotent() async throws {
         let dir = try Self.makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: dir) }
         let project = ProjectEntry(name: "Bare", path: dir)
@@ -166,7 +168,7 @@ import ScarfCore
         #expect(firstMtime == secondMtime)
     }
 
-    @Test func setTenantPreservesSiblingManifestFields() throws {
+    @Test func setTenantPreservesSiblingManifestFields() async throws {
         let dir = try Self.makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: dir) }
         let scarfDir = dir + "/.scarf"

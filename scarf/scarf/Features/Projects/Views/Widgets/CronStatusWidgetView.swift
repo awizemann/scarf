@@ -177,6 +177,13 @@ struct CronStatusWidgetView: View {
             }()
             return (match, trimmed, nil)
         }.value
+        // GENERATION GUARD. `.task(id:)` cancels this body when the widget's
+        // refresh key changes, but cancellation does NOT stop a suspended
+        // `await` from resuming — and the detached read above does not
+        // inherit cancellation at all. Without this check a slow read from an
+        // earlier watcher tick resumed AFTER the newer one had already
+        // committed, and overwrote it with older content.
+        guard !Task.isCancelled else { return }
         self.job = result.0
         self.outputTail = result.1
         self.loadError = result.2
