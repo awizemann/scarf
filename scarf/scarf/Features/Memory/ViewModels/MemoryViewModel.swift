@@ -15,15 +15,22 @@ final class MemoryViewModel {
     var memoryContent = ""
     var userContent = ""
     var memoryProvider = ""
-    var isEditing = false
-    var editingFile: EditTarget = .memory
-    var editText = ""
     var profiles: [String] = []
     var activeProfile = ""
     var isLoading = false
+    var isSaving = false
 
-    enum EditTarget {
+    enum EditTarget: Hashable {
         case memory, user
+    }
+
+    /// Result of a conflict-aware save. `.conflict` means the file on disk no
+    /// longer matches the baseline the draft was branched from, so the write
+    /// was NOT performed — the caller must offer reload-or-overwrite rather
+    /// than silently winning the race.
+    enum SaveOutcome: Equatable {
+        case saved
+        case conflict(onDisk: String)
     }
 
     var memoryCharCount: Int { memoryContent.count }
@@ -80,34 +87,56 @@ final class MemoryViewModel {
         }
     }
 
-    func startEditing(_ target: EditTarget) {
-        editingFile = target
-        editText = target == .memory ? memoryContent : userContent
-        isEditing = true
+    /// Reads the on-disk copy of `target` for the active profile, off the main
+    /// actor. Used by the editor to refresh a clean buffer on demand.
+    func reload(_ target: EditTarget) async -> String {
+        let svc = fileService
+        let profile = activeProfile
+        return await Task.detached {
+            switch target {
+            case .memory: return svc.loadMemory(profile: profile)
+            case .user:   return svc.loadUserProfile(profile: profile)
+            }
+        }.value
     }
 
-    func save() {
+    /// Conflict-aware write. Re-reads the file immediately before writing and
+    /// refuses the write when it no longer matches `baseline` — the same merge
+    /// discipline `BotAgentViewModel.saveSoul` uses for SOUL.md. `force: true`
+    /// is the user's explicit "overwrite" answer to that conflict.
+    ///
+    /// This is the only write path: an unconditional save here is what let a
+    /// watcher tick and a running agent trade blind last-write-wins over the
+    /// user's draft.
+    @discardableResult
+    func save(_ text: String, target: EditTarget, baseline: String, force: Bool = false) async -> SaveOutcome {
         let svc = fileService
-        let target = editingFile
-        let text = editText
         let profile = activeProfile
-        Task.detached { [weak self] in
+        isSaving = true
+        defer { isSaving = false }
+
+        let outcome: SaveOutcome = await Task.detached {
+            if !force {
+                let current: String
+                switch target {
+                case .memory: current = svc.loadMemory(profile: profile)
+                case .user:   current = svc.loadUserProfile(profile: profile)
+                }
+                guard current == baseline else { return .conflict(onDisk: current) }
+            }
             switch target {
             case .memory: svc.saveMemory(text, profile: profile)
             case .user:   svc.saveUserProfile(text, profile: profile)
             }
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                switch target {
-                case .memory: self.memoryContent = text
-                case .user:   self.userContent = text
-                }
-                self.isEditing = false
-            }
-        }
-    }
+            return .saved
+        }.value
 
-    func cancelEditing() {
-        isEditing = false
+        // Deliberately does NOT commit `text` into memoryContent/userContent.
+        // The editor's draft baseline and this published copy have to move in
+        // one step: publishing here first makes the view's `onChange` observer
+        // run while the draft still carries the OLD baseline, which reads as a
+        // conflict against the write we just made ourselves. The caller
+        // commits, after it has advanced the baseline.
+        return outcome
     }
 }
