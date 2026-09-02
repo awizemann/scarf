@@ -110,53 +110,109 @@ final class PluginsViewModel {
     }
 
     /// Pre-v0.16 fallback: roster from disk, activation from config.yaml.
+    ///
+    /// **What this can and cannot see.** It walks `~/.hermes/plugins/` — the
+    /// USER plugin directory — and nothing else. `_discover_all_plugins`
+    /// additionally enumerates bundled plugins (from the Hermes package's own
+    /// `plugins/` dir, whose location Scarf cannot resolve without the CLI)
+    /// and **entry-point** plugins, which are installed as Python packages
+    /// and have no directory at all, so no filesystem walk of any kind can
+    /// find them. On a pre-v0.16 host this list is therefore a subset, not a
+    /// reproduction: it is user-directory plugins only. An earlier note here
+    /// implied parity with the CLI; it never had it, and no directory walk
+    /// can. The `--json` path (v0.16+) is the complete one. (F9)
+    ///
+    /// **Activation keys.** `_scan_level` recurses one level, so a plugin at
+    /// `plugins/<category>/<name>/` is keyed `<category>/<name>` while a
+    /// top-level one is keyed by its manifest `name`. `plugins.enabled` in
+    /// config.yaml may list EITHER form, which is why `status` takes both.
+    /// Scarf used to walk only depth 0 and pass no key, so a plugin enabled
+    /// as `observability/langfuse` was invisible *and* anything enabled by
+    /// key rendered `notEnabled` — the fallback quietly disagreed with the
+    /// host about what was switched on.
     nonisolated fileprivate static func walkPluginsDirectory(dir: String, context ctx: ServerContext) -> [HermesPlugin] {
         let transport = ctx.makeTransport()
         let lists = HermesPluginList.parseConfigActivationLists(
             ctx.readText(ctx.paths.configYAML) ?? ""
         )
         var out: [HermesPlugin] = []
-        guard let entries = try? transport.listDirectory(dir) else { return out }
-        for entry in entries.sorted() where !entry.hasPrefix(".") {
-            let path = dir + "/" + entry
-            guard transport.stat(path)?.isDirectory == true else { continue }
-            let manifest = Self.readManifestStatic(path: path, context: ctx)
-            out.append(HermesPlugin(
-                name: entry,
-                source: manifest.source,
-                activation: HermesPluginList.status(name: entry, enabled: lists.enabled, disabled: lists.disabled),
-                description: "",
-                version: manifest.version,
-                path: path,
-                toolOverride: manifest.toolOverride
-            ))
+
+        /// One directory level. `prefix` is the category segment for depth 1
+        /// (empty at depth 0), mirroring `_scan_level`'s recursion.
+        func scan(_ base: String, prefix: String, depth: Int) {
+            guard let entries = try? transport.listDirectory(base) else { return }
+            for entry in entries.sorted() where !entry.hasPrefix(".") {
+                let path = base + "/" + entry
+                guard transport.stat(path)?.isDirectory == true else { continue }
+                let manifest = Self.readManifestStatic(path: path, context: ctx)
+                guard manifest.hasManifest else {
+                    // No manifest here — at depth 0 this is a category
+                    // directory holding nested plugins. `_scan_level` stops
+                    // recursing at depth >= 1, so we do too.
+                    if depth == 0 { scan(path, prefix: entry, depth: 1) }
+                    continue
+                }
+                // `_read_manifest_info`: name defaults to the directory name
+                // and is overridden by the manifest's own `name`.
+                let name = manifest.name.isEmpty ? entry : manifest.name
+                // `key = f"{prefix}/{d.name}" if prefix else name` — note it
+                // is the DIRECTORY name after a prefix, not the manifest name.
+                let key = prefix.isEmpty ? name : "\(prefix)/\(entry)"
+                out.append(HermesPlugin(
+                    name: name,
+                    source: manifest.source,
+                    activation: HermesPluginList.status(
+                        name: name,
+                        key: key,
+                        enabled: lists.enabled,
+                        disabled: lists.disabled
+                    ),
+                    description: "",
+                    version: manifest.version,
+                    path: path,
+                    toolOverride: manifest.toolOverride
+                ))
+            }
         }
+
+        scan(dir, prefix: "", depth: 0)
         return out
     }
 
     /// Static form of readManifest used by the detached load task. The
     /// instance form delegates to this so both call paths share logic.
-    nonisolated fileprivate static func readManifestStatic(path: String, context: ServerContext) -> (source: String, version: String, toolOverride: Bool) {
+    /// `hasManifest` distinguishes "a plugin directory whose manifest says
+    /// nothing" from "not a plugin directory at all" — the walk needs the
+    /// latter to know when to recurse into a category folder, and a
+    /// three-empty-strings return could not express it.
+    ///
+    /// `plugin.yaml`/`.yml` takes precedence over `plugin.json`, matching
+    /// `_read_manifest_info` and `_is_portable_plugin_dir`.
+    nonisolated fileprivate static func readManifestStatic(
+        path: String,
+        context: ServerContext
+    ) -> (name: String, source: String, version: String, toolOverride: Bool, hasManifest: Bool) {
+        for yamlPath in [path + "/plugin.yaml", path + "/plugin.yml"] {
+            guard let yaml = context.readText(yamlPath) else { continue }
+            let parsed = HermesFileService.parseNestedYAML(yaml)
+            let name = HermesFileService.stripYAMLQuotes(parsed.values["name"] ?? "")
+            let source = HermesFileService.stripYAMLQuotes(parsed.values["source"] ?? parsed.values["repository"] ?? parsed.values["url"] ?? "")
+            let version = HermesFileService.stripYAMLQuotes(parsed.values["version"] ?? "")
+            let toolOverrideRaw = HermesFileService.stripYAMLQuotes(parsed.values["tool_override"] ?? "").lowercased()
+            return (name, source, version, toolOverrideRaw == "true", true)
+        }
         let jsonPath = path + "/plugin.json"
         if let data = context.readData(jsonPath),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let name = (obj["name"] as? String) ?? ""
             let source = (obj["source"] as? String) ?? (obj["repository"] as? String) ?? (obj["url"] as? String) ?? ""
             let version = (obj["version"] as? String) ?? ""
             // v0.14 — `tool_override: true` opt-in. Accept both spellings
             // because plugin authors might use camelCase.
             let toolOverride = (obj["tool_override"] as? Bool) ?? (obj["toolOverride"] as? Bool) ?? false
-            return (source, version, toolOverride)
+            return (name, source, version, toolOverride, true)
         }
-        let yamlPath = path + "/plugin.yaml"
-        if let yaml = context.readText(yamlPath) {
-            let parsed = HermesFileService.parseNestedYAML(yaml)
-            let source = HermesFileService.stripYAMLQuotes(parsed.values["source"] ?? parsed.values["repository"] ?? parsed.values["url"] ?? "")
-            let version = HermesFileService.stripYAMLQuotes(parsed.values["version"] ?? "")
-            let toolOverrideRaw = HermesFileService.stripYAMLQuotes(parsed.values["tool_override"] ?? "").lowercased()
-            let toolOverride = (toolOverrideRaw == "true")
-            return (source, version, toolOverride)
-        }
-        return ("", "", false)
+        return ("", "", "", false, false)
     }
 
     // (readManifestStatic above is the new implementation; the instance

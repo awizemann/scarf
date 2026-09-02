@@ -172,7 +172,17 @@ final class SettingsViewModel {
                 self?.saveMessage = nil
             }
         } else {
-            logger.warning("hermes \(arguments.joined(separator: " ")) failed (exit \(result.exitCode)): \(result.output)")
+            // `arguments` is a `hermes config set <key> <value>` — the value
+            // is whatever the user typed into a settings field, which
+            // includes API keys, tokens and endpoint credentials, and
+            // `result.output` echoes the offending value back. Neither
+            // belongs in a log anyone with Console.app can read. The
+            // decision and the key stay `.public` so the line is still
+            // useful; the payload is `.private`. Matches the shape of the
+            // CronViewModel fix in F2 — this was its surviving sibling. (F9)
+            logger.warning(
+                "hermes config command failed: key=\(key, privacy: .public) exit=\(result.exitCode, privacy: .public) args=\(arguments, privacy: .private) output=\(result.output, privacy: .private)"
+            )
             saveMessage = Self.saveFailureMessage(key: key, output: result.output)
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
                 self?.saveMessage = nil

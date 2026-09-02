@@ -588,7 +588,7 @@ public actor HermesDataService {
                         for row in rows {
                             let id = row.int(at: 0)
                             let json = row.optionalString(at: 1)
-                            let parsed = parseToolCalls(json)
+                            let parsed = Self.parseToolCalls(json)
                             if !parsed.isEmpty {
                                 out[id] = parsed
                             }
@@ -628,7 +628,7 @@ public actor HermesDataService {
                     for row in rows {
                         let id = row.int(at: 0)
                         let json = row.optionalString(at: 1)
-                        let parsed = parseToolCalls(json)
+                        let parsed = Self.parseToolCalls(json)
                         if !parsed.isEmpty {
                             out[id] = parsed
                         }
@@ -660,7 +660,7 @@ public actor HermesDataService {
                             for row in rows {
                                 let rid = row.int(at: 0)
                                 let json = row.optionalString(at: 1)
-                                let parsed = parseToolCalls(json)
+                                let parsed = Self.parseToolCalls(json)
                                 if !parsed.isEmpty {
                                     out[rid] = parsed
                                 }
@@ -1936,7 +1936,7 @@ public actor HermesDataService {
 
     private func messageFromRow(_ row: Row) -> HermesMessage {
         let toolCallsJSON = row.optionalString(at: 5)
-        let toolCalls = parseToolCalls(toolCallsJSON)
+        let toolCalls = Self.parseToolCalls(toolCallsJSON)
         // reasoning lives at index 10 (v0.7+); reasoning_content at 11
         // when v0.11 schema is present. Both columns can carry text
         // simultaneously — UI prefers `reasoningContent`.
@@ -1979,15 +1979,58 @@ public actor HermesDataService {
         )
     }
 
-    private func parseToolCalls(_ json: String?) -> [HermesToolCall] {
+    /// Decode `messages.tool_calls` into models, **dropping only the
+    /// elements that fail**.
+    ///
+    /// `HermesToolCall.init(from:)` rejects a call id outside the safe
+    /// charset (see `isValidCallId`) — a real guard, since the id is
+    /// provider-written and flows into SQL. But decoding the array in one
+    /// `decode([HermesToolCall].self)` made that guard **whole-message**:
+    /// one hostile or merely unusual id and every *other* tool call on that
+    /// assistant turn vanished from the transcript too, silently. A user
+    /// reading history would see a reply that referenced work with no calls
+    /// under it, and nothing on screen would say why.
+    ///
+    /// Element-wise decoding keeps the guard exactly as strict for the call
+    /// that failed while leaving its siblings — which are addressable, and
+    /// whose ids passed — visible. Per-call degradation is the honest
+    /// failure mode: drop what we cannot address, render what we can. (F9)
+    ///
+    /// A payload that isn't a JSON array at all still yields `[]` — there
+    /// are no elements to salvage.
+    nonisolated static func parseToolCalls(_ json: String?) -> [HermesToolCall] {
         guard let json, !json.isEmpty,
               let data = json.data(using: .utf8) else { return [] }
-        do {
-            return try JSONDecoder().decode([HermesToolCall].self, from: data)
-        } catch {
-            Self.logger.error("Failed to decode tool calls: \(error.localizedDescription, privacy: .public)")
+        // Fast path: the whole array decodes, which is the overwhelmingly
+        // common case and avoids re-serialising every element.
+        if let calls = try? JSONDecoder().decode([HermesToolCall].self, from: data) {
+            return calls
+        }
+        // Something in there failed. Split the array and decode each element
+        // on its own so one bad entry costs only itself.
+        guard let elements = try? JSONSerialization.jsonObject(with: data) as? [Any] else {
+            Self.logger.error("tool_calls payload is not a JSON array; dropping all calls for this message")
             return []
         }
+        var calls: [HermesToolCall] = []
+        var dropped = 0
+        for element in elements {
+            guard JSONSerialization.isValidJSONObject([element]),
+                  let elementData = try? JSONSerialization.data(withJSONObject: element),
+                  let call = try? JSONDecoder().decode(HermesToolCall.self, from: elementData)
+            else {
+                dropped += 1
+                continue
+            }
+            calls.append(call)
+        }
+        // Count is public (it's a decision about our own data); nothing from
+        // the payload is logged — the id is exactly the attacker-influenced
+        // string we refused to trust.
+        Self.logger.error(
+            "dropped \(dropped, privacy: .public) undecodable tool call(s); kept \(calls.count, privacy: .public)"
+        )
+        return calls
     }
 
     /// Wraps each whitespace-delimited token in double quotes to prevent FTS5 parse errors
