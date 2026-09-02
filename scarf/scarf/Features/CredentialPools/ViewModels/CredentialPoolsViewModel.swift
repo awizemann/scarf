@@ -285,6 +285,19 @@ final class CredentialPoolsViewModel {
     /// Without `--type`, hermes falls back to the provider's default (OAuth for
     /// Anthropic, etc.) and launches the browser flow even though the user
     /// just gave us a key.
+    ///
+    /// **Why the key stays in argv.** The audit proposed dropping
+    /// `--api-key` and feeding the value to the CLI's prompt over stdin, to
+    /// keep the secret out of a remote `/proc/<pid>/cmdline`. Checked
+    /// against Hermes v2026.8.31 and it does not hold: with `--api-key`
+    /// absent, `auth_commands.py` calls `masked_secret_prompt`, which for a
+    /// non-tty stdin falls through to `getpass.getpass` — and getpass reads
+    /// **`/dev/tty`**, not stdin, whenever a controlling terminal exists.
+    /// Scarf launched from a terminal inherits one, so a piped key would be
+    /// ignored and the command would block on the tty until the timeout.
+    /// Keeping argv is the deliberate choice: a wedged credential dialog is
+    /// a certainty, the /proc read needs an already-present local attacker
+    /// on the host. Revisit if the CLI grows `--api-key-stdin`.
     func addAPIKey(provider: String, apiKey: String, label: String) {
         var args = ["auth", "add", provider, "--type", "api-key", "--api-key", apiKey]
         let trimmedLabel = label.trimmingCharacters(in: .whitespaces)

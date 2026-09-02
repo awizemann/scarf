@@ -743,7 +743,10 @@ public actor CuratorService {
         }
         let combined = stderr.isEmpty ? stdout : stderr
         #if canImport(os)
-        Self.logger.warning("curator \(verb) exit=\(code, privacy: .public) stderr=\(combined, privacy: .public)")
+        // `.private` on the CLI's own output: curator stderr quotes memory
+        // note bodies, paths, and search text back at the caller. The verb
+        // and exit code are the diagnostics; the payload is user content.
+        Self.logger.warning("curator \(verb, privacy: .public) exit=\(code, privacy: .public) stderr=\(combined, privacy: .private)")
         #endif
         throw CuratorError.nonZeroExit(verb: verb, code: code, stderr: combined)
     }

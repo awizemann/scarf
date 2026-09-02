@@ -160,3 +160,59 @@ import Foundation
         }
     }
 }
+
+/// The heredoc-escape half of the encoder (F2 / t-e96cc0ad).
+///
+/// `RemoteSQLiteBackend` ships inlined SQL inside `<<'__SCARF_SQL__'`.
+/// Quoting the delimiter stops expansion but not a value that CLOSES the
+/// document — so a `.text` param carrying the delimiter on its own line
+/// used to turn into remote shell commands. `HermesToolCall.callId`, which
+/// comes from the provider's own tool-call JSON, reaches that path.
+@Suite struct SQLValueInlinerNewlineTests {
+
+    @Test("a newline never survives as a raw byte in the encoded literal")
+    func newlinesAreEncodedNotEmitted() {
+        let encoded = SQLValueInliner.encode(.text("a\nb"))
+        #expect(!encoded.contains("\n"))
+        #expect(encoded == "('a' || char(10) || 'b')")
+    }
+
+    @Test("carriage returns are encoded too — a lone CR ends a line for the shell")
+    func carriageReturnsAreEncoded() {
+        let encoded = SQLValueInliner.encode(.text("a\rb"))
+        #expect(!encoded.contains("\r"))
+        #expect(encoded == "('a' || char(13) || 'b')")
+    }
+
+    @Test("a callId carrying the heredoc delimiter cannot break out")
+    func heredocDelimiterIsNeutralized() throws {
+        let hostile = "call_1\n__SCARF_SQL__\nrm -rf ~\n"
+        let sql = try SQLValueInliner.inline(
+            "SELECT content FROM messages WHERE tool_call_id = ?",
+            params: [.text(hostile)]
+        )
+        // The whole point: the delimiter can no longer sit alone on a line.
+        #expect(!sql.contains("\n"))
+        #expect(sql.contains("char(10)"))
+        #expect(sql.contains("rm -rf ~"))  // still present, but as SQL text
+    }
+
+    @Test("single-quote escaping still applies inside each newline-split piece")
+    func quotesEscapeWithinPieces() {
+        #expect(SQLValueInliner.encode(.text("it's\nmine's")) == "('it''s' || char(10) || 'mine''s')")
+    }
+
+    @Test("a value with no newline keeps the plain bare literal form")
+    func newlineFreeValuesAreUnchanged() {
+        // Guards against the encoder wrapping every literal in parens — the
+        // old form is what every existing call site and test expects.
+        #expect(SQLValueInliner.encode(.text("hello")) == "'hello'")
+        #expect(SQLValueInliner.encode(.text("")) == "''")
+    }
+
+    @Test("leading and trailing newlines produce empty edge pieces, not dropped ones")
+    func edgeNewlinesKeepEmptyPieces() {
+        #expect(SQLValueInliner.encode(.text("\nx")) == "('' || char(10) || 'x')")
+        #expect(SQLValueInliner.encode(.text("x\n")) == "('x' || char(10) || '')")
+    }
+}

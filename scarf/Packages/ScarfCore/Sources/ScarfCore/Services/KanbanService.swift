@@ -59,11 +59,12 @@ public actor KanbanService {
         let (code, stdout, stderr) = await runHermes(args: args, timeout: 20)
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "list")
 
-        // Empty filter on an empty board prints "no matching tasks" instead
-        // of `[]`. Treat as empty rather than letting the JSON decode fail.
-        if stdout.contains("no matching tasks") {
-            return []
-        }
+        // No "(no matching tasks)" sentinel here on purpose. `argv()` always
+        // passes `--json`, and `_cmd_list` returns `json.dumps([])` before it
+        // can ever reach that print — so the sentinel was dead code that a
+        // task TITLED "no matching tasks" could nonetheless trip, silently
+        // emptying a populated board. Substring-matching CLI prose is not a
+        // protocol; the empty array is.
         guard let data = stdout.data(using: .utf8) else {
             throw KanbanError.decoding(message: "non-UTF8 stdout")
         }
@@ -256,8 +257,11 @@ public actor KanbanService {
         if let author, !author.isEmpty {
             args.append(contentsOf: ["--author", author])
         }
-        args.append(taskId)
-        args.append(text)
+        // `--` last, after every flag: argparse treats EVERY token after the
+        // first `--` as a positional, so a flag behind it would be eaten as
+        // an extra positional. `text` is `nargs="+"` — one argv element is a
+        // one-word list the CLI joins, so the whole comment stays intact.
+        args.append(contentsOf: ["--", taskId, text])
         let (code, _, stderr) = await runHermes(args: args, timeout: 15)
         try ensureSuccess(code: code, stdout: "", stderr: stderr, verb: "comment")
     }
@@ -285,10 +289,15 @@ public actor KanbanService {
     }
 
     public func block(taskId: String, reason: String? = nil) async throws {
-        var args = prefix("block", taskId)
+        var args = prefix("block")
+        // `--` before the positionals (see `comment`). The reason goes over
+        // as ONE argv element rather than space-split: `reason` is
+        // `nargs="*"`, so the CLI joins the list back — splitting it here
+        // only destroyed runs of whitespace and handed argparse a chance to
+        // read a word starting with `-` as a flag.
+        args.append(contentsOf: ["--", taskId])
         if let reason, !reason.trimmingCharacters(in: .whitespaces).isEmpty {
-            // Hermes accepts free-form trailing words as the reason.
-            args.append(contentsOf: reason.split(separator: " ").map(String.init))
+            args.append(reason)
         }
         let (code, _, stderr) = await runHermes(args: args, timeout: 15)
         try ensureSuccess(code: code, stdout: "", stderr: stderr, verb: "block")
@@ -356,13 +365,17 @@ public actor KanbanService {
     ) async throws {
         guard !taskIds.isEmpty else { return }
         var args = prefix("promote")
+        // Flags FIRST, then `--`, then the positionals — argparse consumes
+        // everything after the first `--` as a positional, so `--json` /
+        // `--force` behind it would be rejected as "unrecognized arguments".
+        if force { args.append("--force") }
+        if dryRun { args.append("--dry-run") }
+        args.append("--json")
+        args.append("--")
         args.append(contentsOf: taskIds)
         if let reason, !reason.isEmpty {
             args.append(reason)
         }
-        if force { args.append("--force") }
-        if dryRun { args.append("--dry-run") }
-        args.append("--json")
         let (code, stdout, stderr) = await runHermes(args: args, timeout: 30)
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "promote")
     }
@@ -373,6 +386,7 @@ public actor KanbanService {
     public func schedule(taskIds: [String], reason: String? = nil) async throws {
         guard !taskIds.isEmpty else { return }
         var args = prefix("schedule")
+        args.append("--")
         args.append(contentsOf: taskIds)
         if let reason, !reason.isEmpty {
             args.append(reason)
@@ -408,7 +422,7 @@ public actor KanbanService {
         createdBy: String? = nil,
         idempotencyKey: String? = nil
     ) async throws {
-        var args = prefix("swarm", goal)
+        var args = prefix("swarm")
         for worker in workers {
             args.append(contentsOf: ["--worker", worker])
         }
@@ -426,6 +440,11 @@ public actor KanbanService {
             args.append(contentsOf: ["--idempotency-key", idempotencyKey])
         }
         args.append("--json")
+        // `goal` is argparse's positional and moves to the very end behind
+        // `--`, so a goal that legitimately opens with a dash ("--json is
+        // broken") is text rather than a flag. It cannot stay next to the
+        // verb: every token after `--` is a positional.
+        args.append(contentsOf: ["--", goal])
         let (code, stdout, stderr) = await runHermes(args: args, timeout: 60)
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "swarm")
     }

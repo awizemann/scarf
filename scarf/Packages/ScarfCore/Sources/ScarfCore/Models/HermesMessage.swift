@@ -241,6 +241,40 @@ public struct HermesToolCall: Identifiable, Sendable, Codable {
         case arguments
     }
 
+    /// Charset gate on the id decoded out of `messages.tool_calls`.
+    ///
+    /// The id is **not** Scarf's, and it is not Hermes's either: it is
+    /// whatever the model/provider emitted, persisted verbatim into the
+    /// session DB. It then travels back into SQL as a `.text` param
+    /// (`fetchToolResult(callId:)`) and, on remote hosts, into a shell
+    /// heredoc. Every real provider id is ASCII-safe — `call_abc123`,
+    /// `toolu_01…`, a UUID — so pinning the charset here costs nothing and
+    /// stops a hostile id at the boundary rather than N layers down. An id
+    /// that fails is dropped with its sibling calls by
+    /// `HermesDataService`'s decode-failure path (logged, empty array),
+    /// which is the correct outcome: a call we cannot address is a call we
+    /// must not render as addressable.
+    static func isValidCallId(_ id: String) -> Bool {
+        guard !id.isEmpty, id.count <= 256 else { return false }
+        return id.utf8.allSatisfy { byte in
+            (byte >= 0x41 && byte <= 0x5A)      // A-Z
+                || (byte >= 0x61 && byte <= 0x7A) // a-z
+                || (byte >= 0x30 && byte <= 0x39) // 0-9
+                || byte == 0x5F                   // _
+                || byte == 0x2D                   // -
+                || byte == 0x2E                   // .
+                || byte == 0x3A                   // :
+                // base64 / base64url alphabet: a provider that mints ids by
+                // encoding bytes is plausible, and a refused id costs the
+                // whole message its tool calls. These three are inert in
+                // both SQL and `sh` — unlike the quote, backtick, `$`, `;`,
+                // and newline the gate exists to stop.
+                || byte == 0x2B                   // +
+                || byte == 0x2F                   // /
+                || byte == 0x3D                   // =
+        }
+    }
+
     public init(
         callId: String,
         functionName: String,
@@ -259,7 +293,15 @@ public struct HermesToolCall: Identifiable, Sendable, Codable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        callId = try container.decode(String.self, forKey: .callId)
+        let rawCallId = try container.decode(String.self, forKey: .callId)
+        guard Self.isValidCallId(rawCallId) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .callId,
+                in: container,
+                debugDescription: "tool call id contains characters outside [A-Za-z0-9_.:+/=-]"
+            )
+        }
+        callId = rawCallId
         let funcContainer = try container.nestedContainer(keyedBy: FunctionKeys.self, forKey: .function)
         functionName = try funcContainer.decode(String.self, forKey: .name)
         arguments = try funcContainer.decode(String.self, forKey: .arguments)

@@ -115,7 +115,7 @@ public struct LocalTransport: ServerTransport {
             // The existing files use 0600 via HermesEnvService; apply
             // the same to brand-new files so we never demote
             // permissions on a rewrite.
-            if Self.shouldEnforcePrivateMode(for: path) {
+            if TransportPrivateMode.shouldEnforce(for: path) {
                 try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
             }
         } catch {
@@ -449,13 +449,4 @@ public struct LocalTransport: ServerTransport {
     }
     #endif
 
-    // MARK: - Helpers
-
-    /// Heuristic: files that conventionally hold secrets should be created
-    /// with restrictive permissions so a future `scp` or editor doesn't end
-    /// up exposing them.
-    private static func shouldEnforcePrivateMode(for path: String) -> Bool {
-        let name = (path as NSString).lastPathComponent
-        return name == ".env" || name == "auth.json" || name.hasSuffix("-tokens.json")
-    }
 }

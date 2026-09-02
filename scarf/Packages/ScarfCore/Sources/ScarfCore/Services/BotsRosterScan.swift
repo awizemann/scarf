@@ -120,6 +120,25 @@ public enum BotsRosterScan {
         emit() {
           d="$1"
           n="$2"
+          # Validate the id SHELL-SIDE, before it reaches printf. The parser
+          # trusts the record framing (tab-separated fields, one row per
+          # line), and `n` is a directory basename an attacker with write
+          # access to `profiles/` chooses: a name containing a tab forges
+          # extra fields, and one containing a newline forges an entire
+          # extra row — including a second `Y` row for `default`, which
+          # would overwrite the default bot's identity with attacker YAML.
+          # Swift's own isAddressable() filter cannot see that, because by
+          # then the forged row IS a separate line with a clean name.
+          #
+          # The pattern is HermesProfileScope.isValidName's
+          # (^[a-z0-9][a-z0-9_-]{0,63}$), so this can only reject ids the
+          # Swift side would have dropped anyway — no legitimate profile is
+          # lost, and the two scan paths keep their parity contract.
+          case "$n" in
+            ""|-*|_*) return ;;
+            *[!a-z0-9_-]*) return ;;
+          esac
+          if [ "${#n}" -gt 64 ]; then return; fi
           f="$d/profile.yaml"
           if [ -f "$f" ]; then
             sz=`wc -c < "$f" 2>/dev/null | tr -d ' '`

@@ -434,6 +434,13 @@ final class CronViewModel {
         // Caller (CronView) strips this on pre-v0.13 hosts so the flag is
         // never emitted to a Hermes that can't parse it.
         if noAgent { args.append("--no-agent") }
+        // End-of-options before the positionals (`schedule`, optional
+        // `prompt`). A prompt that legitimately opens with a dash —
+        // "--deliver isn't working, investigate" — is otherwise claimed by
+        // argparse as an option and the create dies at exit 2. `--` must
+        // come after every flag: argparse reads every later token as a
+        // positional. (HermesPeerCLI.dmArgs is the precedent.)
+        args.append("--")
         args.append(schedule)
         if noAgent {
             args.append("")
@@ -444,7 +451,10 @@ final class CronViewModel {
     }
 
     func updateJob(id: String, schedule: String?, prompt: String?, name: String?, deliver: String?, repeatCount: String?, newSkills: [String]?, clearSkills: Bool, script: String?, workdir: String? = nil, noAgent: Bool? = nil) {
-        var args = ["cron", "edit", id]
+        // `job_id` is `cron edit`'s only positional, so it moves to the very
+        // end behind `--` — every flag has to precede the marker, since
+        // argparse treats each token after it as a positional.
+        var args = ["cron", "edit"]
         if let schedule, !schedule.isEmpty { args += ["--schedule", schedule] }
         if let prompt, !prompt.isEmpty { args += ["--prompt", prompt] }
         if let name, !name.isEmpty { args += ["--name", name] }
@@ -464,6 +474,7 @@ final class CronViewModel {
             if noAgent { args.append("--no-agent") }
             else { args.append("--agent") }
         }
+        args.append(contentsOf: ["--", id])
         runAndReload(args, success: "Updated")
     }
 
@@ -481,7 +492,13 @@ final class CronViewModel {
                             ?? "Failed: \(result.output.prefix(200))",
                         outcome: .failure
                     )
-                    self.logger.warning("cron command failed: args=\(arguments) output=\(result.output)")
+                    // `.private`: the argv carries the job's prompt and the
+                    // output can echo it back. Only the verb is safe to log
+                    // in the clear — a cron prompt is user content, not
+                    // diagnostics.
+                    self.logger.warning(
+                        "cron command failed: verb=\(arguments.dropFirst().first ?? "?", privacy: .public) args=\(arguments, privacy: .private) output=\(result.output, privacy: .private)"
+                    )
                 }
                 self.load(force: true)
             }

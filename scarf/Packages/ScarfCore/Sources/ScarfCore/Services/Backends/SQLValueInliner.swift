@@ -22,7 +22,9 @@ import Foundation
 /// * `.null` → `NULL`
 /// * `.integer(n)` → `<n>` (no quoting)
 /// * `.real(d)` → `%.17g`-formatted (round-trips Double via decimal)
-/// * `.text(s)` → `'<s with single-quotes doubled>'`
+/// * `.text(s)` → `'<s with single-quotes doubled>'`, with newlines split
+///   out into `char(10)`/`char(13)` concatenation so a value can never
+///   terminate the remote heredoc (see ``encodeText(_:)``)
 /// * `.blob(d)` → `X'<hex>'`
 public enum SQLValueInliner {
 
@@ -110,11 +112,54 @@ public enum SQLValueInliner {
             // %.17g round-trips a Double precisely as a decimal.
             return String(format: "%.17g", d)
         case .text(let s):
-            return "'" + s.replacingOccurrences(of: "'", with: "''") + "'"
+            return encodeText(s)
         case .blob(let d):
             // SQLite blob literal: X'<hex>' (case-insensitive prefix).
             let hex = d.map { String(format: "%02x", $0) }.joined()
             return "X'\(hex)'"
         }
+    }
+
+    /// Encode a text value as a SQLite literal **that can never contain a
+    /// raw newline**.
+    ///
+    /// `RemoteSQLiteBackend` ships the inlined SQL to the host inside a
+    /// quoted heredoc (`<<'__SCARF_SQL__'`). Quoting the delimiter stops
+    /// `$`/backtick expansion, but it does **not** stop a value from ending
+    /// the heredoc: a param carrying `"\n__SCARF_SQL__\n<command>"` closes
+    /// the document early and everything after it is executed by the remote
+    /// shell. `HermesToolCall.callId` (attacker-influenced — it comes from
+    /// whatever the model/provider wrote into `messages.tool_calls`) reaches
+    /// `fetchToolResult(callId:)` as a `.text` param, so that chain was live.
+    ///
+    /// The fix ENCODES rather than rejects: newlines are replaced with
+    /// `char(10)`/`char(13)` concatenation, which is byte-identical to
+    /// SQLite and keeps legitimately multi-line params working (a pasted
+    /// multi-line search query is the real one). The result is an
+    /// expression, not a bare literal — valid everywhere a literal is, in
+    /// every SQL we build.
+    static func encodeText(_ s: String) -> String {
+        func quoted(_ part: Substring) -> String {
+            "'" + part.replacingOccurrences(of: "'", with: "''") + "'"
+        }
+        guard s.contains("\n") || s.contains("\r") else {
+            return quoted(s[...])
+        }
+        var pieces: [String] = []
+        var current = s.startIndex
+        var i = s.startIndex
+        while i < s.endIndex {
+            let c = s[i]
+            if c == "\n" || c == "\r" {
+                pieces.append(quoted(s[current..<i]))
+                pieces.append(c == "\n" ? "char(10)" : "char(13)")
+                i = s.index(after: i)
+                current = i
+                continue
+            }
+            i = s.index(after: i)
+        }
+        pieces.append(quoted(s[current...]))
+        return "(" + pieces.joined(separator: " || ") + ")"
     }
 }

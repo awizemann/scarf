@@ -100,14 +100,11 @@ final class KanbanViewModel {
             tasks = decoded
             lastError = nil
         } catch {
-            // Hermes may print a "no matching tasks" line as text instead of
-            // empty JSON; handle gracefully so the UI shows an empty list
-            // without raising an error banner.
-            if result.stdout.contains("no matching tasks") {
-                tasks = []
-                lastError = nil
-                return
-            }
+            // No "(no matching tasks)" fallback: this argv always carries
+            // `--json`, and the CLI returns `[]` before it can print that
+            // line. The check only ever fired on a board whose own task text
+            // contained the phrase — turning a decode failure into a
+            // silently-emptied board.
             logger.warning("kanban JSON decode failed: \(error.localizedDescription, privacy: .public)")
             lastError = "Couldn't parse kanban list output"
             tasks = []

@@ -30,7 +30,9 @@ struct BotRoutinesViewModelTests {
         #expect(args == [
             "cron", "create", "--name", "[bot:research] Morning digest",
             "--deliver", "bot-chat:research",
-            "0 9 * * *", "Summarize overnight news"
+            // `--` end-of-options, so a prompt opening with a dash is text
+            // rather than a flag (F2 / t-e96cc0ad).
+            "--", "0 9 * * *", "Summarize overnight news"
         ])
         // The name is unambiguously scoped to THIS bot — the adversarial
         // case B4 was asked to hunt: a routine created for bot A landing
@@ -52,7 +54,7 @@ struct BotRoutinesViewModelTests {
         #expect(!args.contains("--deliver"))
         #expect(args == [
             "cron", "create", "--name", "[bot:research] Morning digest",
-            "0 9 * * *", "Summarize overnight news"
+            "--", "0 9 * * *", "Summarize overnight news"
         ])
     }
 

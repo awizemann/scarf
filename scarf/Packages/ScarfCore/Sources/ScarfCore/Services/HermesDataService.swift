@@ -1827,8 +1827,16 @@ public actor HermesDataService {
 
     /// Wraps each whitespace-delimited token in double quotes to prevent FTS5 parse errors
     /// on terms containing dots, hyphens, or FTS5 operators (e.g., "v0.7.0", "config.yaml").
+    ///
+    /// Splitting on **all** whitespace, not just `" "`: a pasted multi-line
+    /// query used to keep its newlines inside a token, and that token was
+    /// shipped verbatim as a `.text` param into the remote heredoc. The
+    /// heredoc side is now newline-safe on its own (``SQLValueInliner``),
+    /// but a newline was never a legitimate part of an FTS phrase either —
+    /// tokenizing it away is the correct search behaviour and removes the
+    /// vector at the source.
     private func sanitizeFTSQuery(_ raw: String) -> String {
-        raw.split(separator: " ")
+        raw.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
             .map { token in
                 let t = String(token)
                 let stripped = t.replacingOccurrences(of: "\"", with: "")

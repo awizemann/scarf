@@ -108,9 +108,12 @@ public struct KanbanCreateRequest: Sendable, Equatable {
             args.append(contentsOf: ["--skill", skill])
         }
         args.append("--json")
-        // Title is the positional argument — appended last so flags
-        // can't be confused for it.
-        args.append(title)
+        // Title is the positional argument — appended last, behind `--`, so
+        // a title that legitimately starts with a dash ("--force is
+        // ignored") is read as text instead of being claimed as an option
+        // (argparse exits 2, or worse, silently flips a flag). `--` has to
+        // be last: argparse reads EVERY token after it as a positional.
+        args.append(contentsOf: ["--", title])
         return args
     }
 }

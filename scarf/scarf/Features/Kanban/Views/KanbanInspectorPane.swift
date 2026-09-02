@@ -511,17 +511,18 @@ struct KanbanInspectorPane: View {
     @ViewBuilder
     private func bodySection(_ task: HermesKanbanTask) -> some View {
         if let body = task.body, !body.isEmpty {
-            if let attributed = try? AttributedString(markdown: body) {
-                Text(attributed)
-                    .scarfStyle(.body)
-                    .foregroundStyle(ScarfColor.foregroundPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Text(body)
-                    .scarfStyle(.body)
-                    .foregroundStyle(ScarfColor.foregroundPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            // PLAIN text, deliberately. A card body is written by whatever
+            // worker touched the card, and `AttributedString(markdown:)`
+            // renders links with no scheme allowlist — a worker could plant
+            // `[Approve](javascript:…)`-shaped bait in the inspector. Comment
+            // bodies right below render as plain `Text` for the same reason;
+            // the two must not diverge. Rendered markdown in this app goes
+            // through `MarkdownContentView`, which carries the allowlist.
+            Text(body)
+                .scarfStyle(.body)
+                .foregroundStyle(ScarfColor.foregroundPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
         } else {
             Text("No description.")
                 .scarfStyle(.footnote)

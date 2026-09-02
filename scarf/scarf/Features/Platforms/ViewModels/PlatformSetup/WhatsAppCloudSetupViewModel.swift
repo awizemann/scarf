@@ -47,6 +47,20 @@ final class WhatsAppCloudSetupViewModel {
     }
 
     func save() {
+        // KNOWN, UNFIXABLE HERE: `access_token` / `app_secret` cross the
+        // command line as `hermes config set … <secret>` argv, and on a
+        // remote host every local user can read that out of /proc while the
+        // call runs. Every other platform Scarf configures has an env-var
+        // path to move the secret into `.env` (0600, written through the
+        // transport); whatsapp_cloud does not — `gateway/platforms/
+        // whatsapp_cloud.py` reads nothing from the environment, and
+        // `hermes_cli/setup_whatsapp_cloud.py` only prompts interactively.
+        // Verified against Hermes v2026.8.31. The fix belongs UPSTREAM:
+        // WHATSAPP_CLOUD_ACCESS_TOKEN / _APP_SECRET env fallbacks in the
+        // adapter, at which point this moves to `envPairs` exactly like
+        // NtfySetupViewModel's token did. Do not "solve" it locally by
+        // shelling a secret through a different verb — they all use argv.
+        //
         // whatsapp_cloud is a BUILT-IN platform (not a plugin), so the gateway
         // parses it as disabled (`enabled` defaults false) unless config.yaml
         // says otherwise — writing the `extra.*` creds alone leaves a

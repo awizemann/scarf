@@ -41,6 +41,12 @@ struct WebhooksView: View {
         .navigationTitle("Webhooks")
         .onAppear { viewModel.load() }
         .sheet(isPresented: $showAddSheet) { addSheet }
+        .sheet(item: Binding(
+            get: { viewModel.createdSecret },
+            set: { if $0 == nil { viewModel.createdSecret = nil } }
+        )) { created in
+            createdSecretSheet(created)
+        }
         .confirmationDialog(
             pendingRemove.map { "Remove webhook \($0.name)?" } ?? "",
             isPresented: Binding(get: { pendingRemove != nil }, set: { if !$0 { pendingRemove = nil } })
@@ -227,7 +233,18 @@ struct WebhooksView: View {
             formField("Skills (comma separated)", text: $addSkills, placeholder: "github-auth, pr-review", mono: true)
             formField("Deliver", text: $addDeliver, placeholder: "log | telegram | discord | slack")
             formField("Chat ID", text: $addChatID, placeholder: "Required for cross-platform delivery")
-            formField("Secret", text: $addSecret, placeholder: "HMAC secret (auto-generated if empty)", mono: true)
+            // SecureField, not TextField: this is an HMAC signing key, and
+            // the sheet is routinely open while someone is screen-sharing a
+            // setup walkthrough. Leaving it empty is the recommended path —
+            // Hermes mints a stronger one and the post-create sheet hands it
+            // back for copying.
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Secret").font(.caption).foregroundStyle(.secondary)
+                SecureField("HMAC secret (auto-generated if empty)", text: $addSecret)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption, design: .monospaced))
+                    .accessibilityLabel("Secret")
+            }
             HStack {
                 Spacer()
                 Button("Cancel") { showAddSheet = false }
@@ -250,6 +267,62 @@ struct WebhooksView: View {
         }
         .padding()
         .frame(minWidth: 560, minHeight: 560)
+    }
+
+    /// Shown once, right after a successful subscribe, when Hermes minted
+    /// the HMAC secret itself. There is no second chance to read it from
+    /// Scarf: `webhook list` does not print secrets, so a user who closes
+    /// this without copying has to open
+    /// `~/.hermes/webhook_subscriptions.json` on the host.
+    @ViewBuilder
+    private func createdSecretSheet(_ created: WebhooksViewModel.CreatedWebhookSecret) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Webhook /\(created.name) created")
+                .font(.headline)
+            Text("Copy the signing secret now — Scarf can't show it again.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if !created.url.isEmpty {
+                copyRow(label: "URL", value: created.url)
+            }
+            copyRow(label: "Secret", value: created.secret)
+            Text("Sign each request body with HMAC-SHA256 using this secret.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Done") { viewModel.createdSecret = nil }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding()
+        .frame(minWidth: 460)
+    }
+
+    @ViewBuilder
+    private func copyRow(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Text(value)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(6)
+                    .background(.quaternary.opacity(0.3))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(value, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
+                .help("Copy \(label)")
+                .accessibilityLabel("Copy \(label)")
+            }
+        }
     }
 
     @ViewBuilder

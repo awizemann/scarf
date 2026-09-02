@@ -398,7 +398,18 @@ public struct SSHTransport: ServerTransport {
         // goes through the SSH file transfer protocol, not a remote shell),
         // so the upload landed at the resolved $HOME path. The mv is a
         // shell command and needs the $HOME-rewritten path to find it.
-        let mvResult = try runRemoteShell("mv \(Self.remotePathArg(tmp)) \(Self.remotePathArg(path))")
+        // Tighten permissions on the TMP file, in the same command as the
+        // mv and BEFORE it: `scp` creates the upload with the remote umask
+        // (commonly 0644), so a `chmod` after the rename would leave the
+        // real path world-readable for a window. Chmod-then-mv means the
+        // file is never observable at its final path in a loose mode.
+        // Mirrors LocalTransport, via the shared basename list — the local
+        // side has enforced 0600 on these since day one and the remote side
+        // silently did not.
+        let chmodPrefix = TransportPrivateMode.shouldEnforce(for: path)
+            ? "chmod 600 \(Self.remotePathArg(tmp)) && "
+            : ""
+        let mvResult = try runRemoteShell("\(chmodPrefix)mv \(Self.remotePathArg(tmp)) \(Self.remotePathArg(path))")
         if mvResult.exitCode != 0 {
             // Best-effort cleanup of the orphan tmp.
             _ = try? runRemoteShell("rm -f \(Self.remotePathArg(tmp))")
