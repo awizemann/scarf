@@ -442,8 +442,15 @@ struct StreamingMarkdownText: View {
             settledText = AttributedString()
         }
         let tail = content[settledSource.endIndex...]
-        guard let gap = tail.range(of: "\n\n", options: .backwards) else { return }
-        let completed = tail[..<gap.lowerBound]
+        // Only settle at a blank line that is OUTSIDE a code fence. A
+        // plain "last \n\n" split happily landed between a fence's
+        // opening ``` and its body, which put an unbalanced backtick
+        // run in the settled prefix and another in the tail; each half
+        // was then inline-parsed on its own, so the code block rendered
+        // as garbled prose (and stayed that way until finalize swapped
+        // in the block pipeline). See `StreamingFenceScanner`.
+        guard let boundary = StreamingFenceScanner.lastSettleBoundary(in: tail) else { return }
+        let completed = tail[..<boundary.completedEnd]
         if !completed.isEmpty {
             if !settledText.characters.isEmpty {
                 settledText.append(AttributedString("\n\n"))
@@ -452,7 +459,130 @@ struct StreamingMarkdownText: View {
         }
         // Consume the separator too — the settled/tail visual gap is
         // owned by the VStack spacing from here on.
-        settledSource = String(content[..<gap.upperBound])
+        settledSource = String(content[..<boundary.boundaryEnd])
+    }
+}
+
+// MARK: - Fence-aware settle boundary
+
+/// Finds the last point in a streaming chunk where the renderer may
+/// safely cut a settled prefix off the live tail.
+///
+/// The rule is the old one — a blank line, i.e. a literal `\n\n` —
+/// *plus* the constraint that the blank line must not be inside a
+/// fenced code block. Fence state is tracked with CommonMark's rules
+/// so the common adversarial chunkings behave:
+///
+/// - ``` and ~~~ are independent fence characters; a ~~~ never closes
+///   a ``` run and vice versa.
+/// - A closing fence must use the same character and be at least as
+///   long as the opener, with nothing but whitespace after it. So
+///   ```` ```` inside a ``` block doesn't close it early.
+/// - An opening ``` fence may carry an info string (` ```swift `), but
+///   a backtick fence's info string may not itself contain a backtick.
+/// - Up to 3 leading spaces still opens a fence; 4+ (or a leading tab)
+///   is an indented code block where ``` is literal text, not a fence.
+/// - Blockquote markers are stripped, so a fence inside a `>` quote
+///   still suppresses settling rather than leaking a half fence into
+///   the settled prefix.
+///
+/// An unterminated fence simply means nothing new settles until it
+/// closes: the tail grows, output stays correct, and finalize hands
+/// off to the full block pipeline regardless. That is the intended
+/// trade — correctness over an incremental-render optimization.
+///
+/// Cost is one linear pass over the (short) unsettled tail per delta,
+/// the same order as the `range(of:options:.backwards)` scan it
+/// replaces.
+enum StreamingFenceScanner {
+    /// `completedEnd` is the end of the text to settle (exclusive of
+    /// the separator); `boundaryEnd` is the index just past the `\n\n`.
+    /// Nil when there is no eligible boundary yet.
+    static func lastSettleBoundary(
+        in tail: Substring
+    ) -> (completedEnd: Substring.Index, boundaryEnd: Substring.Index)? {
+        var inFence = false
+        var fenceChar: Character = "`"
+        var fenceLength = 0
+        var result: (completedEnd: Substring.Index, boundaryEnd: Substring.Index)?
+
+        var lineStart = tail.startIndex
+        // Only fully-terminated lines are considered: an unterminated
+        // trailing line can't be half of a `\n\n` separator, and its
+        // fence marker may still be mid-delta (` `` ` before the third
+        // backtick arrives), so judging it would flip state on a
+        // partial token.
+        while let newline = tail[lineStart...].firstIndex(of: "\n") {
+            let line = tail[lineStart..<newline]
+            if inFence {
+                if closesFence(line, char: fenceChar, length: fenceLength) {
+                    inFence = false
+                    fenceLength = 0
+                }
+            } else if let opener = opensFence(line) {
+                inFence = true
+                fenceChar = opener.char
+                fenceLength = opener.length
+            } else if line.isEmpty, lineStart > tail.startIndex {
+                // `lineStart > startIndex` guarantees the character
+                // before it is the previous line's newline, so this
+                // empty line really is the second half of a `\n\n`.
+                result = (
+                    completedEnd: tail.index(before: lineStart),
+                    boundaryEnd: tail.index(after: newline)
+                )
+            }
+            lineStart = tail.index(after: newline)
+        }
+        return result
+    }
+
+    /// Strips up to 3 leading spaces and any blockquote markers.
+    /// Returns nil when the line is indented 4+ spaces (or starts with
+    /// a tab) — that's an indented code block, where a ``` run is
+    /// literal text and must not toggle fence state.
+    private static func stripped(_ line: Substring) -> Substring? {
+        var s = line
+        var indent = 0
+        while let first = s.first, first == " ", indent < 4 {
+            s = s.dropFirst()
+            indent += 1
+        }
+        if indent >= 4 { return nil }
+        if s.first == "\t" { return nil }
+        while s.first == ">" {
+            s = s.dropFirst()
+            if s.first == " " { s = s.dropFirst() }
+            var quoteIndent = 0
+            while s.first == " ", quoteIndent < 3 {
+                s = s.dropFirst()
+                quoteIndent += 1
+            }
+        }
+        return s
+    }
+
+    private static func opensFence(_ line: Substring) -> (char: Character, length: Int)? {
+        guard let s = stripped(line), let first = s.first,
+              first == "`" || first == "~" else { return nil }
+        let length = s.prefix { $0 == first }.count
+        guard length >= 3 else { return nil }
+        let info = s.dropFirst(length)
+        // A backtick fence's info string may not contain a backtick —
+        // "``` a ``` b" is an inline-code paragraph, not a fence.
+        if first == "`", info.contains("`") { return nil }
+        return (first, length)
+    }
+
+    private static func closesFence(
+        _ line: Substring,
+        char: Character,
+        length: Int
+    ) -> Bool {
+        guard let s = stripped(line), s.first == char else { return false }
+        let run = s.prefix { $0 == char }.count
+        guard run >= length else { return false }
+        return s.dropFirst(run).allSatisfy { $0 == " " || $0 == "\t" }
     }
 }
 

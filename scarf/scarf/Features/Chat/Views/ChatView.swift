@@ -595,9 +595,17 @@ struct ChatView: View {
                 kind: permission.kind,
                 options: permission.options,
                 onRespond: { optionId in
-                    viewModel.respondToPermission(optionId: optionId)
+                    viewModel.respondToPermission(
+                        requestId: permission.requestId,
+                        optionId: optionId
+                    )
                 }
             )
+            // The prompt requires a decision: the agent's tool call is
+            // blocked until one of the options is sent, and an Esc that
+            // merely hid the sheet used to leave it blocked forever
+            // with nothing on screen to explain why.
+            .interactiveDismissDisabled()
         }
         // Model preflight — open before any ACP plumbing when the active
         // server has no `model.default` / `model.provider` set. Keeps the
@@ -650,10 +658,19 @@ struct ChatView: View {
         )
     }
 
+    /// Presents the HEAD of the permission queue. The setter is
+    /// deliberately inert: a permission request is resolved only by
+    /// answering it (`respondToPermission`), which pops it by id. If we
+    /// popped on SwiftUI's dismissal write instead, the write that
+    /// `PermissionApprovalView` emits right after `onRespond` — which
+    /// already popped the answered request — would silently swallow the
+    /// NEXT queued request without ever showing it. An Esc dismissal
+    /// therefore re-presents the same sheet, which is the honest
+    /// outcome: the agent is still blocked waiting for an answer.
     private var permissionBinding: Binding<RichChatViewModel.PendingPermission?> {
         Binding(
             get: { viewModel.richChatViewModel.pendingPermission },
-            set: { viewModel.richChatViewModel.pendingPermission = $0 }
+            set: { _ in }
         )
     }
 

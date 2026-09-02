@@ -163,8 +163,78 @@ public actor ACPClient {
 
     // MARK: - Lifecycle
 
+    /// Coarse lifecycle of the client, exposed so callers (and tests)
+    /// can reason about a half-open start.
+    ///
+    /// `idle` → `starting` → `running` → `stopped`. A failed start
+    /// returns to `idle` (the client is reusable — nothing was left
+    /// half-connected). `stop()` always lands on `stopped`, and a
+    /// subsequent `start()` is allowed: the reconnect paths build a
+    /// FRESH client per attempt today, but nothing about this state
+    /// machine forbids restarting an instance.
+    public enum State: String, Sendable, Equatable {
+        case idle, starting, running, stopped
+    }
+
+    public private(set) var state: State = .idle
+
+    /// The in-flight `start()`, if any. This is the fix for the
+    /// half-open double-connect: `start()`'s old `guard channel == nil`
+    /// was evaluated BEFORE the `await channelFactory(context)`
+    /// suspension, and the actor is reentrant — so a second `start()`
+    /// arriving while the factory was spawning still saw `channel ==
+    /// nil`, spawned a SECOND `hermes acp` subprocess, and clobbered
+    /// `self.channel` / `self._eventStream`, orphaning the first
+    /// process and leaving the first event stream permanently
+    /// unfinished.
+    /// Holding the task lets a concurrent caller JOIN the in-flight
+    /// start instead of racing it.
+    private var startTask: Task<Void, Error>?
+
+    /// Bumped by `stop()`. A `performStart` whose captured generation
+    /// no longer matches was superseded mid-flight and closes the
+    /// channel it just spawned rather than publishing it.
+    private var startGeneration = 0
+
+    /// Idempotent. Concurrent or repeated calls never spawn a second
+    /// channel:
+    /// - a start already in flight is joined (same success/failure);
+    /// - an already-running client returns immediately;
+    /// - a failed start resets to `idle` so a retry is still possible.
     public func start() async throws {
+        if let inFlight = startTask {
+            try await inFlight.value
+            return
+        }
+        guard channel == nil else {
+            // Already connected — nothing to do. Keep `state` honest in
+            // case a caller reached `running` through an older path.
+            state = .running
+            return
+        }
+        state = .starting
+        let generation = startGeneration
+        let task = Task<Void, Error> { try await self.performStart() }
+        startTask = task
+        do {
+            try await task.value
+            // Only clear OUR task: a `stop()` + `start()` pair that
+            // landed while we awaited owns `startTask` now (the
+            // generation bump in `stop()` is the tell).
+            if startGeneration == generation { startTask = nil }
+            // A `stop()` that landed while we were starting owns the
+            // final state — don't stomp `.stopped` back to `.running`.
+            if state == .starting { state = .running }
+        } catch {
+            if startGeneration == generation { startTask = nil }
+            if state == .starting { state = .idle }
+            throw error
+        }
+    }
+
+    private func performStart() async throws {
         guard channel == nil else { return }
+        let generation = startGeneration
 
         // Create the event stream BEFORE anything else so no events are
         // lost while the channel is handshaking.
@@ -184,6 +254,16 @@ public actor ACPClient {
             #endif
             continuation.finish()
             throw error
+        }
+
+        // A `stop()` (or another supersede) landed while the factory was
+        // spawning. Publishing `ch` now would resurrect a client the
+        // caller already tore down and leak the process, so close what
+        // we just opened and bail.
+        guard generation == startGeneration else {
+            await ch.close()
+            continuation.finish()
+            throw CancellationError()
         }
 
         self.channel = ch
@@ -222,6 +302,15 @@ public actor ACPClient {
     }
 
     public func stop() async {
+        // Supersede a half-open start. We deliberately do NOT await it:
+        // `initialize` carries a 60s watchdog and `stop()` is on the
+        // user's cancel path, so blocking here could freeze teardown
+        // for a minute. Bumping the generation makes the in-flight
+        // `performStart` close the channel IT spawned as soon as the
+        // factory returns, so nothing is orphaned.
+        startGeneration &+= 1
+        startTask?.cancel()
+        startTask = nil
         readTask?.cancel()
         readTask = nil
         stderrTask?.cancel()
@@ -243,6 +332,7 @@ public actor ACPClient {
         channel = nil
         isConnected = false
         currentSessionId = nil
+        state = .stopped
         statusMessage = "Disconnected"
         #if canImport(os)
         logger.info("ACP client stopped")

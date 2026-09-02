@@ -256,9 +256,18 @@ struct ChatView: View {
                 onCancel: { controller.cancelModelPreflight() }
             )
         }
+        // Presents the HEAD of the permission queue. The setter is
+        // deliberately inert: a request is resolved only by answering
+        // it (`respondToPermission` pops it by id). Popping on
+        // SwiftUI's dismissal write instead would let the write that
+        // follows `onRespond` — which already popped the answered
+        // request — silently swallow the NEXT queued request without
+        // ever showing it. `interactiveDismissDisabled` keeps a swipe
+        // from looking like it dropped the prompt when the agent is in
+        // fact still blocked on an answer.
         .sheet(item: Binding(
             get: { controller.vm.pendingPermission.map(PermissionWrapper.init) },
-            set: { if $0 == nil { controller.vm.pendingPermission = nil } }
+            set: { _ in }
         )) { wrapper in
             PermissionSheet(permission: wrapper.value) { optionId in
                 await controller.respondToPermission(
@@ -272,6 +281,7 @@ struct ChatView: View {
             // drag to large for long option lists.
             .presentationDetents([.height(220), .large])
             .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled()
         }
     }
 
@@ -2486,7 +2496,10 @@ final class ChatController {
     func respondToPermission(requestId: Int, optionId: String) async {
         guard let client else { return }
         await client.respondToPermission(requestId: requestId, optionId: optionId)
-        vm.pendingPermission = nil
+        // Pop by id, not "the head": a second request can arrive while
+        // this sheet is open, and the head may no longer be the one the
+        // user just answered.
+        vm.resolvePermission(requestId: requestId)
     }
 }
 
