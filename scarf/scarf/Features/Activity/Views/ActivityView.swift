@@ -154,8 +154,12 @@ struct ActivityView: View {
                         .tag(String?.some(session.id))
                 }
             } label: {
-                EmptyView()
+                // An EmptyView label leaves the popup unnamed. A real,
+                // visually hidden label gives it one for VoiceOver and
+                // Voice Control without changing the layout.
+                Text("Filter by session")
             }
+            .labelsHidden()
             .frame(maxWidth: 250)
             Spacer()
         }
@@ -430,6 +434,23 @@ private struct ActivityRow: View {
         .buttonStyle(.plain)
         .disabled(entry.isPlaceholder)
         .onHover { hover = $0 }
+        // Name-first: unlabelled, the row leads with the timestamp column.
+        .accessibilityLabel(Text(verbatim: rowLabel))
+    }
+
+    /// Composed through `String(localized:)` so the fragments extract; a
+    /// plain String handed to `.accessibilityLabel` never would.
+    private var rowLabel: String {
+        var parts: [String] = [entry.toolName]
+        if entry.isPlaceholder {
+            parts.append(String(localized: "loading details"))
+        } else if !entry.summary.isEmpty {
+            parts.append(entry.summary)
+        } else {
+            parts.append(String(localized: entry.kind.displayName))
+        }
+        parts.append(String(localized: "at \(timeLabel)"))
+        return parts.joined(separator: ", ")
     }
 
     private var timeLabel: String {
@@ -491,5 +512,8 @@ struct FilterChip: View {
                 )
         }
         .buttonStyle(.plain)
+        // Selection is fill-colour-only on screen; the trait is what makes
+        // the active filter perceivable to VoiceOver.
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 }

@@ -282,8 +282,18 @@ struct InsightsView: View {
                     }
                     Spacer(minLength: 0)
                 }
+                // The bar's LENGTH is the only rendering of the value (and
+                // the numeral is omitted entirely at zero), so the row is
+                // collapsed into one element that speaks day and count.
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(verbatim: dayNames[(day + 1) % 7]))
+                .accessibilityValue(Text("^[\(count) session](inflect: true)"))
             }
         }
+        // `.contain` keeps each bar reachable while giving the group a name;
+        // a bare `.accessibilityLabel` here would overwrite every child's.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Sessions by day of week"))
     }
 
     private var hourlyChart: some View {
@@ -307,9 +317,16 @@ struct InsightsView: View {
                             Text(" ").font(.system(size: 8))
                         }
                     }
+                    // Bar height is the only value rendering, and only every
+                    // sixth hour is even labelled on screen.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Text("\(hour):00"))
+                    .accessibilityValue(Text("^[\(count) session](inflect: true)"))
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Sessions by hour of day"))
     }
 
     // MARK: - Notable Sessions
@@ -346,6 +363,10 @@ struct InsightsView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .help("Open session")
+                                // Every row's glyph is identical, so the
+                                // bare "Open session" would be ambiguous to
+                                // Voice Control and VoiceOver alike.
+                                .accessibilityLabel(Text("Open session \(notable.preview)"))
                             }
                             .padding(.horizontal, ScarfSpace.s3)
                             .padding(.vertical, 10)

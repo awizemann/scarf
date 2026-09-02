@@ -195,6 +195,9 @@ struct SessionsView: View {
             )
         }
         .buttonStyle(.plain)
+        // The pill's selected state is carried by fill colour alone; the
+        // trait is what makes it perceivable without sight.
+        .accessibilityAddTraits(isActive ? [.isSelected] : [])
     }
 
     /// Memoized on the view model — see `recomputeFilteredSessions()`.
@@ -251,6 +254,8 @@ struct SessionsView: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .accessibilityLabel(Text("Filter by project"))
+        .accessibilityValue(projectFilterLabel)
     }
 
     private var projectFilterIcon: String {
@@ -596,10 +601,26 @@ private struct SessionTableRow: View {
 
     @State private var hover = false
 
+    /// The project chip is a REAL button and used to live inside the row
+    /// button's own label — a nested control, which AppKit flattens into
+    /// the outer button: keyboard focus never reached it and VoiceOver
+    /// activation triggered the row instead of the project filter. It now
+    /// sits beside the row button as a sibling, keeping the same column
+    /// geometry (fixed 120pt) and the same row-wide hover highlight.
     var body: some View {
+        HStack(spacing: 6) {
+            projectCell
+            rowButton
+        }
+        .padding(.horizontal, ScarfSpace.s4)
+        .padding(.vertical, ScarfSpace.s2 + 2)
+        .background(hover ? ScarfColor.backgroundTertiary.opacity(0.6) : Color.clear)
+        .onHover { hover = $0 }
+    }
+
+    private var rowButton: some View {
         Button(action: onTap) {
             HStack(spacing: 6) {
-                projectCell
                 titleCell
                 Text(modelLabel)
                     .font(ScarfFont.monoSmall)
@@ -625,13 +646,33 @@ private struct SessionTableRow: View {
                     .foregroundStyle(ScarfColor.foregroundFaint)
                     .frame(width: 18)
             }
-            .padding(.horizontal, ScarfSpace.s4)
-            .padding(.vertical, ScarfSpace.s2 + 2)
-            .background(hover ? ScarfColor.backgroundTertiary.opacity(0.6) : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { hover = $0 }
+        // Name-first, state-after: the whole row reads as one sentence
+        // instead of seven unlabelled numeric columns. The project chip is
+        // its own element beside this one, so it is deliberately not
+        // repeated here.
+        .accessibilityLabel(Text(verbatim: accessibilityRowLabel))
+        .accessibilityHint(Text("Opens the session detail"))
+    }
+
+    /// Fragments compose with `String(localized:)` — passing a plain String
+    /// variable to `.accessibilityLabel` binds the StringProtocol overload
+    /// and would never be extracted for localization.
+    private var accessibilityRowLabel: String {
+        var parts: [String] = [session.displayLabel(preview: preview)]
+        if let model = session.model, !model.isEmpty {
+            parts.append(String(localized: "model \(model)"))
+        }
+        parts.append(String(localized: "^[\(session.messageCount) message](inflect: true)"))
+        parts.append(String(localized: "\(formatTokens(session.totalTokens)) tokens"))
+        parts.append(String(localized: "cost \(costLabel)"))
+        parts.append(String(localized: "updated \(updatedLabel)"))
+        if session.rewindCount > 0 {
+            parts.append(String(localized: "rewound ^[\(session.rewindCount) time](inflect: true)"))
+        }
+        return parts.joined(separator: ", ")
     }
 
     private var projectCell: some View {
@@ -652,10 +693,14 @@ private struct SessionTableRow: View {
                     .background(Capsule().fill(ScarfColor.accentTint))
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(Text("Project \(projectName)"))
+                .accessibilityHint(Text("Filters the list to this project"))
             } else {
+                // Decorative placeholder — "dash" is noise in the row.
                 Text("—")
                     .font(ScarfFont.monoSmall)
                     .foregroundStyle(ScarfColor.foregroundFaint)
+                    .accessibilityHidden(true)
             }
         }
         .frame(width: 120, alignment: .leading)

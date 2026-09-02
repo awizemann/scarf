@@ -125,6 +125,63 @@ struct KanbanCardView: View {
             self.dragPreview
         }
         .contextMenu { contextMenuItems }
+        // The card had no accessibility of its own: status, priority, the
+        // diagnostics dot and BOTH warning glyphs were `.help()`-only, so
+        // they existed for a hovering mouse and for nobody else. One
+        // element, name-first, state-after — everything visible on the card
+        // is in this label, per the combined-group rule (an explicit label
+        // REPLACES the combined text, so nothing may be left out).
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(verbatim: cardAccessibilityLabel))
+    }
+
+    /// Fragments compose through `String(localized:)` — a plain String on
+    /// `.accessibilityLabel` binds the StringProtocol overload and is never
+    /// extracted for localization.
+    private var cardAccessibilityLabel: String {
+        var parts: [String] = [task.title]
+        parts.append(String(localized: "status \(task.status)"))
+
+        if hallucinationGate == .pending {
+            parts.append(String(localized: "Worker-created — verify before running"))
+        } else if needsAssignmentWarning {
+            // The zombie warning is the most consequential thing on the
+            // card: an unassigned todo/ready task is silently skipped by
+            // Hermes's dispatcher and will never run.
+            parts.append(String(localized: "Unassigned — the dispatcher will skip this task"))
+        }
+
+        if let assignee = task.assignee, !assignee.isEmpty {
+            parts.append(String(localized: "assigned to \(assignee)"))
+        } else if hasMetaRow1 {
+            parts.append(String(localized: "unassigned"))
+        }
+        if let workspace = task.workspaceKind {
+            parts.append(workspace)
+        }
+        if showsGoalBadge {
+            if let turns = task.goalMaxTurns {
+                parts.append(String(localized: "goal mode, \(turns) turns"))
+            } else {
+                parts.append(String(localized: "goal mode"))
+            }
+        }
+        if !task.skills.isEmpty {
+            parts.append(String(localized: "skills \(task.skills.joined(separator: ", "))"))
+        }
+        if supportsKanbanDiagnostics,
+           KanbanStatus.from(task.status) == .blocked,
+           let reason = task.autoBlockedReason, !reason.isEmpty {
+            parts.append(reason)
+        }
+        parts.append(relativeTimeLabel)
+        if supportsKanbanDiagnostics, !task.diagnostics.isEmpty {
+            parts.append(String(localized: "^[\(task.diagnostics.count) diagnostic signal](inflect: true)"))
+        }
+        if let priority = task.priority, priority >= 70 {
+            parts.append(String(localized: "priority \(priority)"))
+        }
+        return parts.joined(separator: ", ")
     }
 
     /// v0.15 lifecycle actions, status-gated. Empty (no menu) on

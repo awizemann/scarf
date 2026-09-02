@@ -174,7 +174,10 @@ struct PickerRow: View {
     var body: some View {
         HStack {
             SettingsRowLabel(label: label)
-            Picker("", selection: Binding(
+            // The visible name is the sibling SettingsRowLabel; the real
+            // control still carries it (hidden) so VoiceOver and Voice
+            // Control can name and target this picker.
+            Picker(label, selection: Binding(
                 get: { selection },
                 set: { onChange($0) }
             )) {
@@ -182,6 +185,7 @@ struct PickerRow: View {
                     Text(verbatim: displayLabel(for: option)).tag(option)
                 }
             }
+            .labelsHidden()
             .frame(maxWidth: 250)
             Spacer()
         }
@@ -204,7 +208,10 @@ struct ToggleRow: View {
     var body: some View {
         HStack {
             SettingsRowLabel(label: label)
-            Toggle("", isOn: Binding(
+            // Real label on the control (hidden visually — the sibling
+            // SettingsRowLabel is what the user sees) so the switch has a
+            // name for VoiceOver and Voice Control.
+            Toggle(label, isOn: Binding(
                 get: { isOn },
                 set: { onChange($0) }
             ))
@@ -249,7 +256,7 @@ struct StepperRow: View {
             Text(verbatim: valueLabel?(value) ?? value.formatted())
                 .font(ScarfFont.monoSmall)
                 .frame(width: 70, alignment: .leading)
-            Stepper("", value: Binding(
+            Stepper(label, value: Binding(
                 get: { value },
                 set: { onChange($0) }
             ), in: range, step: step)
@@ -274,7 +281,7 @@ struct DoubleStepperRow: View {
             Text(value.formatted(.number.precision(.fractionLength(2))))
                 .font(ScarfFont.monoSmall)
                 .frame(width: 70, alignment: .leading)
-            Stepper("", value: Binding(
+            Stepper(label, value: Binding(
                 get: { value },
                 set: { onChange($0) }
             ), in: range, step: step)
@@ -334,6 +341,8 @@ struct PathRow: View {
                     .foregroundStyle(ScarfColor.foregroundMuted)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text("Reveal in Finder"))
+            .help("Reveal in Finder")
         }
         .settingsRowChrome()
     }

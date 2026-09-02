@@ -50,6 +50,7 @@ struct SessionDetailView: View {
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
+                    .accessibilityLabel(Text("Session actions"))
                 }
             }
             HStack(spacing: 16) {
@@ -116,10 +117,22 @@ struct SessionDetailView: View {
                     .font(.caption)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(Text(verbatim: subagentLabel(sub)))
             }
         }
         .padding(.horizontal)
         .padding(.bottom, 8)
+    }
+
+    /// Name-first row label. Fragments go through `String(localized:)` —
+    /// a bare String on `.accessibilityLabel` is never extracted.
+    private func subagentLabel(_ sub: HermesSession) -> String {
+        var parts: [String] = [String(localized: "Subagent \(sub.displayTitle)")]
+        if let model = sub.model, !model.isEmpty {
+            parts.append(String(localized: "model \(model)"))
+        }
+        parts.append(String(localized: "^[\(sub.messageCount) message](inflect: true)"))
+        return parts.joined(separator: ", ")
     }
 
     private var messagesList: some View {
@@ -231,6 +244,9 @@ struct ToolCallBadge: View {
                 }
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text("Tool call \(call.functionName)"))
+            .accessibilityValue(Text(expanded ? "Expanded" : "Collapsed"))
+            .accessibilityHint(Text("Shows the call arguments"))
 
             if expanded {
                 Text(call.argumentsSummary)

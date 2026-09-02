@@ -595,6 +595,11 @@ struct StatusCard: View {
             RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
                 .strokeBorder(ScarfColor.border, lineWidth: 1)
         )
+        // One element per card. The running state is a bare green dot with
+        // no text of its own, so it exists only for sighted users unless it
+        // is spoken as the card's value.
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(Text(tone == .running ? "Running" : "Idle"))
     }
 }
 
@@ -684,18 +689,26 @@ struct SessionRow: View {
             }
             Spacer()
             HStack(spacing: 12) {
+                // Each metric renders as glyph + bare numeral: without a
+                // label VoiceOver reads a run of naked numbers, since SF
+                // Symbols carry no spoken name here.
                 Label("\(session.messageCount)", systemImage: "bubble.left")
+                    .accessibilityLabel(Text("^[\(session.messageCount) message](inflect: true)"))
                 Label("\(session.toolCallCount)", systemImage: "wrench")
+                    .accessibilityLabel(Text("^[\(session.toolCallCount) tool call](inflect: true)"))
                 if session.apiCallCount > 0 {
                     Label("\(session.apiCallCount)", systemImage: "network")
                         .help("API calls (Hermes v2026.4.23+)")
+                        .accessibilityLabel(Text("^[\(session.apiCallCount) API call](inflect: true)"))
                 }
                 if session.rewindCount > 0 {
                     Label("\(session.rewindCount)", systemImage: "arrow.counterclockwise")
                         .help("Rewound ^[\(session.rewindCount) time](inflect: true) (Hermes v0.16+)")
+                        .accessibilityLabel(Text("rewound ^[\(session.rewindCount) time](inflect: true)"))
                 }
                 if let cost = session.displayCostUSD, cost > 0 {
                     Label(cost.formatted(.currency(code: "USD").precision(.fractionLength(4))), systemImage: "dollarsign.circle")
+                        .accessibilityLabel(Text("cost \(cost.formatted(.currency(code: "USD").precision(.fractionLength(4))))"))
                 }
             }
             .scarfStyle(.caption)
