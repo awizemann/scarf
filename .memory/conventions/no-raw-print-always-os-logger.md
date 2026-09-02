@@ -5,7 +5,7 @@ permalink: scarf/conventions/no-raw-print-always-os-logger
 tags: [logging, conventions, rule, audit-2026-06-13]
 source_paths: [scarf/scarf/Core/Services/HermesFileService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesProfileResolver.swift, scarf/scarf/Features/Projects/Views/Widgets/WebviewWidgetView.swift]
 source_paths_inferred: false
-source_sha: cc42250a7195da79d17ebe0e2d8351d5ea93c384
+source_sha: 73ff36e8d264366ed074a105fe88d39d73b27f7b
 created: 2026-06-13
 updated: 2026-06-13
 reviewed: 2026-09-02

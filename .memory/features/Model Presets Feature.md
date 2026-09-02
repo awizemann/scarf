@@ -2,16 +2,13 @@
 title: Model Presets Feature
 type: note
 permalink: scarf/features/model-presets-feature
-tags:
-- models
-- presets
-- acp
-source_sha: 64bb87b88f785636aea2386ba3837723f7b81eec
-source_paths: scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ModelPreset.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPresetService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectModelPresetReader.swift, scarf/scarf/Core/Services/ProjectModelPresetBinding.swift, scarf/scarf/Features/Models/Views/ModelPresetsView.swift
+tags: [models, presets, acp]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ModelPreset.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPresetService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectModelPresetReader.swift, scarf/scarf/Core/Services/ProjectModelPresetBinding.swift, scarf/scarf/Features/Models/Views/ModelPresetsView.swift]
+source_sha: 73ff36e8d264366ed074a105fe88d39d73b27f7b
 created: 2026-05-29
 updated: 2026-05-29
-reviewed: 2026-06-28
-reviewed_by: audit:claude-code (audit)
+reviewed: 2026-09-02
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations
