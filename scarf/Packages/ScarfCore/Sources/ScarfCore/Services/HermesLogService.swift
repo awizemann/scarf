@@ -136,11 +136,56 @@ public actor HermesLogService {
             let lines = content.components(separatedBy: "\n").filter { !$0.isEmpty }
             return lines.map { parseLine($0) }
         }
-        guard let data = FileManager.default.contents(atPath: path) else { return [] }
-        let content = String(data: data, encoding: .utf8) ?? ""
-        let lines = content.components(separatedBy: "\n").filter { !$0.isEmpty }
-        let lastLines = Array(lines.suffix(count))
-        return lastLines.map { parseLine($0) }
+        // BOUNDED. `FileManager.contents(atPath:)` read the WHOLE file into
+        // memory just to take the last `count` lines — and `agent.log` on a
+        // busy host is routinely hundreds of megabytes, so opening the Logs
+        // tab allocated the entire file on first paint (C10). The remote
+        // branch above has always used a bounded `tail -n`; this is the local
+        // equivalent, walking backwards from EOF in chunks until it has
+        // enough newlines or hits the byte ceiling.
+        return Self.readLocalTail(path: path, count: count).map { parseLine($0) }
+    }
+
+    /// Ceiling on the local tail read. A log line is rarely over a few hundred
+    /// bytes, so 4 MiB comfortably covers 500 lines of anything sane while
+    /// bounding the pathological case (one enormous single-line JSON dump).
+    static let localTailByteCeiling = 4 * 1024 * 1024
+
+    /// Read the last `count` non-empty lines of a local file without loading
+    /// the whole thing. Returns fewer lines if the file is shorter, or if the
+    /// byte ceiling is reached first — in which case the OLDEST line in the
+    /// window may be a partial line, so it is dropped.
+    static func readLocalTail(path: String, count: Int) -> [String] {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return [] }
+        defer { try? handle.close() }
+        guard let end = try? handle.seekToEnd(), end > 0 else { return [] }
+
+        let chunkSize = 64 * 1024
+        var data = Data()
+        var offset = end
+        var hitCeiling = false
+
+        while offset > 0 {
+            if data.count >= localTailByteCeiling { hitCeiling = true; break }
+            let readSize = UInt64(min(chunkSize, Int(offset)))
+            offset -= readSize
+            guard (try? handle.seek(toOffset: offset)) != nil,
+                  let chunk = try? handle.read(upToCount: Int(readSize))
+            else { break }
+            data = chunk + data
+            // +1: the final newline terminates the last line rather than
+            // starting one, so N newlines bound N lines, not N+1.
+            let newlines = data.reduce(into: 0) { $0 += ($1 == 0x0A ? 1 : 0) }
+            if newlines > count { break }
+        }
+
+        let content = String(decoding: data, as: UTF8.self)
+        var lines = content.components(separatedBy: "\n")
+        // The first element is a partial line whenever the window did not
+        // start at byte 0 — rendering half a log line as if it were whole is
+        // worse than showing one line fewer.
+        if offset > 0 || hitCeiling { lines = Array(lines.dropFirst()) }
+        return Array(lines.filter { !$0.isEmpty }.suffix(count))
     }
 
     public func readNewLines() -> [LogEntry] {

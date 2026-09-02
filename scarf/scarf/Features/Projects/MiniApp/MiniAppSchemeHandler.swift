@@ -26,6 +26,12 @@ final class MiniAppSchemeHandler: NSObject, WKURLSchemeHandler {
         self.baseDirectory = baseDirectory
     }
 
+    /// Per-asset ceiling. Generous for anything a mini-app legitimately
+    /// serves (a page, a script, an image, a short clip) while bounding the
+    /// pathological case. Refusals are logged AND returned as 413, never
+    /// silently truncated — a half-served asset is worse than a failed one.
+    static let maxAssetBytes = 64 * 1024 * 1024
+
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
         guard let url = urlSchemeTask.request.url else {
             urlSchemeTask.didFailWithError(URLError(.badURL))
@@ -42,6 +48,26 @@ final class MiniAppSchemeHandler: NSObject, WKURLSchemeHandler {
         ) else {
             Self.logger.warning("blocked out-of-bounds / escaping mini-app request: \(url.path, privacy: .public)")
             respond(urlSchemeTask, url: url, status: 404, mime: "text/plain; charset=utf-8", body: Data("Not found".utf8))
+            return
+        }
+
+        // SIZE CAP. `FileManager.contents(atPath:)` reads the whole file into
+        // memory, and a mini-app's asset directory is AGENT-GENERATED — a
+        // stray multi-gigabyte artefact dropped next to index.html would have
+        // been loaded in full to serve one `<img>`. Stat first and refuse
+        // anything over the ceiling with a real HTTP status, so the page's own
+        // error handling fires instead of the app quietly ballooning.
+        let attributes = try? FileManager.default.attributesOfItem(atPath: filePath)
+        let byteSize = (attributes?[.size] as? NSNumber)?.intValue
+        if let byteSize, byteSize > Self.maxAssetBytes {
+            Self.logger.warning(
+                "mini-app asset over the \(Self.maxAssetBytes, privacy: .public)-byte cap refused: \(url.path, privacy: .public) (\(byteSize, privacy: .public) bytes)"
+            )
+            respond(
+                urlSchemeTask, url: url, status: 413,
+                mime: "text/plain; charset=utf-8",
+                body: Data("Asset exceeds the \(Self.maxAssetBytes / (1024 * 1024)) MB mini-app limit.".utf8)
+            )
             return
         }
 

@@ -108,16 +108,36 @@ struct LogTailWidgetView: View {
         let outcome: WidgetIOResult<String> = await Task.detached {
             let transport = context.makeTransport()
             do {
-                // Measures disk/transport latency for reading the log file.
-                let data = try ScarfMon.measure(.diskIO, "widget.log_tail.load") {
-                    try transport.readFile(absPath)
-                }
-                guard let text = String(data: data, encoding: .utf8) else {
-                    return .failure("File is not UTF-8 — log_tail expects text.")
+                // BOUNDED. This widget shows the last `n` lines of a log, and
+                // it used to pull the WHOLE file across the transport to get
+                // them — on a dashboard that reloads on every watcher tick,
+                // against a log that grows all day. `tail -n` does the
+                // bounding at the source on both local and remote transports
+                // (the same tool `HermesLogService` uses for its remote
+                // branch), so the transfer is proportional to what is shown.
+                let text: String = try ScarfMon.measure(.diskIO, "widget.log_tail.load") {
+                    if let result = try? transport.runProcess(
+                        executable: "/usr/bin/tail",
+                        args: ["-n", String(n), absPath],
+                        stdin: nil,
+                        timeout: 30
+                    ), result.exitCode == 0 {
+                        return result.stdoutString
+                    }
+                    // `tail` absent or refused (an unusual host, or a path it
+                    // can't stat): fall back to the whole-file read rather
+                    // than showing nothing. Correctness over the optimisation.
+                    let data = try transport.readFile(absPath)
+                    guard let whole = String(data: data, encoding: .utf8) else {
+                        throw WidgetTailError.notUTF8
+                    }
+                    return whole
                 }
                 let stripped = AnsiStripper.strip(text)
                 let parts = stripped.split(separator: "\n", omittingEmptySubsequences: false)
                 return .success(parts.suffix(n).joined(separator: "\n"))
+            } catch is WidgetTailError {
+                return .failure("File is not UTF-8 — log_tail expects text.")
             } catch {
                 return .failure("Could not read file: \(error.localizedDescription)")
             }
@@ -132,3 +152,7 @@ struct LogTailWidgetView: View {
         }
     }
 }
+
+/// Local sentinel so the non-UTF-8 case can travel out of the measured
+/// closure as a `throw` rather than as a second return channel.
+private enum WidgetTailError: Error { case notUTF8 }

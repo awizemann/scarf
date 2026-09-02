@@ -45,6 +45,17 @@ struct LogsView: View {
                     .foregroundStyle(ScarfColor.foregroundMuted)
             }
             Spacer()
+            // The retention cap must be visible: a tab left open long enough
+            // to drop its oldest entries otherwise just looks like a log that
+            // starts in the middle.
+            if viewModel.didDropOldEntries {
+                Label(
+                    "Showing the most recent \(LogsViewModel.maxRetainedEntries) entries",
+                    systemImage: "scissors"
+                )
+                .font(ScarfFont.monoSmall)
+                .foregroundStyle(ScarfColor.foregroundMuted)
+            }
             Text("\(viewModel.filteredEntries.count) entries")
                 .font(ScarfFont.monoSmall)
                 .foregroundStyle(ScarfColor.foregroundFaint)

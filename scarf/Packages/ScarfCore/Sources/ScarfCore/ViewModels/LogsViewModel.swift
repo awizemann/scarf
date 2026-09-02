@@ -11,14 +11,25 @@ public final class LogsViewModel {
         self.logService = HermesLogService(context: context)
     }
 
-    public var entries: [LogEntry] = []
+    public var entries: [LogEntry] = [] { didSet { recomputeFilteredEntries() } }
+
+    /// Hard ceiling on retained entries. The 2-second tail poll appended
+    /// forever: a Logs tab left open on a chatty host grew `entries` without
+    /// bound until the app was quit. Oldest entries are dropped first.
+    public static let maxRetainedEntries = 5_000
+
+    /// True once the retention cap has actually dropped anything. A cap that
+    /// degrades silently is indistinguishable from a quiet log, so the view
+    /// renders a banner off this rather than the user wondering where the
+    /// start of the file went.
+    public private(set) var didDropOldEntries = false
     /// True during initial load + log-file switch so the view can show a
     /// `.loadingOverlay` (the 2s tail poll does NOT toggle this). (t-aud07)
     public var isLoading = false
     public var selectedLogFile: LogFile = .agent
-    public var filterLevel: LogEntry.LogLevel?
-    public var selectedComponent: LogComponent = .all
-    public var searchText = ""
+    public var filterLevel: LogEntry.LogLevel? { didSet { recomputeFilteredEntries() } }
+    public var selectedComponent: LogComponent = .all { didSet { recomputeFilteredEntries() } }
+    public var searchText = "" { didSet { recomputeFilteredEntries() } }
     private var pollTimer: Timer?
 
     public enum LogFile: String, CaseIterable, Identifiable {
@@ -82,20 +93,44 @@ public final class LogsViewModel {
         }
     }
 
-    public var filteredEntries: [LogEntry] {
-        entries.filter { entry in
-            let levelOk = filterLevel == nil || entry.level == filterLevel
-            let searchOk = searchText.isEmpty || entry.raw.localizedCaseInsensitiveContains(searchText)
-            let componentOk: Bool = {
-                guard let prefix = selectedComponent.loggerPrefix else { return true }
-                return entry.logger.hasPrefix(prefix)
-            }()
+    /// MEMOIZED, not computed. As a computed property this ran a full filter
+    /// — including a `localizedCaseInsensitiveContains` per entry, which is
+    /// an ICU collation call, not a byte compare — over up to 5,000 entries
+    /// on EVERY SwiftUI body evaluation, while a 2-second poll kept
+    /// invalidating that body. Its four inputs (`entries`, `filterLevel`,
+    /// `selectedComponent`, `searchText`) each recompute it on `didSet`.
+    public private(set) var filteredEntries: [LogEntry] = []
+
+    private func recomputeFilteredEntries() {
+        let level = filterLevel
+        let search = searchText
+        let prefix = selectedComponent.loggerPrefix
+        filteredEntries = entries.filter { entry in
+            let levelOk = level == nil || entry.level == level
+            let searchOk = search.isEmpty || entry.raw.localizedCaseInsensitiveContains(search)
+            let componentOk = prefix.map { entry.logger.hasPrefix($0) } ?? true
             return levelOk && searchOk && componentOk
         }
     }
 
+    /// Test seam for `appendBounded` — the retention cap is the contract,
+    /// and it is only reachable through the poll timer in production.
+    func appendBoundedForTesting(_ newEntries: [LogEntry]) { appendBounded(newEntries) }
+
+    /// Append new tail lines, enforcing `maxRetainedEntries`.
+    private func appendBounded(_ newEntries: [LogEntry]) {
+        guard !newEntries.isEmpty else { return }
+        var combined = entries + newEntries
+        if combined.count > Self.maxRetainedEntries {
+            combined.removeFirst(combined.count - Self.maxRetainedEntries)
+            didDropOldEntries = true
+        }
+        entries = combined
+    }
+
     public func load() async {
         isLoading = true
+        didDropOldEntries = false
         await logService.openLog(path: path(for: selectedLogFile))
         entries = await logService.readLastLines(count: 500)
         await logService.seekToEnd()
@@ -107,6 +142,7 @@ public final class LogsViewModel {
         isLoading = true
         selectedLogFile = file
         entries = []
+        didDropOldEntries = false
         await logService.openLog(path: path(for: file))
         entries = await logService.readLastLines(count: 500)
         await logService.seekToEnd()
@@ -118,10 +154,7 @@ public final class LogsViewModel {
         pollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
-                let newEntries = await self.logService.readNewLines()
-                if !newEntries.isEmpty {
-                    self.entries.append(contentsOf: newEntries)
-                }
+                self.appendBounded(await self.logService.readNewLines())
             }
         }
     }
