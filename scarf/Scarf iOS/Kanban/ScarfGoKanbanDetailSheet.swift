@@ -110,15 +110,15 @@ struct ScarfGoKanbanDetailSheet: View {
             // Wrap chips in FlowLayout so the new v0.13 `retries` chip
             // doesn't push the row over the iPhone-portrait width budget.
             FlowLayout(spacing: 6) {
-                ScarfBadge(task.status.lowercased(), kind: badgeKind(for: task.status))
+                ScarfBadge(verbatim: task.status.lowercased(), kind: badgeKind(for: task.status))
                 if let assignee = task.assignee, !assignee.isEmpty {
-                    ScarfBadge(assignee, kind: .neutral)
+                    ScarfBadge(verbatim: assignee, kind: .neutral)
                 }
                 if let workspace = task.workspaceKind {
-                    ScarfBadge(workspace, kind: .neutral)
+                    ScarfBadge(verbatim: workspace, kind: .neutral)
                 }
                 if let tenant = task.tenant, !tenant.isEmpty {
-                    ScarfBadge(tenant, kind: .brand)
+                    ScarfBadge(verbatim: tenant, kind: .brand)
                 }
                 if diagnosticsAvailable, let maxRetries = task.maxRetries {
                     ScarfBadge("retries: \(maxRetries)", kind: .neutral)
@@ -205,7 +205,7 @@ struct ScarfGoKanbanDetailSheet: View {
                     Button {
                         selectedDiagnostic = diag
                     } label: {
-                        ScarfBadge(diag.kind, kind: diagnosticBadgeKind(diag))
+                        ScarfBadge(verbatim: diag.kind, kind: diagnosticBadgeKind(diag))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(diag.message ?? diag.kind)
@@ -291,7 +291,7 @@ struct ScarfGoKanbanDetailSheet: View {
                 ForEach(runs) { run in
                     VStack(alignment: .leading, spacing: 2) {
                         HStack {
-                            ScarfBadge(run.outcome ?? run.status, kind: outcomeKind(run.outcome ?? run.status))
+                            ScarfBadge(verbatim: run.outcome ?? run.status, kind: outcomeKind(run.outcome ?? run.status))
                             if let profile = run.profile {
                                 Text(profile)
                                     .font(.subheadline)

@@ -66,7 +66,7 @@ struct DiagnosticDetailSheet: View {
         }
     }
 
-    private var severityLabel: String {
+    private var severityLabel: LocalizedStringKey {
         let kind = KanbanDiagnosticKind.from(diagnostic.kind)
         switch kind.severity {
         case .danger:  return "danger"

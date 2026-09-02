@@ -237,7 +237,6 @@ struct KanbanInspectorPane: View {
     private func assigneeMenu(for task: HermesKanbanTask) -> some View {
         let current = task.assignee?.isEmpty == false ? task.assignee : nil
         let options = mergedAssigneeOptions(currentAssignee: current)
-        let label = current ?? "Unassigned"
         let kind: ScarfBadgeKind = (current == nil) ? .warning : .brand
         return Menu {
             Button("Unassigned") { onReassign(nil) }
@@ -249,7 +248,11 @@ struct KanbanInspectorPane: View {
             }
         } label: {
             HStack(spacing: 4) {
-                ScarfBadge(verbatim: label, kind: kind)
+                if let current {
+                    ScarfBadge(verbatim: current, kind: kind)
+                } else {
+                    ScarfBadge("Unassigned", kind: kind)
+                }
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(ScarfColor.foregroundMuted)

@@ -154,7 +154,7 @@ struct BackupServerSheet: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             case .archivingProject(let name, let n):
-                Text(verbatim: "\(name): \(Self.formatBytes(n)) so far")
+                Text("\(name): \(Self.formatBytes(n)) so far")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             default:

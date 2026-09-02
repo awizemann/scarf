@@ -121,7 +121,7 @@ struct ScarfGoKanbanView: View {
                         .foregroundStyle(.secondary)
                 }
                 if let workspace = task.workspaceKind {
-                    ScarfBadge(workspace, kind: .neutral)
+                    ScarfBadge(verbatim: workspace, kind: .neutral)
                 }
                 if let priority = task.priority, priority >= 70 {
                     ScarfBadge("p\(priority)", kind: priority >= 90 ? .danger : .warning)

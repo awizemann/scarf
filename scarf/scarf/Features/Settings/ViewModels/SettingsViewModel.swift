@@ -166,7 +166,7 @@ final class SettingsViewModel {
             outcome: .init(succeeded: result.exitCode == 0)
         ))
         if result.exitCode == 0 {
-            saveMessage = "Saved \(key)"
+            saveMessage = String(localized: "Saved \(key)")
             config = fileService.loadConfig()
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.saveMessage = nil
@@ -208,7 +208,9 @@ final class SettingsViewModel {
                 return true
             }
             .map(Self.strippingErrorDecoration) ?? ""
-        return reason.isEmpty ? "Failed to save \(key)" : "Couldn’t save \(key): \(reason)"
+        return reason.isEmpty
+            ? String(localized: "Failed to save \(key)")
+            : String(localized: "Couldn’t save \(key): \(reason)")
     }
 
     /// Strip Hermes's `✗ ` CLI marker and any leading `SomeError: ` label
@@ -319,7 +321,7 @@ final class SettingsViewModel {
                 // builder anyway so this banner keeps matching its siblings
                 // if the wording ever changes.
                 self.saveMessage = ok
-                    ? "Saved model settings"
+                    ? String(localized: "Saved model settings")
                     : Self.saveFailureMessage(key: "model settings", output: "")
                 DispatchQueue.main.asyncAfter(deadline: .now() + (ok ? 2 : 5)) { [weak self] in
                     self?.saveMessage = nil
@@ -532,7 +534,7 @@ final class SettingsViewModel {
         ))
         config = fileService.loadConfig()
         if result.exitCode == 0 {
-            saveMessage = "Saved \(key)"
+            saveMessage = String(localized: "Saved \(key)")
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.saveMessage = nil
             }
@@ -840,7 +842,7 @@ final class SettingsViewModel {
                 return
             }
         }
-        saveMessage = "Saved \(label)"
+        saveMessage = String(localized: "Saved \(label)")
         config = fileService.loadConfig()
         rawConfigYAML = context.readText(path) ?? rawConfigYAML
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in

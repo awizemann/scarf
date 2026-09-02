@@ -42,7 +42,7 @@ struct RestoreServerSheet: View {
                 .font(.title2)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Restore from backup").scarfStyle(.headline)
-                Text(verbatim: "Target: \(context.displayName)")
+                Text("Target: \(context.displayName)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -167,7 +167,7 @@ struct RestoreServerSheet: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             case .restoringProject(let name, let n):
-                Text(verbatim: "\(name): \(ByteCountFormatter.string(fromByteCount: n, countStyle: .file)) pushed")
+                Text("\(name): \(ByteCountFormatter.string(fromByteCount: n, countStyle: .file)) pushed")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             default:
