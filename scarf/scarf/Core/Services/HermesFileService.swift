@@ -265,6 +265,98 @@ struct HermesFileService: Sendable {
         return (HermesMCPAdd.parseOutcome(result.output, name: name), result.output)
     }
 
+    /// Reads the two pieces of host state that change which prompts
+    /// `hermes mcp add` will ask, so the stdin plan can be built for the
+    /// state the host is ACTUALLY in. See ``HermesMCPAdd/HostState`` for why
+    /// guessing here mis-feeds a bearer token. (F9)
+    ///
+    /// `apiKeyAlreadyConfigured` is `nil` — a refusal, not a default — when
+    /// we cannot read `.env` at all (a remote transport hiccup, an
+    /// unreadable file); an *absent* file that we successfully determined is
+    /// absent is a confident `false`.
+    nonisolated func mcpAddHostState(
+        name: String,
+        overwriteConfirmed: Bool = false
+    ) -> HermesMCPAdd.HostState {
+        let exists = loadMCPServers().contains { $0.name == name }
+        return HermesMCPAdd.HostState(
+            serverNameExists: exists,
+            overwriteConfirmed: overwriteConfirmed,
+            apiKeyAlreadyConfigured: mcpAPIKeyAlreadyConfigured(name: name)
+        )
+    }
+
+    /// Mirrors the CLI's `get_env_value(MCP_<NAME>_API_KEY)` resolution
+    /// order: the process environment the child will inherit first, then
+    /// `~/.hermes/.env`. Both are things Scarf can see — the child's
+    /// `os.environ` is derived from the environment we hand it in
+    /// `runHermesCLI`, so this is a determination, not an estimate.
+    ///
+    /// Returns `nil` when the `.env` read fails in a way we can't
+    /// distinguish from "unreadable" on a remote host.
+    nonisolated func mcpAPIKeyAlreadyConfigured(name: String) -> Bool? {
+        let key = HermesMCPAdd.envKeyForServer(name)
+        if !context.isRemote,
+           let value = Self.enrichedEnvironment()[key], !value.isEmpty {
+            return true
+        }
+        guard let envText = readFile(context.paths.envFile) else {
+            // No `.env`: on a local host that is a confident "absent" — the
+            // file genuinely isn't there and the CLI's `load_env()` returns
+            // {}. On a remote host a nil read is ambiguous (missing file vs.
+            // failed transport), so refuse rather than assume.
+            return context.isRemote ? nil : false
+        }
+        for line in envText.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            guard trimmed.hasPrefix("\(key)=") || trimmed.hasPrefix("export \(key)=") else { continue }
+            guard let eq = trimmed.firstIndex(of: "=") else { continue }
+            let value = trimmed[trimmed.index(after: eq)...]
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+            if !value.isEmpty { return true }
+        }
+        return false
+    }
+
+    /// Prefixes the CLI's output with a note when the plan deliberately
+    /// withheld a token the user typed. The CLI reuses the `.env` key it
+    /// already has and never prompts, so without this the typed token is
+    /// silently discarded and the server keeps using the OLD credential —
+    /// a failure the user would only find by testing the server. (F9)
+    nonisolated static func annotate(_ output: String, plan: HermesMCPAdd.Plan, name: String) -> String {
+        guard plan.discardedSuppliedToken else { return output }
+        return tokenReusedNote(name: name) + "\n" + output
+    }
+
+    nonisolated static func tokenReusedNote(name: String) -> String {
+        let key = HermesMCPAdd.envKeyForServer(name)
+        return String(
+            localized: "Note: \(key) is already set in ~/.hermes/.env, so Hermes reused it and ignored the token you entered. To replace the token, remove that line from .env and add the server again.",
+            comment: "MCP add reused an existing API key instead of the typed one"
+        )
+    }
+
+    /// Turns a `HermesMCPAdd.PlanError` into the `(exitCode, output)` shape
+    /// the add call sites already handle, with a message the user can act
+    /// on. Refusing beats feeding a misaligned stdin plan.
+    nonisolated static func describe(_ error: Error, name: String) -> (exitCode: Int32, output: String) {
+        switch error {
+        case HermesMCPAdd.PlanError.serverAlreadyExists:
+            return (1, String(
+                localized: "A server named “\(name)” already exists. Adding it again would overwrite the existing entry — confirm the overwrite, or choose a different name.",
+                comment: "MCP add refused because the server name is taken"
+            ))
+        case HermesMCPAdd.PlanError.apiKeyStateUnknown(let envKey):
+            return (1, String(
+                localized: "Couldn’t determine whether \(envKey) is already set on this host, so Scarf stopped rather than risk sending your token to the wrong prompt. Check that ~/.hermes/.env is readable and try again.",
+                comment: "MCP add refused because the .env key state could not be read"
+            ))
+        default:
+            return (1, "\(error)")
+        }
+    }
+
     /// Creates a stdio MCP server entry, passing the command's arguments
     /// **at add time** so the CLI's discovery probe launches the real
     /// server and the entry lands enabled.
@@ -280,11 +372,19 @@ struct HermesFileService: Sendable {
         name: String,
         command: String,
         args: [String],
-        env: [String: String] = [:]
+        env: [String: String] = [:],
+        overwriteConfirmed: Bool = false
     ) -> (exitCode: Int32, output: String) {
-        let plan = HermesMCPAdd.stdioPlan(name: name, command: command, args: args, env: env)
-        let run = runMCPAdd(plan, name: name)
-        return (run.outcome.isLive ? 0 : 1, run.output)
+        let state = mcpAddHostState(name: name, overwriteConfirmed: overwriteConfirmed)
+        do {
+            let plan = try HermesMCPAdd.stdioPlan(
+                name: name, command: command, args: args, env: env, state: state
+            )
+            let run = runMCPAdd(plan, name: name)
+            return (run.outcome.isLive ? 0 : 1, run.output)
+        } catch {
+            return Self.describe(error, name: name)
+        }
     }
 
     /// Creates an HTTP MCP server entry, answering only the prompts the
@@ -294,7 +394,8 @@ struct HermesFileService: Sendable {
         name: String,
         url: String,
         auth: String?,
-        apiKey: String = ""
+        apiKey: String = "",
+        overwriteConfirmed: Bool = false
     ) -> (exitCode: Int32, output: String) {
         let mode: HermesMCPAddAuthMode
         switch auth?.lowercased() {
@@ -302,8 +403,14 @@ struct HermesFileService: Sendable {
         case "header": mode = apiKey.isEmpty ? .none : .header(token: apiKey)
         default: mode = .none
         }
-        let run = runMCPAdd(HermesMCPAdd.urlPlan(name: name, url: url, auth: mode), name: name)
-        return (run.outcome.isLive ? 0 : 1, run.output)
+        let state = mcpAddHostState(name: name, overwriteConfirmed: overwriteConfirmed)
+        do {
+            let plan = try HermesMCPAdd.urlPlan(name: name, url: url, auth: mode, state: state)
+            let run = runMCPAdd(plan, name: name)
+            return (run.outcome.isLive ? 0 : 1, Self.annotate(run.output, plan: plan, name: name))
+        } catch {
+            return Self.describe(error, name: name)
+        }
     }
 
     /// Adds an SSE-transport MCP server. v0.13+ only — caller is responsible
@@ -323,7 +430,8 @@ struct HermesFileService: Sendable {
         url: String,
         sseReadTimeout: Int?,
         auth: String? = nil,
-        apiKey: String = ""
+        apiKey: String = "",
+        overwriteConfirmed: Bool = false
     ) -> (exitCode: Int32, output: String) {
         let mode: HermesMCPAddAuthMode
         switch auth?.lowercased() {
@@ -331,8 +439,20 @@ struct HermesFileService: Sendable {
         case "header": mode = apiKey.isEmpty ? .none : .header(token: apiKey)
         default: mode = .none
         }
-        let run = runMCPAdd(HermesMCPAdd.urlPlan(name: name, url: url, auth: mode), name: name)
-        let addResult = (exitCode: Int32(run.outcome.isLive ? 0 : 1), output: run.output)
+        let state = mcpAddHostState(name: name, overwriteConfirmed: overwriteConfirmed)
+        let run: (outcome: HermesMCPAddOutcome, output: String)
+        var tokenWasDiscarded = false
+        do {
+            let plan = try HermesMCPAdd.urlPlan(name: name, url: url, auth: mode, state: state)
+            run = runMCPAdd(plan, name: name)
+            tokenWasDiscarded = plan.discardedSuppliedToken
+        } catch {
+            return Self.describe(error, name: name)
+        }
+        let addResult = (
+            exitCode: Int32(run.outcome.isLive ? 0 : 1),
+            output: tokenWasDiscarded ? Self.tokenReusedNote(name: name) + "\n" + run.output : run.output
+        )
         guard addResult.exitCode == 0 else { return addResult }
         // Stamp the SSE transport discriminator (+ optional read timeout)
         // into the freshly-written entry's YAML block.

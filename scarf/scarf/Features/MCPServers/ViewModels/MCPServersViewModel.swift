@@ -31,6 +31,47 @@ final class MCPServersViewModel {
     var catalogText = ""
     var isLoadingCatalog = false
 
+    /// An add that stopped short because the server name is already taken.
+    ///
+    /// `hermes mcp add` asks "Server '<name>' already exists. Overwrite?"
+    /// **before** the auth stage, and Scarf answers its prompts positionally
+    /// on stdin — so that extra prompt used to swallow the auth answer and
+    /// shift a bearer token onto the wrong question. The overwrite decision
+    /// is therefore the user's, made here, and passed down as an explicit
+    /// `overwriteConfirmed` flag that the plan builder requires before it
+    /// will queue the extra `y`. (F9)
+    ///
+    /// `retry` re-runs the *same* add with the confirmation set.
+    struct PendingOverwrite: Identifiable {
+        let id = UUID()
+        let name: String
+        let retry: @MainActor () -> Void
+    }
+    var pendingOverwrite: PendingOverwrite?
+
+    /// A non-fatal notice from an add that SUCCEEDED but did something the
+    /// user needs to know about — today, only "your typed token was ignored
+    /// because the .env key already exists". Success-path information used
+    /// to be dropped entirely: `activeError` is only read when the add
+    /// fails. (F9)
+    var activeNotice: String?
+
+    /// Pull a leading `Note:` line out of an add's output. `HermesFileService`
+    /// prefixes one when the plan withheld a supplied token.
+    nonisolated static func addNotice(in output: String) -> String? {
+        guard let first = output.components(separatedBy: "\n").first,
+              first.hasPrefix("Note:") else { return nil }
+        return String(first.dropFirst("Note:".count)).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// True when `name` is already in the loaded server list. Advisory only:
+    /// `HermesFileService` re-checks config.yaml authoritatively and refuses
+    /// the add outright if this list was stale, so a race can never silently
+    /// overwrite.
+    func serverNameIsTaken(_ name: String) -> Bool {
+        servers.contains { $0.name == name }
+    }
+
     var filteredServers: [HermesMCPServer] {
         guard !searchText.isEmpty else { return servers }
         let query = searchText.lowercased()
@@ -216,7 +257,22 @@ final class MCPServersViewModel {
         testAllTask?.cancel()
     }
 
-    func addFromPreset(preset: MCPServerPreset, name: String, pathArg: String?, envValues: [String: String]) {
+    func addFromPreset(
+        preset: MCPServerPreset,
+        name: String,
+        pathArg: String?,
+        envValues: [String: String],
+        overwriteConfirmed: Bool = false
+    ) {
+        if !overwriteConfirmed, serverNameIsTaken(name) {
+            pendingOverwrite = PendingOverwrite(name: name) { [weak self] in
+                self?.addFromPreset(
+                    preset: preset, name: name, pathArg: pathArg,
+                    envValues: envValues, overwriteConfirmed: true
+                )
+            }
+            return
+        }
         let fileService = self.fileService
         let allArgs: [String] = {
             var base = preset.args
@@ -235,13 +291,15 @@ final class MCPServersViewModel {
                     name: name,
                     command: preset.command ?? "",
                     args: allArgs,
-                    env: envValues
+                    env: envValues,
+                    overwriteConfirmed: overwriteConfirmed
                 )
             case .http:
                 addResult = fileService.addMCPServerHTTP(
                     name: name,
                     url: preset.url ?? "",
-                    auth: preset.auth
+                    auth: preset.auth,
+                    overwriteConfirmed: overwriteConfirmed
                 )
             case .sse:
                 // No SSE-transport presets ship today; the preset picker
@@ -262,6 +320,7 @@ final class MCPServersViewModel {
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                self.activeNotice = Self.addNotice(in: addResult.output)
                 self.flashStatus("Added \(name)")
                 self.load(force: true)
                 self.selectedServerName = name
@@ -306,16 +365,35 @@ final class MCPServersViewModel {
         auth: String?,
         apiKey: String = "",
         defaultEnabledTools: [String] = [],
-        defaultExcludedTools: [String] = []
+        defaultExcludedTools: [String] = [],
+        overwriteConfirmed: Bool = false
     ) {
+        if !overwriteConfirmed, serverNameIsTaken(name) {
+            pendingOverwrite = PendingOverwrite(name: name) { [weak self] in
+                self?.addCustom(
+                    name: name, transport: transport, command: command, args: args,
+                    url: url, auth: auth, apiKey: apiKey,
+                    defaultEnabledTools: defaultEnabledTools,
+                    defaultExcludedTools: defaultExcludedTools,
+                    overwriteConfirmed: true
+                )
+            }
+            return
+        }
         let fileService = self.fileService
         Task.detached { [weak self] in
             let result: (exitCode: Int32, output: String)
             switch transport {
             case .stdio:
-                result = fileService.addMCPServerStdio(name: name, command: command, args: args)
+                result = fileService.addMCPServerStdio(
+                    name: name, command: command, args: args,
+                    overwriteConfirmed: overwriteConfirmed
+                )
             case .http:
-                result = fileService.addMCPServerHTTP(name: name, url: url, auth: auth, apiKey: apiKey)
+                result = fileService.addMCPServerHTTP(
+                    name: name, url: url, auth: auth, apiKey: apiKey,
+                    overwriteConfirmed: overwriteConfirmed
+                )
             case .sse:
                 // Routed through addCustomSSE; this branch is unreachable from
                 // the add-server form (which dispatches per-transport in submit())
@@ -333,6 +411,7 @@ final class MCPServersViewModel {
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 if result.exitCode == 0 {
+                    self.activeNotice = Self.addNotice(in: result.output)
                     self.flashStatus("Added \(name)")
                     self.load(force: true)
                     self.selectedServerName = name
@@ -356,12 +435,26 @@ final class MCPServersViewModel {
         auth: String? = nil,
         apiKey: String = "",
         defaultEnabledTools: [String] = [],
-        defaultExcludedTools: [String] = []
+        defaultExcludedTools: [String] = [],
+        overwriteConfirmed: Bool = false
     ) {
+        if !overwriteConfirmed, serverNameIsTaken(name) {
+            pendingOverwrite = PendingOverwrite(name: name) { [weak self] in
+                self?.addCustomSSE(
+                    name: name, url: url, sseReadTimeout: sseReadTimeout,
+                    auth: auth, apiKey: apiKey,
+                    defaultEnabledTools: defaultEnabledTools,
+                    defaultExcludedTools: defaultExcludedTools,
+                    overwriteConfirmed: true
+                )
+            }
+            return
+        }
         let fileService = self.fileService
         Task.detached { [weak self] in
             let result = fileService.addMCPServerSSE(
-                name: name, url: url, sseReadTimeout: sseReadTimeout, auth: auth, apiKey: apiKey
+                name: name, url: url, sseReadTimeout: sseReadTimeout,
+                auth: auth, apiKey: apiKey, overwriteConfirmed: overwriteConfirmed
             )
             if result.exitCode == 0 {
                 Self.applyCatalogToolDefaults(
@@ -374,6 +467,7 @@ final class MCPServersViewModel {
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 if result.exitCode == 0 {
+                    self.activeNotice = Self.addNotice(in: result.output)
                     self.flashStatus("Added \(name)")
                     self.load(force: true)
                     self.selectedServerName = name

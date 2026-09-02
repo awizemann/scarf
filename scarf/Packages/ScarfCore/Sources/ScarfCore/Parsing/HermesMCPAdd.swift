@@ -89,11 +89,113 @@ public enum HermesMCPAdd {
     public struct Plan: Sendable, Equatable {
         public let arguments: [String]
         public let stdin: String
+        /// Set when the plan deliberately did NOT send a token the caller
+        /// supplied, because the CLI will not ask for one. The caller must
+        /// tell the user — otherwise a typed token is silently discarded and
+        /// the server quietly keeps authenticating with the old key. (F9)
+        public let discardedSuppliedToken: Bool
 
-        public init(arguments: [String], stdin: String) {
+        public init(arguments: [String], stdin: String, discardedSuppliedToken: Bool = false) {
             self.arguments = arguments
             self.stdin = stdin
+            self.discardedSuppliedToken = discardedSuppliedToken
         }
+    }
+
+    /// Why a plan could not be built. Building a plan is **refused** rather
+    /// than guessed whenever the prompt sequence isn't fully determined —
+    /// a misaligned stdin plan writes a bearer token into the wrong prompt,
+    /// which is how a token once landed in `~/.hermes/.env` as a literal
+    /// `y`. Refusing costs the user a dialog; guessing costs them a leaked
+    /// secret. (F9)
+    public enum PlanError: Error, Equatable, Sendable {
+        /// `name` is already in config.yaml. `cmd_mcp_add` will ask
+        /// "Server '<name>' already exists. Overwrite?" **before** the auth
+        /// stage, and that prompt eats the first stdin line — shifting every
+        /// later answer onto the wrong question. The caller must resolve the
+        /// user's intent (an explicit overwrite confirmation, or a different
+        /// name) and rebuild.
+        case serverAlreadyExists(name: String)
+        /// The caller could not determine whether `MCP_<NAME>_API_KEY` is
+        /// already set, so we cannot know whether the CLI will ask for a
+        /// token at all.
+        case apiKeyStateUnknown(envKey: String)
+    }
+
+    /// The state of the host that changes which prompts `mcp add` asks.
+    ///
+    /// **Why this has to be passed in.** `cmd_mcp_add`'s prompt sequence is
+    /// not a function of the flags alone — it depends on what already exists
+    /// on the host, and the answers are fed positionally on stdin:
+    ///
+    /// * `mcp_config.py:483-487` — if `name` is already in
+    ///   `_get_mcp_servers()`, an extra `Overwrite? [y/N]` prompt is asked
+    ///   **before** the auth stage. One extra prompt, and the `n`/`y` meant
+    ///   for "Does this server require authentication?" answers *it*
+    ///   instead, and the token line then answers the auth question.
+    /// * `mcp_config.py:545-548` — inside the header-auth branch, if
+    ///   `get_env_value(MCP_<NAME>_API_KEY)` already returns a value, the
+    ///   CLI prints "already configured" and **never prompts for the key**.
+    ///   The token line Scarf queued is then read by the *next* prompt
+    ///   ("Enable all N tools?"), and the token itself is echoed into a
+    ///   prompt whose answer we never intended.
+    ///
+    /// Both were verified against `hermes_cli/mcp_config.py` at v2026.8.31.
+    public struct HostState: Sendable, Equatable {
+        /// `name` is already a key under `mcp_servers:` in config.yaml.
+        public let serverNameExists: Bool
+        /// The user has explicitly confirmed, in Scarf's UI, that they want
+        /// to overwrite the existing entry. Only meaningful when
+        /// `serverNameExists` is true.
+        public let overwriteConfirmed: Bool
+        /// Whether `MCP_<NAME>_API_KEY` already resolves for the CLI —
+        /// `nil` means "couldn't determine", which is a refusal, not a
+        /// default.
+        public let apiKeyAlreadyConfigured: Bool?
+
+        public init(
+            serverNameExists: Bool,
+            overwriteConfirmed: Bool = false,
+            apiKeyAlreadyConfigured: Bool? = false
+        ) {
+            self.serverNameExists = serverNameExists
+            self.overwriteConfirmed = overwriteConfirmed
+            self.apiKeyAlreadyConfigured = apiKeyAlreadyConfigured
+        }
+
+        /// A pristine host: no such server, no pre-existing key. The shape
+        /// every add took before F9 — correct only when it happens to be
+        /// true, which is why it is now stated rather than assumed.
+        public static let fresh = HostState(serverNameExists: false)
+    }
+
+    /// `_env_key_for_server` — mirrors `mcp_config.py:153-156` exactly:
+    /// upper-case, every non-`[A-Za-z0-9_]` run mapped to `_`, leading and
+    /// trailing `_` stripped, wrapped as `MCP_<suffix>_API_KEY`.
+    ///
+    /// Note the Python is `re.sub` per-character (not per-run), so `a-b`
+    /// becomes `A_B` and `a--b` becomes `A__B`; the double underscore is
+    /// preserved here for the same reason.
+    public static func envKeyForServer(_ name: String) -> String {
+        let allowed = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+        let mapped = String(name.uppercased().map { allowed.contains($0) ? $0 : "_" })
+        var suffix = Substring(mapped)
+        while suffix.hasPrefix("_") { suffix = suffix.dropFirst() }
+        while suffix.hasSuffix("_") { suffix = suffix.dropLast() }
+        return "MCP_\(suffix)_API_KEY"
+    }
+
+    /// The stdin line that answers the pre-auth `Overwrite? [y/N]` prompt,
+    /// or `nil` when that prompt will not be asked. Throws when the server
+    /// exists and the user has not confirmed.
+    private static func overwritePrefix(name: String, state: HostState) throws -> String {
+        guard state.serverNameExists else { return "" }
+        guard state.overwriteConfirmed else {
+            throw PlanError.serverAlreadyExists(name: name)
+        }
+        // `_confirm(..., default=False)` — the default is NO, so this `y`
+        // is load-bearing; a blank line would cancel the add outright.
+        return "y\n"
     }
 
     /// Blank lines that accept the default at every prompt still pending
@@ -125,15 +227,31 @@ public enum HermesMCPAdd {
     /// captures leading-dash tokens verbatim, so `--args -y <pkg>` is both
     /// correct and the only form that parses.
     ///
-    /// (`--` before an ordinary positional — `profile delete -y -- name` —
-    /// is unaffected and still correct; only REMAINDER behaves this way.)
+    /// **And no `--` before the `name` positional either.** The F2/F3 rule
+    /// ("guard a user-supplied positional with `--`") does NOT generalise to
+    /// this subparser, and F9 checked rather than assumed. `mcp add`'s only
+    /// positional is `name`, and it is declared *after* `--command` /
+    /// `--url` / `--env` / `--args` on the command line in every form we
+    /// emit. Python's argparse treats everything following the first `--`
+    /// as positional, so `mcp add -- srv --command npx` fails with
+    /// `unrecognized arguments: --command npx` — verified by execution
+    /// against the real subparser shape at v2026.8.31, for the stdio, url,
+    /// `--env` and leading-dash-name forms alike. There is therefore no
+    /// safe `--` placement here; a leading-dash server name is instead
+    /// rejected upstream by the name validator before it reaches argv.
+    ///
+    /// (`--` before an ordinary positional in a *flagless tail* —
+    /// `profile delete -y -- name` — is unaffected and still correct; both
+    /// REMAINDER and "flags after the positional" defeat it.)
     public static func stdioPlan(
         name: String,
         command: String,
         args: [String],
         env: [String: String] = [:],
-        connectTimeout: Int? = nil
-    ) -> Plan {
+        connectTimeout: Int? = nil,
+        state: HostState = .fresh
+    ) throws -> Plan {
+        let overwrite = try overwritePrefix(name: name, state: state)
         var argv = ["mcp", "add", name, "--command", command]
         if let connectTimeout {
             argv += ["--connect-timeout", String(connectTimeout)]
@@ -146,19 +264,26 @@ public enum HermesMCPAdd {
         if !args.isEmpty {
             argv += ["--args"] + args
         }
-        // stdio reaches neither auth branch — only the post-probe prompt.
-        return Plan(arguments: argv, stdin: defaultsTail)
+        // stdio reaches neither auth branch — only the overwrite prompt (if
+        // the name is taken) and the post-probe prompts.
+        return Plan(arguments: argv, stdin: overwrite + defaultsTail)
     }
 
     /// Builds an `mcp add` invocation for an HTTP (or SSE-to-be) server.
+    ///
+    /// Throws `PlanError` when the host state leaves the prompt sequence
+    /// undetermined — see ``HostState``. Never guess here: every stdin line
+    /// is positional, and the header-auth plan carries a bearer token.
     public static func urlPlan(
         name: String,
         url: String,
         auth: HermesMCPAddAuthMode,
-        connectTimeout: Int? = nil
-    ) -> Plan {
+        connectTimeout: Int? = nil,
+        state: HostState = .fresh
+    ) throws -> Plan {
         var argv = ["mcp", "add", name, "--url", url]
-        var stdin = ""
+        var stdin = try overwritePrefix(name: name, state: state)
+        var discardedToken = false
 
         switch auth {
         case .oauth:
@@ -169,8 +294,27 @@ public enum HermesMCPAdd {
         case .header(let token):
             argv += ["--auth", "header"]
             // y → "Does this server require authentication?"
-            // then the token, at the value read. Never a bare `y` here.
-            stdin += "y\n\(token)\n"
+            let envKey = envKeyForServer(name)
+            switch state.apiKeyAlreadyConfigured {
+            case .some(true):
+                // `mcp_config.py:545-548` — `get_env_value(env_key)` hits, so
+                // the CLI prints "<KEY>: already configured" and NEVER asks
+                // for a token. Queueing the token line here would feed it to
+                // the next prompt entirely ("Enable all N tools?"), which
+                // both mis-answers that prompt and echoes the secret into a
+                // question we didn't intend to answer. The existing key is
+                // reused via `_bearer_auth_headers`, which is the outcome
+                // the user wants anyway — but the token the user just typed
+                // is NOT what will be used, and they have to be told.
+                stdin += "y\n"
+                discardedToken = !token.isEmpty
+            case .some(false):
+                // No existing key → the value read happens. Never a bare `y`
+                // at a value read.
+                stdin += "y\n\(token)\n"
+            case .none:
+                throw PlanError.apiKeyStateUnknown(envKey: envKey)
+            }
         case .none:
             // No `--auth`: same branch as header, but decline. The
             // prompt's default is YES, so this `n` is load-bearing.
@@ -185,7 +329,11 @@ public enum HermesMCPAdd {
         if let connectTimeout {
             argv += ["--connect-timeout", String(connectTimeout)]
         }
-        return Plan(arguments: argv, stdin: stdin + defaultsTail)
+        return Plan(
+            arguments: argv,
+            stdin: stdin + defaultsTail,
+            discardedSuppliedToken: discardedToken
+        )
     }
 
     /// Reads the real outcome out of `hermes mcp add` stdout.

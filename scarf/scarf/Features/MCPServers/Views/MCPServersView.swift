@@ -80,6 +80,34 @@ struct MCPServersView: View {
         } message: {
             Text(viewModel.activeError ?? "")
         }
+        .alert("Server added", isPresented: Binding(
+            get: { viewModel.activeNotice != nil },
+            set: { if !$0 { viewModel.activeNotice = nil } }
+        )) {
+            Button("OK") { viewModel.activeNotice = nil }
+        } message: {
+            Text(viewModel.activeNotice ?? "")
+        }
+        // The overwrite decision is the user's, and it has to be made BEFORE
+        // the CLI runs: `hermes mcp add` asks "already exists. Overwrite?"
+        // ahead of the auth stage, and Scarf's stdin answers are positional,
+        // so the plan must be built already knowing the answer. (F9)
+        .alert(
+            "Replace “\(viewModel.pendingOverwrite?.name ?? "")”?",
+            isPresented: Binding(
+                get: { viewModel.pendingOverwrite != nil },
+                set: { if !$0 { viewModel.pendingOverwrite = nil } }
+            ),
+            presenting: viewModel.pendingOverwrite
+        ) { pending in
+            Button("Replace", role: .destructive) {
+                viewModel.pendingOverwrite = nil
+                pending.retry()
+            }
+            Button("Cancel", role: .cancel) { viewModel.pendingOverwrite = nil }
+        } message: { pending in
+            Text("An MCP server named “\(pending.name)” is already in your config. Replacing it overwrites that entry's command, URL, auth and tool filters. Its OAuth token file and any saved API key in ~/.hermes/.env are kept.")
+        }
     }
 
     private var pageHeader: some View {
