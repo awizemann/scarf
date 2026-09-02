@@ -327,4 +327,13 @@ public enum BotsError: Error, Equatable, Sendable {
     case unsafeToWrite(path: String)
     /// The avatar exceeds the gateway's own 2MB ceiling and was not read.
     case avatarTooLarge(path: String, size: Int)
+    /// A file exists but could not be turned into an editable buffer
+    /// (unreadable, oversized, or not UTF-8). Distinct from "absent", which is
+    /// normal: the caller must NOT fall back to an empty editor, because
+    /// saving that would replace the real file with nothing. Phase B.
+    case unsafeToRead(path: String)
+    /// A value or dotted config key Scarf refuses to hand to
+    /// `hermes config set/unset` — empty, flag-shaped, or carrying a character
+    /// that would change which key is written. Phase B.
+    case invalidValue(key: String)
 }
