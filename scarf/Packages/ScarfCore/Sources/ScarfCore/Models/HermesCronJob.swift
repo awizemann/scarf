@@ -136,8 +136,14 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         self.prompt            = try c.decodeIfPresent(String.self, forKey: .prompt) ?? ""
         self.skills            = try c.decodeIfPresent([String].self, forKey: .skills)
         self.model             = try c.decodeIfPresent(String.self, forKey: .model)
-        self.schedule          = try c.decode(CronSchedule.self, forKey: .schedule)
-        self.enabled           = try c.decode(Bool.self, forKey: .enabled)
+        // Hermes's own reader is tolerant here (`cron/jobs.py`):
+        // `(job.get("schedule") or {})` — schedule may be null or absent —
+        // and `job.get("enabled", True)`. Mirror that instead of failing
+        // the record (which used to fail the WHOLE file and blank the cron
+        // board). A defaulted empty schedule is elided again on encode.
+        self.schedule          = try c.decodeIfPresent(CronSchedule.self, forKey: .schedule)
+            ?? CronSchedule(kind: "")
+        self.enabled           = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         self.state             = try c.decodeIfPresent(String.self, forKey: .state) ?? ""
         self.deliver           = try c.decodeIfPresent(String.self, forKey: .deliver)
         self.nextRunAt         = try c.decodeIfPresent(String.self, forKey: .nextRunAt)
@@ -251,7 +257,12 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         try c.encode(prompt, forKey: .prompt)
         try c.encodeIfPresent(skills, forKey: .skills)
         try c.encodeIfPresent(model, forKey: .model)
-        try c.encode(schedule, forKey: .schedule)
+        // A schedule defaulted from a null/absent record (see init(from:)) is
+        // NOT written back — encoding `{"kind": ""}` would put a key on disk
+        // Hermes never wrote.
+        if !schedule.isDecodedPlaceholder {
+            try c.encode(schedule, forKey: .schedule)
+        }
         try c.encode(enabled, forKey: .enabled)
         try c.encode(state, forKey: .state)
         try c.encodeIfPresent(deliver, forKey: .deliver)
@@ -504,6 +515,14 @@ public struct CronSchedule: Sendable, Codable, Equatable {
         self.extra = extra
     }
 
+    /// True when this value is the empty placeholder `init(from:)` fabricates
+    /// for a record whose `schedule` was null/absent (Hermes tolerates both).
+    /// `encode(to:)` elides such a schedule so it never lands on disk.
+    public nonisolated var isDecodedPlaceholder: Bool {
+        kind.isEmpty && runAt == nil && display == nil
+            && expression == nil && minutes == nil && extra.isEmpty
+    }
+
     /// The schedule string that round-trips back through
     /// `hermes cron edit --schedule` — **never** the human display label.
     ///
@@ -537,7 +556,10 @@ public struct CronSchedule: Sendable, Codable, Equatable {
 
     public nonisolated init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.kind       = try c.decode(String.self, forKey: .kind)
+        // Tolerant like Hermes's reader: a schedule dict without `kind`
+        // (or with `kind: null`) reads as an unknown/empty kind rather than
+        // failing the record.
+        self.kind       = try c.decodeIfPresent(String.self, forKey: .kind) ?? ""
         self.runAt      = try c.decodeIfPresent(String.self, forKey: .runAt)
         self.display    = try c.decodeIfPresent(String.self, forKey: .display)
         self.expression = try c.decodeIfPresent(String.self, forKey: .expression)
@@ -555,7 +577,8 @@ public struct CronSchedule: Sendable, Codable, Equatable {
 
     public nonisolated func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(kind, forKey: .kind)
+        // Don't fabricate `kind: ""` for a record that never carried one.
+        if !kind.isEmpty { try c.encode(kind, forKey: .kind) }
         try c.encodeIfPresent(runAt, forKey: .runAt)
         try c.encodeIfPresent(display, forKey: .display)
         try c.encodeIfPresent(expression, forKey: .expression)
@@ -599,25 +622,52 @@ public struct CronJobsFile: Sendable, Codable {
         //      Non-dict values are junk and are skipped, not fatal.
         //   3. `[ {...}, ... ]`                    — bare top-level array.
         if let c = try? decoder.container(keyedBy: CodingKeys.self), c.contains(.jobs) {
-            do {
-                self.jobs = try c.decode([HermesCronJob].self, forKey: .jobs)
-            } catch {
-                // Only treat this as shape 2 when `jobs` really is a map.
-                // Otherwise rethrow the ARRAY error — a store that's a
-                // list with one bad job must not be reported as "not a
-                // dict", which would send the next reader hunting the
-                // wrong bug.
-                guard let map = try? c.decode([String: JSONValue].self, forKey: .jobs) else {
-                    throw error
-                }
+            if let raw = try? c.decode([JSONValue].self, forKey: .jobs) {
+                self.jobs = Self.decodeJobsTolerantly(raw)
+            } else if let map = try? c.decode([String: JSONValue].self, forKey: .jobs) {
                 self.jobs = try Self.flattenIDKeyedJobs(map)
+            } else {
+                // Neither array nor map — decode strictly so the thrown
+                // error describes the real shape problem for the banner.
+                self.jobs = try c.decode([HermesCronJob].self, forKey: .jobs)
             }
             self.updatedAt = try c.decodeIfPresent(String.self, forKey: .updatedAt)
             return
         }
         // Bare array root.
-        self.jobs = try decoder.singleValueContainer().decode([HermesCronJob].self)
+        let raw = try decoder.singleValueContainer().decode([JSONValue].self)
+        self.jobs = Self.decodeJobsTolerantly(raw)
         self.updatedAt = nil
+    }
+
+    /// Per-record tolerant decode of the jobs array. Hermes's own reader
+    /// (`_normalize_job_record` / `list_jobs`, cron/jobs.py) is read-tolerant
+    /// and skips malformed records with a warning rather than failing the
+    /// file; hand edits are documented as supported, so one bad record must
+    /// not blank the whole cron board. A record irrecoverable even under
+    /// the tolerant field defaults (e.g. no `id` at all) is skipped and
+    /// logged, never fatal.
+    private nonisolated static func decodeJobsTolerantly(
+        _ raw: [JSONValue]
+    ) -> [HermesCronJob] {
+        var out: [HermesCronJob] = []
+        for (index, value) in raw.enumerated() {
+            guard case .object = value else {
+                flattenLogger.warning(
+                    "jobs.json: skipping non-object jobs[\(index, privacy: .public)]"
+                )
+                continue
+            }
+            do {
+                let data = try JSONEncoder().encode(value)
+                out.append(try JSONDecoder().decode(HermesCronJob.self, from: data))
+            } catch {
+                flattenLogger.warning(
+                    "jobs.json: skipping undecodable jobs[\(index, privacy: .public)]: \(String(describing: error), privacy: .public)"
+                )
+            }
+        }
+        return out
     }
 
     /// Flatten `{"<id>": {job}}` to `[job]`, adopting the map key as `id`
@@ -625,17 +675,11 @@ public struct CronJobsFile: Sendable, Codable {
     /// `cron/jobs.py`'s `{**v, "id": v.get("id") or k}`. Non-object values
     /// are skipped — a flattened record wouldn't be a job.
     ///
-    /// **Asymmetry with the array path, on purpose.** Shape 1
-    /// (`{"jobs": [...]}`) is strict: one undecodable element throws and
-    /// `loadCronJobsOutcome` raises `decodeFailed`, which the Cron view
-    /// surfaces as a banner. This map path is tolerant: a bad entry is
-    /// skipped and the rest of the board still renders. That mirrors
-    /// Hermes itself — `list_jobs` skips malformed id-keyed records with a
-    /// warning rather than failing the read — and reflects who writes the
-    /// two shapes: the array is Hermes's own output (a decode failure there
-    /// is a real schema drift worth shouting about), while the map is
-    /// hand-edited/third-party and partial junk is expected. The skip is
-    /// logged so it is at least observable in Console.
+    /// Tolerant like the array path (`decodeJobsTolerantly`): a bad entry is
+    /// skipped and logged, and the rest of the board still renders — the
+    /// behavior Hermes's own `list_jobs` has for malformed records. The
+    /// `decodeFailed` banner is reserved for a file that isn't a jobs store
+    /// at all.
     private nonisolated static let flattenLogger = Logger(subsystem: "com.scarf", category: "HermesCronJob")
 
     private nonisolated static func flattenIDKeyedJobs(

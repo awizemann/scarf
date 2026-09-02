@@ -64,14 +64,16 @@ import Foundation
         #expect(file.jobs.map(\.id) == ["ok"])
     }
 
-    /// A `jobs` array carrying one undecodable job must still surface as
-    /// an ARRAY decode failure, not get mis-diagnosed as an id-keyed map.
-    @Test func arrayWithABadJobRethrowsTheArrayError() {
-        #expect(throws: DecodingError.self) {
-            _ = try decodeFile("""
-                {"jobs":[{"name":"no id or enabled","schedule":{"kind":"interval"}}]}
-                """)
-        }
+    /// A `jobs` array carrying one irrecoverable job (no id) skips that
+    /// record and keeps the rest — Hermes's own reader is tolerant, and
+    /// one bad record must never blank the whole cron board. (This used to
+    /// fail the WHOLE file; the 2026-09-02 pattern hunt flipped it.)
+    @Test func arrayWithABadJobSkipsItAndKeepsTheRest() throws {
+        let file = try decodeFile("""
+            {"jobs":[{"name":"no id","schedule":{"kind":"interval"}},
+                     \(Self.minimalJob)]}
+            """)
+        #expect(file.jobs.count == 1)
     }
 
     /// Bare top-level array — `load_jobs` wraps it back into
