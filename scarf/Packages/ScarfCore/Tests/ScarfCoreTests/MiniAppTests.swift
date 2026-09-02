@@ -46,8 +46,21 @@ import Foundation
         #expect(MiniAppPermission.prompt.isSensitive)         // drives a tool-enabled agent
         #expect(!MiniAppPermission.query("kanban.tasks").isSensitive)  // allow-listed read-only kind
         #expect(MiniAppPermission.query("sessions").isSensitive)       // non-allowlisted kind → sensitive (default-off for generated)
-        #expect(!MiniAppPermission.fileRead.isSensitive)
+        // Whole-project read is an elevation, not a default: `.env`,
+        // `*.pem` and `config.yaml` live under a project root, so an
+        // agent-generated app must not get `file:read` pre-ticked.
+        #expect(MiniAppPermission.fileRead.isSensitive)
         #expect(!MiniAppPermission.store.isSensitive)
+        #expect(!MiniAppPermission.events.isSensitive)
+    }
+
+    /// The launch sheet's default policy: nothing sensitive is pre-checked
+    /// for an agent-generated mini-app. Pins the property `defaultChecked()`
+    /// in `MiniAppPermissionPreview` actually relies on.
+    @Test func agentGeneratedAppsGetNoSensitivePermissionByDefault() {
+        let declared: [MiniAppPermission] = [.store, .events, .fileRead, .prompt, .net, .query("kanban.tasks")]
+        let preTicked = declared.filter { !$0.isSensitive }
+        #expect(Set(preTicked) == Set([.store, .events, .query("kanban.tasks")]))
     }
 
     // MARK: - MiniAppManifest

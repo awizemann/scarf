@@ -91,16 +91,34 @@ public enum MiniAppAssetResolver {
         guard let lexical = resolvedPath(requestPath: requestPath, baseDirectory: baseDirectory) else {
             return nil
         }
-        let baseReal = URL(fileURLWithPath: (baseDirectory as NSString).standardizingPath)
-            .resolvingSymlinksInPath().path
-        let fileReal = URL(fileURLWithPath: lexical).resolvingSymlinksInPath().path
-        guard fileReal == baseReal || fileReal.hasPrefix(baseReal + "/") else { return nil }
+        guard isSymlinkContained(path: lexical, baseDirectory: baseDirectory) else { return nil }
 
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: lexical, isDirectory: &isDir), !isDir.boolValue else {
             return nil
         }
         return lexical
+    }
+
+    /// Symlink-resolved containment: is `path` still inside `baseDirectory`
+    /// once BOTH sides are run through `resolvingSymlinksInPath`?
+    ///
+    /// The reusable half of `containedFilePath` — split out so callers that
+    /// must NOT require local existence (a widget path that may be read over
+    /// SSH, or a file that doesn't exist yet) can apply the same
+    /// resolve-both-sides rule without inheriting the exists-and-is-a-file
+    /// check. Resolving both sides is what keeps legitimate cases working
+    /// when the base itself lives under a symlinked prefix (macOS `/tmp` →
+    /// `/private/tmp`, test dirs under `/var` → `/private/var`).
+    ///
+    /// A path that does not exist resolves as far as its existing prefix,
+    /// so a not-yet-created file inside the base still passes.
+    public static func isSymlinkContained(path: String, baseDirectory: String) -> Bool {
+        let baseReal = URL(fileURLWithPath: (baseDirectory as NSString).standardizingPath)
+            .resolvingSymlinksInPath().path
+        let fileReal = URL(fileURLWithPath: (path as NSString).standardizingPath)
+            .resolvingSymlinksInPath().path
+        return fileReal == baseReal || fileReal.hasPrefix(baseReal + "/")
     }
 
     /// MIME type for a file path, by extension. Unknown → octet-stream.

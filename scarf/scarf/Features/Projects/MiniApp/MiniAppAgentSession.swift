@@ -74,6 +74,15 @@ actor MiniAppAgentSession {
     // hold isolation across `await`). Cleared whenever the prompt resolves.
     private var promptInFlight = false
 
+    /// End-of-turn handshake state (see `completeTurn` / `drainEventLoop`).
+    /// `eventsProcessed` counts every event this session's loop has taken off
+    /// `client.events`, in the same units as `ACPClient.eventsEmitted`;
+    /// `drainTarget` is the count a suspended `drainEventLoop` is waiting to
+    /// reach.
+    private var eventsProcessed = 0
+    private var drainTarget: Int?
+    private var drainContinuation: CheckedContinuation<Void, Never>?
+
     /// Live event forwarder for `scarf.onEvent`. Set by the bridge when the
     /// mini-app subscribes; receives this session's streamed events.
     private var eventSink: (@Sendable (ACPEvent) -> Void)?
@@ -159,6 +168,10 @@ actor MiniAppAgentSession {
     func shutdown() async {
         eventLoop?.cancel()
         eventLoop = nil
+        // Cancelling the loop means nothing will ever satisfy a pending
+        // end-of-turn handshake — release it before failing the prompt, or
+        // `completeTurn` stays suspended for the process's lifetime.
+        releaseDrainIfSatisfied(force: true)
         resumePending(.failure(AgentError.cancelled))
         if let client {
             await client.stop()
@@ -186,10 +199,11 @@ actor MiniAppAgentSession {
             let stream = await client.events
             for await event in stream {
                 guard let self else { break }
-                // Only this session's events (or connection-level ones).
-                if event.sessionId == sessionId || event.sessionId == nil {
-                    await self.handle(event)
-                }
+                // Only this session's events (or connection-level ones) are
+                // handled, but EVERY consumed event is counted — the count is
+                // the handshake's unit and must stay in step with the
+                // client's `eventsEmitted`, which counts unfiltered.
+                await self.consume(event, sessionId: sessionId)
             }
             // The stream finishes on connection loss / clean shutdown.
             // ACPClient never yields `.connectionLost`, so this is the only
@@ -200,26 +214,76 @@ actor MiniAppAgentSession {
         }
     }
 
+    /// One event off the stream: count it (handshake bookkeeping), handle it
+    /// when it belongs to this session, then release a satisfied drain.
+    private func consume(_ event: ACPEvent, sessionId: String) {
+        eventsProcessed += 1
+        if event.sessionId == sessionId || event.sessionId == nil {
+            handle(event)
+        }
+        releaseDrainIfSatisfied()
+    }
+
     private func streamEnded() {
+        // No further event can arrive, so a pending drain must not wait for
+        // a target it will never reach.
+        releaseDrainIfSatisfied(force: true)
         resumePending(.failure(AgentError.connectionLost("agent session ended")))
     }
 
     /// Synthesize turn completion AFTER the event loop has folded every
-    /// buffered `messageChunk` into the reply. `sendPrompt`'s return is the
-    /// completion signal, but the chunks are accumulated by a SEPARATE
-    /// event-loop task — so resolving immediately could race ahead of an
-    /// undrained chunk and truncate the reply. ACPClient delivers a turn's
-    /// chunks BEFORE its `session/prompt` response (one ordered read loop),
-    /// so they're all buffered by the time we get here; yielding until the
-    /// reply buffer stops growing drains them deterministically. Terminates:
-    /// no new chunks arrive (the single in-flight prompt's turn has ended).
+    /// buffered `messageChunk` into the reply.
+    ///
+    /// `sendPrompt`'s return is the completion signal, but the chunks are
+    /// accumulated by a SEPARATE event-loop task, so resolving immediately
+    /// could race ahead of an undrained chunk and truncate the reply.
+    ///
+    /// **This used to be a count-stability poll** (`Task.yield()` until
+    /// `pendingBuffer.count` stopped changing). That is not a
+    /// synchronization primitive: it infers "drained" from "nothing arrived
+    /// during my last yield", so it truncates the reply whenever the event
+    /// loop needs one scheduling hop more than that (a loaded executor, a
+    /// slower machine, a chunk still in the channel's read buffer), it spins
+    /// the CPU while a chunk is genuinely in flight, and it cannot tell a
+    /// drained stream from an empty chunk.
+    ///
+    /// Replaced with an explicit handshake on a COUNT, not on timing:
+    /// `ACPClient.eventsEmitted` is how many events the client has yielded,
+    /// and `eventsProcessed` is how many this session's loop has consumed.
+    /// The client handles one incoming line at a time, so the emitted count
+    /// read immediately after the `session/prompt` response provably
+    /// includes every `messageChunk` of this turn. Waiting until
+    /// `eventsProcessed >= target` is therefore an exact "the loop has seen
+    /// everything from my turn" condition with a definite termination — no
+    /// polling and no timing assumption. `streamEnded()` and `shutdown()`
+    /// release a waiter so a dead stream can't strand it.
     private func completeTurn(sessionId: String, result: ACPPromptResult) async {
-        var lastCount = -1
-        while pendingBuffer.count != lastCount {
-            lastCount = pendingBuffer.count
-            await Task.yield()
-        }
+        await drainEventLoop()
         handle(.promptComplete(sessionId: sessionId, response: result))
+    }
+
+    /// Suspend until the event loop has consumed every event the client had
+    /// emitted as of now. Returns immediately when the loop is already
+    /// caught up or isn't running.
+    private func drainEventLoop() async {
+        guard let client, let eventLoop, !eventLoop.isCancelled else { return }
+        let target = await client.eventsEmitted
+        guard eventsProcessed < target else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            drainTarget = target
+            drainContinuation = continuation
+        }
+    }
+
+    /// Release a waiting `drainEventLoop` once its target is reached (or
+    /// unconditionally, when `force` — the stream ended and no further event
+    /// will ever arrive).
+    private func releaseDrainIfSatisfied(force: Bool = false) {
+        guard let continuation = drainContinuation,
+              force || eventsProcessed >= (drainTarget ?? 0) else { return }
+        drainContinuation = nil
+        drainTarget = nil
+        continuation.resume()
     }
 
     private func handle(_ event: ACPEvent) {
@@ -253,11 +317,22 @@ actor MiniAppAgentSession {
 
     /// Resolve the in-flight prompt exactly once (first signal wins) and
     /// release the busy slot. Honors the passed result.
+    ///
+    /// The busy slot is cleared UNCONDITIONALLY, outside the
+    /// continuation guard. It used to be cleared only when a continuation
+    /// was actually resumed, which left `promptInFlight` stuck true — and
+    /// the mini-app permanently answering `busy` — on every path that
+    /// releases the slot without a registered continuation: `shutdown()`
+    /// (or `streamEnded()`) landing in the window between `promptInFlight =
+    /// true` and the `withCheckedThrowingContinuation` body running, and a
+    /// second terminal signal arriving after the first already consumed the
+    /// continuation. Clearing a slot that is already free is harmless;
+    /// leaving one held forever wedges the session for its whole lifetime.
     private func resumePending(_ result: Result<String, Error>) {
+        promptInFlight = false
         guard let continuation = pendingContinuation else { return }
         pendingContinuation = nil
         pendingBuffer = ""
-        promptInFlight = false
         continuation.resume(with: result)
     }
 }

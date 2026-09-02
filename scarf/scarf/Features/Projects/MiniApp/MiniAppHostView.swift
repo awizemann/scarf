@@ -84,6 +84,16 @@ struct MiniAppHostView: NSViewRepresentable {
         return webView
     }
 
+    /// **Precondition: the host is `.id`-keyed on the granted permission set**
+    /// (`MiniAppRunner` does this). `updateNSView` only ever reloads the entry
+    /// document for a different `manifest.id` — it deliberately does NOT
+    /// rebuild the configuration, so a changed `grantedPermissions` on the
+    /// SAME view would leave the old dispatcher (and the old, wider grant)
+    /// live in the running `WKWebView`. Narrowing a grant must therefore
+    /// destroy and recreate this representable, which is what the `.id`
+    /// achieves. Do not "optimize" that `.id` away, and do not start
+    /// mutating permissions here — the configuration is immutable after
+    /// `WKWebView` init, so there is no correct in-place update.
     func updateNSView(_ webView: WKWebView, context: Context) {
         guard context.coordinator.loadedAppID != manifest.id else { return }
         context.coordinator.loadedAppID = manifest.id
@@ -96,9 +106,16 @@ struct MiniAppHostView: NSViewRepresentable {
     }
 
     /// Default `ui.*` handling: log, then forward to the host's handler.
+    ///
+    /// Only the action KIND is public. The payload (toast text, window
+    /// title, requested size) is authored by untrusted — often
+    /// agent-generated — web content, so it is logged `.private`: a
+    /// mini-app that reads a file or a kanban card must not be able to
+    /// launder that content into the system log, which is readable outside
+    /// the app's own sandbox and gets swept into sysdiagnose bundles.
     private static func handleUIAction(_ action: MiniAppUIAction, custom: ((MiniAppUIAction) -> Void)?) {
         Logger(subsystem: "com.scarf", category: "MiniAppHostView")
-            .info("mini-app ui action: \(String(describing: action), privacy: .public)")
+            .info("mini-app ui action: \(action.kind, privacy: .public) \(action.payloadDescription, privacy: .private)")
         custom?(action)
     }
 
@@ -106,7 +123,23 @@ struct MiniAppHostView: NSViewRepresentable {
     /// process) when SwiftUI removes the host — including on `.id`-driven
     /// recreation when permissions change, so a revoked grant doesn't leave
     /// an old session running.
+    ///
+    /// Also unwires the bridge from the content controller. The
+    /// `WKUserContentController` holds a STRONG reference to the script
+    /// message handler, and the handler owns the dispatcher carrying the
+    /// user's grants — so without an explicit removal a torn-down mini-app's
+    /// bridge (and its agent session reference) can outlive the view. On the
+    /// `.id`-driven rebuild after a narrowed grant this matters twice: the
+    /// stale handler must not survive alongside the new, tighter one.
     static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
+        // Stop any in-flight page work before unwiring, so nothing races a
+        // reply into a handler that is being removed.
+        nsView.stopLoading()
+        nsView.navigationDelegate = nil
+        let controller = nsView.configuration.userContentController
+        controller.removeScriptMessageHandler(forName: MiniAppBridge.messageHandlerName, contentWorld: .page)
+        controller.removeAllUserScripts()
+
         let session = coordinator.agentSession
         coordinator.agentSession = nil
         Task { await session?.shutdown() }

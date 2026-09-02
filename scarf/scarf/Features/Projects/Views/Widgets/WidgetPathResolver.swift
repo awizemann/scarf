@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfCore
 
 /// Project root the dashboard widgets resolve relative `path` fields against.
 /// Set by `ProjectsView` from the currently-selected project; nil when no
@@ -15,10 +16,11 @@ extension EnvironmentValues {
     }
 }
 
-/// Resolves a widget's `path` field against the project root. Rejects paths
-/// that escape the project boundary via `..` segments after normalization,
-/// rejects absolute paths, and rejects empty / nil inputs. The returned
-/// path is suitable to hand to `transport.readFile`.
+/// Resolves a widget's `path` field against the project root. Rejects
+/// absolute paths, empty / nil inputs, paths that escape the project
+/// boundary via `..` segments, and — for local projects — paths that escape
+/// it through a **symlink**. The returned path is suitable to hand to
+/// `transport.readFile`.
 ///
 /// Returns nil + the reason if the path is invalid; widgets surface that
 /// reason via `WidgetErrorCard`.
@@ -44,11 +46,33 @@ enum WidgetPathResolver {
         for s in segments where s == ".." { return .failure(.escapesProject) }
         let joined = (projectRoot as NSString).appendingPathComponent(trimmed)
         let standardized = (joined as NSString).standardizingPath
-        // Belt and suspenders: ensure the standardized path is still
-        // beneath projectRoot. Standardizing resolves "./" and may follow
-        // symlinks; this catch checks the final string prefix.
+        // Lexical containment. `standardizingPath` resolves "." / ".." / "~"
+        // but does NOT resolve symlinks — so this prefix check alone is a
+        // purely textual guarantee (the previous comment here claimed the
+        // opposite, which is what made the symlink hole look covered).
         let rootStd = (projectRoot as NSString).standardizingPath
-        if !standardized.hasPrefix(rootStd) {
+        guard standardized == rootStd || standardized.hasPrefix(rootStd + "/") else {
+            return .failure(.escapesProject)
+        }
+        // Symlink layer. A dashboard widget's `path` comes from
+        // `.scarf/dashboard.json` — agent-writable — and the project tree it
+        // points into is agent-writable too, so `reports/weekly.md` can be a
+        // symlink to `~/.hermes/auth.json` and the lexical check above waves
+        // it through; `transport.readFile` then reads THROUGH the link.
+        // Apply the convention's resolve-BOTH-sides rule via the tested
+        // ScarfCore helper (see
+        // `.memory/conventions/path-containment-for-untrusted-dirs-…`).
+        //
+        // Gated on the root existing locally, and deliberately NOT routed
+        // through `MiniAppAssetResolver.containedFilePath`: that helper also
+        // demands the file exist as a local non-directory, which is wrong
+        // here on two counts — these paths are read through `ServerContext`'s
+        // transport and may live on a REMOTE host (nothing local to stat, and
+        // no way to detect a remote symlink from here), and a missing local
+        // file should surface as the widget's read error, not as
+        // "escapes the project root".
+        if FileManager.default.fileExists(atPath: rootStd),
+           !MiniAppAssetResolver.isSymlinkContained(path: standardized, baseDirectory: rootStd) {
             return .failure(.escapesProject)
         }
         return .success(standardized)
@@ -61,7 +85,7 @@ extension WidgetPathResolver.ResolveError {
         case .noProject:       return "No project selected."
         case .missingPath:     return "Missing required `path` field."
         case .absolutePath:    return "Path must be relative to the project root, not absolute."
-        case .escapesProject:  return "Path escapes the project root (`..` segments are not allowed)."
+        case .escapesProject:  return "Path escapes the project root (`..` segments and symlinks that lead outside are not allowed)."
         }
     }
 }

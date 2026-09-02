@@ -86,6 +86,18 @@ public actor ACPClient {
     private var eventContinuation: AsyncStream<ACPEvent>.Continuation?
     private var _eventStream: AsyncStream<ACPEvent>?
 
+    /// How many events this client has yielded into `events` since `start()`.
+    ///
+    /// Exposed so a consumer can perform an explicit end-of-turn handshake:
+    /// because incoming lines are handled one at a time on this actor, the
+    /// value read right after a `session/prompt` response necessarily
+    /// includes every notification that preceded that response on the wire.
+    /// A consumer that also counts what it has processed can therefore wait
+    /// for "I have seen at least N events" instead of guessing from timing.
+    /// (`MiniAppAgentSession.drainEventLoop` is the live case — it replaced a
+    /// count-stability poll that truncated replies under load.)
+    public private(set) var eventsEmitted = 0
+
     public private(set) var isConnected = false
     public private(set) var currentSessionId: String?
     public private(set) var statusMessage = ""
@@ -850,12 +862,14 @@ public actor ACPClient {
             }
         } else if message.isNotification {
             if let event = ACPEventParser.parse(notification: message) {
+                eventsEmitted += 1
                 eventContinuation?.yield(event)
             }
         } else if message.isRequest {
             if message.method == "session/request_permission",
                let event = ACPEventParser.parsePermissionRequest(message) {
                 statusMessage = "Permission required"
+                eventsEmitted += 1
                 eventContinuation?.yield(event)
             }
         }

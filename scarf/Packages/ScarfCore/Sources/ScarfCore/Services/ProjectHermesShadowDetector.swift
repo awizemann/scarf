@@ -105,11 +105,24 @@ public struct ProjectHermesShadowDetector: Sendable {
     /// the global Hermes home AND clears the warning on the next
     /// refresh. Two ordered steps:
     ///
-    /// 1. Copy `auth.json` into the global home (only when present).
-    ///    Hermes credentials live in this single file; preserving them
-    ///    is the load-bearing part of "consolidate" — every other
-    ///    project-local file is either replaceable or scoped to the
-    ///    project anyway.
+    /// 1. Copy `auth.json` into the global home (only when present)
+    ///    **without clobbering an existing one** (`cp -n`). Hermes
+    ///    credentials live in this single file; preserving them is the
+    ///    load-bearing part of "consolidate" — every other project-local
+    ///    file is either replaceable or scoped to the project anyway.
+    ///
+    ///    **Why `-n` and not a plain `cp`.** A plain `cp` overwrites
+    ///    `~/.hermes/auth.json` — the user's PRIMARY, possibly
+    ///    differently-scoped credential — with a project-local one, from a
+    ///    button labelled "copy fix command". That is a destructive,
+    ///    unrecoverable side effect nobody asked for and the UI copy never
+    ///    promised. With `-n` the command is purely additive: it fills an
+    ///    empty global home, and otherwise leaves it alone. The project's
+    ///    own `auth.json` is never lost either way — step 2 renames the
+    ///    shadow aside rather than deleting it, so it stays readable in
+    ///    `.hermes.scarf-bak.<stamp>/` if the user decides they wanted it.
+    ///    The `.help` copy on the Dashboard button states this same "only
+    ///    if you don't already have one" contract.
     /// 2. Rename the project-local `.hermes/` to
     ///    `.hermes.scarf-bak.<UTC-stamp>/`. Hermes' CLI stops seeing it
     ///    as `$HERMES_HOME` (it scans for a dir literally named
@@ -133,7 +146,10 @@ public struct ProjectHermesShadowDetector: Sendable {
         var parts: [String] = []
         if shadow.hasAuthJSON {
             parts.append("mkdir -p \(shellQuote(hermesHome))")
-            parts.append("cp \(shellQuote(shadow.shadowPath + "/auth.json")) \(shellQuote(hermesHome + "/auth.json"))")
+            // `-n`: never overwrite an existing global auth.json. See the
+            // doc comment — clobbering the user's primary credential from a
+            // "copy fix command" button is not a fix.
+            parts.append("cp -n \(shellQuote(shadow.shadowPath + "/auth.json")) \(shellQuote(hermesHome + "/auth.json"))")
             parts.append("chmod 600 \(shellQuote(hermesHome + "/auth.json"))")
         }
         // The rename is unconditional: even shadows without auth.json

@@ -85,21 +85,29 @@ public enum MiniAppPermission: Codable, Sendable, Hashable {
     /// `kanban.tasks` is implemented, and it's read-only board data.
     public static let nonSensitiveQueryKinds: Set<String> = ["kanban.tasks"]
 
-    /// Surfaces that touch the world beyond read-only, in-project data:
-    /// outbound network, filesystem writes, kanban mutation, and any
-    /// non-allowlisted query kind. The preview sheet highlights these;
-    /// agent-generated mini-apps get them denied by default until the user
-    /// explicitly elevates.
+    /// Surfaces that reach beyond a mini-app's own, structured, read-only
+    /// data: outbound network, filesystem reads/writes, kanban mutation, and
+    /// any non-allowlisted query kind. The preview sheet flags these with a
+    /// warning and — for agent-generated mini-apps — leaves them UNCHECKED,
+    /// so running such an app never silently grants one (`defaultChecked()`).
     public var isSensitive: Bool {
         switch self {
         // `prompt` drives a tool-enabled agent with web-supplied text — the
         // biggest escalation, so agent-generated apps don't get it by default.
         case .prompt, .net, .fileWrite, .kanbanWrite: return true
+        // `file:read` is read-only and project-scoped, but "the project" is
+        // not a low-value blast radius: `.env`, `*.pem`, `config.yaml`, and
+        // credential-bearing dotfiles routinely live under the project root,
+        // and a mini-app that can read them can also render them into a page
+        // (or, with `prompt`, feed them to an agent). Whole-project read is
+        // therefore a deliberate elevation, never a pre-ticked default for
+        // agent-generated web content.
+        case .fileRead: return true
         case .unknown: return true  // unrecognized → treat as sensitive (deny-by-default)
         // A query is non-sensitive only for an allow-listed read-only kind;
         // any other (or future privacy-relevant) kind defaults to sensitive.
         case .query(let kind): return !Self.nonSensitiveQueryKinds.contains(kind)
-        case .events, .fileRead, .store: return false
+        case .events, .store: return false
         }
     }
 
@@ -110,7 +118,7 @@ public enum MiniAppPermission: Codable, Sendable, Hashable {
         case .events: return "Read this chat's streamed agent output"
         case .query(let kind): return "Read \(kind.isEmpty ? "data" : kind) (read-only)"
         case .kanbanWrite: return "Create and move kanban tasks"
-        case .fileRead: return "Read files inside the project"
+        case .fileRead: return "Read any file inside the project"
         case .fileWrite: return "Write files inside the project"
         case .store: return "Save its own settings"
         case .net: return "Make outbound network requests"

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// On-disk manifest for a mini-app — `miniapp.json` at the root of a
 /// mini-app directory (`<project>/.scarf/miniapps/<id>/`).
@@ -65,6 +66,41 @@ public struct MiniAppManifest: Codable, Sendable, Hashable, Identifiable {
         self.permissions = permissions
         self.panelHint = panelHint
         self.generated = generated
+    }
+
+    /// Stable fingerprint of the security-relevant half of `miniapp.json` —
+    /// what a permission grant is actually a decision *about*.
+    ///
+    /// Persisted alongside a `MiniAppGrant` so a trust-on-first-use decision
+    /// is bound to content, not just to `(projectId, miniAppId)`: a
+    /// mini-app that rewrites its own manifest to request `net` +
+    /// `file:read` (agent-generated apps are rewritten routinely, and the
+    /// directory is agent-writable) can no longer inherit the grant the user
+    /// gave the previous version. A changed fingerprint sends the launch
+    /// flow back through the permission sheet, seeded with the prior answer.
+    ///
+    /// **Why not a hash of the whole `miniapp.json` (or the whole app).**
+    /// The mini-app's *code* changes constantly and legitimately — that is
+    /// the point of an agent-built app — and `name`/`version`/`panelHint`
+    /// churn with it. Re-prompting on every cosmetic edit trains the user to
+    /// click "Approve" without reading, which destroys the value of the
+    /// sheet; and hashing the HTML/JS would make the prompt fire on every
+    /// single iteration. The grant authorizes *surfaces*, so the fingerprint
+    /// covers exactly the fields that determine them: the declared
+    /// permissions, the `entry` document the grant is handed to, and the
+    /// `minBridgeVersion` gate. Raw permission strings are used (not the
+    /// parsed cases) so an unknown-today permission still perturbs the hash.
+    public var securityFingerprint: String {
+        let material = ([
+            "v1",
+            "entry=" + entry,
+            "minBridge=" + minBridgeVersion
+        ] + permissions.map { "perm=" + $0.rawValue }.sorted()).joined(separator: "\n")
+        return Self.sha256Hex(material)
+    }
+
+    static func sha256Hex(_ string: String) -> String {
+        SHA256.hash(data: Data(string.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: - Codable (lenient)

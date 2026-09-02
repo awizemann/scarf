@@ -132,10 +132,23 @@ struct MiniAppLaunchHost: View {
             }
             let store = MiniAppGrantStore(context: serverContext)
             let pid = project.id.uuidString
-            if store.hasDecision(projectId: pid, miniAppId: manifest.id) {
+            // TOFU is bound to CONTENT, not just identity: the stored grant
+            // is reused only when it was made about this exact manifest
+            // fingerprint (permissions + entry + minBridgeVersion). A
+            // mini-app that rewrites its own `miniapp.json` to ask for more
+            // — trivial for an agent-generated app in an agent-writable
+            // directory — lands back on the sheet instead of inheriting the
+            // old grant. A stale/pre-fingerprint decision still seeds the
+            // sheet, so re-review shows the user's previous answer rather
+            // than resetting to policy defaults.
+            if store.hasDecision(projectId: pid, miniAppId: manifest.id, matching: manifest.securityFingerprint) {
                 granted = store.grantedPermissions(projectId: pid, miniAppId: manifest.id)
                 phase = .run
             } else {
+                if store.hasDecision(projectId: pid, miniAppId: manifest.id) {
+                    reviewSeed = store.grantedPermissions(projectId: pid, miniAppId: manifest.id)
+                        .intersection(manifest.permissions)
+                }
                 phase = .review
             }
         }
@@ -145,7 +158,8 @@ struct MiniAppLaunchHost: View {
         try? MiniAppGrantStore(context: serverContext).setGrant(
             projectId: project.id.uuidString,
             miniAppId: manifest.id,
-            permissions: permissions
+            permissions: permissions,
+            manifestFingerprint: manifest.securityFingerprint
         )
     }
 }

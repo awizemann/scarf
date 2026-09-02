@@ -72,13 +72,41 @@ final class ScarfMiniAppBridge: NSObject, WKScriptMessageHandlerWithReply {
         // then hand off to `dispatch` — the WebKit-free seam that owns the
         // trust boundary + handler routing (and is what the tests drive,
         // since a `WKScriptMessage` can't be constructed in a test).
+
+        // MAIN FRAME ONLY. The user script is injected with
+        // `forMainFrameOnly: true`, but a message handler is registered on
+        // the whole content world: any subframe the mini-app manages to
+        // create can still `postMessage` this handler directly and reach
+        // the granted surfaces (file.read, prompt, …) without the shim. The
+        // grant was reviewed for the mini-app's own document, so refuse
+        // anything that isn't it.
+        guard message.frameInfo.isMainFrame else {
+            Self.logger.warning("rejected bridge call from a non-main frame")
+            replyHandler(nil, "permission_denied: bridge is main-frame only")
+            return
+        }
+
         guard let body = message.body as? [String: Any],
               let methodString = body["method"] as? String,
               let method = MiniAppBridgeMethod(rawValue: methodString) else {
             replyHandler(nil, "bad_request: malformed bridge message")
             return
         }
-        let args = (body["args"] as? [String]) ?? (body["args"] as? [Any])?.compactMap { $0 as? String } ?? []
+        // Args are strictly `[String]`. The previous `compactMap { $0 as?
+        // String }` silently DROPPED non-string entries, which SHIFTS every
+        // later argument left — `store.set(null, secret)` arrived as
+        // `store.set(secret)`, i.e. a positional-argument confusion the
+        // page controls. Reject the whole call instead.
+        let rawArgs = body["args"]
+        let args: [String]
+        if rawArgs == nil || rawArgs is NSNull {
+            args = []
+        } else if let strings = rawArgs as? [String] {
+            args = strings
+        } else {
+            replyHandler(nil, "bad_request: args must be an array of strings")
+            return
+        }
         dispatch(method: method, args: args, reply: replyHandler)
     }
 
@@ -277,4 +305,30 @@ enum MiniAppUIAction: Sendable {
     case setTitle(String)
     case resize(width: Double?, height: Double?)
     case requestClose
+
+    /// The action's KIND, with no page-supplied payload in it — safe to log
+    /// at `privacy: .public`. The payloads (toast text, window title) are
+    /// authored by untrusted web content and must never be interpolated
+    /// publicly into the system log.
+    var kind: String {
+        switch self {
+        case .toast: return "toast"
+        case .setTitle: return "setTitle"
+        case .resize: return "resize"
+        case .requestClose: return "requestClose"
+        }
+    }
+
+    /// The page-controlled payload, for `privacy: .private` logging only.
+    var payloadDescription: String {
+        switch self {
+        case .toast(let text): return text
+        case .setTitle(let title): return title
+        case .resize(let w, let h):
+            let width = w.map { String($0) } ?? "nil"
+            let height = h.map { String($0) } ?? "nil"
+            return "w=\(width) h=\(height)"
+        case .requestClose: return ""
+        }
+    }
 }

@@ -11,12 +11,24 @@ public struct MiniAppGrant: Codable, Sendable, Hashable {
     /// `MiniAppPermission` raw values the user approved.
     public var permissions: [String]
     public var decidedAt: String
+    /// `MiniAppManifest.securityFingerprint` at the moment of the decision —
+    /// what the user was actually shown. `nil` for grants written before
+    /// fingerprinting shipped, which is treated as "not a decision about
+    /// today's manifest" (→ re-review, seeded with this grant).
+    public var manifestFingerprint: String?
 
-    public init(projectId: String, miniAppId: String, permissions: [String], decidedAt: String) {
+    public init(
+        projectId: String,
+        miniAppId: String,
+        permissions: [String],
+        decidedAt: String,
+        manifestFingerprint: String? = nil
+    ) {
         self.projectId = projectId
         self.miniAppId = miniAppId
         self.permissions = permissions
         self.decidedAt = decidedAt
+        self.manifestFingerprint = manifestFingerprint
     }
 }
 
@@ -57,7 +69,8 @@ public struct MiniAppGrantStore: Sendable {
     public nonisolated func setGrant(
         projectId: String,
         miniAppId: String,
-        permissions: Set<MiniAppPermission>
+        permissions: Set<MiniAppPermission>,
+        manifestFingerprint: String? = nil
     ) throws {
         var grants = load()
         grants.removeAll { $0.projectId == projectId && $0.miniAppId == miniAppId }
@@ -65,7 +78,8 @@ public struct MiniAppGrantStore: Sendable {
             projectId: projectId,
             miniAppId: miniAppId,
             permissions: permissions.map(\.rawValue).sorted(),
-            decidedAt: Self.iso8601.string(from: Date())
+            decidedAt: Self.iso8601.string(from: Date()),
+            manifestFingerprint: manifestFingerprint
         ))
         try persist(grants)
     }
@@ -84,6 +98,30 @@ public struct MiniAppGrantStore: Sendable {
     /// preview sheet before first run).
     public nonisolated func hasDecision(projectId: String, miniAppId: String) -> Bool {
         load().contains { $0.projectId == projectId && $0.miniAppId == miniAppId }
+    }
+
+    /// Whether the recorded decision was made about **this** manifest —
+    /// i.e. a decision exists AND its `manifestFingerprint` matches
+    /// `fingerprint`.
+    ///
+    /// The trust-on-first-use key is `(projectId, miniAppId, fingerprint)`,
+    /// not `(projectId, miniAppId)`: a mini-app directory is agent-writable,
+    /// so an app the user approved for `store` alone can rewrite its own
+    /// `miniapp.json` to also request `net` and `file:read` and — under the
+    /// old key — would have silently run with whatever the launcher looked
+    /// up. Now the permission sheet reappears whenever the security-relevant
+    /// manifest fields change. Pre-fingerprint grants (`nil`) also fail this
+    /// check, so those get exactly one re-review, seeded with the prior
+    /// answer, rather than being trusted blindly.
+    public nonisolated func hasDecision(
+        projectId: String,
+        miniAppId: String,
+        matching fingerprint: String
+    ) -> Bool {
+        guard let grant = load().first(where: { $0.projectId == projectId && $0.miniAppId == miniAppId }) else {
+            return false
+        }
+        return grant.manifestFingerprint == fingerprint
     }
 
     public nonisolated func allGrants() -> [MiniAppGrant] { load() }

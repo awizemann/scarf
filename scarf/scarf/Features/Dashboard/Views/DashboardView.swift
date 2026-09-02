@@ -215,7 +215,7 @@ struct DashboardView: View {
             .buttonStyle(ScarfSecondaryButton())
             .controlSize(.small)
             .help(shadow.hasAuthJSON
-                  ? "Copies a one-liner that consolidates this project's auth.json into your global ~/.hermes/ and renames the shadow .hermes/ aside as .hermes.scarf-bak.<timestamp>/ so it stops binding. Run it on the remote, then refresh the Dashboard."
+                  ? "Copies a one-liner that adds this project's auth.json to your global ~/.hermes/ only if you don't already have one (an existing global auth.json is never overwritten), then renames the shadow .hermes/ aside as .hermes.scarf-bak.<timestamp>/ so it stops binding — the project's copy stays readable in that backup folder. Run it on the remote, then refresh the Dashboard."
                   : "Copies a one-liner that renames this project's shadow .hermes/ aside as .hermes.scarf-bak.<timestamp>/ so Hermes' CLI stops binding to it as $HERMES_HOME. Run it on the remote, then refresh the Dashboard.")
         }
         .padding(ScarfSpace.s2)
