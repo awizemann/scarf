@@ -2,7 +2,7 @@
 title: Home
 type: note
 permalink: scarf-wiki/home
-updated: 2026-09-01
+updated: 2026-09-02
 created: 2026-05-29
 ---
 
@@ -10,7 +10,7 @@ created: 2026-05-29
 
 **The native Mac & iOS app for the [Hermes AI agent](https://github.com/hermes-ai/hermes-agent).** Full visibility into what Hermes is doing, when, and what it creates — on your Mac against one local install or many remote ones, and from your iPhone over SSH with **ScarfGo**.
 
-**Latest release:** [v2.24.0](https://github.com/awizemann/scarf/releases/tag/v2.24.0) — **Bots**, a new top-level section above Chat for Hermes's Bot Mode: a roster of named agents with native deterministic avatars, full create/edit, live streaming Bot Chat conversations over ACP (local or plain SSH), per-bot routines that interop with Hermes desktop's, and remote bots via `hermes peer` — plus a five-audit pre-release pass whose blocking findings (slash-menu capabilities in bot chats, failures rendered as failures, a silent no-op Settings toggle, dead Settings rows, a11y gaps, localization-ready shared components) are all fixed. Bots/Peers are English-first this release. Previous: [v2.23.0](https://github.com/awizemann/scarf/releases/tag/v2.23.0) brought Hermes v0.21.0 "Pantheon" parity (Peers section, cron incidents/doctor, tripled MCP catalog, carrier-aware previews). Earlier: [v2.22.0](https://github.com/awizemann/scarf/releases/tag/v2.22.0) with full accessibility + six-language localization. All earlier versions: [Release Notes Index](Release-Notes-Index).
+**Latest release:** [v3.0.0](https://github.com/awizemann/scarf/releases/tag/v3.0.0) — the milestone release: **Bots grows up** (per-bot model pins with honest provenance, SOUL.md editing with conflict detection, per-bot toolset/MCP enablement, roster search/activity/presence, one-round-trip SSH scanning) and **the whole app went through a five-lens audit** — symlink/webview escapes closed, mini-app permissions fingerprinted, five quietly-broken surfaces repaired (Plugins state, Webhooks list, Profiles export/delete, MCP adds, one-shot cron edits), honest Dashboard/Insights numbers, a Memory editor that never discards unsaved text, structural localization fixes (2,374 keys × six languages with real plural grammar), and accessibility extended across every remaining surface. No breaking changes. Previous: [v2.24.0](https://github.com/awizemann/scarf/releases/tag/v2.24.0) introduced the Bots section with live streaming bot chats. Earlier: [v2.23.0](https://github.com/awizemann/scarf/releases/tag/v2.23.0) with Hermes v0.21.0 "Pantheon" parity. All earlier versions: [Release Notes Index](Release-Notes-Index).
 
 **Mobile:** [Join the ScarfGo public TestFlight](https://testflight.apple.com/join/qCrRpcTz) — see [ScarfGo](ScarfGo) for the feature tour and [ScarfGo Onboarding](ScarfGo-Onboarding) for the one-minute SSH setup.
 
@@ -58,4 +58,4 @@ Scarf 2.0+ is a multi-window app — one window per Hermes server, local or remo
 Open-source (MIT), actively maintained. See [Roadmap](Roadmap) for what's coming.
 
 ---
-_Last updated: 2026-09-01 — Scarf v2.24.0 (Bots: Bot Mode comes home)._
+_Last updated: 2026-09-02 — Scarf 3.0.0 (Bots complete + the full-app audit)._
