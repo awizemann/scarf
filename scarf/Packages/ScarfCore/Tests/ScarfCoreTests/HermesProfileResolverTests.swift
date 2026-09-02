@@ -108,6 +108,32 @@ struct HermesProfileResolverOverrideTests {
         #expect(HermesProfileResolver.resolveLocalHome() == second)
     }
 
+    /// `ServerContext.local.paths.home` must route through this resolver —
+    /// the wiring half of M0bTransportTests' `serverContextPathsLocalVsRemote`,
+    /// which moved here because the resolver reads the process-wide
+    /// SCARF_HERMES_HOME env var this serialized suite owns. With a
+    /// marker-bearing override active, the exact home comes back — stronger
+    /// than the old `hasSuffix("/.hermes")` and immune to an active profile.
+    @Test func serverContextLocalPathsRouteThroughProfileResolver() throws {
+        let saved = ProcessInfo.processInfo.environment[Self.envKey]
+        defer { restore(saved) }
+
+        let tmp = NSTemporaryDirectory().appending("scarf-ctx-home-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(atPath: tmp, withIntermediateDirectories: true)
+        try Data().write(to: URL(fileURLWithPath: tmp + "/" + HermesProfileResolver.testHomeMarkerFilename))
+        defer { try? FileManager.default.removeItem(atPath: tmp) }
+        setenv(Self.envKey, tmp, 1)
+
+        #expect(ServerContext.local.paths.home == tmp)
+
+        // Without the override, the context still mirrors the resolver, and
+        // the default resolution ends in /.hermes (root) or a profile home.
+        restore(nil)
+        let resolved = HermesProfileResolver.resolveLocalHome()
+        #expect(ServerContext.local.paths.home == resolved)
+        #expect(resolved.hasSuffix("/.hermes") || resolved.contains("/.hermes/profiles/"))
+    }
+
     private func restore(_ saved: String?) {
         if let saved {
             setenv(Self.envKey, saved, 1)
