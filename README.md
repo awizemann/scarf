@@ -67,14 +67,16 @@ Connecting takes about a minute: add a server (same details as `ssh user@host`),
 
 Scarf for macOS collects **anonymous usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames; no persistent identifier) to guide development. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/).
 
-## What's New in 2.24.0
+## What's New in 3.0.0
 
-- **Bots** ⚙ — a new top-level section above Chat for Hermes's Bot Mode: your roster of named agents with native deterministic avatars, full create/edit/delete, and one-click promotion of any profile to a bot. Interops both ways with Hermes's own desktop — same profiles, same chats.
-- **Live bot conversations** ⚙ — each bot's canonical Bot Chat as a real streaming Scarf chat (tokens, thinking, tool cards, inline permissions) over ACP, locally or across plain SSH.
-- **Routines & remote bots** ⚙ — per-bot scheduled jobs that run as the right bot (delegation-wrapped exactly like Hermes desktop's), and your `hermes peer` bots in the roster for DMs and async runs.
-- **Five-audit release pass** — independent audits of Bot Mode, the last two releases, Chat, Bots, and Settings; every blocking finding fixed: bot chats get the full slash menu, failures render as failures, a silent no-op Settings toggle works, three dead Settings rows removed, accessibility gaps closed, and the shared UI components are now localization-ready.
+- **Bots, complete** ⚙ — the bot editor now configures the agent itself: per-bot model pins with honest provenance, SOUL.md editing with conflict detection, per-bot toolset/MCP enablement, and a roster with search, activity previews, live presence — painting over SSH in one round-trip instead of sixty.
+- **The 3.0 audit** — every sidebar section independently audited for correctness, security, performance, translation, and accessibility; everything blocking fixed. Symlink and webview escapes closed, mini-app permissions fingerprinted, secrets out of argv, and five quietly-broken surfaces repaired (Plugins state, Webhooks list, Profiles export/delete, MCP adds, one-shot cron edits).
+- **Honest numbers** — "Last 7 days" means seven days, Insights uses one population, the Memory editor never discards unsaved text.
+- **Fully localized, for real** — a structural fix made previously-unreachable translations live; 2,374 keys across six languages with real plural grammar, regression-guarded by tests.
+- **Accessible throughout** — VoiceOver/Voice Control coverage extended across sessions, Kanban, tools, logs, health, and chat transcripts; Reduce Motion respected.
+- No breaking changes; Hermes v0.6.0–v0.21.0 compatibility unchanged.
 
-Full notes: [v2.24.0](https://github.com/awizemann/scarf/releases/tag/v2.24.0) · v2.23.0 brought Hermes v0.21 "Pantheon" parity (Peers, cron health, tripled MCP catalog) · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
+Full notes: [v3.0.0](https://github.com/awizemann/scarf/releases/tag/v3.0.0) · v2.24.0 introduced the Bots section with live streaming bot chats · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
 
 ## Features
 
