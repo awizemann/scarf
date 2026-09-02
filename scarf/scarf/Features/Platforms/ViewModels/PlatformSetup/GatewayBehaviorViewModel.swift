@@ -57,20 +57,41 @@ final class GatewayBehaviorViewModel {
     /// the file — defaults match v0.13 server-side defaults so the form
     /// looks identical to a fresh-install host.
     func load() {
-        let cfg = HermesFileService(context: context).loadConfig()
-        let block = cfg.gatewayPlatforms[platform] ?? .empty
-        if let kind {
-            switch kind {
-            case .channels: items = block.allowedChannels
-            case .chats:    items = block.allowedChats
-            case .rooms:    items = block.allowedRooms
-            }
-        } else {
-            items = []
+        let ctx = context
+        let platform = platform
+        let kind = kind
+        isLoading = true
+        // `loadConfig()` is an SFTP read on a remote host. Detached, then
+        // committed on MainActor — the same posture `save()` now takes.
+        Task { [weak self] in
+            let snapshot = await Task.detached {
+                () -> (items: [String], busyAck: Bool, restartNotification: Bool) in
+                let cfg = HermesFileService(context: ctx).loadConfig()
+                let block = cfg.gatewayPlatforms[platform] ?? .empty
+                var items: [String] = []
+                if let kind {
+                    switch kind {
+                    case .channels: items = block.allowedChannels
+                    case .chats:    items = block.allowedChats
+                    case .rooms:    items = block.allowedRooms
+                    }
+                }
+                return (items, cfg.displayBusyAckEnabled, block.gatewayRestartNotification)
+            }.value
+            guard let self else { return }
+            // Never clobber the form under a save in flight — the values the
+            // user is committing must not be replaced by the pre-save disk
+            // copy this read started from.
+            guard !self.isSaving else { self.isLoading = false; return }
+            self.items = snapshot.items
+            self.busyAckEnabled = snapshot.busyAck
+            self.gatewayRestartNotification = snapshot.restartNotification
+            self.isLoading = false
         }
-        busyAckEnabled              = cfg.displayBusyAckEnabled
-        gatewayRestartNotification  = block.gatewayRestartNotification
     }
+
+    /// True while the initial config read is in flight.
+    private(set) var isLoading: Bool = false
 
     /// Persist edits in two phases:
     ///
@@ -85,35 +106,12 @@ final class GatewayBehaviorViewModel {
     ///    `slash_command_notice_ttl_seconds` key were never read by any
     ///    Hermes version and are no longer written.)
     func save() {
+        guard !isSaving else { return }
         isSaving = true
-        defer {
-            isSaving = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                self?.message = nil
-            }
-        }
+        message = nil
 
-        // Step 1: list write via direct YAML edit. Detached so the SCP
-        // round-trip on remote hosts doesn't block MainActor — local
-        // writes are still cheap, but the same posture works for both.
-        if let kind, capabilities.hasGatewayAllowlists {
-            let trimmed = items
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-            let ok = GatewayConfigWriter.saveList(
-                context: context,
-                platform: platform,
-                key: kind.yamlKey,
-                items: trimmed
-            )
-            if !ok {
-                Self.logger.warning("GatewayConfigWriter.saveList failed for \(self.platform, privacy: .public)")
-                message = "Failed to write allowlist to config.yaml"
-                return
-            }
-        }
-
-        // Step 2: scalar saves via `hermes config set`.
+        // Step 2's key set is computed on MainActor (it reads the form), the
+        // I/O below is not.
         var configKV: [String: String] = [:]
         if capabilities.hasGatewayBusyAckToggle {
             configKV["display.busy_ack_enabled"] =
@@ -137,15 +135,60 @@ final class GatewayBehaviorViewModel {
                 PlatformSetupHelpers.envBool(gatewayRestartNotification)
         }
 
-        if configKV.isEmpty {
-            message = "Allowlist saved — restart gateway to apply"
-            return
-        }
+        let ctx = context
+        let platform = platform
+        let listKey = (capabilities.hasGatewayAllowlists ? kind?.yamlKey : nil)
+        let trimmedItems = items
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let kv = configKV
 
-        let result = PlatformSetupHelpers.saveForm(
-            context: context, envPairs: [:], configKV: configKV
-        )
-        message = result
+        // BOTH steps are I/O — a direct YAML rewrite (SCP round-trip on
+        // remote) and one `hermes config set` process per key. Running them
+        // inline froze the sheet for the whole save, and the `isSaving` flag
+        // that guards the button was set and cleared inside the same
+        // synchronous run (set, `defer`-cleared, never yielding), so it could
+        // never render. The old step-1 comment claiming the write was
+        // "detached so the SCP round-trip doesn't block MainActor" described
+        // code that did not exist; it does now.
+        Task { [weak self] in
+            let outcome = await Task.detached { () -> String in
+                // Step 1: list write via direct YAML edit — `hermes config
+                // set` can't write list values.
+                if let listKey {
+                    let ok = GatewayConfigWriter.saveList(
+                        context: ctx,
+                        platform: platform,
+                        key: listKey,
+                        items: trimmedItems
+                    )
+                    if !ok {
+                        return "Failed to write allowlist to config.yaml"
+                    }
+                }
+                // Step 2: scalar saves via `hermes config set`.
+                if kv.isEmpty {
+                    return "Allowlist saved — restart gateway to apply"
+                }
+                return PlatformSetupHelpers.saveForm(
+                    context: ctx, envPairs: [:], configKV: kv
+                )
+            }.value
+
+            guard let self else { return }
+            self.isSaving = false
+            self.message = outcome
+            if outcome == "Failed to write allowlist to config.yaml" {
+                Self.logger.warning("GatewayConfigWriter.saveList failed for \(platform, privacy: .public)")
+                // A failure message is never auto-cleared — the user
+                // dismisses it by saving again.
+                return
+            }
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(3))
+                self?.message = nil
+            }
+        }
     }
 
     /// The `hermes config set` key for the restart-notification toggle.

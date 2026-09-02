@@ -56,14 +56,19 @@ final class PersonalitiesViewModel {
     }
 
     func load() {
-        let svc = fileService
         let ctx = context
         let path = soulPath
         let inCodeBuiltins = hasBuiltinPersonalitiesInCode
         Task.detached { [weak self] in
-            let config = svc.loadConfig()
+            // ONE read of config.yaml, not two. `loadConfig()` reads and
+            // parses the file, and the personalities block was then re-read
+            // from disk a second time through `ctx.readText` — two SFTP
+            // round-trips over the identical bytes on every Personalities
+            // visit. Read the text once and derive both from it.
+            let yaml = ctx.readText(ctx.paths.configYAML) ?? ""
+            let config = HermesConfig(yaml: yaml)
             let parsed = Self.parsePersonalitiesBlock(
-                yaml: ctx.readText(ctx.paths.configYAML) ?? "",
+                yaml: yaml,
                 hasBuiltinPersonalitiesInCode: inCodeBuiltins
             )
             let soul = ctx.readText(path) ?? ""
@@ -92,37 +97,71 @@ final class PersonalitiesViewModel {
             .map(HermesPersonality.init)
     }
 
+    /// True while a `hermes config set` or a SOUL.md write is in flight.
+    /// The picker and the Save button disable on it, so the transition
+    /// actually renders instead of the window freezing for the round-trip.
+    private(set) var isSaving = false
+
     func setActive(_ name: String) {
-        let result = runHermes(["config", "set", "display.personality", name])
-        if result.exitCode == 0 {
-            activeName = name
-            message = "Active personality set to \(name)"
-        } else {
-            logger.warning("Failed to set personality: \(result.output)")
-            // Same `hermes config set` failure surface as Settings, so use
-            // the shared builder: it quotes the CLI's own reason (e.g. the
-            // managed-scope refusal) instead of a generic string.
-            message = SettingsViewModel.saveFailureMessage(
-                key: "display.personality", output: result.output
-            )
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.message = nil
+        guard !isSaving else { return }
+        isSaving = true
+        let ctx = context
+        Task { [weak self] in
+            // `hermes config set` is a process spawn — an SSH exec channel on
+            // a remote host. Detached, matching `load()` right above.
+            let result = await Task.detached {
+                ctx.runHermes(["config", "set", "display.personality", name])
+            }.value
+            guard let self else { return }
+            self.isSaving = false
+            if result.exitCode == 0 {
+                self.activeName = name
+                self.message = "Active personality set to \(name)"
+            } else {
+                self.logger.warning("Failed to set personality: \(result.output)")
+                // Same `hermes config set` failure surface as Settings, so use
+                // the shared builder: it quotes the CLI's own reason (e.g. the
+                // managed-scope refusal) instead of a generic string.
+                self.message = SettingsViewModel.saveFailureMessage(
+                    key: "display.personality", output: result.output
+                )
+            }
+            self.clearMessageAfterDelay()
         }
     }
 
     func saveSOUL(_ content: String) {
-        if context.writeText(soulPath, content: content) {
-            soulMarkdown = content
-            message = "SOUL.md saved"
-        } else {
-            logger.error("Failed to write SOUL.md to \(self.context.displayName)")
-            message = "Save failed"
+        guard !isSaving else { return }
+        isSaving = true
+        let ctx = context
+        let path = soulPath
+        Task { [weak self] in
+            let ok = await Task.detached { ctx.writeText(path, content: content) }.value
+            guard let self else { return }
+            self.isSaving = false
+            if ok {
+                self.soulMarkdown = content
+                self.message = "SOUL.md saved"
+            } else {
+                self.logger.error("Failed to write SOUL.md to \(self.context.displayName)")
+                self.message = "Save failed"
+            }
+            self.clearMessageAfterDelay()
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+    }
+
+    private func clearMessageAfterDelay() {
+        messageClearTask?.cancel()
+        messageClearTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
             self?.message = nil
         }
     }
+
+    /// Held so a second action's message isn't wiped by the first action's
+    /// still-pending timer.
+    @ObservationIgnored private var messageClearTask: Task<Void, Never>?
 
     func openConfigInEditor() {
         context.openInLocalEditor(context.paths.configYAML)

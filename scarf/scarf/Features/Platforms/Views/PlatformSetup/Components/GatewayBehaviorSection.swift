@@ -79,6 +79,9 @@ struct GatewayBehaviorSection: View {
                         .foregroundStyle(.green)
                 }
                 Spacer()
+                if viewModel.isSaving {
+                    ProgressView().controlSize(.small)
+                }
                 Button("Save behavior") { viewModel.save() }
                     .buttonStyle(ScarfPrimaryButton())
                     .controlSize(.small)

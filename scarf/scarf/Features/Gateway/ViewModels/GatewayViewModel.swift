@@ -87,8 +87,26 @@ final class MessagingGatewayViewModel {
     /// hides itself in that case.
     var gatewayList: GatewayListSnapshot?
 
+    /// Newest-wins token for `load()`. A load is unparameterised, so
+    /// coalescing would normally do — but every mutation here (start / stop /
+    /// approve / revoke) changes the very state a load reads, and a load that
+    /// started BEFORE the mutation would otherwise commit pre-mutation data
+    /// on top of the post-mutation reload. Mutations bump this token as they
+    /// begin, so any load already in flight drops its result. Same shape as
+    /// `InsightsViewModel`'s generation guard (F4), for the same reason:
+    /// joining or replaying a stale pass answers the wrong question.
+    @ObservationIgnored private var loadGeneration = 0
+
+    /// Invalidate every in-flight `load()`. Called at the start of each
+    /// mutation so a reload issued afterwards is the only one that can commit.
+    private func invalidateInFlightLoads() {
+        loadGeneration &+= 1
+    }
+
     func load() {
         isLoading = true
+        loadGeneration &+= 1
+        let generation = loadGeneration
         let ctx = context
         let caps = capabilities
         Task.detached { [weak self] in
@@ -100,7 +118,7 @@ final class MessagingGatewayViewModel {
                 ? HermesGatewayListService.fetch(context: ctx)
                 : nil
             await MainActor.run { [weak self] in
-                guard let self else { return }
+                guard let self, self.loadGeneration == generation else { return }
                 self.gateway = status
                 self.approvedUsers = pairing.approved
                 self.pendingPairings = pairing.pending
@@ -255,47 +273,106 @@ final class MessagingGatewayViewModel {
     /// no-op stop reports as requested — the reload that follows tells the
     /// truth. Substring-matching that prose is not a protocol.
     private func runServiceAction(_ verb: String, label: String, settleSeconds: Double) {
-        let result = runHermes(["gateway", verb])
+        guard !isBusy else { return }
+        isBusy = true
+        // Bump BOTH tokens before the CLI runs: `actionGeneration` cancels an
+        // earlier action's settle timer, `loadGeneration` cancels any load
+        // already reading the pre-action state.
         actionGeneration &+= 1
+        invalidateInFlightLoads()
         let generation = actionGeneration
+        let ctx = context
 
-        guard result.exitCode == 0 else {
-            actionFailed = true
-            actionMessage = SettingsViewModel.failureReason(from: result.output)
-                .map { String(localized: "Gateway \(label) failed: \($0)") }
-                ?? String(localized: "Gateway \(label) failed")
-            // Reload anyway (the host may have moved), but never clear a
-            // failure message on a timer — the user dismisses it by taking
-            // the next action.
-            load()
-            return
-        }
+        Task { [weak self] in
+            // `hermes gateway start|stop|restart` is a process spawn against a
+            // possibly-remote host; running it inline froze the whole app for
+            // the duration. Detached, exactly like `load()` above.
+            let result = await Task.detached { ctx.runHermes(["gateway", verb]) }.value
+            guard let self else { return }
+            self.isBusy = false
+            // A newer action superseded this one while the CLI ran — its
+            // message and its reload own the UI now.
+            guard self.actionGeneration == generation else { return }
 
-        actionFailed = false
-        actionMessage = String(localized: "Gateway \(label) requested")
-        DispatchQueue.main.asyncAfter(deadline: .now() + settleSeconds) { [weak self] in
-            guard let self, self.actionGeneration == generation else { return }
-            self.load()
-            self.actionMessage = nil
+            guard result.exitCode == 0 else {
+                self.actionFailed = true
+                self.actionMessage = SettingsViewModel.failureReason(from: result.output)
+                    .map { String(localized: "Gateway \(label) failed: \($0)") }
+                    ?? String(localized: "Gateway \(label) failed")
+                // Reload anyway (the host may have moved), but never clear a
+                // failure message on a timer — the user dismisses it by taking
+                // the next action.
+                self.load()
+                return
+            }
+
+            self.actionFailed = false
+            self.actionMessage = String(localized: "Gateway \(label) requested")
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(settleSeconds))
+                guard let self, self.actionGeneration == generation else { return }
+                self.load()
+                self.actionMessage = nil
+            }
         }
     }
 
     func approvePairing(platform: String, code: String) {
-        runHermes(["pairing", "approve", platform, code])
-        load()
+        guard !isBusy else { return }
+        isBusy = true
+        invalidateInFlightLoads()
+        let ctx = context
+        Task { [weak self] in
+            let result = await Task.detached {
+                ctx.runHermes(["pairing", "approve", platform, code])
+            }.value
+            guard let self else { return }
+            self.isBusy = false
+            if result.exitCode != 0 {
+                self.actionFailed = true
+                self.actionMessage = SettingsViewModel.failureReason(from: result.output)
+                    .map { String(localized: "Approve failed: \($0)") }
+                    ?? String(localized: "Approve failed")
+            } else {
+                self.actionFailed = false
+            }
+            self.load()
+        }
     }
 
     func revokeUser(_ user: PairedUser) {
-        runHermes(["pairing", "revoke", user.platform, user.userId])
-        approvedUsers.removeAll { $0.id == user.id }
+        guard !isBusy else { return }
+        isBusy = true
+        invalidateInFlightLoads()
+        let ctx = context
+        Task { [weak self] in
+            let result = await Task.detached {
+                ctx.runHermes(["pairing", "revoke", user.platform, user.userId])
+            }.value
+            guard let self else { return }
+            self.isBusy = false
+            // Only drop the row when the CLI agreed — the optimistic removal
+            // it replaced hid a failed revoke behind a vanished row until the
+            // next load put it back.
+            if result.exitCode == 0 {
+                self.actionFailed = false
+                self.approvedUsers.removeAll { $0.id == user.id }
+            } else {
+                self.actionFailed = true
+                self.actionMessage = SettingsViewModel.failureReason(from: result.output)
+                    .map { String(localized: "Revoke failed: \($0)") }
+                    ?? String(localized: "Revoke failed")
+            }
+            self.load()
+        }
     }
+
+    /// True while a service action or pairing mutation is running. The view
+    /// disables the buttons on it, so the state transition actually renders
+    /// rather than the whole window freezing for the CLI's duration.
+    private(set) var isBusy = false
 
     // MARK: - Private
     // (loadGatewayStatus / loadPairing were moved to static helpers above
     // so the detached load() can run them without touching MainActor state.)
-
-    @discardableResult
-    private func runHermes(_ arguments: [String]) -> (output: String, exitCode: Int32) {
-        context.runHermes(arguments)
-    }
 }

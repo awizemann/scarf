@@ -15,7 +15,7 @@ import os
 /// field set without re-implementing the write plumbing 12 times.
 @MainActor
 enum PlatformSetupHelpers {
-    static let logger = Logger(subsystem: "com.scarf", category: "PlatformSetup")
+    nonisolated static let logger = Logger(subsystem: "com.scarf", category: "PlatformSetup")
 
     /// Apply a form save in one atomic batch against a specific server.
     ///
@@ -28,8 +28,12 @@ enum PlatformSetupHelpers {
     ///   some fields accept an explicit empty string (e.g., `display.skin: ""`).
     ///
     /// Returns a user-facing summary message.
+    /// `nonisolated`: the body is pure transport I/O (env writes + one
+    /// `hermes config set` process per key) and touches no MainActor state,
+    /// so callers can — and now do — run it from a `Task.detached` instead of
+    /// freezing the window for a round-trip per key.
     @discardableResult
-    static func saveForm(context: ServerContext, envPairs: [String: String], configKV: [String: String]) -> String {
+    nonisolated static func saveForm(context: ServerContext, envPairs: [String: String], configKV: [String: String]) -> String {
         let envService = HermesEnvService(context: context)
 
         // Split env pairs into set vs. unset.
@@ -68,7 +72,7 @@ enum PlatformSetupHelpers {
     /// Synchronous hermes CLI invocation against the given server. Use only
     /// for fast commands like `config set`; longer commands should use
     /// `HermesFileService.runHermesCLI` from a `Task.detached`.
-    static func runHermesCLI(context: ServerContext, args: [String], timeout: TimeInterval = 15) -> (exitCode: Int32, output: String) {
+    nonisolated static func runHermesCLI(context: ServerContext, args: [String], timeout: TimeInterval = 15) -> (exitCode: Int32, output: String) {
         HermesFileService(context: context).runHermesCLI(args: args, timeout: timeout)
     }
 

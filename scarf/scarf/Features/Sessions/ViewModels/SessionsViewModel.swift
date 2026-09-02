@@ -138,7 +138,7 @@ final class SessionsViewModel {
     /// True while `load()` runs so the view can show a `.loadingOverlay`
     /// instead of a blank table on first open / refresh. (t-aud07)
     var isLoading = false
-    var sessions: [HermesSession] = []
+    var sessions: [HermesSession] = [] { didSet { recomputeFilteredSessions() } }
     var sessionPreviews: [String: String] = [:]
     var selectedSession: HermesSession?
     var messages: [HermesMessage] = []
@@ -211,23 +211,87 @@ final class SessionsViewModel {
 
     /// session ID → project display name. Empty when no sessions on screen
     /// are project-attributed.
-    private(set) var sessionProjectNames: [String: String] = [:]
+    private(set) var sessionProjectNames: [String: String] = [:] {
+        didSet { recomputeFilteredSessions() }
+    }
     /// Every project in the registry, used to populate the filter Menu.
     private(set) var allProjects: [ProjectEntry] = []
     /// Currently selected project filter.
     /// - `nil` (default): show all sessions.
     /// - `""` sentinel: show only unattributed sessions.
     /// - any other string: project name to match against `sessionProjectNames`.
-    var projectFilter: String?
+    var projectFilter: String? { didSet { recomputeFilteredSessions() } }
 
-    /// Sessions to actually render — applies `projectFilter` over `sessions`.
-    /// Inset is O(n) which is fine at the 500-session window we load.
-    var filteredSessions: [HermesSession] {
-        guard let filter = projectFilter else { return sessions }
-        if filter.isEmpty {
-            return sessions.filter { sessionProjectNames[$0.id] == nil }
+    /// Sessions to actually render — `projectFilter` applied over `sessions`.
+    ///
+    /// MEMOIZED, not computed. As a computed property this ran a full O(n)
+    /// filter over the 500-row window on EVERY SwiftUI body evaluation of
+    /// every view that touched it — selection changes, hover, the search
+    /// field, each watcher tick — for a result that only changes when
+    /// `sessions`, `sessionProjectNames` or `projectFilter` does. Those three
+    /// are the only inputs, and each recomputes this on `didSet`, so the
+    /// cache cannot go stale without the compiler noticing a fourth input.
+    private(set) var filteredSessions: [HermesSession] = []
+
+    /// The three pills above the table. Lives on the view model rather than
+    /// as view `@State` so the row slice and the counts it promises are
+    /// derived ONCE per input change instead of once per body evaluation.
+    enum QuickFilter: String, CaseIterable, Identifiable, Sendable {
+        case all, today, starred
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .all: return "All"
+            case .today: return "Today"
+            case .starred: return "Starred"
+            }
         }
-        return sessions.filter { sessionProjectNames[$0.id] == filter }
+    }
+
+    var quickFilter: QuickFilter = .all { didSet { recomputeFilteredSessions() } }
+
+    /// `filteredSessions` with `quickFilter` applied — the rows actually
+    /// rendered. Memoized for the same reason as `filteredSessions`: the view
+    /// referenced it four times per body pass, each a fresh O(n) filter.
+    private(set) var visibleSessions: [HermesSession] = []
+
+    /// Row count per pill. Each case MUST agree with the corresponding
+    /// `visibleSessions` slice — the pill promises a count and the table then
+    /// has to deliver those rows — so both are computed here, together, from
+    /// the same inputs. Three separate O(n) filters used to run per body pass.
+    private(set) var quickFilterCounts: [QuickFilter: Int] = [:]
+
+    nonisolated static func isToday(_ date: Date?) -> Bool {
+        guard let date else { return false }
+        return Calendar.current.isDateInToday(date)
+    }
+
+    private func recomputeFilteredSessions() {
+        if let filter = projectFilter {
+            if filter.isEmpty {
+                filteredSessions = sessions.filter { sessionProjectNames[$0.id] == nil }
+            } else {
+                filteredSessions = sessions.filter { sessionProjectNames[$0.id] == filter }
+            }
+        } else {
+            filteredSessions = sessions
+        }
+
+        switch quickFilter {
+        case .all:     visibleSessions = filteredSessions
+        case .today:   visibleSessions = filteredSessions.filter { Self.isToday($0.startedAt) }
+        case .starred: visibleSessions = filteredSessions.filter(\.pinned)
+        }
+
+        // Counts are over the WHOLE window, not the project slice — that is
+        // the pre-existing semantics of the pill badges, kept deliberately.
+        var todayCount = 0
+        var starredCount = 0
+        for session in sessions {
+            if Self.isToday(session.startedAt) { todayCount += 1 }
+            if session.pinned { starredCount += 1 }
+        }
+        quickFilterCounts = [.all: sessions.count, .today: todayCount, .starred: starredCount]
     }
 
     /// Project display name for a session, or nil for unattributed.
@@ -393,28 +457,56 @@ final class SessionsViewModel {
         // attempt's message on screen makes it read as a fresh failure.
         renameError = nil
         guard !title.isEmpty else { return }
-        let result = runHermes(["sessions", "rename", sessionId, title])
-        guard result.exitCode == 0 else {
-            // Keep the sheet up so the message lands next to the field
-            // that produced it. The canonical Bot Chat can never be
-            // renamed, so this is also the only place the user is told
-            // why (see `SessionRenameFailure`).
-            renameError = SessionRenameFailure.message(for: result.output)
-            return
-        }
-        if let idx = sessions.firstIndex(where: { $0.id == sessionId }) {
-            let updated = sessions[idx].withTitle(title)
-            sessions[idx] = updated
-            if selectedSession?.id == sessionId {
-                selectedSession = updated
+        guard !isRenaming else { return }
+        isRenaming = true
+        let ctx = context
+        inFlightRename = Task { [weak self] in
+            // `hermes sessions rename` is a process spawn — an SSH exec
+            // channel on a remote host — and ran inline on the MainActor,
+            // freezing the sheet (and the whole window) for the round-trip.
+            // Detached, matching `loadImpl()`'s attribution batch.
+            let result = await Task.detached {
+                ctx.runHermes(["sessions", "rename", sessionId, title])
+            }.value
+            guard let self else { return }
+            self.isRenaming = false
+            guard result.exitCode == 0 else {
+                // Keep the sheet up so the message lands next to the field
+                // that produced it. The canonical Bot Chat can never be
+                // renamed, so this is also the only place the user is told
+                // why (see `SessionRenameFailure`).
+                self.renameError = SessionRenameFailure.message(for: result.output)
+                return
             }
+            if let idx = self.sessions.firstIndex(where: { $0.id == sessionId }) {
+                let updated = self.sessions[idx].withTitle(title)
+                self.sessions[idx] = updated
+                if self.selectedSession?.id == sessionId {
+                    self.selectedSession = updated
+                }
+            }
+            self.sessionPreviews[sessionId] = title
+            self.renameError = nil
+            self.showRenameSheet = false
+            self.renameSessionId = nil
+            self.renameOriginalTitle = nil
         }
-        sessionPreviews[sessionId] = title
-        renameError = nil
-        showRenameSheet = false
-        renameSessionId = nil
-        renameOriginalTitle = nil
     }
+
+    /// True while the rename CLI is running. The sheet's Rename button
+    /// disables on it, so the busy state renders instead of the window
+    /// hanging.
+    private(set) var isRenaming = false
+
+    /// True while the delete CLI is running.
+    private(set) var isDeleting = false
+
+    /// In-flight handle for `confirmDelete()` / `performRename()`. Exposed so
+    /// a test can `await` the mutation it just triggered — the CLI call moved
+    /// off the MainActor, so these are no longer complete when the call
+    /// returns.
+    @ObservationIgnored private(set) var inFlightDelete: Task<Void, Never>?
+    @ObservationIgnored private(set) var inFlightRename: Task<Void, Never>?
 
     func beginDelete(_ session: HermesSession) {
         deleteSessionId = session.id
@@ -432,34 +524,45 @@ final class SessionsViewModel {
     /// same teardown. A failed CLI delete posts nothing.
     func confirmDelete() {
         guard let sessionId = deleteSessionId else { return }
+        guard !isDeleting else { return }
         deleteError = nil
-        let exitCode = sessionDeleteRunner(context, sessionId)
-        guard exitCode == 0 else {
-            // Pre-fix this branch was an implicit no-op: the dialog
-            // dismissed, the row stayed, and nothing said why. The row
-            // staying put IS the correct outcome for a failed delete —
-            // it's the silence that made it read as a UI glitch.
-            deleteError = "Couldn't delete that session on \(context.displayName) (hermes sessions delete exited \(exitCode))."
-            showDeleteConfirmation = false
-            deleteSessionId = nil
-            return
+        isDeleting = true
+        let runner = sessionDeleteRunner
+        let ctx = context
+        inFlightDelete = Task { [weak self] in
+            // Detached: the delete CLI is a remote process spawn. The
+            // injected `sessionDeleteRunner` seam is preserved exactly —
+            // tests still stub it, they just await instead of returning.
+            let exitCode = await Task.detached { runner(ctx, sessionId) }.value
+            guard let self else { return }
+            self.isDeleting = false
+            guard exitCode == 0 else {
+                // Pre-fix this branch was an implicit no-op: the dialog
+                // dismissed, the row stayed, and nothing said why. The row
+                // staying put IS the correct outcome for a failed delete —
+                // it's the silence that made it read as a UI glitch.
+                self.deleteError = "Couldn't delete that session on \(ctx.displayName) (hermes sessions delete exited \(exitCode))."
+                self.showDeleteConfirmation = false
+                self.deleteSessionId = nil
+                return
+            }
+            self.sessions.removeAll { $0.id == sessionId }
+            if self.selectedSession?.id == sessionId {
+                self.selectedSession = nil
+                self.messages = []
+            }
+            self.computeStats()
+            NotificationCenter.default.post(
+                name: SessionDeletedSignal.name,
+                object: nil,
+                userInfo: [
+                    SessionDeletedSignal.sessionIdKey: sessionId,
+                    SessionDeletedSignal.contextKey: ctx,
+                ]
+            )
+            self.showDeleteConfirmation = false
+            self.deleteSessionId = nil
         }
-        sessions.removeAll { $0.id == sessionId }
-        if selectedSession?.id == sessionId {
-            selectedSession = nil
-            messages = []
-        }
-        computeStats()
-        NotificationCenter.default.post(
-            name: SessionDeletedSignal.name,
-            object: nil,
-            userInfo: [
-                SessionDeletedSignal.sessionIdKey: sessionId,
-                SessionDeletedSignal.contextKey: context,
-            ]
-        )
-        showDeleteConfirmation = false
-        deleteSessionId = nil
     }
 
     // MARK: - Export
@@ -676,8 +779,14 @@ final class SessionsViewModel {
 
     /// `dbSize` is pre-computed off-main by the watcher-driven `load()` so the
     /// `state.db` stat() — a synchronous SSH round-trip on remote — never runs
-    /// on the main actor on the hot path (gh#102). The nil default keeps the
-    /// one-shot `confirmDelete()` path doing the stat inline (user-initiated).
+    /// on the main actor (gh#102).
+    ///
+    /// The nil default no longer stats inline. `confirmDelete()` was the one
+    /// caller that passed nil, and "user-initiated" did not make a blocking
+    /// SSH stat acceptable: it landed on the main actor immediately after a
+    /// delete, i.e. exactly when the window had to repaint. It reuses the last
+    /// size `load()` measured instead — which is also the more honest number,
+    /// since deleting rows does not shrink a SQLite file until a VACUUM.
     private func computeStats(dbSize: String? = nil) {
         let totalMessages = sessions.reduce(0) { $0 + $1.messageCount }
 
@@ -689,11 +798,10 @@ final class SessionsViewModel {
 
         let fileSize: String
         if let dbSize {
+            lastKnownDBSize = dbSize
             fileSize = dbSize
-        } else if let stat = context.makeTransport().stat(context.paths.stateDB) {
-            fileSize = Int64(stat.size).formatted(.byteCount(style: .file))
         } else {
-            fileSize = "unknown"
+            fileSize = lastKnownDBSize ?? "unknown"
         }
 
         storeStats = SessionStoreStats(
@@ -703,6 +811,10 @@ final class SessionsViewModel {
             platformCounts: sorted
         )
     }
+
+    /// Last `state.db` size measured off-main by `load()`. Reused by the
+    /// stat-less `computeStats()` path.
+    @ObservationIgnored private var lastKnownDBSize: String?
 
     // MARK: - Hermes CLI
 

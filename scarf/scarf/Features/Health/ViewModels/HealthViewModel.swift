@@ -175,16 +175,30 @@ final class HealthViewModel {
         // the user navigates away (cancelLoad()).
         loadTask?.cancel()
         loadTask = Task.detached { [weak self] in
-            let pid = svc.hermesPID()
-            if Task.isCancelled { return }
-            let versionOutput = Self.probeVersion(ctx)
-            if Task.isCancelled { return }
-            let statusOutput = ctx.runHermes(["status"]).output
-            if Task.isCancelled { return }
-            let doctorOutput = ctx.runHermes(["doctor"]).output
-            if Task.isCancelled { return }
-            let subscription = subSvc.loadState()
-            let config = svc.loadConfig()
+            // The five probes are mutually independent — none reads another's
+            // output — so they run CONCURRENTLY rather than as five serial
+            // remote round-trips. On a remote host this is the difference
+            // between ~5×RTT and ~1×RTT on every Health visit (C10).
+            // Each rides its own `Task.detached` because the underlying calls
+            // block (process spawn / SSH exec); running them as bare
+            // `async let` would park five cooperative-pool threads.
+            async let pidProbe        = Task.detached { svc.hermesPID() }.value
+            async let versionProbe    = Task.detached { Self.probeVersion(ctx) }.value
+            async let statusProbe     = Task.detached { ctx.runHermes(["status"]).output }.value
+            async let doctorProbe     = Task.detached { ctx.runHermes(["doctor"]).output }.value
+            async let subscriptionRead = Task.detached { subSvc.loadState() }.value
+            async let configRead      = Task.detached { svc.loadConfig() }.value
+
+            let pid = await pidProbe
+            let versionOutput = await versionProbe
+            let statusOutput = await statusProbe
+            let doctorOutput = await doctorProbe
+            let subscription = await subscriptionRead
+            let config = await configRead
+            // Cancellation drops the commit rather than painting a stale
+            // panel (t-aud11). It no longer aborts BETWEEN round-trips —
+            // there are no "between"s left — but since all six now overlap,
+            // the window they occupy is one round-trip, not five.
             if Task.isCancelled { return }
 
             let lines = versionOutput.components(separatedBy: "\n")
@@ -333,39 +347,84 @@ final class HealthViewModel {
         ))
     }
 
+    /// True while Start / Stop / Restart is in flight. The buttons disable on
+    /// it, so the busy state actually renders instead of the window freezing
+    /// for the length of a remote `gateway start`.
+    private(set) var isControlBusy = false
+
     func stopHermes() {
-        let stopped = fileService.stopHermes()
-        Self.recordControlAction(.stop, succeeded: stopped)
-        actionMessage = "Stop signal sent"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.refreshProcessStatus()
-            self?.actionMessage = nil
+        guard !isControlBusy else { return }
+        isControlBusy = true
+        actionMessage = "Stopping…"
+        let svc = fileService
+        Task { [weak self] in
+            // `stopHermes()` signals a process (an SSH round-trip on remote);
+            // it never belonged on the MainActor. Detached, matching the
+            // `runDebugShare` / `runAudit` precedent below.
+            let stopped = await Task.detached { svc.stopHermes() }.value
+            guard let self else { return }
+            self.isControlBusy = false
+            Self.recordControlAction(.stop, succeeded: stopped)
+            self.actionMessage = stopped ? "Stop signal sent" : "Stop failed"
+            self.settleAndRefresh(after: 2)
         }
     }
 
     func startHermes() {
-        let started = runHermes(["gateway", "start"]).exitCode == 0
-        Self.recordControlAction(.start, succeeded: started)
-        actionMessage = "Start requested"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.refreshProcessStatus()
-            self?.actionMessage = nil
+        guard !isControlBusy else { return }
+        isControlBusy = true
+        actionMessage = "Starting…"
+        let ctx = context
+        Task { [weak self] in
+            let result = await Task.detached { ctx.runHermes(["gateway", "start"]) }.value
+            guard let self else { return }
+            self.isControlBusy = false
+            let started = result.exitCode == 0
+            Self.recordControlAction(.start, succeeded: started)
+            // Surface the exit code the way the neighbouring diagnostics
+            // actions do; the old code announced "Start requested" whether or
+            // not the CLI had refused.
+            self.actionMessage = started
+                ? "Start requested"
+                : (SettingsViewModel.failureReason(from: result.output).map { "Start failed: \($0)" }
+                    ?? "Start failed (exit \(result.exitCode))")
+            self.settleAndRefresh(after: 3)
         }
     }
 
     func restartHermes() {
-        let stopped = fileService.stopHermes()
-        actionMessage = "Restarting..."
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+        guard !isControlBusy else { return }
+        isControlBusy = true
+        actionMessage = "Restarting…"
+        let svc = fileService
+        let ctx = context
+        Task { [weak self] in
+            let stopped = await Task.detached { svc.stopHermes() }.value
+            try? await Task.sleep(for: .seconds(2))
+            let result = await Task.detached { ctx.runHermes(["gateway", "start"]) }.value
             guard let self else { return }
-            let started = self.runHermes(["gateway", "start"]).exitCode == 0
+            self.isControlBusy = false
+            let started = result.exitCode == 0
             // A restart only succeeded if both halves did; a stop that found
             // nothing running still has to bring the gateway back.
             Self.recordControlAction(.restart, succeeded: stopped && started)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                self?.refreshProcessStatus()
-                self?.actionMessage = nil
-            }
+            self.actionMessage = started
+                ? "Restart requested"
+                : (SettingsViewModel.failureReason(from: result.output).map { "Restart failed: \($0)" }
+                    ?? "Restart failed (exit \(result.exitCode))")
+            self.settleAndRefresh(after: 3)
+        }
+    }
+
+    /// Give the process time to settle, re-probe, then clear the transient
+    /// message. Shared by the three control actions so none of them can grow
+    /// its own timing.
+    private func settleAndRefresh(after seconds: Double) {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard let self else { return }
+            self.refreshProcessStatus()
+            self.actionMessage = nil
         }
     }
 
@@ -576,14 +635,28 @@ final class HealthViewModel {
     /// Capture `hermes dump` output — a setup summary used for debugging / support.
     /// Does NOT upload anything.
     func runDump() {
+        guard !isRunningDump else { return }
+        isRunningDump = true
         actionMessage = "Running dump…"
-        let result = runHermes(["dump"])
-        diagnosticsOutput = result.output
-        actionMessage = result.exitCode == 0 ? "Dump captured" : "Dump failed"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.actionMessage = nil
+        let ctx = context
+        Task { [weak self] in
+            let result = await Task.detached { ctx.runHermes(["dump"]) }.value
+            guard let self else { return }
+            self.isRunningDump = false
+            self.diagnosticsOutput = result.output
+            self.actionMessage = result.exitCode == 0
+                ? "Dump captured"
+                : "Dump failed (exit \(result.exitCode))"
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(3))
+                self?.actionMessage = nil
+            }
         }
     }
+
+    /// Mirrors `isSharingDebug` / `isRunningAudit` — `hermes dump` is the same
+    /// class of long CLI call and was the only one still run inline.
+    private(set) var isRunningDump = false
 
     /// Upload a debug report via `hermes debug share`. THIS UPLOADS DATA to Nous
     /// Research support infrastructure — caller must confirm with the user first.

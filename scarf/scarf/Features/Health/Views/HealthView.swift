@@ -110,6 +110,7 @@ struct HealthView: View {
                     showDiagnostics = true
                 }
                 .buttonStyle(ScarfGhostButton())
+                .disabled(viewModel.isRunningDump)
                 Button("Share Debug Report…") {
                     showShareConfirm = true
                 }
@@ -380,15 +381,18 @@ struct HealthView: View {
                 }
                 Spacer()
                 HStack(spacing: ScarfSpace.s2) {
+                    if viewModel.isControlBusy {
+                        ProgressView().controlSize(.small)
+                    }
                     Button("Start") { viewModel.startHermes() }
                         .buttonStyle(ScarfPrimaryButton())
-                        .disabled(viewModel.hermesRunning)
+                        .disabled(viewModel.hermesRunning || viewModel.isControlBusy)
                     Button("Stop") { viewModel.stopHermes() }
                         .buttonStyle(ScarfSecondaryButton())
-                        .disabled(!viewModel.hermesRunning)
+                        .disabled(!viewModel.hermesRunning || viewModel.isControlBusy)
                     Button("Restart") { viewModel.restartHermes() }
                         .buttonStyle(ScarfGhostButton())
-                        .disabled(!viewModel.hermesRunning)
+                        .disabled(!viewModel.hermesRunning || viewModel.isControlBusy)
                 }
                 .fixedSize(horizontal: true, vertical: false)
             }

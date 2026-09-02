@@ -56,6 +56,12 @@ struct QuickCommandsView: View {
             subtitle: "Shell shortcuts hermes exposes in chat as `/command_name`."
         ) {
             HStack(spacing: ScarfSpace.s2) {
+                // The editor sheet dismisses on Save, so the busy state has
+                // to render here — otherwise a slow remote write shows
+                // nothing at all between the dismiss and the toast.
+                if viewModel.isSaving {
+                    ProgressView().controlSize(.small)
+                }
                 if let msg = viewModel.message {
                     Label(msg, systemImage: "checkmark.circle.fill")
                         .scarfStyle(.caption)

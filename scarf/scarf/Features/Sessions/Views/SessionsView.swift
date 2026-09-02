@@ -16,7 +16,6 @@ import ScarfDesign
 ///  4. Bordered card with column-header row + data rows.
 struct SessionsView: View {
     @State private var viewModel: SessionsViewModel
-    @State private var quickFilter: QuickFilter = .all
     @Environment(AppCoordinator.self) private var coordinator
     @Environment(HermesFileWatcher.self) private var fileWatcher
     @Environment(\.hermesCapabilities) private var capabilitiesStore
@@ -43,17 +42,10 @@ struct SessionsView: View {
     /// broken filter rather than an unwired one. On a pre-v0.20 host the
     /// column is absent, `pinned` is false for every row, and a truthful
     /// zero is exactly what the pill should show.
-    enum QuickFilter: String, CaseIterable, Identifiable {
-        case all, today, starred
-        var id: String { rawValue }
-        var label: String {
-            switch self {
-            case .all: return "All"
-            case .today: return "Today"
-            case .starred: return "Starred"
-            }
-        }
-    }
+    /// The pill enum, its counts and the row slice all live on the view
+    /// model now — see `SessionsViewModel.QuickFilter`. As view state they
+    /// were recomputed from scratch on every body evaluation.
+    typealias QuickFilter = SessionsViewModel.QuickFilter
 
     var body: some View {
         VStack(spacing: 0) {
@@ -100,6 +92,7 @@ struct SessionsView: View {
         .sheet(isPresented: $viewModel.showExportOptionsSheet) { exportOptionsSheet }
         .confirmationDialog("Delete Session?", isPresented: $viewModel.showDeleteConfirmation) {
             Button("Delete", role: .destructive) { viewModel.confirmDelete() }
+                .disabled(viewModel.isDeleting)
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This will permanently delete the session and all its messages.")
@@ -183,14 +176,14 @@ struct SessionsView: View {
     }
 
     private func quickFilterPill(_ filter: QuickFilter) -> some View {
-        let isActive = quickFilter == filter
+        let isActive = viewModel.quickFilter == filter
         return Button {
-            quickFilter = filter
+            viewModel.quickFilter = filter
         } label: {
             HStack(spacing: 5) {
                 Text(filter.label)
                     .scarfStyle(.caption)
-                Text("\(quickFilterCount(filter))")
+                Text("\(viewModel.quickFilterCounts[filter] ?? 0)")
                     .font(ScarfFont.monoSmall)
                     .opacity(0.7)
             }
@@ -204,30 +197,8 @@ struct SessionsView: View {
         .buttonStyle(.plain)
     }
 
-    private func quickFilterCount(_ filter: QuickFilter) -> Int {
-        switch filter {
-        case .all:     return viewModel.sessions.count
-        case .today:   return viewModel.sessions.filter { Self.isToday($0.startedAt) }.count
-        case .starred: return viewModel.sessions.filter(\.pinned).count
-        }
-    }
-
-    private static func isToday(_ date: Date?) -> Bool {
-        guard let date else { return false }
-        return Calendar.current.isDateInToday(date)
-    }
-
-    /// Apply `quickFilter` on top of the project-filter slice the view
-    /// model owns. Each case must agree with `quickFilterCount` — the pill
-    /// promises a row count and then has to deliver those rows.
-    private var visibleSessions: [HermesSession] {
-        let base = viewModel.filteredSessions
-        switch quickFilter {
-        case .all:     return base
-        case .today:   return base.filter { Self.isToday($0.startedAt) }
-        case .starred: return base.filter(\.pinned)
-        }
-    }
+    /// Memoized on the view model — see `recomputeFilteredSessions()`.
+    private var visibleSessions: [HermesSession] { viewModel.visibleSessions }
 
     private var projectFilterMenu: some View {
         Menu {
@@ -355,7 +326,12 @@ struct SessionsView: View {
     // MARK: - Table
 
     private var sessionsTable: some View {
-        VStack(spacing: 0) {
+        // LAZY: the table sits inside a `ScrollView` and renders up to 500
+        // rows. An eager `VStack` built and laid out every one of them on
+        // first paint, whether or not any were on screen (C10). `LazyVStack`
+        // keeps the same appearance — the header pins as the first child, not
+        // as a section header — while only materialising visible rows.
+        LazyVStack(spacing: 0) {
             tableHeaderRow
             if viewModel.isSearching {
                 searchResultRows
@@ -532,10 +508,16 @@ struct SessionsView: View {
                     .buttonStyle(ScarfGhostButton())
                     .keyboardShortcut(.cancelAction)
                 Spacer()
+                if viewModel.isRenaming {
+                    ProgressView().controlSize(.small)
+                }
                 Button("Rename") { viewModel.confirmRename() }
                     .buttonStyle(ScarfPrimaryButton())
                     .keyboardShortcut(.defaultAction)
-                    .disabled(viewModel.renameText.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(
+                        viewModel.isRenaming
+                        || viewModel.renameText.trimmingCharacters(in: .whitespaces).isEmpty
+                    )
             }
         }
         .padding(ScarfSpace.s5)

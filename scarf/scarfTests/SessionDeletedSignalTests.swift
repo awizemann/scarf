@@ -113,6 +113,7 @@ import ScarfCore
         let svm = Self.sessionsVM(
             context: home.context, deleting: "sess-A", exitCode: 0, deletes: deletes)
         svm.confirmDelete()
+        await svm.inFlightDelete?.value
         #expect(deletes.recorded == ["sess-A"])
         #expect(svm.showDeleteConfirmation == false)
         #expect(svm.deleteSessionId == nil)
@@ -152,6 +153,7 @@ import ScarfCore
         let svm = Self.sessionsVM(
             context: home.context, deleting: "sess-other", exitCode: 0, deletes: deletes)
         svm.confirmDelete()
+        await svm.inFlightDelete?.value
         #expect(deletes.recorded == ["sess-other"])
 
         // Give any erroneous teardown time to surface before asserting
@@ -185,6 +187,7 @@ import ScarfCore
         let svm = Self.sessionsVM(
             context: otherHome.context, deleting: "sess-A", exitCode: 0, deletes: deletes)
         svm.confirmDelete()
+        await svm.inFlightDelete?.value
         #expect(deletes.recorded == ["sess-A"])
 
         try? await Task.sleep(nanoseconds: 300_000_000)
@@ -258,6 +261,7 @@ import ScarfCore
         let svm = Self.sessionsVM(
             context: drifted, deleting: "sess-A", exitCode: 0, deletes: deletes)
         svm.confirmDelete()
+        await svm.inFlightDelete?.value
 
         let closed = await Lifecycle.waitUntil { await ch.closed }
         #expect(closed, "cosmetic displayName drift between poster and chat context vetoed the teardown — same session store, client leaked")
@@ -312,6 +316,7 @@ import ScarfCore
         let svm = Self.sessionsVM(
             context: home.context, deleting: "sess-X", exitCode: 0, deletes: deletes)
         svm.confirmDelete()
+        await svm.inFlightDelete?.value
 
         #expect(deletes.recorded == ["sess-X"])
         #expect(signals.recorded(for: home.context) == ["sess-X"],
@@ -336,6 +341,7 @@ import ScarfCore
         let svm = Self.sessionsVM(
             context: home.context, deleting: "sess-X", exitCode: 1, deletes: deletes)
         svm.confirmDelete()
+        await svm.inFlightDelete?.value
 
         #expect(deletes.recorded == ["sess-X"])
         #expect(signals.recorded(for: home.context).isEmpty,
@@ -359,6 +365,7 @@ import ScarfCore
             context: home.context, deleting: "sess-X", exitCode: 1, deletes: deletes)
         svm.sessions = [Self.stubSession(id: "sess-X")]
         svm.confirmDelete()
+        await svm.inFlightDelete?.value
 
         let message = try #require(svm.deleteError, "a failed delete left no message on screen")
         #expect(message.contains("1"), "the exit code is the only diagnostic the CLI gave us")
@@ -369,6 +376,7 @@ import ScarfCore
         svm.sessionDeleteRunner = { _, sid in deletes.record(sid); return 0 }
         svm.deleteSessionId = "sess-X"
         svm.confirmDelete()
+        await svm.inFlightDelete?.value
         #expect(svm.deleteError == nil)
         #expect(svm.sessions.isEmpty)
     }

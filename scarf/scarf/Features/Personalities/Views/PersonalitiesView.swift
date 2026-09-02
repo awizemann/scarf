@@ -66,6 +66,7 @@ struct PersonalitiesView: View {
                 ReadOnlyRow(label: "Defined", value: "None in config.yaml — add under `personalities:` to customize.")
             } else {
                 PickerRow(label: "Active", selection: viewModel.activeName, options: viewModel.activeOptions) { viewModel.setActive($0) }
+                    .disabled(viewModel.isSaving)
             }
         }
     }
@@ -132,6 +133,7 @@ struct PersonalitiesView: View {
                         editingSOUL = false
                     }
                     .controlSize(.small)
+                    .disabled(viewModel.isSaving)
                     .keyboardShortcut("s", modifiers: .command)
                 } else {
                     Button("Edit") { editingSOUL = true }

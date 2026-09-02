@@ -98,8 +98,37 @@ final class QuickCommandsViewModel {
         // the raw dot; only the interpolated CLI segment is transformed.
         let caps = HermesVersionCache.shared.cached(for: context) ?? .empty
         let sanitizedName = ConfigDottedKeySegment.escaped(name, capabilities: caps)
-        let typeResult = runHermes(["config", "set", "quick_commands.\(sanitizedName).type", "exec"])
-        let cmdResult = runHermes(["config", "set", "quick_commands.\(sanitizedName).command", command])
+        isSaving = true
+        let ctx = context
+        Task { [weak self] in
+            // TWO `hermes config set` process spawns — two SSH exec channels
+            // on a remote host — were running inline on the MainActor.
+            // Detached, matching `load()` above. They stay SEQUENTIAL inside
+            // the detached body: both write config.yaml, and Hermes's writer
+            // is read-modify-write, so overlapping them would lose one key.
+            let (typeResult, cmdResult) = await Task.detached {
+                (
+                    ctx.runHermes(["config", "set", "quick_commands.\(sanitizedName).type", "exec"]),
+                    ctx.runHermes(["config", "set", "quick_commands.\(sanitizedName).command", command])
+                )
+            }.value
+            guard let self else { return }
+            self.isSaving = false
+            self.applyAddOrUpdateResult(
+                sanitizedName: sanitizedName, typeResult: typeResult, cmdResult: cmdResult
+            )
+        }
+    }
+
+    /// True while `addOrUpdate` is writing. The sheet's Save button disables
+    /// on it so the busy state renders.
+    private(set) var isSaving = false
+
+    private func applyAddOrUpdateResult(
+        sanitizedName: String,
+        typeResult: (output: String, exitCode: Int32),
+        cmdResult: (output: String, exitCode: Int32)
+    ) {
         if typeResult.exitCode == 0 && cmdResult.exitCode == 0 {
             // Toast carries the name the command was actually SAVED under,
             // never the raw CLI segment. `ConfigDottedKeySegment.escaped`
@@ -114,12 +143,24 @@ final class QuickCommandsViewModel {
             load(force: true)
         } else {
             logger.warning("Failed to save quick command: type=\(typeResult.output) cmd=\(cmdResult.output)")
-            message = "Save failed"
+            // Surface the CLI's own reason, the way Settings and
+            // Personalities do — "Save failed" alone hid the managed-scope
+            // refusal that is the common cause here.
+            let failing = typeResult.exitCode != 0 ? typeResult : cmdResult
+            let key = typeResult.exitCode != 0
+                ? "quick_commands.\(sanitizedName).type"
+                : "quick_commands.\(sanitizedName).command"
+            message = SettingsViewModel.saveFailureMessage(key: key, output: failing.output)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+        messageClearTask?.cancel()
+        messageClearTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
             self?.message = nil
         }
     }
+
+    @ObservationIgnored private var messageClearTask: Task<Void, Never>?
 
     /// Removal requires editing config.yaml directly — `hermes config set` has no
     /// unset for nested keys. Open the file in the editor for manual removal.

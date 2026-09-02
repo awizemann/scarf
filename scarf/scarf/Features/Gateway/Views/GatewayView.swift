@@ -108,15 +108,22 @@ struct GatewayView: View {
                         .foregroundStyle(viewModel.actionFailed ? ScarfColor.danger : Color.secondary)
                 }
                 HStack(spacing: ScarfSpace.s2) {
+                    if viewModel.isBusy {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
                     Button("Start") { viewModel.startGateway() }
                         .buttonStyle(ScarfPrimaryButton())
                         .controlSize(.small)
+                        .disabled(viewModel.isBusy)
                     Button("Stop") { viewModel.stopGateway() }
                         .buttonStyle(ScarfSecondaryButton())
                         .controlSize(.small)
+                        .disabled(viewModel.isBusy)
                     Button("Restart") { viewModel.restartGateway() }
                         .buttonStyle(ScarfSecondaryButton())
                         .controlSize(.small)
+                        .disabled(viewModel.isBusy)
                 }
             }
 
@@ -215,6 +222,7 @@ struct GatewayView: View {
                             }
                             .controlSize(.small)
                             .buttonStyle(ScarfPrimaryButton())
+                            .disabled(viewModel.isBusy)
                         }
                         .font(.caption)
                         .padding(ScarfSpace.s2)
@@ -245,6 +253,7 @@ struct GatewayView: View {
                             viewModel.revokeUser(user)
                         }
                         .controlSize(.small)
+                        .disabled(viewModel.isBusy)
                     }
                     .padding(ScarfSpace.s2)
                     .background(.quaternary.opacity(0.3))
