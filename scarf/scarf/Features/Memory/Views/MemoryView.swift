@@ -11,6 +11,9 @@ struct MemoryView: View {
     @State private var viewModel: MemoryViewModel
     @State private var showResetConfirm: Bool = false
     @State private var resetError: String?
+    /// True while `hermes memory reset` is running; the destructive button
+    /// disables on it so the state transition renders.
+    @State private var isResetting = false
     @State private var selectedFile: MemoryViewModel.EditTarget = .memory
     @State private var draftText: String = ""
     /// The on-disk text this draft was branched from. `isDirty` is measured
@@ -82,6 +85,7 @@ struct MemoryView: View {
             titleVisibility: .visible
         ) {
             Button("Reset", role: .destructive) { resetMemoryRemotely() }
+                .disabled(isResetting)
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Wipes MEMORY.md and USER.md to empty via `hermes memory reset --yes`. The agent's accumulated knowledge for this server is gone immediately. Use this when a session went off the rails — there's no undo.")
@@ -460,15 +464,31 @@ struct MemoryView: View {
         }
     }
 
+    /// `hermes memory reset --yes` is a process spawn — an SSH exec channel on
+    /// a remote host — and ran inline on the MainActor, freezing the window
+    /// for the round-trip. Detached, matching the discipline every other
+    /// path in `MemoryViewModel` (load / switchProfile / reload / save)
+    /// already follows.
     private func resetMemoryRemotely() {
-        let result = viewModel.context.runHermes(["memory", "reset", "--yes"])
-        if result.exitCode == 0 {
-            viewModel.load()
-        } else {
-            let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            resetError = trimmed.isEmpty
-                ? "hermes memory reset exited with status \(result.exitCode)."
-                : trimmed
+        guard !isResetting else { return }
+        isResetting = true
+        let ctx = viewModel.context
+        Task {
+            let result = await Task.detached {
+                ctx.runHermes(["memory", "reset", "--yes"])
+            }.value
+            isResetting = false
+            if result.exitCode == 0 {
+                // Only AFTER the reset has actually happened — a load issued
+                // before it returned would have re-published the pre-reset
+                // text and made a successful wipe look like a no-op.
+                viewModel.load()
+            } else {
+                let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                resetError = trimmed.isEmpty
+                    ? "hermes memory reset exited with status \(result.exitCode)."
+                    : trimmed
+            }
         }
     }
 

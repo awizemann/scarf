@@ -750,9 +750,12 @@ final class SettingsViewModel {
     /// Read-only status panel via `hermes secrets bitwarden status`. Mirrors
     /// how `runConfigCheck` shells a read; returns the captured text output
     /// (a Rich panel). Empty on non-zero exit.
-    func bitwardenStatus() -> String {
-        let result = runHermes(["secrets", "bitwarden", "status"])
-        return result.output
+    /// `async` — the CLI call is a process spawn (an SSH exec channel on a
+    /// remote host) and ran inline on the MainActor from a button action,
+    /// hanging Settings for the round-trip. The read itself is unchanged.
+    func bitwardenStatus() async -> String {
+        let ctx = context
+        return await Task.detached { ctx.runHermes(["secrets", "bitwarden", "status"]).output }.value
     }
 
     // MARK: - Performance / Advanced

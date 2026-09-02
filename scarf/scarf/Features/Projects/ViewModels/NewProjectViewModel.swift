@@ -94,24 +94,63 @@ final class NewProjectViewModel {
     /// Attempt to scaffold the project. Returns the registered
     /// `ProjectEntry` on success, nil on validation/scaffolder
     /// failure (with `errorMessage` populated for the sheet).
-    func commit() -> ProjectEntry? {
+    /// Scaffold the project. `async` because the body is filesystem work
+    /// through the context's transport — directory creation, several file
+    /// writes, and a skill-bundle copy — which on a remote context is a
+    /// string of SFTP round-trips. Run inline on the MainActor it froze the
+    /// wizard for the whole scaffold, and `isCommitting` was set and
+    /// `defer`-cleared inside that same synchronous run, so the spinner the
+    /// sheet already draws for it could never appear.
+    func commit() async -> ProjectEntry? {
         guard canCommit else {
             errorMessage = "Fill in the name, folder, and parent directory."
             return nil
         }
+        guard !isCommitting else { return nil }
         isCommitting = true
-        defer { isCommitting = false }
         errorMessage = nil
 
+        let ctx = context
+        let name = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let slug = folderName
+        let parent = parentDirectory
+        let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let result: Result<ProjectEntry, Error> = await Task.detached { [logger] in
+            Self.scaffoldOffMain(
+                context: ctx, name: name, slug: slug, parentDir: parent,
+                description: trimmedDescription.isEmpty ? nil : trimmedDescription,
+                logger: logger
+            )
+        }.value
+
+        isCommitting = false
+        switch result {
+        case .success(let entry):
+            logger.info("scaffolded \(entry.name, privacy: .public) at \(entry.path, privacy: .public)")
+            return entry
+        case .failure(let error):
+            errorMessage = error.localizedDescription
+            logger.warning("scaffold failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    private nonisolated static func scaffoldOffMain(
+        context: ServerContext,
+        name: String,
+        slug: String,
+        parentDir: String,
+        description: String?,
+        logger: Logger
+    ) -> Result<ProjectEntry, Error> {
         let scaffolder = ProjectScaffolder(context: context)
         do {
             let entry = try scaffolder.scaffold(
-                name: projectName.trimmingCharacters(in: .whitespacesAndNewlines),
-                slug: folderName,
-                parentDir: parentDirectory,
-                description: description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ? nil
-                    : description.trimmingCharacters(in: .whitespacesAndNewlines)
+                name: name,
+                slug: slug,
+                parentDir: parentDir,
+                description: description
             )
             // P3 of the projects-feature fix: bootstrap the bundled
             // `scarf-template-author` skill IMMEDIATELY before the
@@ -133,12 +172,9 @@ final class NewProjectViewModel {
                     "skill preflight failed for new-project wizard: \(error.localizedDescription, privacy: .public)"
                 )
             }
-            logger.info("scaffolded \(entry.name, privacy: .public) at \(entry.path, privacy: .public)")
-            return entry
+            return .success(entry)
         } catch {
-            errorMessage = error.localizedDescription
-            logger.warning("scaffold failed: \(error.localizedDescription, privacy: .public)")
-            return nil
+            return .failure(error)
         }
     }
 

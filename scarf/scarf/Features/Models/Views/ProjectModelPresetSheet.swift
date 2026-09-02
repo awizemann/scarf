@@ -27,6 +27,7 @@ struct ProjectModelPresetSheet: View {
     @State private var useGlobalDefault: Bool = true
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var isSaving = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -71,8 +72,12 @@ struct ProjectModelPresetSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .buttonStyle(ScarfSecondaryButton())
+                if isSaving {
+                    ProgressView().controlSize(.small)
+                }
                 Button("Save") { save() }
                     .buttonStyle(ScarfPrimaryButton())
+                    .disabled(isSaving)
                     .keyboardShortcut(.return, modifiers: .command)
             }
             .padding(ScarfSpace.s4)
@@ -152,9 +157,16 @@ struct ProjectModelPresetSheet: View {
         do {
             let loaded = try await service.list()
             self.presets = loaded
-            // Hydrate the current binding from the manifest.
-            let reader = ProjectModelPresetReader(context: context)
-            if let idString = reader.presetID(forProjectPath: project.path),
+            // Hydrate the current binding from the manifest. The reader is
+            // SYNCHRONOUS transport I/O (a manifest.json read, i.e. an SFTP
+            // round-trip on a remote project) inside an @MainActor function —
+            // detach it, the way `service.list()` above already is.
+            let ctx = context
+            let path = project.path
+            let boundID = await Task.detached {
+                ProjectModelPresetReader(context: ctx).presetID(forProjectPath: path)
+            }.value
+            if let idString = boundID,
                let uuid = UUID(uuidString: idString),
                loaded.contains(where: { $0.id == uuid })
             {
@@ -170,14 +182,33 @@ struct ProjectModelPresetSheet: View {
         self.isLoading = false
     }
 
+    /// `ProjectModelPresetBinding.bind` is a read-modify-write of the
+    /// project's `.scarf/manifest.json` through the transport — two round
+    /// trips on a remote project — and ran inline on the MainActor, freezing
+    /// the sheet until it returned or failed.
     private func save() {
-        let binding = ProjectModelPresetBinding(context: context)
-        do {
-            let newValue: String? = useGlobalDefault ? nil : selectedID?.uuidString
-            try binding.bind(presetID: newValue, to: project)
-            dismiss()
-        } catch {
-            errorMessage = "Couldn't save: \(error.localizedDescription)"
+        guard !isSaving else { return }
+        isSaving = true
+        errorMessage = nil
+        let ctx = context
+        let project = project
+        let newValue: String? = useGlobalDefault ? nil : selectedID?.uuidString
+        Task {
+            let failure: String? = await Task.detached {
+                do {
+                    try ProjectModelPresetBinding(context: ctx)
+                        .bind(presetID: newValue, to: project)
+                    return nil
+                } catch {
+                    return error.localizedDescription
+                }
+            }.value
+            isSaving = false
+            if let failure {
+                errorMessage = "Couldn't save: \(failure)"
+            } else {
+                dismiss()
+            }
         }
     }
 }

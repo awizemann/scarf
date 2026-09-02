@@ -192,7 +192,7 @@ struct NewProjectSheet: View {
                     .accessibilityIdentifier("newProject.cancelButton")
                 Spacer()
                 Button {
-                    runCommit()
+                    Task { await runCommit() }
                 } label: {
                     if viewModel.isCommitting {
                         ProgressView().controlSize(.small)
@@ -202,7 +202,7 @@ struct NewProjectSheet: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(ScarfPrimaryButton())
-                .disabled(!viewModel.canCommit)
+                .disabled(!viewModel.canCommit || viewModel.isCommitting)
                 .accessibilityIdentifier("newProject.createButton")
             }
         }
@@ -224,8 +224,8 @@ struct NewProjectSheet: View {
         }
     }
 
-    private func runCommit() {
-        guard let entry = viewModel.commit() else { return }
+    private func runCommit() async {
+        guard let entry = await viewModel.commit() else { return }
         // "New Project from Scratch" has no template concept at all — the
         // wizard is name/folder/parent-dir only, so `template` is always
         // this fixed token rather than anything the user typed.

@@ -15,6 +15,7 @@ struct SecretsTab: View {
     @Bindable var viewModel: SettingsViewModel
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     @State private var statusOutput: String = ""
+    @State private var isCheckingStatus = false
     @State private var showStatus = false
 
     private var bitwarden: BitwardenSettings { viewModel.config.bitwarden }
@@ -51,10 +52,18 @@ struct SecretsTab: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 160, alignment: .trailing)
                 Button("Check Status") {
-                    statusOutput = viewModel.bitwardenStatus()
-                    showStatus = true
+                    isCheckingStatus = true
+                    Task {
+                        statusOutput = await viewModel.bitwardenStatus()
+                        isCheckingStatus = false
+                        showStatus = true
+                    }
                 }
                 .controlSize(.small)
+                .disabled(isCheckingStatus)
+                if isCheckingStatus {
+                    ProgressView().controlSize(.small)
+                }
                 Spacer()
             }
             .padding(.horizontal, 12)

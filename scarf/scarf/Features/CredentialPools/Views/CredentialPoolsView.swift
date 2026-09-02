@@ -255,6 +255,13 @@ struct CredentialPoolsView: View {
             subtitle: "Shared OAuth + token pools rotated across runs."
         ) {
             HStack(spacing: ScarfSpace.s2) {
+                // The confirmation dialogs and the add sheet dismiss on
+                // action, so the busy state has to render here — otherwise a
+                // slow remote `hermes auth …` shows nothing between the
+                // dismiss and the toast.
+                if viewModel.isMutating {
+                    ProgressView().controlSize(.small)
+                }
                 if let msg = viewModel.message {
                     Label(msg, systemImage: "info.circle.fill")
                         .scarfStyle(.caption)
@@ -418,6 +425,7 @@ struct CredentialPoolsView: View {
             PickerRow(label: "Rotation", selection: pool.strategy, options: viewModel.strategyOptions) { strategy in
                 viewModel.setStrategy(strategy, for: pool.provider)
             }
+            .disabled(viewModel.isMutating)
             ForEach(pool.credentials) { cred in
                 HStack(spacing: 12) {
                     Image(systemName: cred.authType == "oauth" ? "person.badge.key" : "key.fill")
@@ -478,6 +486,7 @@ struct CredentialPoolsView: View {
                 Spacer()
                 Button("Reset Cooldowns") { viewModel.resetProvider(pool.provider) }
                     .controlSize(.small)
+                    .disabled(viewModel.isMutating)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)

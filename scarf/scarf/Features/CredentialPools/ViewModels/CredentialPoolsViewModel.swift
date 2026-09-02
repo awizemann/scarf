@@ -254,6 +254,47 @@ final class CredentialPoolsViewModel {
 
     // MARK: - Mutations (all routed through the hermes CLI so hermes stays authoritative)
 
+    /// True while any credential mutation is running. Every button on this
+    /// screen disables on it, so the busy state renders — before F6 each of
+    /// these five verbs ran its `hermes auth …` / `hermes config set` process
+    /// spawn inline on the MainActor and froze the window for the round-trip,
+    /// while `load()` right above had already been detached.
+    private(set) var isMutating = false
+
+    /// Run one `hermes` verb off the MainActor and hand the result back on it.
+    /// The `apply` block runs on the MainActor after the CLI has finished, so
+    /// any `load()` it issues is ordered strictly AFTER the mutation and
+    /// cannot re-publish pre-mutation state.
+    private func runMutation(
+        _ args: [String],
+        clearAfter seconds: Double = 2,
+        apply: @escaping @MainActor (_ output: String, _ exitCode: Int32) -> Void
+    ) {
+        guard !isMutating else { return }
+        isMutating = true
+        let ctx = context
+        Task { [weak self] in
+            let result = await Task.detached { ctx.runHermes(args) }.value
+            guard let self else { return }
+            self.isMutating = false
+            apply(result.output, result.exitCode)
+            self.clearMessage(after: seconds)
+        }
+    }
+
+    /// Held so a second action's toast isn't wiped by the first action's
+    /// still-pending timer.
+    @ObservationIgnored private var messageClearTask: Task<Void, Never>?
+
+    private func clearMessage(after seconds: Double) {
+        messageClearTask?.cancel()
+        messageClearTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            self?.message = nil
+        }
+    }
+
     func setStrategy(_ strategy: String, for provider: String) {
         // Defensive: `provider` is normally a fixed Hermes provider id with
         // no dot, but interpolating it unescaped into a dotted config key
@@ -262,20 +303,21 @@ final class CredentialPoolsViewModel {
         // helper as the quick-commands writer — see ConfigDottedKeySegment.
         let caps = HermesVersionCache.shared.cached(for: context) ?? .empty
         let sanitizedProvider = ConfigDottedKeySegment.escaped(provider, capabilities: caps)
-        let result = runHermes(["config", "set", "credential_pool_strategies.\(sanitizedProvider)", strategy])
-        if result.exitCode == 0 {
-            message = "Strategy updated for \(provider)"
-            load()
-        } else {
-            // Shared `hermes config set` failure builder — surfaces the
-            // CLI's own reason rather than a generic string.
-            message = SettingsViewModel.saveFailureMessage(
-                key: "credential_pool_strategies.\(sanitizedProvider)",
-                output: result.output
-            )
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.message = nil
+        runMutation(
+            ["config", "set", "credential_pool_strategies.\(sanitizedProvider)", strategy]
+        ) { [weak self] output, exitCode in
+            guard let self else { return }
+            if exitCode == 0 {
+                self.message = "Strategy updated for \(provider)"
+                self.load()
+            } else {
+                // Shared `hermes config set` failure builder — surfaces the
+                // CLI's own reason rather than a generic string.
+                self.message = SettingsViewModel.saveFailureMessage(
+                    key: "credential_pool_strategies.\(sanitizedProvider)",
+                    output: output
+                )
+            }
         }
     }
 
@@ -311,9 +353,7 @@ final class CredentialPoolsViewModel {
         let apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !provider.isEmpty, !apiKey.isEmpty else {
             message = "Provider and API key are required"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                self?.message = nil
-            }
+            clearMessage(after: 3)
             return
         }
         var args = ["auth", "add", provider, "--type", "api-key", "--api-key", apiKey]
@@ -321,16 +361,15 @@ final class CredentialPoolsViewModel {
         if !trimmedLabel.isEmpty {
             args += ["--label", trimmedLabel]
         }
-        let result = runHermes(args)
-        if result.exitCode == 0 {
-            message = "Credential added"
-            load()
-        } else {
-            logger.warning("Add credential failed: \(result.output)")
-            message = "Add failed: \(result.output.prefix(160))"
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.message = nil
+        runMutation(args, clearAfter: 3) { [weak self] output, exitCode in
+            guard let self else { return }
+            if exitCode == 0 {
+                self.message = "Credential added"
+                self.load()
+            } else {
+                self.logger.warning("Add credential failed: \(output)")
+                self.message = "Add failed: \(output.prefix(160))"
+            }
         }
     }
 
@@ -372,15 +411,19 @@ final class CredentialPoolsViewModel {
     func removeCredential(provider: String, index: Int) {
         // The CLI uses 1-based indexing ("#1", "#2" in `hermes auth list`); our
         // stored `index` is 0-based, so add 1 when handing to the CLI.
-        let result = runHermes(["auth", "remove", provider, String(index + 1)])
-        if result.exitCode == 0 {
-            message = "Credential removed"
-            load()
-        } else {
-            message = "Remove failed"
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.message = nil
+        runMutation(["auth", "remove", provider, String(index + 1)]) { [weak self] output, exitCode in
+            guard let self else { return }
+            if exitCode == 0 {
+                self.message = "Credential removed"
+                self.load()
+            } else {
+                // Surface the CLI's own reason — "Remove failed" alone left
+                // the user with no way to tell a refusal from a missing verb.
+                let detail = output
+                    .split(separator: "\n", omittingEmptySubsequences: true)
+                    .first.map(String.init) ?? "exit \(exitCode)"
+                self.message = "Remove failed: \(detail)"
+            }
         }
     }
 
@@ -391,39 +434,39 @@ final class CredentialPoolsViewModel {
     /// User-initiated; the credential pool view's trash button on
     /// each OAuth row routes here after a confirmation dialog.
     func removeOAuthProvider(_ provider: String) {
-        let result = runHermes(["auth", "logout", provider])
-        if result.exitCode == 0 {
-            message = "Removed OAuth provider \(provider)"
-            load()
-        } else {
+        runMutation(["auth", "logout", provider], clearAfter: 3) { [weak self] output, exitCode in
+            guard let self else { return }
+            if exitCode == 0 {
+                self.message = "Removed OAuth provider \(provider)"
+                self.load()
+            } else {
             // Surface the first output line in the toast so the user
             // can tell whether the verb is missing on this Hermes
             // version (older builds may not have `auth logout`) vs.
             // an actual failure. `runHermes` returns combined output
             // (stdout + stderr) in `output`; first non-empty line is
             // the most useful tail.
-            let detail = result.output
-                .split(separator: "\n", omittingEmptySubsequences: true)
-                .first.map(String.init) ?? "exit \(result.exitCode)"
-            message = "Remove failed: \(detail)"
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.message = nil
+                let detail = output
+                    .split(separator: "\n", omittingEmptySubsequences: true)
+                    .first.map(String.init) ?? "exit \(exitCode)"
+                self.message = "Remove failed: \(detail)"
+            }
         }
     }
 
     func resetProvider(_ provider: String) {
-        let result = runHermes(["auth", "reset", provider])
-        message = result.exitCode == 0 ? "Cooldowns cleared for \(provider)" : "Reset failed"
-        load()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.message = nil
+        runMutation(["auth", "reset", provider]) { [weak self] output, exitCode in
+            guard let self else { return }
+            if exitCode == 0 {
+                self.message = "Cooldowns cleared for \(provider)"
+            } else {
+                let detail = output
+                    .split(separator: "\n", omittingEmptySubsequences: true)
+                    .first.map(String.init) ?? "exit \(exitCode)"
+                self.message = "Reset failed: \(detail)"
+            }
+            self.load()
         }
-    }
-
-    @discardableResult
-    private func runHermes(_ arguments: [String]) -> (output: String, exitCode: Int32) {
-        context.runHermes(arguments)
     }
 }
 
