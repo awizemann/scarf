@@ -276,7 +276,8 @@ struct BotEditorSheet: View {
             if let reason = cannotSaveReason {
                 Text(reason)
                     .scarfStyle(.caption)
-                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .foregroundStyle(ScarfColor.warning)
+                    .accessibilityLabel(Text(reason))
             }
             Spacer()
             Button("Cancel") { onCancel() }
