@@ -267,7 +267,12 @@ final class CredentialPoolsViewModel {
             message = "Strategy updated for \(provider)"
             load()
         } else {
-            message = "Failed to update strategy"
+            // Shared `hermes config set` failure builder — surfaces the
+            // CLI's own reason rather than a generic string.
+            message = SettingsViewModel.saveFailureMessage(
+                key: "credential_pool_strategies.\(sanitizedProvider)",
+                output: result.output
+            )
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             self?.message = nil

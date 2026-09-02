@@ -690,19 +690,30 @@ public struct CompressionSettings: Sendable, Equatable {
     public nonisolated static let empty = CompressionSettings(enabled: true, threshold: 0.5, targetRatio: 0.2, protectLastN: 20)
 }
 
+/// `checkpoints.*`. Both fields carry an "absent on disk" sentinel because
+/// Hermes v0.21 flipped the server-side defaults (enabled `true` → `false`,
+/// max_snapshots `50` → `20`); showing the old defaults for an absent key
+/// misreports a v0.21 host's actual behavior. Resolve for display through
+/// `HermesConfig.displayCheckpointsEnabled(capabilities:)` /
+/// `displayCheckpointsMaxSnapshots(capabilities:)` — never read the raw
+/// fields into UI.
 public struct CheckpointSettings: Sendable, Equatable {
-    public var enabled: Bool
+    /// `nil` = key absent from config.yaml (parse sentinel).
+    public var enabled: Bool?
+    /// `0` = key absent from config.yaml (parse sentinel). Hermes has no
+    /// meaningful `0` here (a zero-snapshot cap is checkpoints-off, which
+    /// is what `enabled` expresses), so the collision is inert.
     public var maxSnapshots: Int
 
 
     public init(
-        enabled: Bool,
+        enabled: Bool?,
         maxSnapshots: Int
     ) {
         self.enabled = enabled
         self.maxSnapshots = maxSnapshots
     }
-    public nonisolated static let empty = CheckpointSettings(enabled: true, maxSnapshots: 50)
+    public nonisolated static let empty = CheckpointSettings(enabled: nil, maxSnapshots: 0)
 }
 
 public struct LoggingSettings: Sendable, Equatable {
@@ -730,10 +741,14 @@ public struct DelegationSettings: Sendable, Equatable {
     public var apiKey: String
     /// `delegation.max_iterations` — max tool-calling turns per child.
     /// Hermes v0.20.4 (migration 36) raised the server-side default 50→250.
+    /// `0` = key absent (parse sentinel); resolve through
+    /// `HermesConfig.displayDelegationMaxIterations(capabilities:)`.
     public var maxIterations: Int
     /// `delegation.max_concurrent_children` — max parallel child agents per
     /// batch. Hermes v0.20.4 (migration 37) raised the server-side default
-    /// 3→10 (floor 1, no ceiling).
+    /// 3→10 (floor 1, no ceiling). `0` = key absent (parse sentinel);
+    /// resolve through
+    /// `HermesConfig.displayDelegationMaxConcurrentChildren(capabilities:)`.
     public var maxConcurrentChildren: Int
 
     public init(
@@ -742,7 +757,7 @@ public struct DelegationSettings: Sendable, Equatable {
         baseURL: String,
         apiKey: String,
         maxIterations: Int,
-        maxConcurrentChildren: Int = 10
+        maxConcurrentChildren: Int = 0
     ) {
         self.model = model
         self.provider = provider
@@ -751,7 +766,7 @@ public struct DelegationSettings: Sendable, Equatable {
         self.maxIterations = maxIterations
         self.maxConcurrentChildren = maxConcurrentChildren
     }
-    public nonisolated static let empty = DelegationSettings(model: "", provider: "", baseURL: "", apiKey: "", maxIterations: 250, maxConcurrentChildren: 10)
+    public nonisolated static let empty = DelegationSettings(model: "", provider: "", baseURL: "", apiKey: "", maxIterations: 0, maxConcurrentChildren: 0)
 }
 
 /// Discord-specific platform settings (`discord.*`). Other platforms currently have thinner schemas.
@@ -1251,6 +1266,46 @@ public struct HermesConfig: Sendable {
     public func displayGatewayTurnLeaseTimeout(capabilities: HermesCapabilities) -> Int {
         if gatewayTurnLeaseTimeout > 0 { return gatewayTurnLeaseTimeout }
         return capabilities.isV021OrLater ? 5 : 1800
+    }
+
+    /// Effective `checkpoints.enabled` for display: the on-disk value when
+    /// the key is present, otherwise the connected host's own default —
+    /// **false** on v0.21.0+, **true** on every older supported host
+    /// (v0.21 flipped auto-checkpointing to opt-in).
+    ///
+    /// Display-only; callers must never write the resolved value back. An
+    /// unknown host version resolves to the older `true`, matching the
+    /// `displayGatewayTurnLeaseTimeout` convention (unknown host is more
+    /// likely to be an old one).
+    public func displayCheckpointsEnabled(capabilities: HermesCapabilities) -> Bool {
+        if let enabled = checkpoints.enabled { return enabled }
+        return !capabilities.isV021OrLater
+    }
+
+    /// Effective `checkpoints.max_snapshots` for display: the on-disk value
+    /// when set, otherwise the host default — **20** on v0.21.0+, **50** on
+    /// older hosts. Display-only.
+    public func displayCheckpointsMaxSnapshots(capabilities: HermesCapabilities) -> Int {
+        if checkpoints.maxSnapshots > 0 { return checkpoints.maxSnapshots }
+        return capabilities.isV021OrLater ? 20 : 50
+    }
+
+    /// Effective `delegation.max_iterations` for display: the on-disk value
+    /// when set, otherwise the host default — **250** on v0.20.4+ (migration
+    /// 36 raised it), **50** on older hosts. Display-only.
+    public func displayDelegationMaxIterations(capabilities: HermesCapabilities) -> Int {
+        if delegation.maxIterations > 0 { return delegation.maxIterations }
+        return capabilities.isV0204OrLater ? 250 : 50
+    }
+
+    /// Effective `delegation.max_concurrent_children` for display: the
+    /// on-disk value when set, otherwise the host default — **10** on
+    /// v0.20.4+ (migration 37 raised it), **3** on older hosts. The row is
+    /// itself gated on `isV0204OrLater`, so the pre-v0.20.4 branch only
+    /// matters for non-UI readers. Display-only.
+    public func displayDelegationMaxConcurrentChildren(capabilities: HermesCapabilities) -> Int {
+        if delegation.maxConcurrentChildren > 0 { return delegation.maxConcurrentChildren }
+        return capabilities.isV0204OrLater ? 10 : 3
     }
 
     /// Human-readable form of `displayMaxTurns(capabilities:)` — "Unlimited"

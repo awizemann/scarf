@@ -10,9 +10,15 @@ struct HermesV0204ConfigTests {
 
     // MARK: - Delegation defaults (HermesConfig+YAML.swift)
 
+    /// The v0.20.4 default (250) is no longer baked into the parse — hosts
+    /// older than v0.20.4 still run 50, so an absent key is a SENTINEL and
+    /// the effective value comes from the capability-aware resolver. Full
+    /// matrix in `HermesCheckpointDelegationDefaultsTests`.
     @Test func delegationMaxIterationsDefaultsTo250WhenUnset() {
         let cfg = HermesConfig(yaml: "")
-        #expect(cfg.delegation.maxIterations == 250)
+        #expect(cfg.delegation.maxIterations == 0)
+        let v0204 = HermesCapabilities.parseLine("Hermes Agent v0.20.4 (2026.8.16)")
+        #expect(cfg.displayDelegationMaxIterations(capabilities: v0204) == 250)
     }
 
     @Test func delegationMaxIterationsReadsExplicitValue() {
@@ -23,9 +29,13 @@ struct HermesV0204ConfigTests {
         #expect(cfg.delegation.maxIterations == 40)
     }
 
+    /// Same sentinel treatment as `max_iterations` — pre-v0.20.4 hosts
+    /// default to 3, not 10.
     @Test func delegationMaxConcurrentChildrenDefaultsTo10WhenUnset() {
         let cfg = HermesConfig(yaml: "")
-        #expect(cfg.delegation.maxConcurrentChildren == 10)
+        #expect(cfg.delegation.maxConcurrentChildren == 0)
+        let v0204 = HermesCapabilities.parseLine("Hermes Agent v0.20.4 (2026.8.16)")
+        #expect(cfg.displayDelegationMaxConcurrentChildren(capabilities: v0204) == 10)
     }
 
     @Test func delegationMaxConcurrentChildrenReadsExplicitValue() {
