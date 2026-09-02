@@ -194,7 +194,11 @@ final class FleetApplyViewModel {
         // A DETACHED task doesn't inherit cancellation from its parent, so
         // the handle is retained and cancelled explicitly by `cancel()`;
         // `Task.isCancelled` inside the body then reads THIS task's flag.
-        applyProgress = (0, plan.effectiveTargets.count)
+        // `plan.targets.count`, NOT `effectiveTargets`: the executor reports
+        // progress over every target it walks, including the ones whose
+        // actions are all no-ops, so a denominator taken from the smaller set
+        // would let the counter run past its own total.
+        applyProgress = (0, plan.targets.count)
         let task = Task.detached(priority: .userInitiated) { [weak self] () -> [FleetApplyExecutor.TargetResult] in
             await FleetApplyExecutor(contexts: contexts).execute(
                 plan,
@@ -202,7 +206,14 @@ final class FleetApplyViewModel {
                 sourceCronJobs: cronJobs,
                 isCancelled: { Task.isCancelled },
                 onProgress: { done, total in
-                    Task { @MainActor in self?.applyProgress = (done, total) }
+                    // Hops to the MainActor arrive in arbitrary order, so the
+                    // counter is clamped monotonic — a progress bar that goes
+                    // backwards reads as a bug in the push itself.
+                    Task { @MainActor in
+                        guard let self else { return }
+                        let previous = self.applyProgress?.done ?? 0
+                        self.applyProgress = (max(previous, done), total)
+                    }
                 }
             )
         }
