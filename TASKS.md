@@ -53,6 +53,7 @@
 - [ ] R4 [iOS]: Key import gate — reject unusable keys at paste time (id: t-a89ccf7a) (added: 2026-08-20)
 - [ ] R6 [iOS]: Splash — use LaunchIcon asset, drop 1024px main-thread decode (id: t-d8d0f1d3) (added: 2026-08-20) (priority: low)
 - [ ] Fix charter.md guardrail indent (human edit) (id: t-00f9972e) (added: 2026-09-01) (priority: high)
+- [ ] AdvancedTab: Max Concurrent Children row over-gated on isV0204OrLater (id: t-8f4f5d68) (added: 2026-09-01)
 
 ## Doing
 
@@ -60,6 +61,15 @@
 
 ## Done
 
+- [x] Per-language quality audits of the l10n backfill (6 native-speaker passes) (id: t-873e62ca) (added: 2026-09-01)
+- [x] L10n backfill: extract Bots/Peers/Cron/component strings + translate 6 locales (id: t-98705b8a) (added: 2026-09-01) (priority: high)
+- [x] Bots P4: Phase B final audit + memory validation (id: t-3d99a36d) (added: 2026-09-01) (priority: high)
+- [x] Bots P3: shared peer state + bots follow-ups (id: t-09bc10fb) (added: 2026-09-01)
+- [x] Chat follow-ups: pendingPermission queue, fence-split streaming fix, ACPClient start() footgun (id: t-6df018af) (added: 2026-09-01)
+- [x] Bots P2: roster quality — search, activity, previews (id: t-6b116d7b) (added: 2026-09-01) (priority: high)
+- [x] Settings follow-ups: capability-aware display defaults, memory-off exit code, saveFailureMessage reuse, config-parity gate widening (id: t-c0737a30) (added: 2026-09-01)
+- [x] Bots P1: bot editor depth (model, soul, skills) (id: t-23a17b55) (added: 2026-09-01) (priority: high)
+- [x] Bots P0: per-bot agent-config foundation (id: t-31529763) (added: 2026-09-01) (priority: urgent)
 - [x] Bots final audit + memory validation (id: t-1e44c785) (added: 2026-09-01) (priority: high)
 - [x] Bots B4: routines + remote bots (peers) (id: t-556e3704) (added: 2026-09-01)
 - [x] Bots B3: live bot chat over ACP (id: t-461ac94b) (added: 2026-09-01) (priority: high)
