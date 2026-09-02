@@ -132,46 +132,10 @@ final class ToolsViewModel {
         mcpStatus = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Delegates to `ScarfCore.HermesToolsList` — the same parse the per-bot
+    /// Agent surface uses, so a toolset row means the same thing on both.
     private func parseToolsList(_ output: String) -> [HermesToolset] {
-        var tools: [HermesToolset] = []
-        for line in output.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            let isEnabled: Bool
-            if trimmed.hasPrefix("✓ enabled") {
-                isEnabled = true
-            } else if trimmed.hasPrefix("✗ disabled") {
-                isEnabled = false
-            } else {
-                continue
-            }
-            let rest = trimmed
-                .replacingOccurrences(of: "✓ enabled", with: "")
-                .replacingOccurrences(of: "✗ disabled", with: "")
-                .trimmingCharacters(in: .whitespaces)
-
-            let parts = rest.split(separator: " ", maxSplits: 1)
-            guard let namePart = parts.first else { continue }
-            let name = String(namePart)
-            let rawDesc = parts.count > 1 ? String(parts[1]) : name
-
-            let icon = extractEmoji(from: rawDesc)
-            let description = rawDesc
-                .unicodeScalars.filter { !$0.properties.isEmoji || $0.isASCII }
-                .map { String($0) }.joined()
-                .trimmingCharacters(in: .whitespaces)
-
-            tools.append(HermesToolset(name: name, description: description, icon: icon, enabled: isEnabled))
-        }
-        return tools
-    }
-
-    private func extractEmoji(from text: String) -> String {
-        for scalar in text.unicodeScalars {
-            if scalar.properties.isEmoji && !scalar.isASCII {
-                return String(scalar)
-            }
-        }
-        return "🔧"
+        HermesToolsList.parse(output)
     }
 
     private nonisolated func runHermes(_ arguments: [String]) async -> (output: String, exitCode: Int32) {

@@ -158,6 +158,27 @@ final class BotRoutinesViewModel {
         )
     }
 
+    /// Mirrors Hermes Desktop's `routineInputError` (`hermes-bots/cron.tsx:258-268`
+    /// at v0.21.0): a title or instruction containing NUL (U+0000) is rejected
+    /// before it ever reaches argv — the shell/CLI boundary can't carry it,
+    /// and the two clients should refuse identically rather than Scarf
+    /// silently truncating or erroring later at the transport. Also refuses
+    /// an empty prompt, which Hermes Desktop's create sheet disables the
+    /// submit button on (A1-L7): a routine with no instruction runs the
+    /// agent with nothing to do.
+    nonisolated static func routineInputError(title: String, instruction: String) -> String? {
+        if title.contains("\0") {
+            return "Job name cannot contain NUL (U+0000)."
+        }
+        if instruction.contains("\0") {
+            return "Job instruction cannot contain NUL (U+0000)."
+        }
+        if instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Prompt can't be empty."
+        }
+        return nil
+    }
+
     /// The exact argv `createRoutine` produces, without needing a live
     /// `CronViewModel`/transport to observe it. Composed by calling the
     /// PRODUCTION builders — `routineFields` above and

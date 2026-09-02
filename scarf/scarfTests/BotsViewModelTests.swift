@@ -113,6 +113,49 @@ struct BotsViewModelTests {
             return _avatars[name]
         }
 
+        // MARK: Phase B P2 seams
+
+        /// Bumped by ``writeAvatar`` so a stat changes the way a real write
+        /// changes one — this is what the avatar cache is keyed on.
+        var avatarMtime: Int64 = 1
+        /// Per-profile activity the roster's phase-3 pass reads.
+        var activities: [String: BotActivity] = [:]
+        /// How many times bytes were actually pulled, and how many `state.db`
+        /// opens happened — the two costs P2 exists to bound.
+        private(set) var avatarByteReads: [String] = []
+        private(set) var activityReads: [String] = []
+
+        func scanRoster() async -> [BotRosterEntry] {
+            lock.lock(); defer { lock.unlock() }
+            return order.compactMap { name in
+                guard let identity = _identities[name] else { return nil }
+                let stat = _avatars[name].map {
+                    BotAvatarStat(
+                        path: $0.path,
+                        mime: $0.mimeType,
+                        size: Int64($0.data.count),
+                        mtime: avatarMtime
+                    )
+                }
+                return BotRosterEntry(identity: identity, avatar: stat)
+            }
+        }
+
+        func loadAvatar(at stat: BotAvatarStat) throws -> HermesBotAvatar {
+            lock.lock(); defer { lock.unlock() }
+            guard let found = _avatars.first(where: { $0.value.path == stat.path })?.value else {
+                throw BotsError.profileMissing(name: stat.path)
+            }
+            avatarByteReads.append(stat.path)
+            return found
+        }
+
+        func activity(forProfile name: String) async -> BotActivity? {
+            lock.lock(); defer { lock.unlock() }
+            activityReads.append(name)
+            return activities[name]
+        }
+
         func saveIdentity(_ identity: HermesBotIdentity) throws {
             lock.lock(); defer { lock.unlock() }
             if let saveError { throw saveError }
@@ -125,6 +168,7 @@ struct BotsViewModelTests {
             lock.lock(); defer { lock.unlock() }
             writtenAvatars.append((name, data.count))
             _avatars[name] = HermesBotAvatar(data: data, mimeType: "image/png", path: "/tmp/\(name)/assets/avatar.png")
+            avatarMtime += 1
         }
 
         func run(_ action: BotsService.Lifecycle) throws -> ProcessResult {
@@ -597,6 +641,70 @@ struct BotsViewModelTests {
         #expect(backend.lifecycleActions == [.rename(from: "scratch", to: "scratch-2")])
     }
 
+    @Test("rename is blocked while the outgoing name has an unsaved SOUL.md buffer, and clears once saved")
+    func renameBlockedByUnsavedSoulEdits() async throws {
+        // A real temp home: `agentViewModel(for:)` always builds a *live*
+        // `BotAgentViewModel` (`BotsViewModel.context`, not the injected
+        // roster `backend`), so dirtying its buffer for real needs an actual
+        // `SOUL.md` on disk under `<home>/profiles/scratch/SOUL.md`.
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let profileDir = home.url
+            .appendingPathComponent("profiles", isDirectory: true)
+            .appendingPathComponent("scratch", isDirectory: true)
+        try FileManager.default.createDirectory(at: profileDir, withIntermediateDirectories: true)
+        try "You are Scratch.".write(
+            to: profileDir.appendingPathComponent("SOUL.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let identity = Self.bot("scratch", title: "Scratch")
+        let backend = MockBotsBackend([identity])
+        let viewModel = BotsViewModel(
+            context: home.context,
+            capabilities: Self.botCapableCapabilities,
+            backend: backend
+        )
+
+        let agentVM = viewModel.agentViewModel(for: "scratch")
+        agentVM.load()
+        await Self.settle { agentVM.hasLoadedSoul }
+        agentVM.soulText = "dirty edits, not saved"
+        #expect(agentVM.isSoulDirty)
+        #expect(viewModel.unsavedAgentEdits(forProfile: "scratch"))
+
+        // Blocked while dirty: the same floor `BotsView.requestSelection`
+        // enforces for a roster switch, since a rename would otherwise
+        // strand the dirty buffer under a name `agentCache` can no longer
+        // address.
+        viewModel.rename(BotRow(identity: identity, avatar: nil), to: "scratch-2")
+        await waitForIdle(viewModel)
+        #expect(backend.lifecycleActions.isEmpty)
+        #expect(viewModel.errorMessage != nil)
+
+        // Save, then retry: now it must go through, and the agent cache
+        // must not leave a reusable entry keyed on the pre-rename name —
+        // `unsavedAgentEdits` (which reads that cache) has to report
+        // nothing outstanding for a name the roster no longer has.
+        agentVM.saveSoul()
+        await Self.settle { !agentVM.isSoulDirty }
+        viewModel.errorMessage = nil
+        viewModel.rename(BotRow(identity: identity, avatar: nil), to: "scratch-2")
+        await waitForIdle(viewModel)
+        #expect(backend.lifecycleActions == [.rename(from: "scratch", to: "scratch-2")])
+        #expect(viewModel.unsavedAgentEdits(forProfile: "scratch") == false)
+    }
+
+    private static func settle(
+        _ condition: () -> Bool
+    ) async {
+        for _ in 0..<400 {
+            if condition() { return }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+    }
+
     // MARK: - Avatar
 
     @Test("storing an avatar marks the identity as carrying a photo")
@@ -642,6 +750,234 @@ struct BotsViewModelTests {
         ).contains("3"))
     }
 
+    // MARK: - Roster search (Phase B P2)
+
+    @Test("the filter matches title, role and profile id, ignoring case and accents")
+    func searchMatchesEveryVisibleField() {
+        let identity = HermesBotIdentity(
+            profileName: "deploy-bot",
+            profileDirectory: "/tmp/deploy-bot",
+            isBotManaged: true,
+            title: "Réleasé Manager",
+            botDescription: "Ships the Thing"
+        )
+        // Title, case-insensitive and diacritic-insensitive both ways.
+        #expect(BotsViewModel.matches(identity, query: "release"))
+        #expect(BotsViewModel.matches(identity, query: "RÉLEASÉ"))
+        // Substring, not prefix — "manager" has to find "Réleasé Manager".
+        #expect(BotsViewModel.matches(identity, query: "manager"))
+        // The role blurb.
+        #expect(BotsViewModel.matches(identity, query: "ships"))
+        // The profile id, which is what `hermes -p` takes.
+        #expect(BotsViewModel.matches(identity, query: "deploy-bot"))
+        #expect(BotsViewModel.matches(identity, query: "nothing here") == false)
+    }
+
+    @Test("the filter narrows every roster group, and clears on leaving the section")
+    func searchFiltersAllGroups() async {
+        let backend = MockBotsBackend([
+            Self.bot("ops", title: "Ops"),
+            Self.bot("research", title: "Research"),
+            Self.bot("secret", title: "Ops Archive", hidden: true),
+            Self.bot("plain", title: nil, managed: false)
+        ])
+        let viewModel = makeViewModel(backend)
+        viewModel.load()
+        await waitForLoad(viewModel, expecting: 4)
+
+        viewModel.searchText = "ops"
+        #expect(viewModel.bots.map(\.id) == ["ops"])
+        // Hidden bots are filtered too — a search that skipped the collapsed
+        // group would claim a bot doesn't exist while it sits inside it.
+        #expect(viewModel.hiddenBots.map(\.id) == ["secret"])
+        #expect(viewModel.otherProfiles.isEmpty)
+
+        viewModel.searchText = "zzz"
+        #expect(viewModel.searchFoundNothing)
+        #expect(viewModel.visibleRows.isEmpty)
+
+        viewModel.clearSearch()
+        #expect(viewModel.searchFoundNothing == false)
+        #expect(viewModel.bots.count == 2)
+    }
+
+    @Test("filtering never moves the selection, so it can't tear down a live conversation")
+    func searchLeavesTheSelectionAlone() async {
+        let backend = MockBotsBackend([Self.bot("ops", title: "Ops"), Self.bot("research", title: "Research")])
+        let viewModel = makeViewModel(backend)
+        viewModel.load()
+        await waitForLoad(viewModel, expecting: 2)
+        viewModel.selectedProfileName = "research"
+
+        // Filtering `research` out of the roster must NOT retarget: the
+        // selection setter closes the bot's `hermes acp` subprocess, and it
+        // would do it behind `BotsView.requestSelection`'s unsaved-SOUL.md
+        // guard — a keystroke silently discarding an identity prompt.
+        viewModel.searchText = "ops"
+        #expect(viewModel.bots.map(\.id) == ["ops"])
+        #expect(viewModel.selectedProfileName == "research")
+    }
+
+    // MARK: - Activity ordering (Phase B P2)
+
+    @Test("recent-activity order is most-recent-first with no-activity rows last")
+    func activitySortOrdersByRecency() async {
+        let backend = MockBotsBackend([
+            Self.bot("quiet", title: "Quiet"),
+            Self.bot("old", title: "Old"),
+            Self.bot("fresh", title: "Fresh")
+        ])
+        backend.activities = [
+            "old": BotActivity(lastMessageAt: Date(timeIntervalSince1970: 100), preview: "a while back"),
+            "fresh": BotActivity(lastMessageAt: Date(timeIntervalSince1970: 900), preview: "just now")
+        ]
+        let viewModel = makeViewModel(backend)
+        viewModel.load()
+        await waitForLoad(viewModel, expecting: 3)
+        await waitForActivity(viewModel, expecting: 2)
+
+        viewModel.sortOrder = .recentActivity
+        #expect(viewModel.bots.map(\.id) == ["fresh", "old", "quiet"])
+        // The other order is untouched by activity.
+        viewModel.sortOrder = .pinnedThenName
+        #expect(viewModel.bots.map(\.id) == ["fresh", "old", "quiet"].sorted())
+    }
+
+    @Test("activity ties fall through to the pinned-then-name order, so it never reshuffles")
+    func activitySortIsStableOnTies() {
+        let same = Date(timeIntervalSince1970: 500)
+        func row(_ name: String, title: String, at date: Date?, pinned: Bool = false) -> BotRow {
+            BotRow(
+                identity: Self.bot(name, title: title, pinned: pinned),
+                avatar: nil,
+                avatarStat: nil,
+                activity: date.map { BotActivity(lastMessageAt: $0, preview: "") }
+            )
+        }
+        // Three bots that all moved at the same instant (one routine fanning
+        // out), plus two that have no activity at all.
+        let input = [
+            row("charlie", title: "Charlie", at: same),
+            row("alpha", title: "Alpha", at: same),
+            row("bravo", title: "Bravo", at: same, pinned: true),
+            row("zeta", title: "Zeta", at: nil),
+            row("yankee", title: "Yankee", at: nil)
+        ]
+        let sorted = BotsViewModel.sortBotsByActivity(input)
+        // Tie-break is the total pinned-then-name order, so the pinned bot
+        // leads the tied group and the rest are alphabetical.
+        #expect(sorted.map(\.id) == ["bravo", "alpha", "charlie", "yankee", "zeta"])
+        // Idempotent, and independent of input order — the property that
+        // stops the roster jittering while activity fills in row by row.
+        #expect(BotsViewModel.sortBotsByActivity(sorted).map(\.id) == sorted.map(\.id))
+        #expect(BotsViewModel.sortBotsByActivity(input.reversed()).map(\.id) == sorted.map(\.id))
+        // With NO activity anywhere — the state before the async pass lands —
+        // it is exactly the default order, not an arbitrary permutation.
+        let none = input.map { BotRow(identity: $0.identity, avatar: nil) }
+        #expect(BotsViewModel.sortBotsByActivity(none).map(\.id) == BotsViewModel.sortBots(none).map(\.id))
+    }
+
+    // MARK: - Load pipeline costs (Phase B P2 / audit A1-M3+M4)
+
+    @Test("a metadata save re-scans the roster but re-reads no avatar bytes")
+    func metadataSaveDoesNotRefetchAvatars() async {
+        let backend = MockBotsBackend([Self.bot("ops", title: "Ops")])
+        try? backend.writeAvatar(Data(repeating: 7, count: 128), forProfile: "ops")
+        let viewModel = makeViewModel(backend)
+        viewModel.load()
+        await waitForLoad(viewModel, expecting: 1)
+        await waitForAvatar(viewModel, profile: "ops")
+        #expect(backend.avatarByteReads.count == 1)
+
+        // Pinning changes profile.yaml and nothing else — the avatar's stat is
+        // unchanged, so its cache key hits and no bytes cross the transport.
+        viewModel.togglePinned(viewModel.bots[0])
+        await waitForIdle(viewModel)
+        await waitForLoad(viewModel, expecting: 1)
+        #expect(backend.avatarByteReads.count == 1)
+        // …and the photo is still on the row, not blanked back to the
+        // generated fallback by the reload.
+        #expect(viewModel.rows[0].avatar != nil)
+    }
+
+    @Test("writing an avatar invalidates the cache so the new bytes are read")
+    func avatarWriteRefetchesBytes() async {
+        let backend = MockBotsBackend([Self.bot("ops", title: "Ops")])
+        try? backend.writeAvatar(Data(repeating: 7, count: 128), forProfile: "ops")
+        let viewModel = makeViewModel(backend)
+        viewModel.load()
+        await waitForLoad(viewModel, expecting: 1)
+        await waitForAvatar(viewModel, profile: "ops")
+        #expect(backend.avatarByteReads.count == 1)
+
+        viewModel.setAvatar(Data(repeating: 9, count: 128), forProfile: "ops")
+        await waitForIdle(viewModel)
+        for _ in 0..<200 where backend.avatarByteReads.count < 2 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(backend.avatarByteReads.count == 2)
+    }
+
+    @Test("a mutation's reload does not re-open every bot's database")
+    func mutationsDoNotRefetchActivity() async {
+        let backend = MockBotsBackend([Self.bot("ops", title: "Ops"), Self.bot("research", title: "Research")])
+        backend.activities = ["ops": BotActivity(lastMessageAt: Date(timeIntervalSince1970: 5), preview: "hi")]
+        let viewModel = makeViewModel(backend)
+        viewModel.load()
+        await waitForLoad(viewModel, expecting: 2)
+        await waitForActivity(viewModel, expecting: 1)
+        let afterFirstLoad = backend.activityReads.count
+        #expect(afterFirstLoad == 2, "the first load reads every bot-managed profile once")
+
+        viewModel.togglePinned(viewModel.bots[0])
+        await waitForIdle(viewModel)
+        await waitForLoad(viewModel, expecting: 2)
+        #expect(backend.activityReads.count == afterFirstLoad)
+        // The preview survives the reload — it is about the chat, not about
+        // profile.yaml, so a pin toggle must not blank it.
+        #expect(viewModel.rows.first { $0.id == "ops" }?.activity?.preview == "hi")
+
+        // An explicit reload is the one thing that re-reads it.
+        viewModel.load(force: true, refreshActivity: true)
+        await waitForLoad(viewModel, expecting: 2)
+        for _ in 0..<200 where backend.activityReads.count == afterFirstLoad {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(backend.activityReads.count > afterFirstLoad)
+    }
+
+    @Test("the roster publishes identities before avatar bytes or activity")
+    func rosterPaintsBeforeTheExpensiveWork() async {
+        let backend = MockBotsBackend([Self.bot("ops", title: "Ops")])
+        try? backend.writeAvatar(Data(repeating: 7, count: 128), forProfile: "ops")
+        backend.activities = ["ops": BotActivity(lastMessageAt: Date(), preview: "later")]
+        let viewModel = makeViewModel(backend)
+        viewModel.load()
+        // The first state in which rows exist must already be paintable: the
+        // identity is there, the photo and the preview are not yet.
+        for _ in 0..<200 where viewModel.rows.isEmpty {
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        #expect(viewModel.rows.count == 1)
+        #expect(viewModel.isLoading == false)
+        #expect(viewModel.rows[0].identity.resolvedTitle == "Ops")
+        #expect(viewModel.rows[0].avatarStat != nil, "the stat rides along with the scan")
+    }
+
+    private func waitForAvatar(_ viewModel: BotsViewModel, profile: String) async {
+        for _ in 0..<200 {
+            if viewModel.rows.first(where: { $0.id == profile })?.avatar != nil { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    private func waitForActivity(_ viewModel: BotsViewModel, expecting count: Int) async {
+        for _ in 0..<200 {
+            if viewModel.rows.filter({ $0.activity != nil }).count == count { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     // MARK: - Sidebar + analytics
 
     @Test("the Bots sidebar section carries a unique snake_case analytics token")
@@ -652,6 +988,36 @@ struct BotsViewModelTests {
             #expect(seen.insert(section.analyticsToken).inserted, "duplicate token \(section.analyticsToken)")
         }
         #expect(seen.contains("bots"))
+    }
+
+    // MARK: - Injected PeersViewModel (A2-F5)
+
+    @Test("an injected PeersViewModel is the one `peers` returns, not a private fallback")
+    func peersUsesTheInjectedInstance() {
+        // A2-F5: `BotsViewModel` used to build its own private `PeersViewModel`
+        // rather than sharing the coordinator-cached one `ContentView` also
+        // hands the standalone Peers section — a peer async-run started from
+        // Bots▸Remote would then be invisible/unstoppable from the Peers pane.
+        // `ContentView` itself isn't unit-testable (it resolves through
+        // `AppCoordinator.featureViewModel`, a live `@Environment`), so this
+        // pins the identity contract one level down: given *some* injected
+        // instance, `peers` must return that exact object, never a
+        // lazily-constructed substitute.
+        let injected = PeersViewModel(context: .local)
+        let backend = MockBotsBackend([])
+        let viewModel = BotsViewModel(
+            context: .local,
+            capabilities: Self.botCapableCapabilities,
+            backend: backend,
+            peers: injected
+        )
+        #expect(viewModel.peers === injected)
+
+        // And the no-injection path (every existing test in this file) must
+        // keep building its own isolated instance — no fixture drift from
+        // this fixup.
+        let uninjected = makeViewModel(backend)
+        #expect(uninjected.peers !== injected)
     }
 
     @Test("Bots is ordered immediately before Chat")

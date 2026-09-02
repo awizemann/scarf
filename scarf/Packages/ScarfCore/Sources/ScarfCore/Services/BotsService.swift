@@ -20,6 +20,7 @@ public struct BotsService: Sendable {
     private let transport: any ServerTransport
     private let paths: HermesPathSet
     private let capabilities: HermesCapabilities
+    private let prefersBatchedScan: Bool
 
     /// Ceiling on a single `profile.yaml` read. The file is metadata *about* a
     /// profile and Hermes keeps it "deliberately tiny"
@@ -29,14 +30,28 @@ public struct BotsService: Sendable {
     /// across an SSH channel into memory.
     public static let maxProfileYAMLBytes = 1_048_576
 
+    /// Timeout for the batched roster script. Deliberately short: this runs on
+    /// the first-paint path's critical section, and the fallback (the per-file
+    /// scan) is *correct*, merely slower — so waiting a long time for the fast
+    /// path is the worst of both.
+    public static let batchedScanTimeout: TimeInterval = 20
+
+    /// - Parameter prefersBatchedScan: whether ``rosterEntries()`` should try
+    ///   the one-round-trip script first. Set for remote contexts only. A
+    ///   local home's per-file scan is a handful of `FileManager` calls with
+    ///   no round trip to save, so spawning `/bin/sh` for it would be slower
+    ///   *and* a second code path to keep in parity — the audit's finding is
+    ///   about SSH latency, not about file I/O.
     public init(
         transport: any ServerTransport,
         paths: HermesPathSet,
-        capabilities: HermesCapabilities
+        capabilities: HermesCapabilities,
+        prefersBatchedScan: Bool = false
     ) {
         self.transport = transport
         self.paths = paths
         self.capabilities = capabilities
+        self.prefersBatchedScan = prefersBatchedScan
     }
 
     // MARK: - Layout
@@ -109,6 +124,75 @@ public struct BotsService: Sendable {
         let empty = HermesBotIdentity(profileName: name, profileDirectory: dir)
         guard let yaml = readBoundedText(path, limit: Self.maxProfileYAMLBytes) else { return empty }
         return HermesBotProfileYAML.parse(yaml, profileName: name, profileDirectory: dir)
+    }
+
+    // MARK: - Roster entries (Phase B P2)
+
+    /// The roster plus each profile's avatar *stat* — everything a roster row
+    /// needs to paint, and nothing it doesn't.
+    ///
+    /// Tries the batched script first on a transport where a round trip is the
+    /// cost (see ``init(transport:paths:capabilities:prefersBatchedScan:)``),
+    /// and falls back to ``rosterEntriesPerFile()`` on any refusal. The two
+    /// paths are held to identical results by
+    /// `BotModePhaseBP2Tests.batchedScanMatchesPerFileScan`.
+    public func rosterEntries() async -> [BotRosterEntry] {
+        if prefersBatchedScan, let batched = await batchedRosterEntries() {
+            return batched
+        }
+        return rosterEntriesPerFile()
+    }
+
+    /// The per-file roster scan — one `stat`/`read` per profile, plus up to
+    /// three avatar `fileExists` probes. Always correct, and the reference
+    /// semantics the batched path is diffed against.
+    public func rosterEntriesPerFile() -> [BotRosterEntry] {
+        scan().map { identity in
+            BotRosterEntry(identity: identity, avatar: avatarStat(forProfile: identity.profileName))
+        }
+    }
+
+    /// One `sh` round trip for the whole roster, or `nil` when the host, the
+    /// transport, or the output says the answer can't be trusted.
+    func batchedRosterEntries() async -> [BotRosterEntry]? {
+        let script = BotsRosterScan.script(
+            rootHome: rootHome,
+            maxYAMLBytes: Self.maxProfileYAMLBytes
+        )
+        guard let result = try? await transport.streamScript(script, timeout: Self.batchedScanTimeout),
+              result.exitCode == 0 else {
+            return nil
+        }
+        return BotsRosterScan.parse(result.stdoutString, rootHome: rootHome)
+    }
+
+    /// The avatar file's path and stat, without reading its bytes.
+    public func avatarStat(forProfile name: String) -> BotAvatarStat? {
+        guard let found = avatarPath(forProfile: name) else { return nil }
+        let stat = transport.stat(found.path)
+        return BotAvatarStat(
+            path: found.path,
+            mime: found.mime,
+            size: stat?.size ?? 0,
+            mtime: Int64(stat?.mtime.timeIntervalSince1970 ?? 0)
+        )
+    }
+
+    /// Read the bytes behind a stat the roster scan already produced.
+    ///
+    /// Split out from ``loadAvatar(forProfile:)`` so the roster never re-probes
+    /// three extensions for a path it was just told: this is the call the view
+    /// model makes *only* on a cache miss, one profile at a time, after the
+    /// roster has already painted.
+    public func loadAvatar(at stat: BotAvatarStat) throws -> HermesBotAvatar {
+        if stat.size > Int64(HermesBotAvatar.maxBytes) {
+            throw BotsError.avatarTooLarge(path: stat.path, size: Int(stat.size))
+        }
+        let data = try transport.readFile(stat.path)
+        guard data.count <= HermesBotAvatar.maxBytes else {
+            throw BotsError.avatarTooLarge(path: stat.path, size: data.count)
+        }
+        return HermesBotAvatar(data: data, mimeType: stat.mime, path: stat.path)
     }
 
     // MARK: - Avatars
@@ -327,4 +411,13 @@ public enum BotsError: Error, Equatable, Sendable {
     case unsafeToWrite(path: String)
     /// The avatar exceeds the gateway's own 2MB ceiling and was not read.
     case avatarTooLarge(path: String, size: Int)
+    /// A file exists but could not be turned into an editable buffer
+    /// (unreadable, oversized, or not UTF-8). Distinct from "absent", which is
+    /// normal: the caller must NOT fall back to an empty editor, because
+    /// saving that would replace the real file with nothing. Phase B.
+    case unsafeToRead(path: String)
+    /// A value or dotted config key Scarf refuses to hand to
+    /// `hermes config set/unset` — empty, flag-shaped, or carrying a character
+    /// that would change which key is written. Phase B.
+    case invalidValue(key: String)
 }

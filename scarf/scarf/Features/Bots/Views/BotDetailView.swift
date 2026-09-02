@@ -2,16 +2,17 @@ import SwiftUI
 import ScarfCore
 import ScarfDesign
 
-/// The detail pane for one bot: identity summary, actions, and two **slots**
-/// later work packages fill in — B3 hangs the bot's chat surface off
-/// `conversation`, B4 hangs routines/peers off `automation`.
+/// The detail pane for one bot: identity summary, actions, and three
+/// **slots** later work packages fill in — B3 hangs the bot's chat surface
+/// off `conversation`, B4 hangs routines/peers off `automation`, and Phase
+/// B's P1 hangs the per-bot agent configuration off `agent`.
 ///
 /// The slots are generic view parameters with placeholder defaults rather
 /// than `if hasChat { … }` branches inside this file, so B3 and B4 add their
 /// surfaces by passing a view at the one call site in ``BotsView`` and never
 /// have to re-cut this layout. Everything above the slots (header card,
 /// identity rows, destructive actions) is stable.
-struct BotDetailView<Conversation: View, Automation: View>: View {
+struct BotDetailView<Conversation: View, Automation: View, Agent: View>: View {
     let row: BotRow
     let isWorking: Bool
     let onEdit: () -> Void
@@ -22,6 +23,7 @@ struct BotDetailView<Conversation: View, Automation: View>: View {
     let onDelete: () -> Void
     private let conversation: Conversation
     private let automation: Automation
+    private let agent: Agent
 
     init(
         row: BotRow,
@@ -45,6 +47,13 @@ struct BotDetailView<Conversation: View, Automation: View>: View {
                 detail: "Scheduled work and bot-to-bot messaging for this profile land in a later update.",
                 icon: "clock.arrow.2.circlepath"
             )
+        },
+        @ViewBuilder agent: () -> Agent = {
+            BotDetailPlaceholder(
+                title: "Agent",
+                detail: "This bot's model, identity prompt, skills and tools land in a later update.",
+                icon: "cpu"
+            )
         }
     ) {
         self.row = row
@@ -57,6 +66,7 @@ struct BotDetailView<Conversation: View, Automation: View>: View {
         self.onDelete = onDelete
         self.conversation = conversation()
         self.automation = automation()
+        self.agent = agent()
     }
 
     var body: some View {
@@ -65,6 +75,7 @@ struct BotDetailView<Conversation: View, Automation: View>: View {
                 identityCard
                 identityDetails
                 conversation
+                agent
                 automation
                 dangerZone
             }
