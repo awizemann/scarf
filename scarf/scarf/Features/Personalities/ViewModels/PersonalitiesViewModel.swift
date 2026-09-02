@@ -99,7 +99,12 @@ final class PersonalitiesViewModel {
             message = "Active personality set to \(name)"
         } else {
             logger.warning("Failed to set personality: \(result.output)")
-            message = "Failed to set personality"
+            // Same `hermes config set` failure surface as Settings, so use
+            // the shared builder: it quotes the CLI's own reason (e.g. the
+            // managed-scope refusal) instead of a generic string.
+            message = SettingsViewModel.saveFailureMessage(
+                key: "display.personality", output: result.output
+            )
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             self?.message = nil

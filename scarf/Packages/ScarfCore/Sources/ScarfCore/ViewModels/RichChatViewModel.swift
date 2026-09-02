@@ -201,7 +201,52 @@ public final class RichChatViewModel {
     /// avoid the misleading "spinner after the reply has landed" UX
     /// we saw in pass-1 (M7 #4).
     public var isAgentWorking = false
-    public var pendingPermission: PendingPermission?
+    /// FIFO queue of permission requests the agent has raised and the
+    /// user hasn't answered yet.
+    ///
+    /// This used to be a single slot. Hermes can raise a second
+    /// `session/request_permission` while the first is still on screen
+    /// (parallel tool calls in one turn), and the single slot silently
+    /// OVERWROTE the first — its sheet swapped contents under the
+    /// user's cursor and the overwritten request was never answered,
+    /// leaving that tool call blocked for the rest of the turn.
+    /// Queueing preserves arrival order: the UI presents the head, and
+    /// answering it pops to the next.
+    public private(set) var permissionQueue: [PendingPermission] = []
+
+    /// The request currently on screen — the head of `permissionQueue`.
+    /// Read-only on purpose: resolution goes through
+    /// `resolvePermission(requestId:)` so a stale dismissal can never
+    /// swallow a request the user hasn't seen yet.
+    public var pendingPermission: PendingPermission? { permissionQueue.first }
+
+    /// Append a request, or refresh one already queued under the same
+    /// id (a duplicate re-send from the agent must not double-queue).
+    public func enqueuePermission(_ permission: PendingPermission) {
+        if let idx = permissionQueue.firstIndex(where: { $0.requestId == permission.requestId }) {
+            permissionQueue[idx] = permission
+        } else {
+            permissionQueue.append(permission)
+        }
+    }
+
+    /// Remove an answered request. Idempotent and id-keyed: a second
+    /// call for the same id (e.g. a sheet writing its dismissal after
+    /// the answer already popped it) is a no-op rather than eating the
+    /// next queued request.
+    public func resolvePermission(requestId: Int) {
+        permissionQueue.removeAll { $0.requestId == requestId }
+    }
+
+    /// Drop every queued request without answering. Used on the paths
+    /// where the turn they belong to is over (prompt complete, cancel,
+    /// disconnect, session reset) — nobody is listening for the answer
+    /// any more, and presenting a leftover on the NEXT turn would ask
+    /// the user about work that already finished.
+    public func clearPendingPermissions() {
+        permissionQueue.removeAll()
+    }
+
     /// Mutated to trigger a scroll-to-bottom in the message list.
     public var scrollTrigger = UUID()
 
@@ -1393,7 +1438,7 @@ public final class RichChatViewModel {
         currentTurnStart = nil
         turnDurations = [:]
         transientHint = nil
-        pendingPermission = nil
+        clearPendingPermissions()
         // v2.8 / Hermes v0.13 — drop optimistic v0.13 surfaces on
         // session reset so a fresh chat (or a resume into a different
         // session) doesn't paint stale goal / queue state from the
@@ -1663,12 +1708,12 @@ public final class RichChatViewModel {
         case .toolCallUpdate(_, let update):
             handleToolCallComplete(update)
         case .permissionRequest(_, let requestId, let request):
-            pendingPermission = PendingPermission(
+            enqueuePermission(PendingPermission(
                 requestId: requestId,
                 title: request.toolCallTitle,
                 kind: request.toolCallKind,
                 options: request.options
-            )
+            ))
         case .promptComplete(_, let response):
             handlePromptComplete(response: response)
         case .connectionLost(let reason):
@@ -1898,6 +1943,15 @@ public final class RichChatViewModel {
         let hadAssistantOutput = streamingAssistantText.isEmpty == false
             || messages.last?.isAssistant == true
         finalizeStreamingMessage()
+        // The turn these belong to is over. An unanswered request that
+        // outlived its turn (agent cancelled, tool abandoned, the turn
+        // errored out from under a parallel tool call) must be DROPPED,
+        // not carried into the next turn — otherwise the user gets a
+        // sheet asking them to approve work that already finished, and
+        // answering it goes nowhere. Only reachable when something went
+        // sideways: a healthy turn can't complete while a tool call is
+        // still blocked on approval.
+        clearPendingPermissions()
 
         if !hadAssistantOutput, response.stopReason != "end_turn" {
             let reason: String
@@ -1995,7 +2049,7 @@ public final class RichChatViewModel {
         // completed and this is the transport noticing afterwards.
         endAnalyticsTurn(errorKind: "connection_lost")
         isAgentWorking = false
-        pendingPermission = nil
+        clearPendingPermissions()
         buildMessageGroups()
     }
 
@@ -2167,7 +2221,7 @@ public final class RichChatViewModel {
     public func finalizeOnDisconnect() {
         finalizeStreamingMessage()
         isAgentWorking = false
-        pendingPermission = nil
+        clearPendingPermissions()
         buildMessageGroups()
     }
 

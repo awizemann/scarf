@@ -15,6 +15,7 @@ import UniformTypeIdentifiers
 struct AdvancedTab: View {
     @Bindable var viewModel: SettingsViewModel
     @Environment(\.hermesCapabilities) private var capabilitiesStore
+    private var capabilities: HermesCapabilities { capabilitiesStore?.capabilities ?? .empty }
     @State private var showRawConfig = false
     @State private var showRestoreConfirm = false
     @State private var pendingRestorePath: String?
@@ -63,8 +64,14 @@ struct AdvancedTab: View {
         }
 
         SettingsSection(title: "Checkpoints", icon: "clock.arrow.circlepath") {
-            ToggleRow(label: "Enabled", isOn: viewModel.config.checkpoints.enabled) { viewModel.setCheckpointsEnabled($0) }
-            StepperRow(label: "Max Snapshots", value: viewModel.config.checkpoints.maxSnapshots, range: 1...500, step: 5) { viewModel.setCheckpointsMaxSnapshots($0) }
+            // Absent keys show the CONNECTED host's own defaults rather than
+            // one release's. `enabled` has defaulted to false on every
+            // supported host (cli.py `cp_cfg.get("enabled", False)` since
+            // long before the v0.6.0 minimum); `max_snapshots` went 50 → 20
+            // at v0.13.0 (tag v2026.5.7, cli.py:2311). Nothing is written
+            // back until the user actually touches a control.
+            ToggleRow(label: "Enabled", isOn: viewModel.config.displayCheckpointsEnabled(capabilities: capabilities)) { viewModel.setCheckpointsEnabled($0) }
+            StepperRow(label: "Max Snapshots", value: viewModel.config.displayCheckpointsMaxSnapshots(capabilities: capabilities), range: 1...500, step: 5) { viewModel.setCheckpointsMaxSnapshots($0) }
         }
 
         SettingsSection(title: "Logging", icon: "doc.text") {
@@ -89,10 +96,13 @@ struct AdvancedTab: View {
             }
             ReadOnlyRow(label: "Provider", value: viewModel.config.delegation.provider)
             EditableTextField(label: "Base URL", value: viewModel.config.delegation.baseURL) { viewModel.setDelegationBaseURL($0) }
-            StepperRow(label: "Max Iterations", value: viewModel.config.delegation.maxIterations, range: 1...500, step: 5) { viewModel.setDelegationMaxIterations($0) }
+            // Absent keys resolve against the host: v0.20.2 raised the
+            // server-side defaults 50→250 and 3→10 (tag v2026.8.16,
+            // hermes_cli/config_defaults.py:1821 / :1846).
+            StepperRow(label: "Max Iterations", value: viewModel.config.displayDelegationMaxIterations(capabilities: capabilities), range: 1...500, step: 5) { viewModel.setDelegationMaxIterations($0) }
             // v0.20.4+ — server default 10, floor 1, no ceiling.
             if capabilitiesStore?.capabilities.isV0204OrLater ?? false {
-                StepperRow(label: "Max Concurrent Children", value: viewModel.config.delegation.maxConcurrentChildren, range: 1...500, step: 1) { viewModel.setDelegationMaxConcurrentChildren($0) }
+                StepperRow(label: "Max Concurrent Children", value: viewModel.config.displayDelegationMaxConcurrentChildren(capabilities: capabilities), range: 1...500, step: 1) { viewModel.setDelegationMaxConcurrentChildren($0) }
                     .help("Max parallel child agents per delegation batch. Values above 10 multiply API cost linearly.")
             }
         }

@@ -893,7 +893,7 @@ final class BotsViewModel {
                     log.warning("bot save failed: \(result, privacy: .public)")
                     self.errorMessage = result
                 } else {
-                    self.flash("Saved \(draft.profileName)")
+                    self.flash(String(localized: "Saved \(draft.profileName)"))
                 }
                 self.load(force: true)
             }
@@ -1139,7 +1139,12 @@ final class BotsViewModel {
         case BotsError.avatarTooLarge(_, let size):
             return "That image is \(size) bytes after conversion; Hermes caps avatars at \(HermesBotAvatar.maxBytes)."
         default:
-            return "Couldn't save \(profileName): \(String(describing: error))"
+            // Curly apostrophe (Apple style) — deliberately the SAME
+            // catalog key as `SettingsViewModel`'s save-failure message.
+            // A straight `'` here forked the catalog into two entries
+            // differing only by the apostrophe glyph, each carrying its
+            // own six translations.
+            return String(localized: "Couldn’t save \(profileName): \(String(describing: error))")
         }
     }
 

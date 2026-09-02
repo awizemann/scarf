@@ -2165,16 +2165,19 @@ final class ChatViewModel {
         return .approve
     }
 
-    func respondToPermission(optionId: String) {
-        guard let client = acpClient,
-              let permission = richChatViewModel.pendingPermission else { return }
+    /// `requestId` is the one the sheet was PRESENTING, not whatever
+    /// happens to sit at the head of the queue now — with a queue
+    /// those can differ (a second request can land while the sheet is
+    /// open), and answering the head would misroute the decision.
+    func respondToPermission(requestId: Int, optionId: String) {
+        guard let client = acpClient else { return }
         Analytics.record(.permissionPromptResponded(
             decision: Self.analyticsPermissionDecision(optionId: optionId)
         ))
         Task {
-            await client.respondToPermission(requestId: permission.requestId, optionId: optionId)
+            await client.respondToPermission(requestId: requestId, optionId: optionId)
         }
-        richChatViewModel.pendingPermission = nil
+        richChatViewModel.resolvePermission(requestId: requestId)
     }
 
     // MARK: - Recent Sessions

@@ -85,7 +85,9 @@ import Foundation
         #expect(c.security.redactSecrets == true)
         #expect(c.humanDelay.mode == "off")
         #expect(c.compression.enabled == true)
-        #expect(c.checkpoints.enabled == true)
+        // Absent-key sentinel, not a default — resolve for display via
+        // `displayCheckpointsEnabled(capabilities:)`.
+        #expect(c.checkpoints.enabled == nil)
         #expect(c.logging.level == "INFO")
         #expect(c.discord.requireMention == true)
         #expect(c.telegram.reactions == false)

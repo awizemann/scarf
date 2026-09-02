@@ -149,7 +149,7 @@ struct CuratorView: View {
                     .lineLimit(1)
                 Spacer()
                 if let category = skill.category, !category.isEmpty {
-                    ScarfBadge(category, kind: .neutral)
+                    ScarfBadge(verbatim: category, kind: .neutral)
                 }
             }
             HStack(spacing: 6) {
@@ -182,7 +182,7 @@ struct CuratorView: View {
 
     private var statusBadge: some View {
         let kind: ScarfBadgeKind
-        let label: String
+        let label: LocalizedStringKey
         switch viewModel.status.state {
         case .enabled:  kind = .success; label = "Enabled"
         case .paused:   kind = .warning; label = "Paused"

@@ -256,14 +256,14 @@ struct CuratorView: View {
 
     private var statusBadge: some View {
         let kind: ScarfBadgeKind
-        let label: String
+        let label: LocalizedStringKey
         switch viewModel.status.state {
         case .enabled:  kind = .success; label = "Enabled"
         case .paused:   kind = .warning; label = "Paused"
         case .disabled: kind = .neutral; label = "Disabled"
         case .unknown:  kind = .neutral; label = "Unknown"
         }
-        return ScarfBadge(verbatim: label, kind: kind)
+        return ScarfBadge(label, kind: kind)
     }
 
     private var skillCountsSection: some View {
@@ -396,10 +396,10 @@ struct CuratorView: View {
         }
     }
 
-    private func skillTable(title: String, rows: [HermesCuratorSkillRow]) -> some View {
+    private func skillTable(title: LocalizedStringKey, rows: [HermesCuratorSkillRow]) -> some View {
         ScarfCard {
             VStack(alignment: .leading, spacing: ScarfSpace.s2) {
-                ScarfSectionHeader(verbatim: title)
+                ScarfSectionHeader(title)
                 ForEach(rows) { row in
                     HStack(alignment: .center, spacing: ScarfSpace.s2) {
                         Text(row.name)

@@ -52,6 +52,16 @@ public extension HermesConfig {
             guard let raw = values[key] else { return nil }
             return Int(raw)
         }
+        // True-optional bool: `nil` means "key absent from config.yaml".
+        // Used where the server-side default CHANGED across Hermes
+        // releases (`checkpoints.enabled`, false since v0.21), so the
+        // display layer resolves the absent case against the host's
+        // capabilities instead of the parse baking in one release's
+        // default. See `HermesConfig.displayCheckpointsEnabled`.
+        func boolOpt(_ key: String) -> Bool? {
+            guard let v = values[key] else { return nil }
+            return v == "true"
+        }
 
         let dockerEnv = maps["terminal.docker_env"] ?? [:]
         let commandAllowlist = lists["permanent_allowlist"] ?? lists["command_allowlist"] ?? []
@@ -237,9 +247,12 @@ public extension HermesConfig {
             progressNotices: bool("compression.progress_notices", default: false)
         )
 
+        // Sentinels, not defaults: v0.21 flipped both server-side defaults
+        // (enabled true→false, max_snapshots 50→20), so an absent key must
+        // resolve against the host — `HermesConfig.displayCheckpoints*`.
         let checkpoints = CheckpointSettings(
-            enabled: bool("checkpoints.enabled", default: true),
-            maxSnapshots: int("checkpoints.max_snapshots", default: 50)
+            enabled: boolOpt("checkpoints.enabled"),
+            maxSnapshots: int("checkpoints.max_snapshots", default: 0)
         )
 
         let logging = LoggingSettings(
@@ -253,8 +266,11 @@ public extension HermesConfig {
             provider: str("delegation.provider"),
             baseURL: str("delegation.base_url"),
             apiKey: str("delegation.api_key"),
-            maxIterations: int("delegation.max_iterations", default: 250),
-            maxConcurrentChildren: int("delegation.max_concurrent_children", default: 10)
+            // Sentinel 0 = absent; the v0.20.4 migrations raised both
+            // defaults (50→250, 3→10), so resolve via
+            // `HermesConfig.displayDelegationMax*`.
+            maxIterations: int("delegation.max_iterations", default: 0),
+            maxConcurrentChildren: int("delegation.max_concurrent_children", default: 0)
         )
 
         let discord = DiscordSettings(
@@ -404,12 +420,18 @@ public extension HermesConfig {
         // explicit block don't appear in the dictionary, so the editor's
         // `?? .empty` fallback hands the user the defaults without leaving
         // stale keys littered across the YAML.
-        // `google_chat` is intentionally absent: its adapter gates access
-        // via GOOGLE_CHAT_ALLOWED_USERS, never an allowed_channels list.
+        // `google_chat` has no allowlist (its adapter gates access via
+        // GOOGLE_CHAT_ALLOWED_USERS, never an allowed_channels list) but it
+        // DOES get a `GatewayBehaviorSection`, so Scarf writes its
+        // `google_chat.gateway_restart_notification`. Leaving it out of this
+        // loop made that toggle a write-only key: it saved, then the next
+        // load read `false` and the switch snapped back. The allowlists
+        // simply come back empty for it.
         let gatewayAllowlistPlatforms = [
             "slack", "mattermost",
             "telegram", "whatsapp",
             "matrix", "dingtalk",
+            "google_chat",
         ]
         var gatewayPlatforms: [String: GatewayPlatformSettings] = [:]
         for platform in gatewayAllowlistPlatforms {

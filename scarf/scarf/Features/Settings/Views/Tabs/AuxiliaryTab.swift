@@ -207,7 +207,7 @@ struct AuxiliaryTab: View {
                             viewModel.setAuxiliary(key, field: "provider", value: "auto")
                         }
                         .controlSize(.small)
-                        .help(Text(verbatim: "Sets `auxiliary.\(key).provider: auto` so Hermes inherits the main provider's authentication."))
+                        .help(Text("Sets `auxiliary.\(key).provider: auto` so Hermes inherits the main provider's authentication."))
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)

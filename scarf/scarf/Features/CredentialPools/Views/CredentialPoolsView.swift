@@ -361,7 +361,7 @@ struct CredentialPoolsView: View {
                     // markdown inline-code styling — `.help(_:)` rejects
                     // styled Text. Plain string preserves the backticks
                     // literally.
-                    .help(Text(verbatim: "Run `hermes auth add \(provider.provider) --type oauth` again to refresh this provider's tokens."))
+                    .help(Text("Run `hermes auth add \(provider.provider) --type oauth` again to refresh this provider's tokens."))
                     Button(role: .destructive) {
                         pendingOAuthRemove = provider
                     } label: {
@@ -369,7 +369,7 @@ struct CredentialPoolsView: View {
                     }
                     .controlSize(.small)
                     .buttonStyle(.borderless)
-                    .help(Text(verbatim: "Remove this OAuth provider from auth.json. Hermes will need to be re-authenticated to use it again."))
+                    .help(Text("Remove this OAuth provider from auth.json. Hermes will need to be re-authenticated to use it again."))
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)

@@ -166,7 +166,7 @@ final class SettingsViewModel {
             outcome: .init(succeeded: result.exitCode == 0)
         ))
         if result.exitCode == 0 {
-            saveMessage = "Saved \(key)"
+            saveMessage = String(localized: "Saved \(key)")
             config = fileService.loadConfig()
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.saveMessage = nil
@@ -208,7 +208,9 @@ final class SettingsViewModel {
                 return true
             }
             .map(Self.strippingErrorDecoration) ?? ""
-        return reason.isEmpty ? "Failed to save \(key)" : "Couldn’t save \(key): \(reason)"
+        return reason.isEmpty
+            ? String(localized: "Failed to save \(key)")
+            : String(localized: "Couldn’t save \(key): \(reason)")
     }
 
     /// Strip Hermes's `✗ ` CLI marker and any leading `SomeError: ` label
@@ -314,7 +316,13 @@ final class SettingsViewModel {
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.config = cfg
-                self.saveMessage = ok ? "Saved model settings" : "Failed to save model settings"
+                // `applyModelConfigPlan` reports only a Bool, so there is no
+                // CLI reason to surface — but route through the shared
+                // builder anyway so this banner keeps matching its siblings
+                // if the wording ever changes.
+                self.saveMessage = ok
+                    ? String(localized: "Saved model settings")
+                    : Self.saveFailureMessage(key: "model settings", output: "")
                 DispatchQueue.main.asyncAfter(deadline: .now() + (ok ? 2 : 5)) { [weak self] in
                     self?.saveMessage = nil
                 }
@@ -507,13 +515,36 @@ final class SettingsViewModel {
     /// Provider switching for external memory plugins. Uses `hermes memory setup/off`
     /// because the CLI wizard runs provider-specific init steps beyond a simple
     /// config.yaml write.
+    ///
+    /// The `off` branch is NOT a `hermes config set`, so it can't ride
+    /// `applyConfigWrite`; it still has to surface a non-zero exit the same
+    /// way — a failed teardown used to reload the unchanged config and
+    /// present as a silent success, leaving the picker showing "none" while
+    /// the provider was still wired up.
     func setMemoryProvider(_ value: String) {
-        if value.isEmpty {
-            _ = runHermes(["memory", "off"])
-        } else {
+        guard value.isEmpty else {
             setSetting("memory.provider", value: value)
+            return
         }
+        let key = "memory.provider"
+        let result = runHermes(["memory", "off"])
+        Analytics.record(.settingChanged(
+            key: .init(rawKey: key),
+            outcome: .init(succeeded: result.exitCode == 0)
+        ))
         config = fileService.loadConfig()
+        if result.exitCode == 0 {
+            saveMessage = String(localized: "Saved \(key)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.saveMessage = nil
+            }
+        } else {
+            logger.warning("hermes memory off failed (exit \(result.exitCode)): \(result.output)")
+            saveMessage = Self.saveFailureMessage(key: key, output: result.output)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                self?.saveMessage = nil
+            }
+        }
     }
     // Hermes v0.9.0 PR #6995: the key is camelCase in config.yaml (not snake_case like the rest of Hermes).
     func setHonchoInitOnSessionStart(_ value: Bool) { setSetting("honcho.initOnSessionStart", value: value ? "true" : "false") }
@@ -802,14 +833,16 @@ final class SettingsViewModel {
         }
         if updated != existing {
             guard context.writeText(path, content: updated) else {
-                saveMessage = "Failed to save \(label)"
+                // Direct-YAML write failure: no CLI output to quote, so the
+                // shared builder's bare form is exactly right.
+                saveMessage = Self.saveFailureMessage(key: label, output: "")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
                     self?.saveMessage = nil
                 }
                 return
             }
         }
-        saveMessage = "Saved \(label)"
+        saveMessage = String(localized: "Saved \(label)")
         config = fileService.loadConfig()
         rawConfigYAML = context.readText(path) ?? rawConfigYAML
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in

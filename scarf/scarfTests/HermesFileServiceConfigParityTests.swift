@@ -187,6 +187,11 @@ struct HermesFileServiceConfigParityTests {
 /// `RichChatViewModel`'s own scalar lookup, not modelled on `HermesConfig`.
 /// The reader coverage of the model.* trio is already pinned by
 /// `classicKeysStillParse` above.
+///
+/// Every OTHER config writer in the app — `LocalModelConfigPlan` included —
+/// is covered by `AllConfigWritersParityTests` at the bottom of this file,
+/// which widened this gate after the `gateway_restart_notification` bug
+/// shipped from a writer this suite never looked at.
 struct SettingsWriteReadParityTests {
 
     // MARK: Source location
@@ -236,7 +241,7 @@ struct SettingsWriteReadParityTests {
     /// reasoning_effort/language go through dedicated literal setters.
     private static let titleGenerationFields = ["provider", "model", "base_url", "api_key"]
 
-    private static func expandedAuxKeys() -> [String] {
+    static func expandedAuxKeys() -> [String] {
         auxTasks.flatMap { task in
             (auxFields + ["reasoning_effort", "max_concurrency"]).map { "auxiliary.\(task).\($0)" }
         } + titleGenerationFields.map { "auxiliary.title_generation.\($0)" }
@@ -305,7 +310,7 @@ struct SettingsWriteReadParityTests {
         }
     }
 
-    private static func signature(_ config: HermesConfig) -> [String] {
+    static func signature(_ config: HermesConfig) -> [String] {
         var out: [String] = []
         flatten(config, path: "root", into: &out)
         return out.sorted()
@@ -338,16 +343,32 @@ struct SettingsWriteReadParityTests {
         return lines.joined(separator: "\n") + "\n"
     }
 
+    /// `a.b.c` + one entry → nested block YAML whose leaf is a MAP, so
+    /// map-valued keys (`agent.reasoning_overrides`, read into
+    /// `maps[...]`) perturb the parse where neither a scalar nor a bullet
+    /// list would. Needed once the direct-YAML writers came under the
+    /// gate: `hermes config set` cannot express a map, which is exactly
+    /// why those surfaces splice the YAML themselves.
+    private static func mapYAML(key: String, entry: String) -> String {
+        let parts = key.split(separator: ".").map(String.init)
+        var lines = parts.enumerated().map { (i, part) in
+            String(repeating: "  ", count: i) + "\(part):"
+        }
+        lines.append(String(repeating: "  ", count: parts.count) + "\(entry): \(entry)")
+        return lines.joined(separator: "\n") + "\n"
+    }
+
     /// A key is "read" if at least one sentinel shape moves a field off its
     /// default. Covers string, bool (both directions — some defaults are
-    /// `true`), int, and block-list readers.
-    private static func isKeyReadable(_ key: String, defaultSignature: [String]) -> Bool {
+    /// `true`), int, block-list, and block-map readers.
+    static func isKeyReadable(_ key: String, defaultSignature: [String]) -> Bool {
         let candidates = [
             scalarYAML(key: key, value: sentinel),
             scalarYAML(key: key, value: "true"),
             scalarYAML(key: key, value: "false"),
             scalarYAML(key: key, value: "424242"),
             listYAML(key: key, item: sentinel),
+            mapYAML(key: key, entry: sentinel),
         ]
         for yaml in candidates where signature(HermesConfig(yaml: yaml)) != defaultSignature {
             return true
@@ -451,5 +472,439 @@ struct SettingsWriteReadParityTests {
         #expect(!Self.isKeyReadable("scarf.fake_unread_key", defaultSignature: defaultSignature))
         // And a real reader is detected as readable (positive control).
         #expect(Self.isKeyReadable("web.search_backend", defaultSignature: defaultSignature))
+    }
+}
+
+// MARK: - Repo-wide config-writer parity gate
+
+/// Widens `SettingsWriteReadParityTests` from ONE file to EVERY config
+/// writer in the app.
+///
+/// The narrow gate scanned `SettingsViewModel.swift` only. That is not
+/// where all config keys are written: `GatewayBehaviorViewModel` builds its
+/// own `hermes config set` batch, `AdvancedTab` calls `setSetting` straight
+/// from the view, `QuickCommandsViewModel` / `CredentialPoolsViewModel`
+/// compose dotted keys inline, every platform-setup VM ships a `configKV`
+/// dictionary, and `LocalModelConfigPlan` (ScarfCore) emits its own argv.
+/// The `gateway_restart_notification` bug — the toggle wrote the nested
+/// `gateway.platforms.<p>.…` path nobody reads, and the reader then
+/// contradicted it on the next load — survived a full release precisely
+/// because that writer sat outside the gate.
+///
+/// Two independent guards:
+///
+/// 1. **Writer discovery.** Every source file under the app / iOS / ScarfCore
+///    trees is scanned for config-write markers. The discovered set must
+///    equal `knownWriters`. A NEW writer file fails here until it is
+///    registered — no writer can be added silently.
+/// 2. **Key readability.** Every config key literal those files write must
+///    round-trip through `HermesConfig(yaml:)`, same detector as the narrow
+///    gate. A wrong / unread path (the restart-notification class) fails.
+///
+/// Non-literal key arguments (the shared executors that take a `key`
+/// parameter, and the genuinely computed keys) can't be read off the
+/// source, so each writer declares how many it has plus the concrete
+/// expansion. A new computed shape pushes the count past the declaration
+/// and fails — it cannot slip through unchecked.
+struct AllConfigWritersParityTests {
+
+    // MARK: Writer manifest
+
+    /// One registered config-writing source file.
+    struct Writer {
+        /// Path relative to the project dir (the parent of `scarfTests`).
+        let path: String
+        /// How many config-write call sites in this file pass a NON-literal
+        /// key (a `key` parameter, or an interpolated/computed expression).
+        /// Every one of them must be accounted for by `computedKeys`.
+        let nonLiteralKeySites: Int
+        /// Concrete keys those non-literal sites can produce, enumerated so
+        /// the readability gate can still check them.
+        let computedKeys: [String]
+    }
+
+    /// Sample values used to make an interpolated key concrete. The gate
+    /// checks the SHAPE of the path, so any legal segment works.
+    private static let sampleQuickCommand = "deploy"
+    private static let sampleProvider = "openai"
+
+    /// Keys `SettingsViewModel` splices straight into `config.yaml` through
+    /// `saveDirectYAML` rather than `hermes config set` — scanned off the
+    /// `label:` argument, which by construction IS the dotted key each
+    /// caller writes. Scanned rather than hard-coded so a fourth
+    /// direct-YAML surface is covered the moment it lands.
+    static var directYAMLKeys: [String] {
+        guard let source = try? read("scarf/Features/Settings/ViewModels/SettingsViewModel.swift")
+        else { return [] }
+        return matches(#"saveDirectYAML\(label:\s*"([^"]+)""#, in: stripComments(source))
+    }
+
+    /// Platforms whose gateway-behavior toggles Scarf actually writes —
+    /// scanned off the `GatewayBehaviorSection(platform: "…")` call sites so
+    /// a newly-wired platform is covered automatically instead of needing a
+    /// second list here to be kept in sync.
+    static func gatewayBehaviorPlatforms() -> [String] {
+        let views = swiftFiles().filter { $0.contains("Features/Platforms/Views") }
+        var out: Set<String> = []
+        for rel in views {
+            guard let source = try? read(rel) else { continue }
+            out.formUnion(matches(#"GatewayBehaviorSection\(\s*platform:\s*"([^"]+)""#, in: source))
+        }
+        return out.sorted()
+    }
+
+    /// The restart-notification keys those platforms produce, expanded by
+    /// CALLING the production key builder — the path is pinned by shipping
+    /// code, not by a copy of it in the test.
+    private static var gatewayRestartNotificationKeys: [String] {
+        gatewayBehaviorPlatforms().map {
+            GatewayBehaviorViewModel.restartNotificationKey(platform: $0, capabilities: .empty)
+        }
+    }
+
+    private static var knownWriters: [Writer] {
+        [
+            // 8 non-literal sites: `applyConfigWrite`'s two
+            // `["config", "set"/"unset", key, …]` argv (keys come from the
+            // scanned `setSetting(` literals) plus the six interpolated
+            // `setSetting("auxiliary.\(task)…")` writers, which
+            // `SettingsWriteReadParityTests` already pins by template and
+            // expands into concrete keys.
+            // …plus 1 direct-YAML site (`saveDirectYAML`'s shared
+            // `context.writeText(path, …)`), whose three callers name the
+            // key they splice in their `label:`.
+            Writer(path: "scarf/Features/Settings/ViewModels/SettingsViewModel.swift",
+                   nonLiteralKeySites: 9,
+                   computedKeys: SettingsWriteReadParityTests.expandedAuxKeys()
+                    + directYAMLKeys),
+            Writer(path: "scarf/Features/Settings/Views/Tabs/AdvancedTab.swift",
+                   nonLiteralKeySites: 0, computedKeys: []),
+            Writer(path: "scarf/Core/Services/HermesFileService.swift",
+                   nonLiteralKeySites: 0, computedKeys: []),
+            // Shared executor: keys arrive from each platform VM's configKV.
+            Writer(path: "scarf/Features/Platforms/ViewModels/PlatformSetup/PlatformSetupHelpers.swift",
+                   nonLiteralKeySites: 1, computedKeys: []),
+            Writer(path: "scarf/Features/Platforms/ViewModels/PlatformSetup/GatewayBehaviorViewModel.swift",
+                   nonLiteralKeySites: 1,
+                   computedKeys: gatewayRestartNotificationKeys),
+            Writer(path: "scarf/Features/Platforms/ViewModels/PlatformSetup/DiscordSetupViewModel.swift",
+                   nonLiteralKeySites: 0, computedKeys: []),
+            Writer(path: "scarf/Features/Platforms/ViewModels/PlatformSetup/TelegramSetupViewModel.swift",
+                   nonLiteralKeySites: 0, computedKeys: []),
+            Writer(path: "scarf/Features/Platforms/ViewModels/PlatformSetup/SlackSetupViewModel.swift",
+                   nonLiteralKeySites: 0, computedKeys: []),
+            Writer(path: "scarf/Features/Platforms/ViewModels/PlatformSetup/MatrixSetupViewModel.swift",
+                   nonLiteralKeySites: 0, computedKeys: []),
+            Writer(path: "scarf/Features/Platforms/ViewModels/PlatformSetup/SignalSetupViewModel.swift",
+                   nonLiteralKeySites: 0, computedKeys: []),
+            Writer(path: "scarf/Features/Platforms/ViewModels/PlatformSetup/WhatsAppSetupViewModel.swift",
+                   nonLiteralKeySites: 0, computedKeys: []),
+            Writer(path: "scarf/Features/Platforms/ViewModels/PlatformSetup/WhatsAppCloudSetupViewModel.swift",
+                   nonLiteralKeySites: 0, computedKeys: []),
+            Writer(path: "scarf/Features/Platforms/ViewModels/PlatformSetup/EmailSetupViewModel.swift",
+                   nonLiteralKeySites: 0, computedKeys: []),
+            Writer(path: "scarf/Features/Platforms/ViewModels/PlatformSetup/NtfySetupViewModel.swift",
+                   nonLiteralKeySites: 0, computedKeys: []),
+            Writer(path: "scarf/Features/Platforms/ViewModels/PlatformSetup/HomeAssistantSetupViewModel.swift",
+                   nonLiteralKeySites: 0, computedKeys: []),
+            Writer(path: "scarf/Features/QuickCommands/ViewModels/QuickCommandsViewModel.swift",
+                   nonLiteralKeySites: 2,
+                   computedKeys: [
+                    "quick_commands.\(sampleQuickCommand).type",
+                    "quick_commands.\(sampleQuickCommand).command",
+                   ]),
+            Writer(path: "scarf/Features/Personalities/ViewModels/PersonalitiesViewModel.swift",
+                   nonLiteralKeySites: 0, computedKeys: []),
+            Writer(path: "scarf/Features/CredentialPools/ViewModels/CredentialPoolsViewModel.swift",
+                   nonLiteralKeySites: 1,
+                   computedKeys: ["credential_pool_strategies.\(sampleProvider)"]),
+            // ScarfCore's model-picker plan. Its argv sites take a `key`
+            // parameter; the concrete keys are the literals in the same file
+            // (`model.default`/`provider`/`base_url`/`api_key`/`api_mode`)
+            // plus `model.context_length`, cleared through the managed-key
+            // list rather than a `.clear(key: "…")` literal.
+            // Shared direct-YAML executor for the gateway allowlists: one
+            // `writeText` site whose `platform` / `key` both arrive as
+            // parameters from `GatewayBehaviorViewModel`.
+            Writer(path: "Packages/ScarfCore/Sources/ScarfCore/Services/GatewayConfigWriter.swift",
+                   nonLiteralKeySites: 1, computedKeys: []),
+            Writer(path: "Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelConfigPlan.swift",
+                   nonLiteralKeySites: 2,
+                   computedKeys: ["model.context_length"]),
+        ]
+    }
+
+    // MARK: Source roots + discovery
+
+    private static var projectDir: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // …/scarfTests
+            .deletingLastPathComponent()   // …/<proj>
+    }
+
+    private static let sourceRoots = ["scarf", "Scarf iOS", "Packages/ScarfCore/Sources"]
+
+    /// Any of these in a file means it writes at least one config KEY.
+    /// Deliberately excludes `configKV: [:]` (a platform VM with no config
+    /// keys) and bare `configKV` parameter mentions.
+    private static let writerMarkers = [
+        #"(?:un)?setSetting\("#,
+        #""config",\s*"(?:set|unset)""#,
+        #"configKV\s*\[\s*""#,
+        #"configKV:\s*\[String:\s*String\]\s*=\s*\[\s*\n"#,
+        // Direct-YAML writers. `hermes config set` stringifies arrays and
+        // can't express a sequence-of-mappings, so the list/map surfaces
+        // (gateway allowlists, agent.reasoning_overrides,
+        // model_catalog.excluded_providers, profile_routes) bypass the CLI
+        // and splice `~/.hermes/config.yaml` themselves. None of the argv
+        // or `setSetting` markers above can see that shape — before this
+        // marker `SettingsViewModel` was only caught INCIDENTALLY, by its
+        // unrelated `setSetting` calls, so a brand-new file whose ONLY
+        // config writes were direct-YAML splices walked straight past
+        // Guard 1. Both orderings are listed because the path constant and
+        // the write can appear either way round in a file; requiring BOTH
+        // tokens keeps non-config `writeText` callers (SOUL.md, the iOS
+        // memory snapshot) out of the discovered set.
+        #"paths\.configYAML[\s\S]*?\.writeText\("#,
+        #"\.writeText\([\s\S]*?paths\.configYAML"#,
+    ]
+
+    private static func swiftFiles() -> [String] {
+        var out: [String] = []
+        for root in sourceRoots {
+            let base = projectDir.appendingPathComponent(root)
+            guard let e = FileManager.default.enumerator(atPath: base.path) else { continue }
+            for case let rel as String in e where rel.hasSuffix(".swift") {
+                out.append("\(root)/\(rel)")
+            }
+        }
+        return out.sorted()
+    }
+
+    private static func matches(_ pattern: String, in source: String) -> [String] {
+        guard let re = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else { return [] }
+        let ns = source as NSString
+        return re.matches(in: source, range: NSRange(location: 0, length: ns.length)).map { m in
+            m.numberOfRanges > 1 ? ns.substring(with: m.range(at: 1)) : ns.substring(with: m.range)
+        }
+    }
+
+    private static func count(_ pattern: String, in source: String) -> Int {
+        (try? NSRegularExpression(pattern: pattern))
+            .map { $0.numberOfMatches(in: source, range: NSRange(location: 0, length: (source as NSString).length)) } ?? 0
+    }
+
+    private static func read(_ relativePath: String) throws -> String {
+        try String(contentsOf: projectDir.appendingPathComponent(relativePath), encoding: .utf8)
+    }
+
+    /// Source with `//` comment tails removed, so prose never counts as a
+    /// call site or contributes a key.
+    private static func stripComments(_ source: String) -> String {
+        source.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { line -> String in
+                guard let r = line.range(of: "//") else { return String(line) }
+                return String(line[line.startIndex..<r.lowerBound])
+            }
+            .joined(separator: "\n")
+    }
+
+    // MARK: Key extraction
+
+    /// Literal config keys a writer file spells out, across every write
+    /// shape the app uses.
+    static func literalKeys(in source: String) -> (staticKeys: [String], interpolated: [String]) {
+        var found: [String] = []
+        found += matches(#"(?:un)?setSetting\("([^"]*)""#, in: source)
+        found += matches(#""config",\s*"(?:set|unset)",\s*"([^"]*)""#, in: source)
+        found += matches(#"configKV\["([^"]*)"\]"#, in: source)
+        found += matches(#"\.(?:set|clear)\(key:\s*"([^"]*)""#, in: source)
+        found += configKVDictionaryKeys(in: source)
+        return (found.filter { !$0.contains(#"\("#) }, found.filter { $0.contains(#"\("#) })
+    }
+
+    /// Keys of a `let configKV: [String: String] = [ "k": v, … ]` literal.
+    /// Scans from the opening bracket to the matching close so a `"…"`
+    /// elsewhere in the file is never mistaken for an entry.
+    private static func configKVDictionaryKeys(in source: String) -> [String] {
+        guard let re = try? NSRegularExpression(pattern: #"configKV:\s*\[String:\s*String\]\s*=\s*\["#) else { return [] }
+        let ns = source as NSString
+        var keys: [String] = []
+        for m in re.matches(in: source, range: NSRange(location: 0, length: ns.length)) {
+            var depth = 1
+            var i = m.range.upperBound
+            var inString = false
+            var block = ""
+            while i < ns.length, depth > 0 {
+                let c = ns.substring(with: NSRange(location: i, length: 1))
+                if c == "\"" { inString.toggle() }
+                if !inString {
+                    if c == "[" { depth += 1 }
+                    if c == "]" { depth -= 1; if depth == 0 { break } }
+                }
+                block += c
+                i += 1
+            }
+            keys += matches(#"^\s*"([^"]+)"\s*:"#, in: block)
+                + matches(#"\n\s*"([^"]+)"\s*:"#, in: block)
+        }
+        return keys
+    }
+
+    // MARK: Keys deliberately outside HermesConfig
+
+    /// A key whose reader is NOT `HermesConfig(yaml:)` but a dedicated
+    /// per-feature parser. Legitimate — those surfaces are maps/lists keyed
+    /// by user-chosen names, which `HermesConfig`'s fixed struct can't model
+    /// — but each one still has to name the reader, and the gate asserts
+    /// that reader really does look the path up (`readerLiteral`). An
+    /// unread key can therefore never hide behind a hand-waved exemption.
+    struct ExternalReader {
+        let key: String
+        let readerPath: String
+        let readerLiteral: String
+    }
+
+    private static var externalReaders: [ExternalReader] {
+        [
+            .init(key: "quick_commands.\(sampleQuickCommand).type",
+                  readerPath: "scarf/Features/QuickCommands/ViewModels/QuickCommandsViewModel.swift",
+                  readerLiteral: "\"quick_commands.\""),
+            .init(key: "quick_commands.\(sampleQuickCommand).command",
+                  readerPath: "scarf/Features/QuickCommands/ViewModels/QuickCommandsViewModel.swift",
+                  readerLiteral: "\"quick_commands.\""),
+            .init(key: "credential_pool_strategies.\(sampleProvider)",
+                  readerPath: "scarf/Features/CredentialPools/ViewModels/CredentialPoolsViewModel.swift",
+                  readerLiteral: "\"credential_pool_strategies\""),
+            .init(key: "platforms.email.skip_attachments",
+                  readerPath: "scarf/Features/Platforms/ViewModels/PlatformSetup/EmailSetupViewModel.swift",
+                  readerLiteral: "\"platforms.email.skip_attachments\""),
+        ]
+    }
+
+    /// Keys Scarf writes for HERMES to consume and never reads back, by
+    /// design. Each needs a reason; the list must stay tiny.
+    ///
+    /// * `platforms.whatsapp_cloud.enabled` — derived on save from whether
+    ///   phone_number_id + access_token are both filled in. Scarf recomputes
+    ///   it from those two fields on every load, so reading the flag back
+    ///   would add a second source of truth, not remove one.
+    private static let writeOnlyKeys: Set<String> = [
+        "platforms.whatsapp_cloud.enabled",
+    ]
+
+    // MARK: Tests
+
+    /// Guard 1 — no config writer may exist outside the manifest.
+    @Test func everyConfigWriterFileIsRegistered() throws {
+        var discovered: Set<String> = []
+        for rel in Self.swiftFiles() {
+            let source = Self.stripComments(try Self.read(rel))
+            if Self.writerMarkers.contains(where: { Self.count($0, in: source) > 0 }) {
+                discovered.insert(rel)
+            }
+        }
+        let known = Set(Self.knownWriters.map(\.path))
+        let unregistered = discovered.subtracting(known).sorted()
+        let stale = known.subtracting(discovered).sorted()
+        #expect(unregistered.isEmpty, """
+            Config-writing source file(s) not registered in \
+            AllConfigWritersParityTests.knownWriters: \
+            \(unregistered.joined(separator: ", ")). Register each (with its \
+            non-literal key sites and their concrete expansions) so its keys \
+            go through the write/read parity gate.
+            """)
+        #expect(stale.isEmpty, """
+            Registered writer(s) no longer write config keys — drop them from \
+            knownWriters: \(stale.joined(separator: ", "))
+            """)
+    }
+
+    /// Guard 2 — every key any registered writer writes must be read back
+    /// by `HermesConfig(yaml:)`. A wrong nested path (the
+    /// `gateway_restart_notification` bug) is unread and fails here.
+    @Test func everyWrittenKeyAcrossAllWritersIsReadable() throws {
+        var keys: Set<String> = []
+        for writer in Self.knownWriters {
+            let source = Self.stripComments(try Self.read(writer.path))
+            let (staticKeys, _) = Self.literalKeys(in: source)
+            keys.formUnion(staticKeys)
+            keys.formUnion(writer.computedKeys)
+        }
+        // Sanity: the multi-shape scan must actually find the surface.
+        #expect(keys.count >= 200,
+                "Repo-wide scan found only \(keys.count) config keys — scan likely broke")
+
+        keys.subtract(Self.externalReaders.map(\.key))
+        keys.subtract(Self.writeOnlyKeys)
+
+        let defaultSignature = SettingsWriteReadParityTests.signature(HermesConfig(yaml: ""))
+        let unread = keys.sorted().filter {
+            !SettingsWriteReadParityTests.isKeyReadable($0, defaultSignature: defaultSignature)
+        }
+        #expect(unread.isEmpty, """
+            \(unread.count) config key(s) are WRITTEN somewhere in Scarf but NOT \
+            read back by HermesConfig(yaml:) — they save then reload stale, or \
+            (worse) they are a wrong path nothing has ever read. Fix the path or \
+            add the reader in ScarfCore's HermesConfig+YAML.swift: \
+            \(unread.joined(separator: ", "))
+            """)
+    }
+
+    /// Guard 2b — the escape hatch can't be abused. Every key exempted as
+    /// "read by a dedicated parser" must actually appear in that parser's
+    /// source, and must NOT be readable through `HermesConfig` (otherwise
+    /// the exemption is dead weight hiding the key from the real gate).
+    @Test func externalReaderExemptionsAreRealAndStillNeeded() throws {
+        let defaultSignature = SettingsWriteReadParityTests.signature(HermesConfig(yaml: ""))
+        for entry in Self.externalReaders {
+            let reader = try Self.read(entry.readerPath)
+            #expect(reader.contains(entry.readerLiteral), """
+                \(entry.key) is exempted from the parity gate as "read by \
+                \(entry.readerPath)", but that file does not contain \
+                \(entry.readerLiteral) — the exemption is stale.
+                """)
+            #expect(!SettingsWriteReadParityTests.isKeyReadable(entry.key, defaultSignature: defaultSignature), """
+                \(entry.key) IS readable through HermesConfig now — drop the \
+                externalReaders exemption so the real gate covers it.
+                """)
+        }
+    }
+
+    /// Guard 3 — every non-literal key site must be declared. A new
+    /// computed/interpolated writer shape pushes the real count past the
+    /// manifest and fails here instead of silently skipping the gate.
+    @Test func nonLiteralKeySiteCountsMatchTheManifest() throws {
+        for writer in Self.knownWriters {
+            let source = Self.stripComments(try Self.read(writer.path))
+            // Every config-write call site in the file…
+            let argvSites = Self.count(#""config",\s*"(?:set|unset)","#, in: source)
+            let setSettingSites = Self.count(#"(?:un)?setSetting\("#, in: source)
+                - Self.count(#"func\s+(?:un)?setSetting\("#, in: source)
+            let configKVSites = Self.count(#"configKV\["#, in: source)
+            // Direct-YAML splice sites. The key is never a literal at the
+            // write itself (it lives in the transform / the caller's
+            // arguments), so each one is by definition a non-literal site
+            // and must be declared.
+            let directYAMLSites = Self.count(#"\.writeText\(\s*path\s*,"#, in: source)
+            let sites = argvSites + setSettingSites + configKVSites + directYAMLSites
+            // …minus those whose key the scan captured as a FULLY STATIC
+            // literal. An interpolated literal (`"quick_commands.\(name).type"`)
+            // is a matched literal but NOT a checkable key, so it counts as
+            // non-literal and must be declared with its expansion.
+            let literalArgv = Self.matches(#""config",\s*"(?:set|unset)",\s*"([^"]*)""#, in: source)
+            let literalSetSetting = Self.matches(#"(?:un)?setSetting\("([^"]*)""#, in: source)
+            let literalConfigKV = Self.matches(#"configKV\["([^"]*)"\]"#, in: source)
+            let staticLiterals = (literalArgv + literalSetSetting + literalConfigKV)
+                .filter { !$0.contains(#"\("#) }
+                .count
+            let nonLiteral = sites - staticLiterals
+            #expect(nonLiteral == writer.nonLiteralKeySites, """
+                \(writer.path): found \(nonLiteral) non-literal config-key site(s), \
+                manifest declares \(writer.nonLiteralKeySites). A key written through \
+                a computed expression evades the readability gate — update \
+                knownWriters with the site count AND the concrete keys it produces.
+                """)
+        }
     }
 }

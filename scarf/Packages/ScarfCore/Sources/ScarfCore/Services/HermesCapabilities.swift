@@ -969,6 +969,16 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// proxying through a feature-specific flag.
     public var isV020OrLater: Bool { atLeastSemver(0, 20, 0) }
 
+    /// Whether the connected host is on v0.20.2 or newer. Patch-level floor
+    /// for the raised delegation ceilings: tag v2026.8.16 (v0.20.2) is where
+    /// `hermes_cli/config_defaults.py:1821` first reads
+    /// `"max_iterations": 250` and `:1846` `"max_concurrent_children": 10`
+    /// (at v2026.8.13 / v0.20.1 those same keys were `:1764` = 50 and
+    /// `:1789` = 3), and where `hermes_cli/config_migrations.py:757`
+    /// (`_migrate_to_36`) and `:787` (`_migrate_to_37`) are introduced.
+    /// See `HermesConfig.displayDelegationMaxIterations`.
+    public var isV0202OrLater: Bool { atLeastSemver(0, 20, 2) }
+
     /// Whether the connected host is on v0.20.3 or newer. Patch-level floor:
     /// tag v2026.8.16.2 is where `tools/bot_mode_probe.py` — and with it the
     /// `ui_meta['hermes-bots']` convention — first ships. See `hasBotMode`.

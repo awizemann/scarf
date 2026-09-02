@@ -542,14 +542,15 @@ struct BotsView: View {
     }
 
     private func rowAccessibilityLabel(_ row: BotRow) -> String {
-        var parts = [row.identity.resolvedTitle, "profile \(row.identity.profileName)"]
-        if !row.identity.isBotManaged { parts.append("not a bot yet") }
-        if row.isPinned { parts.append("pinned") }
-        if row.isHidden { parts.append("hidden") }
+        var parts = [row.identity.resolvedTitle,
+                     String(localized: "profile \(row.identity.profileName)")]
+        if !row.identity.isBotManaged { parts.append(String(localized: "not a bot yet")) }
+        if row.isPinned { parts.append(String(localized: "pinned")) }
+        if row.isHidden { parts.append(String(localized: "hidden")) }
         let presence = viewModel.presence(forProfile: row.identity.profileName)
         if presence.isLive { parts.append(presence.accessibilityDescription) }
         if let last = row.activity?.lastMessageAt {
-            parts.append("last active \(Self.relative(last))")
+            parts.append(String(localized: "last active \(Self.relative(last))"))
         }
         return parts.joined(separator: ", ")
     }
