@@ -66,9 +66,14 @@ struct WebhooksView: View {
         ) {
             HStack(spacing: ScarfSpace.s2) {
                 if let msg = viewModel.message {
-                    Label(msg, systemImage: "info.circle.fill")
-                        .scarfStyle(.caption)
-                        .foregroundStyle(ScarfColor.success)
+                    Label(
+                        msg,
+                        systemImage: viewModel.messageIsError
+                            ? "exclamationmark.triangle.fill"
+                            : "info.circle.fill"
+                    )
+                    .scarfStyle(.caption)
+                    .foregroundStyle(viewModel.messageIsError ? ScarfColor.warning : ScarfColor.success)
                 }
                 Button("Reload") { viewModel.load(force: true) }
                     .buttonStyle(ScarfGhostButton())
@@ -254,7 +259,14 @@ struct WebhooksView: View {
             }
             HStack {
                 Spacer()
-                Button("Cancel") { showAddSheet = false }
+                Button("Cancel") {
+                    showAddSheet = false
+                    // Don't leave a typed HMAC secret sitting in @State
+                    // after the sheet closes — the form is only reset when
+                    // it is next OPENED, so it otherwise lived in memory
+                    // indefinitely. (F9)
+                    addSecret = ""
+                }
                 Button("Subscribe") {
                     viewModel.subscribe(
                         name: addName,
@@ -266,6 +278,11 @@ struct WebhooksView: View {
                         chatID: addChatID,
                         secret: addSecret
                     )
+                    // Cleared immediately: `subscribe` has already copied it
+                    // into the argv it will run, and the form is otherwise
+                    // only reset on the NEXT open — leaving the secret live
+                    // in @State for the rest of the session. (F9)
+                    addSecret = ""
                     showAddSheet = false
                 }
                 .buttonStyle(.borderedProminent)

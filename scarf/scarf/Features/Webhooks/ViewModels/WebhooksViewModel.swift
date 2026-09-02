@@ -49,6 +49,10 @@ final class WebhooksViewModel {
     var webhooks: [HermesWebhook] = []
     var isLoading = false
     var message: String?
+    /// Whether `message` is a failure. The header banner used to render
+    /// every message in the success colour, so an honest "subscribe failed"
+    /// still read as green-checkmark good news. (F9)
+    var messageIsError = false
 
     /// True when hermes's webhook gateway isn't configured. In that state,
     /// `hermes webhook list` returns setup instructions rather than a list of
@@ -60,6 +64,13 @@ final class WebhooksViewModel {
     /// call (the VM is cached in `AppCoordinator` and persists across switches);
     /// Reload and post-mutation reloads pass `force: true` (t-aud24).
     @ObservationIgnored private var hasLoaded = false
+
+    /// Set by `subscribe` to the normalized name it believes it just
+    /// created. The next completed `load` checks the reloaded list for it —
+    /// a second, independent confirmation alongside the `Secret:` line, so a
+    /// drift in either the create output or this parser can't leave a
+    /// "Subscribed" banner over a subscription that isn't there. (F9)
+    @ObservationIgnored private var pendingSubscribeConfirmation: String?
 
     func load(force: Bool = false) {
         if !force, hasLoaded || isLoading { return }
@@ -73,6 +84,17 @@ final class WebhooksViewModel {
                 self.isLoading = false
                 self.webhookPlatformNotEnabled = notEnabled
                 self.webhooks = parsed
+                if let pending = self.pendingSubscribeConfirmation {
+                    self.pendingSubscribeConfirmation = nil
+                    if !notEnabled, !parsed.contains(where: { $0.name == pending }) {
+                        self.message = String(
+                            localized: "Hermes reported creating /\(pending), but it isn’t in the subscription list. Check `hermes webhook list` on the host.",
+                            comment: "Webhook subscribe claimed success but the reload disagrees"
+                        )
+                        self.messageIsError = true
+                        self.createdSecret = nil
+                    }
+                }
             }
         }
     }
@@ -115,22 +137,71 @@ final class WebhooksViewModel {
         if !skills.isEmpty { args += ["--skills", skills] }
         if !deliver.isEmpty { args += ["--deliver", deliver] }
         if !chatID.isEmpty { args += ["--deliver-chat-id", chatID] }
+        // `--secret` puts a user-typed HMAC secret in this process's argv,
+        // where it is visible to any local `ps`/`/proc` reader for the life
+        // of the CLI run. Hermes offers no stdin or env path for it on
+        // `webhook subscribe`, so there is no alternative short of not
+        // supporting the field — and leaving it empty (the default, and what
+        // the placeholder recommends) makes Hermes mint the secret itself
+        // and avoids the exposure entirely. Same trade-off, and same note,
+        // as the WhatsApp token argv in F2.
         if !secret.isEmpty { args += ["--secret", secret] }
         args += ["--", name]
+        // `_cmd_subscribe` normalizes before writing: lowercased, spaces to
+        // hyphens. The reload check has to look for THAT name, not what the
+        // user typed, or a "Weather Hook" subscribe would look absent.
+        let storedName = name.trimmingCharacters(in: .whitespaces)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "-")
         Task.detached { [fileService] in
             let result = fileService.runHermesCLI(args: args, timeout: 60)
-            let minted = result.exitCode == 0
-                ? Self.parseCreatedSecret(result.output, name: name)
-                : nil
+            // `_cmd_subscribe` exits 0 on EVERY failure path — an invalid
+            // name, `--deliver-only` without a real target, a bad script —
+            // each is a `print(...)` then a bare `return`, so the exit code
+            // alone reported "Subscribed /<name>" for subscriptions that
+            // were never written. The success line is the real signal: on a
+            // genuine create/update the CLI always prints `Secret:`
+            // (whether it minted the value or echoed the one we passed), and
+            // on every failure path it prints nothing of the sort. (F9)
+            let created = Self.parseCreatedSecret(result.output, name: storedName)
             await MainActor.run {
-                self.message = result.exitCode == 0 ? "Subscribed /\(name)" : "Failed"
-                self.createdSecret = minted
+                if let created {
+                    self.message = "Subscribed /\(storedName)"
+                    self.messageIsError = false
+                    self.createdSecret = created
+                    self.pendingSubscribeConfirmation = storedName
+                } else {
+                    // Surface the CLI's own words — "Invalid name 'x y'.
+                    // Use lowercase alphanumeric…" is actionable in a way
+                    // that a bare "Failed" is not.
+                    self.createdSecret = nil
+                    self.message = Self.subscribeFailureMessage(result.output)
+                    self.messageIsError = true
+                }
                 self.load(force: true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                let delay: TimeInterval = created == nil ? 6 : 2
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                     self?.message = nil
                 }
             }
         }
+    }
+
+    /// Pull the CLI's own failure line out of a `webhook subscribe` that
+    /// wrote nothing. Every failure path in `_cmd_subscribe` prints a line
+    /// starting `Error:`; fall back to the last non-empty line, then to a
+    /// generic message, so the banner is never empty.
+    nonisolated static func subscribeFailureMessage(_ output: String) -> String {
+        let lines = output.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        if let error = lines.first(where: { $0.hasPrefix("Error:") }) {
+            return String(error.dropFirst("Error:".count)).trimmingCharacters(in: .whitespaces)
+        }
+        return lines.last ?? String(
+            localized: "Subscribe failed — Hermes wrote no subscription and gave no reason.",
+            comment: "Webhook subscribe failed with no CLI output"
+        )
     }
 
     /// Pull `Secret:` / `URL:` out of the create output.

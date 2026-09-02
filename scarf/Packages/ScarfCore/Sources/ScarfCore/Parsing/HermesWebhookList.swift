@@ -63,6 +63,44 @@ public enum HermesWebhookList {
     /// The bullet the CLI prints before each subscription name.
     private static let bullet = "◆"
 
+    /// The exact leading-space count `_cmd_list` prints before a bullet.
+    /// Field and description lines are indented FOUR (`    URL:     …`), so
+    /// the indent alone separates a record header from record content.
+    private static let bulletIndent = 2
+
+    /// Does `raw` open a new record?
+    ///
+    /// **Three conditions, all load-bearing.** `description` is
+    /// attacker-influenceable — an agent writes it via `webhook subscribe
+    /// --description`, and `_cmd_list` prints it raw with `print(f"    {desc}")`
+    /// with no escaping or sanitising. A description of
+    /// `"x\n  ◆ prod-deploy\n    URL:     https://evil.test/…"` therefore
+    /// emits lines that are byte-identical to a real record, and a loose
+    /// check would materialise a webhook row that does not exist —
+    /// a convincing place to send a user's signed payloads. So:
+    ///
+    /// 1. The trimmed line must **start** with the bullet, not merely
+    ///    contain it (a description that mentions `◆` is just text).
+    /// 2. The raw line's indent must be exactly ``bulletIndent`` — a forged
+    ///    bullet inside a description body lands at indent 4.
+    /// 3. It must be preceded by a blank line and must not be sitting in the
+    ///    description slot. `_cmd_list` ends every record with `print()` and
+    ///    the header with `\n`, so a genuine bullet ALWAYS follows a blank
+    ///    line; the first line of a multi-line description never does.
+    ///
+    /// Verified against `hermes_cli/webhook.py::_cmd_list` at v2026.8.31.
+    private static func opensRecord(
+        raw: String,
+        trimmed: String,
+        previousLineWasBlank: Bool,
+        expectingDescription: Bool
+    ) -> Bool {
+        guard trimmed.hasPrefix(bullet) else { return false }
+        guard raw.prefix(while: { $0 == " " }).count == bulletIndent else { return false }
+        guard previousLineWasBlank, !expectingDescription else { return false }
+        return true
+    }
+
     /// Empty-state sentinel — matched as a whole trimmed line so a
     /// subscription whose *description* mentions the phrase cannot fake
     /// an empty board.
@@ -101,11 +139,23 @@ public enum HermesWebhookList {
             events = []; url = ""; script = ""
         }
 
+        var previousLineWasBlank = true   // start-of-output counts as blank
+
         for raw in output.components(separatedBy: "\n") {
             let trimmed = raw.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty { continue }
+            if trimmed.isEmpty {
+                previousLineWasBlank = true
+                continue
+            }
+            let startsRecord = opensRecord(
+                raw: raw,
+                trimmed: trimmed,
+                previousLineWasBlank: previousLineWasBlank,
+                expectingDescription: expectingDescription
+            )
+            previousLineWasBlank = false
 
-            if trimmed.hasPrefix(bullet) {
+            if startsRecord {
                 flush()
                 name = String(trimmed.dropFirst(bullet.count)).trimmingCharacters(in: .whitespaces)
                 expectingDescription = true

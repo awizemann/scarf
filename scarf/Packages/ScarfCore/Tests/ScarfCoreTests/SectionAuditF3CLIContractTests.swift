@@ -210,6 +210,86 @@ struct SectionAuditF3CLIContractTests {
         #expect(entries.map(\.name) == ["solo"])
     }
 
+    /// A subscription's `description` is agent-written and `_cmd_list`
+    /// prints it raw (`print(f"    {desc}")`) with no escaping — so a
+    /// description containing newlines can emit lines that look exactly like
+    /// a record header. A forged record would show the user a webhook row
+    /// that does not exist, pointing at an endpoint of the forger's choosing.
+    ///
+    /// Three properties keep it out: the bullet must START the trimmed line,
+    /// sit at the CLI's two-space bullet indent, and follow a blank line
+    /// (every real record does; a description's own lines never do). (F9)
+    @Test("a forged ◆ record inside a description does not open a record")
+    func webhookForgedDescriptionIgnored() throws {
+        // The description the agent wrote was:
+        //   "Harmless\n  ◆ prod-deploy\n    URL:     https://evil.test/hook"
+        let output = """
+
+          2 webhook subscription(s):
+
+          ◆ real
+            Harmless
+          ◆ prod-deploy
+            URL:     https://evil.test/hook
+            URL:     http://localhost:8787/webhooks/real
+            Events:  (all)
+            Deliver: log
+
+          ◆ second
+            URL:     http://localhost:8787/webhooks/second
+            Events:  (all)
+            Deliver: log
+
+        """
+        let entries = HermesWebhookList.parse(output)
+        // Only the two genuine records — the forged bullet is not preceded
+        // by a blank line, so it stays description text.
+        #expect(entries.map(\.name) == ["real", "second"])
+        let real = try #require(entries.first)
+        // And the forged URL never becomes the real record's URL: the first
+        // `URL:` line the forger injected is inside the record body, so the
+        // record keeps whichever URL the CLI itself emitted last.
+        #expect(!real.url.contains("evil.test"))
+        #expect(real.url == "http://localhost:8787/webhooks/real")
+    }
+
+    /// A description that merely MENTIONS the bullet is ordinary text.
+    @Test("a description containing ◆ mid-line is not a record boundary")
+    func webhookDescriptionMentioningBulletIsText() throws {
+        let output = """
+
+          1 webhook subscription(s):
+
+          ◆ solo
+            Fires on deploy ◆ and release
+            URL:     http://h/webhooks/solo
+            Events:  (all)
+            Deliver: log
+
+        """
+        let entries = HermesWebhookList.parse(output)
+        #expect(entries.map(\.name) == ["solo"])
+        #expect(try #require(entries.first).description == "Fires on deploy ◆ and release")
+    }
+
+    /// A forged bullet at the FIELD indent (4) is rejected on the indent
+    /// rule alone, even where a blank line precedes it.
+    @Test("a bullet at the field indent never opens a record")
+    func webhookBulletAtWrongIndentIgnored() {
+        let output = """
+
+          1 webhook subscription(s):
+
+          ◆ solo
+            URL:     http://h/webhooks/solo
+
+            ◆ fake
+            URL:     https://evil.test/hook
+
+        """
+        #expect(HermesWebhookList.parse(output).map(\.name) == ["solo"])
+    }
+
     // MARK: - Profiles
 
     @Test("export paths are normalised to the extension the CLI writes")
@@ -242,8 +322,8 @@ struct SectionAuditF3CLIContractTests {
     // MARK: - MCP add
 
     @Test("stdio plan passes args at add time so the probe can succeed")
-    func mcpStdioPlan() {
-        let plan = HermesMCPAdd.stdioPlan(name: "gh", command: "npx", args: ["-y", "@modelcontextprotocol/server-github"])
+    func mcpStdioPlan() throws {
+        let plan = try HermesMCPAdd.stdioPlan(name: "gh", command: "npx", args: ["-y", "@modelcontextprotocol/server-github"])
         // No `--` after `--args`: argparse eats the first `--` itself
         // before REMAINDER sees it, and the rest of the line then fails as
         // `unrecognized arguments` (verified on CPython 3.14). REMAINDER
@@ -257,8 +337,8 @@ struct SectionAuditF3CLIContractTests {
     }
 
     @Test("stdio plan orders --env before the --args remainder")
-    func mcpStdioEnvOrdering() {
-        let plan = HermesMCPAdd.stdioPlan(name: "gh", command: "npx", args: ["server"], env: ["TOKEN": "t", "A": "b"])
+    func mcpStdioEnvOrdering() throws {
+        let plan = try HermesMCPAdd.stdioPlan(name: "gh", command: "npx", args: ["server"], env: ["TOKEN": "t", "A": "b"])
         let envIndex = plan.arguments.firstIndex(of: "--env")!
         let argsIndex = plan.arguments.firstIndex(of: "--args")!
         #expect(envIndex < argsIndex)
@@ -267,8 +347,8 @@ struct SectionAuditF3CLIContractTests {
     }
 
     @Test("no-auth HTTP declines the auth prompt instead of feeding a bare y")
-    func mcpNoAuthPlan() {
-        let plan = HermesMCPAdd.urlPlan(name: "ink", url: "https://mcp.ml.ink/mcp", auth: .none)
+    func mcpNoAuthPlan() throws {
+        let plan = try HermesMCPAdd.urlPlan(name: "ink", url: "https://mcp.ml.ink/mcp", auth: .none)
         #expect(plan.arguments == ["mcp", "add", "ink", "--url", "https://mcp.ml.ink/mcp"])
         // The CLI prompt defaults to YES, so the `n` is load-bearing:
         // the old `y\ny\ny\n` accepted it, then handed `y` to the bearer
@@ -278,19 +358,151 @@ struct SectionAuditF3CLIContractTests {
     }
 
     @Test("oauth passes --auth oauth and answers nothing but defaults")
-    func mcpOAuthPlan() {
-        let plan = HermesMCPAdd.urlPlan(name: "linear", url: "https://mcp.linear.app/mcp", auth: .oauth)
+    func mcpOAuthPlan() throws {
+        let plan = try HermesMCPAdd.urlPlan(name: "linear", url: "https://mcp.linear.app/mcp", auth: .oauth)
         #expect(plan.arguments.contains("--auth"))
         #expect(plan.arguments.contains("oauth"))
         #expect(plan.stdin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
     @Test("header auth sends the real token at the value read")
-    func mcpHeaderPlan() {
-        let plan = HermesMCPAdd.urlPlan(name: "acme", url: "https://acme.test/mcp", auth: .header(token: "sk-live-abc123"))
+    func mcpHeaderPlan() throws {
+        let plan = try HermesMCPAdd.urlPlan(name: "acme", url: "https://acme.test/mcp", auth: .header(token: "sk-live-abc123"))
         #expect(plan.arguments.contains("header"))
         // y answers the yes/no question; the token answers the value read.
         #expect(plan.stdin.hasPrefix("y\nsk-live-abc123\n"))
+    }
+
+    // MARK: - MCP add: host-state-dependent prompt shifts (F9)
+
+    /// `mcp_config.py:483-487` — when the name is already in
+    /// `_get_mcp_servers()`, an "already exists. Overwrite?" prompt is asked
+    /// BEFORE the auth stage. That extra prompt eats the first stdin line,
+    /// so the `y` meant for "requires authentication?" answers *it* and the
+    /// bearer token then answers the auth question. Refuse rather than
+    /// guess: the caller must resolve the user's intent first.
+    @Test("an existing server name refuses the plan instead of shifting stdin")
+    func mcpExistingNameRefusesPlan() {
+        let taken = HermesMCPAdd.HostState(serverNameExists: true)
+        #expect(throws: HermesMCPAdd.PlanError.serverAlreadyExists(name: "acme")) {
+            _ = try HermesMCPAdd.urlPlan(
+                name: "acme", url: "https://acme.test/mcp",
+                auth: .header(token: "sk-live-abc123"), state: taken
+            )
+        }
+        #expect(throws: HermesMCPAdd.PlanError.serverAlreadyExists(name: "gh")) {
+            _ = try HermesMCPAdd.stdioPlan(name: "gh", command: "npx", args: [], state: taken)
+        }
+    }
+
+    /// With the user's explicit confirmation, the extra prompt IS answered —
+    /// and answered `y`, because `_confirm(default=False)` would otherwise
+    /// cancel — and every later answer keeps its correct position.
+    @Test("a confirmed overwrite prepends exactly one y and keeps auth aligned")
+    func mcpConfirmedOverwriteKeepsAlignment() throws {
+        let confirmed = HermesMCPAdd.HostState(serverNameExists: true, overwriteConfirmed: true)
+        let plan = try HermesMCPAdd.urlPlan(
+            name: "acme", url: "https://acme.test/mcp",
+            auth: .header(token: "sk-live-abc123"), state: confirmed
+        )
+        // overwrite-y, auth-y, token — in that order, one line each.
+        #expect(plan.stdin.hasPrefix("y\ny\nsk-live-abc123\n"))
+        let noAuth = try HermesMCPAdd.urlPlan(
+            name: "ink", url: "https://mcp.ml.ink/mcp", auth: .none, state: confirmed
+        )
+        #expect(noAuth.stdin.hasPrefix("y\nn\n"))
+        let stdio = try HermesMCPAdd.stdioPlan(
+            name: "gh", command: "npx", args: ["server"], state: confirmed
+        )
+        #expect(stdio.stdin.hasPrefix("y\n"))
+    }
+
+    /// `mcp_config.py:545-548` — when `MCP_<NAME>_API_KEY` already resolves,
+    /// the CLI prints "already configured" and never prompts for the key.
+    /// A queued token line would then be read by the NEXT prompt ("Enable
+    /// all N tools?"), mis-answering it and echoing the secret at a prompt
+    /// we never meant to answer. The token must simply not be sent.
+    @Test("a pre-existing MCP_<NAME>_API_KEY suppresses the token line")
+    func mcpExistingEnvKeySuppressesToken() throws {
+        let keyed = HermesMCPAdd.HostState(
+            serverNameExists: false, apiKeyAlreadyConfigured: true
+        )
+        let plan = try HermesMCPAdd.urlPlan(
+            name: "acme", url: "https://acme.test/mcp",
+            auth: .header(token: "sk-live-abc123"), state: keyed
+        )
+        #expect(plan.stdin.hasPrefix("y\n"))
+        // The secret must not appear anywhere in what we pipe.
+        #expect(!plan.stdin.contains("sk-live-abc123"))
+        // …and the caller is told, so the user learns their typed token was
+        // NOT the one the server will use. Dropping it silently would leave
+        // the server authenticating with the old key with nothing on screen
+        // to say so.
+        #expect(plan.discardedSuppliedToken)
+    }
+
+    /// The flag is only for a token we actually withheld — a fresh host
+    /// sends the token normally and must not raise the notice.
+    @Test("no discarded-token notice when the token was actually sent")
+    func mcpFreshHostDoesNotFlagDiscard() throws {
+        let plan = try HermesMCPAdd.urlPlan(
+            name: "acme", url: "https://acme.test/mcp",
+            auth: .header(token: "sk-live-abc123"), state: .fresh
+        )
+        #expect(plan.stdin.contains("sk-live-abc123"))
+        #expect(!plan.discardedSuppliedToken)
+    }
+
+    /// Residual uncertainty is a refusal, never a default. If we can't tell
+    /// whether the key exists, we can't tell whether a token line will be
+    /// consumed — and being wrong leaks it into the wrong prompt.
+    @Test("an unknown API-key state refuses rather than guessing")
+    func mcpUnknownKeyStateRefuses() {
+        let unknown = HermesMCPAdd.HostState(
+            serverNameExists: false, apiKeyAlreadyConfigured: nil
+        )
+        #expect(throws: HermesMCPAdd.PlanError.apiKeyStateUnknown(envKey: "MCP_ACME_API_KEY")) {
+            _ = try HermesMCPAdd.urlPlan(
+                name: "acme", url: "https://acme.test/mcp",
+                auth: .header(token: "sk-live-abc123"), state: unknown
+            )
+        }
+        // A no-auth or oauth plan asks no key question, so an unknown key
+        // state is irrelevant there and must NOT refuse.
+        #expect(throws: Never.self) {
+            _ = try HermesMCPAdd.urlPlan(
+                name: "acme", url: "https://acme.test/mcp", auth: .none, state: unknown
+            )
+        }
+    }
+
+    /// Mirrors `_env_key_for_server` (`mcp_config.py:153-156`) — the Python
+    /// `re.sub` runs per character, so `a--b` yields a doubled underscore,
+    /// and `.strip("_")` only trims the ends.
+    @Test("envKeyForServer matches the CLI's _env_key_for_server exactly")
+    func mcpEnvKeyDerivation() {
+        #expect(HermesMCPAdd.envKeyForServer("acme") == "MCP_ACME_API_KEY")
+        #expect(HermesMCPAdd.envKeyForServer("my-server") == "MCP_MY_SERVER_API_KEY")
+        #expect(HermesMCPAdd.envKeyForServer("a--b") == "MCP_A__B_API_KEY")
+        #expect(HermesMCPAdd.envKeyForServer("_lead_") == "MCP_LEAD_API_KEY")
+        #expect(HermesMCPAdd.envKeyForServer("dot.name") == "MCP_DOT_NAME_API_KEY")
+    }
+
+    /// The F2/F3 "guard the user-supplied positional with `--`" rule does
+    /// NOT generalise to `mcp add`: its `name` positional is followed on the
+    /// command line by `--command` / `--url` / `--env` / `--args`, and
+    /// argparse treats everything after the first `--` as positional, so a
+    /// leading `--` makes every flag an `unrecognized argument`. Verified by
+    /// running the real subparser shape; pinned here so nobody "fixes" it
+    /// back for consistency.
+    @Test("mcp add emits no `--` separator anywhere — argparse rejects it")
+    func mcpAddNeverEmitsDoubleDash() throws {
+        let stdio = try HermesMCPAdd.stdioPlan(name: "gh", command: "npx", args: ["-y", "pkg"])
+        let url = try HermesMCPAdd.urlPlan(name: "ink", url: "https://x.test/mcp", auth: .none)
+        #expect(!stdio.arguments.contains("--"))
+        #expect(!url.arguments.contains("--"))
+        #expect(stdio.arguments[2] == "gh")
+        #expect(url.arguments[2] == "ink")
     }
 
     @Test("mcp add outcome is read from stdout, never from exit 0")
