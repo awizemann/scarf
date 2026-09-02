@@ -527,6 +527,7 @@ struct AllConfigWritersParityTests {
     /// checks the SHAPE of the path, so any legal segment works.
     private static let sampleQuickCommand = "deploy"
     private static let sampleProvider = "openai"
+    private static let sampleMCPServer = "github"
 
     /// Keys `SettingsViewModel` splices straight into `config.yaml` through
     /// `saveDirectYAML` rather than `hermes config set` — scanned off the
@@ -631,6 +632,21 @@ struct AllConfigWritersParityTests {
             Writer(path: "Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelConfigPlan.swift",
                    nonLiteralKeySites: 2,
                    computedKeys: ["model.context_length"]),
+            // Per-bot agent config (Bot Mode Phase B). The shared
+            // `setValue`/`unsetValue` executors take a `key` parameter (the
+            // two non-literal sites); the concrete keys they can produce are
+            // the model pin pair plus the interpolated MCP enablement key.
+            // Writes go to the BOT profile's config.yaml via `-p <bot>`, and
+            // reads come back through this service's own direct-file parse,
+            // not the root HermesConfig — hence the external reader below
+            // for the MCP key.
+            Writer(path: "Packages/ScarfCore/Sources/ScarfCore/Services/BotAgentConfigService.swift",
+                   nonLiteralKeySites: 2,
+                   computedKeys: [
+                    "model.default",
+                    "model.provider",
+                    "mcp_servers.\(sampleMCPServer).enabled",
+                   ]),
         ]
     }
 
@@ -779,6 +795,9 @@ struct AllConfigWritersParityTests {
             .init(key: "platforms.email.skip_attachments",
                   readerPath: "scarf/Features/Platforms/ViewModels/PlatformSetup/EmailSetupViewModel.swift",
                   readerLiteral: "\"platforms.email.skip_attachments\""),
+            .init(key: "mcp_servers.\(sampleMCPServer).enabled",
+                  readerPath: "Packages/ScarfCore/Sources/ScarfCore/Services/BotAgentConfigService.swift",
+                  readerLiteral: "\"mcp_servers.\""),
         ]
     }
 
