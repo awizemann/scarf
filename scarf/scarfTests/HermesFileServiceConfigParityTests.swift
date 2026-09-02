@@ -784,10 +784,10 @@ struct AllConfigWritersParityTests {
     private static var externalReaders: [ExternalReader] {
         [
             .init(key: "quick_commands.\(sampleQuickCommand).type",
-                  readerPath: "scarf/Features/QuickCommands/ViewModels/QuickCommandsViewModel.swift",
+                  readerPath: "Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesQuickCommandsYAML.swift",
                   readerLiteral: "\"quick_commands.\""),
             .init(key: "quick_commands.\(sampleQuickCommand).command",
-                  readerPath: "scarf/Features/QuickCommands/ViewModels/QuickCommandsViewModel.swift",
+                  readerPath: "Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesQuickCommandsYAML.swift",
                   readerLiteral: "\"quick_commands.\""),
             .init(key: "credential_pool_strategies.\(sampleProvider)",
                   readerPath: "scarf/Features/CredentialPools/ViewModels/CredentialPoolsViewModel.swift",

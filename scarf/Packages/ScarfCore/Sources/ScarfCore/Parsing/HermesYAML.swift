@@ -63,6 +63,14 @@ public enum HermesYAML {
         // value, which is a section header, which resets this to nil. So
         // "deeper than the last scalar" is an unambiguous continuation.
         var lastScalarIndent: Int?
+        // Where the most recent plain/quoted scalar landed, so folded
+        // continuation lines can be JOINED back onto it instead of dropped.
+        // PyYAML wraps long plain and single-quoted scalars at ~80 columns;
+        // reading only the first physical line silently truncates the value
+        // (a quick-command shell pipeline losing its trailing guard was the
+        // worst case). YAML folding joins a single line break as one space.
+        var lastScalarPath: String?
+        var lastScalarParent: (path: String, key: String)?
 
         func currentPath(joinedWith child: String? = nil) -> String {
             var parts = stack.map(\.name)
@@ -80,8 +88,26 @@ public enum HermesYAML {
             let isListItem = trimmed.hasPrefix("- ")
 
             // Folded/continued scalar line (see `lastScalarIndent`) — not a
-            // key, not a list item, and must not touch the stack.
-            if !isListItem, let last = lastScalarIndent, indent > last { continue }
+            // key, not a list item, and must not touch the stack. Join it
+            // onto the scalar it continues (single space, per YAML line
+            // folding) so an ~80-column PyYAML wrap never truncates the
+            // value. A continuation can freely contain `key: value` text —
+            // in real YAML a key line can never sit deeper than the sibling
+            // scalar before it (see the `lastScalarIndent` note above), so
+            // this cannot swallow a genuine nested block body.
+            if !isListItem, let last = lastScalarIndent, indent > last {
+                if let path = lastScalarPath {
+                    let joined = (values[path].map { $0.isEmpty ? trimmed : $0 + " " + trimmed }) ?? trimmed
+                    values[path] = joined
+                    if let parent = lastScalarParent {
+                        // Re-strip quotes on the FULL value: a quoted scalar
+                        // folded across lines only closes its quote on the
+                        // last continuation line.
+                        maps[parent.path, default: [:]][parent.key] = stripYAMLQuotes(joined)
+                    }
+                }
+                continue
+            }
 
             // Pop stack entries with indent >= current indent.
             // Exception: a list item at the same indent as its parent key is
@@ -104,6 +130,8 @@ public enum HermesYAML {
                 guard !path.isEmpty else { continue }
                 lists[path, default: []].append(stripped)
                 lastScalarIndent = nil
+                lastScalarPath = nil
+                lastScalarParent = nil
                 continue
             }
 
@@ -126,13 +154,21 @@ public enum HermesYAML {
                 key = raw
                 afterColon = String(rest.dropFirst()).trimmingCharacters(in: .whitespaces)
             } else {
-                guard let colonIdx = trimmed.firstIndex(of: ":") else { continue }
+                // Plain (unquoted) key. YAML's `key: value` separator is a
+                // colon followed by whitespace (or end-of-line); a colon NOT
+                // followed by whitespace is part of the key itself — PyYAML
+                // emits Ollama-style ids like `llama3:8b: high` unquoted.
+                // Splitting at the first bare colon used to shear that into
+                // key "llama3" + value "8b: high".
+                guard let colonIdx = plainKeySeparatorIndex(in: trimmed) else { continue }
                 key = String(trimmed[trimmed.startIndex..<colonIdx]).trimmingCharacters(in: .whitespaces)
                 afterColon = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
             }
 
             let path = currentPath(joinedWith: key)
             lastScalarIndent = indent
+            lastScalarPath = nil
+            lastScalarParent = nil
 
             if afterColon.isEmpty || afterColon == "|" || afterColon == ">"
                 || afterColon.hasPrefix("#") {
@@ -187,6 +223,7 @@ public enum HermesYAML {
             }
 
             values[path] = afterColon
+            lastScalarPath = path
 
             // Also record as a map entry under the parent so blocks like
             // `terminal.docker_env` are accessible as `[String: String]`
@@ -194,9 +231,27 @@ public enum HermesYAML {
             if !stack.isEmpty {
                 let parentPath = currentPath()
                 maps[parentPath, default: [:]][key] = stripYAMLQuotes(afterColon)
+                lastScalarParent = (path: parentPath, key: key)
             }
         }
         return ParsedYAML(values: values, lists: lists, maps: maps)
+    }
+
+    /// Index of the `key: value` separator colon in a trimmed plain-key
+    /// line: the first colon followed by whitespace or end-of-line. Colons
+    /// with a non-space successor are part of the key (`llama3:8b: high`).
+    private static func plainKeySeparatorIndex(in trimmed: String) -> String.Index? {
+        var i = trimmed.startIndex
+        while i < trimmed.endIndex {
+            if trimmed[i] == ":" {
+                let next = trimmed.index(after: i)
+                if next == trimmed.endIndex || trimmed[next] == " " || trimmed[next] == "\t" {
+                    return i
+                }
+            }
+            i = trimmed.index(after: i)
+        }
+        return nil
     }
 
     /// Parse the inside of a single-line flow dict (`a: low, 'b:c': high`)

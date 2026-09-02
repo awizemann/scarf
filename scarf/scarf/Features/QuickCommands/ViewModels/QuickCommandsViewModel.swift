@@ -43,40 +43,11 @@ final class QuickCommandsViewModel {
     /// detached task when called from `@MainActor`.
     nonisolated static func loadQuickCommands(context: ServerContext) -> [HermesQuickCommand] {
         guard let yaml = context.readText(context.paths.configYAML) else { return [] }
-        let parsed = HermesFileService.parseNestedYAML(yaml)
-        var byName: [String: (type: String, command: String)] = [:]
-        let prefix = "quick_commands."
-        for (key, value) in parsed.values where key.hasPrefix(prefix) {
-            // Don't naively `split(".", maxSplits: 2)` — a command name that
-            // itself contains a literal dot (e.g. "v1.2_deploy", written via
-            // the escaped-key path in `addOrUpdate`) is stored in config.yaml
-            // as a real dotted YAML key, so `parseNestedYAML`'s flattened
-            // path is "quick_commands.v1.2_deploy.type": a naive 3-way split
-            // would chop it into name="v1" field="2_deploy.type" and both
-            // silently drop the real entry and fabricate a bogus one. Peel
-            // the known ".type"/".command" suffix off instead so everything
-            // in between — dots included — is the name.
-            let remainder = key.dropFirst(prefix.count)
-            let name: Substring
-            let field: String
-            if remainder.hasSuffix(".type") {
-                field = "type"
-                name = remainder.dropLast(".type".count)
-            } else if remainder.hasSuffix(".command") {
-                field = "command"
-                name = remainder.dropLast(".command".count)
-            } else {
-                continue
-            }
-            guard !name.isEmpty else { continue }
-            var existing = byName[String(name)] ?? (type: "exec", command: "")
-            let stripped = HermesFileService.stripYAMLQuotes(value)
-            if field == "type" { existing.type = stripped }
-            if field == "command" { existing.command = stripped }
-            byName[String(name)] = existing
-        }
-        return byName.map { HermesQuickCommand(name: $0.key, type: $0.value.type, command: $0.value.command) }
-            .sorted { $0.name < $1.name }
+        // Shared with the iOS slash-menu reader (RichChatViewModel) via
+        // `HermesQuickCommandsYAML` — one place owns the dotted-name
+        // suffix-peel ("v1.2_deploy") and the folded-scalar handling.
+        return HermesQuickCommandsYAML.entries(inYAML: yaml)
+            .map { HermesQuickCommand(name: $0.name, type: $0.type, command: $0.command) }
     }
 
     /// Check for obviously destructive shell strings. Display-only; we do not block.

@@ -135,7 +135,11 @@ import Foundation
         let peers = HermesBotPeersYAML.parse(yaml: yaml)
         #expect(peers.count == 1)
         #expect(peers[0].url == "http://spark.lan:8377")
-        #expect(peers[0].note.hasPrefix("'ops runbook lives on the wiki"))
+        // The continuation is now JOINED into the note (and the reunited
+        // quote pair stripped) — previously only the first physical line
+        // survived, with a dangling opening quote.
+        #expect(peers[0].note.hasPrefix("ops runbook lives on the wiki"))
+        #expect(peers[0].note.hasSuffix("and then page someone"))
     }
 
     @Test func targetJoinsAProfileWithASlash() {

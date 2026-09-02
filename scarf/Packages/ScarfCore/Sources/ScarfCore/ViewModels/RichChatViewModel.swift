@@ -1852,24 +1852,14 @@ public final class RichChatViewModel {
     /// projection, so we keep the parser minimal and ScarfCore-local.
     nonisolated static func loadQuickCommands(context: ServerContext) -> [(name: String, command: String)] {
         guard let yaml = context.readText(context.paths.configYAML) else { return [] }
-        let parsed = HermesYAML.parseNestedYAML(yaml)
-        var byName: [String: (type: String, command: String)] = [:]
-        for (key, value) in parsed.values where key.hasPrefix("quick_commands.") {
-            let parts = key.split(separator: ".", maxSplits: 2, omittingEmptySubsequences: false)
-            guard parts.count == 3 else { continue }
-            let name = String(parts[1])
-            let field = String(parts[2])
-            var existing = byName[name] ?? (type: "exec", command: "")
-            let stripped = HermesYAML.stripYAMLQuotes(value)
-            if field == "type" { existing.type = stripped }
-            if field == "command" { existing.command = stripped }
-            byName[name] = existing
-        }
-        return byName.compactMap { (name, entry) in
+        // Shared parser (HermesQuickCommandsYAML) so dotted names like
+        // `v1.2_deploy` survive on this side too — the naive
+        // `split(separator: ".", maxSplits: 2)` this used dropped them
+        // from the iOS slash menu while the Mac list showed them.
+        return HermesQuickCommandsYAML.entries(inYAML: yaml).compactMap { entry in
             guard entry.type == "exec", !entry.command.isEmpty else { return nil }
-            return (name: name, command: entry.command)
+            return (name: entry.name, command: entry.command)
         }
-        .sorted { $0.name < $1.name }
     }
 
     private func appendMessageChunk(text: String) {
