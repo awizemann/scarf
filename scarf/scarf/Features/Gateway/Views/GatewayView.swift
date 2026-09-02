@@ -105,7 +105,7 @@ struct GatewayView: View {
                 if let msg = viewModel.actionMessage {
                     Text(msg)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(viewModel.actionFailed ? ScarfColor.danger : Color.secondary)
                 }
                 HStack(spacing: ScarfSpace.s2) {
                     Button("Start") { viewModel.startGateway() }
@@ -121,9 +121,12 @@ struct GatewayView: View {
             }
 
             HStack(spacing: ScarfSpace.s3) {
+                // `isRunning` is the live `hermes gateway status` verdict —
+                // the stored `gateway_state` alone stays "running" forever
+                // after a crash or a failed start.
                 StatusBadge(
-                    label: viewModel.gateway.state,
-                    isActive: viewModel.gateway.state == "running"
+                    label: viewModel.gateway.isRunning ? viewModel.gateway.state : "not running",
+                    isActive: viewModel.gateway.isRunning
                 )
                 if let pid = viewModel.gateway.pid {
                     Label("PID \(pid)", systemImage: "number")

@@ -20,6 +20,17 @@ public enum CronScheduleFormatter {
     /// Primary entry point. Returns a phrase suitable for the row
     /// subtitle in Mac + ScarfGo cron lists.
     public static func humanReadable(from schedule: CronSchedule) -> String {
+        // One-shot jobs first. Hermes calls this kind `"once"` (never
+        // `"runat"` — `cron/jobs.py::parse_schedule` at v2026.8.31 emits
+        // `{"kind": "once", "run_at": …, "display": "once at …"}`), and it
+        // always writes a `display`, so the old `case "runat"` branch below
+        // the display-trust block was doubly unreachable: the wrong kind
+        // string AND behind an early return. One-shots rendered as the raw
+        // `once at 2026-02-03 14:00` stamp instead of a localized date.
+        if isOneShot(schedule.kind) {
+            return onceDescription(schedule)
+        }
+
         // Trust `display` when it doesn't look like raw cron. Users
         // CAN set descriptive labels via `hermes cron set-display`;
         // we don't want to overwrite that.
@@ -38,13 +49,9 @@ public enum CronScheduleFormatter {
             return phrase
         }
 
-        // Non-cron kinds (runAt, interval) get their own branches.
+        // Non-cron kinds (interval) get their own branch; one-shots are
+        // handled up top, before the display-trust return.
         switch schedule.kind.lowercased() {
-        case "runat", "run_at":
-            if let runAt = schedule.runAt, !runAt.isEmpty {
-                return "Once on \(runAt)"
-            }
-            return "One-off"
         case "interval":
             return schedule.display ?? schedule.expression ?? "Interval"
         default:
@@ -78,6 +85,26 @@ public enum CronScheduleFormatter {
             return formatNextRun(date, now: now)
         }
         return iso
+    }
+
+    /// Every spelling of the one-shot kind Scarf has ever seen from Hermes.
+    /// `"once"` is the only one current Hermes writes; the other two are
+    /// tolerated so a hand-edited or older `jobs.json` still renders.
+    nonisolated static func isOneShot(_ kind: String) -> Bool {
+        ["once", "runat", "run_at"].contains(kind.lowercased())
+    }
+
+    /// `"Once on Feb 3, 2026 at 2:00 PM"`, falling back through the raw
+    /// timestamp and then the stored display label.
+    nonisolated static func onceDescription(_ schedule: CronSchedule) -> String {
+        if let runAt = schedule.runAt, !runAt.isEmpty {
+            if let date = isoDate(runAt) {
+                return "Once on \(date.formatted(date: .abbreviated, time: .shortened))"
+            }
+            return "Once on \(runAt)"
+        }
+        if let display = schedule.display, !display.isEmpty { return display }
+        return "One-off"
     }
 
     nonisolated static func isoDate(_ iso: String) -> Date? {

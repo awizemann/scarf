@@ -14,6 +14,23 @@ struct ToolsView: View {
         VStack(spacing: 0) {
             pageHeader
             platformPicker
+            if let failure = viewModel.toggleFailureMessage {
+                HStack(spacing: ScarfSpace.s2) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(ScarfColor.danger)
+                    Text(failure)
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundPrimary)
+                    Spacer()
+                    Button("Dismiss") { viewModel.dismissToggleFailure() }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
+                }
+                .padding(.horizontal, ScarfSpace.s3)
+                .padding(.vertical, ScarfSpace.s2)
+                .background(ScarfColor.danger.opacity(0.10))
+                .accessibilityElement(children: .combine)
+            }
             toolsList
             if !viewModel.mcpStatus.isEmpty {
                 Divider()

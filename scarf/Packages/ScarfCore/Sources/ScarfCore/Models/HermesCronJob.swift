@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-public struct HermesCronJob: Identifiable, Sendable, Codable {
+public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     public nonisolated let id: String
     public nonisolated let name: String
     public nonisolated let prompt: String
@@ -463,7 +463,7 @@ public struct HermesCronJob: Identifiable, Sendable, Codable {
     }
 }
 
-public struct CronSchedule: Sendable, Codable {
+public struct CronSchedule: Sendable, Codable, Equatable {
     public nonisolated let kind: String
     public nonisolated let runAt: String?
     public nonisolated let display: String?
@@ -502,6 +502,37 @@ public struct CronSchedule: Sendable, Codable {
         self.expression = expression
         self.minutes = minutes
         self.extra = extra
+    }
+
+    /// The schedule string that round-trips back through
+    /// `hermes cron edit --schedule` — **never** the human display label.
+    ///
+    /// Hermes stores a one-shot as
+    /// `{"kind": "once", "run_at": "<ISO>", "display": "once at 2026-02-03 14:00"}`
+    /// (`cron/jobs.py::parse_schedule`, verified at tag `v2026.8.31`).
+    /// `parse_schedule` can read the `run_at` ISO timestamp back, but it has
+    /// no branch that understands `"once at 2026-02-03 14:00"`: the phrase is
+    /// not an `every …` form, not a 5-field cron expression, does not start
+    /// with `\d{4}-\d{2}-\d{2}` and contains no `T`, so it falls through to
+    /// `parse_duration` and the edit dies with `Invalid schedule`. Editing any
+    /// one-shot job was therefore impossible while the sheet seeded itself
+    /// from `display`.
+    ///
+    /// Intervals prefer the stored `minutes` (the field the scheduler
+    /// actually runs on) re-rendered as `every Nm`, which `parse_schedule`
+    /// round-trips exactly; cron kinds use `expr`.
+    public nonisolated var editValue: String {
+        switch kind.lowercased() {
+        case "once", "runat", "run_at":
+            if let runAt, !runAt.isEmpty { return runAt }
+        case "interval":
+            if let minutes { return "every \(minutes)m" }
+        case "cron":
+            if let expression, !expression.isEmpty { return expression }
+        default:
+            break
+        }
+        return expression ?? display ?? ""
     }
 
     public nonisolated init(from decoder: any Decoder) throws {

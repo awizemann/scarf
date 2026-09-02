@@ -54,8 +54,24 @@ final class ToolsViewModel {
             if let idx = toolsets.firstIndex(where: { $0.name == tool.name }) {
                 toolsets[idx].enabled = !newEnabled
             }
+            // The revert alone is invisible: the switch snaps back and the
+            // user has no idea whether they mis-clicked or the CLI refused.
+            // Reuse the Settings extraction so the CLI's own sentence (or a
+            // Python traceback tail) becomes one readable line.
+            toggleFailureMessage = SettingsViewModel.failureReason(from: result.output)
+                .map { String(localized: "Couldn’t \(action) \(tool.name): \($0)") }
+                ?? String(localized: "Couldn’t \(action) \(tool.name)")
+            logger.warning("tools \(action, privacy: .public) failed (exit \(result.exitCode))")
+        } else {
+            toggleFailureMessage = nil
         }
     }
+
+    /// Sticky failure banner for the last toggle. `nil` = no failure
+    /// outstanding. Cleared by a successful toggle or by `dismissToggleFailure`.
+    var toggleFailureMessage: String?
+
+    func dismissToggleFailure() { toggleFailureMessage = nil }
 
     /// Enumerate all known platforms and compute a connectivity status per platform.
     ///

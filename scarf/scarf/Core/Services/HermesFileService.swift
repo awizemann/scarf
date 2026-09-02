@@ -502,17 +502,34 @@ struct HermesFileService: Sendable {
         // reports the failure on stdout instead. Look for explicit failure
         // markers so the UI doesn't show a green check on a broken server.
         let output = result.1
-        let hasFailureMarker = output.contains("✗")
-            || output.range(of: "Connection failed", options: .caseInsensitive) != nil
-            || output.range(of: "No such file or directory", options: .caseInsensitive) != nil
-            || output.range(of: "Error:", options: .caseInsensitive) != nil
         return MCPTestResult(
             serverName: name,
-            succeeded: result.0 == 0 && !hasFailureMarker,
+            succeeded: result.0 == 0 && !Self.mcpTestReportsFailure(output),
             output: output,
             tools: tools,
             elapsed: elapsed
         )
+    }
+
+    /// Did `hermes mcp test` report a failure?
+    ///
+    /// `mcp test` exits 0 even when the inner connection fails — it reports
+    /// on stdout — so the exit code alone can't decide. But every failure
+    /// path goes through `hermes_cli/mcp_config.py::_error`, which prints
+    /// `  ✗ {text}` (line 56, verified at tag `v2026.8.31`): the ✗ marker
+    /// covers `Connection failed …`, `Server '…' not found …`, and every
+    /// other error the command can emit.
+    ///
+    /// The three prose substrings this used to also match ("Connection
+    /// failed", "No such file or directory", "Error:", all case-insensitive)
+    /// were therefore redundant AND false-positive generators: on a healthy
+    /// server the same output continues with one line per discovered tool,
+    /// `    {tool_name:36s} {description}` — so a filesystem server with a
+    /// tool documented "… returns Error: ENOENT / No such file or directory"
+    /// turned a fully successful probe red. CLI prose is not a protocol; the
+    /// ✗ marker is.
+    nonisolated static func mcpTestReportsFailure(_ output: String) -> Bool {
+        output.contains("✗")
     }
 
     nonisolated private static func parseToolListFromTestOutput(_ output: String) -> [String] {

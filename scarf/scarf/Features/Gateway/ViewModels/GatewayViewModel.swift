@@ -25,6 +25,17 @@ struct MessagingGatewayInfo {
     /// signal. There is no "service is loaded" string anywhere in the CLI;
     /// the previous `contains("service is loaded")` check could never match.
     let isLoaded: Bool
+    /// Live liveness verdict, NOT `state == "running"`.
+    ///
+    /// `gateway_state.json` is written by the gateway itself and nothing
+    /// rewrites it on a crash, a `kill -9`, or a failed start — so
+    /// `gateway_state` sits at `"running"` indefinitely after the process is
+    /// gone, and the green badge cheerfully repeated it. `hermes gateway
+    /// status` is the live probe (it derives pids from
+    /// `get_gateway_runtime_snapshot()`), so its verdict wins where it has
+    /// one; the file's `state` is only the fallback for the service-managed
+    /// branches, which print neither marker.
+    let isRunning: Bool
 }
 
 struct PlatformInfo: Identifiable {
@@ -66,7 +77,7 @@ final class MessagingGatewayViewModel {
         self.capabilities = capabilities
     }
 
-    var gateway = MessagingGatewayInfo(pid: nil, state: "unknown", exitReason: nil, startTime: nil, updatedAt: nil, platforms: [], isLoaded: false)
+    var gateway = MessagingGatewayInfo(pid: nil, state: "unknown", exitReason: nil, startTime: nil, updatedAt: nil, platforms: [], isLoaded: false, isRunning: false)
     var approvedUsers: [PairedUser] = []
     var pendingPairings: [PendingPairing] = []
     var isLoading = false
@@ -135,8 +146,21 @@ final class MessagingGatewayViewModel {
         return MessagingGatewayInfo(
             pid: pid, state: state, exitReason: exitReason,
             startTime: startTime, updatedAt: updatedAt,
-            platforms: platforms, isLoaded: isLoaded
+            platforms: platforms, isLoaded: isLoaded,
+            isRunning: isGatewayRunning(state: state, statusOutput: statusOutput)
         )
+    }
+
+    /// Live-probe liveness. `✗ Gateway is not running` and
+    /// `✓ Gateway is running (PID: …)` are the two verdicts the manual
+    /// branch of `hermes gateway status` prints (`hermes_cli/gateway.py`
+    /// lines 8928/8958 at tag `v2026.8.31`); the systemd/launchd/Windows
+    /// branches print neither, so there the stored `gateway_state` is all
+    /// we have and the old behaviour is kept.
+    nonisolated static func isGatewayRunning(state: String, statusOutput: String) -> Bool {
+        if statusOutput.contains("✗ Gateway is not running") { return false }
+        if statusOutput.contains("✓ Gateway is running") { return true }
+        return state == "running"
     }
 
     /// True when `hermes gateway status` shows the gateway running under a
@@ -200,30 +224,59 @@ final class MessagingGatewayViewModel {
         return (approved, pending)
     }
 
-    func startGateway() {
-        runHermes(["gateway", "start"])
-        actionMessage = "Gateway start requested"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.load()
-            self?.actionMessage = nil
-        }
-    }
+    func startGateway() { runServiceAction("start", label: "start", settleSeconds: 2) }
 
-    func stopGateway() {
-        runHermes(["gateway", "stop"])
-        actionMessage = "Gateway stop requested"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.load()
-            self?.actionMessage = nil
-        }
-    }
+    func stopGateway() { runServiceAction("stop", label: "stop", settleSeconds: 2) }
 
-    func restartGateway() {
-        runHermes(["gateway", "restart"])
-        actionMessage = "Gateway restart requested"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.load()
-            self?.actionMessage = nil
+    func restartGateway() { runServiceAction("restart", label: "restart", settleSeconds: 3) }
+
+    /// Generation token for the deferred settle-and-reload. Every service
+    /// action bumps it; the pending block from an earlier action sees a
+    /// stale token and does nothing. Without this, clicking Stop within two
+    /// seconds of Start let Start's timer clear Stop's message and fire an
+    /// extra reload on top of it — and a sticky failure message posted by
+    /// the second action was wiped by the first action's timer.
+    @ObservationIgnored private var actionGeneration = 0
+
+    /// True while `actionMessage` is reporting a failure — the view paints it
+    /// as an error and it is never auto-cleared.
+    private(set) var actionFailed = false
+
+    /// One code path for start/stop/restart so the exit code can't be
+    /// dropped on one of them. `hermes gateway start` exits 1 on its real
+    /// failure paths (`hermes_cli/gateway.py`, verified at v2026.8.31), and
+    /// the previous code discarded that entirely — a start that never
+    /// happened still announced "Gateway start requested" and then, two
+    /// seconds later, showed the badge built from the pre-existing
+    /// `gateway_state.json`.
+    ///
+    /// The exit code is the only signal read here: `gateway stop` prints
+    /// "✗ No gateway running for this profile" and still exits 0, so a
+    /// no-op stop reports as requested — the reload that follows tells the
+    /// truth. Substring-matching that prose is not a protocol.
+    private func runServiceAction(_ verb: String, label: String, settleSeconds: Double) {
+        let result = runHermes(["gateway", verb])
+        actionGeneration &+= 1
+        let generation = actionGeneration
+
+        guard result.exitCode == 0 else {
+            actionFailed = true
+            actionMessage = SettingsViewModel.failureReason(from: result.output)
+                .map { String(localized: "Gateway \(label) failed: \($0)") }
+                ?? String(localized: "Gateway \(label) failed")
+            // Reload anyway (the host may have moved), but never clear a
+            // failure message on a timer — the user dismisses it by taking
+            // the next action.
+            load()
+            return
+        }
+
+        actionFailed = false
+        actionMessage = String(localized: "Gateway \(label) requested")
+        DispatchQueue.main.asyncAfter(deadline: .now() + settleSeconds) { [weak self] in
+            guard let self, self.actionGeneration == generation else { return }
+            self.load()
+            self.actionMessage = nil
         }
     }
 

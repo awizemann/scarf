@@ -128,6 +128,16 @@ struct HermesCapabilitiesPanel: View {
             flagRow("v0.13 (Goals, ACP queue, model presets)", on: caps.isV013OrLater)
             flagRow("v0.14 (Subgoal, /yolo, /sessions, Proxy)", on: caps.isV014OrLater)
             flagRow("v0.15 (Kanban v0.15, ntfy, MCP mTLS, Bitwarden)", on: caps.isV015OrLater)
+            flagRow("v0.16 (Session rename/optimize, Insights, Dashboard)", on: caps.isV016OrLater)
+            flagRow("v0.17 (Curator consolidate, WhatsApp Cloud, Photon)", on: caps.isV017OrLater)
+            flagRow("v0.18 (Cron attach-to-session, MCP reauth, plugin tool override)", on: caps.isV018OrLater)
+            flagRow("v0.19 (config unset, auxiliary reasoning effort, gateway profile routes)", on: caps.isV019OrLater)
+            flagRow("v0.20 (Compress, Cron run history, approval suggestions)", on: caps.isV020OrLater)
+            flagRow("v0.20.3 (Bot mode)", on: caps.isV0203OrLater)
+            flagRow("v0.20.4 (Curator ledger/purge, skill project trust, MCP cwd)", on: caps.isV0204OrLater)
+            flagRow("v0.20.5 (Full --version output, cron reasoning effort)", on: caps.isV0205OrLater)
+            flagRow("v0.20.6 (Cron incidents, resume --run-now, bot-chat delivery)", on: caps.isV0206OrLater)
+            flagRow("v0.21 (Cron doctor, peer run, bot-chat creation)", on: caps.isV021OrLater)
             if caps.detected {
                 Divider().padding(.vertical, 2)
                 Text("These flags drive the slash menu, project Kanban tab, model presets, and other version-gated surfaces. A red entry means UI for that release is hidden because the connected Hermes is older.")
@@ -165,12 +175,25 @@ struct HermesCapabilitiesPanel: View {
 
     private var activeFlagCount: Int {
         guard let caps = store?.capabilities, caps.detected else { return 0 }
-        var n = 0
-        if caps.hasCurator { n += 1 }
-        if caps.isV013OrLater { n += 1 }
-        if caps.isV014OrLater { n += 1 }
-        if caps.isV015OrLater { n += 1 }
-        return n
+        // One entry per row in `flagList` — the count under the version line
+        // is a claim about that list, so the two move together.
+        let gates: [Bool] = [
+            caps.hasCurator,
+            caps.isV013OrLater,
+            caps.isV014OrLater,
+            caps.isV015OrLater,
+            caps.isV016OrLater,
+            caps.isV017OrLater,
+            caps.isV018OrLater,
+            caps.isV019OrLater,
+            caps.isV020OrLater,
+            caps.isV0203OrLater,
+            caps.isV0204OrLater,
+            caps.isV0205OrLater,
+            caps.isV0206OrLater,
+            caps.isV021OrLater,
+        ]
+        return gates.filter { $0 }.count
     }
 
     // MARK: - Actions

@@ -139,7 +139,12 @@ struct CronView: View {
             CronJobEditor(mode: .edit(job), availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery) { form in
                 viewModel.updateJob(
                     id: job.id,
-                    schedule: form.schedule,
+                    // Untouched schedule → omit `--schedule` entirely. Re-sending
+                    // a one-shot's own `run_at` would be rejected once that
+                    // instant has passed (`cron/jobs.py` refuses a run_at outside
+                    // the grace window), so a rename of a fired one-shot must not
+                    // drag its spent timestamp along.
+                    schedule: form.schedule == job.schedule.editValue ? nil : form.schedule,
                     prompt: form.prompt,
                     name: form.name,
                     deliver: form.deliver,
@@ -1188,7 +1193,12 @@ struct CronJobEditor: View {
             if case .edit(let job) = mode {
                 isEditMode = true
                 form.name = job.name
-                form.schedule = job.schedule.expression ?? job.schedule.display ?? ""
+                // `editValue`, never `display`: a one-shot's display label
+                // ("once at 2026-02-03 14:00") is not a schedule Hermes can
+                // parse back, so seeding the field from it made every
+                // one-shot edit fail at `parse_schedule`. See
+                // `CronSchedule.editValue`.
+                form.schedule = job.schedule.editValue
                 form.prompt = job.prompt
                 form.deliver = job.deliver ?? ""
                 form.skills = job.skills ?? []

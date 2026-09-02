@@ -197,6 +197,17 @@ final class SettingsViewModel {
     /// `static` and `internal` so tests can drive it with fixture output
     /// without standing up a SettingsViewModel.
     static func saveFailureMessage(key: String, output: String) -> String {
+        let reason = Self.failureReason(from: output) ?? ""
+        return reason.isEmpty
+            ? String(localized: "Failed to save \(key)")
+            : String(localized: "Couldn’t save \(key): \(reason)")
+    }
+
+    /// The extraction half of `saveFailureMessage`, without the "save"
+    /// wording — for channels that report an *action* rather than a write
+    /// (gateway start/stop/restart). Returns `nil` when the CLI said
+    /// nothing usable, so the caller can pick its own generic sentence.
+    static func failureReason(from output: String) -> String? {
         let reason = output
             .components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -208,9 +219,7 @@ final class SettingsViewModel {
                 return true
             }
             .map(Self.strippingErrorDecoration) ?? ""
-        return reason.isEmpty
-            ? String(localized: "Failed to save \(key)")
-            : String(localized: "Couldn’t save \(key): \(reason)")
+        return reason.isEmpty ? nil : reason
     }
 
     /// Strip Hermes's `✗ ` CLI marker and any leading `SomeError: ` label
