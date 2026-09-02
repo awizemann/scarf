@@ -238,13 +238,40 @@ public final class RichChatViewModel {
         permissionQueue.removeAll { $0.requestId == requestId }
     }
 
-    /// Drop every queued request without answering. Used on the paths
-    /// where the turn they belong to is over (prompt complete, cancel,
-    /// disconnect, session reset) — nobody is listening for the answer
-    /// any more, and presenting a leftover on the NEXT turn would ask
-    /// the user about work that already finished.
+    /// Invoked with the `requestId` of every queued permission request
+    /// that `clearPendingPermissions()` drops, so the owner can answer
+    /// the agent's still-open `session/request_permission` JSON-RPC
+    /// call with the ACP `cancelled` outcome.
+    ///
+    /// Injected rather than held as a client reference: this view model
+    /// lives in ScarfCore and has no `ACPClient` — `ChatViewModel` owns
+    /// that and wires this up. Unset (`nil`) degrades to the old
+    /// clear-only behaviour, which is what the previews, tests and the
+    /// iOS lightweight client get.
+    @ObservationIgnored
+    public var permissionCanceller: ((Int) -> Void)?
+
+    /// Drop every queued request. Used on the paths where the turn they
+    /// belong to is over (prompt complete, cancel, disconnect, session
+    /// reset) — nobody is listening for the answer any more, and
+    /// presenting a leftover on the NEXT turn would ask the user about
+    /// work that already finished.
+    ///
+    /// Dropping them from our queue is only HALF the job: each one is an
+    /// outstanding JSON-RPC request the agent is still blocked on. This
+    /// used to only `removeAll()`, so the tool call sat waiting for a
+    /// response that could never arrive — on the `handlePromptComplete`
+    /// path (the one reachable while the connection is still healthy)
+    /// that wedges the agent-side tool indefinitely. Every dropped
+    /// request is now CANCELLED first, which is the ACP-correct answer
+    /// for "the user was never asked".
     public func clearPendingPermissions() {
+        let dropped = permissionQueue
         permissionQueue.removeAll()
+        guard let permissionCanceller else { return }
+        for request in dropped {
+            permissionCanceller(request.requestId)
+        }
     }
 
     /// Mutated to trigger a scroll-to-bottom in the message list.

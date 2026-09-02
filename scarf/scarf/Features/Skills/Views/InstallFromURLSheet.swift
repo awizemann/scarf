@@ -16,13 +16,36 @@ struct InstallFromURLSheet: View {
     @State private var url: String = ""
     @State private var category: String = ""
     @State private var nameOverride: String = ""
+    /// The overrides start collapsed, but a rejected value must never be
+    /// able to disable Install while its explanation is hidden inside a
+    /// closed disclosure — so a problem forces the group open.
+    @State private var overridesExpanded = false
 
     /// Loose validity check — accept anything that starts with `https://`
     /// (HTTP gets blocked because Hermes refuses non-TLS skill URLs by
     /// default to keep MITM-injected SKILL.md off the host).
-    private var isValid: Bool {
+    private var isValidURL: Bool {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.lowercased().hasPrefix("https://") && trimmed.count > 10
+    }
+
+    /// Both overrides are interpolated into the install path
+    /// `~/.hermes/skills/<category>/<name>/`. `--name` is checked by
+    /// Hermes and aborts the install after the download with a message
+    /// Scarf could only surface as a canned "Install failed"; `--category`
+    /// is NOT checked by Hermes on the flag path at all, so a `..` typed
+    /// here would place the skill outside the skills root. Both are
+    /// validated against Hermes's own regexes before the button enables.
+    private var categoryProblem: SkillInstallValidator.Problem? {
+        SkillInstallValidator.problem(with: category, field: .category)
+    }
+
+    private var nameProblem: SkillInstallValidator.Problem? {
+        SkillInstallValidator.problem(with: nameOverride, field: .name)
+    }
+
+    private var isValid: Bool {
+        isValidURL && categoryProblem == nil && nameProblem == nil
     }
 
     var body: some View {
@@ -43,7 +66,13 @@ struct InstallFromURLSheet: View {
                     .accessibilityLabel("URL")
             }
 
-            DisclosureGroup("Optional overrides") {
+            DisclosureGroup(
+                "Optional overrides",
+                isExpanded: Binding(
+                    get: { overridesExpanded || categoryProblem != nil || nameProblem != nil },
+                    set: { overridesExpanded = $0 }
+                )
+            ) {
                 VStack(alignment: .leading, spacing: ScarfSpace.s2) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Category")
@@ -51,6 +80,12 @@ struct InstallFromURLSheet: View {
                             .foregroundStyle(ScarfColor.foregroundMuted)
                         ScarfTextField("e.g. productivity (defaults to `local`)", text: $category)
                             .accessibilityLabel("Category")
+                        if let problem = categoryProblem {
+                            Text(problem.userMessage)
+                                .scarfStyle(.caption)
+                                .foregroundStyle(ScarfColor.danger)
+                                .accessibilityLabel("Category error: \(problem.userMessage)")
+                        }
                     }
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Skill name")
@@ -58,6 +93,12 @@ struct InstallFromURLSheet: View {
                             .foregroundStyle(ScarfColor.foregroundMuted)
                         ScarfTextField("Override if SKILL.md has no `name:`", text: $nameOverride)
                             .accessibilityLabel("Skill name")
+                        if let problem = nameProblem {
+                            Text(problem.userMessage)
+                                .scarfStyle(.caption)
+                                .foregroundStyle(ScarfColor.danger)
+                                .accessibilityLabel("Skill name error: \(problem.userMessage)")
+                        }
                     }
                 }
                 .padding(.top, ScarfSpace.s2)

@@ -16,6 +16,19 @@ final class ChatViewModel {
         self.dataService = HermesDataService(context: context)
         self.fileService = HermesFileService(context: context)
         self.richChatViewModel = RichChatViewModel(context: context)
+        // Answer, rather than silently abandon, every permission request
+        // dropped by `clearPendingPermissions()`. Each queued entry is an
+        // open `session/request_permission` JSON-RPC call the agent is
+        // blocked on; dropping it from the queue alone leaves that tool
+        // call hanging. Read through `self` at call time (not captured as
+        // a value) because `acpClient` is replaced on every session
+        // start / resume — a captured client would cancel against a dead
+        // subprocess. Fire-and-forget: the cancel is a notification, and
+        // on the disconnect paths the write simply no-ops.
+        richChatViewModel.permissionCanceller = { [weak self] requestId in
+            guard let client = self?.acpClient else { return }
+            Task { await client.cancelPermission(requestId: requestId) }
+        }
         // Probe hermes binary existence once off-main, then cache. Doing
         // this synchronously inside `hermesBinaryExists`'s getter would
         // block main on every chat-body re-evaluation — for a remote

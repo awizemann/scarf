@@ -413,10 +413,30 @@ public final class CuratorViewModel {
         }
     }
 
+    /// Bumped by every `scheduleTransientClear()`. Same newest-wins
+    /// generation-counter idiom `InsightsViewModel.load()` uses, and for
+    /// the same reason: the value published between the request and its
+    /// deferred effect may no longer be the one the effect was scheduled
+    /// for.
+    @ObservationIgnored
+    private var transientGeneration = 0
+
+    /// Auto-clear `transientMessage` 3 s after it was set — but only if
+    /// nothing has set a NEWER one in the meantime.
+    ///
+    /// Without the token, the timer fired against whatever message was
+    /// current when it landed. Two toasts inside 3 s (pin then unpin, a
+    /// rollback while a prune toast is up, any second verb on the
+    /// leaderboard) meant the FIRST toast's timer wiped the SECOND one —
+    /// so the second confirmation flashed for the remainder of the first
+    /// one's window and vanished, sometimes after a few hundred ms.
     private func scheduleTransientClear() {
+        transientGeneration &+= 1
+        let generation = transientGeneration
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
-            self?.transientMessage = nil
+            guard let self, self.transientGeneration == generation else { return }
+            self.transientMessage = nil
         }
     }
 

@@ -616,10 +616,18 @@ public final class SkillsViewModel {
     /// used to surface the actual error reason in `hubMessage` instead of a
     /// canned "Browse failed". Skips Rich box-drawing chrome and ANSI noise
     /// so the message stays readable in a one-line banner.
-    nonisolated private static func firstSignificantLine(_ output: String) -> String {
+    ///
+    /// The ESC byte is spelled with an ICU `\x1B` escape, NOT Swift's
+    /// `\u{001B}`: this pattern is a RAW string handed to
+    /// `NSRegularExpression`, where Swift performs no escape processing
+    /// at all — the engine received those seven literal characters,
+    /// which ICU reads as `` followed by a stray `{}`, so the
+    /// pattern never matched a real escape sequence and ANSI colour
+    /// codes reached the banner verbatim.
+    nonisolated static func firstSignificantLine(_ output: String) -> String {
         let stripped = output
             .replacingOccurrences(
-                of: #"\u{001B}\[[0-9;]*m"#,
+                of: #"\x1B\[[0-9;]*[a-zA-Z]"#,
                 with: "",
                 options: .regularExpression
             )
@@ -743,8 +751,37 @@ public final class SkillsViewModel {
     }
 
     private func isValidSkillPath(_ path: String) -> Bool {
-        guard !path.contains(".."), path.hasPrefix(context.paths.skillsDir) else {
+        guard Self.skillPathIsContained(path, skillsDir: context.paths.skillsDir) else {
             logger.warning("Rejected skill path outside skills dir: \(path, privacy: .public)")
+            return false
+        }
+        return true
+    }
+
+    /// Containment check for a skill file path, gating both the editor's
+    /// read and its write-back.
+    ///
+    /// The `..`-plus-`hasPrefix` pair below is a purely LEXICAL guarantee —
+    /// neither operation follows symlinks — so on its own it waved through
+    /// `~/.hermes/skills/<cat>/<skill>/SKILL.md` being a symlink to
+    /// somewhere else entirely, and `transport.writeFile` then wrote
+    /// THROUGH the link, outside the skills root. Skills are agent- and
+    /// installer-writable, and a hub skill arrives as a downloaded
+    /// tarball, so the link need not be user-made.
+    ///
+    /// The symlink layer applies the convention's resolve-BOTH-sides rule
+    /// through the tested `MiniAppAssetResolver.isSymlinkContained`. As in
+    /// `WidgetPathResolver.resolve`, it is deliberately NOT
+    /// `containedFilePath`: that helper also demands the file exist
+    /// locally as a non-directory, which is wrong here because skill I/O
+    /// goes through `ServerContext`'s transport and the skills tree may
+    /// live on a REMOTE host. Hence the gate on the skills dir existing
+    /// locally — for a remote context there is nothing to stat and no way
+    /// to see a remote symlink from here, so the lexical rule stands alone.
+    nonisolated static func skillPathIsContained(_ path: String, skillsDir: String) -> Bool {
+        guard !path.contains(".."), path.hasPrefix(skillsDir) else { return false }
+        if FileManager.default.fileExists(atPath: skillsDir),
+           !MiniAppAssetResolver.isSymlinkContained(path: path, baseDirectory: skillsDir) {
             return false
         }
         return true
