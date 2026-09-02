@@ -391,10 +391,11 @@ struct BotsView: View {
     }
 
     private func rowAccessibilityLabel(_ row: BotRow) -> String {
-        var parts = [row.identity.resolvedTitle, "profile \(row.identity.profileName)"]
-        if !row.identity.isBotManaged { parts.append("not a bot yet") }
-        if row.isPinned { parts.append("pinned") }
-        if row.isHidden { parts.append("hidden") }
+        var parts = [row.identity.resolvedTitle,
+                     String(localized: "profile \(row.identity.profileName)")]
+        if !row.identity.isBotManaged { parts.append(String(localized: "not a bot yet")) }
+        if row.isPinned { parts.append(String(localized: "pinned")) }
+        if row.isHidden { parts.append(String(localized: "hidden")) }
         return parts.joined(separator: ", ")
     }
 

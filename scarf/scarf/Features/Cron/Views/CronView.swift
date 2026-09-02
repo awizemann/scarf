@@ -495,7 +495,7 @@ struct CronView: View {
         }
     }
 
-    private func statCard(label: String, value: String, sub: String?) -> some View {
+    private func statCard(label: LocalizedStringKey, value: String, sub: String?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .scarfStyle(.captionUppercase)
@@ -599,7 +599,7 @@ struct CronView: View {
 
     /// Tooltip text for the list-row `cron doctor` warning icon.
     private func doctorTooltip(_ finding: HermesCronDoctorFinding) -> String {
-        "Health check: " + finding.issues.joined(separator: " · ")
+        String(localized: "Health check: \(finding.issues.joined(separator: " · "))")
     }
 
     /// Inline `cron doctor` findings for the selected job — a warning
