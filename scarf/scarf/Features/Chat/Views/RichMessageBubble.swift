@@ -73,6 +73,19 @@ struct RichMessageBubble: View, Equatable {
     private var toolCardStyle: ToolCardStyle {
         ToolCardStyle(rawValue: toolCardStyleRaw) ?? .full
     }
+
+    /// The current density styles would leave this assistant bubble with
+    /// nothing inside — a tool-call-only message with tool cards hidden
+    /// (and any reasoning hidden too). Rendering it anyway left an empty
+    /// bubble plus a "tool_calls" footer for every hidden call group,
+    /// which made the bar's hide-tool-calls toggle look like a no-op
+    /// (Alan, 2026-09-02). Skip the bubble entirely; the content comes
+    /// back the moment the style flips.
+    private var hiddenByDensity: Bool {
+        message.content.isEmpty
+            && (message.toolCalls.isEmpty || toolCardStyle == .hidden)
+            && (!message.hasReasoning || reasoningStyle == .hidden)
+    }
     private var reasoningStyle: ReasoningStyle {
         ReasoningStyle(rawValue: reasoningStyleRaw) ?? .disclosure
     }
@@ -124,9 +137,11 @@ struct RichMessageBubble: View, Equatable {
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(Text("You"))
         } else if message.isAssistant {
-            assistantBubble
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel(Text("Assistant"))
+            if !hiddenByDensity {
+                assistantBubble
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(Text("Assistant"))
+            }
         }
         // Tool result messages are rendered inline in ToolCallCard, not as standalone bubbles
     }
