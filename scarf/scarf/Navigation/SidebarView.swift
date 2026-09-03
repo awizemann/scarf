@@ -253,13 +253,11 @@ struct SidebarView: View {
             Circle()
                 .fill(running ? ScarfColor.success : ScarfColor.foregroundFaint)
                 .frame(width: 7, height: 7)
-            Text(running ? "Hermes running" : "Hermes stopped")
+            Text(running ? "\(hermesLabel) Running" : "\(hermesLabel) Stopped")
                 .scarfStyle(.caption)
                 .foregroundStyle(ScarfColor.foregroundMuted)
-            Spacer()
-            Text(versionPill)
-                .font(ScarfFont.monoSmall)
-                .foregroundStyle(ScarfColor.foregroundFaint)
+                .lineLimit(1)
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, ScarfSpace.s4 - 2)
         .padding(.vertical, ScarfSpace.s2 + 2)
@@ -271,16 +269,14 @@ struct SidebarView: View {
         )
     }
 
-    /// The connected host's Hermes version (cached probe — no live call
-    /// from a view body). Falls back to Scarf's own version while no
-    /// probe has landed yet, so the footer never shows a bare dash.
-    /// Scarf's version remains available in About / Settings.
-    private var versionPill: String {
+    /// "Hermes v0.21.0" when the cached probe knows the connected host's
+    /// version, plain "Hermes" until one lands (cached read — no live
+    /// call from a view body). Scarf's own version lives in About.
+    private var hermesLabel: String {
         if let semver = HermesVersionCache.shared.cached(for: serverContext)?.semver {
             return "Hermes v\(semver)"
         }
-        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
-        return "v\(v)"
+        return "Hermes"
     }
 
     // MARK: - Models
