@@ -27,6 +27,10 @@ struct ProjectsView: View {
     /// drop from the registry.
     @State private var pendingRemoveFromList: ProjectEntry?
 
+    /// Last mutation-failure title seen, so the alert keeps its title
+    /// while it animates away. See the `.alert` below.
+    @State private var lastMutationErrorTitle = ""
+
     /// Project queued for the rename sheet (v2.3). Sheet state lives
     /// on the parent view so the sidebar stays a pure presentation
     /// layer; rename logic routes through `ProjectsViewModel.renameProject`.
@@ -59,11 +63,24 @@ struct ProjectsView: View {
         // `widget.<type>.load` to spot churn that re-fires file-reading
         // widgets unnecessarily.
         let _: Void = ScarfMon.event(.render, "mac.dashboard.body")
-        return HSplitView {
-            projectList
-                .frame(minWidth: 180, maxWidth: 220)
-            dashboardArea
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        return VStack(spacing: 0) {
+            // Registry damage spans both panes: the sidebar is what
+            // went wrong, so the notice sits above the split rather
+            // than inside either half.
+            if let damage = viewModel.registryDamage {
+                RegistryDamageBanner(
+                    damage: damage,
+                    isRemote: serverContext.isRemote,
+                    onDismiss: { viewModel.dismissRegistryDamage() }
+                )
+                Divider()
+            }
+            HSplitView {
+                projectList
+                    .frame(minWidth: 180, maxWidth: 220)
+                dashboardArea
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
         .navigationTitle("Projects")
         .toolbar { templatesToolbar }
@@ -203,22 +220,30 @@ struct ProjectsView: View {
             presenting: pendingRemoveFromList
         ) { project in
             Button("Remove from List") {
-                // Strip the project's secrets block from ~/.hermes/.env
-                // BEFORE removing it from the registry — the env-mirror
-                // resolves slug via the cached manifest, which still
-                // exists at this point. Failure is non-fatal: a stale
-                // block in .env is benign (just unreachable env vars).
-                do {
-                    try KeychainEnvMirror(context: serverContext).unmirror(project: project)
-                } catch {
-                    // Silent: the mirror's own logger has already
-                    // recorded the failure.
-                }
-                viewModel.removeProject(project)
-                if coordinator.selectedProjectName == project.name {
-                    coordinator.selectedProjectName = nil
-                }
                 pendingRemoveFromList = nil
+                // Deferred so the registry write — and any failure
+                // alert it raises — happens after this dialog has
+                // finished dismissing, rather than flipping an alert
+                // inside the same presentation transaction.
+                Task { @MainActor in
+                    // The removal has to succeed BEFORE the
+                    // irreversible side work: stripping the secrets
+                    // block and clearing the coordinator's selection
+                    // for a project that is still in the registry
+                    // leaves a worse state than not trying at all.
+                    guard viewModel.removeProject(project) else { return }
+                    // Safe to unmirror AFTER the registry write: the
+                    // slug comes from `<project>/.scarf/manifest.json`,
+                    // which "Remove from List" never touches, so it
+                    // resolves the same before and after.
+                    // Failure is non-fatal: a stale block in .env is
+                    // benign (just unreachable env vars), and the
+                    // mirror's own logger has recorded it.
+                    try? KeychainEnvMirror(context: serverContext).unmirror(project: project)
+                    if coordinator.selectedProjectName == project.name {
+                        coordinator.selectedProjectName = nil
+                    }
+                }
             }
             Button("Cancel", role: .cancel) {
                 pendingRemoveFromList = nil
@@ -229,6 +254,29 @@ struct ProjectsView: View {
                 "Nothing on disk is touched — the folder, cron job, skills, and memory block all stay. " +
                 "To actually remove installed files, use \"Uninstall Template…\" instead."
             )
+        }
+        // A mutation the user asked for that didn't happen. Modal on
+        // purpose: they just clicked something, the click had no
+        // effect, and the sidebar looks identical either way — a
+        // passive notice would be missed.
+        // Title is cached rather than read straight off the view model:
+        // dismissing clears `mutationError` first, which would collapse
+        // the title to "" for the frames the alert is still animating
+        // out.
+        .onChange(of: viewModel.mutationError) { _, new in
+            if let new { lastMutationErrorTitle = new.title }
+        }
+        .alert(
+            lastMutationErrorTitle,
+            isPresented: Binding(
+                get: { viewModel.mutationError != nil },
+                set: { if !$0 { viewModel.dismissMutationError() } }
+            ),
+            presenting: viewModel.mutationError
+        ) { _ in
+            Button("OK", role: .cancel) { viewModel.dismissMutationError() }
+        } message: { failure in
+            Text(failure.message)
         }
     }
 
@@ -389,9 +437,16 @@ struct ProjectsView: View {
                 : nil
         )
         .sheet(isPresented: $showingAddSheet) {
+            // Each of these three sheets calls back and then dismisses
+            // itself. Running the mutation on the next main-actor turn
+            // keeps its failure alert out of the sheet's own dismissal
+            // transaction, where AppKit can drop the presentation and
+            // the user would see nothing at all.
             AddProjectSheet(context: serverContext) { name, path in
-                viewModel.addProject(name: name, path: path)
-                fileWatcher.updateProjectWatches(dashboardPaths: viewModel.dashboardPaths, scarfDirs: viewModel.projectScarfDirs)
+                Task { @MainActor in
+                    viewModel.addProject(name: name, path: path)
+                    fileWatcher.updateProjectWatches(dashboardPaths: viewModel.dashboardPaths, scarfDirs: viewModel.projectScarfDirs)
+                }
             }
         }
         .sheet(item: $renameTarget) { target in
@@ -401,7 +456,7 @@ struct ProjectsView: View {
                     .filter { $0.name != target.name }
                     .map(\.name)
             ) { newName in
-                viewModel.renameProject(target, to: newName)
+                Task { @MainActor in viewModel.renameProject(target, to: newName) }
             }
         }
         .sheet(item: $moveTarget) { target in
@@ -409,7 +464,7 @@ struct ProjectsView: View {
                 project: target,
                 existingFolders: viewModel.folders
             ) { newFolder in
-                viewModel.moveProject(target, toFolder: newFolder)
+                Task { @MainActor in viewModel.moveProject(target, toFolder: newFolder) }
             }
         }
     }

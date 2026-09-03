@@ -1,5 +1,94 @@
+import Foundation
 import Observation
 import os
+
+/// A user-initiated project mutation that did not happen.
+///
+/// Split into title + message because that is exactly the shape an
+/// alert wants, and because the title alone ("Couldn't rename
+/// “site”") is the part worth reading — the message carries the
+/// underlying reason, which is often a filesystem error string.
+public struct ProjectMutationFailure: Equatable, Sendable {
+    public var title: String
+    public var message: String
+
+    public init(title: String, message: String) {
+        self.title = title
+        self.message = message
+    }
+}
+
+/// Damage the last registry load had to work around, in the form a
+/// banner can render.
+///
+/// `~/.hermes/scarf/projects.json` is agent-writable forever, so this
+/// is a routine event rather than an exceptional one. Phase 1 made the
+/// reader survive it; this is the part that says so out loud.
+public struct RegistryDamageNotice: Equatable, Sendable {
+    /// Where the unreadable file was copied, when the file could not be
+    /// parsed as a project list at all.
+    public var quarantinePath: String?
+    /// The rolling one-deep backup, when one exists on disk.
+    public var backupPath: String?
+    /// Rows that could not be decoded and were left out.
+    public var droppedCount: Int
+    /// `"<project>.<field>"` for each field dropped from a surviving row.
+    public var salvagedFields: [String]
+
+    public init(
+        quarantinePath: String? = nil,
+        backupPath: String? = nil,
+        droppedCount: Int = 0,
+        salvagedFields: [String] = []
+    ) {
+        self.quarantinePath = quarantinePath
+        self.backupPath = backupPath
+        self.droppedCount = droppedCount
+        self.salvagedFields = salvagedFields
+    }
+
+    /// Identity of THIS damage, so a dismissal sticks across the many
+    /// reloads a file watcher fires while the file stays broken — and
+    /// so *new* damage still reopens the banner.
+    ///
+    /// Deliberately excludes `backupPath`: it describes what we can
+    /// offer the user, not what went wrong. Including it meant any
+    /// later save creating `projects.json.bak` flipped the signature
+    /// and reopened a banner the user had already dismissed.
+    public var signature: String {
+        "\(quarantinePath ?? "-")|\(droppedCount)|\(salvagedFields.joined(separator: ","))"
+    }
+
+    /// The copy the user backed up to, if any — what "Show in Finder"
+    /// should select. The quarantine copy wins: it is the file that
+    /// holds the bytes we could not read.
+    public var revealPath: String? { quarantinePath ?? backupPath }
+
+    /// Banner headline. Only promises a backup when there actually is
+    /// one to point at — in the salvaged-field case nothing was set
+    /// aside, so claiming otherwise sends the user looking for a file
+    /// that doesn't exist.
+    public var headline: String {
+        revealPath == nil
+            ? "Part of your projects list couldn't be read"
+            : "Projects list was damaged — a backup was saved"
+    }
+
+    /// One plain sentence describing what was lost. No jargon: the user
+    /// did not write this file and should not have to know its shape.
+    public var summary: String {
+        if quarantinePath != nil {
+            return "Scarf couldn't read your projects file, so it set the old one aside and started a fresh list."
+        }
+        if droppedCount > 0, !salvagedFields.isEmpty {
+            return "\(droppedCount) \(droppedCount == 1 ? "project" : "projects") couldn't be read and were left out, and some details on other projects were skipped."
+        }
+        if droppedCount > 0 {
+            return "\(droppedCount) \(droppedCount == 1 ? "project" : "projects") couldn't be read and were left out of the list."
+        }
+        return "Some project details couldn't be read and were skipped."
+    }
+}
 
 @Observable
 @MainActor
@@ -19,6 +108,27 @@ public final class ProjectsViewModel {
     public var dashboard: ProjectDashboard?
     public var dashboardError: String?
     public var isLoading = false
+
+    /// The last user-initiated mutation that did not happen, for the
+    /// view to alert on. `nil` whenever the last one succeeded — every
+    /// mutator clears it on entry, so a retry that works takes the
+    /// alert down with it.
+    public private(set) var mutationError: ProjectMutationFailure?
+
+    /// Damage found in the registry the last time it was loaded, for
+    /// the view's banner. `nil` when the file read cleanly, or when the
+    /// user has dismissed this exact damage.
+    public private(set) var registryDamage: RegistryDamageNotice?
+
+    /// Signatures of the damage the user has dismissed. Kept so the
+    /// banner stays down across the many reloads a watcher fires while
+    /// the file remains broken, while NEW damage still reopens it.
+    ///
+    /// A SET rather than one slot: an agent that rewrites the registry
+    /// between two bad shapes would otherwise defeat dismissal
+    /// entirely, each shape clearing the other's dismissal and
+    /// re-raising the banner on every tick. Emptied on a clean load.
+    @ObservationIgnored private var dismissedDamageSignatures: Set<String> = []
     @ObservationIgnored private var reloadTask: Task<Void, Never>?
     @ObservationIgnored private var reloadGeneration = 0
 
@@ -27,7 +137,15 @@ public final class ProjectsViewModel {
     /// context does blocking scp/SSH, so do NOT call this from a repeated /
     /// hot path (e.g. the file-watcher `.onChange`) — use `reload()` there.
     public func load() {
-        apply(registry: service.loadRegistry())
+        // A synchronous load is a fresh, authoritative read, so it
+        // supersedes any reload still in flight: bump the generation
+        // token or an older detached read — one a watcher tick started
+        // before this call — can land afterwards and clobber both the
+        // project list and the damage banner with staler data.
+        reloadGeneration &+= 1
+        let loaded = service.loadRegistryDetailed()
+        apply(registry: loaded.registry)
+        applyDamage(Self.damageNotice(for: loaded, service: service))
         if let selected = selectedProject { loadDashboard(for: selected) }
     }
 
@@ -47,9 +165,18 @@ public final class ProjectsViewModel {
             // than clobbering fresher data. (`isCancelled` alone can't order
             // the `dashboard` write, which sits behind a second await.) The
             // synchronous `load()` this replaced couldn't interleave at all.
-            let registry = await Task.detached { ProjectDashboardService(context: ctx).loadRegistry() }.value
+            // The salvage seam runs off-main with the read it belongs
+            // to: `damageNotice` may stat the `.bak` file, which is a
+            // live SSH round-trip on a remote context and must never
+            // happen on the main actor from a watcher tick.
+            let loaded = await Task.detached { () -> (ProjectRegistry, RegistryDamageNotice?) in
+                let svc = ProjectDashboardService(context: ctx)
+                let result = svc.loadRegistryDetailed()
+                return (result.registry, ProjectsViewModel.damageNotice(for: result, service: svc))
+            }.value
             guard let self, generation == self.reloadGeneration else { return }
-            self.apply(registry: registry)
+            self.apply(registry: loaded.0)
+            self.applyDamage(loaded.1)
             if let selected = self.selectedProject {
                 await self.reloadDashboard(for: selected, generation: generation)
             }
@@ -66,56 +193,179 @@ public final class ProjectsViewModel {
         }
     }
 
+    /// Turn a registry load result into banner-ready damage, or `nil`
+    /// when the file read cleanly.
+    ///
+    /// `nonisolated` on purpose: `reload()` calls this from inside its
+    /// detached read so the `.bak` stat — a real SSH round-trip on a
+    /// remote context — never lands on the main actor.
+    nonisolated static func damageNotice(
+        for result: ProjectDashboardService.RegistryLoadResult,
+        service: ProjectDashboardService
+    ) -> RegistryDamageNotice? {
+        guard result.salvaged else { return nil }
+        // Only stat the backup once we already know something is wrong;
+        // a clean load — the overwhelmingly common case, once per
+        // watcher tick — costs nothing extra.
+        let backup = service.context.paths.projectsRegistry + ".bak"
+        return RegistryDamageNotice(
+            quarantinePath: result.quarantinePath,
+            backupPath: service.transport.fileExists(backup) ? backup : nil,
+            droppedCount: result.salvage.droppedCount,
+            salvagedFields: result.salvage.salvagedFields
+        )
+    }
+
+    /// Commit damage to the banner state, honouring a prior dismissal
+    /// of this exact damage.
+    private func applyDamage(_ notice: RegistryDamageNotice?) {
+        guard let notice else {
+            // The file reads cleanly again: drop the banner AND every
+            // dismissal, so if it breaks again later the user is told.
+            registryDamage = nil
+            dismissedDamageSignatures.removeAll()
+            return
+        }
+        guard !dismissedDamageSignatures.contains(notice.signature) else {
+            registryDamage = nil
+            return
+        }
+        registryDamage = notice
+    }
+
+    /// Take the registry-damage banner down. The same damage will not
+    /// reopen it; different damage will.
+    public func dismissRegistryDamage() {
+        guard let current = registryDamage else { return }
+        dismissedDamageSignatures.insert(current.signature)
+        registryDamage = nil
+    }
+
+    /// Clear the mutation alert.
+    public func dismissMutationError() {
+        mutationError = nil
+    }
+
+    /// Load the registry for a mutation, or `nil` when the file did not
+    /// read cleanly and the mutation must not proceed.
+    ///
+    /// **A lossy load must never be written back.** A salvaged decode
+    /// hands us the SURVIVING subset: the rows it couldn't read are
+    /// missing, and a surviving row may be missing a field. Saving that
+    /// subset makes the loss permanent — the dropped projects are gone
+    /// from `projects.json`, and a row rewritten without its `uuid`
+    /// gets a fresh identity from `ProjectStore` and silently detaches
+    /// from its own record, cron jobs and fleet siblings. The one-deep
+    /// `.bak` only survives until the next save. So the read half of
+    /// this phase learned to tolerate damage; the WRITE half has to
+    /// refuse it, loudly, rather than quietly finish the job the bad
+    /// agent write started.
+    ///
+    /// Synchronous like the mutators that call it: these are one-shot,
+    /// user-initiated paths, not the hot watcher path `reload()` covers.
+    private func registryForMutation(_ action: String) -> ProjectRegistry? {
+        // Same reasoning as `load()`: this mutation is about to become
+        // the newest truth, so invalidate any reload already in flight.
+        // Safe to bump here — a mutator runs to its commit without a
+        // suspension point, so no newer reload can start in between.
+        reloadGeneration &+= 1
+        let loaded = service.loadRegistryDetailed()
+        applyDamage(Self.damageNotice(for: loaded, service: service))
+        guard !loaded.salvaged else {
+            fail(
+                "Couldn't \(action)",
+                reason: "Scarf couldn't read all of your projects file, and changing it now would "
+                    + "throw away the parts it couldn't read. A copy has been saved alongside it. "
+                    + "Repair \(service.context.paths.projectsRegistry) first, then try again."
+            )
+            return nil
+        }
+        return loaded.registry
+    }
+
+    /// Record a failed mutation for the view to alert on, and log it.
+    private func fail(_ title: String, _ error: any Error) {
+        let reason = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        mutationError = ProjectMutationFailure(title: title, message: reason)
+        logger.error("\(title, privacy: .public): \(reason, privacy: .public)")
+    }
+
+    /// Record a refusal that isn't an error — a name collision, a
+    /// project that has since vanished from the registry.
+    private func fail(_ title: String, reason: String) {
+        mutationError = ProjectMutationFailure(title: title, message: reason)
+    }
+
     public func selectProject(_ project: ProjectEntry) {
         selectedProject = project
         loadDashboard(for: project)
     }
 
-    public func addProject(name: String, path: String) {
-        var registry = service.loadRegistry()
-        guard !registry.projects.contains(where: { $0.name == name }) else { return }
+    @discardableResult
+    public func addProject(name: String, path: String) -> Bool {
+        mutationError = nil
+        guard var registry = registryForMutation("add “\(name)”") else { return false }
+        guard !registry.projects.contains(where: { $0.name == name }) else {
+            fail("Couldn't add “\(name)”", reason: "A project with that name is already in the list.")
+            return false
+        }
         let entry = ProjectEntry(name: name, path: path)
         registry.projects.append(entry)
-        // saveRegistry throws now. The VM doesn't currently have a
-        // surface for user-visible errors (there's no alert/toast in
-        // the Projects view), so log at error level to the unified
-        // log and keep the in-memory state consistent with whatever
-        // landed on disk. If the write fails, the added entry won't
-        // persist across launches — the user sees it appear + work
-        // this session, then it's gone at relaunch. Not ideal, but
-        // matches today's UX and flagged for a proper alert later.
+        // The in-memory list is committed only on a successful write.
+        // The previous version added the row either way, so a failed
+        // save left a project the user could see and use all session
+        // that was simply gone at relaunch — the silent failure this
+        // whole change exists to remove.
         do {
             try service.saveRegistry(registry)
         } catch {
-            logger.error("addProject couldn't persist registry: \(error.localizedDescription, privacy: .public)")
+            fail("Couldn't add “\(name)”", error)
+            return false
         }
         projects = registry.projects
         selectProject(entry)
+        return true
     }
 
-    public func removeProject(_ project: ProjectEntry) {
-        var registry = service.loadRegistry()
+    @discardableResult
+    public func removeProject(_ project: ProjectEntry) -> Bool {
+        mutationError = nil
+        guard var registry = registryForMutation("remove “\(project.name)”") else { return false }
+        // Without this guard a removal of something already gone would
+        // save an unchanged list — and if that list is empty, the
+        // `allowEmpty` below deliberately bypasses Phase 1's
+        // empty-overwrite refusal, blanking the file while reporting
+        // success.
+        guard registry.projects.contains(where: { $0.name == project.name }) else {
+            fail("Couldn't remove “\(project.name)”", reason: "That project is no longer in the list.")
+            return false
+        }
         registry.projects.removeAll { $0.name == project.name }
         do {
             // Deliberate removal: removing the user's last project must
             // still be able to leave the registry empty.
             try service.saveRegistry(registry, allowEmpty: true)
         } catch {
-            logger.error("removeProject couldn't persist registry: \(error.localizedDescription, privacy: .public)")
+            // Keep the project on screen: it is still in the file, and
+            // showing it gone would be a lie the next launch corrects.
+            fail("Couldn't remove “\(project.name)”", error)
+            return false
         }
         projects = registry.projects
         if selectedProject?.name == project.name {
             selectedProject = nil
             dashboard = nil
         }
+        return true
     }
 
     // MARK: - v2.3 registry verbs (folder / archive / rename)
 
     /// Move a project into a folder. `nil` folder returns the project
     /// to the top level. No-op when the target already matches.
-    public func moveProject(_ project: ProjectEntry, toFolder folder: String?) {
-        mutateEntry(project) { $0.folder = folder }
+    @discardableResult
+    public func moveProject(_ project: ProjectEntry, toFolder folder: String?) -> Bool {
+        mutateEntry(project, action: "move “\(project.name)”") { $0.folder = folder }
     }
 
     /// Rename a project. `name` is the registry's unique key + the
@@ -123,12 +373,25 @@ public final class ProjectsViewModel {
     /// existing project's name. Returns true on success.
     @discardableResult
     public func renameProject(_ project: ProjectEntry, to newName: String) -> Bool {
+        mutationError = nil
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
+        guard !trimmed.isEmpty else {
+            // Unreachable from RenameProjectSheet (it disables Save on
+            // an empty field), but the invariant this phase asserts is
+            // that NO mutator returns false without saying why.
+            fail("Couldn't rename “\(project.name)”", reason: "A project needs a name.")
+            return false
+        }
         guard trimmed != project.name else { return true }
-        var registry = service.loadRegistry()
-        guard !registry.projects.contains(where: { $0.name == trimmed }) else { return false }
-        guard let index = registry.projects.firstIndex(where: { $0.name == project.name }) else { return false }
+        guard var registry = registryForMutation("rename “\(project.name)”") else { return false }
+        guard !registry.projects.contains(where: { $0.name == trimmed }) else {
+            fail("Couldn't rename “\(project.name)”", reason: "A project named “\(trimmed)” is already in the list.")
+            return false
+        }
+        guard let index = registry.projects.firstIndex(where: { $0.name == project.name }) else {
+            fail("Couldn't rename “\(project.name)”", reason: "That project is no longer in the list.")
+            return false
+        }
         let old = registry.projects[index]
         // `uuid` is CARRIED OVER, never re-derived. It is the project's stable
         // identity — the key of `<path>/.scarf/project.json`, the fleet
@@ -147,7 +410,7 @@ public final class ProjectsViewModel {
         do {
             try service.saveRegistry(registry)
         } catch {
-            logger.error("renameProject couldn't persist registry: \(error.localizedDescription, privacy: .public)")
+            fail("Couldn't rename “\(project.name)”", error)
             return false
         }
         projects = registry.projects
@@ -159,17 +422,25 @@ public final class ProjectsViewModel {
 
     /// Soft-archive a project. Stays on disk + in the registry; the
     /// sidebar just hides it unless `showArchived` is on.
-    public func archiveProject(_ project: ProjectEntry) {
-        mutateEntry(project) { $0.archived = true }
+    @discardableResult
+    public func archiveProject(_ project: ProjectEntry) -> Bool {
+        // Clear the selection only if the archive actually persisted —
+        // otherwise the user loses their place to a write that didn't
+        // happen.
+        guard mutateEntry(project, action: "archive “\(project.name)”", { $0.archived = true }) else {
+            return false
+        }
         if selectedProject?.name == project.name {
             selectedProject = nil
             dashboard = nil
         }
+        return true
     }
 
     /// Restore an archived project to the default view.
-    public func unarchiveProject(_ project: ProjectEntry) {
-        mutateEntry(project) { $0.archived = false }
+    @discardableResult
+    public func unarchiveProject(_ project: ProjectEntry) -> Bool {
+        mutateEntry(project, action: "restore “\(project.name)”") { $0.archived = false }
     }
 
     /// Distinct folder labels across the current project set, sorted
@@ -182,22 +453,35 @@ public final class ProjectsViewModel {
 
     // MARK: - Helpers
 
-    private func mutateEntry(_ project: ProjectEntry, _ mutation: (inout ProjectEntry) -> Void) {
-        var registry = service.loadRegistry()
-        guard let index = registry.projects.firstIndex(where: { $0.name == project.name }) else { return }
+    /// - Parameter action: the verb phrase for the failure alert, e.g.
+    ///   `move “site”` → "Couldn't move “site”". Every caller is a
+    ///   thing the user clicked, so every failure has to be sayable.
+    @discardableResult
+    private func mutateEntry(
+        _ project: ProjectEntry,
+        action: String,
+        _ mutation: (inout ProjectEntry) -> Void
+    ) -> Bool {
+        mutationError = nil
+        guard var registry = registryForMutation(action) else { return false }
+        guard let index = registry.projects.firstIndex(where: { $0.name == project.name }) else {
+            fail("Couldn't \(action)", reason: "That project is no longer in the list.")
+            return false
+        }
         var entry = registry.projects[index]
         mutation(&entry)
         registry.projects[index] = entry
         do {
             try service.saveRegistry(registry)
         } catch {
-            logger.error("mutateEntry couldn't persist registry for \(project.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            return
+            fail("Couldn't \(action)", error)
+            return false
         }
         projects = registry.projects
         if selectedProject?.name == project.name {
             selectedProject = entry
         }
+        return true
     }
 
     public func refreshDashboard() {
