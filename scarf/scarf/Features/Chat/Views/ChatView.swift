@@ -694,6 +694,63 @@ extension RichChatViewModel.PendingPermission: @retroactive Identifiable {
     public var id: Int { requestId }
 }
 
+/// A centered flow: children keep their intrinsic size and wrap onto new
+/// rows when the available width runs out. Used for the approval buttons so
+/// long option labels ("Deny and tell Hermes what to do differently") are
+/// never clipped by a fixed single row.
+struct WrapRowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    private func rows(for subviews: Subviews, in width: CGFloat) -> [[Int]] {
+        var rows: [[Int]] = [[]]
+        var x: CGFloat = 0
+        for (idx, view) in subviews.enumerated() {
+            let size = view.sizeThatFits(.unspecified)
+            if !rows[rows.count - 1].isEmpty, x + size.width > width {
+                rows.append([])
+                x = 0
+            }
+            rows[rows.count - 1].append(idx)
+            x += size.width + spacing
+        }
+        return rows
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var height: CGFloat = 0
+        var maxRowWidth: CGFloat = 0
+        for row in rows(for: subviews, in: width) {
+            let sizes = row.map { subviews[$0].sizeThatFits(.unspecified) }
+            let rowWidth = sizes.reduce(0) { $0 + $1.width } + spacing * CGFloat(max(0, row.count - 1))
+            maxRowWidth = max(maxRowWidth, rowWidth)
+            height += (sizes.map(\.height).max() ?? 0)
+        }
+        let rowCount = rows(for: subviews, in: width).count
+        height += spacing * CGFloat(max(0, rowCount - 1))
+        return CGSize(width: proposal.width ?? maxRowWidth, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in rows(for: subviews, in: bounds.width) {
+            let sizes = row.map { subviews[$0].sizeThatFits(.unspecified) }
+            let rowWidth = sizes.reduce(0) { $0 + $1.width } + spacing * CGFloat(max(0, row.count - 1))
+            let rowHeight = sizes.map(\.height).max() ?? 0
+            var x = bounds.minX + max(0, (bounds.width - rowWidth) / 2)
+            for (offset, idx) in row.enumerated() {
+                let size = sizes[offset]
+                subviews[idx].place(
+                    at: CGPoint(x: x, y: y + (rowHeight - size.height) / 2),
+                    proposal: ProposedViewSize(size)
+                )
+                x += size.width + spacing
+            }
+            y += rowHeight + spacing
+        }
+    }
+}
+
 struct PermissionApprovalView: View {
     let title: String
     let kind: String
@@ -710,11 +767,28 @@ struct PermissionApprovalView: View {
             Text("Tool Approval Required")
                 .font(.headline)
 
-            Text(title)
-                .font(.body.monospaced())
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
+            // The tool detail can be an entire security-scanned script.
+            // A bounded, scrollable well keeps the dialog a fixed size no
+            // matter how long the content runs, and leading alignment +
+            // selectable text make it actually readable/copyable.
+            ScrollView {
+                Text(title)
+                    .font(.callout.monospaced())
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            }
+            .frame(maxHeight: 360)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(nsColor: .textBackgroundColor).opacity(0.6))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(.quaternary, lineWidth: 1)
+            )
 
             // Numbered keyboard shortcuts (1–9) on the option buttons.
             // Mirrors the new TUI pattern Hermes v2026.4.23 ships —
@@ -724,7 +798,9 @@ struct PermissionApprovalView: View {
             // `.keyboardShortcut`. Capped at 9 — extra options stay
             // tappable but unbound (they'd need modifiers to
             // disambiguate beyond 9, which isn't worth it).
-            HStack(spacing: 12) {
+            // Buttons keep their intrinsic width and wrap onto more
+            // rows when they don't fit, so no label is ever clipped.
+            WrapRowLayout(spacing: 12) {
                 ForEach(Array(options.enumerated()), id: \.element.optionId) { idx, option in
                     let label = idx < 9 ? "\(idx + 1). \(option.name)" : option.name
                     Group {
@@ -742,12 +818,13 @@ struct PermissionApprovalView: View {
                             .buttonStyle(.borderedProminent)
                         }
                     }
+                    .fixedSize()
                     .applyingNumberShortcut(index: idx)
                 }
             }
         }
         .padding(24)
-        .frame(minWidth: 350)
+        .frame(minWidth: 640, maxWidth: 720)
     }
 
     private var kindIcon: String {
