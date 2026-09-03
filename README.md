@@ -67,6 +67,17 @@ Connecting takes about a minute: add a server (same details as `ssh user@host`),
 
 Scarf for macOS collects **anonymous usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames; no persistent identifier) to guide development. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/).
 
+## What's New in 3.0.1
+
+- **Bot creation works for every profile** — Hermes wraps long values in `profile.yaml` across lines; Scarf's writer refused those files, so any bot with a longer role description couldn't be created or edited. Fixed on both the read and write side, verified against real Hermes-created profiles.
+- **Parser hunt** — every file Scarf reads or writes that Hermes authors was audited against Hermes's own serializer output: local-model reasoning overrides (`llama3:8b`) save again, long quick commands no longer silently truncate (or execute as a prefix of your pipeline), one bad cron record no longer blanks the board, and empty gateway sections aren't duplicated.
+- **Hardening** — Release builds now compile with warnings as errors; all 46 Swift 6 concurrency diagnostics cleared, including a live VoiceOver bug.
+- **Bot conversations actually reach the bot** — Hermes's ACP layer can't reopen the canonical Bot Chat (it's CLI/gateway-born); Scarf now delivers those messages the way Hermes's own bot-DM tool does and refreshes the transcript from state.db, proven end-to-end against the real binary.
+- **Friendlier bot creation** — the profile id derives from the bot's name as you type, and a disabled Create button now says why. Anonymous usage analytics extended to the bot lifecycle (same privacy contract; opt out in Settings → Advanced).
+- **Chat quality-of-life** — two-row session bar that never clips its numbers, on-the-spot toggles for tool calls and reasoning, a scrollable tool-approval dialog, live header updates on rename, and the Hermes version in the sidebar footer.
+
+Full notes: [v3.0.1](https://github.com/awizemann/scarf/releases/tag/v3.0.1)
+
 ## What's New in 3.0.0
 
 - **Bots, complete** ⚙ — the bot editor now configures the agent itself: per-bot model pins with honest provenance, SOUL.md editing with conflict detection, per-bot toolset/MCP enablement, and a roster with search, activity previews, live presence — painting over SSH in one round-trip instead of sixty.
