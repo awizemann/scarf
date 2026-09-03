@@ -3,80 +3,202 @@ title: Architecture-Overview
 type: note
 permalink: scarf-wiki/architecture-overview
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-09-03
+source_sha: 7b1be630ce477231a804649efe75285f95c410b5
+source_paths: scarf/Packages/ScarfCore/Sources/ScarfCore, scarf/scarf/Core, scarf/scarf/Features, scarf/Scarf iOS, scarf/Packages/ScarfDesign
+source_paths_inferred: false
 ---
 
 # Architecture Overview
 
-Scarf is a SwiftUI app organized around **MVVM-F** (Model-View-ViewModel-Feature). Each user-facing capability is a self-contained feature module; cross-feature concerns flow through shared services. There are no third-party UI dependencies — system SQLite3, Foundation JSON, and SwiftUI's `AttributedString` markdown carry the load.
+Scarf is a native multi-window macOS and iOS application that connects to local or remote Hermes instances over plain SSH or embedded Swift SSH (Citadel on iOS). It reads Hermes's SQLite database, launches subprocess connections for real-time chat, and coordinates management operations through the `hermes` CLI. The architecture is built on Swift 6's strict concurrency model and structured as MVVM-Feature: each sidebar section is a self-contained feature module, sharing core services through a unified ScarfCore package.
 
-## Layering at a glance
+## System layers
 
 ```
-Mac target (scarf):
-  scarf/Features/         SwiftUI views + @Observable ViewModels (one per capability)
-  scarf/Navigation/       AppCoordinator (single source of truth for nav state)
-  scarf/Core/Services/    Mac-only services (SwiftTerm bridge, Sparkle wrapper)
-  scarf/Core/Persistence/ Server registry (Codable plist)
-
-iOS target (scarf mobile):
-  Scarf iOS/App/          ScarfGoTabRoot, ScarfGoCoordinator, theme glue
-  Scarf iOS/Onboarding/   SSH key generation, paste-public-key, connection test
-  Scarf iOS/<feature>/    Dashboard, Chat, Projects, Skills, Memory, Cron, Settings, Servers, Notifications
-
-Shared (Packages/):
-  ScarfCore               Models, services, view-models, transport protocol, ACP
-                          client, parsers, security helpers — consumed by both
-                          targets via local SPM package.
-  ScarfIOS                Citadel-backed SSH transport, KeychainSSHKeyStore, the
-                          iOS-specific bits that can't compile on macOS.
-  ScarfDesign             Rust palette, ScarfFont scale, ScarfSpace/Radius/Shadow
-                          tokens, reusable components (PageHeader, Card, Badge,
-                          TextField, four button styles). Linked into both targets.
+┌─────────────────────────────────────────────┐
+│ Views (SwiftUI, per-platform)               │
+│ macOS: split-view sidebar + detail pane     │
+│ iOS: tab navigation w/ adaptive sidebar     │
+└─────────────────┬───────────────────────────┘
+                  │ binds to @Observable
+┌─────────────────▼───────────────────────────┐
+│ ViewModels (MVVM, per-feature)              │
+│ ChatViewModel, SessionsViewModel, etc.      │
+└─────────────────┬───────────────────────────┘
+                  │ calls
+┌─────────────────▼───────────────────────────┐
+│ Services (ScarfCore, transport-agnostic)    │
+│ HermesDataService, ACPClient, CuratorService│
+└─────────────────┬───────────────────────────┘
+                  │ via
+┌─────────────────▼───────────────────────────┐
+│ ServerContext + Transport                   │
+│ Local | SSHTransport | CitadelServerTransport
+└─────────────────┬───────────────────────────┘
+                  │ reaches
+┌─────────────────▼───────────────────────────┐
+│ Hermes host (local ~/.hermes or remote)     │
+│ state.db | config.yaml | hermes CLI         │
+└─────────────────────────────────────────────┘
 ```
 
-See [Core Services](Core-Services), [Data Model](Data-Model), [Transport Layer](Transport-Layer), [ScarfCore Package](ScarfCore-Package), [Design System](Design-System), and [Sidebar & Navigation](Sidebar-and-Navigation) for the detail per layer.
+## Feature modules
+
+Each sidebar section is a self-contained feature under `Features/<Name>/`:
+
+```
+scarf/scarf/Features/
+├─ Chat/                     (Rich ACP chat + terminal mode)
+├─ Projects/                 (Dashboards, Kanban, Mini-apps, Templates)
+├─ Sessions/                 (Conversation history, search, export)
+├─ Kanban/                   (Board view, card management)
+├─ Templates/                (Catalog, install, configure, export)
+├─ Bots/                     (Bot roster, profiles, conversations)
+├─ Platforms/                (Messaging gateway setup, QR pairing)
+├─ Settings/                 (Config editor, models, profiles, APIs)
+└─ [13 more sections]        (Skills, Cron, Memory, Webhooks, etc.)
+```
+
+Features never import sibling features directly — all cross-feature navigation goes through `AppCoordinator`. Each feature exposes a `View` entry point; the coordinator instantiates and presents it.
+
+## Core packages (shared code)
+
+### ScarfCore (`scarf/Packages/ScarfCore/`)
+
+The heart of the app: models, services, and view models that both macOS and iOS reuse byte-for-byte.
+
+| Module | Contains |
+|---|---|
+| **Models** | `ACPRequest`, `HermesMessage`, `ScarfProject`, `ACPEvent`, `HermesProfile`, and ~60 more |
+| **Services** | `HermesDataService`, `ACPClient`, `HermesFileService`, `HermesLogService`, `CuratorService`, `BotsService`, `ModelCatalogService`, `NousSubscriptionService`, and ~10 more |
+| **ViewModels** | `ChatViewModel`, `SessionsViewModel`, `ActivityViewModel`, `ConnectionStatusViewModel`, and shared VM logic |
+| **Transport** | `LocalTransport`, `SSHTransport`, `ServerContext`, `ServerTransport` protocol |
+| **ACP** | `ACPClient` actor, `ACPChannel` protocol, `ACPEventParser`, message stream handling |
+| **Parsing** | YAML/JSON parsers for profiles, jobs, approvals, cron schedules, bot peers |
+| **Diagnostics** | `ScarfAnalytics`, `ScarfMon` (performance sampling), `ScarfMonBoot` |
+
+**Tests:** `scarf/Packages/ScarfCore/Tests/ScarfCoreTests/` — 107 files covering models, services, transport, and ACP.
+
+### ScarfDesign (`scarf/Packages/ScarfDesign/`)
+
+Typed design-token bundle imported by both targets:
+
+- **Colors:** `ScarfColor.accent` (rust), semantic colors (success, danger, warning, info), tool-call kind tints.
+- **Typography:** 11 preset styles via `.scarfStyle()` (title, body, caption, code).
+- **Spacing & Radius:** Token helpers for consistent layouts.
+- **Components:** `Card`, `Badge`, `TextField` styles, shared SwiftUI modifiers.
+
+### ScarfIOS (`scarf/Packages/ScarfIOS/`)
+
+iOS-specific code isolated for later decoupling:
+
+- `CitadelServerTransport` — pure-Swift SSH (Citadel framework).
+- `Ed25519KeyGenerator` — on-device keypair generation.
+- `KeychainSSHKeyStore` — iOS Keychain storage.
+- `IOSDashboardViewModel`, `NetworkReachabilityService`.
+
+## Transport layer
+
+Scarf speaks to Hermes through a `ServerTransport` abstraction:
+
+| Transport | Environment | Read | Write | Subprocess |
+|---|---|---|---|---|
+| **LocalTransport** | Mac with `~/.hermes/` | Direct file I/O | Direct file I/O | Fork/exec |
+| **SSHTransport** | Mac reaching remote | scp `host:path` to temp | ssh-exec + echo | ssh host -- binary |
+| **CitadelServerTransport** | iOS (no system ssh) | SFTP (Citadel) | SFTP | ssh host -- binary |
+
+All are wrapped by `ServerContext`, which routes file reads, CLI execution, and database queries. Callers never know which transport is active.
+
+**Key invariants:**
+- Database reads are **read-only** (`PRAGMA query_only = ON`) to avoid WAL contention with Hermes.
+- Management actions go through `hermes` CLI (safe) — never direct SQL writes.
+- File watching: local uses FSEvents; remote uses 3-second mtime polling.
+
+**Reference:** [[Transport Layer]]
+
+## Data flow — reading Hermes state
+
+1. View `.task` calls `viewModel.load()`.
+2. ViewModel calls service method, e.g., `HermesDataService.loadSessions(context:)`.
+3. Service:
+   - **Local:** Direct SQLite read from `~/.hermes/state.db`.
+   - **Remote:** `scp host:~/.hermes/state.db /tmp/snapshot-<uuid>.db` (atomic, cached, temporary).
+4. Service parses, dedupes concurrent requests, returns typed result.
+5. ViewModel publishes `@Observable` changes; SwiftUI re-renders.
+
+**File watching:** `HermesFileWatcher` observes `~/.hermes/` (local FSEvents) or polls mtimes (remote). When files change, views refresh automatically.
+
+## Data flow — chat and subprocess (ACP)
+
+[[ACP Subprocess]]
+
+1. ViewModel calls `ACPClient.start(context:, sessionID:)`.
+2. ACPClient:
+   - **Local:** Spawns `~/.hermes/bin/hermes acp` subprocess.
+   - **Remote:** SSH: `ssh host -- hermes acp`, pipes stdin/stdout as JSON-RPC.
+3. Client sends `session/new` or `session/load` RPC, opens event stream.
+4. Hermes emits chunks (text, tool calls, reasoning, permissions, progress).
+5. ACPClient parses events; ViewModel upserts observable messages.
+6. SwiftUI renders in real-time, throttled to 50ms per batch.
+
+**Resilience:** If the stream dies, ViewModel auto-reconnects via `session/load` on exponential backoff (1→2→4→8→16 seconds). Hermes keeps writing to `state.db` during the outage.
+
+## Multi-server architecture
+
+Scarf is a multi-window app: each window binds to exactly one Hermes server.
+
+- **Local:** Auto-synthesized on app launch; points to `~/.hermes/`.
+- **Remote:** Added via **File → Open Server**; saved to `~/Library/Preferences/com.scarf.app.plist`.
+- **Per-window isolation:** Each window has its own `AppCoordinator`, feature ViewModels, and ServerContext.
+
+**Reference:** [[Multi-Server Architecture (Scarf 2.0+)]]
+
+## Concurrency model
+
+Strict Swift 6 concurrency throughout:
+
+- **Services** are `actor`-isolated (e.g., `ACPClient`, `HermesDataService`) or `Sendable struct` (e.g., `HermesFileService`).
+- **ViewModels** are `@Observable @MainActor` (state binds to SwiftUI).
+- **Views** run on `@MainActor` (SwiftUI requirement).
+- **Long-running work** (file I/O, SSH, database reads) runs off-main via `Task` or `async` callsites.
+- **No data races:** compiler enforces sendability; all cross-isolation calls are explicit `await`.
+
+## Capability gating
+
+Hermes evolves; Scarf detects schema, CLI output, and version tags to capability-gate UI. Unsupported surfaces simply hide on older hosts — no crashes, no errors.
+
+**Pattern:** `HermesCapabilities` (ScarfCore/Services) queries Hermes's version and schema; features check `.isV0204OrLater` before showing v0.20.4-only surfaces.
+
+**Reference:** [[Hermes Capability Gating Pattern]]
+
+## iOS-specific architecture
+
+Both `scarf` (macOS) and `scarf mobile` (iOS) are targets in `scarf/scarf.xcodeproj`, sharing ScarfCore + ScarfDesign.
+
+| Aspect | Mac | iOS |
+|---|---|---|
+| **Transport** | System SSH (OpenSSH ControlMaster) | Citadel (pure Swift) |
+| **SSH keys** | Assumed in `~/.ssh/` | Generated on-device, iOS Keychain |
+| **Layout** | Split-view sidebar + detail | Tabs + sidebar (adaptive on iPad) |
+| **Localization** | 7 languages | English only (v1) |
+| **Push notifications** | Sparkle (manual check) | TestFlight / App Store (future) |
+
+**Reference:** [[ScarfGo iOS Companion App]], [Platform Differences](Platform-Differences)
+
+## Design system
+
+All UI uses typed tokens from ScarfDesign — no hardcoded colors, fonts, or spacing.
+
+**Convention:** Reach for `ScarfColor`, `ScarfFont`, `ScarfSpace`, `ScarfRadius` before custom values. If something isn't tokenized, either add the token or justify the exception inline.
+
+**Reference:** [Design System](Design-System)
 
 ## Key invariants
 
-- **Features never import sibling features.** Cross-feature operations go through `AppCoordinator` (for navigation state) or a service (for data).
-- **Read-only DB access.** Scarf never writes to `~/.hermes/state.db`. The only files Scarf writes are memory files (`MEMORY.md`, `USER.md`), cron job definitions, `.env`, `config.yaml`, and per-server snapshot caches.
-- **Sandbox disabled.** Scarf needs to read `~/.hermes/` directly, so the App Sandbox entitlement is intentionally off. There are no extra entitlements beyond standard macOS.
-- **Swift 6 strict concurrency.** `@MainActor` is the default isolation; services use `nonisolated` async methods and route results back to MainActor for UI updates.
-- **No external runtime dependencies.** Sparkle (for updates) is the only SPM dependency.
-
-## Navigation model
-
-A single `@Observable AppCoordinator` holds `selectedSection: SidebarSection`, `selectedSessionId`, and `selectedProjectName`. It is injected into the view tree via `.environment()`. The sidebar reads/writes the selection; feature views observe it. This keeps "where are we" in one place rather than scattered across views.
-
-The sidebar groups capabilities into four sections: **Monitor**, **Interact**, **Configure**, **Manage**. See [Sidebar & Navigation](Sidebar-and-Navigation) for the full section list.
-
-## Multi-server: one window per server (Mac) / one tab root per server (iOS)
-
-Scarf 2.0 is multi-window on Mac. Each window binds to exactly one **`ServerContext`** — either the local `~/.hermes/` (synthesized automatically) or a remote SSH host. Windows are independent; opening a second window for a different server gives you side-by-side state.
-
-ScarfGo (iOS) uses the same `ServerContext` abstraction but with a single-window TabView. Switching servers from the Servers list rebuilds the `ScarfGoTabRoot` against the new context — same effect as opening a different window on Mac.
-
-Server state lives in the `ServerRegistry` (Mac: Codable plist in `~/Library/Preferences/com.scarf.app`; iOS: `UserDefaults` under `com.scarf.ios.servers.v2` + per-server SSH keys in the iOS Keychain). A window's `ServerContext` is built once and provides the unified API services use:
-
-- `context.readText(path)` / `writeText(path, body)` — file I/O via the active transport.
-- `context.runHermes(args…)` — invokes `hermes` locally or `ssh host -- hermes` remotely.
-- `context.openInLocalEditor(path)` — pulls remote files local first, then opens (Mac only).
-- `context.transport` — `LocalTransport` (Mac local), `SSHTransport` (Mac remote, OpenSSH-driven), or `CitadelServerTransport` (iOS, pure-Swift Citadel). All three implement `ServerTransport`.
-
-Services receive a `ServerContext`, never raw `FileManager`, `Process`, or `NSWorkspace.open` for Hermes paths. See [Transport Layer](Transport-Layer) for the protocol details.
-
-## Chat — ACP subprocess
-
-The Rich Chat surface speaks the Hermes Agent Client Protocol (ACP) — a JSON-RPC dialect over stdio. `ACPClient` spawns `hermes acp` (locally) or `ssh -T host -- hermes acp` (remote) and exposes an async event stream. No SQLite polling is involved — chat is end-to-end real-time. See [ACP Subprocess](ACP-Subprocess).
-
-## File watching
-
-`HermesFileWatcher` reacts to changes under `~/.hermes/` so the Dashboard, Sessions browser, Activity feed, and Memory viewer refresh without manual reload. Local windows use FSEvents (`DispatchSourceFileSystemObject`); remote windows use mtime polling tunneled over the SSH ControlMaster. **v2.7+** also watches each registered project's `<project>/.scarf/` directory (both local FSEvents and remote polling), so file-reading dashboard widgets (`markdown_file`, `log_tail`, `image`) refresh automatically when the cron job updates their underlying file.
-
-## Updates
-
-`UpdaterService` is a thin wrapper around Sparkle. The appcast lives at `https://awizemann.github.io/scarf/appcast.xml` (gh-pages branch); each entry is EdDSA-signed by the release script. See [Release Process](Release-Process).
-
----
-_Last updated: 2026-04-25 — Scarf v2.5.0 (ScarfCore + ScarfIOS + ScarfDesign extraction)_
+1. **Read-only database** — avoid WAL contention with Hermes.
+2. **Safe CLI paths** — all management goes through `hermes` CLI.
+3. **Feature isolation** — no direct feature-to-feature imports.
+4. **Transport abstraction** — views/services never check transport type directly.
+5. **No app sandbox** — entitlements disable it so Scarf can read `~/.hermes/` and spawn `hermes`.
+6. **Strict concurrency** — all async code explicitly isolated and sendable.
