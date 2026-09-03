@@ -47,6 +47,12 @@ XCODEGEN=0
 CHECK_ICLOUD=0
 # ===================================================================================
 
+# --keep-running: install + launch the fresh build side-by-side instead of
+# quitting the running copy (also honored as KEEP_RUNNING=1).
+for arg in "$@"; do
+  [ "$arg" = "--keep-running" ] && KEEP_RUNNING=1
+done
+
 CONFIG="${BUILD_DETACHED_CONFIG:-Release}"
 DERIVED="${BUILD_DETACHED_DERIVED:-/tmp/${APP_PRODUCT}-build-detached}"
 SPM="${BUILD_DETACHED_SPM:-/tmp/${APP_PRODUCT}-build-detached-spm}"
@@ -250,10 +256,22 @@ if [ "$CHECK_ICLOUD" = 1 ] && ! codesign -d --entitlements - "$BUILT" 2>/dev/nul
 fi
 
 # Swap in only on a good build: quit every running copy, install the new one decoupled, make it distinct.
-quit_running_copies
-rm -rf "$INSTALL_PATH"
-cp -R "$BUILT" "$INSTALL_PATH"
-ensure_display_name
+# With --keep-running (or KEEP_RUNNING=1), the running copy is left alone and the fresh build is
+# installed and launched SIDE-BY-SIDE at a "-next" path — for testing a fix while a live session
+# keeps working. The next default run replaces both.
+if [ "${KEEP_RUNNING:-0}" = 1 ]; then
+  SIDE_PATH="${INSTALL_PATH%.app}-next.app"
+  rm -rf "$SIDE_PATH"
+  cp -R "$BUILT" "$SIDE_PATH"
+  INSTALL_PATH="$SIDE_PATH" ensure_display_name || true
+  open -n "$SIDE_PATH"
+  say "==> launched side-by-side copy → $SIDE_PATH  (running copy left untouched)"
+else
+  quit_running_copies
+  rm -rf "$INSTALL_PATH"
+  cp -R "$BUILT" "$INSTALL_PATH"
+  ensure_display_name
 
-open -n "$INSTALL_PATH"
-say "==> launched \"$DISPLAY_NAME\" → $INSTALL_PATH  (decoupled; safe from the next build)"
+  open -n "$INSTALL_PATH"
+  say "==> launched \"$DISPLAY_NAME\" → $INSTALL_PATH  (decoupled; safe from the next build)"
+fi
