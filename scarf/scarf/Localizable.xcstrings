@@ -2341,6 +2341,46 @@
         }
       }
     },
+    "%lld tool calls, completed, expandable": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Tool-Aufrufe, abgeschlossen, erweiterbar"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld llamadas de herramienta, completado, expandible"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld appels d’outils, terminé, développable"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 件のツール呼び出し、完了、展開可能"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld chamadas de ferramenta, concluído, expansível"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 个工具调用，已完成，可展开"
+          }
+        }
+      }
+    },
     "%lld tool calls, expandable": {
       "localizations": {
         "de": {

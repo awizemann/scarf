@@ -359,7 +359,8 @@ struct MessageGroupView: View, Equatable {
                         toolResults: group.toolResults,
                         // Live status rides the TRAILING activity
                         // segment only.
-                        liveStatus: (offset == items.count - 1) ? liveStatus : nil
+                        liveStatus: (offset == items.count - 1) ? liveStatus : nil,
+                        turnDurations: turnDurations
                     )
                 }
             }

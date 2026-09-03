@@ -350,7 +350,11 @@ struct RichMessageBubble: View, Equatable {
 
             VStack(alignment: .leading, spacing: 4) {
                 VStack(alignment: .leading, spacing: ScarfSpace.s2) {
-                    if message.hasReasoning, reasoningStyle != .hidden {
+                    // `hasVisibleReasoning`, not `hasReasoning`: a
+                    // whitespace-only streamed thought chunk satisfied
+                    // the loose check and rendered an empty REASONING
+                    // disclosure box above the reply.
+                    if message.hasVisibleReasoning, reasoningStyle != .hidden {
                         reasoningSection
                     }
                     if !message.content.isEmpty {

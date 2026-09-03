@@ -171,6 +171,11 @@ public struct MessageGroup: Identifiable {
         /// True when the run includes the in-flight streaming message
         /// (id == 0) — the segment the live status attaches to.
         public let isLive: Bool
+        /// Every source `HermesMessage.id` in the run (collapse can
+        /// drop ids from `entries`, so this is collected separately).
+        /// Lets the view look up per-turn data keyed by message id —
+        /// e.g. `turnDurations` for the settled "✓ … · 41s" header.
+        public let messageIds: [Int]
 
         public var reasoningCount: Int { reasoningMessages.count }
         public var latestEntry: ChatActivityEntry? { entries.last }
@@ -256,11 +261,16 @@ public struct MessageGroup: Identifiable {
         var total = 0
         var emptyResponses = 0
         var isLive = false
+        var messageIds: [Int] = []
 
         for msg in messages {
+            messageIds.append(msg.id)
             if msg.id == 0 { isLive = true }
             if msg.isEmptyResponseSentinel { emptyResponses += 1 }
-            if msg.hasReasoning { reasoningMessages.append(msg) }
+            // Visible reasoning only — a whitespace-only streamed
+            // thought chunk must not tick the header count or render
+            // a blank reasoning row.
+            if msg.hasVisibleReasoning { reasoningMessages.append(msg) }
             for call in msg.toolCalls {
                 total += 1
                 kindCounts[call.toolKind, default: 0] += 1
@@ -287,7 +297,8 @@ public struct MessageGroup: Identifiable {
             emptyResponseCount: emptyResponses,
             totalToolCount: total,
             toolKindCounts: kindCounts,
-            isLive: isLive
+            isLive: isLive,
+            messageIds: messageIds
         )
     }
 }

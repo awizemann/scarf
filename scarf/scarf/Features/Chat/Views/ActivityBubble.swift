@@ -26,6 +26,11 @@ struct ActivityBubbleView: View {
     /// Non-nil only when this is the trailing segment of the in-flight
     /// turn — the bubble then doubles as the typing indicator.
     var liveStatus: RichChatViewModel.LiveActivityStatus? = nil
+    /// Wall-clock turn durations keyed by assistant-message id (the
+    /// existing v2.5 plumbing). A settled segment shows the duration
+    /// recorded on one of its own source messages — honest: it's the
+    /// turn stopwatch value finalize stamped, never a synthesized sum.
+    var turnDurations: [Int: TimeInterval] = [:]
 
     @Environment(ChatViewModel.self) private var chatViewModel
     @Environment(\.chatFontScale) private var chatFontScale: Double
@@ -49,6 +54,18 @@ struct ActivityBubbleView: View {
     private var hasExpandableContent: Bool {
         (toolCardStyle != .hidden && segment.entries.count > 0)
             || (reasoningStyle != .hidden && segment.reasoningCount > 0)
+    }
+
+    /// Turn is over for this segment: not streaming, no live status.
+    private var isSettled: Bool {
+        !segment.isLive && liveStatus == nil
+    }
+
+    /// Duration recorded on one of this segment's source messages, if
+    /// the v2.5 stopwatch landed there (it lands on the turn's first
+    /// finalized message — usually a tool-bearing row inside the run).
+    private var settledDuration: TimeInterval? {
+        segment.messageIds.compactMap { turnDurations[$0] }.max()
     }
 
     var body: some View {
@@ -104,6 +121,13 @@ struct ActivityBubbleView: View {
             }
         } label: {
             HStack(spacing: 6) {
+                // Settled affordance: subtle completed checkmark ahead
+                // of the counts once the turn is done ("✓ 23 tools · 41s").
+                if isSettled {
+                    Image(systemName: "checkmark.circle")
+                        .font(.system(size: 10))
+                        .foregroundStyle(ScarfColor.success.opacity(0.8))
+                }
                 if segment.totalToolCount > 0 {
                     Image(systemName: "wrench")
                         .font(.system(size: 10))
@@ -118,6 +142,12 @@ struct ActivityBubbleView: View {
                         .font(.system(size: 10))
                     Text("\(segment.reasoningCount) reasoning")
                         .font(ChatFontScale.caption2(chatFontScale))
+                }
+                if isSettled, let seconds = settledDuration {
+                    Text(verbatim: "·")
+                    Text(verbatim: RichChatViewModel.formatTurnDuration(seconds))
+                        .font(ChatFontScale.caption2(chatFontScale))
+                        .help("Wall-clock duration of this turn")
                 }
                 if let liveStatus {
                     if segment.totalToolCount > 0 || segment.reasoningCount > 0 {
@@ -144,7 +174,11 @@ struct ActivityBubbleView: View {
             )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(Text("\(segment.totalToolCount) tool calls, expandable"))
+        .accessibilityLabel(
+            isSettled
+                ? Text("\(segment.totalToolCount) tool calls, completed, expandable")
+                : Text("\(segment.totalToolCount) tool calls, expandable")
+        )
         .accessibilityValue(expanded ? Text("Expanded") : Text("Collapsed"))
     }
 

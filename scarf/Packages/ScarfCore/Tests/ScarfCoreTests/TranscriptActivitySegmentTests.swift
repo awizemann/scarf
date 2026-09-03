@@ -302,6 +302,53 @@ import Foundation
         #expect(Self.bubble(list.first)?.content == "The result was (empty) today")
     }
 
+    // MARK: - Whitespace-only streaming rows (transient empty bubble)
+
+    @Test func whitespaceOnlyStreamingRowRendersNothing() {
+        // Models emit a bare "\n" chunk between tool calls; the id-0
+        // row must render NOTHING until it has visible text — the
+        // live status row / three-dots are the only indicators.
+        let list = Self.items([
+            Self.assistant(id: 0, content: "\n\n")
+        ])
+        #expect(list.isEmpty)
+    }
+
+    @Test func whitespaceOnlyReasoningRendersNothing() {
+        // A whitespace-only streamed thought chunk used to render an
+        // empty REASONING disclosure / tick the header count.
+        let list = Self.items([
+            Self.assistant(id: 0, content: "", reasoning: " \n")
+        ])
+        #expect(list.isEmpty)
+    }
+
+    @Test func whitespaceTextWithToolsFoldsEntirelyIntoActivity() {
+        // "\n" + a tool call: the whole row is activity — no split
+        // that would leave a tiny empty text bubble beside the card.
+        let list = Self.items([
+            Self.assistant(id: 0, content: "\n", toolCalls: [Self.toolCall(id: "c1")])
+        ])
+        #expect(list.count == 1)
+        let seg = Self.segment(list.first)
+        #expect(seg?.totalToolCount == 1)
+        #expect(seg?.isLive == true)
+    }
+
+    @Test func segmentCollectsAllSourceMessageIds() {
+        // ×N collapse keeps only the latest call's id in entries; the
+        // settled-duration lookup needs EVERY source id.
+        let args = #"{"path":"a"}"#
+        let list = Self.items([
+            Self.assistant(id: -3, content: "", toolCalls: [Self.toolCall(id: "c1", name: "read_file", arguments: args)]),
+            Self.assistant(id: -2, content: "", toolCalls: [Self.toolCall(id: "c2", name: "read_file", arguments: args)]),
+            Self.assistant(id: -1, content: "", reasoning: "thinking")
+        ])
+        let seg = Self.segment(list.first)
+        #expect(seg?.entries.count == 1)
+        #expect(seg?.messageIds == [-3, -2, -1])
+    }
+
     // MARK: - P3a argument backfill + "{}" suppression
 
     @Test func emptyObjectArgumentsSummaryIsBlank() {

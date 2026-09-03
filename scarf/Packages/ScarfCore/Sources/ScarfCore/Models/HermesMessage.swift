@@ -92,12 +92,27 @@ public struct HermesMessage: Identifiable, Sendable {
     }
 
     /// True when this message carries text the user should read as a
-    /// reply — non-empty and not the `"(empty)"` sentinel. Drives both
-    /// transcript segmentation (sentinel/textless messages fold into
-    /// activity runs) and grouping (only visible-text assistants start
-    /// a new user-less group).
+    /// reply — at least one non-whitespace character and not the
+    /// `"(empty)"` sentinel. Drives both transcript segmentation
+    /// (sentinel/textless messages fold into activity runs) and
+    /// grouping (only visible-text assistants start a new user-less
+    /// group). Whitespace-only content matters on the STREAMING path:
+    /// models commonly emit a bare "\n" chunk between tool calls, and
+    /// treating that as text rendered a transient empty bubble pill
+    /// mid-turn (Alan, 2026-09-02 live test).
     public var hasVisibleText: Bool {
-        !content.isEmpty && !isEmptyResponseSentinel
+        !content.isEmpty
+            && !isEmptyResponseSentinel
+            && content.contains(where: { !$0.isWhitespace })
+    }
+
+    /// True when any reasoning channel has *renderable* text (or a
+    /// lazily-loadable on-disk blob). Stricter than `hasReasoning`,
+    /// which is satisfied by a whitespace-only streamed thought chunk
+    /// — that case rendered an empty REASONING disclosure box.
+    public var hasVisibleReasoning: Bool {
+        (preferredReasoning ?? "").contains(where: { !$0.isWhitespace })
+            || reasoningContentAvailable
     }
     /// True when ANY reasoning channel has content. UI uses this to
     /// decide whether to render the "Thinking…" disclosure.
