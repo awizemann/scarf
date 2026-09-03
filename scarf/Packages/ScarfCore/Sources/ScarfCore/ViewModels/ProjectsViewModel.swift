@@ -97,7 +97,9 @@ public final class ProjectsViewModel {
         var registry = service.loadRegistry()
         registry.projects.removeAll { $0.name == project.name }
         do {
-            try service.saveRegistry(registry)
+            // Deliberate removal: removing the user's last project must
+            // still be able to leave the registry empty.
+            try service.saveRegistry(registry, allowEmpty: true)
         } catch {
             logger.error("removeProject couldn't persist registry: \(error.localizedDescription, privacy: .public)")
         }

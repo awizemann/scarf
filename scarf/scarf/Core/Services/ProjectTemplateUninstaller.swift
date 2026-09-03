@@ -236,7 +236,9 @@ struct ProjectTemplateUninstaller: Sendable {
         // already run at this point, so a retry is safe: the plan's
         // remaining steps are all no-ops on second pass.
         do {
-            try dashboardService.saveRegistry(registry)
+            // Deliberate removal — uninstalling the only project must
+            // still be able to leave the registry empty.
+            try dashboardService.saveRegistry(registry, allowEmpty: true)
         } catch {
             Self.logger.error("uninstall couldn't rewrite projects registry: \(error.localizedDescription, privacy: .public)")
             throw ProjectTemplateError.registryUpdateFailed(error.localizedDescription)

@@ -10,6 +10,36 @@ public struct ProjectRegistry: Codable, Sendable {
     ) {
         self.projects = projects
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case projects
+    }
+
+    /// Per-row salvage decode. The registry is agent-writable, so one
+    /// bad row must never cost the whole file: rows decode
+    /// independently and an undecodable one is skipped rather than
+    /// thrown. Only a file that isn't a registry at all (no `projects`
+    /// array) fails — `ProjectDashboardService` quarantines that case.
+    ///
+    /// Rows go through `SalvagedRow`, whose `init(from:)` never throws,
+    /// so the array decode always advances past a bad element. Decoding
+    /// element-by-element off an `UnkeyedDecodingContainer` would not:
+    /// a throwing `decode` leaves the container's index untouched.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let rows = try c.decode([SalvagedRow].self, forKey: .projects)
+        let log = decoder.userInfo[.projectRegistrySalvage] as? RegistrySalvageLog
+        for row in rows where row.entry == nil { log?.recordDroppedRow() }
+        self.projects = rows.compactMap(\.entry)
+    }
+}
+
+private struct SalvagedRow: Decodable {
+    let entry: ProjectEntry?
+
+    init(from decoder: Decoder) throws {
+        entry = try? ProjectEntry(from: decoder)
+    }
 }
 
 public struct ProjectEntry: Codable, Sendable, Identifiable, Hashable {
@@ -87,13 +117,32 @@ public struct ProjectEntry: Codable, Sendable, Identifiable, Hashable {
         case name, path, folder, archived, uuid
     }
 
+    /// `name` + `path` are the row: without them there is no project,
+    /// so they still throw (the row is then skipped by
+    /// `ProjectRegistry`). Every OPTIONAL field decodes leniently — a
+    /// malformed value drops that FIELD, never the row. The live
+    /// 2026-09-02 corruption was a hand-written `"uuid":
+    /// "SHABUBOX-SEO-TRACKER-2026-09-03"`; an agent mistyping one key
+    /// must not be able to erase a project, let alone every project.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.name = try c.decode(String.self, forKey: .name)
         self.path = try c.decode(String.self, forKey: .path)
-        self.folder = try c.decodeIfPresent(String.self, forKey: .folder)
-        self.archived = try c.decodeIfPresent(Bool.self, forKey: .archived) ?? false
-        self.uuid = try c.decodeIfPresent(UUID.self, forKey: .uuid)
+
+        let log = decoder.userInfo[.projectRegistrySalvage] as? RegistrySalvageLog
+        let row = name
+        func salvage<T: Decodable>(_ type: T.Type, _ key: CodingKeys) -> T? {
+            if let value = try? c.decodeIfPresent(type, forKey: key) { return value }
+            // Absent or explicitly null is normal; anything else was a
+            // value we could not read and are dropping.
+            if c.contains(key), !((try? c.decodeNil(forKey: key)) ?? false) {
+                log?.recordSalvagedField(key.stringValue, row: row)
+            }
+            return nil
+        }
+        self.folder = salvage(String.self, .folder)
+        self.archived = salvage(Bool.self, .archived) ?? false
+        self.uuid = salvage(UUID.self, .uuid)
     }
 
     public func encode(to encoder: Encoder) throws {
