@@ -29,6 +29,13 @@ struct RichChatMessageList: View {
     /// that were merged pre-hydration un-merge as each one's tools
     /// land, which the user perceives as bubbles spawning one-by-one.
     var isHydratingTools: Bool = false
+    /// Scarf-composed live status for the in-flight turn (P2). Non-nil
+    /// only after the turn's first ACP event and while no visible text
+    /// is streaming; the trailing group's ActivityBubble renders it
+    /// (spinner + "Running <tool>…" / "Reasoning…" / "Receiving
+    /// response…"). While nil, the classic three-dots indicator covers
+    /// the pre-first-event gap.
+    var liveStatus: RichChatViewModel.LiveActivityStatus? = nil
 
     /// Scrolling strategy: plain `VStack` (not `LazyVStack`) plus
     /// `.defaultScrollAnchor(.bottom)`.
@@ -122,14 +129,22 @@ struct RichChatMessageList: View {
                             MessageGroupView(
                                 group: group,
                                 turnDurations: turnDurations,
-                                isHydratingTools: isHydratingTools
+                                isHydratingTools: isHydratingTools,
+                                // Live status attaches only to the
+                                // trailing group of the in-flight turn.
+                                liveStatus: (isWorking && group.id == groups.last?.id)
+                                    ? liveStatus : nil
                             )
                             .equatable()
                             .id("group-\(group.id)")
                         }
                     }
 
-                    if isWorking {
+                    // Three-dots indicator only for the pre-first-event
+                    // gap (P2): once the turn emits its first event the
+                    // trailing ActivityBubble (or streaming text bubble)
+                    // is the progress signal.
+                    if isWorking && liveStatus == nil {
                         typingIndicator
                             .id("typing-indicator")
                     }
@@ -234,16 +249,12 @@ struct MessageGroupView: View, Equatable {
     /// property + included in `==` ensures the flag flip cascades
     /// through every visible bubble exactly once.
     var isHydratingTools: Bool = false
+    /// Live status for the in-flight turn — non-nil only on the
+    /// trailing group while the agent is working and no text is
+    /// streaming (see `RichChatMessageList`). Participates in `==`.
+    var liveStatus: RichChatViewModel.LiveActivityStatus? = nil
 
     @Environment(ChatViewModel.self) private var chatViewModel
-    /// Read here so the toolSummary pill knows whether to render as
-    /// always-visible (today's behavior) or as a tappable inspector
-    /// shortcut when per-call tool cards are hidden (issue #47).
-    @AppStorage(ChatDensityKeys.toolCardStyle)
-    private var toolCardStyleRaw: String = ToolCardStyle.full.rawValue
-    private var toolCardStyle: ToolCardStyle {
-        ToolCardStyle(rawValue: toolCardStyleRaw) ?? .full
-    }
 
     /// Equatable short-circuit for SwiftUI: when the trailing group's
     /// streaming bubble grows, only that group's `==` returns false.
@@ -269,6 +280,9 @@ struct MessageGroupView: View, Equatable {
         // (coalesced vs raw) — must invalidate or the body never
         // re-evals after Phase 2 finishes.
         guard lhs.isHydratingTools == rhs.isHydratingTools else { return false }
+        // Live status flips are rare (per structural ACP event) but
+        // must repaint the trailing ActivityBubble's spinner line.
+        guard lhs.liveStatus == rhs.liveStatus else { return false }
         for (l, r) in zip(lhs.group.assistantMessages, rhs.group.assistantMessages) {
             if l.id != r.id { return false }
             if l.id == 0 {
@@ -320,80 +334,43 @@ struct MessageGroupView: View, Equatable {
             // skipping the merge during hydration we render the raw
             // shape up front; a single re-render at hydration end
             // applies coalescing if it's still appropriate.
-            let assistantBubbles = isHydratingTools
-                ? group.assistantMessages.filter(\.isAssistant)
-                : group.coalescedAssistantBubbles.filter(\.isAssistant)
-            ForEach(Array(assistantBubbles.enumerated()), id: \.offset) { _, message in
-                RichMessageBubble(
-                    message: message,
-                    toolResults: group.toolResults,
-                    turnDuration: turnDurations[message.id]
-                )
-                .equatable()
+            // Turn ActivityBubble partition (chat-transcript UX P1):
+            // maximal runs of tool-bearing-or-textless assistant
+            // messages render as ONE ActivityBubble; text-bearing
+            // messages stay normal bubbles. Text coalescing keeps the
+            // same hydration gate as before — the v2.8 two-phase
+            // loader's un-merge churn rationale is unchanged.
+            let items = group.transcriptItems(coalesceText: !isHydratingTools)
+            let lastActivityOffset = items.lastIndex {
+                if case .activity = $0 { return true } else { return false }
             }
-
-            // When per-call tool cards are visible, the summary pill
-            // is informational only. When tool cards are hidden
-            // (issue #47), this pill becomes the only chrome surfacing
-            // tool activity AND the only path back into the inspector
-            // pane — render it on every group with calls (not just >1)
-            // and make it tappable to focus the first call.
-            let showSummary = (toolCardStyle == .hidden)
-                ? group.toolCallCount > 0
-                : group.toolCallCount > 1
-            if showSummary {
-                toolSummary
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var toolSummary: some View {
-        let kinds = group.toolKindCounts
-        if !kinds.isEmpty {
-            let firstCallId = group.assistantMessages
-                .flatMap(\.toolCalls)
-                .first?.callId
-            let isInteractive = (toolCardStyle == .hidden) && firstCallId != nil
-            Group {
-                if isInteractive, let firstCallId {
-                    Button {
-                        chatViewModel.focusedToolCallId = firstCallId
-                    } label: {
-                        toolSummaryPill(kinds, interactive: true)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Click to inspect tool calls")
-                } else {
-                    toolSummaryPill(kinds, interactive: false)
+            ForEach(Array(items.enumerated()), id: \.offset) { offset, item in
+                switch item {
+                case .bubble(let message):
+                    RichMessageBubble(
+                        message: message,
+                        toolResults: group.toolResults,
+                        turnDuration: turnDurations[message.id]
+                    )
+                    .equatable()
+                case .activity(let segment):
+                    ActivityBubbleView(
+                        segment: segment,
+                        toolResults: group.toolResults,
+                        // Live status rides the TRAILING activity
+                        // segment only.
+                        liveStatus: (offset == items.count - 1) ? liveStatus : nil
+                    )
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.vertical, 2)
-        }
-    }
 
-    @ViewBuilder
-    private func toolSummaryPill(_ kinds: [ToolKind: Int], interactive: Bool) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: "wrench")
-                .font(.caption2)
-            Text(summaryText(kinds))
-                .font(.caption2)
-            if interactive {
-                Image(systemName: "arrow.up.right.square")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+            // Edge: the turn is in flight with a live status but the
+            // trailing item is a text bubble (text finalized, waiting
+            // between events) — no ActivityBubble hosts the status, so
+            // it renders standalone.
+            if let liveStatus, lastActivityOffset != items.count - 1 {
+                LiveActivityStatusRow(status: liveStatus)
             }
         }
-        .foregroundStyle(.tertiary)
-    }
-
-    private func summaryText(_ kinds: [ToolKind: Int]) -> String {
-        let total = kinds.values.reduce(0, +)
-        let parts = kinds.sorted(by: { $0.value > $1.value })
-            .map { "\($0.value) \($0.key.rawValue)" }
-            .joined(separator: ", ")
-        return "Used \(total) tools (\(parts))"
     }
 }

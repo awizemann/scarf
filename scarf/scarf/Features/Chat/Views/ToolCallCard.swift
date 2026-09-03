@@ -14,6 +14,10 @@ struct ToolCallCard: View {
     /// `RichMessageBubble` (Mac). Inline expansion still toggles on the
     /// same click — power users get both paths from one gesture.
     var onFocus: (() -> Void)? = nil
+    /// Number of identical consecutive calls this card stands for
+    /// (ActivityBubble collapse). 1 = today's single-call rendering;
+    /// > 1 shows a "×N" badge next to the function name.
+    var repeatCount: Int = 1
 
     @State private var expanded = false
     /// Pretty-printed `call.arguments`. Computed once per `call.callId`
@@ -43,6 +47,12 @@ struct ToolCallCard: View {
                         .font(ScarfFont.monoSmall)
                         .fontWeight(.semibold)
                         .foregroundStyle(ScarfColor.foregroundPrimary)
+                    if repeatCount > 1 {
+                        Text(verbatim: "×\(repeatCount)")
+                            .font(ScarfFont.monoSmall)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
+                    }
                     Text(call.argumentsSummary)
                         .font(ScarfFont.monoSmall)
                         .foregroundStyle(ScarfColor.foregroundMuted)
@@ -79,7 +89,11 @@ struct ToolCallCard: View {
             // The header button merges to "READ, read_file, path/to/x" and
             // then stops: the completion checkmark / spinner and the
             // disclosure chevron are glyphs with no spoken form.
-            .accessibilityLabel(Text("Tool call \(call.functionName), \(call.argumentsSummary)"))
+            .accessibilityLabel(
+                repeatCount > 1
+                    ? Text("Tool call \(call.functionName), repeated \(repeatCount) times, \(call.argumentsSummary)")
+                    : Text("Tool call \(call.functionName), \(call.argumentsSummary)")
+            )
             .accessibilityValue(
                 result != nil
                     ? Text(expanded ? "Finished, expanded" : "Finished, collapsed")
@@ -118,7 +132,10 @@ struct ToolCallCard: View {
                 .padding(.leading, 4)
             }
         }
-        .task(id: call.callId) {
+        // Keyed on arguments length too: the P3 backfill can replace a
+        // "{}" placeholder with real arguments under the SAME callId,
+        // and a callId-only key would leave the expanded view stale.
+        .task(id: "\(call.callId)#\(call.arguments.utf8.count)") {
             formattedArgs = formatJSON(call.arguments)
         }
     }

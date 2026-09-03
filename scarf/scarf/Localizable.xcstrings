@@ -2341,6 +2341,46 @@
         }
       }
     },
+    "%lld tool calls, expandable": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Tool-Aufrufe, erweiterbar"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld llamadas de herramienta, expandible"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld appels d’outils, développable"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 件のツール呼び出し、展開可能"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld chamadas de ferramenta, expansível"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 个工具调用，可展开"
+          }
+        }
+      }
+    },
     "%lld tools": {
       "localizations": {
         "de": {
@@ -15521,6 +15561,46 @@
         }
       }
     },
+    "Collapsed": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eingeklappt"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Contraído"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réduit"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "折りたたみ済み"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recolhido"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已折叠"
+          }
+        }
+      }
+    },
     "Collapses pauses with ffmpeg client-side before upload to cloud STT providers. Reduces upload time, per-minute billing, and hallucination risk. Clips under 12s skip the trim; on any failure the original uploads untouched.": {
       "localizations": {
         "de": {
@@ -25513,6 +25593,46 @@
         }
       }
     },
+    "Enter a profile id (or a name to derive one).": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gib eine Profil-ID ein (oder einen Namen, aus dem sie abgeleitet wird)."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Introduce un id de perfil (o un nombre del que derivarlo)."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saisissez un id de profil (ou un nom dont il sera dérivé)."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "プロファイルIDを入力してください（名前から自動生成もできます）。"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Insira um id de perfil (ou um nome para derivá-lo)."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请输入配置文件 ID（或输入名称自动生成）。"
+          }
+        }
+      }
+    },
     "Enter manually": {
       "localizations": {
         "de": {
@@ -26357,6 +26477,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "在检查器中展开"
+          }
+        }
+      }
+    },
+    "Expanded": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erweitert"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expandido"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Développé"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "展開済み"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expandido"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已展开"
           }
         }
       }
@@ -54396,6 +54556,46 @@
         }
       }
     },
+    "Profile ids use lowercase letters, digits, dashes and underscores.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profil-IDs bestehen aus Kleinbuchstaben, Ziffern, Bindestrichen und Unterstrichen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Los id de perfil usan minúsculas, dígitos, guiones y guiones bajos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les id de profil utilisent des minuscules, des chiffres, des tirets et des tirets bas."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "プロファイルIDには小文字・数字・ハイフン・アンダースコアが使えます。"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ids de perfil usam letras minúsculas, dígitos, hífens e sublinhados."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置文件 ID 只能包含小写字母、数字、连字符和下划线。"
+          }
+        }
+      }
+    },
     "Profile this window is viewing — click to switch": {
       "localizations": {
         "de": {
@@ -57408,6 +57608,46 @@
         }
       }
     },
+    "Reasoning…": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Überlegt…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Razonando…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Raisonnement…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "推論中…"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Raciocinando…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "推理中…"
+          }
+        }
+      }
+    },
     "Reasons appear as a comment on the task and feed into the worker's context if it's later unblocked.": {
       "comment": "A description of how the reason is used.",
       "isCommentAutoGenerated": true,
@@ -57488,6 +57728,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "重新分配此任务。Hermes 的调度器只运行已分配的任务。"
+          }
+        }
+      }
+    },
+    "Receiving response…": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Antwort wird empfangen…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recibiendo respuesta…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réception de la réponse…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "応答を受信中…"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recebendo resposta…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在接收响应…"
           }
         }
       }
@@ -64204,6 +64484,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "运行中"
+          }
+        }
+      }
+    },
+    "Running %@…": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Führt %@ aus…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ejecutando %@…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exécution de %@…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ を実行中…"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Executando %@…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在运行 %@…"
           }
         }
       }
@@ -76305,6 +76625,46 @@
         }
       }
     },
+    "The profile id can't be \"default\".": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Profil-ID darf nicht „default“ sein."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El id de perfil no puede ser «default»."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L'id de profil ne peut pas être « default »."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "プロファイルIDに「default」は使えません。"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O id de perfil não pode ser \"default\"."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置文件 ID 不能为“default”。"
+          }
+        }
+      }
+    },
     "The project directory on disk isn't changed — only the label Scarf shows in the sidebar.": {
       "comment": "A description of the project name field.",
       "isCommentAutoGenerated": true,
@@ -79537,6 +79897,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "工具使用强制策略"
+          }
+        }
+      }
+    },
+    "Tool call %@, repeated %lld times, %@": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tool-Aufruf %1$@, %2$lld-mal wiederholt, %3$@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Llamada de herramienta %1$@, repetida %2$lld veces, %3$@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appel d’outil %1$@, répété %2$lld fois, %3$@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ツール呼び出し %1$@、%2$lld 回繰り返し、%3$@"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chamada de ferramenta %1$@, repetida %2$lld vezes, %3$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工具调用 %1$@，重复 %2$lld 次，%3$@"
           }
         }
       }
@@ -93176,126 +93576,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "→ %@ 的回滚"
-          }
-        }
-      }
-    },
-    "Enter a profile id (or a name to derive one).": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Gib eine Profil-ID ein (oder einen Namen, aus dem sie abgeleitet wird)."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Introduce un id de perfil (o un nombre del que derivarlo)."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Saisissez un id de profil (ou un nom dont il sera dérivé)."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "プロファイルIDを入力してください（名前から自動生成もできます）。"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Insira um id de perfil (ou um nome para derivá-lo)."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "请输入配置文件 ID（或输入名称自动生成）。"
-          }
-        }
-      }
-    },
-    "The profile id can't be \"default\".": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Die Profil-ID darf nicht „default“ sein."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "El id de perfil no puede ser «default»."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "L'id de profil ne peut pas être « default »."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "プロファイルIDに「default」は使えません。"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O id de perfil não pode ser \"default\"."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "配置文件 ID 不能为“default”。"
-          }
-        }
-      }
-    },
-    "Profile ids use lowercase letters, digits, dashes and underscores.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Profil-IDs bestehen aus Kleinbuchstaben, Ziffern, Bindestrichen und Unterstrichen."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Los id de perfil usan minúsculas, dígitos, guiones y guiones bajos."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Les id de profil utilisent des minuscules, des chiffres, des tirets et des tirets bas."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "プロファイルIDには小文字・数字・ハイフン・アンダースコアが使えます。"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ids de perfil usam letras minúsculas, dígitos, hífens e sublinhados."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "配置文件 ID 只能包含小写字母、数字、连字符和下划线。"
           }
         }
       }

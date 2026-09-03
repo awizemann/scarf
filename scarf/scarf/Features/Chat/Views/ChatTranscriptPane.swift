@@ -74,7 +74,8 @@ struct ChatTranscriptPane: View {
                         Task { await richChat.loadEarlier() }
                     }
                 },
-                isHydratingTools: richChat.isHydratingTools
+                isHydratingTools: richChat.isHydratingTools,
+                liveStatus: richChat.liveActivityStatus
             )
 
             Divider()
