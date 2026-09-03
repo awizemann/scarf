@@ -190,6 +190,118 @@ import Foundation
         #expect(Self.segment(list.first)?.isLive == false)
     }
 
+    // MARK: - DB-history shapes (cross-group aggregation + "(empty)" sentinel)
+
+    private static func message(
+        id: Int, role: String, content: String,
+        toolCallId: String? = nil, toolCalls: [HermesToolCall] = []
+    ) -> HermesMessage {
+        HermesMessage(
+            id: id, sessionId: "s1", role: role, content: content,
+            toolCallId: toolCallId, toolCalls: toolCalls, toolName: nil,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(id)),
+            tokenCount: nil, finishReason: nil, reasoning: nil
+        )
+    }
+
+    @Test func historyToolLoopAggregatesAcrossRowsIntoOneCollapsedCard() {
+        // The ShabuBox shape: DB-loaded rows (positive ids, no id-0
+        // streaming row) — user prompt, then a long run of identical
+        // `find` calls each persisted as its own assistant row with a
+        // tool-result row and an "(empty)" sentinel row between them.
+        let findArgs = #"{"command":"find /x -type f | sort | head -20"}"#
+        var rows: [HermesMessage] = [Self.message(id: 1, role: "user", content: "audit the tracker")]
+        var id = 2
+        for i in 0..<15 {
+            rows.append(Self.message(
+                id: id, role: "assistant", content: "",
+                toolCalls: [Self.toolCall(id: "c\(i)", name: "terminal", arguments: findArgs)]
+            ))
+            rows.append(Self.message(id: id + 1, role: "tool", content: "files", toolCallId: "c\(i)"))
+            rows.append(Self.message(id: id + 2, role: "assistant", content: "(empty)"))
+            id += 3
+        }
+        rows.append(Self.message(id: id, role: "assistant", content: "All done."))
+
+        let groups = RichChatViewModel.buildGroups(from: rows)
+        // One user-rooted group holds the entire turn.
+        #expect(groups.count == 1)
+
+        let items = groups[0].transcriptItems(coalesceText: true)
+        // ONE aggregated activity segment, then the closing text bubble.
+        #expect(items.count == 2)
+        let seg = Self.segment(items.first)
+        #expect(seg?.totalToolCount == 15)
+        // Identical consecutive calls collapse to ONE ×15 card even
+        // with "(empty)" sentinel rows interleaved.
+        #expect(seg?.entries.count == 1)
+        #expect(seg?.entries.first?.count == 15)
+        #expect(seg?.emptyResponseCount == 15)
+        #expect(seg?.isLive == false)
+        #expect(Self.bubble(items.last)?.content == "All done.")
+    }
+
+    @Test func userlessActivityRowsShareOneGroup() {
+        // A history window that starts mid-turn (no user message):
+        // activity-only assistant rows must accumulate into ONE group
+        // instead of one single-call group per row.
+        let rows: [HermesMessage] = [
+            Self.message(id: 1, role: "assistant", content: "",
+                         toolCalls: [Self.toolCall(id: "c1", name: "read_file")]),
+            Self.message(id: 2, role: "tool", content: "ok", toolCallId: "c1"),
+            Self.message(id: 3, role: "assistant", content: "",
+                         toolCalls: [Self.toolCall(id: "c2", name: "read_file")]),
+            Self.message(id: 4, role: "assistant", content: "(empty)")
+        ]
+        let groups = RichChatViewModel.buildGroups(from: rows)
+        #expect(groups.count == 1)
+        #expect(groups[0].transcriptItems(coalesceText: true).count == 1)
+    }
+
+    @Test func userlessTextAssistantsStillSplitGroups() {
+        // Visible-text assistants keep today's one-reply-per-group
+        // behavior in user-less runs.
+        let rows: [HermesMessage] = [
+            Self.message(id: 1, role: "assistant", content: "Reply one"),
+            Self.message(id: 2, role: "assistant", content: "Reply two")
+        ]
+        let groups = RichChatViewModel.buildGroups(from: rows)
+        #expect(groups.count == 2)
+    }
+
+    @Test func emptySentinelNeverRendersAsATextBubble() {
+        let list = Self.items([
+            Self.assistant(id: -1, content: "(empty)")
+        ])
+        #expect(list.count == 1)
+        let seg = Self.segment(list.first)
+        #expect(seg != nil)
+        #expect(seg?.emptyResponseCount == 1)
+        #expect(seg?.totalToolCount == 0)
+    }
+
+    @Test func emptySentinelDoesNotSplitAnActivityRun() {
+        let args = #"{"path":"a"}"#
+        let list = Self.items([
+            Self.assistant(id: -3, content: "", toolCalls: [Self.toolCall(id: "c1", name: "read_file", arguments: args)]),
+            Self.assistant(id: -2, content: "(empty)"),
+            Self.assistant(id: -1, content: "", toolCalls: [Self.toolCall(id: "c2", name: "read_file", arguments: args)])
+        ])
+        #expect(list.count == 1)
+        let seg = Self.segment(list.first)
+        #expect(seg?.entries.count == 1)
+        #expect(seg?.entries.first?.count == 2)
+        #expect(seg?.emptyResponseCount == 1)
+    }
+
+    @Test func onlyExactSentinelMatches() {
+        // Real text that merely mentions "(empty)" is a normal bubble.
+        let list = Self.items([
+            Self.assistant(id: -1, content: "The result was (empty) today")
+        ])
+        #expect(Self.bubble(list.first)?.content == "The result was (empty) today")
+    }
+
     // MARK: - P3a argument backfill + "{}" suppression
 
     @Test func emptyObjectArgumentsSummaryIsBlank() {

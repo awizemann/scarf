@@ -80,6 +80,25 @@ public struct HermesMessage: Identifiable, Sendable {
     public var isUser: Bool { role == "user" }
     public var isAssistant: Bool { role == "assistant" }
     public var isToolResult: Bool { role == "tool" }
+
+    /// Hermes writes the literal string `"(empty)"` as assistant
+    /// content when the model returned an empty response (verified in
+    /// state.db: role=assistant, content='(empty)'). Detected at
+    /// render/segmentation level only — stored data is never mutated —
+    /// so the transcript can show an honest muted "empty response" row
+    /// instead of a text bubble that says "(empty)".
+    public var isEmptyResponseSentinel: Bool {
+        isAssistant && content == "(empty)"
+    }
+
+    /// True when this message carries text the user should read as a
+    /// reply — non-empty and not the `"(empty)"` sentinel. Drives both
+    /// transcript segmentation (sentinel/textless messages fold into
+    /// activity runs) and grouping (only visible-text assistants start
+    /// a new user-less group).
+    public var hasVisibleText: Bool {
+        !content.isEmpty && !isEmptyResponseSentinel
+    }
     /// True when ANY reasoning channel has content. UI uses this to
     /// decide whether to render the "Thinking…" disclosure.
     public var hasReasoning: Bool {

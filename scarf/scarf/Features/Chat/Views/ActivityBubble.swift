@@ -69,7 +69,15 @@ struct ActivityBubbleView: View {
                 )
 
             VStack(alignment: .leading, spacing: 6) {
-                header
+                // A segment holding ONLY "(empty)" sentinel rows has no
+                // counts worth a pill — the muted row below carries it.
+                if segment.totalToolCount > 0 || segment.reasoningCount > 0
+                    || liveStatus != nil {
+                    header
+                }
+                if segment.emptyResponseCount > 0 {
+                    emptyResponseRow
+                }
                 if expanded {
                     expandedContent
                 } else if toolCardStyle != .hidden, let latest = segment.latestEntry {
@@ -149,6 +157,26 @@ struct ActivityBubbleView: View {
             Text("Reasoning…")
         case .receiving:
             Text("Receiving response…")
+        }
+    }
+
+    /// Muted, honest rendering of Hermes' `"(empty)"` sentinel — the
+    /// model returned an empty response. Detection is render-level
+    /// only (stored content is untouched); never a full text bubble.
+    private var emptyResponseRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Image(systemName: "circle.dashed")
+                .font(.system(size: 9))
+                .foregroundStyle(ScarfColor.foregroundFaint)
+            Text("Empty response from the model")
+                .font(ChatFontScale.caption(chatFontScale))
+                .italic()
+                .foregroundStyle(ScarfColor.foregroundFaint)
+            if segment.emptyResponseCount > 1 {
+                Text(verbatim: "×\(segment.emptyResponseCount)")
+                    .font(ChatFontScale.caption2(chatFontScale))
+                    .foregroundStyle(ScarfColor.foregroundFaint)
+            }
         }
     }
 

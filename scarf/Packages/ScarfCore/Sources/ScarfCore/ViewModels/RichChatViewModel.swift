@@ -159,6 +159,10 @@ public struct MessageGroup: Identifiable {
         /// Textless messages in the run that carry reasoning (the
         /// former blank-shell "thoughts-only" bubbles fold in here).
         public let reasoningMessages: [HermesMessage]
+        /// Count of Hermes `"(empty)"` sentinel rows in the run — the
+        /// model returned an empty response. Rendered as a muted
+        /// inline row, never a text bubble.
+        public let emptyResponseCount: Int
         /// Total tool calls (duplicates counted), for the header count.
         public let totalToolCount: Int
         /// Aggregate `ToolKind → count` over the segment (duplicates
@@ -170,7 +174,9 @@ public struct MessageGroup: Identifiable {
 
         public var reasoningCount: Int { reasoningMessages.count }
         public var latestEntry: ChatActivityEntry? { entries.last }
-        public var isEmpty: Bool { entries.isEmpty && reasoningMessages.isEmpty }
+        public var isEmpty: Bool {
+            entries.isEmpty && reasoningMessages.isEmpty && emptyResponseCount == 0
+        }
     }
 
     /// Partition this group's assistant messages into transcript items.
@@ -212,7 +218,11 @@ public struct MessageGroup: Identifiable {
         }
 
         for msg in assistantMessages where msg.isAssistant {
-            let hasText = !msg.content.isEmpty
+            // The Hermes "(empty)" sentinel counts as textless: it
+            // folds into activity runs like a thoughts-only message
+            // (rendered there as a muted "empty response" row), so it
+            // can't split a tool loop or paint a "(empty)" bubble.
+            let hasText = msg.hasVisibleText
             let hasTools = !msg.toolCalls.isEmpty
             if hasText {
                 flushActivity()
@@ -244,10 +254,12 @@ public struct MessageGroup: Identifiable {
         var reasoningMessages: [HermesMessage] = []
         var kindCounts: [ToolKind: Int] = [:]
         var total = 0
+        var emptyResponses = 0
         var isLive = false
 
         for msg in messages {
             if msg.id == 0 { isLive = true }
+            if msg.isEmptyResponseSentinel { emptyResponses += 1 }
             if msg.hasReasoning { reasoningMessages.append(msg) }
             for call in msg.toolCalls {
                 total += 1
@@ -272,6 +284,7 @@ public struct MessageGroup: Identifiable {
         return ChatActivitySegment(
             entries: entries,
             reasoningMessages: reasoningMessages,
+            emptyResponseCount: emptyResponses,
             totalToolCount: total,
             toolKindCounts: kindCounts,
             isLive: isLive
@@ -3043,6 +3056,13 @@ public final class RichChatViewModel {
     // MARK: - Message Grouping
 
     private func buildMessageGroups() {
+        messageGroups = Self.buildGroups(from: messages)
+    }
+
+    /// Pure grouping pass over a chronological message array — extracted
+    /// static so DB-history shapes (no user echo, no id-0 streaming row)
+    /// can be exercised directly in tests.
+    nonisolated static func buildGroups(from messages: [HermesMessage]) -> [MessageGroup] {
         var groups: [MessageGroup] = []
         var currentUser: HermesMessage?
         var currentAssistant: [HermesMessage] = []
@@ -3076,7 +3096,18 @@ public final class RichChatViewModel {
                 }
                 currentAssistant.append(message)
             } else {
-                if currentUser == nil && !currentAssistant.isEmpty && message.isAssistant {
+                // A user-less run of assistants used to split at EVERY
+                // assistant boundary, which shattered a DB-loaded tool
+                // loop into one single-call group per row — each
+                // rendering its own "1 tools" ActivityBubble with no
+                // cross-message ×N collapse (ShabuBox SEO session,
+                // 2026-09-02). Only a VISIBLE-TEXT assistant starts a
+                // new user-less group now; activity-only rows (tool
+                // calls, thoughts-only, blank, or the Hermes "(empty)"
+                // sentinel) accumulate so `transcriptItems` can
+                // aggregate the whole run into one segment.
+                if currentUser == nil && !currentAssistant.isEmpty
+                    && message.isAssistant && message.hasVisibleText {
                     flushGroup()
                 }
                 currentAssistant.append(message)
@@ -3084,7 +3115,7 @@ public final class RichChatViewModel {
         }
         flushGroup()
 
-        messageGroups = groups
+        return groups
     }
 }
 
