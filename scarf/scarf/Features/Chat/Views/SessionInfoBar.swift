@@ -99,7 +99,63 @@ struct SessionInfoBar: View {
         HermesProfileResolver.activeProfileName()
     }
 
+    // Transcript density, toggled straight from the bar. Same AppStorage
+    // keys the Settings → Display pickers own; the bar buttons flip
+    // between "hidden" and the last non-hidden style so a user who
+    // prefers compact chips gets compact back, not full.
+    @AppStorage(ChatDensityKeys.toolCardStyle)
+    private var toolCardStyleRaw: String = ToolCardStyle.full.rawValue
+    @AppStorage(ChatDensityKeys.reasoningStyle)
+    private var reasoningStyleRaw: String = ReasoningStyle.disclosure.rawValue
+    @AppStorage(ChatDensityKeys.toolCardStyleBeforeHide)
+    private var toolCardStyleBeforeHide: String = ToolCardStyle.full.rawValue
+    @AppStorage(ChatDensityKeys.reasoningStyleBeforeHide)
+    private var reasoningStyleBeforeHide: String = ReasoningStyle.disclosure.rawValue
+
+    private var toolCallsVisible: Bool { toolCardStyleRaw != ToolCardStyle.hidden.rawValue }
+    private var reasoningVisible: Bool { reasoningStyleRaw != ReasoningStyle.hidden.rawValue }
+
+    private func toggleToolCalls() {
+        if toolCallsVisible {
+            toolCardStyleBeforeHide = toolCardStyleRaw
+            toolCardStyleRaw = ToolCardStyle.hidden.rawValue
+        } else {
+            let restored = toolCardStyleBeforeHide
+            toolCardStyleRaw = restored == ToolCardStyle.hidden.rawValue
+                ? ToolCardStyle.full.rawValue : restored
+        }
+    }
+
+    private func toggleReasoning() {
+        if reasoningVisible {
+            reasoningStyleBeforeHide = reasoningStyleRaw
+            reasoningStyleRaw = ReasoningStyle.hidden.rawValue
+        } else {
+            let restored = reasoningStyleBeforeHide
+            reasoningStyleRaw = restored == ReasoningStyle.hidden.rawValue
+                ? ReasoningStyle.disclosure.rawValue : restored
+        }
+    }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            identityRow
+            if session != nil { statsRow }
+        }
+        .scarfStyle(.caption)
+        .foregroundStyle(ScarfColor.foregroundMuted)
+        .padding(.horizontal, ScarfSpace.s4)
+        .padding(.vertical, 6)
+        .background(ScarfColor.backgroundSecondary)
+        .overlay(
+            Rectangle().fill(ScarfColor.border).frame(height: 1),
+            alignment: .bottom
+        )
+    }
+
+    /// Row 1: who and where — profile, project, mode chips, working
+    /// state, and the session title.
+    private var identityRow: some View {
         HStack(spacing: 16) {
             if let session {
                 // Profile chip leftmost — surfaces which Hermes profile
@@ -275,18 +331,45 @@ struct SessionInfoBar: View {
                         .truncationMode(.tail)
                 }
 
+                Spacer()
+
+                Label(session.source, systemImage: session.sourceIcon)
+            } else {
+                Text("No active session")
+                    .foregroundStyle(ScarfColor.foregroundFaint)
+                Spacer()
+            }
+        }
+    }
+
+    /// Row 2: session telemetry — model, tokens, reasoning, compactions,
+    /// cost, elapsed — plus the transcript visibility toggles. The
+    /// numeric labels keep their intrinsic width; the model name is the
+    /// one item allowed to truncate, so the counts never wrap or clip.
+    @ViewBuilder
+    private var statsRow: some View {
+        if let session {
+            HStack(spacing: 16) {
                 if let model = session.model {
                     Label(model, systemImage: "cpu")
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .layoutPriority(-1)
+                        .help(model)
                 }
 
                 let inputToks = session.inputTokens > 0 ? session.inputTokens : acpInputTokens
                 let outputToks = session.outputTokens > 0 ? session.outputTokens : acpOutputTokens
                 Label("\(formatTokens(inputToks)) in / \(formatTokens(outputToks)) out", systemImage: "number")
                     .contentTransition(.numericText())
+                    .lineLimit(1)
+                    .fixedSize()
 
                 let reasonToks = session.reasoningTokens > 0 ? session.reasoningTokens : acpThoughtTokens
                 if reasonToks > 0 {
                     Label("\(formatTokens(reasonToks)) reasoning", systemImage: "brain")
+                        .lineLimit(1)
+                        .fixedSize()
                 }
 
                 // v0.13: Hermes surfaces a running count of automatic
@@ -301,6 +384,7 @@ struct SessionInfoBar: View {
                     )
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)
+                    .fixedSize()
                     .help("Hermes auto-compacted this session's context ^[\(acpCompressionCount) time](inflect: true)")
                 }
 
@@ -308,6 +392,8 @@ struct SessionInfoBar: View {
                     let formattedCost = cost.formatted(.currency(code: "USD").precision(.fractionLength(4)))
                     Label(session.costIsActual ? formattedCost : "\(formattedCost) est.", systemImage: "dollarsign.circle")
                         .contentTransition(.numericText())
+                        .lineLimit(1)
+                        .fixedSize()
                 }
 
                 if let start = session.startedAt {
@@ -317,26 +403,55 @@ struct SessionInfoBar: View {
                     } icon: {
                         Image(systemName: "clock")
                     }
+                    .lineLimit(1)
+                    .fixedSize()
                 }
 
                 Spacer()
 
-                Label(session.source, systemImage: session.sourceIcon)
-            } else {
-                Text("No active session")
-                    .foregroundStyle(ScarfColor.foregroundFaint)
-                Spacer()
+                visibilityToggle(
+                    isOn: toolCallsVisible,
+                    systemImage: "wrench.and.screwdriver",
+                    onLabel: "Hide tool calls in the transcript",
+                    offLabel: "Show tool calls in the transcript",
+                    action: toggleToolCalls
+                )
+                visibilityToggle(
+                    isOn: reasoningVisible,
+                    systemImage: "brain",
+                    onLabel: "Hide reasoning in the transcript",
+                    offLabel: "Show reasoning in the transcript",
+                    action: toggleReasoning
+                )
             }
         }
-        .scarfStyle(.caption)
-        .foregroundStyle(ScarfColor.foregroundMuted)
-        .padding(.horizontal, ScarfSpace.s4)
-        .padding(.vertical, 6)
-        .background(ScarfColor.backgroundSecondary)
-        .overlay(
-            Rectangle().fill(ScarfColor.border).frame(height: 1),
-            alignment: .bottom
-        )
+    }
+
+    /// A compact eye-style toggle for the stats row. Filled/tinted when
+    /// the channel is visible, slashed and muted when hidden.
+    private func visibilityToggle(
+        isOn: Bool,
+        systemImage: String,
+        onLabel: LocalizedStringKey,
+        offLabel: LocalizedStringKey,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Image(systemName: systemImage)
+                Image(systemName: isOn ? "eye" : "eye.slash")
+                    .imageScale(.small)
+            }
+            .padding(.horizontal, ScarfSpace.s2)
+            .padding(.vertical, 2)
+            .background(
+                Capsule().fill(isOn ? ScarfColor.accent.opacity(0.12) : ScarfColor.foregroundFaint.opacity(0.10))
+            )
+            .foregroundStyle(isOn ? ScarfColor.accent : ScarfColor.foregroundFaint)
+        }
+        .buttonStyle(.plain)
+        .help(isOn ? onLabel : offLabel)
+        .accessibilityLabel(isOn ? onLabel : offLabel)
     }
 
     private func formatTokens(_ count: Int) -> String {

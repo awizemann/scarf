@@ -15,6 +15,11 @@ import ScarfCore
 enum ChatDensityKeys {
     static let toolCardStyle  = "scarf.chat.toolCardStyle"
     static let reasoningStyle = "scarf.chat.reasoningStyle"
+    /// The style each SessionInfoBar visibility toggle restores when
+    /// flipped back on — so a compact-chip user gets compact back, not
+    /// full. Written by the bar toggles only.
+    static let toolCardStyleBeforeHide  = "scarf.chat.toolCardStyleBeforeHide"
+    static let reasoningStyleBeforeHide = "scarf.chat.reasoningStyleBeforeHide"
     static let fontScale      = "scarf.chat.fontScale"
     /// Whether the left sessions list pane is visible in the Mac
     /// 3-pane chat layout. Defaults true (today's behavior). Issue #58.
