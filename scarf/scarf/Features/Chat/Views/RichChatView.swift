@@ -44,7 +44,14 @@ struct RichChatView: View {
         HStack(spacing: 0) {
             if showSessionsList {
                 ChatSessionListPane(chatViewModel: chatViewModel, richChat: richChat)
-                    .frame(width: 264)
+                    // Was fixed 264 — now user-resizable + persisted, and
+                    // the default is ~25% wider (264 → 330).
+                    .resizableColumn(
+                        key: "scarf.chat.sessionsListWidth",
+                        defaultWidth: 330,
+                        minWidth: 220,
+                        maxWidth: 420
+                    )
                     .transition(.move(edge: .leading).combined(with: .opacity))
                 Divider().background(ScarfColor.border)
             }
@@ -58,7 +65,19 @@ struct RichChatView: View {
             if showInspector {
                 Divider().background(ScarfColor.border)
                 ChatInspectorPane(chatViewModel: chatViewModel)
-                    .frame(width: 320)
+                    // Same shared resizable-column mechanism as the
+                    // sessions list; default unchanged (320). Handle on
+                    // the leading edge — it's a right-side column.
+                    .resizableColumn(
+                        key: "scarf.chat.inspectorWidth",
+                        // Max chosen with the sessions list's so both
+                        // panes fully widened still leave the transcript
+                        // usable at the window's minimum content width.
+                        defaultWidth: 320,
+                        minWidth: 260,
+                        maxWidth: 440,
+                        handleEdge: .leading
+                    )
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }

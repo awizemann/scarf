@@ -77,9 +77,19 @@ struct BotsView: View {
             if !hasBotMode {
                 unsupportedState
             } else {
-                HSplitView {
+                // Shared resizable-column mechanism (also used by the chat
+                // 3-pane layout) instead of HSplitView: the divider drag
+                // persists across relaunches, and the default is ~25%
+                // wider than the old ideal (300 → 375).
+                HStack(spacing: 0) {
                     roster
-                        .frame(minWidth: 260, idealWidth: 300, maxWidth: 420)
+                        .resizableColumn(
+                            key: "scarf.bots.rosterWidth",
+                            defaultWidth: 375,
+                            minWidth: 260,
+                            maxWidth: 480
+                        )
+                    Divider().background(ScarfColor.border)
                     detail
                         .frame(minWidth: 360, maxWidth: .infinity)
                 }
