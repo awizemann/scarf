@@ -40,6 +40,18 @@ enum SessionDeletedSignal {
     nonisolated static let contextKey = "context"
 }
 
+/// Posted after a successful `hermes sessions rename` from ANY surface
+/// (Sessions tab, chat sidebar), so every other view of the same session
+/// — most visibly the chat header's `SessionInfoBar` title — updates
+/// immediately instead of waiting for its next reload. Broadcast, not
+/// polling: same pattern as `SessionDeletedSignal`.
+enum SessionRenamedSignal {
+    nonisolated static let name = Notification.Name("Scarf.sessionRenamedElsewhere")
+    nonisolated static let sessionIdKey = "sessionId"
+    nonisolated static let titleKey = "title"
+    nonisolated static let contextKey = "context"
+}
+
 /// `hermes sessions export --format {jsonl,md,qmd,html,trace}` (v0.20+,
 /// gated on `HermesCapabilities.hasSessionsExportFormats`). Cases mirror the
 /// CLI's own `--format` choices exactly, so `cliValue == rawValue`.
@@ -480,6 +492,15 @@ final class SessionsViewModel {
                 self.renameError = SessionRenameFailure.message(for: result.output)
                 return
             }
+            NotificationCenter.default.post(
+                name: SessionRenamedSignal.name,
+                object: nil,
+                userInfo: [
+                    SessionRenamedSignal.sessionIdKey: sessionId,
+                    SessionRenamedSignal.titleKey: title,
+                    SessionRenamedSignal.contextKey: ctx,
+                ]
+            )
             if let idx = self.sessions.firstIndex(where: { $0.id == sessionId }) {
                 let updated = self.sessions[idx].withTitle(title)
                 self.sessions[idx] = updated

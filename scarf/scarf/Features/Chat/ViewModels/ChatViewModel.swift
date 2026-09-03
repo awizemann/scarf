@@ -65,6 +65,19 @@ final class ChatViewModel {
                 self?.handleSessionDeletedElsewhere(sessionId: sessionId, context: deletedContext)
             }
         }
+        // Same seam for renames: keep this window's chat header title
+        // live when the session is renamed from any surface.
+        sessionRenamedObserver = NotificationCenter.default.addObserver(
+            forName: SessionRenamedSignal.name, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let sessionId = note.userInfo?[SessionRenamedSignal.sessionIdKey] as? String,
+                  let title = note.userInfo?[SessionRenamedSignal.titleKey] as? String,
+                  let renamedContext = note.userInfo?[SessionRenamedSignal.contextKey] as? ServerContext
+            else { return }
+            MainActor.assumeIsolated {
+                self?.handleSessionRenamedElsewhere(sessionId: sessionId, title: title, context: renamedContext)
+            }
+        }
     }
 
     /// Token for the `SessionDeletedSignal` observer. Block observers
@@ -74,10 +87,15 @@ final class ChatViewModel {
     /// window's VM goes away.
     @ObservationIgnored
     private var sessionDeletedObserver: (any NSObjectProtocol)?
+    @ObservationIgnored
+    private var sessionRenamedObserver: (any NSObjectProtocol)?
 
     deinit {
         if let sessionDeletedObserver {
             NotificationCenter.default.removeObserver(sessionDeletedObserver)
+        }
+        if let sessionRenamedObserver {
+            NotificationCenter.default.removeObserver(sessionRenamedObserver)
         }
     }
 
@@ -459,6 +477,23 @@ final class ChatViewModel {
     var acpClientFactory: (ServerContext, String?) -> ACPClient = { ctx, projectCwd in
         ACPClient.forMacApp(context: ctx, projectCwd: projectCwd)
     }
+
+    /// Optional interception point for `sendText`: when set and it returns
+    /// `true`, the prompt was handled by an alternate transport and NONE of
+    /// the ACP machinery runs — no `sendViaACP`, and crucially no
+    /// `autoStartACPAndSend`. Installed by `BotConversationViewModel` while
+    /// a bot's Bot Chat is being conversed with over the CLI transport
+    /// (a CLI/gateway-born session Hermes' ACP adapter refuses to load —
+    /// `acp_adapter/session.py:527`); for such a conversation an ACP
+    /// auto-start would `session/new` a stray untitled session in the bot's
+    /// profile and the prompt would never reach the bot. Routing at the
+    /// `sendText` choke point (rather than only the bot composer's `onSend`)
+    /// also covers every other UI path that funnels into `sendText` — the
+    /// goal pill's clear button, quick commands, the compress sheet.
+    /// Nil (production main-Chat default) = unchanged behavior. Returning
+    /// `false` lets the ordinary pipeline proceed.
+    @ObservationIgnored
+    var sendRouter: ((String, [ChatImageAttachment]) -> Bool)?
 
     /// Test seam for the model-config write shared by the preflight
     /// sheet and the mismatch banner's "Choose model…" flow
@@ -989,6 +1024,12 @@ final class ChatViewModel {
         // Nothing derived from `text` is recorded: not its length, not its
         // first character, not whether it looked like a slash command.
         Analytics.record(.messageSent(hasAttachment: !images.isEmpty, inputMode: inputMode))
+        // Alternate-transport hook (Bot Chat CLI delivery). Checked after
+        // the analytics emission — it is still a user-sent message — and
+        // before any ACP path, because for a routed conversation the ACP
+        // fallback (`autoStartACPAndSend`) is precisely the bug being
+        // prevented: a stray untitled `session/new` in the bot's profile.
+        if let sendRouter, sendRouter(text, images) { return }
         if displayMode == .richChat {
             if let client = acpClient {
                 sendViaACP(client: client, text: text, images: images)
@@ -2331,7 +2372,42 @@ final class ChatViewModel {
             recentSessions[idx] = recentSessions[idx].withTitle(trimmed)
         }
         sessionPreviews[sessionId] = trimmed
+        applyRenameToAttachedSession(sessionId: sessionId, title: trimmed)
+        // Broadcast so every OTHER surface showing this session — the
+        // Sessions tab, another window's chat header — updates without
+        // waiting for its next reload. Mirrors `SessionDeletedSignal`.
+        NotificationCenter.default.post(
+            name: SessionRenamedSignal.name,
+            object: nil,
+            userInfo: [
+                SessionRenamedSignal.sessionIdKey: sessionId,
+                SessionRenamedSignal.titleKey: trimmed,
+                SessionRenamedSignal.contextKey: context,
+            ]
+        )
         return true
+    }
+
+    /// Push a confirmed rename into the live transcript header: the
+    /// `SessionInfoBar` title reads `richChatViewModel.currentSession`,
+    /// which nothing refreshed on rename — the header stayed stale until
+    /// the next full reload (Alan, 2026-09-02).
+    private func applyRenameToAttachedSession(sessionId: String, title: String) {
+        if let current = richChatViewModel.currentSession, current.id == sessionId {
+            richChatViewModel.currentSession = current.withTitle(title)
+        }
+    }
+
+    /// A rename landed on another surface (Sessions tab, another window).
+    /// Update this window's caches and, when it's the attached session,
+    /// the live header.
+    private func handleSessionRenamedElsewhere(sessionId: String, title: String, context renamedContext: ServerContext) {
+        guard renamedContext == context else { return }
+        if let idx = recentSessions.firstIndex(where: { $0.id == sessionId }) {
+            recentSessions[idx] = recentSessions[idx].withTitle(title)
+        }
+        sessionPreviews[sessionId] = title
+        applyRenameToAttachedSession(sessionId: sessionId, title: title)
     }
 
     /// Why the last sidebar rename failed; `nil` once one succeeds or a
