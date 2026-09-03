@@ -15,8 +15,8 @@ reviewed_by: audit:claude-code (background)
 ## Observations
 - [rule] 🚨 A helper reachable from code already wrapped in `try`/catch should `throw` a typed error rather than `fatalError()`/force-unwrap on invariant violations — even when a comment calls it a "programmer error". Crashing the whole app to signal a recoverable caller bug is strictly worse than propagating an error the existing handlers can absorb. #rule
 - [pattern] Reserve `fatalError`/force-unwrap for truly impossible states (compile-time-constant literals). Prefer `??` without a force-unwrapped fallback.
-- [check] Quick audit: `grep -rn 'fatalError\|try!' --include="*.swift" scarf | grep -v /Tests/`
-- [history] 2026-06-13 Cycle 1: `SQLValueInliner.swift:71,82` (`fatalError` on placeholder/param-count mismatch, called from `RemoteSQLiteBackend.query()/queryBatch()` `try` paths); `MCPServerPresetPickerView.swift:126` (force-unwrap on a fallback URL literal — benign variant). #history
+- [check] Quick audit: `grep -rn 'fatalError|try!' --include="*.swift" scarf | grep -v /Tests/`
+- [done] 2026-06-13 Cycle 1: `SQLValueInliner.swift` fatalError on mismatch → `throw InlineError` (commit 597edaa t-aud08); `MCPServerPresetPickerView.swift` force-unwrap → safe binding (same commit). #history
 
 ## Relations
 - relates_to [[Scarf Architecture Rules]]

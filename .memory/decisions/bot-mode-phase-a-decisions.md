@@ -5,7 +5,7 @@ permalink: scarf/decisions/bot-mode-phase-a-decisions
 tags: [bot-mode, phase-a, hermes, profiles, decisions]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/BotRoutinePrefix.swift, scarf/scarf/Features/Bots/ViewModels/BotRoutinesViewModel.swift, scarf/scarf/Features/Bots/ViewModels/BotsViewModel.swift, scarf/scarf/Features/Bots/Views/BotRoutinesView.swift, scarf/scarf/Features/Bots/Views/RemoteBotDetailView.swift, scarf/scarf/Features/Bots/Views/BotsView.swift]
 source_paths_inferred: false
-source_sha: d8fabdec350f7e2752a6f928a7bd9454230421a0
+source_sha: 6b99894cd77829a42e24f2aff7c8d0da1392ba26
 created: 2026-09-01
 updated: 2026-09-01
 reviewed: 2026-09-02

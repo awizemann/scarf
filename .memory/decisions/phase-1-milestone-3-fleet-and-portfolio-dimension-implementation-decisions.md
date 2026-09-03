@@ -4,10 +4,11 @@ type: note
 permalink: scarf/decisions/phase-1-milestone-3-fleet-and-portfolio-dimension-implementation-decisions
 tags: [projects, phase-1, milestone-3, fleet, portfolio, config-as-policy, decision, cron]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/FleetService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectPortfolio.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/FleetApplyPlan.swift, scarf/scarf/Features/Projects/ViewModels/FleetApplyExecutor.swift, scarf/scarf/Core/Services/KanbanTenantResolver.swift, scarf/scarf/Features/Projects/Views/CockpitFleetPanel.swift]
-source_sha: 73ff36e8d264366ed074a105fe88d39d73b27f7b
+source_paths_inferred: false
+source_sha: 7b1be630ce477231a804649efe75285f95c410b5
 created: 2026-06-20
 updated: 2026-06-20
-reviewed: 2026-09-02
+reviewed: 2026-09-03
 reviewed_by: audit:claude-code (background)
 ---
 

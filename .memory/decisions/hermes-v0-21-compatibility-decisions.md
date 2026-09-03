@@ -5,7 +5,7 @@ permalink: scarf/decisions/hermes-v0-21-compatibility-decisions
 tags: [hermes, capability-gating, config, versioning, settings]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesConfig.swift, scarf/scarf/Features/Settings/Views/Tabs/WebToolsTab.swift, scarf/scarf/Features/Settings/Views/Tabs/AuxiliaryTab.swift]
 source_paths_inferred: false
-source_sha: 676f7d8dffc2c34a567124e08b36d30c650ca587
+source_sha: f1952fb7c66a4b7afd2576098f7fe9f98643b52e
 created: 2026-09-01
 updated: 2026-09-02
 reviewed: 2026-09-02

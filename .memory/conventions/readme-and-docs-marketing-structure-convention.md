@@ -14,8 +14,9 @@ reviewed_by: audit:claude-code (background)
 ## Observations
 - [convention] README.md carries ONLY the latest release's "What's New" section (4-6 bullets + link). All older versions live exclusively in the wiki Release-Notes-Index. Release prep must REPLACE the What's New section, never stack a new one on top. #readme #releases
 - [convention] Same rule for wiki/Home.md: one "Latest release" paragraph + Release-Notes-Index link — no Previous/Earlier release stack.
-- [positioning] Canonical one-liner (README, wiki Home, landing page all aligned 2026-08-13): "The native Mac & iOS app for your Hermes AI agent." ScarfGo is co-equal in positioning, not a footnote — it appears in the first sentence and gets a top-of-README section with TestFlight link.
-- [structure] README order: hero → Why Scarf (5 value-prop bullets) → ScarfGo → What's New (latest only) → Features (matching real sidebar order: Projects first, then Monitor/Interact/Configure/Manage, ⚙ marks capability-gated) → multi-server → requirements/compat → install → dashboards → architecture → releases → contributing → support.
+- [todo] **REGRESSION 2026-09-02** — README.md now has both v3.0.1 AND v3.0.0 What's New sections; wiki/Home.md stacks Latest + Previous + Earlier. Restore compliance: README keeps 3.0.1 only, move 3.0.0 summary to Release-Notes-Index link, same for wiki/Home.md. #releases
+- [positioning] Canonical one-liner (README, wiki Home, landing page all aligned 2026-08-13): "The native Mac & iOS app for your Hermes AI agent." ScarfGo is co-equal in positioning, not a footnote — it appears prominently in a top-of-README section with TestFlight link, and is mentioned in wiki/Home's opening paragraph.
+- [structure] README order: hero → Why Scarf (5 value-prop bullets) → ScarfGo → Privacy → What's New (latest only)... → Features (matching real sidebar order: Projects first, then Monitor/Interact/Configure/Manage, ⚙ marks capability-gated) → multi-server → requirements/compat → install → dashboards → architecture → releases → contributing → support → license.
 - [fact] Canonical Hermes upstream repo (confirmed by Alan 2026-08-13): github.com/hermes-ai/hermes-agent. The stray awizemann/hermes-agent links in wiki/Privacy-Policy.md and wiki/ScarfGo.md were corrected the same day.
 
 ## Relations

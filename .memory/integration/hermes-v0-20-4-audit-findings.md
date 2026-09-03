@@ -2,6 +2,7 @@
 title: Hermes v0.20.4 Audit Findings
 type: note
 permalink: scarf/integration/hermes-v0-20-4-audit-findings
+status: deprecated
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesCronJob.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift]
 source_paths_inferred: false
 source_sha: cc42250a7195da79d17ebe0e2d8351d5ea93c384

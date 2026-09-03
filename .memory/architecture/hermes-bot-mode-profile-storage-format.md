@@ -5,10 +5,10 @@ permalink: scarf/architecture/hermes-bot-mode-profile-storage-format
 tags: [hermes, bot-mode, profiles, yaml, wire-format]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesBotIdentity.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesBotProfileYAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/BotsService.swift]
 source_paths_inferred: false
-source_sha: 466bb7f11b7652ac99876183d0968269cddcac38
+source_sha: f1952fb7c66a4b7afd2576098f7fe9f98643b52e
 created: 2026-09-01
 updated: 2026-09-01
-reviewed: 2026-09-01
+reviewed: 2026-09-02
 reviewed_by: audit:claude-code (background)
 ---
 

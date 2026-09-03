@@ -11,11 +11,9 @@ reviewed: 2026-09-02
 reviewed_by: audit:claude-code (background)
 ---
 
-What shipped for the Hermes v0.20.0 (v2026.8.3) cycle and why (branch feat/hermes-v020-parity, built 2026-08-03 by orchestrated sub-agents in three waves + a fresh-eyes fix round; full findings: [[Hermes v0.20.0 Audit Findings]]).
-
 ## Observations
 - [decision] Compaction-summary styling is driven by HYDRATION-LAYER content classification (marker prefixes "[CONTEXT COMPACTION — REFERENCE ONLY]", legacy "[CONTEXT SUMMARY]:", merged delimiter — mirroring Hermes ContextCompressor.classify_summary_content), NOT the ACP _meta.hermes.compactionSummary replay flags. Rationale: Hermes persists summaries as ordinary active state.db rows; Scarf's loadSessionHistory wholesale-replaces messages, so replay-side styling either no-ops or double-renders (proven by fresh-eyes audit). The _meta parsing is kept in ACPMessages but replay stays fully suppressed pre-engagement. #decision
-- [decision] max_turns absent-key parse keeps the 0 sentinel; the DISPLAY default is capability-resolved (HermesConfig.displayMaxTurns: 500 at v0.20+, 60 before). Never bake a new upstream default into the parser — it leaks writes to old hosts. #decision
+- [decision] max_turns absent-key parse keeps the 0 sentinel; the DISPLAY default is capability-resolved (HermesConfig.displayMaxTurns: 500 at v0.20.0–v0.20.4, 60 older; upgraded to unlimited as of v0.20.5). Never bake a new upstream default into the parser — it leaks writes to old hosts. #decision
 - [decision] Remote-context session export offers only stdout-capable formats (jsonl/trace); path formats (md/html/qmd) are local-only because the CLI writes on the remote host. #decision
 - [decision] Curator adopt: bulk "Adopt All" requires a confirmation alert; adopt/adoptAll always pass --yes because hermes curator adopt prompts [y/N] on TTY. skills uninstall has NO --yes flag and prompts unconditionally — Scarf feeds stdin "y\n". #decision
 - [decision] A2A deliberately NOT added to the platform roster (infrastructure plugin, no user config surface). Buzz added with NO GatewayAllowlistKind mapping (user-gated via allowed_users). #decision
@@ -25,6 +23,7 @@ What shipped for the Hermes v0.20.0 (v2026.8.3) cycle and why (branch feat/herme
 ## Relations
 - extends [[Hermes v0.18 Compatibility Decisions]]
 - relates_to [[Hermes v0.20.0 Audit Findings]]
+- relates_to [[Hermes v0.20.5 Compatibility Decisions]]
 - implements [[Hermes Capability Gating Pattern]]
 
 

@@ -5,16 +5,16 @@ permalink: scarf/decisions/hermes-v0-20-5-compatibility-decisions
 tags: [hermes, compatibility, v0.20.5, decisions]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/scarf/Features/Health/ViewModels/HealthViewModel.swift, scarf/scarf/Features/Profiles/ViewModels/ProfilesViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesConfig.swift, scarf/scarf/Features/Settings/Views/Tabs/VoiceTab.swift]
 source_paths_inferred: false
-source_sha: 73ff36e8d264366ed074a105fe88d39d73b27f7b
+source_sha: 7b1be630ce477231a804649efe75285f95c410b5
 created: 2026-08-26
 updated: 2026-08-26
-reviewed: 2026-09-02
+reviewed: 2026-09-03
 reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations
 
-- [decision] Hermes v0.20.5 parity Phase 1 shipped on branch feat/hermes-v0205-parity (8 commits 5ca7c82..09da74d, 2026-08-26, pending merge). Capability group: isV0205OrLater (patch-level floor via atLeastSemver) + hasVersionFlagFullOutput + hasCronReasoningEffort (declared, unconsumed until the cron editor lands in Phase 2). #gating
+- [decision] Hermes v0.20.5 parity Phase 1 shipped on branch feat/hermes-v0205-parity (8 commits 5ca7c82..09da74d, 2026-08-26, merged to main as commit 99de671). Capability group: isV0205OrLater (patch-level floor via atLeastSemver) + hasVersionFlagFullOutput + hasCronReasoningEffort (declared, unconsumed until the cron editor lands in Phase 2). #gating
 - [decision] Version probe strategy (HealthViewModel.probeVersion): warm HermesVersionCache picks argv from hasVersionFlagFullOutput; cold cache probes `--version` first (safe on every host ≥v0.6.0), falls back to bare `version` only when output lacks "commits behind" AND parsed semver < 0.20.5/unparseable; warm path self-corrects a stale ≤0.20.4 cache (bare `version` output unparseable → retry `--version`) because users run `hermes update` inside the 600s TTL. #health
 - [decision] max_turns: sentinel 0 = maxTurnsUnlimited; display resolves absent key to unlimited on 0.20.5+, 500 on 0.20.0–0.20.4, 60 older; steppers open the 0 floor ("Unlimited" label) only on isV0205OrLater so Scarf never writes 0 to a host without unlimited semantics; iOS ceiling raised 500→1000 to match macOS. #config
 - [decision] stt.provider: parse default "" (absent ≠ "local" since 0.20.5 stopped seeding it); "Auto (unset)" picker row writes via unsetSetting, gated on hasConfigUnset (v0.19+) not isV0205OrLater — absent = "Hermes decides" on every host and it's the only exit from a pin; row hidden pre-v0.19 unless already current; stt.local.* tuning rows stay visible under Auto. #config

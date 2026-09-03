@@ -11,8 +11,6 @@ reviewed: 2026-09-02
 reviewed_by: audit:claude-code (background)
 ---
 
-What shipped for the Hermes v0.20.4 (v2026.8.18) cycle and why. Branch feat/hermes-v0204-parity, 12 commits (7181436..2430b64), built 2026-08-20 by 9 phase agents + fresh-eyes audit + 3 fix agents. MERGED to main (08bb30e) and SHIPPED in v2.20.0 (cut 2026-08-20, Sparkle update verified by Alan). Findings basis: [[Hermes v0.20.4 Audit Findings]].
-
 ## Observations
 - [decision] Capability gating is PATCH-level this cycle: isV0204OrLater = atLeastSemver(0,20,4) with 8 flags (cron pause-marker, builtin personalities, curator ledger/purge/entry-rollback, skills project-trust/update-force, MCP identity_header) — isV020OrLater would wrongly light on v0.20.0 hosts. Schema features (hidden, last_read_at, listable-children) use column probes plus a JSON1 probe (remote infers from sqlite3 version ≥3.38). #gating
 - [decision] Personalities: 14 built-ins hardcoded (HermesPersonalities.swift) and unioned with agent.personalities entries ONLY when hasBuiltinPersonalitiesInCode — on pre-0.20.4 hosts config is authoritative (a deleted built-in stays deleted). Prompt preview ports render_personality_prompt (system_prompt + Tone/Style lines). Fixed pre-existing prefix bug (agent.personalities.) and system_prompt/bare-string forms. #personalities

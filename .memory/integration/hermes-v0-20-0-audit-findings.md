@@ -4,10 +4,10 @@ type: note
 permalink: scarf/integration/hermes-v0-20-0-audit-findings
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesCuratorReport.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesTool.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/SkillsViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift]
 source_paths_inferred: false
-source_sha: 73ff36e8d264366ed074a105fe88d39d73b27f7b
+source_sha: 7b1be630ce477231a804649efe75285f95c410b5
 created: 2026-08-03
 updated: 2026-08-03
-reviewed: 2026-09-02
+reviewed: 2026-09-03
 reviewed_by: audit:claude-code (background)
 ---
 

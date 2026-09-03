@@ -3,9 +3,9 @@ title: Streaming chat UI upserts are throttled to 50ms — ACP chunk rate must n
 type: note
 permalink: scarf/architecture/streaming-chat-ui-upserts-are-throttled-to-50ms-acp-chunk
 tags: [performance, chat, streaming, gh-140]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatViewModel.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatViewModel.swift, scarf/scarf/Core/Utilities/MarkdownContentView.swift]
 source_paths_inferred: false
-source_sha: d8fabdec350f7e2752a6f928a7bd9454230421a0
+source_sha: 6b99894cd77829a42e24f2aff7c8d0da1392ba26
 created: 2026-08-31
 updated: 2026-08-31
 reviewed: 2026-09-02
