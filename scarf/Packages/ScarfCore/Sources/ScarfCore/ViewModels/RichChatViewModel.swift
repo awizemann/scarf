@@ -29,6 +29,14 @@ public struct MessageGroup: Identifiable {
         assistantMessages.reduce(0) { $0 + $1.toolCalls.count }
     }
 
+    /// Assistant messages in this group carrying renderable reasoning.
+    /// Feeds the recall-mode activity marker's "· M reasoning" count.
+    public var visibleReasoningCount: Int {
+        assistantMessages.reduce(0) {
+            $0 + (($1.isAssistant && $1.hasVisibleReasoning) ? 1 : 0)
+        }
+    }
+
     /// Aggregated `ToolKind → count` over all assistant tool calls in
     /// this group. Lives on the model so SwiftUI's Equatable
     /// short-circuit (issue #46) covers it — previously this was a
@@ -1425,6 +1433,12 @@ public final class RichChatViewModel {
     /// Cleared during a `loadEarlier()` fetch so the UI can show a
     /// spinner and we don't fan out duplicate page requests.
     public private(set) var isLoadingEarlier: Bool = false
+    /// Recall-mode boundary (Alan, 2026-09-03): rows paged in via
+    /// `loadEarlier()` — ids strictly below this value — render as
+    /// prompts + text replies + one muted activity marker per turn,
+    /// with no tool cards or reasoning. `nil` until the first page
+    /// lands; the session-open window always renders in full.
+    public private(set) var earlierHistoryCutoffId: Int?
     private var nextLocalId = -1
 
     /// Issue #63: locally-created user messages awaiting state.db
@@ -1623,6 +1637,7 @@ public final class RichChatViewModel {
         oldestLoadedMessageID = nil
         hasMoreHistory = false
         isLoadingEarlier = false
+        earlierHistoryCutoffId = nil
         isAgentWorking = false
         userSendPending = false
         hasUserSentPromptThisSession = false
@@ -2900,21 +2915,60 @@ public final class RichChatViewModel {
         let opened = await dataService.open()
         guard opened else { return }
 
-        let older = await dataService.fetchMessages(
-            sessionId: sessionId,
-            limit: pageSize,
-            before: oldest
-        )
-        guard !older.isEmpty else {
-            hasMoreHistory = false
-            return
+        // Paged-in history renders in recall mode (prompts + text
+        // replies + one activity marker per turn — Alan, 2026-09-03),
+        // so a page that contains NOTHING renderable (pure junk rows)
+        // must not strand the user with a cleared spinner and no
+        // visible change. Keep fetching — bounded — until a page
+        // yields renderable content or the table is exhausted; either
+        // way `isLoadingEarlier` clears (defer) and the state machine
+        // settles. Never an infinite spinner by construction.
+        var cursor = oldest
+        var accumulated: [HermesMessage] = []
+        for _ in 0..<Self.maxEarlierPageFetches {
+            let page = await dataService.fetchMessages(
+                sessionId: sessionId,
+                limit: pageSize,
+                before: cursor
+            )
+            guard !page.isEmpty else {
+                hasMoreHistory = false
+                break
+            }
+            accumulated = page + accumulated
+            cursor = page.first?.id ?? cursor
+            // Fewer rows than the page size → bottom of the table.
+            if page.count < pageSize { hasMoreHistory = false }
+            if Self.pageHasRenderableContent(page) || !hasMoreHistory { break }
         }
-        messages.insert(contentsOf: older, at: 0)
-        oldestLoadedMessageID = older.first?.id
-        // If this fetch returned fewer than the page size we've hit
-        // the bottom of the table — no further pages worth fetching.
-        hasMoreHistory = older.count >= pageSize
+        guard !accumulated.isEmpty else { return }
+
+        // First successful page marks the recall-mode boundary: every
+        // row older than what the session open loaded renders text-only.
+        if earlierHistoryCutoffId == nil {
+            earlierHistoryCutoffId = oldest
+        }
+        messages.insert(contentsOf: accumulated, at: 0)
+        oldestLoadedMessageID = accumulated.first?.id
         buildMessageGroups()
+    }
+
+    /// Bound on back-to-back page fetches inside one `loadEarlier`
+    /// call when pages keep coming back with nothing renderable.
+    static let maxEarlierPageFetches = 5
+
+    /// Whether a fetched history page contains anything the recall-mode
+    /// renderer can show: a user prompt, visible assistant text, tool
+    /// calls or reasoning (drawn as the activity marker), or the
+    /// Hermes "(empty)" sentinel (drawn as the muted empty-response row).
+    nonisolated static func pageHasRenderableContent(_ page: [HermesMessage]) -> Bool {
+        page.contains { msg in
+            msg.isUser
+                || msg.hasVisibleText
+                || !msg.toolCalls.isEmpty
+                || msg.hasVisibleReasoning
+                || msg.isEmptyResponseSentinel
+        }
     }
 
     // MARK: - DB Polling (terminal mode fallback)

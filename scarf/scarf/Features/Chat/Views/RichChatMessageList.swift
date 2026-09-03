@@ -36,6 +36,11 @@ struct RichChatMessageList: View {
     /// response…"). While nil, the classic three-dots indicator covers
     /// the pre-first-event gap.
     var liveStatus: RichChatViewModel.LiveActivityStatus? = nil
+    /// Recall-mode boundary: DB rows with ids below this were paged in
+    /// via "Load earlier" and render as prompts + text replies + one
+    /// activity marker per turn (no tool cards / reasoning). Nil until
+    /// the user pages back.
+    var earlierCutoffId: Int? = nil
 
     /// Scrolling strategy: plain `VStack` (not `LazyVStack`) plus
     /// `.defaultScrollAnchor(.bottom)`.
@@ -133,7 +138,18 @@ struct RichChatMessageList: View {
                                 // Live status attaches only to the
                                 // trailing group of the in-flight turn.
                                 liveStatus: (isWorking && group.id == groups.last?.id)
-                                    ? liveStatus : nil
+                                    ? liveStatus : nil,
+                                // Recall mode applies only to groups made
+                                // ENTIRELY of paged-in DB rows (positive
+                                // ids below the cutoff) — local echoes
+                                // (negative ids) and the live window
+                                // always render in full.
+                                isEarlierPage: earlierCutoffId.map { cut in
+                                    !group.allMessages.isEmpty
+                                        && group.allMessages.allSatisfy {
+                                            $0.id > 0 && $0.id < cut
+                                        }
+                                } ?? false
                             )
                             .equatable()
                             .id("group-\(group.id)")
@@ -253,6 +269,10 @@ struct MessageGroupView: View, Equatable {
     /// trailing group while the agent is working and no text is
     /// streaming (see `RichChatMessageList`). Participates in `==`.
     var liveStatus: RichChatViewModel.LiveActivityStatus? = nil
+    /// Recall mode (Alan, 2026-09-03): this group was paged in via
+    /// "Load earlier" — render prompts + visible-text replies plus one
+    /// muted `EarlierActivityMarker` in place of its activity segments.
+    var isEarlierPage: Bool = false
 
     @Environment(ChatViewModel.self) private var chatViewModel
 
@@ -283,6 +303,9 @@ struct MessageGroupView: View, Equatable {
         // Live status flips are rare (per structural ACP event) but
         // must repaint the trailing ActivityBubble's spinner line.
         guard lhs.liveStatus == rhs.liveStatus else { return false }
+        // Recall-mode flip (first "Load earlier" page landing) changes
+        // the group's rendering wholesale.
+        guard lhs.isEarlierPage == rhs.isEarlierPage else { return false }
         for (l, r) in zip(lhs.group.assistantMessages, rhs.group.assistantMessages) {
             if l.id != r.id { return false }
             if l.id == 0 {
@@ -344,6 +367,9 @@ struct MessageGroupView: View, Equatable {
             let lastActivityOffset = items.lastIndex {
                 if case .activity = $0 { return true } else { return false }
             }
+            let firstActivityOffset = items.firstIndex {
+                if case .activity = $0 { return true } else { return false }
+            }
             ForEach(Array(items.enumerated()), id: \.offset) { offset, item in
                 switch item {
                 case .bubble(let message):
@@ -354,14 +380,26 @@ struct MessageGroupView: View, Equatable {
                     )
                     .equatable()
                 case .activity(let segment):
-                    ActivityBubbleView(
-                        segment: segment,
-                        toolResults: group.toolResults,
-                        // Live status rides the TRAILING activity
-                        // segment only.
-                        liveStatus: (offset == items.count - 1) ? liveStatus : nil,
-                        turnDurations: turnDurations
-                    )
+                    if isEarlierPage {
+                        // Recall mode: ONE muted marker per turn, at
+                        // the first activity position; later segments
+                        // in the same group are absorbed into it.
+                        if offset == firstActivityOffset {
+                            EarlierActivityMarker(
+                                toolCount: group.toolCallCount,
+                                reasoningCount: group.visibleReasoningCount
+                            )
+                        }
+                    } else {
+                        ActivityBubbleView(
+                            segment: segment,
+                            toolResults: group.toolResults,
+                            // Live status rides the TRAILING activity
+                            // segment only.
+                            liveStatus: (offset == items.count - 1) ? liveStatus : nil,
+                            turnDurations: turnDurations
+                        )
+                    }
                 }
             }
 

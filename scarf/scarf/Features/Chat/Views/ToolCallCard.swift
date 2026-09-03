@@ -18,6 +18,12 @@ struct ToolCallCard: View {
     /// (ActivityBubble collapse). 1 = today's single-call rendering;
     /// > 1 shows a "×N" badge next to the function name.
     var repeatCount: Int = 1
+    /// True when this card belongs to a settled (not in-flight) turn.
+    /// A settled call with no loaded result/exit telemetry renders a
+    /// muted done glyph — NEVER a spinner: `loadHistoricalToolResults`
+    /// defaults false, so historical results are routinely absent and
+    /// absence of data must not read as "running" (Alan, 2026-09-03).
+    var isSettled: Bool = false
 
     @State private var expanded = false
     /// Pretty-printed `call.arguments`. Computed once per `call.callId`
@@ -59,11 +65,20 @@ struct ToolCallCard: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 8)
-                    if result != nil {
+                    switch runState {
+                    case .success:
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 11))
                             .foregroundStyle(ScarfColor.success)
-                    } else {
+                    case .failure:
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(ScarfColor.danger)
+                    case .settledUnknown:
+                        Image(systemName: "checkmark.circle")
+                            .font(.system(size: 11))
+                            .foregroundStyle(ScarfColor.foregroundFaint)
+                    case .running:
                         ProgressView()
                             .controlSize(.mini)
                     }
@@ -95,9 +110,9 @@ struct ToolCallCard: View {
                     : Text("Tool call \(call.functionName), \(call.argumentsSummary)")
             )
             .accessibilityValue(
-                result != nil
-                    ? Text(expanded ? "Finished, expanded" : "Finished, collapsed")
-                    : Text(expanded ? "Running, expanded" : "Running, collapsed")
+                runState == .running
+                    ? Text(expanded ? "Running, expanded" : "Running, collapsed")
+                    : Text(expanded ? "Finished, expanded" : "Finished, collapsed")
             )
             .accessibilityAddTraits(isFocused ? [.isSelected] : [])
 
@@ -138,6 +153,14 @@ struct ToolCallCard: View {
         .task(id: "\(call.callId)#\(call.arguments.utf8.count)") {
             formattedArgs = formatJSON(call.arguments)
         }
+    }
+
+    private var runState: ToolCallRunState {
+        ToolCallRunState.state(
+            hasResult: result != nil,
+            exitCode: call.exitCode,
+            isSettled: isSettled
+        )
     }
 
     private var toolLabel: String {

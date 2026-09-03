@@ -75,7 +75,8 @@ struct ChatTranscriptPane: View {
                     }
                 },
                 isHydratingTools: richChat.isHydratingTools,
-                liveStatus: richChat.liveActivityStatus
+                liveStatus: richChat.liveActivityStatus,
+                earlierCutoffId: richChat.earlierHistoryCutoffId
             )
 
             Divider()

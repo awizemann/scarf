@@ -349,6 +349,63 @@ import Foundation
         #expect(seg?.messageIds == [-3, -2, -1])
     }
 
+    // MARK: - Settled spinner state + recall-mode paging
+
+    @Test func settledHistoricalCallNeverRendersAsRunning() {
+        // loadHistoricalToolResults defaults FALSE → historical calls
+        // routinely have no result row and no exit code. On a settled
+        // session that must render as a muted done glyph, not a spinner.
+        #expect(ToolCallRunState.state(hasResult: false, exitCode: nil, isSettled: true) == .settledUnknown)
+        // Live in-flight call with no telemetry yet → genuinely running.
+        #expect(ToolCallRunState.state(hasResult: false, exitCode: nil, isSettled: false) == .running)
+        // Known telemetry wins regardless of settled-ness.
+        #expect(ToolCallRunState.state(hasResult: true, exitCode: nil, isSettled: false) == .success)
+        #expect(ToolCallRunState.state(hasResult: false, exitCode: 0, isSettled: true) == .success)
+        #expect(ToolCallRunState.state(hasResult: false, exitCode: 1, isSettled: false) == .failure)
+    }
+
+    @Test func allToolRowPageIsRenderable() {
+        // Alan's hang shape: a "Load earlier" page consisting entirely
+        // of tool-call assistant rows + tool results. Recall mode
+        // renders it as an activity marker, so the pager must treat it
+        // as renderable content and complete.
+        let page: [HermesMessage] = [
+            Self.message(id: 10, role: "assistant", content: "",
+                         toolCalls: [Self.toolCall(id: "c1", name: "skill_view")]),
+            Self.message(id: 11, role: "tool", content: "out", toolCallId: "c1"),
+            Self.message(id: 12, role: "assistant", content: "(empty)")
+        ]
+        #expect(RichChatViewModel.pageHasRenderableContent(page))
+    }
+
+    @Test func junkPageIsNotRenderable() {
+        // Blank assistant rows only — nothing recall mode can draw;
+        // the pager keeps fetching (bounded) instead of stopping with
+        // no visible change.
+        let page: [HermesMessage] = [
+            Self.message(id: 10, role: "assistant", content: ""),
+            Self.message(id: 11, role: "assistant", content: " \n")
+        ]
+        #expect(RichChatViewModel.pageHasRenderableContent(page) == false)
+        #expect(RichChatViewModel.pageHasRenderableContent([
+            Self.message(id: 12, role: "user", content: "hi")
+        ]))
+    }
+
+    @Test func groupMarkerCountsForARecalledTurn() {
+        // The recall marker shows "N tools · M reasoning" summed over
+        // the whole paged-in turn.
+        let g = Self.group([
+            Self.assistant(id: 2, content: "", toolCalls: [
+                Self.toolCall(id: "c1"), Self.toolCall(id: "c2")
+            ]),
+            Self.assistant(id: 3, content: "", reasoning: "thinking"),
+            Self.assistant(id: 4, content: "", reasoning: " \n") // whitespace: not counted
+        ])
+        #expect(g.toolCallCount == 2)
+        #expect(g.visibleReasoningCount == 1)
+    }
+
     // MARK: - P3a argument backfill + "{}" suppression
 
     @Test func emptyObjectArgumentsSummaryIsBlank() {

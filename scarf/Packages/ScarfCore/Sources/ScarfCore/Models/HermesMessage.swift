@@ -397,6 +397,37 @@ public struct HermesToolCall: Identifiable, Sendable, Codable {
     }
 }
 
+/// Pure decision for how a tool-call row's status glyph renders.
+/// Extracted from the views so the "phantom running spinner" class of
+/// bug is unit-testable: a SETTLED historical call must never render
+/// as running just because its result row wasn't fetched
+/// (`loadHistoricalToolResults` defaults false, so historical
+/// `toolResults` are routinely absent — absence of data is not
+/// evidence of execution).
+public enum ToolCallRunState: Sendable, Equatable {
+    /// Known-good completion (exit 0, or a result row exists).
+    case success
+    /// Known failure (non-zero exit code).
+    case failure
+    /// The turn is over but no result/exit telemetry was loaded —
+    /// render a muted "done" glyph, never a spinner.
+    case settledUnknown
+    /// Genuinely in flight (part of a live, unsettled turn).
+    case running
+
+    public static func state(
+        hasResult: Bool,
+        exitCode: Int?,
+        isSettled: Bool
+    ) -> ToolCallRunState {
+        if let exit = exitCode {
+            return exit == 0 ? .success : .failure
+        }
+        if hasResult { return .success }
+        return isSettled ? .settledUnknown : .running
+    }
+}
+
 public enum ToolKind: String, Sendable, CaseIterable {
     case read
     case edit

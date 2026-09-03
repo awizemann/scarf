@@ -260,7 +260,8 @@ struct ActivityBubbleView: View {
                 result: toolResults[call.callId],
                 isFocused: chatViewModel.focusedToolCallId == call.callId,
                 onFocus: { chatViewModel.focusedToolCallId = call.callId },
-                repeatCount: entry.count
+                repeatCount: entry.count,
+                isSettled: isSettled
             )
         case .compact:
             compactChip(entry)
@@ -295,15 +296,24 @@ struct ActivityBubbleView: View {
                         .foregroundStyle(ScarfColor.foregroundMuted)
                 }
                 Spacer(minLength: 6)
-                if let exit = call.exitCode {
-                    Image(systemName: exit == 0 ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(exit == 0 ? ScarfColor.success : ScarfColor.danger)
-                } else if result != nil {
+                switch ToolCallRunState.state(
+                    hasResult: result != nil,
+                    exitCode: call.exitCode,
+                    isSettled: isSettled
+                ) {
+                case .success:
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 10))
                         .foregroundStyle(ScarfColor.success)
-                } else {
+                case .failure:
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(ScarfColor.danger)
+                case .settledUnknown:
+                    Image(systemName: "checkmark.circle")
+                        .font(.system(size: 10))
+                        .foregroundStyle(ScarfColor.foregroundFaint)
+                case .running:
                     ProgressView().controlSize(.mini)
                 }
             }
@@ -334,6 +344,36 @@ struct ActivityBubbleView: View {
         case .browser: return ScarfColor.Tool.search
         case .other:   return ScarfColor.foregroundMuted
         }
+    }
+}
+
+/// Recall-mode marker for a paged-in turn (Alan, 2026-09-03): earlier
+/// pages render prompts + text replies only, with at most ONE of these
+/// per turn so the transcript doesn't lie about the activity that
+/// happened — no cards, no tool JSON hydration for paged history.
+struct EarlierActivityMarker: View {
+    let toolCount: Int
+    let reasoningCount: Int
+    @Environment(\.chatFontScale) private var chatFontScale: Double
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "gearshape.2")
+                .font(.system(size: 9))
+            if toolCount > 0 {
+                Text("\(toolCount) tools")
+            }
+            if reasoningCount > 0 {
+                if toolCount > 0 { Text(verbatim: "·") }
+                Text("\(reasoningCount) reasoning")
+            }
+            Text(verbatim: "—")
+            Text("not loaded")
+                .italic()
+        }
+        .font(ChatFontScale.caption2(chatFontScale))
+        .foregroundStyle(ScarfColor.foregroundFaint)
+        .padding(.leading, 36) // align with assistant bubble column
     }
 }
 
