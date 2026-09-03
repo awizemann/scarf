@@ -90,7 +90,8 @@ There is **no per-event consent routing** in the package — the groups gate lay
 - onboarding_completed; onboarding_abandoned {last_step}
 
 ### Sessions & chat
-- chat_session_started {mode: new|resume|continue_last, origin: chat|error_retry|project|kanban|cron}
+- chat_session_started {mode: new|resume|continue_last, origin: chat|error_retry|project|kanban|cron|bots}
+  - `origin: bots` — a bot's canonical Bot Chat opened from the Bots section; this is the bot chat-engagement signal (see "Bots" below).
   - `origin: error_retry` — the chat error banner's Reconnect button (`ChatView.swift`), which mechanically runs the same resume as the session list. Split out so failure recovery doesn't inflate ordinary resume counts.
 - session_resume_fallback {kind: new_session_fallback|history_fallback|sparse_transcript|slash_command_fallback}
 - message_sent {has_attachment, input_mode: typed|voice|quick_command} — never content/length
@@ -112,6 +113,18 @@ There is **no per-event consent routing** in the package — the groups gate lay
 - setting_changed {key (identifier only, never value), outcome}
 - voice_used {kind: tts|push_to_talk}
 - notification_toggled; deep_link_opened {kind: install_template|test}
+
+### Bots (v3.0.1)
+
+Bot lifecycle usage for the Bots section (Hermes Bot Mode, v0.20.3+). Props are all case-derived enum tokens in `UsageEvent` — never profile names, titles, prompts, toolset/server names, or peer targets.
+
+- bot_created {method: created|made_from_profile, outcome} — `created` = the Create Bot sheet (`BotsViewModel.createBot`; a create whose profile landed but whose bot-identity write failed counts as `failed` — the bot did not come into being); `made_from_profile` = the "Make a Bot" promotion on an unmanaged profile (`BotsViewModel.promote`).
+- bot_updated {aspect: identity|avatar|model_pin|toolsets|mcp|soul, outcome} — one event per edit-save. `identity` = the editor sheet, pin toggle, un-hide, and rename (`BotsViewModel`); `avatar` = `setAvatar`; `model_pin`/`toolsets`/`mcp`/`soul` = the agent pane (`BotAgentViewModel` — a SOUL.md save that hit a disk conflict reports `failed`). **No `routine` aspect**: per-bot routine changes report through `bot_routine_action` and must not double-count here.
+- bot_removed {kind: deleted|identity_removed|hidden} — `deleted` = `hermes profile delete`; `identity_removed` = "Remove from Bots" (profile survives, bot block cleared); `hidden` = the hide toggle turning hidden ON (un-hiding is a `bot_updated {aspect: identity}`). Deliberately no `outcome` prop: a failed removal removes nothing, so only removals that happened are reported.
+- bot_routine_action {action: created|deleted, outcome} — the per-bot Routines pane (`BotRoutinesViewModel`, via `CronViewModel`'s outcome hook). **No `edited` token**: the pane has no edit affordance. Pause/resume/run-now are deliberately not tracked — they ride the shared cron machinery and aren't a bot-adoption signal.
+- bot_peer_action {action: dm_sent|async_run} — remote-bot (peer) interactions (`PeersViewModel.sendDM`/`startRun`, which back both Bots▸Remote and the standalone Peers pane). Recorded at send time with no outcome: a peer DM is a synchronous remote agent turn that can run for minutes.
+
+Bot CHAT engagement is **already covered** by `chat_session_started {origin: bots}` — do not add a duplicate bot-chat event. Bots *navigation* is likewise already covered generically by `section_viewed {section: bots}` (`SidebarSection.analyticsToken`).
 
 ### Diagnostics
 
