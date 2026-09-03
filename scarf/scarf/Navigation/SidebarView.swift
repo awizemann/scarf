@@ -271,7 +271,14 @@ struct SidebarView: View {
         )
     }
 
+    /// The connected host's Hermes version (cached probe — no live call
+    /// from a view body). Falls back to Scarf's own version while no
+    /// probe has landed yet, so the footer never shows a bare dash.
+    /// Scarf's version remains available in About / Settings.
     private var versionPill: String {
+        if let semver = HermesVersionCache.shared.cached(for: serverContext)?.semver {
+            return "Hermes v\(semver)"
+        }
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
         return "v\(v)"
     }
