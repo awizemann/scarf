@@ -17,6 +17,14 @@ import ScarfCore
 /// 2. the session opened is the one titled exactly `"Bot Chat"` in that
 ///    profile's `state.db` — the only title for which Hermes injects the
 ///    bot-mode teammate protocol (`agent/system_prompt.py:737-747`).
+///
+/// **Two transports, decided by the session's birth** (see ``Delivery``):
+/// Hermes' ACP adapter only restores sessions with `source == "acp"`
+/// (`acp_adapter/session.py:527`), so the streaming stack above applies
+/// only to an ACP-born Bot Chat. The canonical Bot Chat is almost never
+/// that — Scarf creates it over the CLI, Hermes Desktop over the gateway —
+/// so the common case converses over the CLI transport with `state.db`
+/// hydration instead: honest, un-streamed, and in the real Bot Chat.
 @Observable
 @MainActor
 final class BotConversationViewModel {
@@ -31,6 +39,30 @@ final class BotConversationViewModel {
         case creating
         case live
         case failed(String)
+    }
+
+    /// How prompts travel to the bot and how replies come back. Decided per
+    /// resolve from the live session's `sessions.source`, because Hermes'
+    /// ACP adapter can only `session/load` a session that was CREATED over
+    /// ACP (`acp_adapter/session.py:527`, v2026.8.31 — `_restore` returns
+    /// `nil` for any other `source`, and `fork_session` funnels through the
+    /// same gate).
+    ///
+    /// - `acpStreaming`: the session is ACP-born; resume it over ACP and
+    ///   stream tokens live. Guarded by `verifyCanonicalBinding`.
+    /// - `cliTransport`: the session is CLI- or gateway-born — which is
+    ///   every Bot Chat Scarf itself creates (`createCanonicalBotChat`) and
+    ///   every one Hermes Desktop creates (gateway `session.create`,
+    ///   canonical-chat.ts:334-338). Each prompt is delivered exactly the
+    ///   way Hermes' own Bot Mode DM tool documents (`tools/bot_mode_dm.py`:
+    ///   `hermes -p <bot> chat -c "Bot Chat" …`), and the transcript is
+    ///   hydrated + polled from the profile's `state.db`. No token
+    ///   streaming — replies appear when the turn completes — but the turn
+    ///   runs in the real Bot Chat with the bot-mode protocol active,
+    ///   which streaming over a stray `session/new` never would.
+    enum Delivery: Equatable {
+        case acpStreaming
+        case cliTransport
     }
 
     let profileName: String
@@ -49,6 +81,10 @@ final class BotConversationViewModel {
 
     /// The resolved canonical chat, once found.
     private(set) var canonical: HermesDataService.CanonicalBotChat?
+
+    /// The transport of the current `.live` conversation, nil otherwise.
+    /// Views read it for the honest no-streaming caption.
+    private(set) var delivery: Delivery?
 
     /// Monotonic token so a slow resolve for a bot the user has already
     /// navigated away from can never land on a newer open. Same shape as
@@ -170,15 +206,108 @@ final class BotConversationViewModel {
             guard let self, !Task.isCancelled, self.generation == intent else { return }
             if let found {
                 self.canonical = found
-                self.phase = .live
-                // `liveId` (the compression tip), never `registryId`: on a
-                // long-lived forever-chat the titled row is often a dead
-                // compressed ancestor.
-                self.chat.resumeSession(found.liveId, origin: .bots)
-                await self.verifyCanonicalBinding(expected: found.liveId, intent: intent)
+                if found.isACPBorn {
+                    // ACP-born session: Hermes CAN `session/load` it, so the
+                    // full streaming stack applies.
+                    self.delivery = .acpStreaming
+                    self.chat.sendRouter = nil
+                    self.phase = .live
+                    // `liveId` (the compression tip), never `registryId`: on a
+                    // long-lived forever-chat the titled row is often a dead
+                    // compressed ancestor.
+                    self.chat.resumeSession(found.liveId, origin: .bots)
+                    await self.verifyCanonicalBinding(expected: found.liveId, intent: intent)
+                } else {
+                    // CLI/gateway-born session — the normal case for every
+                    // Bot Chat Scarf or Hermes Desktop creates. ACP's
+                    // `_restore` refuses these (`acp_adapter/session.py:527`),
+                    // so a `resumeSession` here would fall back to
+                    // `session/new` and `verifyCanonicalBinding` would
+                    // (rightly) kill the conversation — the release-blocking
+                    // "Couldn't open this conversation" loop. Converse over
+                    // the CLI transport instead.
+                    await self.connectViaCLITransport(found, intent: intent)
+                }
             } else {
                 self.canonical = nil
+                self.delivery = nil
+                self.chat.sendRouter = nil
                 self.phase = .noConversationYet
+            }
+        }
+    }
+
+    // MARK: - CLI transport (non-ACP-born Bot Chats)
+
+    /// Attach to a Bot Chat that ACP cannot load: hydrate the transcript
+    /// from the profile's `state.db` and route every send through the CLI.
+    ///
+    /// No ACP process is spawned at all for this delivery mode — there is
+    /// nothing for one to do (it could not load the session, and prompting
+    /// it would write into the wrong session). `verifyCanonicalBinding`
+    /// never runs here for the same reason: there is no ACP binding to
+    /// verify, and the identity guarantee comes from the CLI's own
+    /// `-c "Bot Chat"` targeting instead.
+    private func connectViaCLITransport(
+        _ found: HermesDataService.CanonicalBotChat,
+        intent: Int
+    ) async {
+        delivery = .cliTransport
+        // Route EVERY ChatViewModel send path (composer, goal pill, quick
+        // commands) through the CLI so nothing can trigger the ACP
+        // auto-start fallback and mint a stray untitled session.
+        chat.sendRouter = { [weak self] text, _ in
+            guard let self, self.delivery == .cliTransport else { return false }
+            self.deliverViaCLI(text)
+            return true
+        }
+        let rich = chat.richChatViewModel
+        rich.setSessionId(found.liveId)
+        phase = .live
+        await rich.loadSessionHistory(sessionId: found.liveId)
+        // The resolve may have been superseded mid-hydration (bot switch,
+        // close). The generation check is what keeps a slow hydration from
+        // resurrecting a closed conversation's UI state.
+        guard !Task.isCancelled, generation == intent else { return }
+    }
+
+    /// Deliver one prompt over the transport Hermes' own Bot Mode uses
+    /// (`tools/bot_mode_dm.py`): the same `hermes -p <bot> chat -c "Bot
+    /// Chat" --create-if-missing -Q --query-file` invocation that created
+    /// the session — `--create-if-missing` makes it a pure append when the
+    /// session already exists. The transcript catches up by polling
+    /// `state.db` (the terminal-mode machinery `RichChatViewModel` already
+    /// has), so the reply appears when the turn completes rather than
+    /// streaming token by token.
+    private func deliverViaCLI(_ text: String) {
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return }
+        guard case .live = phase, delivery == .cliTransport else { return }
+        let intent = generation
+        let rich = chat.richChatViewModel
+        rich.addUserMessage(text: text)
+        rich.markPromptSent()
+        rich.markAgentWorking()
+        let ctx = context
+        let profile = profileName
+        let make = creator
+        // NOT `work`: a delivery must not be cancelled by a concurrent
+        // resolve bookkeeping path the way lifecycle tasks are — the CLI
+        // process is already running and the turn is already Hermes' —
+        // but it must still notice `close()` via the generation check.
+        Task { [weak self] in
+            let failure = await make(ctx, profile, text)
+            guard let self, self.generation == intent else { return }
+            let rich = self.chat.richChatViewModel
+            if let failure {
+                // The conversation itself is fine — the transcript is
+                // real and retrying is safe — so surface the failure in
+                // the chat's error banner rather than tearing the whole
+                // phase down to `.failed`.
+                rich.cancelPendingSend()
+                rich.acpError = failure
+            } else {
+                rich.scheduleRefresh()
             }
         }
     }
@@ -214,10 +343,11 @@ final class BotConversationViewModel {
                 guard bound != expected else { return }
                 chat.stopACP()
                 canonical = nil
+                delivery = nil
                 phase = .failed(
-                    "Hermes couldn’t open this bot’s “\(BotChatSession.canonicalTitle)” session, "
-                    + "and Scarf won’t send messages into a replacement — they wouldn’t reach the bot. "
-                    + "Check that the profile’s state.db is readable and try again."
+                    "Hermes couldn’t reopen this bot’s “\(BotChatSession.canonicalTitle)” session for "
+                    + "live streaming, and Scarf won’t send messages into a replacement — they wouldn’t "
+                    + "reach the bot. Try again; Scarf will re-check which transport the conversation needs."
                 )
                 return
             }
@@ -232,6 +362,7 @@ final class BotConversationViewModel {
         guard !Task.isCancelled, generation == intent else { return }
         chat.stopACP()
         canonical = nil
+        delivery = nil
         phase = .failed(
             "Hermes never finished opening this bot’s “\(BotChatSession.canonicalTitle)” session, "
             + "so Scarf can’t confirm messages would reach the bot. Check that `hermes acp` starts "
@@ -249,6 +380,13 @@ final class BotConversationViewModel {
         work?.cancel()
         work = nil
         chat.stopACP()
+        // CLI-transport leftovers: the DB poll timer `markAgentWorking`
+        // started (stopACP knows nothing about it) and the send router —
+        // a `ChatViewModel` outliving this conversation must go back to
+        // ordinary behavior.
+        chat.richChatViewModel.cancelPendingSend()
+        chat.sendRouter = nil
+        delivery = nil
         _ = acpHandle.take()
         canonical = nil
         phase = .idle

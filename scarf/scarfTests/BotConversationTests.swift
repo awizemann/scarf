@@ -83,8 +83,11 @@ struct BotConversationTests {
 
     // MARK: - Lifecycle
 
-    private func canonical(_ id: String) -> HermesDataService.CanonicalBotChat {
-        HermesDataService.CanonicalBotChat(registryId: id, liveId: id)
+    /// `source` defaults to `"cli"` because that is what every Bot Chat
+    /// Scarf creates actually is; tests exercising the ACP streaming path
+    /// pass `"acp"` explicitly.
+    private func canonical(_ id: String, source: String = "cli") -> HermesDataService.CanonicalBotChat {
+        HermesDataService.CanonicalBotChat(registryId: id, liveId: id, liveSource: source)
     }
 
     /// An `ACPChannel` that never answers. Enough for `ACPClient.start()`
@@ -184,6 +187,121 @@ struct BotConversationTests {
         #expect(vm.canonical?.registryId == "bot-chat-1")
     }
 
+    // MARK: - Transport routing (the "Couldn't open this conversation" fix)
+
+    /// The release-blocking bug: a CLI-born Bot Chat (which is every one
+    /// Scarf creates) cannot be `session/load`-ed by Hermes' ACP adapter
+    /// (`acp_adapter/session.py:527`), so resuming it over ACP fell back to
+    /// `session/new` and the verifier — correctly — refused the drifted
+    /// binding, leaving the conversation permanently unopenable. The fix:
+    /// a non-ACP-born session never touches ACP at all.
+    @MainActor
+    @Test("a CLI-born Bot Chat opens over the CLI transport — no ACP process at all")
+    func cliBornSessionNeverTouchesACP() async {
+        let recorder = ProfileRecorder()
+        let vm = makeVM(found: canonical("bot-chat-1", source: "cli"), recorder: recorder)
+        vm.open()
+        await settle()
+        #expect(vm.phase == .live)
+        #expect(vm.delivery == .cliTransport)
+        #expect(recorder.profiles.isEmpty, "no ACP client may be spawned for a session ACP cannot load")
+        #expect(vm.chat.richChatViewModel.sessionId == "bot-chat-1")
+        #expect(vm.chat.sendRouter != nil, "every ChatViewModel send path must route to the CLI")
+    }
+
+    @MainActor
+    @Test("a gateway-born Bot Chat (Hermes Desktop's) routes to the CLI transport too")
+    func gatewayBornSessionRoutesToCLI() async {
+        let vm = makeVM(found: canonical("bot-chat-1", source: "gateway"))
+        vm.open()
+        await settle()
+        #expect(vm.phase == .live)
+        #expect(vm.delivery == .cliTransport)
+    }
+
+    @MainActor
+    @Test("only an ACP-born session takes the streaming path")
+    func acpBornSessionStreams() async {
+        let vm = makeVM(found: canonical("bot-chat-1", source: "acp"))
+        vm.open()
+        await settle()
+        #expect(vm.phase == .live)
+        #expect(vm.delivery == .acpStreaming)
+        #expect(vm.chat.sendRouter == nil, "streaming conversations keep the ordinary ACP send path")
+    }
+
+    @MainActor
+    @Test("a CLI-mode send is delivered through the CLI creator, and the composer send path routes there too")
+    func cliModeSendGoesThroughTheCLI() async {
+        let delivered = DeliveredBox()
+        let context = ServerContext.local(home: URL(fileURLWithPath: "/tmp/scarf-b3-home"))
+        let vm = BotConversationViewModel(
+            profileName: "scout",
+            context: context,
+            locator: { [c = canonical("bot-chat-1")] _ in c },
+            creator: { _, _, text in delivered.append(text); return nil },
+            acpClientMaker: recordingMaker(ProfileRecorder())
+        )
+        vm.open()
+        await settle()
+        #expect(vm.delivery == .cliTransport)
+
+        // Through the conversation's own send…
+        vm.send("first")
+        await settle()
+        // …and through ChatViewModel.sendText, the path the transcript
+        // pane's composer and the goal pill actually take.
+        vm.chat.sendText("second")
+        await settle()
+
+        #expect(delivered.texts == ["first", "second"])
+        #expect(vm.phase == .live, "a CLI send must not disturb the live phase")
+        // The optimistic echo is in the transcript.
+        #expect(vm.chat.richChatViewModel.messages.contains { $0.isUser && $0.content == "first" })
+    }
+
+    @MainActor
+    @Test("a failed CLI delivery surfaces in the error banner and the conversation stays live")
+    func cliDeliveryFailureIsBannerNotTeardown() async {
+        let vm = makeVM(
+            found: canonical("bot-chat-1"),
+            creationFailure: "hermes exited 1: no model configured"
+        )
+        vm.open()
+        await settle()
+        vm.send("hello")
+        await settle()
+        #expect(vm.phase == .live, "the transcript is real; a failed send must stay retryable in place")
+        #expect(vm.chat.richChatViewModel.acpError == "hermes exited 1: no model configured")
+        #expect(!vm.chat.richChatViewModel.isAgentWorking, "the spinner must unwind when the send never reached Hermes")
+    }
+
+    @MainActor
+    @Test("close() uninstalls the CLI send router")
+    func closeUninstallsTheRouter() async {
+        let vm = makeVM(found: canonical("bot-chat-1"))
+        vm.open()
+        await settle()
+        #expect(vm.chat.sendRouter != nil)
+        vm.close()
+        #expect(vm.chat.sendRouter == nil)
+        #expect(vm.delivery == nil)
+    }
+
+    /// Thread-safe accumulator for delivered prompts.
+    private final class DeliveredBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: [String] = []
+        func append(_ text: String) {
+            lock.lock(); defer { lock.unlock() }
+            stored.append(text)
+        }
+        var texts: [String] {
+            lock.lock(); defer { lock.unlock() }
+            return stored
+        }
+    }
+
     @MainActor
     @Test("the first message is what creates the conversation, then it connects")
     func firstMessageCreatesThenConnects() async {
@@ -245,7 +363,7 @@ struct BotConversationTests {
     @MainActor
     @Test("a session bound to anything other than the Bot Chat is refused, not used")
     func aDriftedSessionBindingIsRefused() async {
-        let vm = makeVM(found: canonical("bot-chat-1"))
+        let vm = makeVM(found: canonical("bot-chat-1", source: "acp"))
         vm.open()
         await settle()
         #expect(vm.phase == .live)
@@ -267,7 +385,7 @@ struct BotConversationTests {
     @MainActor
     @Test("a correctly-bound session is left alone by the verifier")
     func acorrectBindingIsNotDisturbed() async {
-        let vm = makeVM(found: canonical("bot-chat-1"))
+        let vm = makeVM(found: canonical("bot-chat-1", source: "acp"))
         vm.open()
         await settle()
         vm.chat.richChatViewModel.setSessionId("bot-chat-1")
@@ -443,7 +561,7 @@ struct BotConversationTests {
         let vm = BotConversationViewModel(
             profileName: "scout",
             context: context,
-            locator: { _ in HermesDataService.CanonicalBotChat(registryId: "bot-chat-1", liveId: "bot-chat-1") },
+            locator: { _ in HermesDataService.CanonicalBotChat(registryId: "bot-chat-1", liveId: "bot-chat-1", liveSource: "acp") },
             creator: { _, _, _ in nil },
             acpClientMaker: { ctx, _, _ in ACPClient(context: ctx) { _ in ScriptedACPChannel() } }
         )

@@ -303,6 +303,49 @@ import SQLite3
         await svc.close()
     }
 
+    // MARK: - Transport decision (liveSource)
+
+    /// The resolve carries the LIVE tip's `sessions.source` because it is
+    /// what decides the conversation transport: Hermes' ACP adapter
+    /// restores only `source == "acp"` sessions (`acp_adapter/session.py:527`),
+    /// so a CLI- or gateway-born Bot Chat must be conversed with over the
+    /// CLI transport. This is the DB half of the release-blocking
+    /// "Couldn't open this conversation" fix.
+    @Test func liveSourceComesFromTheRegistryRowWhenThereIsNoChain() async throws {
+        let home = tempRoot("source-flat")
+        try makeHome(at: home, rows: [SessionRow(id: "s-bot", title: "Bot Chat", source: "cli")])
+        let svc = await service(forHome: home)
+        let found = await svc.locateCanonicalBotChat()
+        #expect(found?.liveSource == "cli")
+        #expect(found?.isACPBorn == false)
+        await svc.close()
+    }
+
+    @Test func liveSourceComesFromTheTipNotTheRegistryOnACompressedChain() async throws {
+        let home = tempRoot("source-chain")
+        try makeHome(at: home, rows: [
+            SessionRow(id: "root", title: "Bot Chat", endReason: "compression", source: "gateway", endedAt: 2_000),
+            SessionRow(id: "tip", parent: "root", source: "acp", startedAt: 2_001)
+        ])
+        let svc = await service(forHome: home)
+        let found = await svc.locateCanonicalBotChat()
+        #expect(found?.liveId == "tip")
+        #expect(found?.liveSource == "acp")
+        #expect(found?.isACPBorn == true)
+        await svc.close()
+    }
+
+    @Test func onlyAnExactACPSourceCountsAsACPBorn() {
+        // Mirrors the adapter's own equality check — anything else, nil
+        // included, must take the CLI transport (which works for every
+        // session; the ACP resume works only for "acp" ones).
+        for (source, expected) in [("acp", true), ("cli", false), ("gateway", false), ("ACP", false)] {
+            let canonical = HermesDataService.CanonicalBotChat(registryId: "r", liveId: "l", liveSource: source)
+            #expect(canonical.isACPBorn == expected, "\(source)")
+        }
+        #expect(HermesDataService.CanonicalBotChat(registryId: "r", liveId: "l").isACPBorn == false)
+    }
+
     /// The gate that keeps the walk out of subagent transcripts: a child of
     /// a NON-compression-ended parent is not a continuation.
     @Test func doesNotFollowChildrenOfANonCompressedParent() async throws {

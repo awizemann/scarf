@@ -2670,6 +2670,18 @@ public final class RichChatViewModel {
         startActivePolling()
     }
 
+    /// Unwind `markAgentWorking()` for a send that never reached Hermes —
+    /// e.g. the Bot Chat CLI transport's delivery subprocess failed before
+    /// the agent saw the prompt. Without this the poll loop spins forever
+    /// waiting for a user row that will never appear in `state.db`
+    /// (`userSendPending` only clears when the DB echoes the message), and
+    /// the composer stays in its "agent is working" state.
+    public func cancelPendingSend() {
+        userSendPending = false
+        isAgentWorking = false
+        stopActivePolling()
+    }
+
     public func scheduleRefresh() {
         debounceTask?.cancel()
         debounceTask = Task { @MainActor [weak self] in

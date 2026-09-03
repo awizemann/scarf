@@ -60,6 +60,17 @@ struct BotConversationView: View {
                 .foregroundStyle(ScarfColor.foregroundPrimary)
             Spacer()
             if case .live = viewModel.phase {
+                // Honest about the transport: a CLI-delivered conversation
+                // (every Bot Chat created by Scarf or Hermes Desktop —
+                // Hermes' ACP adapter can't load those sessions) shows the
+                // reply only when the turn completes. Streaming applies
+                // only to the rare ACP-born Bot Chat.
+                if viewModel.delivery == .cliTransport {
+                    Text("Replies arrive when each turn completes")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                        .help("This conversation runs through the Hermes CLI in the bot's real Bot Chat session. Hermes can't stream this session live over ACP, so the reply appears all at once when the bot finishes its turn.")
+                }
                 Text("@\(viewModel.handle)")
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)
@@ -85,7 +96,7 @@ struct BotConversationView: View {
             placeholder(
                 icon: "hourglass",
                 title: "Starting the conversation…",
-                detail: "\(botTitle) is answering your first message. This one turn runs through the Hermes CLI — after it, messages stream live."
+                detail: "\(botTitle) is answering your first message. Bot conversations run through the Hermes CLI — the reply appears when the turn completes."
             )
 
         case .failed(let message):

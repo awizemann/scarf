@@ -1130,9 +1130,28 @@ public actor HermesDataService {
         public let registryId: String
         public let liveId: String
 
-        public init(registryId: String, liveId: String) {
+        /// The `sessions.source` of the LIVE tip — `"cli"`, `"acp"`,
+        /// `"gateway"`, … — read at resolve time because it decides the
+        /// transport. Hermes' ACP adapter refuses to restore any session
+        /// whose source is not exactly `"acp"`
+        /// (`acp_adapter/session.py:527`, v2026.8.31), so a Bot Chat born
+        /// over the CLI or the gateway — which is every Bot Chat Scarf or
+        /// Hermes Desktop creates — can never be `session/load`-ed and must
+        /// be conversed with over the CLI transport instead. `nil` means
+        /// the row predates the resolve carrying it (tests) or the source
+        /// column couldn't be read; both are treated as NOT ACP-born, which
+        /// is the safe direction — the CLI transport works for every
+        /// session, the ACP resume only for `"acp"` ones.
+        public let liveSource: String?
+
+        /// Whether Hermes' ACP adapter is able to `session/load` the live
+        /// tip. Only a session created BY ACP qualifies.
+        public var isACPBorn: Bool { liveSource == "acp" }
+
+        public init(registryId: String, liveId: String, liveSource: String? = nil) {
             self.registryId = registryId
             self.liveId = liveId
+            self.liveSource = liveSource
         }
     }
 
@@ -1264,7 +1283,16 @@ public actor HermesDataService {
             return nil
         }
         let tip = await compressionTip(for: registry.id)
-        return CanonicalBotChat(registryId: registry.id, liveId: tip)
+        // The tip's `source` decides the conversation transport (see
+        // `CanonicalBotChat.liveSource`). When the walk didn't move, the
+        // registry row already carries it; otherwise one more row read.
+        let liveSource: String?
+        if tip == registry.id {
+            liveSource = registry.source
+        } else {
+            liveSource = await fetchSession(id: tip)?.source
+        }
+        return CanonicalBotChat(registryId: registry.id, liveId: tip, liveSource: liveSource)
     }
 
     /// PRAGMA-driven column probe for the `sessions` table. Scarf never
