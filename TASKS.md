@@ -46,10 +46,12 @@
 - [ ] Delete resolved WS-* TODO comments + stale doc comments (id: t-1febd6fa) (added: 2026-09-02) (priority: low)
 - [ ] v0.21 platform adapters not in Scarf roster + Discord allowlist gap (id: t-0c0b1aa7) (added: 2026-09-02)
 - [ ] UI automation pass (re-enable scarfUITests, cover real-file flows) (id: t-d11c4fef) (added: 2026-09-02)
+- [ ] Harden Scarf-owned project files against agent damage (id: t-67f621c7) (added: 2026-09-02) (priority: high)
 
 ## Doing
 
 - [ ] Refresh marketing site + README FAQ for v2.15 Projects (supersede PR #109) (id: t-83c4c692) (added: 2026-06-28)
+- [ ] Chat activity-bubble UX (P1–P4) (id: t-43c8f3de) (added: 2026-09-02)
 
 ## Done
 
