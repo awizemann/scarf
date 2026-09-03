@@ -82,9 +82,7 @@ struct RichMessageBubble: View, Equatable {
     /// (Alan, 2026-09-02). Skip the bubble entirely; the content comes
     /// back the moment the style flips.
     private var hiddenByDensity: Bool {
-        message.content.isEmpty
-            && (message.toolCalls.isEmpty || toolCardStyle == .hidden)
-            && (!message.hasReasoning || reasoningStyle == .hidden)
+        message.isHiddenByDensity(toolStyle: toolCardStyle, reasoningStyle: reasoningStyle)
     }
     private var reasoningStyle: ReasoningStyle {
         ReasoningStyle(rawValue: reasoningStyleRaw) ?? .disclosure
@@ -662,7 +660,12 @@ struct RichMessageBubble: View, Equatable {
     /// the conventions in ChatGPT, Claude.ai, Cursor, etc.
     private static func shouldShowFinishReason(_ reason: String) -> Bool {
         let normalized = reason.trimmingCharacters(in: .whitespaces).lowercased()
-        return !["stop", "end_turn", "end-turn", ""].contains(normalized)
+        // `tool_calls` / `tool_use` / `function_call` are the normal way a
+        // tool-calling turn ends — as unremarkable as `stop` (the tool
+        // count already has its own pill). Rendering the raw wire token
+        // read as a warning label under every tool-bearing bubble.
+        return !["stop", "end_turn", "end-turn", "tool_calls", "tool_use", "function_call", ""]
+            .contains(normalized)
     }
 
     /// Visual tone for an abnormal finish-reason badge. Severity

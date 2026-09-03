@@ -92,6 +92,37 @@ enum ReasoningStyle: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Density visibility
+
+extension HermesMessage {
+    /// True when the current density styles would leave this assistant
+    /// message with nothing to show — a tool-call-only message with tool
+    /// cards hidden (and any reasoning hidden too). Shared by
+    /// `RichMessageBubble` (skips the bubble) and `MessageGroupView` /
+    /// the group list (skips whole groups, so hidden messages don't
+    /// leave stacked row-spacing gaps behind).
+    func isHiddenByDensity(toolStyle: ToolCardStyle, reasoningStyle: ReasoningStyle) -> Bool {
+        guard isAssistant, !isCompactionSummary else { return false }
+        return content.isEmpty
+            && (toolCalls.isEmpty || toolStyle == .hidden)
+            && (!hasReasoning || reasoningStyle == .hidden)
+    }
+}
+
+extension MessageGroup {
+    /// A group with no user message whose every assistant message is
+    /// density-hidden renders as a zero-height row that still collects
+    /// the list's row spacing — N of them in a tool-heavy turn read as
+    /// one big blank gap. Skip the group entirely instead.
+    func isHiddenByDensity(toolStyle: ToolCardStyle, reasoningStyle: ReasoningStyle) -> Bool {
+        userMessage == nil
+            && !assistantMessages.isEmpty
+            && assistantMessages.allSatisfy {
+                $0.isHiddenByDensity(toolStyle: toolStyle, reasoningStyle: reasoningStyle)
+            }
+    }
+}
+
 /// Convenience helpers for translating the user's chat font scale into
 /// SwiftUI's `DynamicTypeSize`. Applied once at the `RichChatView` root
 /// so all of message list / input bar / session info bar scale together.

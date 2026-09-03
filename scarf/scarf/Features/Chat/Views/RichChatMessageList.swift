@@ -47,6 +47,19 @@ struct RichChatMessageList: View {
     /// first-render cost is acceptable. If ever needed for huge sessions
     /// we can reintroduce lazy with a preference-key-based height
     /// measurement, but that's a much larger change.
+    /// Density styles, read here so wholly-hidden groups can be skipped
+    /// before they enter the VStack (see the ForEach below).
+    @AppStorage(ChatDensityKeys.toolCardStyle)
+    private var listToolCardStyleRaw: String = ToolCardStyle.full.rawValue
+    @AppStorage(ChatDensityKeys.reasoningStyle)
+    private var listReasoningStyleRaw: String = ReasoningStyle.disclosure.rawValue
+    private var listToolCardStyle: ToolCardStyle {
+        ToolCardStyle(rawValue: listToolCardStyleRaw) ?? .full
+    }
+    private var listReasoningStyle: ReasoningStyle {
+        ReasoningStyle(rawValue: listReasoningStyleRaw) ?? .disclosure
+    }
+
     var body: some View {
         // ScarfMon — confirms whether the parent re-issues the
         // ForEach. If this fires once and we still see RichMessageBubble.body
@@ -101,13 +114,19 @@ struct RichChatMessageList: View {
                     }
 
                     ForEach(groups) { group in
-                        MessageGroupView(
-                            group: group,
-                            turnDurations: turnDurations,
-                            isHydratingTools: isHydratingTools
-                        )
-                        .equatable()
-                        .id("group-\(group.id)")
+                        // A group whose every message is density-hidden must
+                        // not render at all: a zero-height row still collects
+                        // the VStack's 16pt spacing, and a tool-heavy turn
+                        // hides a dozen in a row — read as one big blank gap.
+                        if !group.isHiddenByDensity(toolStyle: listToolCardStyle, reasoningStyle: listReasoningStyle) {
+                            MessageGroupView(
+                                group: group,
+                                turnDurations: turnDurations,
+                                isHydratingTools: isHydratingTools
+                            )
+                            .equatable()
+                            .id("group-\(group.id)")
+                        }
                     }
 
                     if isWorking {
