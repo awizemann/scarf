@@ -285,25 +285,46 @@ public struct ACPToolCallEvent: @unchecked Sendable {
     }
 }
 
-public struct ACPToolCallUpdateEvent: Sendable {
+/// `@unchecked Sendable` for the same reason as `ACPToolCallEvent`:
+/// `rawInput` is an immutable `[String: Any]` value graph parsed off the
+/// ACP notification and only ever re-serialized verbatim.
+public struct ACPToolCallUpdateEvent: @unchecked Sendable {
     public let toolCallId: String
     public let kind: String
     public let status: String
     public let content: String
     public let rawOutput: String?
+    /// Tool-call arguments as carried on the `tool_call_update`
+    /// notification. Hermes sometimes omits `rawInput` on the initial
+    /// `tool_call` event and only populates it here — used to backfill
+    /// the stored call's `"{}"` placeholder. Defaulted so existing
+    /// call sites (and tests) compile unchanged.
+    public let rawInput: [String: Any]?
 
     public init(
         toolCallId: String,
         kind: String,
         status: String,
         content: String,
-        rawOutput: String?
+        rawOutput: String?,
+        rawInput: [String: Any]? = nil
     ) {
         self.toolCallId = toolCallId
         self.kind = kind
         self.status = status
         self.content = content
         self.rawOutput = rawOutput
+        self.rawInput = rawInput
+    }
+
+    /// `rawInput` re-serialized as a JSON string, or nil when the update
+    /// carried no arguments (never fabricates a `"{}"` placeholder —
+    /// that token is exactly what the backfill exists to replace).
+    public var argumentsJSON: String? {
+        guard let input = rawInput, !input.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: input),
+              let str = String(data: data, encoding: .utf8) else { return nil }
+        return str
     }
 }
 
@@ -412,7 +433,8 @@ public enum ACPEventParser {
                 kind: update["kind"] as? String ?? "other",
                 status: update["status"] as? String ?? "completed",
                 content: extractContentArrayText(from: update),
-                rawOutput: update["rawOutput"] as? String
+                rawOutput: update["rawOutput"] as? String,
+                rawInput: update["rawInput"] as? [String: Any]
             )
             return .toolCallUpdate(sessionId: sessionId, update: event)
 

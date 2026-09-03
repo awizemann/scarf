@@ -214,7 +214,12 @@ public struct HermesToolCall: Identifiable, Sendable, Codable {
     public var id: String { callId }
     public let callId: String
     public let functionName: String
-    public let arguments: String
+    /// Raw JSON arguments string. `var` (not `let`) because the ACP
+    /// `tool_call` start event sometimes omits `rawInput` (stored as
+    /// the literal `"{}"`), and the later `tool_call_update` carries
+    /// the real arguments — `RichChatViewModel.handleToolCallComplete`
+    /// backfills them in place.
+    public var arguments: String
 
     /// Wall-clock duration of the tool call. Set on ACP `toolCallComplete`
     /// (or equivalent) by `RichChatViewModel`. Nil for sessions loaded
@@ -335,8 +340,13 @@ public struct HermesToolCall: Identifiable, Sendable, Codable {
     public var argumentsSummary: String {
         guard let data = arguments.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return arguments
+            // The literal "{}" placeholder (tool_call event without
+            // rawInput) must never leak into the UI as a raw token.
+            return arguments == "{}" ? "" : arguments
         }
+        // Empty argument object → nothing meaningful to summarize.
+        // Without this the fallthrough below rendered the raw "{}".
+        if json.isEmpty { return "" }
         if let command = json["command"] as? String {
             return command
         }
