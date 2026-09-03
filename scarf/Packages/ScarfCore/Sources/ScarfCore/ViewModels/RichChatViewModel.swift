@@ -126,6 +126,183 @@ public struct MessageGroup: Identifiable {
             reasoningContent: reasoningContent.isEmpty ? nil : reasoningContent
         )
     }
+
+    // MARK: - Turn activity segmentation (chat-transcript UX package, P1)
+
+    /// One renderable item in a group's assistant area: either a normal
+    /// text bubble or an aggregated run of agent *activity* (tool calls
+    /// and textless reasoning) that the view renders as a single
+    /// ActivityBubble instead of N+1 separate rows.
+    public enum ChatTranscriptItem {
+        case bubble(HermesMessage)
+        case activity(ChatActivitySegment)
+    }
+
+    /// A tool call inside an activity segment, with consecutive
+    /// IDENTICAL calls (same function name + same arguments) collapsed
+    /// into one entry carrying a repeat count (rendered as "×N").
+    public struct ChatActivityEntry: Identifiable {
+        public var id: String { call.callId }
+        public var call: HermesToolCall
+        public var count: Int
+        /// Source `HermesMessage.id` — lets the view look up per-message
+        /// context (e.g. turn durations) if it ever needs to.
+        public var sourceMessageId: Int
+    }
+
+    /// A maximal run of consecutive tool-bearing-or-textless assistant
+    /// messages, aggregated for the ActivityBubble. Presentation-only:
+    /// nothing in storage changes — the same `HermesMessage`s back it.
+    public struct ChatActivitySegment {
+        /// Collapsed tool-call entries, in emission order.
+        public let entries: [ChatActivityEntry]
+        /// Textless messages in the run that carry reasoning (the
+        /// former blank-shell "thoughts-only" bubbles fold in here).
+        public let reasoningMessages: [HermesMessage]
+        /// Total tool calls (duplicates counted), for the header count.
+        public let totalToolCount: Int
+        /// Aggregate `ToolKind → count` over the segment (duplicates
+        /// counted) — same derivation as `MessageGroup.toolKindCounts`.
+        public let toolKindCounts: [ToolKind: Int]
+        /// True when the run includes the in-flight streaming message
+        /// (id == 0) — the segment the live status attaches to.
+        public let isLive: Bool
+
+        public var reasoningCount: Int { reasoningMessages.count }
+        public var latestEntry: ChatActivityEntry? { entries.last }
+        public var isEmpty: Bool { entries.isEmpty && reasoningMessages.isEmpty }
+    }
+
+    /// Partition this group's assistant messages into transcript items.
+    ///
+    /// Rules:
+    ///  - A message with visible text renders as a normal bubble. If it
+    ///    also carries tool calls, the text renders first (stripped of
+    ///    calls) and its calls join the activity run that follows —
+    ///    matching the actual chronology (text streamed, then the tool
+    ///    ran, then finalize packed both into one row).
+    ///  - Textless messages (tool-only, thoughts-only, or blank) join
+    ///    the current activity run; maximal runs become ONE segment.
+    ///  - Consecutive pure-text settled messages coalesce exactly like
+    ///    `coalescedAssistantBubbles` when `coalesceText` is true (the
+    ///    caller passes `!isHydratingTools` — same gate as before).
+    ///  - The streaming bubble (id == 0) is never coalesced into a
+    ///    text run.
+    public func transcriptItems(coalesceText: Bool) -> [ChatTranscriptItem] {
+        var items: [ChatTranscriptItem] = []
+        var textRun: [HermesMessage] = []
+        var activityMessages: [HermesMessage] = []
+
+        func flushTextRun() {
+            guard !textRun.isEmpty else { return }
+            if textRun.count == 1 {
+                items.append(.bubble(textRun[0]))
+            } else {
+                items.append(.bubble(Self.merge(textRun)))
+            }
+            textRun = []
+        }
+
+        func flushActivity() {
+            guard !activityMessages.isEmpty else { return }
+            defer { activityMessages = [] }
+            let segment = Self.buildActivitySegment(from: activityMessages)
+            guard !segment.isEmpty else { return }
+            items.append(.activity(segment))
+        }
+
+        for msg in assistantMessages where msg.isAssistant {
+            let hasText = !msg.content.isEmpty
+            let hasTools = !msg.toolCalls.isEmpty
+            if hasText {
+                flushActivity()
+                if hasTools {
+                    // Text first, calls into a (new) activity run.
+                    flushTextRun()
+                    items.append(.bubble(msg.withToolCalls([])))
+                    activityMessages.append(msg.withTextRemoved())
+                } else if coalesceText, msg.id != 0 {
+                    textRun.append(msg)
+                } else {
+                    flushTextRun()
+                    items.append(.bubble(msg))
+                }
+            } else {
+                flushTextRun()
+                activityMessages.append(msg)
+            }
+        }
+        flushTextRun()
+        flushActivity()
+        return items
+    }
+
+    private static func buildActivitySegment(
+        from messages: [HermesMessage]
+    ) -> ChatActivitySegment {
+        var entries: [ChatActivityEntry] = []
+        var reasoningMessages: [HermesMessage] = []
+        var kindCounts: [ToolKind: Int] = [:]
+        var total = 0
+        var isLive = false
+
+        for msg in messages {
+            if msg.id == 0 { isLive = true }
+            if msg.hasReasoning { reasoningMessages.append(msg) }
+            for call in msg.toolCalls {
+                total += 1
+                kindCounts[call.toolKind, default: 0] += 1
+                if var last = entries.last,
+                   last.call.functionName == call.functionName,
+                   last.call.arguments == call.arguments {
+                    // Identical consecutive call → collapse, keeping the
+                    // LATEST call's identity so inspector focus and the
+                    // in-flight spinner track the most recent attempt.
+                    last.call = call
+                    last.count += 1
+                    last.sourceMessageId = msg.id
+                    entries[entries.count - 1] = last
+                } else {
+                    entries.append(ChatActivityEntry(
+                        call: call, count: 1, sourceMessageId: msg.id
+                    ))
+                }
+            }
+        }
+        return ChatActivitySegment(
+            entries: entries,
+            reasoningMessages: reasoningMessages,
+            totalToolCount: total,
+            toolKindCounts: kindCounts,
+            isLive: isLive
+        )
+    }
+}
+
+extension HermesMessage {
+    /// Copy with the visible text removed — used when a message's text
+    /// renders as its own bubble while its tool calls join an activity
+    /// segment. Reasoning stays with the text bubble (it belongs to the
+    /// visible reply, and keeping it there avoids double-rendering).
+    fileprivate func withTextRemoved() -> HermesMessage {
+        HermesMessage(
+            id: id,
+            sessionId: sessionId,
+            role: role,
+            content: "",
+            toolCallId: toolCallId,
+            toolCalls: toolCalls,
+            toolName: toolName,
+            timestamp: timestamp,
+            tokenCount: tokenCount,
+            finishReason: finishReason,
+            reasoning: nil,
+            reasoningContent: nil,
+            reasoningContentAvailable: false,
+            isCompactionSummary: isCompactionSummary,
+            containsCompactionSummary: containsCompactionSummary
+        )
+    }
 }
 
 @Observable
@@ -1431,6 +1608,7 @@ public final class RichChatViewModel {
         streamingThinkingText = ""
         streamingToolCalls = []
         cancelStreamingFlush()
+        setLiveActivityStatus(nil)
         acpInputTokens = 0
         acpOutputTokens = 0
         acpThoughtTokens = 0
@@ -1873,6 +2051,9 @@ public final class RichChatViewModel {
             ScarfMon.event(.chatStream, "firstByte", count: 1, bytes: text.utf8.count)
         }
         streamingAssistantText += text
+        // Text is streaming — the growing text bubble is its own
+        // progress signal; the ActivityBubble live status stands down.
+        setLiveActivityStatus(nil)
         scheduleStreamingUpsert()
     }
 
@@ -1881,7 +2062,40 @@ public final class RichChatViewModel {
             ScarfMon.event(.chatStream, "firstThoughtByte", count: 1, bytes: text.utf8.count)
         }
         streamingThinkingText += text
+        if streamingAssistantText.isEmpty {
+            setLiveActivityStatus(.reasoning)
+        }
         scheduleStreamingUpsert()
+    }
+
+    // MARK: - Live activity status (P2)
+
+    /// Scarf-composed live status for the in-flight turn, shown by the
+    /// trailing ActivityBubble while no visible text is streaming.
+    /// Derived from live ACP events (never from the poll-based
+    /// `sessions.last_activity_description` column, which lags).
+    /// `nil` = no status to show: either the turn hasn't produced its
+    /// first event yet (the classic three-dots indicator covers that
+    /// gap) or visible text is streaming (the text bubble itself is
+    /// the progress signal).
+    public enum LiveActivityStatus: Equatable, Sendable {
+        /// A tool call is executing; payload is its function name.
+        case runningTool(String)
+        /// Thought-stream bytes are arriving with no visible text yet.
+        case reasoning
+        /// Between events — waiting on the model's next output.
+        case receiving
+    }
+
+    public private(set) var liveActivityStatus: LiveActivityStatus?
+
+    /// Equality-guarded setter: `@Observable` fires on every mutation,
+    /// and thought chunks arrive at chunk rate — writing an unchanged
+    /// `.reasoning` per chunk would invalidate the transcript's
+    /// trailing group tens of times per second for nothing.
+    private func setLiveActivityStatus(_ status: LiveActivityStatus?) {
+        guard liveActivityStatus != status else { return }
+        liveActivityStatus = status
     }
 
     private func handleToolCallStart(_ call: ACPToolCallEvent) {
@@ -1892,6 +2106,7 @@ public final class RichChatViewModel {
             startedAt: Date()
         )
         streamingToolCalls.append(toolCall)
+        setLiveActivityStatus(.runningTool(call.functionName))
         // Tally for `agent_turn_completed`'s bucket. Counted at *start* so a
         // turn cut short by a disconnect still has an honest tally; the
         // running total survives the per-tool-call `finalizeStreamingMessage`
@@ -1914,7 +2129,20 @@ public final class RichChatViewModel {
                 streamingToolCalls[idx].duration = Date().timeIntervalSince(started)
             }
             streamingToolCalls[idx].exitCode = Self.exitCode(forStatus: update.status)
+            // Backfill arguments: the `tool_call` start event sometimes
+            // omits `rawInput` (stored as the literal "{}" placeholder);
+            // when the completing update carries the real arguments,
+            // splice them in before finalize locks the call into the
+            // permanent message.
+            let stored = streamingToolCalls[idx].arguments
+            if stored.isEmpty || stored == "{}",
+               let backfilled = update.argumentsJSON {
+                streamingToolCalls[idx].arguments = backfilled
+            }
         }
+        // Tool finished; until the next event lands we're waiting on
+        // the model again.
+        setLiveActivityStatus(.receiving)
 
         // Finalize the streaming assistant message (with its tool calls) as a permanent message
         finalizeStreamingMessage()
@@ -2022,6 +2250,7 @@ public final class RichChatViewModel {
         // everything else maps onto a bounded `error_kind`.
         endAnalyticsTurn(errorKind: Self.analyticsTurnErrorKind(stopReason: response.stopReason))
         isAgentWorking = false
+        setLiveActivityStatus(nil)
         // v2.8 / Hermes v0.13 — Hermes runs the next `/queue`-deferred
         // prompt server-side now that this turn has settled. Drain the
         // local mirror FIFO so the header chip count matches what the
@@ -2066,6 +2295,7 @@ public final class RichChatViewModel {
         // completed and this is the transport noticing afterwards.
         endAnalyticsTurn(errorKind: "connection_lost")
         isAgentWorking = false
+        setLiveActivityStatus(nil)
         clearPendingPermissions()
         buildMessageGroups()
     }
@@ -2238,6 +2468,7 @@ public final class RichChatViewModel {
     public func finalizeOnDisconnect() {
         finalizeStreamingMessage()
         isAgentWorking = false
+        setLiveActivityStatus(nil)
         clearPendingPermissions()
         buildMessageGroups()
     }
