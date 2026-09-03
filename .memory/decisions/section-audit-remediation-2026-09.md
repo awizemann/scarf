@@ -299,3 +299,137 @@ One item was **REFUTED by execution** and is recorded below rather than "fixed".
 `ScarfDesign/ScarfLinkPolicy.swift` (new, shared Mac+iOS). Tests extend the existing suites: `SQLValueInlinerTests` (+8: CRLF, CR-only, CRLF-only, mixed, heredoc breakout, C0/NUL, non-ASCII fast path), `SectionAuditF3CLIContractTests` (+10: MCP host-state shifts, env-key derivation, no-`--` pin, three forged-webhook-record fixtures), `ProjectHermesShadowConsolidationTests` (+2, one of which **executes** the emitted command in a real shell against a pre-existing destination), and a new `ToolCallDecodeDegradationTests` (4). Counts: ScarfCore **1817 tests / 112 suites** green; app target **607 / 78** green. Mac and iOS (`scarf mobile`) both build.
 
 Pre-existing and NOT caused by this package, verified against a clean stash: `scarfUITests` has 2 launch-test failures on baseline, and `M0bTransportTests.serverContextPathsLocalVsRemote` flakes under the parallel full suite (passes 3/3 in isolation) — filed as a follow-up.
+
+
+## The Debug-vs-Release diagnostics gap (2026-09-02, commit 8b4ae88)
+
+The 3.0.0 release cut surfaced ~46 Swift concurrency diagnostics that eight packages' green builds had never shown. Root cause is NOT a stricter Release configuration — `SWIFT_TREAT_WARNINGS_AS_ERRORS` is unset in every config, and Debug and Release both carry `SWIFT_VERSION = 5.0`, `SWIFT_APPROACHABLE_CONCURRENCY = YES` and (app + test targets only) `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`. Both actions in fact BUILD, with identical diagnostics. The gap is **visibility**: the package gates run `swift test --package-path scarf/Packages/ScarfCore`, which never compiles the app target at all, and an incremental Debug build only recompiles touched files, so a warning introduced in an untouched file is never re-emitted. A clean whole-module compile of the app target is the only thing that shows the full set.
+
+- [gotcha] `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` is set on the **app and test targets, not on ScarfCore** (whose `Package.swift` pins `.swiftLanguageMode(.v5)` and has no default-isolation setting). So a service type moved from ScarfCore into the app target silently acquires MainActor isolation it did not have before — the whole class of diagnostics fixed in 8b4ae88 #concurrency #swift6
+- [gotcha] Under Swift 5 mode these are warnings carrying "this is an error in the Swift 6 language mode"; they do NOT fail a build today. The release archive is where they became visible, not where they became fatal. Any claim that "Release is stricter" is wrong — the difference is clean-vs-incremental and app-target-vs-package #build
+- [rule] 🚨 **Protocol-isolation rule: an IO-service protocol is declared `nonisolated`, at the requirements, and so are its conformers.** `BotsBackend` / `BotAgentBackend` are `Sendable` seams over blocking transport IO, deliberately called from inside `Task.detached` (the F6/Phase-B design). Under default MainActor isolation they became implicitly MainActor and every call site went red. The fix is always at the DECLARATION — `nonisolated` on each requirement plus `nonisolated` on the live conformer AND every test mock — never removing the detachment and never hopping to the main actor, which would put blocking IO on the UI thread. Marking the mocks too is load-bearing: a MainActor mock would let the tests pass under an isolation the production path does not have #rule #concurrency
+- [decision] The same rule was applied to constants and value types the compiler had captured: `BotAgentViewModel.toolsetPlatform`, `FleetApplyExecutor.maxConcurrentHosts`, `WindowProfileScope.macDefaultsKey`, `WidgetHelpers.ansiPattern`, `SettingsViewModel.strippingErrorDecoration`, `HealthViewModel.UpdateStatus`, `BotDraft`, `HermesWebhook`, `HermesEnvService`, and `BotConversationViewModel.ACPHandle` (an NSLock-guarded `@unchecked Sendable` whose whole purpose is cross-actor use including `deinit`). None changes runtime threading — each codifies where the code already ran #decision
+- [gotcha] A nested `Task` may NOT capture the outer closure's weakly-captured `self` **var** — `[self]` in the inner capture list does not silence `#SendableClosureCaptures`. Bind a local `let` copy first (`let owner = self`) and capture that (`FleetApplyViewModel.applyProgress`) #concurrency
+- [gotcha] Removing an "unnecessary" `nonisolated(unsafe)` from a static constant can hand it MainActor isolation instead, breaking a `nonisolated static func` that reads it. `WidgetHelpers.ansiPattern` needed `nonisolated private static let`, not a bare `private static let` #concurrency
+- [gotcha] `NSLock.lock()`/`unlock()` are unavailable from an `async` function even when nothing awaits between them. Hoist the critical section into a synchronous private helper returning an enum of outcomes (`HermesVersionCache.lookupOrStartProbe`) #concurrency
+- [todo] Add a clean **Release build of the app target** (and the iOS target) to the package gates — `swift test` on ScarfCore alone structurally cannot see any of this. A `xcodebuild -configuration Release build` with a warnings-diff, or flipping `SWIFT_TREAT_WARNINGS_AS_ERRORS = YES` for Release once the count is zero, would make the release cut boring #ci
+
+
+## Release ratchet: why two capture fixes survived the sweep
+
+`SWIFT_TREAT_WARNINGS_AS_ERRORS = YES` now sits in all seven Release config
+blocks (commit `0dec023`). Landing it surfaced two capture diagnostics that
+the sweep in `8b4ae88` believed it had already fixed. Both survived for the
+same reason: **the fix was applied one scope too deep.**
+
+- `FleetApplyViewModel` (#SendableClosureCaptures). The sweep wrote
+  `let owner = self` *inside* the `onProgress` closure. That does nothing —
+  the binding is evaluated on the concurrently-executing closure's own
+  invocation, and what it reads is still the outer weak `self` binding, which
+  Swift 6 classifies as a captured var. The binding has to happen **before the
+  closure is formed**, so the closure captures an immutable local.
+- `ChatView` (#ImplicitStrongCapture). `Task { @MainActor [weak vm] in … }`
+  gave one closure a weak ownership of `vm` differing from the implicit strong
+  capture of the same value in the enclosing scope. Note the trap: simply
+  deleting the capture list does NOT fix it, because `vm` is a *property of the
+  view* — naming it in the closure then captures `self` implicitly and the
+  iOS Release build fails with "requires explicit use of 'self'". Same remedy
+  as above: bind to a local before the closure, capture the local.
+
+**Rule:** for both diagnostics the fix shape is a `let` binding *outside* the
+closure plus an explicit capture list naming that local. A capture list alone,
+or a binding inside the closure, addresses neither.
+
+## `unsafeToWrite` on bot create — root cause and the refined rule
+
+Symptom: `hermes profile create` succeeded (directory present, profile listed
+under Other profiles) but the identity write failed with
+`unsafeToWrite(path: ".../profile.yaml")`, surfaced as "Profile X was created,
+but its bot details couldn't be saved."
+
+**Root cause (verified against the reporting machine's real file, not
+inferred): Hermes persists profile.yaml through `yaml.safe_dump`, whose
+default `width=80` wraps a long value into a multi-line PLAIN scalar** — the
+value begins on the key's line and continues on indented lines below it:
+
+```yaml
+description: You are an SEO analyst that will keep an eye on a website (https://…)
+  as well as search terms that are used to find or potentially find the site through
+  search, and make recommendations on changes, additions, etc for the site.
+description_auto: false
+```
+
+Scarf's line-oriented `setScalar` saw those indented continuation lines as a
+**nested block body under a key it expects to be a scalar** and refused. So
+*every* bot created with a role longer than 80 columns was unwritable. The
+reader had the mirror-image bug: it read only the key's own line and truncated
+the value at the wrap point.
+
+The same wrap applies one level down — the gateway dumps the `ui_meta` →
+`hermes-bots` block through `safe_dump` too, so a wrapped bot `description`
+was truncated and its tail swept into `unknownMetaLines`, where the next save
+re-emitted it as junk sibling keys.
+
+### Corrections to the hypotheses we started from
+
+- **Not** the empty optional profile-name field. Empty string and nil take the
+  same path; `display_name` is popped either way, matching Hermes' own writer.
+- **Not** absent vs. empty vs. degraded. Those paths were already correct:
+  absent → write-from-empty, 0-byte → write-from-empty, unreadable → refuse.
+  The B0/F5 rule needed no change; it was never the thing failing.
+- **Not** a stat/read race, a duplicate `ui_meta`, or an inline flow mapping.
+  The error message enumerates possible refusal shapes generically — it is not
+  diagnostic, and reading it as one sent us at the wrong suspects.
+
+### The rule that resolves it
+
+YAML's own: **a key carrying a value on its own line cannot also have a block
+body.** Therefore indented lines beneath such a key are unambiguously
+continuation of its scalar, and the writer replaces the whole run. A **bare**
+`key:` with an indented body is a genuine mapping/sequence and is still
+refused. The reader folds runs the way PyYAML loads them (single break → space,
+blank line → newline) and handles `|` / `>` block scalars.
+
+Fixing the writer without the reader would have converted a refusal into
+silent data loss — the truncated value would have been written back as the
+whole value. Both halves ship together (`b835ef0`).
+
+### Refined absent / empty / degraded rule
+
+- **Absent** file → write from empty. Normal: Hermes creates profile.yaml lazily.
+- **Empty** (0-byte) file → write from empty. An empty file has nothing to lose.
+- **Degraded** (exists, unreadable, oversized, non-UTF8) → REFUSE. Merging into
+  a display-time "degrade to empty" would replace the user's file with a stub.
+- **Well-formed but in a shape the surgical writer cannot edit unambiguously**
+  (bare key with a body, duplicate top-level key, populated inline `ui_meta`,
+  tab-indented body, oversized rendered block) → REFUSE.
+- A **wrapped multi-line scalar is none of these.** It is an ordinary
+  well-formed value and must be edited normally.
+
+Adversarially re-checked: the oversized, non-UTF8, duplicate-key, bare-key-
+with-body, and populated-inline-`ui_meta` refusals all still refuse.
+
+### Gates
+
+ScarfCore 1830 tests / 114 suites green; app `scarfTests` 607 tests / 78 suites
+green; Release and Debug both platforms build clean under the ratchet.
+
+**Fixture rule this reinforces:** fixtures for Hermes-authored files must be
+GENERATED with Hermes' own dumper options (`yaml.safe_dump(…,
+default_flow_style=False, sort_keys=False, allow_unicode=True)`), never
+hand-typed. Every hand-typed fixture in the suite was one logical line per key,
+which is exactly why the suite was green while real files failed.
+
+
+
+## Bot Chat transport routing (2026-09-02, release blocker fix)
+
+Fresh bots were permanently unopenable after their first message: Scarf creates the canonical Bot Chat via `hermes chat -c "Bot Chat" --create-if-missing` (source="cli"), and Hermes v0.21's ACP adapter only restores sessions with `source == "acp"` (`acp_adapter/session.py:527`; `fork_session` uses the same gate). The ACP resume always fell back to `session/new`, and `verifyCanonicalBinding` correctly refused the drift — forever. Hermes Desktop's gateway-born Bot Chats are equally unloadable, so the v2.24 "streaming bot conversations" path only ever worked for ACP-born sessions, which no real Bot Chat is (unit tests injected canonical ids without exercising source).
+
+**Decision — hybrid transport routed by `sessions.source`** (surfaced as `CanonicalBotChat.liveSource` / `isACPBorn`):
+- `"acp"` → unchanged ACP streaming path, verifier retained (never silently bind a non-Bot-Chat session).
+- anything else (the real-world case) → CLI transport: NO ACP process; transcript hydrated from the profile's state.db (`loadSessionHistory`) with terminal-mode DB polling; each send is the exact delivery Hermes' own `tools/bot_mode_dm.py` documents (`hermes -p <bot> chat -c "Bot Chat" --create-if-missing -Q --query-file`, verified live to be a pure append on an existing session). Honest UI: "Replies arrive when each turn completes". `ChatViewModel.sendRouter` intercepts every sendText path so goal-pill/quick-command sends can't ACP-auto-start a stray untitled session in the bot's profile. Scarf never writes state.db.
+
+Rejected: any ACP titling/adoption surface (none exists at v2026.8.31 — searched) and relaxing the verifier (a bot chat that isn't the Bot Chat is worse than none).
+
+E2E regression net: `scarfTests/BotConversationCLITransportE2ETests` runs the real hermes binary in an isolated `HERMES_HOME` against a local OpenAI-compatible SSE stub (python3 stdlib, port 0) — profile create → production creation invocation → second message → one session, both turns, title intact. Commit e8770b5.
