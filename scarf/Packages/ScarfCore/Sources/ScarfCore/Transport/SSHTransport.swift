@@ -498,6 +498,42 @@ public struct SSHTransport: ServerTransport {
         return nil
     }
 
+    /// One round-trip for every path, instead of one round-trip per path.
+    ///
+    /// Emits `<size> <mtime> <type>` per path in the SAME ORDER as `paths`,
+    /// with a `- - -` placeholder for anything that doesn't stat, so the
+    /// reply lines can be zipped back onto the inputs without echoing the
+    /// paths (which would have to be parsed back out of a line that may
+    /// legally contain spaces).
+    public func statAll(_ paths: [String]) -> [String: FileStat] {
+        guard !paths.isEmpty else { return [:] }
+        let unique = Array(Set(paths))
+        let argList = unique.map { Self.remotePathArg($0) }.joined(separator: " ")
+        // GNU first, BSD fallback, placeholder last — the same ladder
+        // `stat(_:)` climbs, just once per path inside one shell.
+        let cmd = """
+            for p in \(argList); do \
+            stat -c "%s %Y %F" "$p" 2>/dev/null \
+            || stat -f "%z %m %HT" "$p" 2>/dev/null \
+            || echo "- - -"; done
+            """
+        guard let result = try? runRemoteShell(cmd), result.exitCode == 0 else { return [:] }
+        let lines = result.stdoutString.split(separator: "\n", omittingEmptySubsequences: false)
+        var out: [String: FileStat] = [:]
+        for (index, path) in unique.enumerated() {
+            guard index < lines.count else { break }
+            let line = lines[index].trimmingCharacters(in: .whitespaces)
+            // The placeholder must NOT parse: `parseStatOutput` would read
+            // "- - -" as a zero-byte file at the epoch, turning "absent"
+            // into "present and empty" — which is exactly the
+            // absent-vs-unreadable confusion the registry work spent a
+            // phase removing.
+            guard line != "- - -" else { continue }
+            if let info = Self.parseStatOutput(line) { out[path] = info }
+        }
+        return out
+    }
+
     private static func parseStatOutput(_ s: String) -> FileStat? {
         // Expected: "<bytes> <unix-epoch-secs> <type>" where <type> is either
         // a GNU word ("regular file", "directory") or a BSD word ("Regular
@@ -833,27 +869,60 @@ public struct SSHTransport: ServerTransport {
     // MARK: - Watching
 
     public func watchPaths(_ paths: [String]) -> AsyncStream<WatchEvent> {
-        // Polling: call `stat -c %Y` on all paths every 3s and yield a single
-        // `.anyChanged` when any mtime changed vs. the prior tick. ControlMaster
-        // makes each stat ~5ms so the cost is bounded.
+        watchPaths(paths, baseline: nil)
+    }
+
+    public func watchPaths(
+        _ paths: [String], baseline: WatchBaselineStore?
+    ) -> AsyncStream<WatchEvent> {
+        // Polling: stat all paths every 3s and yield a single `.anyChanged`
+        // when any of them changed vs. the prior tick. ControlMaster makes
+        // each stat ~5ms so the cost is bounded.
+        //
+        // The signature is `mtime:size` PER PATH, held in the caller's
+        // `baseline` when one is supplied. Two things follow that a single
+        // joined mtime string could not do: a same-second write that
+        // changed the file's length is still a delta, and a restart of this
+        // stream (the watcher's project set changed) resumes from what the
+        // previous stream knew instead of silently re-baselining and
+        // swallowing whatever landed in the gap.
         AsyncStream { continuation in
             let task = Task.detached { [self] in
-                var lastSignature: String = ""
+                let memory = baseline ?? WatchBaselineStore()
                 while !Task.isCancelled {
                     // Build one shell command that stats all paths in one
-                    // ssh round-trip. Missing paths print "0" which still
-                    // participates correctly in change detection. Paths
-                    // get the `~`→`$HOME` rewrite via remotePathArg.
+                    // ssh round-trip. Missing paths print "0 0" which still
+                    // participates correctly in change detection (a file
+                    // appearing or vanishing is a change). Paths get the
+                    // `~`→`$HOME` rewrite via remotePathArg.
                     let argList = paths.map { Self.remotePathArg($0) }.joined(separator: " ")
-                    let cmd = "for p in \(argList); do stat -c %Y \"$p\" 2>/dev/null || stat -f %m \"$p\" 2>/dev/null || echo 0; done"
+                    let cmd = "for p in \(argList); do stat -c \"%Y:%s\" \"$p\" 2>/dev/null || stat -f \"%m:%z\" \"$p\" 2>/dev/null || echo 0:0; done"
                     do {
                         let result = try runRemoteShell(cmd, timeout: 30)
-                        let signature = result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !signature.isEmpty && signature != lastSignature {
-                            if !lastSignature.isEmpty {
-                                continuation.yield(.anyChanged)
-                            }
-                            lastSignature = signature
+                        let lines = result.stdoutString
+                            .split(separator: "\n", omittingEmptySubsequences: false)
+                            .map { $0.trimmingCharacters(in: .whitespaces) }
+                            .filter { !$0.isEmpty }
+                        // A short or empty reply is a sick transport, not a
+                        // set of vanished files: applying it per-path would
+                        // forget baselines and then report a spurious change
+                        // when the host came back.
+                        //
+                        // A reply that doesn't line up is still USABLE as a
+                        // whole-blob signature, and falling back to one is
+                        // what keeps a host whose `stat` we can't read
+                        // line-by-line from having no watcher at all — the
+                        // pre-existing behaviour, kept as the floor.
+                        var fresh: [String: String] = [:]
+                        if lines.count == paths.count {
+                            for (index, path) in paths.enumerated() { fresh[path] = lines[index] }
+                        } else if lines.isEmpty {
+                            continue
+                        } else {
+                            fresh["\u{0}blob"] = lines.joined(separator: "\n")
+                        }
+                        if memory.apply(fresh) {
+                            continuation.yield(.anyChanged)
                         }
                     } catch {
                         // Transient failure (connection drop) — skip this tick.

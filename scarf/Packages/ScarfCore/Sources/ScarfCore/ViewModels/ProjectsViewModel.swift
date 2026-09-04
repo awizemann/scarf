@@ -119,8 +119,15 @@ public final class ProjectsViewModel {
 
     public var projects: [ProjectEntry] = []
     public var selectedProject: ProjectEntry?
-    public var dashboard: ProjectDashboard?
-    public var dashboardError: String?
+    /// Whether the SELECTED project has a `.scarf/dashboard.json`.
+    ///
+    /// This is all the sidebar ever wanted: it draws a filled icon on the
+    /// selected row when the project has a dashboard. It used to get that
+    /// from a fully decoded `ProjectDashboard` held here — a second read +
+    /// decode of the same file the cockpit view model was already reading
+    /// and decoding, on every watcher tick, so that one glyph could ask a
+    /// yes/no question. One `stat` answers it.
+    public private(set) var selectedHasDashboard = false
     public var isLoading = false
 
     /// The last user-initiated mutation that did not happen, for the
@@ -160,7 +167,9 @@ public final class ProjectsViewModel {
         let loaded = service.loadRegistryDetailed()
         apply(registry: loaded.registry)
         applyDamage(Self.damageNotice(for: loaded, service: service))
-        if let selected = selectedProject { loadDashboard(for: selected) }
+        if let selected = selectedProject {
+            selectedHasDashboard = service.dashboardExists(for: selected)
+        }
     }
 
     /// Off-main registry (+ selected dashboard) refresh for hot paths like the
@@ -192,7 +201,7 @@ public final class ProjectsViewModel {
             self.apply(registry: loaded.0)
             self.applyDamage(loaded.1)
             if let selected = self.selectedProject {
-                await self.reloadDashboard(for: selected, generation: generation)
+                await self.refreshDashboardFlag(for: selected, generation: generation)
             }
         }
         reloadTask = task
@@ -203,7 +212,7 @@ public final class ProjectsViewModel {
         projects = registry.projects
         if let selected = selectedProject, !projects.contains(where: { $0.name == selected.name }) {
             selectedProject = nil
-            dashboard = nil
+            selectedHasDashboard = false
         }
     }
 
@@ -276,16 +285,31 @@ public final class ProjectsViewModel {
     /// refuse it, loudly, rather than quietly finish the job the bad
     /// agent write started.
     ///
-    /// Synchronous like the mutators that call it: these are one-shot,
-    /// user-initiated paths, not the hot watcher path `reload()` covers.
-    private func registryForMutation(_ action: String) -> ProjectRegistry? {
+    /// Async like the mutators that call it: one-shot, user-initiated
+    /// paths, but on a remote context the read is a real SSH round-trip
+    /// and the main actor is not the place for it (charter C10).
+    private func registryForMutation(_ action: String) async -> LoadedForMutation? {
         // Same reasoning as `load()`: this mutation is about to become
         // the newest truth, so invalidate any reload already in flight.
-        // Safe to bump here — a mutator runs to its commit without a
-        // suspension point, so no newer reload can start in between.
         reloadGeneration &+= 1
-        let loaded = service.loadRegistryDetailed()
-        applyDamage(Self.damageNotice(for: loaded, service: service))
+        // OFF THE MAIN ACTOR (charter C10). On a remote context this is a
+        // `cat` over SSH plus, on the damage path, a `.bak` stat — three to
+        // five blocking round-trips per user-initiated mutation, on the
+        // actor drawing the window. The `RegistryWriteLock` the save below
+        // takes waits up to 2s on its own, which used to stack on top of
+        // this.
+        let ctx = context
+        let loaded = await Task.detached { () -> (ProjectDashboardService.RegistryLoadResult, RegistryDamageNotice?) in
+            let svc = ProjectDashboardService(context: ctx)
+            let result = svc.loadRegistryDetailed()
+            return (result, ProjectsViewModel.damageNotice(for: result, service: svc))
+        }.value
+        // The mutation is the newest truth: re-claim the generation AFTER
+        // the await, so a reload that started while we were reading cannot
+        // land its older registry on top of what we are about to commit.
+        reloadGeneration &+= 1
+        applyDamage(loaded.1)
+        let result = loaded.0
         // UX, not enforcement. `ProjectDashboardService.saveRegistry` is the
         // guard — it refuses this write whether or not we look. What this
         // adds is the ALERT: the verb the user clicked, before the mutator
@@ -298,11 +322,43 @@ public final class ProjectsViewModel {
         // project, while the doctor happily repaired the same file. The
         // banner still reports field salvage; the doctor now raises a
         // finding for it; neither stops the user working.
-        if let loss = loaded.loss {
+        if let loss = result.loss {
             fail("Couldn't \(action)", reason: loss.message)
             return nil
         }
-        return loaded.registry
+        return LoadedForMutation(registry: result.registry, baseline: result.contentFingerprint)
+    }
+
+    /// A registry read plus the fingerprint of the bytes it came from.
+    ///
+    /// The pair travels together, as a VALUE, rather than the baseline
+    /// living on the view model: the mutators are async now, so two of them
+    /// can interleave across their reads, and a shared slot would let the
+    /// second one's baseline be the thing the first one writes against.
+    private struct LoadedForMutation {
+        var registry: ProjectRegistry
+        /// Fingerprint of the registry bytes this mutation is computed
+        /// from. Handed to `saveRegistry` so a write that would erase
+        /// somebody else's concurrent change is refused rather than
+        /// silently winning. `nil` for a registry that wasn't on disk.
+        var baseline: String?
+    }
+
+    /// `saveRegistry` off the main actor. Encode + lock + inspect + `.bak`
+    /// + atomic publish is three to five transport round-trips on a remote
+    /// context, and `RegistryWriteLock` can wait 2s before any of them.
+    private func save(
+        _ registry: ProjectRegistry, allowEmpty: Bool = false, expecting: String?
+    ) async throws {
+        let ctx = context
+        try await Task.detached {
+            try ProjectDashboardService(context: ctx)
+                .saveRegistry(registry, allowEmpty: allowEmpty, expecting: expecting)
+        }.value
+        // The file on disk is now ours. Any reload still in flight read the
+        // file BEFORE this write, so retire its generation rather than let
+        // it commit the pre-write list over the post-write one.
+        reloadGeneration &+= 1
     }
 
     /// Record a failed mutation for the view to alert on, and log it.
@@ -318,15 +374,28 @@ public final class ProjectsViewModel {
         mutationError = ProjectMutationFailure(title: title, message: reason)
     }
 
+    /// Select a project. **Nothing here touches the transport.**
+    ///
+    /// It used to: a sidebar click ran `dashboardExists` + `loadDashboard`
+    /// synchronously, which on a remote context is two blocking SSH
+    /// round-trips on the main actor, before the selection could even
+    /// paint (charter C10). The dashboard icon's flag now resolves off-main
+    /// and lands a moment later.
     public func selectProject(_ project: ProjectEntry) {
         selectedProject = project
-        loadDashboard(for: project)
+        selectedHasDashboard = false
+        reloadGeneration &+= 1
+        let generation = reloadGeneration
+        Task { [weak self] in
+            await self?.refreshDashboardFlag(for: project, generation: generation)
+        }
     }
 
     @discardableResult
-    public func addProject(name: String, path: String) -> Bool {
+    public func addProject(name: String, path: String) async -> Bool {
         mutationError = nil
-        guard var registry = registryForMutation("add “\(name)”") else { return false }
+        guard let loaded = await registryForMutation("add “\(name)”") else { return false }
+        var registry = loaded.registry
         guard !registry.projects.contains(where: { $0.name == name }) else {
             fail("Couldn't add “\(name)”", reason: "A project with that name is already in the list.")
             return false
@@ -346,7 +415,7 @@ public final class ProjectsViewModel {
         // that was simply gone at relaunch — the silent failure this
         // whole change exists to remove.
         do {
-            try service.saveRegistry(registry)
+            try await save(registry, expecting: loaded.baseline)
         } catch {
             fail("Couldn't add “\(name)”", error)
             return false
@@ -357,9 +426,10 @@ public final class ProjectsViewModel {
     }
 
     @discardableResult
-    public func removeProject(_ project: ProjectEntry) -> Bool {
+    public func removeProject(_ project: ProjectEntry) async -> Bool {
         mutationError = nil
-        guard var registry = registryForMutation("remove “\(project.name)”") else { return false }
+        guard let loaded = await registryForMutation("remove “\(project.name)”") else { return false }
+        var registry = loaded.registry
         // Without this guard a removal of something already gone would
         // save an unchanged list — and if that list is empty, the
         // `allowEmpty` below deliberately bypasses Phase 1's
@@ -386,7 +456,7 @@ public final class ProjectsViewModel {
         do {
             // Deliberate removal: removing the user's last project must
             // still be able to leave the registry empty.
-            try service.saveRegistry(registry, allowEmpty: true)
+            try await save(registry, allowEmpty: true, expecting: loaded.baseline)
         } catch {
             // Keep the project on screen: it is still in the file, and
             // showing it gone would be a lie the next launch corrects.
@@ -397,10 +467,19 @@ public final class ProjectsViewModel {
         // Only AFTER the registry write committed. Revoking grants and
         // stripping the AGENTS.md block for a project that is still listed
         // (because the save threw) would be damage, not cleanup.
-        ProjectLifecycleService(context: context).cleanUpAfterRemoval(of: project)
+        // Off-main for the same reason the save is: revoking grants and
+        // stripping the AGENTS.md block are transport writes. AWAITED, not
+        // fire-and-forget — `removeProject` returning true has always meant
+        // the removal is complete, and callers (and tests) read the grant
+        // store straight afterwards.
+        let lifecycle = ProjectLifecycleService(context: context)
+        let removed = project
+        await Task.detached(priority: .userInitiated) {
+            lifecycle.cleanUpAfterRemoval(of: removed)
+        }.value
         if selectedProject?.name == project.name {
             selectedProject = nil
-            dashboard = nil
+            selectedHasDashboard = false
         }
         return true
     }
@@ -410,15 +489,15 @@ public final class ProjectsViewModel {
     /// Move a project into a folder. `nil` folder returns the project
     /// to the top level. No-op when the target already matches.
     @discardableResult
-    public func moveProject(_ project: ProjectEntry, toFolder folder: String?) -> Bool {
-        mutateEntry(project, action: "move “\(project.name)”") { $0.folder = folder }
+    public func moveProject(_ project: ProjectEntry, toFolder folder: String?) async -> Bool {
+        await mutateEntry(project, action: "move “\(project.name)”") { $0.folder = folder }
     }
 
     /// Rename a project. `name` is the registry's unique key + the
     /// Identifiable id; rejects renames that would collide with an
     /// existing project's name. Returns true on success.
     @discardableResult
-    public func renameProject(_ project: ProjectEntry, to newName: String) -> Bool {
+    public func renameProject(_ project: ProjectEntry, to newName: String) async -> Bool {
         mutationError = nil
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -429,7 +508,8 @@ public final class ProjectsViewModel {
             return false
         }
         guard trimmed != project.name else { return true }
-        guard var registry = registryForMutation("rename “\(project.name)”") else { return false }
+        guard let loaded = await registryForMutation("rename “\(project.name)”") else { return false }
+        var registry = loaded.registry
         guard !registry.projects.contains(where: { $0.name == trimmed }) else {
             fail("Couldn't rename “\(project.name)”", reason: "A project named “\(trimmed)” is already in the list.")
             return false
@@ -454,16 +534,16 @@ public final class ProjectsViewModel {
             uuid: old.uuid
         )
         do {
-            try service.saveRegistry(registry)
+            try await save(registry, expecting: loaded.baseline)
         } catch {
             fail("Couldn't rename “\(project.name)”", error)
             return false
         }
         projects = registry.projects
-        propagateRenameToRecord(registry.projects[index], from: project.name)
         if selectedProject?.name == project.name {
             selectedProject = registry.projects[index]
         }
+        await propagateRenameToRecord(registry.projects[index], from: project.name)
         return true
     }
 
@@ -483,14 +563,21 @@ public final class ProjectsViewModel {
     /// unreachable remote must not roll back a rename that already landed.
     /// The doctor's `recordNameMismatch` finding is the backstop — a
     /// divergence that survives this is now SAID rather than silent.
-    private func propagateRenameToRecord(_ entry: ProjectEntry, from oldName: String) {
-        let store = ProjectStore(context: context)
-        guard var record = store.load(projectPath: entry.path) else { return }
-        guard record.name != entry.name else { return }
-        record.name = entry.name
-        do {
-            try store.save(record)
-        } catch {
+    private func propagateRenameToRecord(_ entry: ProjectEntry, from oldName: String) async {
+        let ctx = context
+        let outcome: (any Error)? = await Task.detached { () -> (any Error)? in
+            let store = ProjectStore(context: ctx)
+            guard var record = store.load(projectPath: entry.path) else { return nil }
+            guard record.name != entry.name else { return nil }
+            record.name = entry.name
+            do {
+                try store.save(record)
+                return nil
+            } catch {
+                return error
+            }
+        }.value
+        if let error = outcome {
             // Not a `fail(...)`: the rename SUCCEEDED. Surfacing an alert
             // here would tell the user their rename didn't work when it did.
             logger.warning(
@@ -502,11 +589,11 @@ public final class ProjectsViewModel {
     /// Soft-archive a project. Stays on disk + in the registry; the
     /// sidebar just hides it unless `showArchived` is on.
     @discardableResult
-    public func archiveProject(_ project: ProjectEntry) -> Bool {
+    public func archiveProject(_ project: ProjectEntry) async -> Bool {
         // Clear the selection only if the archive actually persisted —
         // otherwise the user loses their place to a write that didn't
         // happen.
-        guard mutateEntry(project, action: "archive “\(project.name)”", { $0.archived = true }) else {
+        guard await mutateEntry(project, action: "archive “\(project.name)”", { $0.archived = true }) else {
             return false
         }
         // Archive is no longer an inert display bool. The watchers stop
@@ -531,15 +618,15 @@ public final class ProjectsViewModel {
         Task.detached(priority: .utility) { lifecycle.setCronPaused(true, for: target) }
         if selectedProject?.name == project.name {
             selectedProject = nil
-            dashboard = nil
+            selectedHasDashboard = false
         }
         return true
     }
 
     /// Restore an archived project to the default view.
     @discardableResult
-    public func unarchiveProject(_ project: ProjectEntry) -> Bool {
-        guard mutateEntry(project, action: "restore “\(project.name)”", { $0.archived = false })
+    public func unarchiveProject(_ project: ProjectEntry) async -> Bool {
+        guard await mutateEntry(project, action: "restore “\(project.name)”", { $0.archived = false })
         else { return false }
         // Symmetric with `archiveProject`. Without this, archiving would be
         // a one-way door wearing a toggle's clothes: the jobs would stay
@@ -569,9 +656,10 @@ public final class ProjectsViewModel {
         _ project: ProjectEntry,
         action: String,
         _ mutation: (inout ProjectEntry) -> Void
-    ) -> Bool {
+    ) async -> Bool {
         mutationError = nil
-        guard var registry = registryForMutation(action) else { return false }
+        guard let loaded = await registryForMutation(action) else { return false }
+        var registry = loaded.registry
         guard let index = registry.projects.firstIndex(where: { $0.name == project.name }) else {
             fail("Couldn't \(action)", reason: "That project is no longer in the list.")
             return false
@@ -580,7 +668,7 @@ public final class ProjectsViewModel {
         mutation(&entry)
         registry.projects[index] = entry
         do {
-            try service.saveRegistry(registry)
+            try await save(registry, expecting: loaded.baseline)
         } catch {
             fail("Couldn't \(action)", error)
             return false
@@ -592,9 +680,11 @@ public final class ProjectsViewModel {
         return true
     }
 
-    public func refreshDashboard() {
+    /// Re-check whether the selected project has a dashboard. Off-main.
+    public func refreshDashboard() async {
         guard let project = selectedProject else { return }
-        loadDashboard(for: project)
+        reloadGeneration &+= 1
+        await refreshDashboardFlag(for: project, generation: reloadGeneration)
     }
 
     /// Archived rows are EXCLUDED. Watching an archived project's dashboard
@@ -617,36 +707,15 @@ public final class ProjectsViewModel {
         projects.filter { !$0.archived }.map(\.scarfDir)
     }
 
-    private func loadDashboard(for project: ProjectEntry) {
-        dashboardError = nil
-        if !service.dashboardExists(for: project) {
-            dashboard = nil
-            dashboardError = "No dashboard found at \(project.dashboardPath)"
-            return
-        }
-        if let loaded = service.loadDashboard(for: project) {
-            dashboard = loaded
-        } else {
-            dashboard = nil
-            dashboardError = "Failed to parse dashboard JSON"
-        }
-    }
-
-    /// Off-main variant of `loadDashboard(for:)` for `reload()`. Does the
-    /// `dashboardExists` + `loadDashboard` transport reads on a detached task,
-    /// then commits the result back on the main actor.
-    private func reloadDashboard(for project: ProjectEntry, generation: Int) async {
+    /// One off-main `stat` — not a read, not a decode. The cockpit view
+    /// model owns loading and rendering the dashboard; this exists solely
+    /// so the sidebar can pick a glyph.
+    private func refreshDashboardFlag(for project: ProjectEntry, generation: Int) async {
         let ctx = context
-        let outcome: (dashboard: ProjectDashboard?, error: String?) = await Task.detached {
-            let svc = ProjectDashboardService(context: ctx)
-            guard svc.dashboardExists(for: project) else {
-                return (nil, "No dashboard found at \(project.dashboardPath)")
-            }
-            if let loaded = svc.loadDashboard(for: project) { return (loaded, nil) }
-            return (nil, "Failed to parse dashboard JSON")
+        let exists = await Task.detached {
+            ProjectDashboardService(context: ctx).dashboardExists(for: project)
         }.value
-        guard generation == reloadGeneration else { return }
-        dashboardError = outcome.error
-        dashboard = outcome.dashboard
+        guard generation == reloadGeneration, selectedProject?.path == project.path else { return }
+        selectedHasDashboard = exists
     }
 }

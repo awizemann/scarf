@@ -304,21 +304,28 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         // - `ios.fileWatcher.paths` (event with bytes=count) — number
         //   of paths watched per cycle, helps explain a slow tick when
         //   the project list grows.
+        watchPaths(paths, baseline: nil)
+    }
+
+    public func watchPaths(
+        _ paths: [String], baseline: WatchBaselineStore?
+    ) -> AsyncStream<WatchEvent> {
         AsyncStream { continuation in
             let task = Task.detached { [weak self] in
-                var lastSignature = ""
+                // Per-path signatures in the CALLER's store when it supplied
+                // one, so restarting this stream (the watcher's project set
+                // changed) doesn't silently re-baseline and swallow whatever
+                // landed during the gap. See `WatchBaselineStore`.
+                let memory = baseline ?? WatchBaselineStore()
                 while !Task.isCancelled {
                     guard let self else { break }
                     ScarfMon.event(.transport, "ios.fileWatcher.paths", count: 1, bytes: paths.count)
                     let current = await ScarfMon.measureAsync(.transport, "ios.fileWatcher.tick") {
                         await self.buildWatchSignature(for: paths)
                     }
-                    if !current.isEmpty, current != lastSignature {
-                        if !lastSignature.isEmpty {
-                            ScarfMon.event(.transport, "ios.fileWatcher.delta", count: 1)
-                            continuation.yield(.anyChanged)
-                        }
-                        lastSignature = current
+                    if !current.isEmpty, memory.apply(current) {
+                        ScarfMon.event(.transport, "ios.fileWatcher.delta", count: 1)
+                        continuation.yield(.anyChanged)
                     }
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
                 }
@@ -327,16 +334,16 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         }
     }
 
-    private func buildWatchSignature(for paths: [String]) async -> String {
-        var parts: [String] = []
+    private func buildWatchSignature(for paths: [String]) async -> [String: String] {
+        var parts: [String: String] = [:]
         for path in paths {
             if let stat = try? await asyncStat(path) {
-                parts.append("\(path):\(Int(stat.mtime.timeIntervalSince1970)):\(stat.size)")
+                parts[path] = "\(Int(stat.mtime.timeIntervalSince1970)):\(stat.size)"
             } else {
-                parts.append("\(path):0:0")
+                parts[path] = "0:0"
             }
         }
-        return parts.joined(separator: ",")
+        return parts
     }
 
     // MARK: - Static helpers

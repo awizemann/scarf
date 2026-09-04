@@ -78,7 +78,10 @@ struct ProjectCockpitView: View {
             if vm.dashboard != nil { selectedPanel = .dashboard }
         }
         .onChange(of: fileWatcher.lastChangeDate) {
-            Task { await viewModel?.load(force: true) }
+            // `.watcher`: short-circuits on an unchanged facet signature
+            // (one batched stat instead of ~10 reads) and never triggers a
+            // doctor scan. See `ProjectCockpitViewModel.LoadReason`.
+            Task { await viewModel?.load(force: true, reason: .watcher) }
         }
         .sheet(isPresented: $showDoctor, onDismiss: {
             // The doctor writes the registry and project records, so the

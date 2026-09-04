@@ -22,6 +22,20 @@ import Foundation
         try body(ServerContext.local(home: home), projectsRoot.path)
     }
 
+    /// Async twin of `withTempHome`, for suites whose body has to await
+    /// (the project mutators do their transport I/O off the main actor).
+    static func withTempHomeAsync(
+        isolation: isolated (any Actor)? = #isolation,
+        _ body: (ServerContext, _ projectsRoot: String) async throws -> Void
+    ) async throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-projectstore-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let projectsRoot = home.appendingPathComponent("projects", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectsRoot, withIntermediateDirectories: true)
+        try await body(ServerContext.local(home: home), projectsRoot.path)
+    }
+
     /// Create `<projectsRoot>/<slug>/.scarf/` and return the project dir.
     static func makeProjectDir(_ projectsRoot: String, slug: String) throws -> String {
         let dir = projectsRoot + "/" + slug

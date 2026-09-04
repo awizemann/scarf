@@ -158,7 +158,7 @@ struct ProjectsSidebar: View {
     private func projectRow(_ project: ProjectEntry) -> some View {
         HStack {
             Image(
-                systemName: viewModel.dashboard != nil
+                systemName: viewModel.selectedHasDashboard
                     && viewModel.selectedProject == project
                     ? "square.grid.2x2.fill"
                     : "square.grid.2x2"
@@ -214,11 +214,11 @@ struct ProjectsSidebar: View {
         Button("Move to Folder…", systemImage: "folder") { onMoveToFolder(project) }
         if project.archived {
             Button("Unarchive", systemImage: "tray.and.arrow.up") {
-                viewModel.unarchiveProject(project)
+                Task { await viewModel.unarchiveProject(project) }
             }
         } else {
             Button("Archive", systemImage: "archivebox") {
-                viewModel.archiveProject(project)
+                Task { await viewModel.archiveProject(project) }
             }
         }
         Divider()

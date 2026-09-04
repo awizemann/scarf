@@ -15,8 +15,8 @@ import Foundation
     // MARK: - Harness
 
     static func withTempHome(
-        _ body: (ServerContext, _ projectsRoot: String) throws -> Void
-    ) throws {
+        _ body: (ServerContext, _ projectsRoot: String) async throws -> Void
+    ) async throws {
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent("scarf-d2-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: home) }
@@ -26,7 +26,7 @@ import Foundation
         try FileManager.default.createDirectory(
             atPath: ctx.paths.scarfDir, withIntermediateDirectories: true
         )
-        try body(ctx, projectsRoot.path)
+        try await body(ctx, projectsRoot.path)
     }
 
     @discardableResult
@@ -53,13 +53,13 @@ import Foundation
     /// The record's `name` is what `renderAgentContextBlock` injects into
     /// every chat opened in the project. A rename that only touched the
     /// registry meant the agent was told the OLD name forever.
-    @Test func renamePropagatesIntoTheProjectRecord() throws {
-        try Self.withTempHome { ctx, root in
+    @Test func renamePropagatesIntoTheProjectRecord() async throws {
+        try await Self.withTempHome { ctx, root in
             let project = try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
             let vm = Self.loadedVM(ctx)
             let row = try #require(vm.projects.first)
 
-            #expect(vm.renameProject(row, to: "Renamed"))
+            #expect(await vm.renameProject(row, to: "Renamed"))
 
             let record = try #require(ProjectStore(context: ctx).load(projectPath: project.rootPath))
             #expect(record.name == "Renamed")
@@ -72,23 +72,23 @@ import Foundation
     /// A rename whose record can't be written still succeeds — the registry
     /// write is the one the user sees. The doctor is the backstop, and the
     /// next test proves it fires.
-    @Test func renameStillSucceedsWhenThereIsNoRecordToPropagateInto() throws {
-        try Self.withTempHome { ctx, root in
+    @Test func renameStillSucceedsWhenThereIsNoRecordToPropagateInto() async throws {
+        try await Self.withTempHome { ctx, root in
             let dir = root + "/bare"
             try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
             try ProjectDashboardService(context: ctx).saveRegistry(
                 ProjectRegistry(projects: [ProjectEntry(name: "Bare", path: dir)])
             )
             let vm = Self.loadedVM(ctx)
-            #expect(vm.renameProject(try #require(vm.projects.first), to: "Still Fine"))
+            #expect(await vm.renameProject(try #require(vm.projects.first), to: "Still Fine"))
             #expect(vm.mutationError == nil)
         }
     }
 
     // MARK: - H7: the doctor can see divergence
 
-    @Test func doctorReportsAndRepairsANameDivergence() throws {
-        try Self.withTempHome { ctx, root in
+    @Test func doctorReportsAndRepairsANameDivergence() async throws {
+        try await Self.withTempHome { ctx, root in
             let project = try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
             // The pre-propagation state: registry renamed, record stale.
             var registry = ProjectDashboardService(context: ctx).loadRegistry()
@@ -112,8 +112,8 @@ import Foundation
     /// The move case: a record found at X declaring it belongs at Y. Every
     /// writer underneath addresses the project by `record.rootPath`, so
     /// this is reported and never auto-repaired.
-    @Test func doctorReportsAMovedProjectAndOffersNoRepair() throws {
-        try Self.withTempHome { ctx, root in
+    @Test func doctorReportsAMovedProjectAndOffersNoRepair() async throws {
+        try await Self.withTempHome { ctx, root in
             let project = try Self.makeProject(ctx, root: root, slug: "moved", name: "Moved")
             // Simulate the hand-move: the record still names the old home.
             var record = try #require(ProjectStore(context: ctx).load(projectPath: project.rootPath))
@@ -134,8 +134,8 @@ import Foundation
         }
     }
 
-    @Test func aHealthyProjectProducesNeitherDivergenceFinding() throws {
-        try Self.withTempHome { ctx, root in
+    @Test func aHealthyProjectProducesNeitherDivergenceFinding() async throws {
+        try await Self.withTempHome { ctx, root in
             try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
             let report = ProjectDoctorService(context: ctx).diagnose()
             #expect(report.findings.filter { $0.kind == .recordNameMismatch }.isEmpty)
@@ -150,8 +150,8 @@ import Foundation
     /// as a `duplicateName` finding the user is meant to be able to resolve
     /// row by row. Name-keyed removal made that impossible: removing either
     /// one removed both.
-    @Test func removingOneOfTwoRowsSharingANameLeavesTheOther() throws {
-        try Self.withTempHome { ctx, root in
+    @Test func removingOneOfTwoRowsSharingANameLeavesTheOther() async throws {
+        try await Self.withTempHome { ctx, root in
             let a = try Self.makeProject(ctx, root: root, slug: "a", name: "Twin")
             let b = try Self.makeProject(ctx, root: root, slug: "b", name: "Other")
             // Force the name collision behind the store's back.
@@ -167,7 +167,7 @@ import Foundation
 
             let vm = Self.loadedVM(ctx)
             let target = try #require(vm.projects.first { $0.uuid == a.id })
-            #expect(vm.removeProject(target))
+            #expect(await vm.removeProject(target))
 
             let rows = ProjectDashboardService(context: ctx).loadRegistry().projects
             #expect(rows.count == 1)
@@ -177,8 +177,8 @@ import Foundation
 
     // MARK: - Removal cleans up what lives outside the registry
 
-    @Test func removalRevokesGrantsAndStripsTheAgentsBlock() throws {
-        try Self.withTempHome { ctx, root in
+    @Test func removalRevokesGrantsAndStripsTheAgentsBlock() async throws {
+        try await Self.withTempHome { ctx, root in
             let project = try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
             let grants = MiniAppGrantStore(context: ctx)
             try grants.setGrant(
@@ -190,7 +190,7 @@ import Foundation
                 .write(to: URL(fileURLWithPath: agentsPath))
 
             let vm = Self.loadedVM(ctx)
-            #expect(vm.removeProject(try #require(vm.projects.first)))
+            #expect(await vm.removeProject(try #require(vm.projects.first)))
 
             // Grants gone — otherwise re-using this folder resurrects them,
             // ids being derived from (host, path).
@@ -202,12 +202,12 @@ import Foundation
         }
     }
 
-    @Test func removalOfAProjectWhoseFolderIsGoneStillSucceeds() throws {
-        try Self.withTempHome { ctx, root in
+    @Test func removalOfAProjectWhoseFolderIsGoneStillSucceeds() async throws {
+        try await Self.withTempHome { ctx, root in
             let project = try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
             try FileManager.default.removeItem(atPath: project.rootPath)
             let vm = Self.loadedVM(ctx)
-            #expect(vm.removeProject(try #require(vm.projects.first)))
+            #expect(await vm.removeProject(try #require(vm.projects.first)))
             #expect(vm.mutationError == nil)
             #expect(ProjectDashboardService(context: ctx).loadRegistry().projects.isEmpty)
         }
@@ -215,8 +215,8 @@ import Foundation
 
     // MARK: - Archive is no longer inert
 
-    @Test func archivingStopsTheProjectBeingWatched() throws {
-        try Self.withTempHome { ctx, root in
+    @Test func archivingStopsTheProjectBeingWatched() async throws {
+        try await Self.withTempHome { ctx, root in
             try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
             try Self.makeProject(ctx, root: root, slug: "beta", name: "Beta")
             let vm = Self.loadedVM(ctx)
@@ -224,7 +224,7 @@ import Foundation
             #expect(vm.projectScarfDirs.count == 2)
 
             let alpha = try #require(vm.projects.first { $0.name == "Alpha" })
-            #expect(vm.archiveProject(alpha))
+            #expect(await vm.archiveProject(alpha))
 
             #expect(vm.dashboardPaths.count == 1)
             #expect(vm.projectScarfDirs.count == 1)
@@ -232,15 +232,15 @@ import Foundation
         }
     }
 
-    @Test func unarchivingPutsTheProjectBackUnderWatch() throws {
-        try Self.withTempHome { ctx, root in
+    @Test func unarchivingPutsTheProjectBackUnderWatch() async throws {
+        try await Self.withTempHome { ctx, root in
             try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
             let vm = Self.loadedVM(ctx)
             let alpha = try #require(vm.projects.first)
-            #expect(vm.archiveProject(alpha))
+            #expect(await vm.archiveProject(alpha))
             #expect(vm.dashboardPaths.isEmpty)
             let archived = try #require(vm.projects.first)
-            #expect(vm.unarchiveProject(archived))
+            #expect(await vm.unarchiveProject(archived))
             #expect(vm.dashboardPaths.count == 1)
         }
     }
@@ -249,8 +249,8 @@ import Foundation
     /// `ProjectStore.derive` uses. With no cron file there is nothing to
     /// pause and nothing to fail — archiving a project on a host without
     /// Hermes running must not report an error.
-    @Test func archivingWithNoCronJobsIsANoOp() throws {
-        try Self.withTempHome { ctx, root in
+    @Test func archivingWithNoCronJobsIsANoOp() async throws {
+        try await Self.withTempHome { ctx, root in
             let project = try Self.makeProject(ctx, root: root, slug: "alpha", name: "Alpha")
             let lifecycle = ProjectLifecycleService(context: ctx)
             #expect(lifecycle.cronJobIDs(for: ProjectEntry(
@@ -264,10 +264,10 @@ import Foundation
 
     // MARK: - Root policy at the app's own door
 
-    @Test func theSidebarRefusesAnAbsurdProjectRoot() throws {
-        try Self.withTempHome { ctx, _ in
+    @Test func theSidebarRefusesAnAbsurdProjectRoot() async throws {
+        try await Self.withTempHome { ctx, _ in
             let vm = Self.loadedVM(ctx)
-            #expect(vm.addProject(name: "Everything", path: "/") == false)
+            #expect(await vm.addProject(name: "Everything", path: "/") == false)
             #expect(vm.mutationError != nil)
             #expect(ProjectDashboardService(context: ctx).loadRegistry().projects.isEmpty)
         }
@@ -314,8 +314,8 @@ import Foundation
     /// spelled the folder with a trailing slash missed the row and derived
     /// from a uuid-less entry — keying the AGENTS.md block on the interim
     /// path-derived id instead of the registry's.
-    @Test func loadOrDeriveFindsTheRowThroughADifferentPathSpelling() throws {
-        try Self.withTempHome { ctx, root in
+    @Test func loadOrDeriveFindsTheRowThroughADifferentPathSpelling() async throws {
+        try await Self.withTempHome { ctx, root in
             let dir = root + "/alpha"
             try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
             let asserted = UUID()

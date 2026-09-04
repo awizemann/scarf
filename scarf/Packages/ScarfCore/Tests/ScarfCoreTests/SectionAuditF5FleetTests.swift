@@ -195,9 +195,9 @@ import Foundation
     /// `ProjectEntry`'s Equatable deliberately ignores `uuid`, so the identity
     /// carry-over has to be asserted on the field itself.
     @MainActor
-    @Test func renameKeepsTheStableIdentifierInsteadOfReDerivingIt() throws {
+    @Test func renameKeepsTheStableIdentifierInsteadOfReDerivingIt() async throws {
         let id = UUID()
-        try ProjectStoreTests.withTempHome { ctx, _ in
+        try await ProjectStoreTests.withTempHomeAsync { ctx, _ in
             let service = ProjectDashboardService(context: ctx)
             try service.saveRegistry(ProjectRegistry(projects: [
                 ProjectEntry(name: "OldName", path: "/p", folder: "Work", archived: false, uuid: id)
@@ -205,7 +205,7 @@ import Foundation
 
             let vm = ProjectsViewModel(context: ctx)
             vm.load()
-            #expect(vm.renameProject(vm.projects[0], to: "NewName") == true)
+            #expect(await vm.renameProject(vm.projects[0], to: "NewName") == true)
 
             let reloaded = service.loadRegistry().projects[0]
             #expect(reloaded.name == "NewName")

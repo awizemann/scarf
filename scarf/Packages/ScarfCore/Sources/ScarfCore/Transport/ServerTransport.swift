@@ -33,6 +33,16 @@ public protocol ServerTransport: Sendable {
     nonisolated func writeFile(_ path: String, data: Data) throws
     nonisolated func fileExists(_ path: String) -> Bool
     nonisolated func stat(_ path: String) -> FileStat?
+    /// Stat MANY paths, ideally in one transport round-trip.
+    ///
+    /// The point of this existing at all is the remote case: `stat` is one
+    /// SSH round-trip, so a caller that wants to know whether any of a
+    /// dozen files changed paid a dozen. Every change-detection fast path
+    /// in the app (the cockpit's per-facet short-circuit, the widget
+    /// re-read guards) asks that question, so it gets one call. Paths that
+    /// do not exist are simply ABSENT from the result — the same
+    /// information `stat` returning nil carries.
+    nonisolated func statAll(_ paths: [String]) -> [String: FileStat]
     nonisolated func listDirectory(_ path: String) throws -> [String]
     /// Create directories including intermediates. No-op if already present.
     nonisolated func createDirectory(_ path: String) throws
@@ -130,6 +140,93 @@ public protocol ServerTransport: Sendable {
     /// Observe changes to a set of paths and yield events when any of them
     /// change. Local: FSEvents. Remote: polls `stat` mtime every 3s.
     nonisolated func watchPaths(_ paths: [String]) -> AsyncStream<WatchEvent>
+
+    /// `watchPaths`, but with the caller's own per-path signature memory.
+    ///
+    /// A polling watcher has to baseline before it can report a delta, so
+    /// the FIRST poll after a (re)start is silent by construction — and a
+    /// change that lands inside that window is swallowed forever. That is
+    /// only tolerable while restarts are rare; when the caller restarts the
+    /// poller because its watch set changed, the baseline belongs to the
+    /// CALLER, not to the stream. Pass a store and a restart resumes from
+    /// what the previous stream already knew: paths it has seen keep their
+    /// signature (so a change during the gap is reported), paths it has not
+    /// are seeded silently (so an added path is not a spurious delta).
+    nonisolated func watchPaths(
+        _ paths: [String], baseline: WatchBaselineStore?
+    ) -> AsyncStream<WatchEvent>
+}
+
+/// Per-path signature memory shared between a watcher and the polling
+/// streams it starts. Mutable across stream restarts on purpose — it is
+/// the thing that must OUTLIVE them.
+///
+/// The signature is `mtime-seconds:size`, not mtime alone. One-second
+/// mtime granularity is the resolution `stat` reports over SSH, so two
+/// writes inside the same second are one signature; pairing size with it
+/// catches the overwhelmingly common case of that pair (a file that grew
+/// or shrank) at zero extra cost. It is not a hash and does not pretend
+/// to be one — a same-second, same-size rewrite is still invisible until
+/// the next poll that differs.
+public final class WatchBaselineStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var signatures: [String: String] = [:]
+
+    public init() {}
+
+    /// Fold a fresh poll into the baseline.
+    ///
+    /// - Returns: `true` when a path we ALREADY had a signature for now has
+    ///   a different one. A path seen for the first time is recorded and
+    ///   reported as no change; paths absent from `fresh` are forgotten so
+    ///   a shrinking watch set can't keep answering for paths nobody
+    ///   watches.
+    @discardableResult
+    public func apply(_ fresh: [String: String]) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        var changed = false
+        for (path, signature) in fresh {
+            if let known = signatures[path], known != signature { changed = true }
+        }
+        signatures = fresh
+        return changed
+    }
+
+    /// Test seam: the signature currently held for `path`, if any.
+    public func signature(for path: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return signatures[path]
+    }
+
+    public func reset() {
+        lock.lock()
+        defer { lock.unlock() }
+        signatures.removeAll()
+    }
+}
+
+public extension ServerTransport {
+    /// Default: one `stat` per path. Correct everywhere and cheap on a
+    /// local filesystem; `SSHTransport` overrides it with a single shell
+    /// command so the remote case is one round-trip instead of N.
+    nonisolated func statAll(_ paths: [String]) -> [String: FileStat] {
+        var result: [String: FileStat] = [:]
+        for path in paths where result[path] == nil {
+            if let info = stat(path) { result[path] = info }
+        }
+        return result
+    }
+
+    /// Default: ignore the baseline and use the stream's own. Correct for
+    /// the local FSEvents transport (which has no baseline — it is
+    /// event-driven, not polled) and for test fakes.
+    nonisolated func watchPaths(
+        _ paths: [String], baseline: WatchBaselineStore?
+    ) -> AsyncStream<WatchEvent> {
+        watchPaths(paths)
+    }
 }
 
 public extension ServerTransport {

@@ -16,7 +16,7 @@ import Foundation
 
     // MARK: - Harness
 
-    static func withTempHome(_ body: (ServerContext, _ registryPath: String) throws -> Void) throws {
+    static func withTempHome(_ body: (ServerContext, _ registryPath: String) async throws -> Void) async throws {
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent("scarf-projects-vm-\(UUID().uuidString)", isDirectory: true)
         let ctx = ServerContext.local(home: home)
@@ -32,7 +32,7 @@ import Foundation
             )
             try? FileManager.default.removeItem(at: home)
         }
-        try body(ctx, ctx.paths.projectsRegistry)
+        try await body(ctx, ctx.paths.projectsRegistry)
     }
 
     static func seed(_ projects: [ProjectEntry], context: ServerContext) throws {
@@ -60,8 +60,8 @@ import Foundation
 
     /// The read-only directory really does defeat a write, so the
     /// failure tests below can't pass vacuously.
-    @Test func readOnlyDirectoryActuallyBlocksWrites() throws {
-        try Self.withTempHome { ctx, path in
+    @Test func readOnlyDirectoryActuallyBlocksWrites() async throws {
+        try await Self.withTempHome { ctx, path in
             try Self.seed([ProjectEntry(name: "a", path: "/tmp/a")], context: ctx)
             try Self.makeReadOnly(ctx)
             #expect(throws: (any Error).self) {
@@ -75,14 +75,14 @@ import Foundation
 
     // MARK: - Mutations surface their failures
 
-    @Test func addProjectSurfacesWriteFailureAndDoesNotFakeSuccess() throws {
-        try Self.withTempHome { ctx, _ in
+    @Test func addProjectSurfacesWriteFailureAndDoesNotFakeSuccess() async throws {
+        try await Self.withTempHome { ctx, _ in
             try Self.seed([ProjectEntry(name: "existing", path: "/tmp/existing")], context: ctx)
             let vm = ProjectsViewModel(context: ctx)
             vm.load()
             try Self.makeReadOnly(ctx)
 
-            let ok = vm.addProject(name: "brand-new", path: "/tmp/brand-new")
+            let ok = await vm.addProject(name: "brand-new", path: "/tmp/brand-new")
 
             #expect(ok == false)
             #expect(vm.mutationError?.title == "Couldn't add “brand-new”")
@@ -95,20 +95,20 @@ import Foundation
         }
     }
 
-    @Test func addProjectSurfacesDuplicateNameInsteadOfNoOp() throws {
-        try Self.withTempHome { ctx, _ in
+    @Test func addProjectSurfacesDuplicateNameInsteadOfNoOp() async throws {
+        try await Self.withTempHome { ctx, _ in
             try Self.seed([ProjectEntry(name: "site", path: "/tmp/site")], context: ctx)
             let vm = ProjectsViewModel(context: ctx)
             vm.load()
 
-            #expect(vm.addProject(name: "site", path: "/tmp/other") == false)
+            #expect(await vm.addProject(name: "site", path: "/tmp/other") == false)
             #expect(vm.mutationError?.title == "Couldn't add “site”")
             #expect(vm.mutationError?.message.contains("already in the list") == true)
         }
     }
 
-    @Test func removeProjectSurfacesWriteFailureAndKeepsTheProject() throws {
-        try Self.withTempHome { ctx, _ in
+    @Test func removeProjectSurfacesWriteFailureAndKeepsTheProject() async throws {
+        try await Self.withTempHome { ctx, _ in
             try Self.seed(
                 [ProjectEntry(name: "keep", path: "/tmp/keep"), ProjectEntry(name: "drop", path: "/tmp/drop")],
                 context: ctx
@@ -119,7 +119,7 @@ import Foundation
             vm.selectProject(target)
             try Self.makeReadOnly(ctx)
 
-            #expect(vm.removeProject(target) == false)
+            #expect(await vm.removeProject(target) == false)
             #expect(vm.mutationError?.title == "Couldn't remove “drop”")
             // Still on disk, so still on screen — and still selected.
             #expect(vm.projects.map(\.name).sorted() == ["drop", "keep"])
@@ -127,22 +127,22 @@ import Foundation
         }
     }
 
-    @Test func renameProjectSurfacesWriteFailure() throws {
-        try Self.withTempHome { ctx, _ in
+    @Test func renameProjectSurfacesWriteFailure() async throws {
+        try await Self.withTempHome { ctx, _ in
             try Self.seed([ProjectEntry(name: "old", path: "/tmp/old")], context: ctx)
             let vm = ProjectsViewModel(context: ctx)
             vm.load()
             let target = try #require(vm.projects.first)
             try Self.makeReadOnly(ctx)
 
-            #expect(vm.renameProject(target, to: "new") == false)
+            #expect(await vm.renameProject(target, to: "new") == false)
             #expect(vm.mutationError?.title == "Couldn't rename “old”")
             #expect(vm.projects.map(\.name) == ["old"])
         }
     }
 
-    @Test func renameProjectSurfacesNameCollision() throws {
-        try Self.withTempHome { ctx, _ in
+    @Test func renameProjectSurfacesNameCollision() async throws {
+        try await Self.withTempHome { ctx, _ in
             try Self.seed(
                 [ProjectEntry(name: "a", path: "/tmp/a"), ProjectEntry(name: "b", path: "/tmp/b")],
                 context: ctx
@@ -151,13 +151,13 @@ import Foundation
             vm.load()
             let target = try #require(vm.projects.first { $0.name == "a" })
 
-            #expect(vm.renameProject(target, to: "b") == false)
+            #expect(await vm.renameProject(target, to: "b") == false)
             #expect(vm.mutationError?.message.contains("already in the list") == true)
         }
     }
 
-    @Test func archiveSurfacesFailureAndKeepsSelection() throws {
-        try Self.withTempHome { ctx, _ in
+    @Test func archiveSurfacesFailureAndKeepsSelection() async throws {
+        try await Self.withTempHome { ctx, _ in
             try Self.seed([ProjectEntry(name: "site", path: "/tmp/site")], context: ctx)
             let vm = ProjectsViewModel(context: ctx)
             vm.load()
@@ -165,22 +165,22 @@ import Foundation
             vm.selectProject(target)
             try Self.makeReadOnly(ctx)
 
-            #expect(vm.archiveProject(target) == false)
+            #expect(await vm.archiveProject(target) == false)
             #expect(vm.mutationError?.title == "Couldn't archive “site”")
             // A failed archive must not steal the user's place.
             #expect(vm.selectedProject?.name == "site")
         }
     }
 
-    @Test func moveToFolderSurfacesFailure() throws {
-        try Self.withTempHome { ctx, _ in
+    @Test func moveToFolderSurfacesFailure() async throws {
+        try await Self.withTempHome { ctx, _ in
             try Self.seed([ProjectEntry(name: "site", path: "/tmp/site")], context: ctx)
             let vm = ProjectsViewModel(context: ctx)
             vm.load()
             let target = try #require(vm.projects.first)
             try Self.makeReadOnly(ctx)
 
-            #expect(vm.moveProject(target, toFolder: "Work") == false)
+            #expect(await vm.moveProject(target, toFolder: "Work") == false)
             #expect(vm.mutationError?.title == "Couldn't move “site”")
         }
     }
@@ -188,8 +188,8 @@ import Foundation
     /// A mutation whose registry went corrupt underneath it reports
     /// BOTH: the mutation didn't happen (alert) and the file is damaged
     /// (banner).
-    @Test func mutationOnACorruptedRegistryFailsLoudlyAndFlagsTheDamage() throws {
-        try Self.withTempHome { ctx, path in
+    @Test func mutationOnACorruptedRegistryFailsLoudlyAndFlagsTheDamage() async throws {
+        try await Self.withTempHome { ctx, path in
             try Self.seed([ProjectEntry(name: "real", path: "/tmp/real")], context: ctx)
             let vm = ProjectsViewModel(context: ctx)
             vm.load()
@@ -198,7 +198,7 @@ import Foundation
             // the agent-write scenario this phase exists for.
             try Self.write("{ not json at all", to: path)
 
-            #expect(vm.moveProject(target, toFolder: "Work") == false)
+            #expect(await vm.moveProject(target, toFolder: "Work") == false)
             let failure = try #require(vm.mutationError)
             #expect(failure.title == "Couldn't move “real”")
             // The message is the app-wide `RegistryLoss` wording now, so
@@ -214,8 +214,8 @@ import Foundation
     /// load: a salvaged decode returns only the SURVIVING rows, so
     /// saving it would erase the unreadable ones for good. The file
     /// must come through the attempted mutation byte-for-byte intact.
-    @Test func mutationRefusesToWriteBackASalvagedRegistry() throws {
-        try Self.withTempHome { ctx, path in
+    @Test func mutationRefusesToWriteBackASalvagedRegistry() async throws {
+        try await Self.withTempHome { ctx, path in
             // One good row, one row that cannot be decoded at all.
             let original = """
             {
@@ -234,7 +234,7 @@ import Foundation
             #expect(try #require(vm.registryDamage).droppedCount == 1)
 
             let target = try #require(vm.projects.first)
-            #expect(vm.moveProject(target, toFolder: "Work") == false)
+            #expect(await vm.moveProject(target, toFolder: "Work") == false)
             #expect(vm.mutationError?.title == "Couldn't move “good”")
 
             // The unreadable row is still on disk, untouched.
@@ -251,8 +251,8 @@ import Foundation
     /// The damage is not swept under the rug by allowing the write: the
     /// banner still raises (asserted here), and the doctor raises a
     /// `registryFieldSalvaged` finding.
-    @Test func mutationProceedsWhenOnlyAFieldWasSalvaged() throws {
-        try Self.withTempHome { ctx, path in
+    @Test func mutationProceedsWhenOnlyAFieldWasSalvaged() async throws {
+        try await Self.withTempHome { ctx, path in
             try Self.write("""
             {
               "projects": [
@@ -270,7 +270,7 @@ import Foundation
             #expect(damage.salvagedFields == ["good.uuid"])
 
             let target = try #require(vm.projects.first { $0.name == "good" })
-            #expect(vm.moveProject(target, toFolder: "Work"))
+            #expect(await vm.moveProject(target, toFolder: "Work"))
             #expect(vm.mutationError == nil)
 
             // Both rows survive the write; the unreadable uuid does not,
@@ -281,8 +281,8 @@ import Foundation
         }
     }
 
-    @Test func addAndRemoveAlsoRefuseALossyRegistry() throws {
-        try Self.withTempHome { ctx, path in
+    @Test func addAndRemoveAlsoRefuseALossyRegistry() async throws {
+        try await Self.withTempHome { ctx, path in
             let original = """
             { "projects": [ { "name": "good", "path": "/tmp/good" }, { "name": 42 } ] }
             """
@@ -291,9 +291,9 @@ import Foundation
             vm.load()
             let target = try #require(vm.projects.first)
 
-            #expect(vm.addProject(name: "another", path: "/tmp/another") == false)
-            #expect(vm.removeProject(target) == false)
-            #expect(vm.renameProject(target, to: "renamed") == false)
+            #expect(await vm.addProject(name: "another", path: "/tmp/another") == false)
+            #expect(await vm.removeProject(target) == false)
+            #expect(await vm.renameProject(target, to: "renamed") == false)
             #expect(try Self.read(path) == original)
         }
     }
@@ -302,14 +302,14 @@ import Foundation
     /// bypasses Phase 1's empty-overwrite refusal. Without a
     /// "still present?" guard, removing something already gone would
     /// blank the file and report success.
-    @Test func removingAProjectThatIsAlreadyGoneFailsInsteadOfBlankingTheFile() throws {
-        try Self.withTempHome { ctx, path in
+    @Test func removingAProjectThatIsAlreadyGoneFailsInsteadOfBlankingTheFile() async throws {
+        try await Self.withTempHome { ctx, path in
             try Self.seed([ProjectEntry(name: "still-here", path: "/tmp/still-here")], context: ctx)
             let vm = ProjectsViewModel(context: ctx)
             vm.load()
             let ghost = ProjectEntry(name: "already-gone", path: "/tmp/already-gone")
 
-            #expect(vm.removeProject(ghost) == false)
+            #expect(await vm.removeProject(ghost) == false)
             #expect(vm.mutationError?.message.contains("no longer in the list") == true)
             // The real project is untouched.
             #expect(try Self.read(path).contains("still-here"))
@@ -317,24 +317,24 @@ import Foundation
         }
     }
 
-    @Test func renameToAnEmptyNameSaysWhy() throws {
-        try Self.withTempHome { ctx, _ in
+    @Test func renameToAnEmptyNameSaysWhy() async throws {
+        try await Self.withTempHome { ctx, _ in
             try Self.seed([ProjectEntry(name: "site", path: "/tmp/site")], context: ctx)
             let vm = ProjectsViewModel(context: ctx)
             vm.load()
             let target = try #require(vm.projects.first)
 
-            #expect(vm.renameProject(target, to: "   ") == false)
+            #expect(await vm.renameProject(target, to: "   ") == false)
             #expect(vm.mutationError?.message.contains("needs a name") == true)
         }
     }
 
-    @Test func dismissMutationErrorClearsTheAlert() throws {
-        try Self.withTempHome { ctx, _ in
+    @Test func dismissMutationErrorClearsTheAlert() async throws {
+        try await Self.withTempHome { ctx, _ in
             try Self.seed([ProjectEntry(name: "site", path: "/tmp/site")], context: ctx)
             let vm = ProjectsViewModel(context: ctx)
             vm.load()
-            #expect(vm.addProject(name: "site", path: "/tmp/dupe") == false)
+            #expect(await vm.addProject(name: "site", path: "/tmp/dupe") == false)
             #expect(vm.mutationError != nil)
 
             vm.dismissMutationError()
@@ -343,20 +343,20 @@ import Foundation
     }
 
     /// A retry that works must take the alert down with it.
-    @Test func successfulMutationClearsThePriorError() throws {
-        try Self.withTempHome { ctx, _ in
+    @Test func successfulMutationClearsThePriorError() async throws {
+        try await Self.withTempHome { ctx, _ in
             try Self.seed([ProjectEntry(name: "site", path: "/tmp/site")], context: ctx)
             let vm = ProjectsViewModel(context: ctx)
             vm.load()
             let target = try #require(vm.projects.first)
             try Self.makeReadOnly(ctx)
-            #expect(vm.moveProject(target, toFolder: "Work") == false)
+            #expect(await vm.moveProject(target, toFolder: "Work") == false)
             #expect(vm.mutationError != nil)
 
             try FileManager.default.setAttributes(
                 [.posixPermissions: 0o755], ofItemAtPath: ctx.paths.scarfDir
             )
-            #expect(vm.moveProject(target, toFolder: "Work") == true)
+            #expect(await vm.moveProject(target, toFolder: "Work") == true)
             #expect(vm.mutationError == nil)
             #expect(vm.projects.first?.folder == "Work")
         }
@@ -364,8 +364,8 @@ import Foundation
 
     // MARK: - Registry damage banner
 
-    @Test func cleanRegistryShowsNoDamage() throws {
-        try Self.withTempHome { ctx, _ in
+    @Test func cleanRegistryShowsNoDamage() async throws {
+        try await Self.withTempHome { ctx, _ in
             try Self.seed([ProjectEntry(name: "site", path: "/tmp/site")], context: ctx)
             let vm = ProjectsViewModel(context: ctx)
             vm.load()
@@ -375,8 +375,8 @@ import Foundation
 
     /// The live 2026-09-02 shape: a row with a non-UUID `uuid`. The row
     /// survives minus the field, and the user is told.
-    @Test func salvagedFieldRaisesTheDamageNotice() throws {
-        try Self.withTempHome { ctx, path in
+    @Test func salvagedFieldRaisesTheDamageNotice() async throws {
+        try await Self.withTempHome { ctx, path in
             try Self.write("""
             {
               "projects": [
@@ -395,8 +395,8 @@ import Foundation
         }
     }
 
-    @Test func unparseableRegistryRaisesQuarantineNoticeWithARevealPath() throws {
-        try Self.withTempHome { ctx, path in
+    @Test func unparseableRegistryRaisesQuarantineNoticeWithARevealPath() async throws {
+        try await Self.withTempHome { ctx, path in
             try Self.write("this is not a registry", to: path)
             let vm = ProjectsViewModel(context: ctx)
             vm.load()
@@ -411,8 +411,8 @@ import Foundation
         }
     }
 
-    @Test func damageNoticePicksUpTheRollingBackupWhenThereIsOne() throws {
-        try Self.withTempHome { ctx, path in
+    @Test func damageNoticePicksUpTheRollingBackupWhenThereIsOne() async throws {
+        try await Self.withTempHome { ctx, path in
             // A real save first, so `.bak` exists on disk...
             try Self.seed([ProjectEntry(name: "one", path: "/tmp/one")], context: ctx)
             try Self.seed([ProjectEntry(name: "two", path: "/tmp/two")], context: ctx)
@@ -433,8 +433,8 @@ import Foundation
     /// An agent flip-flopping the registry between two bad shapes must
     /// not defeat dismissal — with a single-slot signature each shape
     /// cleared the other's dismissal and the banner came back forever.
-    @Test func dismissalHoldsWhenDamageAlternatesBetweenTwoShapes() throws {
-        try Self.withTempHome { ctx, path in
+    @Test func dismissalHoldsWhenDamageAlternatesBetweenTwoShapes() async throws {
+        try await Self.withTempHome { ctx, path in
             let shapeA = """
             { "projects": [ { "name": "a", "path": "/tmp/a", "uuid": "NOT-A-UUID" } ] }
             """
@@ -463,8 +463,8 @@ import Foundation
     }
 
     /// The headline must not promise a backup when none was made.
-    @Test func headlineOnlyPromisesABackupWhenThereIsOne() throws {
-        try Self.withTempHome { ctx, path in
+    @Test func headlineOnlyPromisesABackupWhenThereIsOne() async throws {
+        try await Self.withTempHome { ctx, path in
             // Salvaged field only: nothing set aside, no `.bak` yet.
             try Self.write("""
             { "projects": [ { "name": "a", "path": "/tmp/a", "uuid": "NOT-A-UUID" } ] }
@@ -486,8 +486,8 @@ import Foundation
 
     /// A `.bak` appearing later is not new damage: it must not reopen a
     /// banner the user already dismissed.
-    @Test func aBackupAppearingDoesNotReopenADismissedBanner() throws {
-        try Self.withTempHome { ctx, path in
+    @Test func aBackupAppearingDoesNotReopenADismissedBanner() async throws {
+        try await Self.withTempHome { ctx, path in
             try Self.write("""
             { "projects": [ { "name": "a", "path": "/tmp/a", "uuid": "NOT-A-UUID" } ] }
             """, to: path)
@@ -508,8 +508,8 @@ import Foundation
         }
     }
 
-    @Test func dismissalSurvivesReloadsOfTheSameDamage() throws {
-        try Self.withTempHome { ctx, path in
+    @Test func dismissalSurvivesReloadsOfTheSameDamage() async throws {
+        try await Self.withTempHome { ctx, path in
             try Self.write("still not a registry", to: path)
             let vm = ProjectsViewModel(context: ctx)
             vm.load()
@@ -529,8 +529,8 @@ import Foundation
     /// A stray dismiss with no banner showing must not blank an
     /// earlier dismissal — otherwise the banner the user already dealt
     /// with reappears on the next watcher tick.
-    @Test func dismissWithNoBannerShowingDoesNotUndoAnEarlierDismissal() throws {
-        try Self.withTempHome { ctx, path in
+    @Test func dismissWithNoBannerShowingDoesNotUndoAnEarlierDismissal() async throws {
+        try await Self.withTempHome { ctx, path in
             try Self.write("not a registry", to: path)
             let vm = ProjectsViewModel(context: ctx)
             vm.load()
@@ -545,8 +545,8 @@ import Foundation
 
     /// ...but NEW damage must reopen it, or the second corruption goes
     /// unreported because the user dismissed the first.
-    @Test func newDamageReopensADismissedBanner() throws {
-        try Self.withTempHome { ctx, path in
+    @Test func newDamageReopensADismissedBanner() async throws {
+        try await Self.withTempHome { ctx, path in
             try Self.write("""
             { "projects": [ { "name": "a", "path": "/tmp/a", "uuid": "NOT-A-UUID" } ] }
             """, to: path)
@@ -567,8 +567,8 @@ import Foundation
 
     /// A repaired file clears both the banner and the dismissal, so a
     /// LATER corruption that happens to look identical is still shown.
-    @Test func repairedRegistryClearsTheDamageAndTheDismissal() throws {
-        try Self.withTempHome { ctx, path in
+    @Test func repairedRegistryClearsTheDamageAndTheDismissal() async throws {
+        try await Self.withTempHome { ctx, path in
             let broken = """
             { "projects": [ { "name": "a", "path": "/tmp/a", "uuid": "NOT-A-UUID" } ] }
             """

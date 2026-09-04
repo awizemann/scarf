@@ -2,6 +2,8 @@ import SwiftUI
 import ScarfCore
 import ScarfDesign
 import AppKit
+import ImageIO
+import UniformTypeIdentifiers
 
 /// Renders a local file (`path`, resolved relative to project root) or a
 /// remote `url`. `path` wins when both are set. Local files refresh via the
@@ -16,6 +18,9 @@ struct ImageWidgetView: View {
 
     @State private var localImage: NSImage?
     @State private var loadError: String?
+    /// `"<mtime>:<size>"` of the bytes currently decoded — a tick whose
+    /// stat matches reads and decodes nothing.
+    @State private var loadedSignature: String?
 
     private var displayHeight: CGFloat? {
         widget.height.map { CGFloat($0) }
@@ -141,24 +146,43 @@ struct ImageWidgetView: View {
 
     private func loadLocal(absPath: String) async {
         let context = serverContext
-        let outcome: WidgetIOResult<NSImage> = await Task.detached {
-            let transport = context.makeTransport()
-            do {
+        let known = loadedSignature
+        let hasImage = localImage != nil
+        // The panel this draws into is a few hundred points wide, and the
+        // file is agent-written — a 6000px screenshot decoded at full size
+        // is ~140 MB of backing store to show a thumbnail, every time.
+        let target = (displayHeight ?? 400) * 3
+        let outcome: (result: WidgetIOResult<NSImage>?, signature: String?) =
+            await Task.detached {
+                let transport = context.makeTransport()
+                // STAT FIRST — see `MarkdownFileWidgetView.reload`. Decoding
+                // is the expensive half here, so skipping it matters even on
+                // a local context.
+                let signature = WidgetFileRead.signature(absPath, transport: transport)
+                if let signature, signature == known, hasImage { return (nil, signature) }
                 // Measures disk/transport latency for reading the image file.
-                let data = try ScarfMon.measure(.diskIO, "widget.image.load") {
-                    try transport.readFile(absPath)
+                let read = ScarfMon.measure(.diskIO, "widget.image.load") {
+                    WidgetFileRead.read(
+                        absPath, cap: WidgetFileRead.maxImageBytes, transport: transport
+                    )
                 }
-                if let img = NSImage(data: data) { return .success(img) }
-                return .failure("File is not a recognized image format.")
-            } catch {
-                return .failure("Could not read file: \(error.localizedDescription)")
-            }
-        }.value
+                switch read {
+                case .failure(let err):
+                    return (.failure(err.message), signature)
+                case .success(let data):
+                    if let img = Self.decode(data, maxPixelSize: target) {
+                        return (.success(img), signature)
+                    }
+                    return (.failure("File is not a recognized image format."), signature)
+                }
+            }.value
         // GENERATION GUARD — see `LogTailWidgetView.reload`. `.task(id:)`
         // cancellation does not stop a suspended `await` from resuming, and
         // the detached read does not inherit cancellation at all.
         guard !Task.isCancelled else { return }
-        switch outcome {
+        guard let result = outcome.result else { return }
+        self.loadedSignature = outcome.signature
+        switch result {
         case .success(let img):
             self.localImage = img
             self.loadError = nil
@@ -166,5 +190,30 @@ struct ImageWidgetView: View {
             self.localImage = nil
             self.loadError = err.message
         }
+    }
+
+    /// Decode `data` to at most `maxPixelSize` on its longest edge.
+    ///
+    /// `NSImage(data:)` keeps the full-resolution representation alive for
+    /// as long as the widget is on screen, whatever size it is drawn at.
+    /// `CGImageSourceCreateThumbnailAtIndex` decodes straight to the size
+    /// we will actually draw, so a large source costs its file bytes and
+    /// then a small bitmap rather than a large one. Falls back to the plain
+    /// decode when the source can't produce a thumbnail (an image format
+    /// ImageIO reads but won't thumbnail).
+    nonisolated private static func decode(_ data: Data, maxPixelSize: CGFloat) -> NSImage? {
+        guard maxPixelSize > 0,
+              let source = CGImageSourceCreateWithData(data as CFData, nil)
+        else { return NSImage(data: data) }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(maxPixelSize)
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return NSImage(data: data)
+        }
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
     }
 }

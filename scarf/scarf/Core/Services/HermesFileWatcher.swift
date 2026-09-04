@@ -5,7 +5,11 @@ import ScarfCore
 final class HermesFileWatcher {
     private(set) var lastChangeDate = Date()
     private var coreSources: [DispatchSourceFileSystemObject] = []
-    private var projectSources: [DispatchSourceFileSystemObject] = []
+    /// Project watches KEYED BY PATH so `updateProjectWatches` can diff.
+    /// Was an array, which forced every update to tear the whole set down
+    /// and rebuild it — ~2N `open(2)`s per coalesced tick for a set that is
+    /// identical to the one it just cancelled.
+    private var projectSources: [String: DispatchSourceFileSystemObject] = [:]
     /// Core paths with no live source: either absent when `startWatching`
     /// ran, or deleted with a gap before anything re-created them.
     ///
@@ -28,6 +32,30 @@ final class HermesFileWatcher {
     /// Updated by `updateProjectWatches` so the remote stream restarts whenever
     /// the project list changes.
     private var remoteProjectPaths: [String] = []
+
+    /// Per-path mtime:size signatures for the remote poller, owned HERE
+    /// rather than inside the stream so a poller restart resumes from what
+    /// the previous one knew.
+    ///
+    /// A polling watcher is silent on its first poll by construction — it
+    /// has nothing to compare against — so every restart used to swallow
+    /// whatever changed during the gap. Restarts were once-per-tick
+    /// (`updateProjectWatches` rebuilt unconditionally), which on a 3s poll
+    /// and a 0.5-1.5s tick meant the remote watcher could go a whole active
+    /// stream without ever reporting a delta. The diff below makes restarts
+    /// rare; this makes the rare ones lossless.
+    private let remoteBaseline = WatchBaselineStore()
+
+    /// Test seam: how many local project paths currently have a live watch.
+    var projectSourceCount: Int { projectSources.count }
+    /// Test seam: how many times `updateProjectWatches` armed a project
+    /// path. A no-op update must not move this.
+    private(set) var projectArmCount = 0
+    /// Test seam: the paths handed to the remote poller, project half only.
+    var remoteWatchedProjectPaths: [String] { remoteProjectPaths }
+    /// Test seam: counts poller restarts so a test can prove a no-op update
+    /// didn't restart it.
+    private(set) var remoteRestartCount = 0
 
     /// Coalescing timer for `lastChangeDate` ticks. v0.13 Hermes writes to
     /// `state.db-wal` and rotating logs at ~10 Hz during gateway activity;
@@ -136,9 +164,12 @@ final class HermesFileWatcher {
     /// poll cadence.
     private func startRemotePoller() {
         remotePollTask?.cancel()
+        remoteRestartCount += 1
         let pathSet = watchedCorePaths + remoteProjectPaths
         ScarfMon.event(.transport, "mac.fileWatcher.remoteRestart", count: 1, bytes: pathSet.count)
-        let stream = transport.watchPaths(pathSet)
+        // The baseline is the WATCHER's, not the stream's — see
+        // `remoteBaseline`. Without it every restart re-baselines silently.
+        let stream = transport.watchPaths(pathSet, baseline: remoteBaseline)
         remotePollTask = Task { [weak self] in
             for await _ in stream {
                 ScarfMon.event(.transport, "mac.fileWatcher.remoteDelta", count: 1)
@@ -185,6 +216,7 @@ final class HermesFileWatcher {
             self.pendingTickDate = nil
             self.burstStartDate = nil
             self.reestablishUnarmedCoreWatches()
+            self.reestablishUnarmedProjectWatches()
             self.lastChangeDate = date
         }
         pendingCoalesceTimer = work
@@ -243,12 +275,18 @@ final class HermesFileWatcher {
     }
 
     func stopWatching() {
-        for source in coreSources + projectSources {
+        for source in coreSources + Array(projectSources.values) {
             source.cancel()
         }
         coreSources.removeAll()
         projectSources.removeAll()
         unarmedCorePaths.removeAll()
+        unarmedProjectPaths.removeAll()
+        remoteProjectPaths.removeAll()
+        // A full stop means the next start has no idea what happened while
+        // we were away, so it must baseline afresh rather than compare
+        // against signatures from before the gap.
+        remoteBaseline.reset()
         timer?.invalidate()
         timer = nil
         remotePollTask?.cancel()
@@ -268,30 +306,67 @@ final class HermesFileWatcher {
     /// append) are NOT detected — by convention the cron job should write
     /// atomically (write-then-rename) or `touch dashboard.json` after each
     /// run.
+    /// **DIFFED, not rebuilt.** Every caller of this is downstream of a
+    /// registry reload, and the busiest one is the coalesced tick — which
+    /// hands over a path set identical to the current one on essentially
+    /// every fire. Rebuilding it cost ~2N `open(2)`s locally and, worse, a
+    /// full SSH poller restart remotely: a re-baseline that ABSORBED any
+    /// change landing during the gap, once per tick.
+    ///
+    /// So: compute the target set, and touch only what actually differs.
+    /// An unchanged set is a no-op — no cancels, no opens, no restart.
     func updateProjectWatches(dashboardPaths: [String], scarfDirs: [String]) {
+        let target = Set(dashboardPaths + scarfDirs)
         if context.isRemote {
-            // Restart the SSH poller with the union of core + project dir
-            // paths. `stat -c %Y` on a directory tracks mtime, which ticks
-            // on add/remove/rename inside the dir — same coverage as the
-            // local FSEvents directory watch below.
-            let union = Array(Set(dashboardPaths + scarfDirs))
-            remoteProjectPaths = union.sorted()
+            // The SSH poller stats the union of core + project paths.
+            // `stat` on a directory tracks mtime, which ticks on
+            // add/remove/rename inside the dir — same coverage as the local
+            // FSEvents directory watch below.
+            let sorted = target.sorted()
+            guard sorted != remoteProjectPaths else { return }
+            remoteProjectPaths = sorted
             startRemotePoller()
             return
         }
-        for source in projectSources {
-            source.cancel()
+        let current = Set(projectSources.keys)
+        guard current != target else { return }
+        for path in current.subtracting(target) {
+            projectSources.removeValue(forKey: path)?.cancel()
         }
-        projectSources.removeAll()
-        for path in dashboardPaths {
+        for path in target.subtracting(current) {
             if let source = makeSource(for: path) {
-                projectSources.append(source)
+                projectSources[path] = source
+                projectArmCount += 1
+                unarmedProjectPaths.remove(path)
+            } else {
+                // Not there YET is the normal state for a fresh project's
+                // `.scarf/dashboard.json`. The old rebuild-every-tick shape
+                // retried these for free; the diff would otherwise never
+                // look at them again, so remember them and retry on the
+                // tick. Deliberately NOT on the retry timer: project paths
+                // are legitimately absent for a long time (a project with
+                // no dashboard has none, ever), and a permanently non-empty
+                // set there would reinstate the unconditional heartbeat
+                // this watcher removed on purpose.
+                unarmedProjectPaths.insert(path)
             }
         }
-        for dir in scarfDirs {
-            if let source = makeSource(for: dir) {
-                projectSources.append(source)
-            }
+        unarmedProjectPaths.formIntersection(target)
+    }
+
+    /// Watched project paths that did not exist when we tried to arm them.
+    /// Retried on the coalesced tick — one `open(2)` each, only while
+    /// non-empty. See `updateProjectWatches`.
+    private var unarmedProjectPaths: Set<String> = []
+    /// Test seam.
+    var unarmedProjectPathCount: Int { unarmedProjectPaths.count }
+
+    private func reestablishUnarmedProjectWatches() {
+        guard !unarmedProjectPaths.isEmpty, !context.isRemote else { return }
+        for path in unarmedProjectPaths {
+            guard let source = makeSource(for: path) else { continue }
+            projectSources[path] = source
+            unarmedProjectPaths.remove(path)
         }
     }
 
@@ -394,11 +469,17 @@ final class HermesFileWatcher {
             }
             return
         }
-        if let index = projectSources.firstIndex(where: { $0 === dead }) {
+        if let key = projectSources.first(where: { $0.value === dead })?.key {
             if let replacement {
-                projectSources[index] = replacement
+                projectSources[key] = replacement
             } else {
-                projectSources.remove(at: index)
+                // Same reasoning as `updateProjectWatches`: a project path
+                // that vanished may well come back (a cron job rewriting
+                // dashboard.json non-atomically, a `.scarf` dir recreated),
+                // and the diff will not revisit it. Remembered, retried on
+                // the tick, free when the set is empty.
+                projectSources.removeValue(forKey: key)
+                unarmedProjectPaths.insert(key)
             }
         }
     }

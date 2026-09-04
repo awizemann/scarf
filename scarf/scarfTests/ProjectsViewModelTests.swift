@@ -27,7 +27,7 @@ import ScarfCore
         vm.load()
         #expect(vm.projects.count == 2)
 
-        vm.moveProject(vm.projects[0], toFolder: "Clients")
+        await vm.moveProject(vm.projects[0], toFolder: "Clients")
 
         #expect(vm.projects.count == 2)
         #expect(vm.projects.first(where: { $0.name == "Alpha" })?.folder == "Clients")
@@ -47,7 +47,7 @@ import ScarfCore
 
         let vm = ProjectsViewModel(context: home.context)
         vm.load()
-        vm.moveProject(vm.projects[0], toFolder: nil)
+        await vm.moveProject(vm.projects[0], toFolder: nil)
 
         #expect(vm.projects[0].folder == nil)
         let fresh = ProjectDashboardService(context: home.context).loadRegistry()
@@ -65,7 +65,7 @@ import ScarfCore
         vm.load()
         vm.selectProject(vm.projects[0])
 
-        let ok = vm.renameProject(vm.projects[0], to: "NewName")
+        let ok = await vm.renameProject(vm.projects[0], to: "NewName")
         #expect(ok == true)
         #expect(vm.projects.count == 1)
         #expect(vm.projects[0].name == "NewName")
@@ -88,7 +88,7 @@ import ScarfCore
         vm.load()
 
         // Renaming A to B should be refused — B already exists.
-        let ok = vm.renameProject(vm.projects[0], to: "B")
+        let ok = await vm.renameProject(vm.projects[0], to: "B")
         #expect(ok == false)
         // Registry unchanged.
         #expect(vm.projects.map(\.name) == ["A", "B"])
@@ -104,8 +104,8 @@ import ScarfCore
         let vm = ProjectsViewModel(context: home.context)
         vm.load()
 
-        #expect(vm.renameProject(vm.projects[0], to: "") == false)
-        #expect(vm.renameProject(vm.projects[0], to: "   ") == false)
+        #expect(await vm.renameProject(vm.projects[0], to: "") == false)
+        #expect(await vm.renameProject(vm.projects[0], to: "   ") == false)
         #expect(vm.projects[0].name == "Foo")
     }
 
@@ -119,9 +119,9 @@ import ScarfCore
         let vm = ProjectsViewModel(context: home.context)
         vm.load()
 
-        #expect(vm.renameProject(vm.projects[0], to: "Foo") == true)
+        #expect(await vm.renameProject(vm.projects[0], to: "Foo") == true)
         // Whitespace around matching name also no-ops.
-        #expect(vm.renameProject(vm.projects[0], to: " Foo ") == true)
+        #expect(await vm.renameProject(vm.projects[0], to: " Foo ") == true)
         #expect(vm.projects[0].name == "Foo")
     }
 
@@ -138,13 +138,13 @@ import ScarfCore
         #expect(vm.projects[0].archived == false)
         #expect(vm.selectedProject != nil)
 
-        vm.archiveProject(vm.projects[0])
+        await vm.archiveProject(vm.projects[0])
         #expect(vm.projects[0].archived == true)
         // Archiving clears the selection so the dashboard doesn't
         // linger on a project the sidebar will hide.
         #expect(vm.selectedProject == nil)
 
-        vm.unarchiveProject(vm.projects[0])
+        await vm.unarchiveProject(vm.projects[0])
         #expect(vm.projects[0].archived == false)
         // Unarchive doesn't re-select — the user chose to hide it,
         // surfacing it doesn't mean they want focus back.

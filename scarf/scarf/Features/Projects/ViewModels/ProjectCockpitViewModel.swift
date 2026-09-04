@@ -79,7 +79,43 @@ final class ProjectCockpitViewModel {
     /// in-flight load is already a fresh one.
     @ObservationIgnored private var inFlightLoad: Task<Void, Never>?
 
-    func load(force: Bool = false, recheckHealth: Bool = false) async {
+    /// `path -> "<mtime-seconds>:<size>"` for every file the last committed
+    /// load actually read. A load whose signature matches this one has
+    /// nothing to do: same bytes in, same values out.
+    ///
+    /// Paired with SIZE rather than mtime alone — one-second granularity is
+    /// what `stat` reports over SSH, so mtime alone calls two writes in the
+    /// same second identical. It is a cheap check, not a hash: a
+    /// same-second, same-size rewrite is still missed until the next change.
+    /// The alternative (reading every facet to find out) is the ~10
+    /// round-trips per tick this exists to remove.
+    @ObservationIgnored private var lastFacetSignature: [String: String]?
+
+    /// Mini-app manifest paths the last load discovered — folded into the
+    /// signature so an edit to an EXISTING `miniapp.json` is seen (the
+    /// `miniapps/` dir mtime only ticks on add/remove/rename).
+    @ObservationIgnored private var lastMiniAppManifestPaths: [String] = []
+
+    /// Test seam: how many times the full facet read has actually run. A
+    /// tick that short-circuits must not move it.
+    @ObservationIgnored private(set) var facetLoadCount = 0
+
+    /// Why this load is running. The distinction the doctor cares about:
+    /// a scan is ~110 transport ops and must never hang off a file-watcher
+    /// tick, however stale the cache window says the verdict is.
+    enum LoadReason {
+        /// The user opened this project, or explicitly asked for a refresh.
+        case userInitiated
+        /// A watcher tick. Short-circuits on an unchanged signature and
+        /// NEVER runs the doctor.
+        case watcher
+    }
+
+    func load(
+        force: Bool = false,
+        recheckHealth: Bool = false,
+        reason: LoadReason = .userInitiated
+    ) async {
         if recheckHealth { ProjectHealthCache.shared.invalidate(context.id) }
         if hasLoaded && !force && !recheckHealth { return }
         if let existing = inFlightLoad {
@@ -89,19 +125,75 @@ final class ProjectCockpitViewModel {
             // invalidation above. Run our own so the health row actually
             // reflects the repairs the user just made.
             if recheckHealth, ProjectHealthCache.shared.report(context.id) == nil {
-                await loadImpl()
+                await loadImpl(reason: .userInitiated, recheckHealth: true)
             }
             return
         }
         let task: Task<Void, Never> = Task { @MainActor [weak self] in
-            await self?.loadImpl()
+            await self?.loadImpl(reason: reason, recheckHealth: recheckHealth)
         }
         inFlightLoad = task
         await task.value
         inFlightLoad = nil
     }
 
-    private func loadImpl() async {
+    /// Every file a full load reads, in the order the load reads them.
+    /// Handed to `transport.statAll` as ONE batched round-trip.
+    private func facetPaths() -> [String] {
+        let root = project.path
+        return [
+            ProjectStore.recordPath(forProjectPath: root),
+            root + "/AGENTS.md",
+            root + "/.scarf/manifest.json",
+            root + "/.scarf/dashboard.json",
+            root + "/.scarf/upgrade.json",
+            MiniAppService.miniAppsDir(forProjectPath: root),
+            context.paths.cronJobsJSON,
+            context.paths.memoryMD
+        ] + lastMiniAppManifestPaths
+    }
+
+    private nonisolated static func signature(
+        of paths: [String], transport: any ServerTransport
+    ) -> [String: String] {
+        let stats = transport.statAll(paths)
+        var out: [String: String] = [:]
+        for path in paths {
+            guard let info = stats[path] else {
+                // ABSENT is a state, and it has to be a DIFFERENT state from
+                // "present and empty" — otherwise a file appearing would not
+                // register as a change.
+                out[path] = "-"
+                continue
+            }
+            out[path] = "\(Int(info.mtime.timeIntervalSince1970)):\(info.size)"
+        }
+        return out
+    }
+
+    private func loadImpl(reason: LoadReason, recheckHealth: Bool) async {
+        // FAST PATH. One batched stat answers "did any input change?"; when
+        // nothing did, this pass reads nothing and — just as importantly —
+        // writes nothing to @Observable state, so SwiftUI does not
+        // re-evaluate every cockpit panel per tick.
+        //
+        // Deliberately NOT taken for a user-initiated pass: the signature
+        // covers the files, and a user asking for a refresh may be asking
+        // about something it doesn't (a model preset rename, a doctor
+        // verdict). Ticks are the hot path and the only one this needs.
+        let paths = facetPaths()
+        let signatureContext = context
+        let freshSignature = await Task.detached(priority: .utility) {
+            Self.signature(of: paths, transport: signatureContext.makeTransport())
+        }.value
+        if reason == .watcher, !recheckHealth, freshSignature == lastFacetSignature {
+            return
+        }
+        // Captured BEFORE the reads below, so a write that lands while they
+        // are in flight is seen by the next pass rather than assumed into
+        // the record.
+        lastFacetSignature = freshSignature
+        facetLoadCount += 1
         hasLoaded = true
         isLoading = true
         // Claimed before the detached work starts, so two loads that overlap
@@ -111,7 +203,17 @@ final class ProjectCockpitViewModel {
         // instance-scoped flag re-ran a registry-wide scan on every project
         // switch — and again on every switch back.
         let cached = ProjectHealthCache.shared.report(context.id)
-        let shouldDiagnose = ProjectHealthCache.shared.claimIfIdle(context.id)
+        // NEVER OFF A TICK. The doctor lists directories and re-reads the
+        // registry — ~110 transport ops on a 20-project host — and this
+        // view model reloads from `.onChange(fileWatcher.lastChangeDate)`,
+        // which fires per persisted message during a stream. The class doc
+        // has said "not on every load" since it was written; the cache
+        // window was doing the enforcing, which meant that every five
+        // minutes a watcher tick DID pay for a full crawl. The reason, not
+        // the clock, decides now: a user opening the project or asking for
+        // a recheck scans (subject to the cache window); a tick never does.
+        let shouldDiagnose = reason == .userInitiated
+            && ProjectHealthCache.shared.claimIfIdle(context.id)
 
         let context = self.context
         let project = self.project
@@ -207,6 +309,13 @@ final class ProjectCockpitViewModel {
         miniApps = result.miniApps
         dashboard = result.dashboard
         needsUpgrade = result.needsUpgrade
+        // Fold the discovered manifests into the NEXT signature: the
+        // `miniapps/` directory mtime only ticks on add/remove/rename, so
+        // without these an edit to an installed mini-app's manifest would
+        // sit behind the short-circuit indefinitely.
+        lastMiniAppManifestPaths = result.miniApps.map {
+            MiniAppService.manifestPath(forProjectPath: project.path, id: $0.id)
+        }
         if let fresh = result.health {
             ProjectHealthCache.shared.store(fresh, for: context.id)
             health = fresh

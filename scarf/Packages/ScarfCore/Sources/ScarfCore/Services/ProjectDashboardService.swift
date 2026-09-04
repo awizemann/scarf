@@ -44,19 +44,29 @@ public struct ProjectDashboardService: Sendable {
         /// The registry file this result describes. Carried so `loss` can
         /// name the file in a message the user has to act on.
         public var registryPath: String
+        /// Cheap fingerprint of the BYTES this result was decoded from, or
+        /// `nil` when the file wasn't there / produced none.
+        ///
+        /// The one thing a caller needs to answer "is the file still what I
+        /// read?" at write time. `saveRegistry(_:expecting:)` compares it;
+        /// see `refusedStaleOverwrite`. Not a security digest — it exists
+        /// to catch a concurrent writer, not to resist one.
+        public var contentFingerprint: String?
 
         public init(
             registry: ProjectRegistry,
             salvage: RegistrySalvageReport = .clean,
             quarantinePath: String? = nil,
             unreadablePath: String? = nil,
-            registryPath: String = ""
+            registryPath: String = "",
+            contentFingerprint: String? = nil
         ) {
             self.registry = registry
             self.salvage = salvage
             self.quarantinePath = quarantinePath
             self.unreadablePath = unreadablePath
             self.registryPath = registryPath
+            self.contentFingerprint = contentFingerprint
         }
 
         /// `true` when the file on disk did not read cleanly — a row or
@@ -158,7 +168,25 @@ public struct ProjectDashboardService: Sendable {
             )
             return (RegistryLoadResult(registry: ProjectRegistry(projects: []), unreadablePath: path, registryPath: path), data)
         }
-        return (decodeRegistry(data: data, path: path), data)
+        var decoded = decodeRegistry(data: data, path: path)
+        decoded.contentFingerprint = Self.fingerprint(data)
+        return (decoded, data)
+    }
+
+    /// FNV-1a over the file's bytes, prefixed with its length.
+    ///
+    /// Deliberately not a cryptographic hash: both sides of every
+    /// comparison are produced by this process within seconds of each
+    /// other, and the question is "did these bytes change", not "can an
+    /// attacker forge a collision". Cheap enough to run on every registry
+    /// read without thinking about it.
+    nonisolated static func fingerprint(_ data: Data) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in data {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x1000_0000_01b3
+        }
+        return "\(data.count):\(String(hash, radix: 16))"
     }
 
     private func decodeRegistry(data: Data, path: String) -> RegistryLoadResult {
@@ -266,7 +294,21 @@ public struct ProjectDashboardService: Sendable {
     /// - Throws: `ProjectRegistryError.refusedLossyOverwrite` when the file
     ///   currently on disk lost rows, was quarantined, or is unreadable
     ///   (see `RegistryLoss`); `.refusedEmptyOverwrite` per `allowEmpty`.
-    public func saveRegistry(_ registry: ProjectRegistry, allowEmpty: Bool = false) throws {
+    /// - Parameter expecting: the `contentFingerprint` of the load this
+    ///   write is based on. When supplied, the write is REFUSED if the file
+    ///   on disk no longer matches it — somebody else changed it in
+    ///   between, and this write would erase their change.
+    ///
+    ///   `RegistryWriteLock` already serialises same-machine writers, so
+    ///   this is about the case a local lock cannot see: a REMOTE registry,
+    ///   where the read and the write are seconds apart over SSH. A cheap
+    ///   comparison, not a protocol — there is no negotiation, no merge,
+    ///   and no retry here. Callers that pass `nil` (an installer writing a
+    ///   registry it just built, a caller with no baseline) behave exactly
+    ///   as before.
+    public func saveRegistry(
+        _ registry: ProjectRegistry, allowEmpty: Bool = false, expecting: String? = nil
+    ) throws {
         let path = context.paths.projectsRegistry
         // Encode BEFORE touching the filesystem, so an encode failure
         // can't leave a half-updated directory behind — and before the
@@ -283,15 +325,22 @@ public struct ProjectDashboardService: Sendable {
         // lock path proceeds unlocked rather than losing the ability to
         // save at all.
         guard let lock = RegistryWriteLock(context: context) else {
-            return try saveRegistryLocked(writeData, registry: registry, allowEmpty: allowEmpty, path: path)
+            return try saveRegistryLocked(
+                writeData, registry: registry, allowEmpty: allowEmpty, path: path,
+                expecting: expecting
+            )
         }
         try lock.withLock(path: path) {
-            try saveRegistryLocked(writeData, registry: registry, allowEmpty: allowEmpty, path: path)
+            try saveRegistryLocked(
+                writeData, registry: registry, allowEmpty: allowEmpty, path: path,
+                expecting: expecting
+            )
         }
     }
 
     private func saveRegistryLocked(
-        _ writeData: Data, registry: ProjectRegistry, allowEmpty: Bool, path: String
+        _ writeData: Data, registry: ProjectRegistry, allowEmpty: Bool, path: String,
+        expecting: String? = nil
     ) throws {
         // ONE read of what is already there, answering all three
         // questions below. Reading per question would also mean three
@@ -302,6 +351,15 @@ public struct ProjectDashboardService: Sendable {
         //    only in that file, and this write would be their end.
         if let loss = existingState.loss {
             throw ProjectRegistryError.refusedLossyOverwrite(path: path, loss: loss)
+        }
+
+        // 1b. Never write over somebody ELSE'S change. Inside the lock, so
+        //     the file we compare is the file we are about to replace.
+        if let expecting, existingState.contentFingerprint != expecting {
+            Self.logger.error(
+                "Refusing a stale registry write to \(path, privacy: .public): the file changed since it was read"
+            )
+            throw ProjectRegistryError.refusedStaleOverwrite(path: path)
         }
 
         let dir = context.paths.scarfDir

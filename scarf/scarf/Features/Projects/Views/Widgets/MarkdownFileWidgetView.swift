@@ -16,6 +16,9 @@ struct MarkdownFileWidgetView: View {
     @State private var loadedContent: String?
     @State private var ioError: String?
     @State private var isLoading = false
+    /// `path -> "<mtime>:<size>"` of the bytes currently rendered. A tick
+    /// whose stat matches this reads nothing.
+    @State private var loadedSignature: String?
 
     var body: some View {
         Group {
@@ -68,19 +71,30 @@ struct MarkdownFileWidgetView: View {
         let context = serverContext
         isLoading = true
         defer { isLoading = false }
-        let outcome: WidgetIOResult<String> = await Task.detached {
+        let known = loadedSignature
+        let hasContent = loadedContent != nil
+        let outcome: (result: WidgetIOResult<String>?, signature: String?) = await Task.detached {
             let transport = context.makeTransport()
-            do {
-                // Measures disk/transport latency for reading the markdown file.
-                let data = try ScarfMon.measure(.diskIO, "widget.markdown_file.load") {
-                    try transport.readFile(absPath)
-                }
+            // STAT FIRST. This view re-runs on every coalesced watcher tick
+            // (`.task(id:)` is keyed on `lastChangeDate`), and the tick
+            // fires per persisted message during a stream — so without this
+            // the widget re-read and re-rendered its file several times a
+            // second because something unrelated changed. One stat, then
+            // nothing.
+            let signature = WidgetFileRead.signature(absPath, transport: transport)
+            if let signature, signature == known, hasContent { return (nil, signature) }
+            // Measures disk/transport latency for reading the markdown file.
+            let read = ScarfMon.measure(.diskIO, "widget.markdown_file.load") {
+                WidgetFileRead.read(absPath, cap: WidgetFileRead.maxTextBytes, transport: transport)
+            }
+            switch read {
+            case .failure(let err):
+                return (.failure(err.message), signature)
+            case .success(let data):
                 guard let text = String(data: data, encoding: .utf8) else {
-                    return .failure("File is not UTF-8 — markdown_file expects text.")
+                    return (.failure("File is not UTF-8 — markdown_file expects text."), signature)
                 }
-                return .success(text)
-            } catch {
-                return .failure("Could not read file: \(error.localizedDescription)")
+                return (.success(text), signature)
             }
         }.value
         // GENERATION GUARD. `.task(id:)` cancels this body when the widget's
@@ -90,7 +104,11 @@ struct MarkdownFileWidgetView: View {
         // earlier watcher tick resumed AFTER the newer one had already
         // committed, and overwrote it with older content.
         guard !Task.isCancelled else { return }
-        switch outcome {
+        // Nothing changed — leave the rendered content (and the
+        // @State it lives in) exactly as it is.
+        guard let result = outcome.result else { return }
+        self.loadedSignature = outcome.signature
+        switch result {
         case .success(let s):
             self.loadedContent = s
             self.ioError = nil

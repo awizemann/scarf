@@ -54,12 +54,59 @@ final class ProjectMenuProbeCache {
         return ProjectTemplateUninstaller(context: context).isTemplateInstalled(project: project)
     }
 
+    /// The project set + context the last refresh probed, and when. Both
+    /// halves of the skip below: a tick that hands over the same projects
+    /// on the same host has nothing new to ask.
+    @ObservationIgnored private var probedPaths: Set<String> = []
+    @ObservationIgnored private var lastProbe: Date?
+    /// Test seam: how many times a real probe pass has been started.
+    @ObservationIgnored private(set) var probeCount = 0
+
+    /// How long a probe stands before a refresh call is allowed to re-run
+    /// it for an unchanged project set.
+    ///
+    /// The answers are install-time facts (a manifest cache and a template
+    /// lock file), so in principle they never go stale on their own — but
+    /// an AGENT can install a template into a project without going through
+    /// Scarf, and then nothing here would ever invalidate. A slow
+    /// revalidation is the honest middle: two stats per project per minute
+    /// rather than per tick.
+    static let revalidateAfter: TimeInterval = 60
+
+    /// Force the next `refresh` to probe even if nothing looks different.
+    /// Call from anything that changes an install-time fact — a template
+    /// install, an uninstall, an upgrade.
+    func invalidate() {
+        lastProbe = nil
+        probedPaths = []
+    }
+
     /// Re-probe every project. Call after the registry loads or changes.
-    func refresh(projects: [ProjectEntry], context: ServerContext) {
+    ///
+    /// **Skips when there is nothing to learn.** This is called from the
+    /// coalesced watcher tick, which fires every 0.5-1.5s during an active
+    /// stream, and each probe is two `fileExists` calls per project — ~40
+    /// blocking SSH round-trips per tick on a 20-project host, all asking
+    /// about facts that only change at install and uninstall time. So an
+    /// unchanged project set on the same host is a no-op until either
+    /// `invalidate()` (an install/uninstall happened) or `revalidateAfter`
+    /// (an agent may have installed one behind our back).
+    func refresh(projects: [ProjectEntry], context: ServerContext, force: Bool = false) {
+        let paths = Set(projects.map(\.path))
+        if !force,
+           probedContext?.id == context.id,
+           paths == probedPaths,
+           let last = lastProbe,
+           Date().timeIntervalSince(last) < Self.revalidateAfter {
+            return
+        }
+        probedPaths = paths
+        lastProbe = Date()
+        probeCount += 1
         probedContext = context
         generation &+= 1
         let generation = self.generation
-        let paths = projects.map(\.path)
+        let probeOrder = projects.map(\.path)
         let uninstaller = ProjectTemplateUninstaller(context: context)
         let manifestPaths = Dictionary(
             projects.map { ($0.path, ProjectConfigService.manifestCachePath(for: $0)) },
@@ -73,7 +120,7 @@ final class ProjectMenuProbeCache {
             let probed = await Task.detached { () -> [String: Answers] in
                 let transport = context.makeTransport()
                 var result: [String: Answers] = [:]
-                for path in paths {
+                for path in probeOrder {
                     guard let project = projectsByPath[path] else { continue }
                     result[path] = Answers(
                         isConfigurable: manifestPaths[path].map { transport.fileExists($0) } ?? false,

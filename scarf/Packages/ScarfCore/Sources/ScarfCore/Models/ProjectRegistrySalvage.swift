@@ -142,6 +142,15 @@ public enum ProjectRegistryError: LocalizedError, Sendable, Equatable {
     /// did NOT happen — see `RegistryWriteLock`. A failure the caller can
     /// report and the user can retry, rather than a clobber nobody sees.
     case registryBusy(path: String)
+    /// The file changed between the read this mutation was computed from
+    /// and the write. Somebody else — a second Scarf window on another
+    /// machine sharing the home, the MCP helper, an agent's editor — got
+    /// there first, and this write would erase their change.
+    ///
+    /// Same-machine writers are serialised by `RegistryWriteLock`; this
+    /// catches what a lock cannot: a REMOTE registry, where the read and
+    /// the write are seconds apart over SSH and the lock is local only.
+    case refusedStaleOverwrite(path: String)
 
     public var errorDescription: String? {
         switch self {
@@ -152,6 +161,8 @@ public enum ProjectRegistryError: LocalizedError, Sendable, Equatable {
             return loss.message
         case .registryBusy(let path):
             return "Another Scarf process is updating \(path) right now. Nothing was changed — try again in a moment."
+        case .refusedStaleOverwrite(let path):
+            return "\(path) was changed by something else while this was open. Nothing was changed — reopen the list and try again."
         }
     }
 }

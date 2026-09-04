@@ -148,6 +148,11 @@ struct ProjectsView: View {
                     viewModel.selectProject(project)
                 }
                 fileWatcher.updateProjectWatches(dashboardPaths: viewModel.dashboardPaths, scarfDirs: viewModel.projectScarfDirs)
+                // A template install changes exactly the install-time facts
+                // the probe cache holds, and the cache no longer re-probes
+                // per tick — so say so explicitly.
+                menuProbes.invalidate()
+                menuProbes.refresh(projects: viewModel.projects, context: serverContext)
             }
         }
         .sheet(isPresented: $showingNewProjectSheet) {
@@ -203,6 +208,10 @@ struct ProjectsView: View {
                 }
                 viewModel.load()
                 fileWatcher.updateProjectWatches(dashboardPaths: viewModel.dashboardPaths, scarfDirs: viewModel.projectScarfDirs)
+                // Symmetric with the install sheet: an uninstall removes the
+                // template lock file the probe cache answers from.
+                menuProbes.invalidate()
+                menuProbes.refresh(projects: viewModel.projects, context: serverContext)
             }
         }
         .sheet(item: $configEditorProject) { project in
@@ -243,7 +252,7 @@ struct ProjectsView: View {
                     // block and clearing the coordinator's selection
                     // for a project that is still in the registry
                     // leaves a worse state than not trying at all.
-                    guard viewModel.removeProject(project) else { return }
+                    guard await viewModel.removeProject(project) else { return }
                     // Safe to unmirror AFTER the registry write: the
                     // slug comes from `<project>/.scarf/manifest.json`,
                     // which "Remove from List" never touches, so it
@@ -456,7 +465,7 @@ struct ProjectsView: View {
             // the user would see nothing at all.
             AddProjectSheet(context: serverContext) { name, path in
                 Task { @MainActor in
-                    viewModel.addProject(name: name, path: path)
+                    await viewModel.addProject(name: name, path: path)
                     fileWatcher.updateProjectWatches(dashboardPaths: viewModel.dashboardPaths, scarfDirs: viewModel.projectScarfDirs)
                 }
             }
@@ -468,7 +477,7 @@ struct ProjectsView: View {
                     .filter { $0.name != target.name }
                     .map(\.name)
             ) { newName in
-                Task { @MainActor in viewModel.renameProject(target, to: newName) }
+                Task { @MainActor in await viewModel.renameProject(target, to: newName) }
             }
         }
         .sheet(item: $moveTarget) { target in
@@ -476,7 +485,7 @@ struct ProjectsView: View {
                 project: target,
                 existingFolders: viewModel.folders
             ) { newFolder in
-                Task { @MainActor in viewModel.moveProject(target, toFolder: newFolder) }
+                Task { @MainActor in await viewModel.moveProject(target, toFolder: newFolder) }
             }
         }
     }
