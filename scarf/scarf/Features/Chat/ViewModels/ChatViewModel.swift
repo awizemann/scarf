@@ -478,6 +478,13 @@ final class ChatViewModel {
         ACPClient.forMacApp(context: ctx, projectCwd: projectCwd)
     }
 
+    /// Reads the per-project "auto-accept edits in this project" setting
+    /// at session boot. A seam rather than a `let` so tests can point it
+    /// at a scratch defaults suite + test Keychain service instead of the
+    /// user's real ones.
+    @ObservationIgnored
+    var autoAcceptEditsStore = ProjectAutoAcceptEditsStore()
+
     /// Optional interception point for `sendText`: when set and it returns
     /// `true`, the prompt was handled by an alternate transport and NONE of
     /// the ACP machinery runs — no `sendViaACP`, and crucially no
@@ -1125,6 +1132,22 @@ final class ChatViewModel {
                 }
                 guard startStillCurrent(intent, client: client) else { return }
 
+                // The mode is scoped to the ACP session, and this path
+                // spawns a NEW one — so a project opted into auto-accept
+                // has to re-assert it here or the user starts getting
+                // prompts again the moment an autostart happens. (Model
+                // presets are deliberately not re-applied here; the mode
+                // is cheap, one RPC, and its absence is user-visible as
+                // a dialog per edit.)
+                if let projectPath {
+                    await applyProjectAutoAcceptEdits(
+                        client: client,
+                        sessionId: resolvedSessionId,
+                        projectPath: projectPath
+                    )
+                    guard startStillCurrent(intent, client: client) else { return }
+                }
+
                 richChatViewModel.setSessionId(resolvedSessionId)
                 acpStatus = ACPPhase.ready
                 isStartingSession = false
@@ -1547,6 +1570,53 @@ final class ChatViewModel {
         }
     }
 
+    /// Open this project's chats in `accept_edits` when the user has
+    /// turned that on for the project.
+    ///
+    /// The setting is Scarf-owned and HMAC-tagged (see
+    /// ``ProjectAutoAcceptEditsStore``) — an agent can't write itself
+    /// into it. What this does is exactly what the user could do by hand
+    /// from the header picker one second after the session opens: one
+    /// `session/set_mode`. Enforcement stays Hermes-side, so sensitive
+    /// paths still prompt.
+    ///
+    /// Non-fatal at every step, and silent about it:
+    /// - Setting off → no RPC at all, byte-identical to today.
+    /// - Pre-v0.15 host (no `session/set_mode`) → skip; C1 says a host
+    ///   without the capability must behave exactly as the prior
+    ///   release, and the user just keeps getting prompts.
+    /// - RPC error → log, leave the mirror on `.default`. The failure is
+    ///   "you get asked", which needs no alert.
+    ///
+    /// Runs after both `session/new` and `session/load`, because the
+    /// mode is scoped to the ACP session and a resume is a fresh one.
+    private func applyProjectAutoAcceptEdits(
+        client: ACPClient,
+        sessionId: String,
+        projectPath: String
+    ) async {
+        guard autoAcceptEditsStore.isEnabled(projectId: projectPath) else { return }
+
+        let caps = capabilitiesStore?.capabilities ?? .empty
+        guard caps.hasSessionEditAutoApproval else {
+            logger.info("host doesn't support session/set_mode (pre-v0.15) — project auto-accept edits not applied")
+            return
+        }
+
+        do {
+            try await client.setSessionMode(
+                sessionId: sessionId,
+                modeId: ACPApprovalMode.acceptEdits.rawValue
+            )
+            // Only mirror what the host actually accepted, so the header
+            // chip never claims a posture the session isn't in.
+            richChatViewModel.activeApprovalMode = .acceptEdits
+            logger.info("applied project auto-accept edits (accept_edits) to session \(sessionId)")
+        } catch {
+            logger.warning("session/set_mode accept_edits failed for project '\(projectPath)': \(error.localizedDescription) — session stays on the default ask-first mode")
+        }
+    }
+
     private func startACPSession(
         resume sessionId: String?,
         projectPath: String? = nil,
@@ -1710,6 +1780,15 @@ final class ChatViewModel {
                 // chat. No-op when no projectPath was passed.
                 if let projectPath {
                     await applyProjectModelPreset(
+                        client: client,
+                        sessionId: resolvedSessionId,
+                        projectPath: projectPath
+                    )
+                    guard startStillCurrent(intent, client: client) else { return }
+
+                    // Then the project's edit-approval posture, if the
+                    // user has opted this project into auto-accept.
+                    await applyProjectAutoAcceptEdits(
                         client: client,
                         sessionId: resolvedSessionId,
                         projectPath: projectPath
@@ -1990,6 +2069,17 @@ final class ChatViewModel {
 
                     // Reconcile in-memory messages with what Hermes persisted to DB
                     await richChatViewModel.reconcileWithDB(sessionId: resolvedSessionId)
+
+                    // A reconnect is a fresh ACP session, so the
+                    // session-scoped edit-approval mode is back at the
+                    // default — re-assert the project's opted-in posture.
+                    if let projectPath {
+                        await applyProjectAutoAcceptEdits(
+                            client: client,
+                            sessionId: resolvedSessionId,
+                            projectPath: projectPath
+                        )
+                    }
 
                     acpStatus = ACPPhase.ready
                     clearACPErrorState()

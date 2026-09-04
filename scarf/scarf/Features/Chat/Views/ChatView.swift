@@ -599,7 +599,21 @@ struct ChatView: View {
                         requestId: permission.requestId,
                         optionId: optionId
                     )
-                }
+                },
+                // "Allow edits for this session" is offered only when the
+                // host can actually be told (v0.15+ `session/set_mode`);
+                // pre-v0.15 the dialog renders exactly as it did before.
+                // `PermissionApprovalView` decides on its own whether the
+                // REQUEST is edit-shaped.
+                onAllowForSession: (viewModel.capabilitiesStore?.capabilities.hasSessionEditAutoApproval ?? false)
+                    ? { optionId in
+                        viewModel.respondToPermission(
+                            requestId: permission.requestId,
+                            optionId: optionId
+                        )
+                        viewModel.switchApprovalMode(.acceptEdits)
+                    }
+                    : nil
             )
             // The prompt requires a decision: the agent's tool call is
             // blocked until one of the options is sent, and an Esc that
@@ -756,7 +770,44 @@ struct PermissionApprovalView: View {
     let kind: String
     let options: [(optionId: String, name: String)]
     let onRespond: (String) -> Void
+    /// Approve this request AND put the session into `accept_edits` so
+    /// the rest of this chat's edits stop asking. Passed the same
+    /// `optionId` a plain approval would send, because the request still
+    /// has to be answered — the mode change only affects the NEXT edit.
+    ///
+    /// Nil on hosts without `session/set_mode` (pre-v0.15). Even when
+    /// non-nil the button appears only for edit-shaped requests; see
+    /// ``sessionAllowOptionId``.
+    var onAllowForSession: ((String) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
+
+    /// The option id "Allow edits for this session" would answer with,
+    /// or nil when this request must not offer it.
+    ///
+    /// **Edit-shaped means what the dialog already thinks it means.**
+    /// The icon and colour above key off `kind`, which is the ACP
+    /// `toolCall.kind` Hermes stamps — and `acp_adapter/edit_approval.py`
+    /// builds every file-edit approval with `kind="edit"` (an execute or
+    /// delete approval carries its own kind). Using the same field keeps
+    /// one definition of "this is an edit prompt" rather than a second
+    /// heuristic that could disagree with the pencil icon the user is
+    /// looking at.
+    ///
+    /// **And it has to be answerable with an ALLOW.** Hermes owns the
+    /// option list (v0.20 parses reduced option sets generically), so the
+    /// button is offered only when exactly one option reads as an
+    /// affirmative single-shot approval — never a deny, never a guess
+    /// between two allows, and never a synthesized option id Hermes
+    /// didn't send. If Hermes ships a request with no allow, the dialog
+    /// renders its options unchanged and the extra button is simply
+    /// absent: flipping the session to accept_edits off the back of a
+    /// prompt the user could only DENY would be exactly backwards.
+    var sessionAllowOptionId: String? {
+        guard kind == "edit", onAllowForSession != nil else { return nil }
+        let allows = options.filter { $0.optionId.hasPrefix("allow") }
+        guard allows.count == 1 else { return nil }
+        return allows[0].optionId
+    }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -820,6 +871,26 @@ struct PermissionApprovalView: View {
                     }
                     .fixedSize()
                     .applyingNumberShortcut(index: idx)
+                }
+
+                // Appended AFTER Hermes's own options so their numbers
+                // don't move: an edit prompt is 1 = Allow edit, 2 = Deny,
+                // and this becomes 3. Muscle memory built on the two-
+                // button dialog keeps working, which matters for a button
+                // whose effect outlives the click.
+                if let sessionAllowOptionId, let onAllowForSession {
+                    // Same 1–9 cap the option buttons use: past nine the
+                    // number prefix would advertise a shortcut that isn't
+                    // bound.
+                    let prefix = options.count < 9 ? "\(options.count + 1). " : ""
+                    Button("\(prefix)Allow edits for this session") {
+                        onAllowForSession(sessionAllowOptionId)
+                        dismiss()
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Approve this edit and stop asking for the rest of this chat. Sensitive paths still prompt, and the next chat starts back at ask-first.")
+                    .fixedSize()
+                    .applyingNumberShortcut(index: options.count)
                 }
             }
         }

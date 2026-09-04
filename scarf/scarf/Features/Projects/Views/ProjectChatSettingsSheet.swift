@@ -2,25 +2,34 @@ import SwiftUI
 import ScarfCore
 import ScarfDesign
 
-/// Sheet for binding a model preset to a specific project. Reads the
-/// current binding from `<project>/.scarf/manifest.json` and writes
-/// back via `ProjectModelPresetBinding`.
+/// The per-project settings that apply to this project's CHAT sessions:
+/// which model they run on, and whether they open with edits
+/// pre-approved.
 ///
-/// Two modes:
-/// - **"Use global default"** — clears the binding so the project
-///   inherits `config.yaml`'s `model.default`. Shows the default
-///   model + provider in parentheses for visibility.
-/// - **"Use preset"** — picks one from the loaded list. Each row
-///   shows the model + provider line so users can pick by model name,
-///   not just preset name.
+/// **Model.** Reads the current binding from
+/// `<project>/.scarf/manifest.json` and writes back via
+/// `ProjectModelPresetBinding`. Two modes: "Use global default" clears
+/// the binding so the project inherits `config.yaml`'s `model.default`;
+/// "Use preset" picks one from the loaded list, each row showing the
+/// model + provider line so users can pick by model name.
 ///
-/// Capability-gated entry point: shown only when
-/// `HermesCapabilities.hasACPSetSessionModel` (v0.13+). On older hosts
-/// the binding wouldn't actually apply at runtime.
-struct ProjectModelPresetSheet: View {
+/// **Auto-accept edits.** Sends `session/set_mode accept_edits` at
+/// session boot for this project's chats — the same thing the chat
+/// header's mode picker does, decided once instead of per chat.
+/// Deliberately NOT stored with the project: see
+/// ``ProjectAutoAcceptEditsStore`` for why a bypass of the edit prompt
+/// can't live anywhere the agent being approved can write.
+///
+/// Each section is capability-gated on its own RPC —
+/// `hasACPSetSessionModel` (v0.13+) and `hasSessionEditAutoApproval`
+/// (v0.15+) — because on an older host the setting simply wouldn't apply
+/// at runtime, and a control that silently does nothing is worse than no
+/// control. The entry point hides when neither is available.
+struct ProjectChatSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let context: ServerContext
     let project: ProjectEntry
+    let capabilities: HermesCapabilities
 
     @State private var presets: [ModelPreset] = []
     @State private var selectedID: UUID?
@@ -28,12 +37,18 @@ struct ProjectModelPresetSheet: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var isSaving = false
+    @State private var autoAcceptEdits = false
+
+    /// The store is stateless (a defaults key + the machine HMAC key), so
+    /// a fresh value per view is free and keeps this testable in
+    /// isolation.
+    private var autoAcceptStore: ProjectAutoAcceptEditsStore { ProjectAutoAcceptEditsStore() }
 
     var body: some View {
         VStack(spacing: 0) {
             ScarfPageHeader(
-                "Model for \(project.name)",
-                subtitle: "Pick the model this project's chats run on. Changes apply on the next chat session."
+                "Chat settings for \(project.name)",
+                subtitle: "How this project's chats start. Changes apply on the next chat session."
             )
 
             ScrollView {
@@ -42,13 +57,19 @@ struct ProjectModelPresetSheet: View {
                         ProgressView()
                             .padding(ScarfSpace.s4)
                     } else {
-                        defaultRow
+                        if capabilities.hasSessionEditAutoApproval {
+                            autoAcceptRow
+                        }
 
-                        if presets.isEmpty {
-                            emptyPresetsRow
-                        } else {
-                            ForEach(presets) { preset in
-                                presetRow(preset)
+                        if capabilities.hasACPSetSessionModel {
+                            defaultRow
+
+                            if presets.isEmpty {
+                                emptyPresetsRow
+                            } else {
+                                ForEach(presets) { preset in
+                                    presetRow(preset)
+                                }
                             }
                         }
 
@@ -85,6 +106,32 @@ struct ProjectModelPresetSheet: View {
         }
         .frame(minWidth: 520, minHeight: 420)
         .task { await load() }
+    }
+
+    /// The auto-accept toggle, with the caveat stated on the card rather
+    /// than in a tooltip: the whole point of an approval prompt is that
+    /// the user knows what turning it off does, and "sensitive paths
+    /// still prompt" is the part that makes this a reasonable thing to
+    /// turn on at all. Wording deliberately mirrors the chat header's
+    /// own Accept Edits mode, because it IS that mode — just chosen once
+    /// for the project instead of per chat.
+    private var autoAcceptRow: some View {
+        ScarfCard {
+            VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+                Toggle(isOn: $autoAcceptEdits) {
+                    Text("Auto-accept edits in this project")
+                        .scarfStyle(.title3)
+                }
+                .toggleStyle(.switch)
+                .accessibilityIdentifier("project.chatSettings.autoAcceptEdits")
+
+                Text("New chats in this project open in Accept Edits, so Hermes doesn't ask before each file change. Sensitive paths still prompt, and shell commands are unaffected. Stored on this Mac only — it never travels with the project, and the agent can't turn it on for itself.")
+                    .scarfStyle(.footnote)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private var defaultRow: some View {
@@ -153,6 +200,17 @@ struct ProjectModelPresetSheet: View {
 
     @MainActor
     private func load() async {
+        // Local (UserDefaults + a Keychain read for the verifying key),
+        // so it's read inline rather than through the transport — and it
+        // is read even when the model section is hidden, so a
+        // capability-degraded host still shows the truth.
+        autoAcceptEdits = autoAcceptStore.isEnabled(projectId: project.path)
+
+        guard capabilities.hasACPSetSessionModel else {
+            isLoading = false
+            return
+        }
+
         let service = ModelPresetService.shared(for: context)
         do {
             let loaded = try await service.list()
@@ -190,6 +248,26 @@ struct ProjectModelPresetSheet: View {
         guard !isSaving else { return }
         isSaving = true
         errorMessage = nil
+
+        // Auto-accept first, and locally: it can fail only one way (the
+        // Keychain won't produce the machine key to tag the record), and
+        // that failure has to be SAID rather than swallowed — silently
+        // not saving a setting the user just switched on would leave them
+        // expecting no prompts and getting them.
+        if capabilities.hasSessionEditAutoApproval {
+            guard autoAcceptStore.setEnabled(autoAcceptEdits, projectId: project.path) else {
+                isSaving = false
+                errorMessage = "Couldn't save the auto-accept setting: this Mac's Keychain wouldn't provide the key Scarf signs it with. Unlock your login keychain and try again."
+                return
+            }
+        }
+
+        guard capabilities.hasACPSetSessionModel else {
+            isSaving = false
+            dismiss()
+            return
+        }
+
         let ctx = context
         let project = project
         let newValue: String? = useGlobalDefault ? nil : selectedID?.uuidString
