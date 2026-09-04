@@ -2,17 +2,13 @@
 title: Project-Scoped Chat and AGENTS.md Context
 type: note
 permalink: scarf/features/project-scoped-chat-and-agents.md-context
-tags:
-- projects
-- chat
-- acp
-- agents-md
-source_sha: 2b9ef15cdddcb1fde12a88556bf755a623ae7758
-source_paths: scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SessionAttributionService.swift, scarf/scarf/Core/Services/ProjectAgentContextService.swift, scarf/scarf/Features/Projects/Views/ProjectSessionsView.swift
+tags: [projects, chat, acp, agents-md]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SessionAttributionService.swift, scarf/scarf/Core/Services/ProjectAgentContextService.swift, scarf/scarf/Features/Projects/Views/ProjectSessionsView.swift]
+source_sha: 2e1a26f6834951023226883f24f70a495897d440
 created: 2026-05-29
 updated: 2026-05-29
-reviewed: 2026-07-12
-reviewed_by: audit:claude-code (audit)
+reviewed: 2026-09-04
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations
