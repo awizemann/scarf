@@ -64,11 +64,54 @@ public enum MiniAppPermission: Codable, Sendable, Hashable {
         case "net": self = .net
         default:
             if trimmed.hasPrefix("query:") {
-                self = .query(String(trimmed.dropFirst("query:".count)))
+                let kind = String(trimmed.dropFirst("query:".count))
+                // CONSENT-SURFACE CHARSET GATE (P8 SEC-L4). The kind is a
+                // free string out of an agent-written `miniapp.json`, and
+                // the permission sheet renders it VERBATIM: "Read <kind>
+                // (read-only)". Without a charset it can carry newlines,
+                // RTL overrides, or a sentence of its own — a spoofing
+                // surface on the one screen where the user is being asked
+                // to trust something. It also used to be able to carry the
+                // comma that broke the grant tag's injectivity (SEC-M2).
+                // An out-of-shape kind is not repaired, it is demoted to
+                // `.unknown`, which the sheet already renders as "will be
+                // denied", counts as sensitive, and never pre-checks.
+                self = Self.isValidQueryKind(kind) ? .query(kind) : .unknown(trimmed)
             } else {
                 self = .unknown(trimmed)
             }
         }
+    }
+
+    /// The shape a query kind may take: lowercase letters, digits, `.`,
+    /// `_` and `-`, starting with a letter, at most 64 characters. Covers
+    /// every kind Scarf implements or has documented (`kanban.tasks`,
+    /// `sessions`, `insights.tokens`, `cron.jobs`) and nothing that can
+    /// misrepresent itself in a consent line.
+    public static func isValidQueryKind(_ kind: String) -> Bool {
+        guard !kind.isEmpty, kind.count <= 64,
+              let first = kind.first, first.isASCII, first.isLowercase
+        else { return false }
+        return kind.allSatisfy { c in
+            guard c.isASCII else { return false }
+            return c.isLowercase || c.isNumber || c == "." || c == "_" || c == "-"
+        }
+    }
+
+    /// A raw permission string rendered into UI, with anything that could
+    /// misrepresent it removed: control characters and bidi/format
+    /// overrides go, and the result is capped. Used for `.unknown`, whose
+    /// whole point is preserving bytes we don't understand — preserving
+    /// them for the ROUND-TRIP is right, showing them raw on the consent
+    /// sheet is not.
+    public static func displaySafe(_ raw: String) -> String {
+        let cleaned = raw.unicodeScalars
+            .filter { !CharacterSet.controlCharacters.contains($0) }
+            .filter { !(0x200B...0x200F).contains($0.value) && !(0x202A...0x202E).contains($0.value)
+                && !(0x2066...0x2069).contains($0.value) }
+        var out = String(String.UnicodeScalarView(cleaned))
+        if out.count > 64 { out = String(out.prefix(64)) + "…" }
+        return out
     }
 
     /// Query kind when this is a `.query`, else `nil`.
@@ -126,7 +169,7 @@ public enum MiniAppPermission: Codable, Sendable, Hashable {
         case .fileWrite: return "Write files inside the project"
         case .store: return "Save its own settings"
         case .net: return "Make outbound network requests"
-        case .unknown(let raw): return "Unknown permission \"\(raw)\" (will be denied)"
+        case .unknown(let raw): return "Unknown permission \"\(Self.displaySafe(raw))\" (will be denied)"
         }
     }
 

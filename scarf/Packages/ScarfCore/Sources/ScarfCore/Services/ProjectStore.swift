@@ -135,34 +135,59 @@ public struct ProjectStore: Sendable {
     /// read answering both questions `save` has to ask (is this damage,
     /// and what should the `.bak` capture). Two separate reads would mean
     /// two SFTP/SSH round-trips on every save.
-    private nonisolated func inspectRecord(projectPath: String) -> (load: RecordLoad, bytes: Data?) {
+    ///
+    /// **Unusable bytes are QUARANTINED (P8 DI-M1).** Oversize or
+    /// undecodable bytes report `.absent`, which is right — the record is
+    /// rebuildable and freezing forever would be worse — but until now the
+    /// only trace of the original was the one-deep `project.json.bak` the
+    /// next save wrote, and the save after that overwrote it. Two derived
+    /// rewrites and the user's hand-edited (or newer-Scarf) record was gone
+    /// with nothing to look at. `GuardedJSONStore.quarantine` is the same
+    /// helper every sidecar uses — memoized, deduped and pruned — so this
+    /// costs nothing on the tick path and keeps up to five copies.
+    ///
+    /// The `quarantined` flag also tells `save` NOT to refresh the `.bak`
+    /// from these bytes: they are already in the `.corrupt-` copy, and the
+    /// `.bak` still holds the last version we believed was good.
+    private nonisolated func inspectRecord(
+        projectPath: String
+    ) -> (load: RecordLoad, bytes: Data?, quarantined: Bool) {
         let path = Self.recordPath(forProjectPath: projectPath)
         var read = try? transport.readFile(path)
         if read == nil {
-            guard let info = transport.stat(path) else { return (.absent, nil) }
+            guard let info = transport.stat(path) else { return (.absent, nil, false) }
             read = try? transport.readFile(path)
             if read == nil {
                 #if canImport(os)
                 Self.logger.error("project.json at \(path, privacy: .public) exists (\(info.size) bytes) but could not be read twice; treating as damaged")
                 #endif
-                return (.unreadable(path: path), nil)
+                return (.unreadable(path: path), nil, false)
             }
         }
-        guard let data = read else { return (.absent, nil) }
+        guard let data = read else { return (.absent, nil, false) }
         if data.count > Self.maxJSONBytes {
             #if canImport(os)
-            Self.logger.warning("project.json at \(path, privacy: .public) is \(data.count) bytes (cap \(Self.maxJSONBytes)); treating as missing")
+            Self.logger.warning("project.json at \(path, privacy: .public) is \(data.count) bytes (cap \(Self.maxJSONBytes)); quarantining")
             #endif
-            return (.absent, data)
+            return (.absent, data, quarantine(data, at: path))
         }
         do {
-            return (.loaded(try JSONDecoder().decode(ScarfProject.self, from: data)), data)
+            return (.loaded(try JSONDecoder().decode(ScarfProject.self, from: data)), data, false)
         } catch {
             #if canImport(os)
-            Self.logger.error("failed to decode project.json at \(path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            Self.logger.error("failed to decode project.json at \(path, privacy: .public): \(error.localizedDescription, privacy: .public); quarantining")
             #endif
-            return (.absent, data)
+            return (.absent, data, quarantine(data, at: path))
         }
+    }
+
+    /// Copy unusable record bytes aside. Returns whether a copy exists —
+    /// `false` means the copy FAILED, in which case the `.bak` refresh is
+    /// still the only rescue and must go ahead.
+    private nonisolated func quarantine(_ data: Data, at path: String) -> Bool {
+        GuardedJSONStore.quarantine(
+            data: data, path: path, transport: transport, label: "project.json"
+        ) != nil
     }
 
     /// Write the canonical record AND index it into the registry
@@ -205,7 +230,12 @@ public struct ProjectStore: Sendable {
         if case .unreadable(let path) = existing.load {
             throw ProjectStoreError.refusedUnreadableRecord(path: path)
         }
-        try writeRecord(project, replacing: existing.bytes)
+        // Quarantined bytes never become the `.bak` — they are already in
+        // the `.corrupt-` copy, and the `.bak` still holds the last good
+        // record (P8 DI-M2, same rule as `GuardedJSONStore.write`).
+        try writeRecord(
+            project, replacing: existing.bytes, skipBackup: existing.quarantined
+        )
         try indexInRegistry(project)
     }
 
@@ -418,7 +448,12 @@ public struct ProjectStore: Sendable {
     /// - Parameter replacing: the bytes currently at the record path, when
     ///   the caller already read them (`save` always has). `nil` means
     ///   "unknown" and costs one read; it never means "nothing there".
-    private nonisolated func writeRecord(_ project: ScarfProject, replacing: Data? = nil) throws {
+    /// - Parameter skipBackup: the bytes being replaced were quarantined,
+    ///   so they are already preserved in a `.corrupt-` copy and must not
+    ///   overwrite the last-known-good `.bak` (P8 DI-M2).
+    private nonisolated func writeRecord(
+        _ project: ScarfProject, replacing: Data? = nil, skipBackup: Bool = false
+    ) throws {
         let scarfDir = project.rootPath + "/.scarf"
         // createDirectory is mkdir -p across every transport.
         try transport.createDirectory(scarfDir)
@@ -430,7 +465,9 @@ public struct ProjectStore: Sendable {
         // the only copy of a project's canonical identity, and the writes
         // that reach here are mostly derived rewrites. Best effort —
         // losing the backup is not a reason to fail the save.
-        if let existing = replacing ?? (try? transport.readFile(path)), !existing.isEmpty, existing != data {
+        if !skipBackup,
+           let existing = replacing ?? (try? transport.readFile(path)),
+           !existing.isEmpty, existing != data {
             do {
                 try transport.writeFile(path + ".bak", data: existing)
             } catch {

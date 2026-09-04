@@ -22,6 +22,12 @@ struct ImageWidgetView: View {
     /// stat matches reads and decodes nothing.
     @State private var loadedSignature: String?
 
+    /// Per-(project, host) beacon consent — see `ImageHostConsentStore`.
+    /// Mirrored into `@State` so pressing Allow re-renders immediately;
+    /// the store is the truth and is re-read whenever the URL changes.
+    @State private var hostAllowed = false
+    private let consent = ImageHostConsentStore()
+
     private var displayHeight: CGFloat? {
         widget.height.map { CGFloat($0) }
     }
@@ -136,7 +142,61 @@ struct ImageWidgetView: View {
         }
     }
 
+    /// Nothing is fetched until the user says so (P8 SEC-M4). The gate is
+    /// keyed on the project and the URL's host, so a dashboard the user has
+    /// blessed doesn't re-ask on every watcher tick, and an agent that
+    /// changes the PATH doesn't get a fresh unconsented request.
+    @ViewBuilder
     private func remoteContent(url: URL) -> some View {
+        if hostAllowed {
+            remoteImage(url: url)
+        } else {
+            beaconConsentCard(url: url)
+        }
+    }
+
+    private func beaconConsentCard(url: URL) -> some View {
+        let host = ImageHostConsentStore.normalizedHost(url) ?? ""
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "eye.trianglebadge.exclamationmark")
+                    .foregroundStyle(ScarfColor.warning)
+                    .accessibilityHidden(true)
+                Text("This widget wants to load an image from \(host).")
+                    .font(.callout)
+            }
+            Text("Loading it contacts that server from your Mac and tells it your IP address. The dashboard file that asks for this is written by the agent.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Allow \(host)") {
+                    consent.allow(url: url, projectId: consentProjectId)
+                    hostAllowed = true
+                }
+                .buttonStyle(.bordered)
+                .accessibilityHint("Lets this project's dashboard load images from this host from now on")
+                Spacer()
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(ScarfColor.backgroundTertiary)
+        .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.sm))
+        // One VO stop: the ask, the consequence, and the button's own.
+        .accessibilityElement(children: .contain)
+        .task(id: url.absoluteString + "|" + consentProjectId) {
+            hostAllowed = consent.isAllowed(url: url, projectId: consentProjectId)
+        }
+    }
+
+    /// The project this consent belongs to. The widget surface has the
+    /// project ROOT to hand, which is exactly the id `ProjectStore` derives
+    /// project identity from, and is stable across renames of the display
+    /// name.
+    private var consentProjectId: String { projectRoot ?? "" }
+
+    private func remoteImage(url: URL) -> some View {
         AsyncImage(url: url) { phase in
             switch phase {
             case .empty:

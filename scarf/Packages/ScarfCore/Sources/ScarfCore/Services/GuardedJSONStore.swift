@@ -67,6 +67,16 @@ public struct GuardedJSONStore: Sendable {
         /// caller can still look at them). `nil` otherwise.
         public var bytes: Data?
 
+        /// `public` so out-of-module writers of NON-JSON text files
+        /// (`AGENTS.md`, `MEMORY.md`, `.env`) can reclassify a zero-byte
+        /// read as `.absent`: zero bytes is damage for a JSON sidecar Scarf
+        /// never writes empty, but an empty markdown or env file is a real,
+        /// writable state a person made.
+        public init(state: State, bytes: Data?) {
+            self.state = state
+            self.bytes = bytes
+        }
+
         public var isDamaged: Bool {
             if case .unreadable = state { return true }
             return false
@@ -176,7 +186,17 @@ public struct GuardedJSONStore: Sendable {
         // `createDirectory` is mkdir -p on every transport.
         try transport.createDirectory(parent)
 
-        if let existing = inspection.bytes, !existing.isEmpty, existing != data {
+        // A QUARANTINED PREDECESSOR IS NOT A BACKUP (P8 DI-M2). The `.bak`
+        // is one-deep and holds the last version of this file we believe
+        // was good. Refreshing it with bytes we just declared unusable
+        // destroys that — and buys nothing, because those exact bytes are
+        // already saved in the `.corrupt-<stamp>` copy the quarantine made.
+        // Corruption then costs the user both copies: the live file
+        // (rebuilt from empty, correctly) and the last good one.
+        var keepsBackup = true
+        if case .quarantined = inspection.state { keepsBackup = false }
+
+        if keepsBackup, let existing = inspection.bytes, !existing.isEmpty, existing != data {
             // Best effort: losing the backup is not a reason to fail the
             // write the user asked for.
             do {

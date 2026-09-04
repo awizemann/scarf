@@ -43,6 +43,31 @@ import os
 /// correct answer — a consent decision is a decision made by a person at a
 /// machine, and importing another host's is exactly the trust we are
 /// refusing.
+/// Why a grant could not be signed. The two cases are deliberately
+/// distinct: one is an environment failure the caller must refuse on, the
+/// other is a row shape we will not put our name to.
+public enum MiniAppGrantSignerError: LocalizedError, Sendable, Equatable {
+    /// The Keychain would not produce the machine's signing key.
+    ///
+    /// **Refuse, don't purge (P8 DI-M3).** Without the key every stored row
+    /// verifies as inauthentic, so the load hands the writer an empty list;
+    /// writing that back turns a locked Keychain into the permanent
+    /// deletion of every permission decision the user ever made. Dropping
+    /// on READ is a recovery (the sheet re-asks); dropping on WRITE is not.
+    case signingKeyUnavailable
+    /// A field carries a byte the payload grammar uses as structure.
+    case uninjectiveComponent(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .signingKeyUnavailable:
+            return "The mini-app grant signing key is unavailable; refusing to rewrite the grants file."
+        case let .uninjectiveComponent(field):
+            return "Mini-app grant field \"\(field)\" contains a reserved separator character; refusing to sign it."
+        }
+    }
+}
+
 public struct MiniAppGrantSigner: Sendable {
     #if canImport(os)
     private static let logger = Logger(subsystem: "com.scarf", category: "MiniAppGrantSigner")
@@ -52,6 +77,10 @@ public struct MiniAppGrantSigner: Sendable {
     public static let keychainAccount = "hmac-key-v1"
 
     private let keychain: ProjectConfigKeychain
+    /// Test seam: simulates a Keychain that will not produce the key —
+    /// the DI-M3 failure — which cannot otherwise be provoked, because
+    /// `signingKey()` mints one on first use.
+    let keyUnavailableForTesting: Bool
 
     /// - Parameter testServiceSuffix: routes the key into a test-only
     ///   Keychain service, exactly as `ProjectConfigKeychain` does, so a
@@ -59,20 +88,53 @@ public struct MiniAppGrantSigner: Sendable {
     ///   Keychain or sharing a key with the running app.
     public nonisolated init(testServiceSuffix: String? = nil) {
         self.keychain = ProjectConfigKeychain(testServiceSuffix: testServiceSuffix)
+        self.keyUnavailableForTesting = false
     }
 
-    /// The tag for a grant, or `nil` when the signing key is unavailable.
+    nonisolated init(testServiceSuffix: String?, keyUnavailableForTesting: Bool) {
+        self.keychain = ProjectConfigKeychain(testServiceSuffix: testServiceSuffix)
+        self.keyUnavailableForTesting = keyUnavailableForTesting
+    }
+
+    /// The tag for a grant, or `nil` when it cannot be produced.
     ///
-    /// A `nil` here is a Keychain failure (locked, denied, unavailable in a
-    /// sandboxed test host), NOT a security decision — the caller decides
-    /// what to do, and both callers choose the direction that fails safe:
-    /// a write stores no tag (so the row is dropped at the next load and
-    /// re-asked), a read drops the row.
+    /// `nil` collapses two very different situations, which is why every
+    /// caller that MUTATES the file uses ``signedTag(for:)`` instead: a
+    /// Keychain that won't hand over the key is a transient environment
+    /// failure, while a permission component carrying a separator byte is a
+    /// hostile row. Kept for read-side and test convenience.
     public nonisolated func tag(for grant: MiniAppGrant) -> String? {
-        guard let key = signingKey() else { return nil }
-        let message = Data(Self.canonicalPayload(for: grant).utf8)
-        let mac = HMAC<SHA256>.authenticationCode(for: message, using: SymmetricKey(data: key))
+        try? signedTag(for: grant)
+    }
+
+    /// The tag for a grant, distinguishing "the key is unavailable" from
+    /// "these field values cannot be signed".
+    ///
+    /// - Throws: ``MiniAppGrantSignerError/signingKeyUnavailable`` when the
+    ///   Keychain would not produce the key (locked, denied, sandboxed test
+    ///   host) — the caller must REFUSE the mutation rather than write a
+    ///   list it filtered with a signer that can't verify anything;
+    ///   ``MiniAppGrantSignerError/uninjectiveComponent(_:)`` when a field
+    ///   carries a byte the payload grammar uses as structure.
+    public nonisolated func signedTag(for grant: MiniAppGrant) throws -> String {
+        let payload = try Self.canonicalPayload(for: grant)
+        guard let key = signingKey() else {
+            throw MiniAppGrantSignerError.signingKeyUnavailable
+        }
+        let mac = HMAC<SHA256>.authenticationCode(
+            for: Data(payload.utf8), using: SymmetricKey(data: key)
+        )
         return Data(mac).base64EncodedString()
+    }
+
+    /// Whether the machine's signing key can be reached right now.
+    ///
+    /// The grants store asks BEFORE it filters: a signer with no key calls
+    /// every row inauthentic, and writing that filtered list back is a
+    /// permanent purge of decisions the user really made. Read paths keep
+    /// their default-deny (a dropped grant re-asks); write paths refuse.
+    public nonisolated func isKeyAvailable() -> Bool {
+        signingKey() != nil
     }
 
     /// Whether `grant`'s recorded `signature` is one THIS machine produced
@@ -82,11 +144,14 @@ public struct MiniAppGrantSigner: Sendable {
     public nonisolated func isAuthentic(_ grant: MiniAppGrant) -> Bool {
         guard let recorded = grant.signature,
               let recordedData = Data(base64Encoded: recorded),
+              // A row whose fields carry a structural byte was never signed
+              // by us — signing refuses them — so it is inauthentic without
+              // needing the key at all.
+              let payload = try? Self.canonicalPayload(for: grant),
               let key = signingKey()
         else { return false }
-        let message = Data(Self.canonicalPayload(for: grant).utf8)
         return HMAC<SHA256>.isValidAuthenticationCode(
-            recordedData, authenticating: message, using: SymmetricKey(data: key)
+            recordedData, authenticating: Data(payload.utf8), using: SymmetricKey(data: key)
         )
     }
 
@@ -94,23 +159,61 @@ public struct MiniAppGrantSigner: Sendable {
     /// grant is in here — most importantly `permissions` (what was
     /// approved), `manifestFingerprint` (what it was approved FOR) and the
     /// (projectId, miniAppId) the decision belongs to. `signature` itself
-    /// is excluded, obviously. Field-separated with a character that cannot
-    /// occur in any of the components, so `("ab", "c")` and `("a", "bc")`
-    /// cannot collide onto one payload.
+    /// is excluded, obviously.
+    ///
+    /// **v2: the permissions field is length-prefixed (P8 SEC-M2).** v1
+    /// joined the permission list with a comma, which is not injective on a
+    /// field whose members may themselves contain a comma — and one of them
+    /// can, because `query:<kind>` carries an arbitrary kind string from an
+    /// agent-written `miniapp.json`. So the single approved permission
+    /// `query:sessions,store` produced the SAME payload — and therefore the
+    /// same valid tag — as the two-permission set `{query:sessions, store}`:
+    /// the user approved one read-only query and the row re-split into a
+    /// never-approved `store` grant under a tag Scarf itself had minted.
+    /// Each permission is now rendered as `<utf8 byte count>:<permission>`,
+    /// which is unambiguous whatever the payload separators are, and any
+    /// component carrying `0x1F` or a comma is REFUSED at sign time rather
+    /// than trusted to the encoding.
     ///
     /// The format is versioned: changing it invalidates every stored tag,
     /// which drops every grant and re-asks. That is a survivable migration
-    /// but not a silent one, so the version prefix makes it deliberate.
-    static func canonicalPayload(for grant: MiniAppGrant) -> String {
+    /// but not a silent one, so the version prefix makes it deliberate — v1
+    /// tags do not verify against a v2 payload, so the v2 rollout re-asks
+    /// every grant exactly once. (The already-filed release note covers it.)
+    static func canonicalPayload(for grant: MiniAppGrant) throws -> String {
+        let permissions = try grant.permissions.sorted().map { permission -> String in
+            try validate(permission, field: "permission")
+            return "\(permission.utf8.count):\(permission)"
+        }
         let parts = [
-            "v1",
-            grant.projectId,
-            grant.miniAppId,
-            grant.permissions.sorted().joined(separator: ","),
-            grant.decidedAt,
-            grant.manifestFingerprint ?? "",
+            "v2",
+            try validated(grant.projectId, field: "projectId"),
+            try validated(grant.miniAppId, field: "miniAppId"),
+            permissions.joined(separator: ","),
+            try validated(grant.decidedAt, field: "decidedAt"),
+            try validated(grant.manifestFingerprint ?? "", field: "manifestFingerprint"),
         ]
-        return parts.joined(separator: "\u{1F}")
+        return parts.joined(separator: Self.fieldSeparator)
+    }
+
+    /// The payload's field separator. Structural, so no component may hold
+    /// it — enforced rather than assumed.
+    static let fieldSeparator = "\u{1F}"
+
+    /// Bytes a component may not contain: the field separator (which would
+    /// let one field forge extra fields) and the comma (which is the
+    /// permission-list separator; length prefixes already make the list
+    /// unambiguous, but a comma-free component means the payload can be
+    /// read by a human and by a future parser without one).
+    private static func validate(_ component: String, field: String) throws {
+        guard !component.contains(fieldSeparator), !component.contains(",") else {
+            throw MiniAppGrantSignerError.uninjectiveComponent(field)
+        }
+    }
+
+    private static func validated(_ component: String, field: String) throws -> String {
+        try validate(component, field: field)
+        return component
     }
 
     // MARK: - Key material
@@ -123,6 +226,7 @@ public struct MiniAppGrantSigner: Sendable {
     /// invalidates any grant signed with a previous one, which is the same
     /// safe direction as every other failure here.
     private nonisolated func signingKey() -> Data? {
+        if keyUnavailableForTesting { return nil }
         do {
             if let existing = try keychain.get(
                 service: Self.keychainService, account: Self.keychainAccount

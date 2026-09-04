@@ -117,6 +117,26 @@ public struct ScarfProject: Codable, Sendable, Identifiable, Hashable {
     /// untrusted (especially agent-generated) web content for itself.
     public var miniApps: [MiniAppRef]
 
+    // MARK: - Unknown keys
+
+    /// Every top-level key in `project.json` that this build does not
+    /// model, carried verbatim through decode → edit → encode.
+    ///
+    /// **Why this file most of all (P8 DI-H2).** `project.json` is the ONE
+    /// record documented as portable — it travels with the repo, is
+    /// versioned alongside it, and is read by other Scarf builds and
+    /// written by agents. Yet every save rewrote it wholesale from this
+    /// model, so any key the model didn't declare was deleted: a newer
+    /// Scarf's field erased by an older build opening the same checkout, an
+    /// agent's own annotation erased by a rename, a future binding erased
+    /// by a derive-and-save. `ProjectEntry` and `ProjectRegistry` got this
+    /// contract in 7bc27c9 for exactly the same reason; the portable record
+    /// had the weaker guarantee, which is backwards.
+    ///
+    /// Excluded from `Equatable`/`Hashable` (see below) so an unknown key
+    /// appearing can never disturb selection or set membership.
+    public var extra: [String: JSONValue]
+
     /// One host's materialization of a project — the fleet dimension
     /// that a per-gateway client structurally cannot offer.
     public struct HostBinding: Codable, Sendable, Hashable {
@@ -182,8 +202,10 @@ public struct ScarfProject: Codable, Sendable, Identifiable, Hashable {
         secretsScope: [String] = [],
         templateLockRef: String? = nil,
         hostBindings: [HostBinding] = [],
-        miniApps: [MiniAppRef] = []
+        miniApps: [MiniAppRef] = [],
+        extra: [String: JSONValue] = [:]
     ) {
+        self.extra = extra
         self.id = id
         self.name = name
         self.rootPath = rootPath
@@ -204,11 +226,42 @@ public struct ScarfProject: Codable, Sendable, Identifiable, Hashable {
 
     // MARK: - Codable (lenient + additive; ISO-8601 dates)
 
-    private enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
         case schemaVersion, id, name, rootPath, createdAt, updatedAt
         case modelPresetId, scopedToolsets, scopedSkills, board
         case cronJobIds, memoryNamespace, secretsScope, templateLockRef
         case hostBindings, miniApps
+    }
+
+    // MARK: - Equatable / Hashable (declared fields only, sans `extra`)
+    //
+    // Hand-written to EXCLUDE `extra`, mirroring `ProjectEntry`: `JSONValue`
+    // is `Equatable` but not `Hashable`, and more importantly a key this
+    // build doesn't understand must not change a record's identity.
+
+    public static func == (lhs: ScarfProject, rhs: ScarfProject) -> Bool {
+        lhs.schemaVersion == rhs.schemaVersion
+            && lhs.id == rhs.id
+            && lhs.name == rhs.name
+            && lhs.rootPath == rhs.rootPath
+            && lhs.createdAt == rhs.createdAt
+            && lhs.updatedAt == rhs.updatedAt
+            && lhs.modelPresetId == rhs.modelPresetId
+            && lhs.scopedToolsets == rhs.scopedToolsets
+            && lhs.scopedSkills == rhs.scopedSkills
+            && lhs.board == rhs.board
+            && lhs.cronJobIds == rhs.cronJobIds
+            && lhs.memoryNamespace == rhs.memoryNamespace
+            && lhs.secretsScope == rhs.secretsScope
+            && lhs.templateLockRef == rhs.templateLockRef
+            && lhs.hostBindings == rhs.hostBindings
+            && lhs.miniApps == rhs.miniApps
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(name)
+        hasher.combine(rootPath)
     }
 
     public init(from decoder: Decoder) throws {
@@ -232,6 +285,19 @@ public struct ScarfProject: Codable, Sendable, Identifiable, Hashable {
         self.templateLockRef = try c.decodeIfPresent(String.self, forKey: .templateLockRef)
         self.hostBindings = try c.decodeIfPresent([HostBinding].self, forKey: .hostBindings) ?? []
         self.miniApps = try c.decodeIfPresent([MiniAppRef].self, forKey: .miniApps) ?? []
+
+        // Sweep up every key this model doesn't declare — explicit nulls
+        // included — so `encode(to:)` puts them back untouched.
+        let known = Set(CodingKeys.allCases.map(\.rawValue))
+        var extras: [String: JSONValue] = [:]
+        if let raw = try? decoder.container(keyedBy: AnyCodingKey.self) {
+            for key in raw.allKeys where !known.contains(key.stringValue) {
+                if let value = try? raw.decode(JSONValue.self, forKey: key) {
+                    extras[key.stringValue] = value
+                }
+            }
+        }
+        self.extra = extras
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -252,6 +318,13 @@ public struct ScarfProject: Codable, Sendable, Identifiable, Hashable {
         try c.encodeIfPresent(templateLockRef, forKey: .templateLockRef)
         try c.encode(hostBindings, forKey: .hostBindings)
         try c.encode(miniApps, forKey: .miniApps)
+
+        // Unknown keys go back last. They cannot collide with the declared
+        // ones (filtered against exactly this key set on the way in).
+        var raw = encoder.container(keyedBy: AnyCodingKey.self)
+        for (key, value) in extra {
+            try raw.encode(value, forKey: AnyCodingKey(stringValue: key))
+        }
     }
 
     /// Shared ISO-8601 formatter for the date fields. `static let` so

@@ -168,7 +168,23 @@ struct ProjectTemplateUninstaller: Sendable {
                 let beginMarker = ProjectTemplateService.memoryBlockBeginMarker(
                     templateId: lock.memoryBlockId!
                 )
-                memoryBlockPresent = text.contains(beginMarker)
+                // BOTH markers, not just the begin one — since SEC-L5 an
+                // unbounded region is refused by `stripMemoryBlock`, so
+                // promising to remove it in the preview would be a lie the
+                // uninstall then quietly failed to keep.
+                let endMarker = ProjectTemplateService.memoryBlockEndMarker(
+                    templateId: lock.memoryBlockId!
+                )
+                if let begin = text.range(of: beginMarker) {
+                    memoryBlockPresent = text.range(
+                        of: endMarker, range: begin.upperBound..<text.endIndex
+                    ) != nil
+                    if !memoryBlockPresent {
+                        Self.logger.error(
+                            "MEMORY.md at \(memoryPath, privacy: .public) has a begin marker for \(lock.memoryBlockId!, privacy: .public) with no end marker; the block will be left in place (unbounded regions are never stripped)"
+                        )
+                    }
+                }
             }
         }
 
@@ -878,11 +894,22 @@ struct ProjectTemplateUninstaller: Sendable {
     }
 
     /// Remove the `<!-- scarf-template:<id>:begin --> … :end -->` block
-    /// from MEMORY.md, preserving everything else. A missing end marker
-    /// is logged but doesn't fail — we strip from the begin marker to
-    /// EOF in that case, on the theory that a broken template block is
-    /// worse than a slightly aggressive strip.
-    nonisolated private func stripMemoryBlock(
+    /// from MEMORY.md, preserving everything else.
+    ///
+    /// **A begin marker with no end marker strips NOTHING (P8 SEC-L5).**
+    /// This used to strip from the begin marker to EOF, reasoning that a
+    /// broken block was worse than an aggressive strip. It is not: MEMORY.md
+    /// is the user's own long-lived prose, and the markers live in a file
+    /// an agent can write. Anyone who can append a bare begin marker to the
+    /// top of MEMORY.md turns the next template uninstall — a routine,
+    /// user-initiated, one-click action — into "delete the whole file", with
+    /// no `.bak` and no prompt. An unbounded region is not a region; we
+    /// refuse, log, and leave the file for a human, exactly as
+    /// `ProjectContextBlock.removeBlock` already does for AGENTS.md.
+    /// `internal` (not `private`) so the SEC-L5 bound is directly testable —
+    /// reaching it through a full uninstall would need a whole installed
+    /// template just to assert what one splice does.
+    nonisolated func stripMemoryBlock(
         blockId: String,
         memoryPath: String,
         transport: any ServerTransport
@@ -894,18 +921,18 @@ struct ProjectTemplateUninstaller: Sendable {
         guard let text = String(data: data, encoding: .utf8) else { return }
         guard let beginRange = text.range(of: beginMarker) else { return }
 
-        let stripRange: Range<String.Index>
-        if let endRange = text.range(of: endMarker, range: beginRange.upperBound..<text.endIndex) {
-            // Include the end marker and one trailing newline if present.
-            var upper = endRange.upperBound
-            if upper < text.endIndex, text[upper] == "\n" {
-                upper = text.index(after: upper)
-            }
-            stripRange = beginRange.lowerBound..<upper
-        } else {
-            Self.logger.warning("memory block for \(blockId, privacy: .public) has begin marker but no end marker; stripping to EOF")
-            stripRange = beginRange.lowerBound..<text.endIndex
+        guard let endRange = text.range(
+            of: endMarker, range: beginRange.upperBound..<text.endIndex
+        ) else {
+            Self.logger.error("memory block for \(blockId, privacy: .public) at \(memoryPath, privacy: .public) has a begin marker but no end marker; refusing to strip anything (the region is unbounded — a human should close or remove the marker)")
+            return
         }
+        // Include the end marker and one trailing newline if present.
+        var upper = endRange.upperBound
+        if upper < text.endIndex, text[upper] == "\n" {
+            upper = text.index(after: upper)
+        }
+        let stripRange = beginRange.lowerBound..<upper
 
         // Also consume one leading blank line that the installer inserts
         // before the begin marker, so repeated install/uninstall cycles

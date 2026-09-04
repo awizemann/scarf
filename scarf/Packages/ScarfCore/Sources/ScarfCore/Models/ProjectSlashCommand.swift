@@ -74,7 +74,15 @@ public extension ProjectSlashCommand {
     /// Allowed name shape: lowercase, digits, hyphens; must start with a
     /// letter. Mirrors the catalog validator's rule so on-disk files
     /// authored in Scarf round-trip cleanly through `.scarftemplate`.
-    static let validNamePattern = #"^[a-z][a-z0-9-]*$"#
+    ///
+    /// **Anchored `\A…\z`, not `^…$` (P8 SEC-L1).** ICU's `$` matches
+    /// before a final line terminator even without `.anchorsMatchLines`, so
+    /// `"deploy\n"` validated as a well-formed command name and the newline
+    /// travelled into the on-disk filename, the `/`-menu label, and any
+    /// line-oriented context that renders it — a name that can end a line
+    /// can forge the one after it. `\z` matches only at the true end of the
+    /// input.
+    static let validNamePattern = #"\A[a-z][a-z0-9-]*\z"#
 
     /// Returns nil when the name is well-formed; otherwise a human-readable
     /// reason suitable for inline editor UX.

@@ -87,9 +87,13 @@ struct KeychainEnvMirror: Sendable {
             return
         }
         let block = SecretsEnvBlock.renderBlock(slug: slug, entries: entries)
-        let existing = try readExisting(at: envPath, transport: transport)
+        let inspection = inspectEnv(at: envPath, transport: transport)
+        let existing = try text(of: inspection, at: envPath)
         let rewritten = SecretsEnvBlock.applyBlock(block, forSlug: slug, to: existing)
-        try writeIfChanged(path: envPath, existing: existing, rewritten: rewritten, transport: transport)
+        try writeIfChanged(
+            path: envPath, existing: existing, rewritten: rewritten,
+            inspection: inspection, transport: transport
+        )
     }
 
     /// Strip the project's block from `~/.hermes/.env`. Reads the
@@ -244,40 +248,96 @@ struct KeychainEnvMirror: Sendable {
         envPath: String,
         transport: any ServerTransport
     ) throws {
-        guard transport.fileExists(envPath) else { return }
-        let existing = try readExisting(at: envPath, transport: transport)
+        let inspection = inspectEnv(at: envPath, transport: transport)
+        if case .absent = inspection.state { return }
+        let existing = try text(of: inspection, at: envPath)
         let rewritten = SecretsEnvBlock.removeBlock(forSlug: slug, from: existing)
-        try writeIfChanged(path: envPath, existing: existing, rewritten: rewritten, transport: transport)
+        try writeIfChanged(
+            path: envPath, existing: existing, rewritten: rewritten,
+            inspection: inspection, transport: transport
+        )
     }
 
-    nonisolated private func readExisting(
-        at path: String,
-        transport: any ServerTransport
+    /// One guarded read of `~/.hermes/.env` (t-05a7c23d, the DI-C2 class).
+    ///
+    /// This file is a whole-file read-modify-write of a document Scarf does
+    /// not own — Hermes's own `ANTHROPIC_API_KEY` and every other
+    /// hand-authored variable live outside our markers. The old
+    /// `readExisting` had BOTH halves of the shape W1 killed in
+    /// `ProjectContextBlock`: `fileExists`-as-proof (false on a dropped
+    /// SSH round-trip → "" → the splice publishes a Scarf-block-only
+    /// `.env`, deleting the user's Hermes credentials) and
+    /// `String(data:encoding:.utf8) ?? ""` (one non-UTF-8 byte → same
+    /// outcome). Now: stat-confirmed, retried proof of damage, a refusal on
+    /// undecodable bytes, and a one-deep `.env.bak` of whatever is
+    /// replaced — whose `0600` mode SEC-L2 restored.
+    nonisolated private func inspectEnv(
+        at path: String, transport: any ServerTransport
+    ) -> GuardedJSONStore.Inspection {
+        let guarded = GuardedJSONStore(transport: transport, label: ".env")
+        var inspection = guarded.inspect(path, maxBytes: Int.max)
+        // An empty `.env` is a real, writable state (Hermes creates one);
+        // zero bytes is only "damage" for a JSON sidecar.
+        if case .unreadable = inspection.state, inspection.bytes?.isEmpty == true {
+            inspection = GuardedJSONStore.Inspection(state: .absent, bytes: nil)
+        }
+        return inspection
+    }
+
+    nonisolated private func text(
+        of inspection: GuardedJSONStore.Inspection, at path: String
     ) throws -> String {
-        guard transport.fileExists(path) else { return "" }
-        let data = try transport.readFile(path)
-        return String(data: data, encoding: .utf8) ?? ""
+        switch inspection.state {
+        case .absent:
+            return ""
+        case .unreadable(let damaged):
+            throw EnvMirrorError.refusedUnreadable(path: damaged)
+        case .quarantined:
+            // Unreachable at `maxBytes: .max`; refuse rather than replace
+            // bytes already judged unusable.
+            throw EnvMirrorError.refusedUnreadable(path: path)
+        case .present:
+            guard let existing = String(data: inspection.bytes ?? Data(), encoding: .utf8) else {
+                throw EnvMirrorError.refusedUndecodableText(path: path)
+            }
+            return existing
+        }
+    }
+
+    enum EnvMirrorError: LocalizedError, Equatable {
+        case refusedUnreadable(path: String)
+        case refusedUndecodableText(path: String)
+        case encodingFailed
+
+        var errorDescription: String? {
+            switch self {
+            case let .refusedUnreadable(path):
+                return "\(path) exists but couldn't be read; refusing to rewrite it."
+            case let .refusedUndecodableText(path):
+                return "\(path) is not valid UTF-8 text; refusing to rewrite it."
+            case .encodingFailed:
+                return "Couldn't UTF-8 encode env file"
+            }
+        }
     }
 
     nonisolated private func writeIfChanged(
         path: String,
         existing: String,
         rewritten: String,
+        inspection: GuardedJSONStore.Inspection,
         transport: any ServerTransport
     ) throws {
         guard rewritten != existing else { return }
         guard let outData = rewritten.data(using: .utf8) else {
-            throw NSError(
-                domain: "com.scarf.keychain-env-mirror",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Couldn't UTF-8 encode env file"]
-            )
+            throw EnvMirrorError.encodingFailed
         }
+        // `GuardedJSONStore.write` mkdir -p's the parent, keeps the one-deep
+        // `.bak`, and refuses an unreadable predecessor a second time.
         // LocalTransport's writeFile preserves 0600 for paths that match
         // `.env` conventions (see ServerTransport.writeFile docstring).
-        // The hermes home is ensured by Hermes itself; we don't mkdir
-        // here.
-        try transport.writeFile(path, data: outData)
+        try GuardedJSONStore(transport: transport, label: ".env")
+            .write(outData, to: path, after: inspection)
         Self.logger.info("rewrote \(path, privacy: .public) — \(outData.count) bytes")
     }
 

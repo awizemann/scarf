@@ -1,6 +1,7 @@
 import SwiftUI
 import ScarfCore
 import ScarfDesign
+import os
 
 /// Cockpit "Mini-apps" panel — lists the project's mini-apps and launches
 /// one through the permission gate into the sandboxed host.
@@ -159,13 +160,26 @@ struct MiniAppLaunchHost: View {
         }
     }
 
+    /// Persist the user's decision. A failure here is not silent-but-fine:
+    /// since G2 the store REFUSES the write when its signing key is
+    /// unavailable (rather than purging every other grant on the machine),
+    /// so this can now fail for a reason worth a log line. The failure
+    /// direction is still safe — nothing is recorded, so the sheet reappears
+    /// on the next launch — but it should be diagnosable when a user asks
+    /// why they keep being re-asked.
     private func save(_ permissions: Set<MiniAppPermission>) {
-        try? MiniAppGrantStore(context: serverContext).setGrant(
-            projectId: project.id.uuidString,
-            miniAppId: manifest.id,
-            permissions: permissions,
-            manifestFingerprint: manifest.securityFingerprint
-        )
+        do {
+            try MiniAppGrantStore(context: serverContext).setGrant(
+                projectId: project.id.uuidString,
+                miniAppId: manifest.id,
+                permissions: permissions,
+                manifestFingerprint: manifest.securityFingerprint
+            )
+        } catch {
+            Logger(subsystem: "com.scarf", category: "MiniAppLaunch").error(
+                "couldn't record the mini-app permission decision for \(manifest.id, privacy: .public): \(error.localizedDescription, privacy: .public); it will be asked again next launch"
+            )
+        }
     }
 }
 
@@ -364,7 +378,10 @@ extension MiniAppPermission {
         case .fileWrite: return String(localized: "Write files inside the project")
         case .store: return String(localized: "Save its own settings")
         case .net: return String(localized: "Make outbound network requests")
-        case .unknown(let raw): return String(localized: "Unknown permission \"\(raw)\" (will be denied)")
+        case .unknown(let raw):
+            // Sanitized, never verbatim: this is the consent sheet, and the
+            // string comes from an agent-written manifest (P8 SEC-L4).
+            return String(localized: "Unknown permission \"\(MiniAppPermission.displaySafe(raw))\" (will be denied)")
         }
     }
 }

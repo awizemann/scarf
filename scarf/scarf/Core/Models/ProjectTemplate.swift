@@ -370,6 +370,13 @@ nonisolated enum ProjectTemplateError: LocalizedError, Sendable {
     /// first deletion, which is why it can't reuse `registryUpdateFailed`,
     /// whose message promises the files are already gone.
     case inadmissibleProjectRoot(String)
+    /// MEMORY.md is stat-confirmed present but two reads of it failed. The
+    /// install would otherwise append its block to an empty document and
+    /// publish that over the user's notes (t-05a7c23d).
+    case memoryFileUnreadable(String)
+    /// MEMORY.md holds bytes that are not valid UTF-8. Read, but not text
+    /// we can splice — and `?? ""` used to make it an empty document.
+    case memoryFileNotText(String)
 
     var errorDescription: String? {
         switch self {
@@ -403,6 +410,10 @@ nonisolated enum ProjectTemplateError: LocalizedError, Sendable {
             return "Removed the template's files, but couldn't update the projects list: \(s). The project may still appear in the sidebar — try the uninstall again."
         case .inadmissibleProjectRoot(let s):
             return "Nothing was removed. \(s)"
+        case .memoryFileUnreadable(let p):
+            return "\(p) exists but couldn't be read; refusing to install a memory block over it."
+        case .memoryFileNotText(let p):
+            return "\(p) is not valid UTF-8 text; refusing to install a memory block over it."
         }
     }
 }

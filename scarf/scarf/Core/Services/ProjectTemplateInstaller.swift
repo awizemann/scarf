@@ -124,18 +124,14 @@ struct ProjectTemplateInstaller: Sendable {
         // logged + surfaced so we don't silently pretend MEMORY.md is empty
         // and append over a broken file.
         if plan.memoryAppendix != nil {
-            let existing: String
-            if transport.fileExists(plan.memoryPath) {
-                do {
-                    let data = try transport.readFile(plan.memoryPath)
-                    existing = String(data: data, encoding: .utf8) ?? ""
-                } catch {
-                    Self.logger.error("failed to read MEMORY.md at \(plan.memoryPath, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                    throw error
-                }
-            } else {
-                existing = ""
-            }
+            // Same guarded read the append itself makes — a file we can't
+            // read or can't decode fails preflight rather than being
+            // treated as empty (which would clear the collision check AND,
+            // before t-05a7c23d, get overwritten wholesale).
+            let existing = try Self.memoryText(
+                of: Self.inspectMemory(at: plan.memoryPath, transport: transport),
+                at: plan.memoryPath
+            )
             let marker = ProjectTemplateService.memoryBlockBeginMarker(templateId: plan.manifest.id)
             if existing.contains(marker) {
                 throw ProjectTemplateError.memoryBlockAlreadyExists(plan.manifest.id)
@@ -206,17 +202,62 @@ struct ProjectTemplateInstaller: Sendable {
 
     // MARK: - Memory
 
+    /// Append the template's memory block to MEMORY.md.
+    ///
+    /// **Guarded (t-05a7c23d, the DI-C2 class).** This is a whole-file
+    /// read-modify-write of the user's own long-lived prose, and it opened
+    /// with `(try? readFile).flatMap { String(data:encoding:.utf8) } ?? ""`
+    /// — which turned BOTH a dropped SSH round-trip and a single non-UTF-8
+    /// byte into an empty document, then published `"" + appendix` over the
+    /// file. A template install would silently replace MEMORY.md with its
+    /// own appendix. Same treatment W1 gave `ProjectContextBlock.writeBlock`:
+    /// stat-confirmed proof of damage, a refusal on undecodable bytes, and
+    /// a one-deep `MEMORY.md.bak` of whatever is replaced.
     nonisolated private func appendMemoryIfNeeded(plan: TemplateInstallPlan) throws {
         guard let appendix = plan.memoryAppendix else { return }
         let transport = context.makeTransport()
-        let existing = (try? transport.readFile(plan.memoryPath)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let inspection = Self.inspectMemory(at: plan.memoryPath, transport: transport)
+        let existing = try Self.memoryText(of: inspection, at: plan.memoryPath)
         let combined = existing + appendix
         guard let data = combined.data(using: .utf8) else {
             throw ProjectTemplateError.requiredFileMissing("memory/append.md (non-UTF8)")
         }
-        let parent = (plan.memoryPath as NSString).deletingLastPathComponent
-        try transport.createDirectory(parent)
-        try transport.writeFile(plan.memoryPath, data: data)
+        try GuardedJSONStore(transport: transport, label: "MEMORY.md")
+            .write(data, to: plan.memoryPath, after: inspection)
+    }
+
+    /// One guarded read of MEMORY.md, shared by preflight and the append.
+    nonisolated static func inspectMemory(
+        at path: String, transport: any ServerTransport
+    ) -> GuardedJSONStore.Inspection {
+        // Uncapped for the same reason `ProjectContextBlock.maxAgentsBytes`
+        // is: MEMORY.md is the user's prose, not an index we decode, and
+        // quarantining it is not ours to do.
+        var inspection = GuardedJSONStore(transport: transport, label: "MEMORY.md")
+            .inspect(path, maxBytes: Int.max)
+        // An empty MEMORY.md is a normal file with nothing to lose.
+        if case .unreadable = inspection.state, inspection.bytes?.isEmpty == true {
+            inspection = GuardedJSONStore.Inspection(state: .absent, bytes: nil)
+        }
+        return inspection
+    }
+
+    nonisolated static func memoryText(
+        of inspection: GuardedJSONStore.Inspection, at path: String
+    ) throws -> String {
+        switch inspection.state {
+        case .absent:
+            return ""
+        case .unreadable(let damaged):
+            throw ProjectTemplateError.memoryFileUnreadable(damaged)
+        case .quarantined:
+            throw ProjectTemplateError.memoryFileUnreadable(path)
+        case .present:
+            guard let text = String(data: inspection.bytes ?? Data(), encoding: .utf8) else {
+                throw ProjectTemplateError.memoryFileNotText(path)
+            }
+            return text
+        }
     }
 
     // MARK: - Cron

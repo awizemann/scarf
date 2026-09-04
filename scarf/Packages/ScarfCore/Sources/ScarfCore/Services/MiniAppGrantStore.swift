@@ -66,6 +66,15 @@ public struct MiniAppGrantStore: Sendable {
         self.signer = MiniAppGrantSigner(testServiceSuffix: testKeySuffix)
     }
 
+    /// Test seam for the DI-M3 refusal: a store whose signer cannot reach
+    /// its key, which is otherwise unreachable (the key is minted on read).
+    nonisolated init(context: ServerContext, signerKeyUnavailable: Bool) {
+        self.context = context
+        self.signer = MiniAppGrantSigner(
+            testServiceSuffix: nil, keyUnavailableForTesting: signerKeyUnavailable
+        )
+    }
+
     /// The permission set the user approved for this mini-app, or empty
     /// (default-deny) when no decision is on record. Unknown raw values
     /// decode to `.unknown` and stay denied at preflight.
@@ -85,20 +94,20 @@ public struct MiniAppGrantStore: Sendable {
         permissions: Set<MiniAppPermission>,
         manifestFingerprint: String? = nil
     ) throws {
+        var grant = MiniAppGrant(
+            projectId: projectId,
+            miniAppId: miniAppId,
+            permissions: permissions.map(\.rawValue).sorted(),
+            decidedAt: Self.iso8601.string(from: Date()),
+            manifestFingerprint: manifestFingerprint
+        )
+        // Signed FIRST, over the final field values, and OUTSIDE the
+        // mutation: an unsignable row (uninjective component, or a Keychain
+        // that won't hand over the key) must abort before anything is
+        // written, not leave an unsigned row the next load silently drops.
+        grant.signature = try signer.signedTag(for: grant)
         try mutate { grants in
             grants.removeAll { $0.projectId == projectId && $0.miniAppId == miniAppId }
-            var grant = MiniAppGrant(
-                projectId: projectId,
-                miniAppId: miniAppId,
-                permissions: permissions.map(\.rawValue).sorted(),
-                decidedAt: Self.iso8601.string(from: Date()),
-                manifestFingerprint: manifestFingerprint
-            )
-            // Signed LAST, over the final field values. A Keychain that
-            // won't hand over the key leaves the row unsigned, which the
-            // next load drops — the user is re-asked rather than silently
-            // granted, and the sheet is the thing that was working anyway.
-            grant.signature = signer.tag(for: grant)
             grants.append(grant)
             return true
         }
@@ -249,6 +258,19 @@ public struct MiniAppGrantStore: Sendable {
     }
 
     private nonisolated func mutateLocked(_ body: (inout [MiniAppGrant]) -> Bool) throws {
+        // SIGNER-UNAVAILABLE IS A REFUSAL, NOT A FILTER (P8 DI-M3). `inspect`
+        // drops every row the signer can't verify — and a signer with no key
+        // can verify nothing, so it hands back an empty list that this write
+        // would publish as the truth. One locked Keychain would then delete
+        // every permission decision on the machine, permanently, with no
+        // quarantine copy and no `.bak` worth having (the `.bak` would hold
+        // the good file exactly once, then be overwritten by the next
+        // purge). Reads keep dropping — default-deny plus a re-ask is a
+        // recovery — but a WRITE that cannot tell forged rows from real ones
+        // has no business rewriting the file at all.
+        guard signer.isKeyAvailable() else {
+            throw MiniAppGrantSignerError.signingKeyUnavailable
+        }
         let (loaded, inspection) = inspect()
         var grants = loaded
         guard body(&grants) else { return }
