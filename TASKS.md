@@ -47,6 +47,15 @@
 - [ ] v0.21 platform adapters not in Scarf roster + Discord allowlist gap (id: t-0c0b1aa7) (added: 2026-09-02)
 - [ ] UI automation pass (re-enable scarfUITests, cover real-file flows) (id: t-d11c4fef) (added: 2026-09-02)
 - [ ] Harden Scarf-owned project files against agent damage (id: t-67f621c7) (added: 2026-09-02) (priority: high)
+- [ ] Projects follow-up: re-sync stale v1.2.0 skill copy in templates/ staging (id: t-18d1fedf) (added: 2026-09-03)
+- [ ] Projects follow-up: project_set_config MCP tool (keychain routing) (id: t-743d2609) (added: 2026-09-03)
+- [ ] Projects follow-up: cross-process registry write lock (all writers) (id: t-db8c745b) (added: 2026-09-03)
+- [ ] Projects S1: uninstall + keychain trust boundaries (security HIGHs) (id: t-f227bb0f) (added: 2026-09-03) (priority: urgent)
+- [ ] Projects D1: adjacent-registry chokepoints + SSH staging + unknown keys (id: t-3b855719) (added: 2026-09-03) (priority: urgent)
+- [ ] Projects D3: transport atomicity parity — iOS truncating write, remote restore, project.json probe (id: t-a6f22379) (added: 2026-09-03) (priority: urgent)
+- [ ] Projects S2/D2: security mediums + lifecycle integrity batch (id: t-a2c169f0) (added: 2026-09-03) (priority: high)
+- [ ] Projects PF: decouple project surfaces from the watcher tick (id: t-45594d27) (added: 2026-09-03) (priority: high)
+- [ ] Projects AX: accessibility batch for projects surfaces (id: t-44d4ad5b) (added: 2026-09-03)
 
 ## Doing
 
@@ -55,6 +64,15 @@
 
 ## Done
 
+- [x] Projects P7: full-surface audit — security, perf, data integrity, a11y (id: t-34cd12c9) (added: 2026-09-03)
+- [x] Projects R2: doctor trust fixes, YAML registrar hardening, denylist scope (id: t-1a1a9ce3) (added: 2026-09-03) (priority: urgent)
+- [x] Projects R1: chokepoint guards — registry, dashboard clamp, identity salt (id: t-50a20782) (added: 2026-09-03) (priority: urgent)
+- [x] Projects P6: skill rewrite to prefer MCP tools + bad-skill cleanup (id: t-2cea158a) (added: 2026-09-03) (priority: high)
+- [x] Projects P5: scarf-projects MCP server (bundled, auto-registered) (id: t-3d915f7f) (added: 2026-09-03) (priority: high)
+- [x] Projects P4: Project Doctor reconciliation service + cockpit surface (id: t-eb8c7005) (added: 2026-09-03) (priority: high)
+- [x] Projects P3: identity hardening — stable UUIDs, unified constants (id: t-91050c08) (added: 2026-09-03) (priority: high)
+- [x] Projects P2: user-visible error surfacing for project mutations (id: t-5523ab86) (added: 2026-09-03) (priority: high)
+- [x] Projects P1: registry survival — salvage decode, quarantine, atomic writes (id: t-22700ef6) (added: 2026-09-03) (priority: high)
 - [x] **[todo/misc]** Ed25519KeyGenerator: resolve the FIXME re Citadel auth method expectations: `Packages/ScarfIOS/Sources/ScarfIOS/Ed25519KeyGenerator.swift:31`. (id: t-todo-ed25519) (added: 2026-06-13, source: t-aud16)
 - [x] **[todo/WS-8]** Verify TTS/xAI config keys + ACP count wire field: `HermesFileService.swift:139`, `SettingsViewModel.swift:213`, `HermesConfig.swift:225` (xAI TTS keys), `ACPMessages.swift:272`, `ACPClient.swift:406` (count field). (id: t-todo-ws8) (added: 2026-06-13, source: t-aud16)
 - [x] **[todo/WS-7]** Verify MCP/profiles/cron CLI flags + sse transport on v0.13: `HermesFileService.swift:725` (mcp add flags), `:1013` (transport: sse), `WebToolsTab.swift:88`, `ProfilesView.swift:308` (--no-skills/--clone-all), `CronViewModel.swift:172,202` (--no-agent), `HermesMCPServer.swift:7` (sse name), `:44` (300s default). (id: t-todo-ws7) (added: 2026-06-13, source: t-aud16)
