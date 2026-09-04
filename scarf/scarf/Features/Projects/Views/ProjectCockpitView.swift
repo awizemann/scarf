@@ -29,6 +29,7 @@ struct ProjectCockpitView: View {
 
     @State private var viewModel: ProjectCockpitViewModel?
     @State private var selectedPanel: CockpitPanel = .sessions
+    @State private var showDoctor = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,6 +41,14 @@ struct ProjectCockpitView: View {
                 upgradeBanner
                     .padding(.horizontal)
                     .padding(.bottom, 10)
+            }
+            if let health = viewModel?.health {
+                let mine = health.issues(forProjectPath: project.path, name: project.name)
+                if !mine.isEmpty {
+                    healthRow(mine)
+                        .padding(.horizontal)
+                        .padding(.bottom, 10)
+                }
             }
             Divider()
             panelBar
@@ -71,6 +80,48 @@ struct ProjectCockpitView: View {
         .onChange(of: fileWatcher.lastChangeDate) {
             Task { await viewModel?.load(force: true) }
         }
+        .sheet(isPresented: $showDoctor, onDismiss: {
+            // The doctor writes the registry and project records, so the
+            // cockpit's facets — and its own health line — are stale once it
+            // closes.
+            Task { await viewModel?.load(force: true, recheckHealth: true) }
+        }) {
+            ProjectDoctorSheet()
+        }
+    }
+
+    // MARK: - Health row
+
+    /// Shown only when the last reconciliation pass found something wrong
+    /// with THIS project. A "no issues" row every time you open a project
+    /// would be noise, and a registry-wide count here would blame this
+    /// project for another one's problem; the header's stethoscope button is
+    /// the always-available way into the full report.
+    private func healthRow(_ issues: [ProjectDoctorFinding]) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "stethoscope")
+                .foregroundStyle(issues.contains { $0.severity == .high } ? ScarfColor.danger : ScarfColor.warning)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Project setup needs attention")
+                    .font(.callout.weight(.medium))
+                Text(issues.count == 1
+                    ? issues[0].title
+                    : "\(issues.count) issues with this project's setup.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            Spacer()
+            Button("Open Project Doctor") { showDoctor = true }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ScarfColor.warning.opacity(0.14))
+        .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md))
     }
 
     // MARK: - Header
@@ -121,6 +172,15 @@ struct ProjectCockpitView: View {
             .help("Reveal in Finder")
             .accessibilityLabel(Text("Reveal in Finder"))
             .disabled(serverContext.isRemote)
+
+            Button {
+                showDoctor = true
+            } label: {
+                Image(systemName: "stethoscope")
+            }
+            .buttonStyle(.borderless)
+            .help("Check your projects for setup problems")
+            .accessibilityLabel(Text("Project Doctor"))
         }
     }
 

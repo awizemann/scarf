@@ -17,6 +17,10 @@ import ScarfDesign
 struct RegistryDamageBanner: View {
     let damage: RegistryDamageNotice
     let isRemote: Bool
+    /// Opens the Project Doctor, which reconciles the registry against each
+    /// project's own record and offers the repairs for what survived the
+    /// damage. Phase 2 shipped this banner with nowhere to go from it.
+    let onOpenDoctor: () -> Void
     let onDismiss: () -> Void
 
     var body: some View {
@@ -43,6 +47,8 @@ struct RegistryDamageBanner: View {
             // buttons stay outside it.
             .accessibilityElement(children: .combine)
             Spacer(minLength: 8)
+            Button("Open Project Doctor") { onOpenDoctor() }
+                .controlSize(.small)
             if !isRemote, let path = damage.revealPath {
                 Button("Show in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])

@@ -325,7 +325,14 @@ public struct ProjectStore: Sendable {
     /// Ensure the registry has a row for this project carrying its
     /// stable UUID. Matches by host path. Writes the registry only when
     /// something actually changes (idempotent — no churn).
-    private nonisolated func indexInRegistry(_ project: ScarfProject) throws {
+    ///
+    /// `public` so `ProjectDoctorService` can back-fill a registry row's
+    /// `uuid` without touching an intact `project.json` (and without
+    /// inventing a second writer for the same job). It loads the registry
+    /// through the salvaging decoder and writes the result back, so a caller
+    /// that could be looking at a LOSSY load must refuse before calling it —
+    /// see `ProjectDoctorService.repairBlockReason`.
+    public nonisolated func indexInRegistry(_ project: ScarfProject) throws {
         let dashboardService = ProjectDashboardService(context: context)
         var registry = dashboardService.loadRegistry()
         if let idx = registry.projects.firstIndex(where: { $0.path == project.rootPath }) {

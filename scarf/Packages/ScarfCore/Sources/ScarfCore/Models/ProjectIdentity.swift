@@ -108,6 +108,12 @@ public enum ProjectIdentity {
     ///   registry row's problem, not this function's. Folding would also make
     ///   ids differ between the case-sensitive and case-insensitive volumes
     ///   Scarf talks to.
+    /// The lexical normalization `deterministicID` seeds on, exposed so
+    /// callers that compare paths for *identity* (the doctor's duplicate-path
+    /// and orphan-scan set arithmetic) agree with the id derivation instead of
+    /// re-implementing the rules. Same frozen contract as `deterministicID`.
+    public static func normalizedPath(_ path: String) -> String { normalize(path) }
+
     private static func normalize(_ path: String) -> String {
         let isAbsolute = path.hasPrefix("/")
         var segments: [String] = []

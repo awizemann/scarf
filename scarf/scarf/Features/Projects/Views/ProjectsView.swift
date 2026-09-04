@@ -51,6 +51,10 @@ struct ProjectsView: View {
     /// evaluation. See `ProjectMenuProbeCache`.
     @State private var menuProbes = ProjectMenuProbeCache()
 
+    /// Project Doctor sheet, opened from the registry-damage banner —
+    /// Phase 2 left that banner with nothing to act on.
+    @State private var showingDoctorSheet = false
+
     init(context: ServerContext) {
         _viewModel = State(initialValue: ProjectsViewModel(context: context))
         _installerViewModel = State(initialValue: TemplateInstallerViewModel(context: context))
@@ -71,6 +75,7 @@ struct ProjectsView: View {
                 RegistryDamageBanner(
                     damage: damage,
                     isRemote: serverContext.isRemote,
+                    onOpenDoctor: { showingDoctorSheet = true },
                     onDismiss: { viewModel.dismissRegistryDamage() }
                 )
                 Divider()
@@ -84,6 +89,13 @@ struct ProjectsView: View {
         }
         .navigationTitle("Projects")
         .toolbar { templatesToolbar }
+        .sheet(isPresented: $showingDoctorSheet, onDismiss: {
+            // Repairs rewrite the registry; the list and the banner both
+            // describe what was on disk before them.
+            Task { await viewModel.reload() }
+        }) {
+            ProjectDoctorSheet()
+        }
         .task {
             await viewModel.reload()
             // Phase-1: lazily migrate existing projects to the first-class

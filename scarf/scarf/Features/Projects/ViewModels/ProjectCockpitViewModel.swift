@@ -50,6 +50,18 @@ final class ProjectCockpitViewModel {
     var needsUpgrade = false
     var isLoading = false
 
+    /// Last reconciliation pass, driving the cockpit's health row. `nil`
+    /// until the first pass finishes.
+    ///
+    /// Deliberately NOT refreshed on every load: the doctor lists
+    /// directories and re-reads the registry, and this view model reloads
+    /// from `.onChange(fileWatcher.lastChangeDate)`, which fires per
+    /// persisted message during a stream. On an SSH context that would put a
+    /// directory crawl behind every token. It runs at most once per cache
+    /// window (see `ProjectHealthCache`) and whenever a caller explicitly
+    /// asks (`recheckHealth`) — after the doctor sheet closes, that is.
+    var health: ProjectDoctorReport?
+
     @ObservationIgnored private var hasLoaded = false
 
     init(context: ServerContext, project: ProjectEntry) {
@@ -67,10 +79,18 @@ final class ProjectCockpitViewModel {
     /// in-flight load is already a fresh one.
     @ObservationIgnored private var inFlightLoad: Task<Void, Never>?
 
-    func load(force: Bool = false) async {
-        if hasLoaded && !force { return }
+    func load(force: Bool = false, recheckHealth: Bool = false) async {
+        if recheckHealth { ProjectHealthCache.shared.invalidate(context.id) }
+        if hasLoaded && !force && !recheckHealth { return }
         if let existing = inFlightLoad {
             await existing.value
+            // A recheck that merely JOINED an in-flight pass has not been
+            // served: that pass decided whether to scan before the
+            // invalidation above. Run our own so the health row actually
+            // reflects the repairs the user just made.
+            if recheckHealth, ProjectHealthCache.shared.report(context.id) == nil {
+                await loadImpl()
+            }
             return
         }
         let task: Task<Void, Never> = Task { @MainActor [weak self] in
@@ -84,6 +104,14 @@ final class ProjectCockpitViewModel {
     private func loadImpl() async {
         hasLoaded = true
         isLoading = true
+        // Claimed before the detached work starts, so two loads that overlap
+        // (a watcher tick landing on the first open) don't both scan. The
+        // claim lives in a per-CONTEXT cache rather than on this instance:
+        // the cockpit builds a new view model per project, so an
+        // instance-scoped flag re-ran a registry-wide scan on every project
+        // switch — and again on every switch back.
+        let cached = ProjectHealthCache.shared.report(context.id)
+        let shouldDiagnose = ProjectHealthCache.shared.claimIfIdle(context.id)
 
         let context = self.context
         let project = self.project
@@ -140,6 +168,7 @@ final class ProjectCockpitViewModel {
             // when the project ships no dashboard — the panel is hidden.
             let dashboard = ProjectDashboardService(context: context).loadDashboard(for: project)
             let needsUpgrade = ProjectUpgradeService(context: context).needsUpgrade(project)
+            let health = shouldDiagnose ? ProjectDoctorService(context: context).diagnose() : nil
 
             return Loaded(
                 project: sp,
@@ -150,7 +179,8 @@ final class ProjectCockpitViewModel {
                 templateVersion: tmpl?.version,
                 miniApps: miniApps,
                 dashboard: dashboard,
-                needsUpgrade: needsUpgrade
+                needsUpgrade: needsUpgrade,
+                health: health
             )
         }.value
 
@@ -163,6 +193,14 @@ final class ProjectCockpitViewModel {
         miniApps = result.miniApps
         dashboard = result.dashboard
         needsUpgrade = result.needsUpgrade
+        if let fresh = result.health {
+            ProjectHealthCache.shared.store(fresh, for: context.id)
+            health = fresh
+        } else {
+            // A load that skipped the scan reuses the cached verdict rather
+            // than blanking the health row.
+            health = cached ?? health
+        }
         isLoading = false
 
         // Resolve the bound preset's display name (actor hop), if any.
@@ -208,5 +246,7 @@ final class ProjectCockpitViewModel {
         let miniApps: [MiniAppManifest]
         let dashboard: ProjectDashboard?
         let needsUpgrade: Bool
+        /// `nil` when this pass deliberately skipped the reconciliation scan.
+        let health: ProjectDoctorReport?
     }
 }
