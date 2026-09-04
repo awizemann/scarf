@@ -133,12 +133,44 @@ import Foundation
         #expect(store.merge(["\u{0}blob": "two"]) == true)
     }
 
-    @Test("returning to per-path alignment drops the blob key")
-    func alignmentClearsTheBlob() {
+    /// F1: the mirror image of the bug `merge` fixed, and the reason this
+    /// test now asserts the OPPOSITE of what it used to.
+    ///
+    /// `apply` replaced the map wholesale, so an aligned poll erased the
+    /// blob baseline. On a host that alternates — aligned, misaligned,
+    /// aligned — the blob was therefore first-sight EVERY time, and a
+    /// change that only the blob could witness was never reported. `apply`
+    /// is authoritative about paths and about nothing else.
+    @Test("returning to per-path alignment keeps the blob baseline")
+    func alignmentKeepsTheBlob() {
         let store = WatchBaselineStore()
-        _ = store.merge(["\u{0}blob": "one"])
+        _ = store.merge([WatchBaselineStore.blobKey: "one"])
         _ = store.apply(["/a": "100:10"])
-        #expect(store.signature(for: "\u{0}blob") == nil)
+        #expect(store.signature(for: WatchBaselineStore.blobKey) == "one")
+        // …and because it survived, the next misaligned reply that differs
+        // is a CHANGE rather than a silent re-baseline.
+        #expect(store.merge([WatchBaselineStore.blobKey: "two"]) == true)
+    }
+
+    /// The full alternation, which is what the poller actually does.
+    @Test("a change seen only during a blob window survives an aligned poll")
+    func blobChangeSurvivesAlternation() {
+        let store = WatchBaselineStore()
+        _ = store.merge([WatchBaselineStore.blobKey: "one"])
+        _ = store.apply(["/a": "100:10"])
+        _ = store.apply(["/a": "100:10"])
+        #expect(store.merge([WatchBaselineStore.blobKey: "two"]) == true)
+    }
+
+    /// `apply` still owns the path half: a path it doesn't mention is
+    /// forgotten, so a shrinking watch set can't keep answering for paths
+    /// nobody watches. Only the reserved namespace is exempt.
+    @Test("apply still forgets paths it does not mention")
+    func applyStillForgetsPaths() {
+        let store = WatchBaselineStore()
+        _ = store.apply(["/a": "100:10", "/b": "100:20"])
+        _ = store.apply(["/a": "100:10"])
+        #expect(store.signature(for: "/b") == nil)
     }
 }
 

@@ -220,27 +220,34 @@ final class ScarfMiniAppBridge: NSObject, WKScriptMessageHandlerWithReply {
                 reply(nil, "not_supported: file.read is only available for projects on this Mac")
                 return
             }
-            // Time-of-use root check. `projectPath` came from a registry row
-            // and `projects.json` is agent-writable, so a row rewritten to
+            // Time-of-use anchor. `projectPath` came from a registry row and
+            // `projects.json` is agent-writable, so a row rewritten to
             // `/Users/me` would make "contained by the project root" mean
-            // "anywhere in the user's home". Refuse the read and say why —
-            // the project itself stays in the sidebar.
-            if let refusal = ProjectRootPolicy.refusalAtUse(for: projectPath, context: serverContext) {
-                Self.logger.error(
-                    "refusing file.read: \(refusal.message, privacy: .public)"
-                )
-                reply(nil, "permission_denied: \(refusal.message)")
+            // "anywhere in the user's home" — and a project root that is
+            // ITSELF a symlink would relocate containment the same way. The
+            // anchor re-runs `ProjectRootPolicy` AND freezes the resolved
+            // base, so the `F_GETPATH` check below compares against a base
+            // that can't be moved between the check and the read. Refuse and
+            // say why — the project itself stays in the sidebar.
+            let anchored = MiniAppAssetResolver.anchor(
+                baseDirectory: projectPath, context: serverContext
+            )
+            guard case .success(let anchor) = anchored else {
+                let message: String
+                if case .failure(let refusal) = anchored { message = refusal.message } else { message = "" }
+                Self.logger.error("refusing file.read: \(message, privacy: .public)")
+                reply(nil, "permission_denied: \(message)")
                 return
             }
             DispatchQueue.global(qos: .userInitiated).async {
                 // Single fd: contained, `O_NOFOLLOW`, fstat-validated,
-                // `F_GETPATH`-rechecked, then read. Closes the symlink-flip
-                // window the old check-path-then-open-path shape left open.
+                // `F_GETPATH`-rechecked against the FROZEN anchor, then
+                // read. Closes the symlink-flip window the old
+                // check-path-then-open-path shape left open.
                 guard case .success(let file) = MiniAppAssetResolver.readContainedFile(
                     requestPath: rel,
-                    baseDirectory: projectPath,
-                    maxBytes: Self.maxFileReadBytes,
-                    isLocal: true
+                    anchor: anchor,
+                    maxBytes: Self.maxFileReadBytes
                 ), let text = String(data: file.data, encoding: .utf8) else {
                     DispatchQueue.main.async {
                         reply(nil, "not_found: file is missing, too large, outside the project, or not UTF-8 text")

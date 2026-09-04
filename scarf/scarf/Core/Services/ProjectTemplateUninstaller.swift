@@ -853,43 +853,25 @@ struct ProjectTemplateUninstaller: Sendable {
             return (attrs[.type] as? FileAttributeType) == .typeSymbolicLink
         }
 
+        // The four path primitives below live in `ScarfCore.PhysicalPath`
+        // now: the mini-app base anchor needs the identical notion of
+        // "where does this path really point", and two containment guards
+        // with two notions is one too many. Kept as thin forwarders so the
+        // call sites (and the tests that name them) don't churn.
         nonisolated static func standardized(_ path: String) -> String {
-            var out = URL(fileURLWithPath: path).standardizedFileURL.path
-            while out.count > 1, out.hasSuffix("/") { out.removeLast() }
-            return out
+            PhysicalPath.standardized(path)
         }
 
         nonisolated static func resolved(_ path: String) -> String {
-            var out = URL(fileURLWithPath: path)
-                .standardizedFileURL.resolvingSymlinksInPath().path
-            while out.count > 1, out.hasSuffix("/") { out.removeLast() }
-            return out
+            PhysicalPath.resolved(path)
         }
 
-        /// Canonical on-disk spelling, tolerant of a path that doesn't
-        /// exist (yet / any more). `resolvingSymlinksInPath` gives up
-        /// entirely on a path whose leaf is missing — it returns the input
-        /// unresolved — which would make the comparison above depend on
-        /// whether a file happened to be there. So: resolve the deepest
-        /// EXISTING ancestor and re-attach the missing tail verbatim.
         nonisolated static func physicalPath(_ path: String) -> String {
-            let std = standardized(path)
-            var components = std.split(separator: "/").map(String.init)
-            var tail: [String] = []
-            while !components.isEmpty {
-                let candidate = "/" + components.joined(separator: "/")
-                if exists(candidate) {
-                    return ([resolved(candidate)] + tail).joined(separator: "/")
-                }
-                tail.insert(components.removeLast(), at: 0)
-            }
-            return std
+            PhysicalPath.physical(path)
         }
 
-        /// `lstat`-flavored existence: true for a dangling symlink too,
-        /// where `FileManager.fileExists` (which follows) says false.
         nonisolated static func exists(_ path: String) -> Bool {
-            (try? FileManager.default.attributesOfItem(atPath: path)) != nil
+            PhysicalPath.exists(path)
         }
     }
 

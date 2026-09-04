@@ -54,11 +54,25 @@ struct ImageWidgetView: View {
         }
         // Title + loaded image read as one VO stop instead of a "photo"
         // icon, a blank "image", and a separate caption.
-        .accessibilityElement(children: .combine)
+        //
+        // But ONLY when there is nothing to interact with. `.combine`
+        // flattens its subtree into a single static element, and when the
+        // beacon consent card is showing, that subtree contains the Allow
+        // button — flattening it dropped the button's focusability and its
+        // hint, leaving a VoiceOver or Full Keyboard Access user with a
+        // security prompt they could hear and not answer. `.contain` keeps
+        // the card (and its own grouping) reachable.
+        .accessibilityElement(children: showsConsentCard ? .contain : .combine)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(ScarfColor.backgroundSecondary)
         .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.lg))
+    }
+
+    /// Is the beacon consent card the thing on screen? Decides the outer
+    /// accessibility grouping — see `body`.
+    private var showsConsentCard: Bool {
+        widget.path == nil && consentProjectId != nil && remoteURL != nil && !hostAllowed
     }
 
     @ViewBuilder
@@ -66,7 +80,22 @@ struct ImageWidgetView: View {
         if let _ = widget.path {
             localContent
         } else if let parsed = remoteURL {
-            remoteContent(url: parsed)
+            if let projectId = consentProjectId {
+                remoteContent(url: parsed, projectId: projectId)
+            } else {
+                // NO PROJECT, NO CONSENT (P8 F1-L4). This used to fall back
+                // to `""`, which put every project with no resolvable root
+                // into ONE shared allowlist bucket: allowing a host in any
+                // of them allowed it in all of them, and a surface that
+                // never had a project root could inherit an approval it was
+                // never shown. There is no honest owner for a consent
+                // record here, so there is no consent — the request is
+                // refused rather than asked about.
+                WidgetErrorCard(
+                    title: "",
+                    reason: "This dashboard isn't bound to a project folder, so Scarf can't ask for (or remember) permission to contact a remote image host."
+                )
+            }
         } else if let raw = widget.url, !raw.isEmpty {
             WidgetErrorCard(
                 verbatimReason: "\(raw)\n\nOnly https:// URLs can be loaded by an image widget.",
@@ -147,15 +176,15 @@ struct ImageWidgetView: View {
     /// blessed doesn't re-ask on every watcher tick, and an agent that
     /// changes the PATH doesn't get a fresh unconsented request.
     @ViewBuilder
-    private func remoteContent(url: URL) -> some View {
+    private func remoteContent(url: URL, projectId: String) -> some View {
         if hostAllowed {
             remoteImage(url: url)
         } else {
-            beaconConsentCard(url: url)
+            beaconConsentCard(url: url, projectId: projectId)
         }
     }
 
-    private func beaconConsentCard(url: URL) -> some View {
+    private func beaconConsentCard(url: URL, projectId: String) -> some View {
         let host = ImageHostConsentStore.normalizedHost(url) ?? ""
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
@@ -171,7 +200,7 @@ struct ImageWidgetView: View {
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("Allow \(host)") {
-                    consent.allow(url: url, projectId: consentProjectId)
+                    consent.allow(url: url, projectId: projectId)
                     hostAllowed = true
                 }
                 .buttonStyle(.bordered)
@@ -185,16 +214,24 @@ struct ImageWidgetView: View {
         .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.sm))
         // One VO stop: the ask, the consequence, and the button's own.
         .accessibilityElement(children: .contain)
-        .task(id: url.absoluteString + "|" + consentProjectId) {
-            hostAllowed = consent.isAllowed(url: url, projectId: consentProjectId)
+        .task(id: url.absoluteString + "|" + projectId) {
+            hostAllowed = consent.isAllowed(url: url, projectId: projectId)
         }
     }
 
-    /// The project this consent belongs to. The widget surface has the
-    /// project ROOT to hand, which is exactly the id `ProjectStore` derives
-    /// project identity from, and is stable across renames of the display
-    /// name.
-    private var consentProjectId: String { projectRoot ?? "" }
+    /// The project this consent belongs to, or `nil` when this surface has
+    /// no project root — in which case there is nothing to key a consent
+    /// record on and remote images are refused outright (see `content`).
+    ///
+    /// The widget surface has the project ROOT to hand, which is exactly the
+    /// id `ProjectStore` derives project identity from, and is stable across
+    /// renames of the display name. It is a PATH, though, so a registry row
+    /// rewritten onto a previously-blessed path inherits its allowlist —
+    /// see `ImageHostConsentStore`.
+    private var consentProjectId: String? {
+        guard let projectRoot, !projectRoot.isEmpty else { return nil }
+        return projectRoot
+    }
 
     private func remoteImage(url: URL) -> some View {
         AsyncImage(url: url) { phase in

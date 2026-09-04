@@ -993,7 +993,9 @@ public struct SSHTransport: ServerTransport {
                             // aligned reply then re-baselined silently and
                             // swallowed every change that landed in the gap
                             // (DI H6).
-                            if memory.merge(["\u{0}blob": lines.joined(separator: "\n")]) {
+                            if memory.merge([
+                                WatchBaselineStore.blobKey: lines.joined(separator: "\n")
+                            ]) {
                                 continuation.yield(.anyChanged)
                             }
                         }

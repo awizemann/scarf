@@ -86,6 +86,14 @@ struct MiniAppLaunchHost: View {
     /// default policy). Without this, re-reviewing reset to defaults and
     /// silently discarded the user's prior customization on approve.
     @State private var reviewSeed: Set<MiniAppPermission>? = nil
+    /// Approve is in flight (the grant write is off-main and can block on
+    /// the registry lock + an SSH round-trip). Disables the button and shows
+    /// progress rather than freezing the sheet under the press.
+    @State private var isSaving = false
+    /// A failed save, shown in the sheet. The failure direction is safe
+    /// (nothing recorded → asked again next launch), but silently running
+    /// after a refused write told the user their decision had stuck.
+    @State private var saveError: String? = nil
 
     private enum Phase { case loading, incompatible, review, run }
 
@@ -110,10 +118,22 @@ struct MiniAppLaunchHost: View {
                 MiniAppPermissionPreview(
                     manifest: manifest,
                     seed: reviewSeed,
+                    isSaving: isSaving,
+                    saveError: saveError,
                     onApprove: { approved in
-                        save(approved)
-                        granted = approved
-                        phase = .run
+                        guard !isSaving else { return }
+                        isSaving = true
+                        saveError = nil
+                        Task {
+                            let failure = await save(approved)
+                            isSaving = false
+                            if let failure {
+                                saveError = failure
+                            } else {
+                                granted = approved
+                                phase = .run
+                            }
+                        }
                     },
                     onCancel: { onClose() }
                 )
@@ -136,8 +156,40 @@ struct MiniAppLaunchHost: View {
                 phase = .incompatible
                 return
             }
-            let store = MiniAppGrantStore(context: serverContext)
+            // OFF-MAIN (charter C10). These are up to three transport reads
+            // of the grants file — each one a guarded read that may retry,
+            // and on a cold start with a corrupt file a quarantine write too
+            // — and they used to run on the MainActor just to decide which
+            // sheet to show. On a remote context that is the whole window
+            // frozen before anything is drawn. One detached hop answers all
+            // three questions together.
+            let context = serverContext
             let pid = project.id.uuidString
+            let miniAppId = manifest.id
+            let fingerprint = manifest.securityFingerprint
+            let permissions = manifest.permissions
+            let decision = await Task.detached { () -> (matched: Bool, granted: Set<MiniAppPermission>, seed: Set<MiniAppPermission>?) in
+                let store = MiniAppGrantStore(context: context)
+                if store.hasDecision(projectId: pid, miniAppId: miniAppId, matching: fingerprint) {
+                    return (
+                        true,
+                        store.grantedPermissions(projectId: pid, miniAppId: miniAppId),
+                        nil
+                    )
+                }
+                let seed = store.hasDecision(projectId: pid, miniAppId: miniAppId)
+                    ? store.grantedPermissions(projectId: pid, miniAppId: miniAppId)
+                        .intersection(permissions)
+                    : nil
+                return (false, [], seed)
+            }.value
+            // CANCELLATION GUARD. `.task(id:)` cancellation does not stop a
+            // suspended `await` from resuming, and a detached child doesn't
+            // inherit cancellation at all — so without this, a switch to
+            // another mini-app could be followed by the PREVIOUS one's read
+            // landing and driving this view into `.run` with the wrong
+            // grant set.
+            guard !Task.isCancelled else { return }
             // TOFU is bound to CONTENT, not just identity: the stored grant
             // is reused only when it was made about this exact manifest
             // fingerprint (permissions + entry + minBridgeVersion). A
@@ -147,39 +199,54 @@ struct MiniAppLaunchHost: View {
             // old grant. A stale/pre-fingerprint decision still seeds the
             // sheet, so re-review shows the user's previous answer rather
             // than resetting to policy defaults.
-            if store.hasDecision(projectId: pid, miniAppId: manifest.id, matching: manifest.securityFingerprint) {
-                granted = store.grantedPermissions(projectId: pid, miniAppId: manifest.id)
+            if decision.matched {
+                granted = decision.granted
                 phase = .run
             } else {
-                if store.hasDecision(projectId: pid, miniAppId: manifest.id) {
-                    reviewSeed = store.grantedPermissions(projectId: pid, miniAppId: manifest.id)
-                        .intersection(manifest.permissions)
-                }
+                reviewSeed = decision.seed
                 phase = .review
             }
         }
     }
 
-    /// Persist the user's decision. A failure here is not silent-but-fine:
-    /// since G2 the store REFUSES the write when its signing key is
-    /// unavailable (rather than purging every other grant on the machine),
-    /// so this can now fail for a reason worth a log line. The failure
-    /// direction is still safe — nothing is recorded, so the sheet reappears
-    /// on the next launch — but it should be diagnosable when a user asks
-    /// why they keep being re-asked.
-    private func save(_ permissions: Set<MiniAppPermission>) {
-        do {
-            try MiniAppGrantStore(context: serverContext).setGrant(
-                projectId: project.id.uuidString,
-                miniAppId: manifest.id,
-                permissions: permissions,
-                manifestFingerprint: manifest.securityFingerprint
-            )
-        } catch {
-            Logger(subsystem: "com.scarf", category: "MiniAppLaunch").error(
-                "couldn't record the mini-app permission decision for \(manifest.id, privacy: .public): \(error.localizedDescription, privacy: .public); it will be asked again next launch"
-            )
-        }
+    /// Persist the user's decision, OFF THE MAIN ACTOR. Returns a
+    /// user-facing reason on failure, `nil` on success.
+    ///
+    /// **Why detached** (charter C10). `MiniAppGrantStore.mutate` takes
+    /// `RegistryWriteLock` — which waits, with a `Thread.sleep`, for up to
+    /// 60s on a contended remote lock — and then does a guarded
+    /// read-modify-write over SSH. Running that synchronously inside the
+    /// button's action beachballed the whole window on the one press the
+    /// user makes at a security prompt. Same `Task.detached`-and-await shape
+    /// as `ProjectsViewModel.save`.
+    ///
+    /// A failure here is not silent-but-fine: since G2 the store REFUSES
+    /// the write when its signing key is unavailable (rather than purging
+    /// every other grant on the machine). The failure direction is still
+    /// safe — nothing is recorded, so the sheet reappears on the next launch
+    /// — but the user pressed Approve and is entitled to know it didn't
+    /// take, rather than watching the app re-ask forever.
+    private func save(_ permissions: Set<MiniAppPermission>) async -> String? {
+        let context = serverContext
+        let projectId = project.id.uuidString
+        let miniAppId = manifest.id
+        let fingerprint = manifest.securityFingerprint
+        return await Task.detached { () -> String? in
+            do {
+                try MiniAppGrantStore(context: context).setGrant(
+                    projectId: projectId,
+                    miniAppId: miniAppId,
+                    permissions: permissions,
+                    manifestFingerprint: fingerprint
+                )
+                return nil
+            } catch {
+                Logger(subsystem: "com.scarf", category: "MiniAppLaunch").error(
+                    "couldn't record the mini-app permission decision for \(miniAppId, privacy: .public): \(error.localizedDescription, privacy: .public); it will be asked again next launch"
+                )
+                return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
+        }.value
     }
 }
 
@@ -191,6 +258,10 @@ struct MiniAppPermissionPreview: View {
     /// Existing grant to pre-select when re-reviewing; `nil` on a first
     /// decision (use the default policy instead of clobbering prior choices).
     var seed: Set<MiniAppPermission>? = nil
+    /// The decision is being written; Approve is disabled and progress shows.
+    var isSaving: Bool = false
+    /// Why the last Approve didn't stick, if it didn't.
+    var saveError: String? = nil
     let onApprove: (Set<MiniAppPermission>) -> Void
     let onCancel: () -> Void
 
@@ -199,10 +270,25 @@ struct MiniAppPermissionPreview: View {
     /// Permissions that can actually be toggled (unknowns are shown but
     /// never grantable).
     private var grantable: [MiniAppPermission] {
-        manifest.permissions.filter { if case .unknown = $0 { return false }; return true }
+        Self.deduped(manifest.permissions.filter { if case .unknown = $0 { return false }; return true })
     }
     private var unknowns: [MiniAppPermission] {
-        manifest.permissions.filter { if case .unknown = $0 { return true }; return false }
+        Self.deduped(manifest.permissions.filter { if case .unknown = $0 { return true }; return false })
+    }
+
+    /// First occurrence wins, order preserved.
+    ///
+    /// `manifest.permissions` is parsed from an agent-written `miniapp.json`
+    /// and nothing upstream promises the list is unique — `["store",
+    /// "store"]` parses to two equal elements. `ForEach(_, id: \.self)` over
+    /// duplicate ids is undefined behaviour in SwiftUI (rows that render
+    /// twice, toggle state that lands on the wrong row, animation glitches),
+    /// and this is the sheet where a row's toggle state IS the security
+    /// decision — the one list in the app where "usually renders fine" is
+    /// not good enough.
+    private static func deduped(_ permissions: [MiniAppPermission]) -> [MiniAppPermission] {
+        var seen: Set<MiniAppPermission> = []
+        return permissions.filter { seen.insert($0).inserted }
     }
 
     var body: some View {
@@ -255,13 +341,32 @@ struct MiniAppPermissionPreview: View {
             }
 
             Divider()
+            if let saveError {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(ScarfColor.warning)
+                        .accessibilityHidden(true)
+                    Text("Couldn't save this decision: \(saveError)")
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .accessibilityElement(children: .combine)
+            }
             HStack {
                 Button("Cancel") { onCancel() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
+                if isSaving {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("Saving your decision")
+                }
                 Button("Approve & Run") { onApprove(checked) }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
+                    .disabled(isSaving)
                     .accessibilityHint("Grants only the checked permissions")
             }
             .padding()

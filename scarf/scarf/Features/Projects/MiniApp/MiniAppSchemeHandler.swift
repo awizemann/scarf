@@ -37,30 +37,35 @@ final class MiniAppSchemeHandler: NSObject, WKURLSchemeHandler {
     )
     private static let logger = Logger(subsystem: "com.scarf", category: "MiniAppSchemeHandler")
 
-    private let baseDirectory: String
-    /// Non-nil when the registry row this mini-app's directory was derived
-    /// from names a root that may not anchor a containment check — see
-    /// `ProjectRootPolicy`. Every request is then refused rather than
-    /// served, because "inside `/Users/me/.scarf/miniapps/x`" is a guarantee
-    /// about a directory the agent chose inside the user's home.
+    /// The base directory, RESOLVED AND PROVEN once, at mount — or the
+    /// refusal that says why it can't be served out of at all.
     ///
-    /// Computed ONCE, at mount: the policy consults the filesystem, and the
-    /// answer can't change under us for the lifetime of one webview without
-    /// the row changing, which remounts. Refusing here does NOT hide the
-    /// project from the sidebar — the row stays, the mini-app doesn't run.
-    private let rootRefusal: ProjectRootPolicy.Refusal?
+    /// This carries two guarantees that used to be separate, and one that
+    /// did not exist:
+    ///
+    /// - the registry row this directory was derived from names a root a
+    ///   containment check can mean something relative to (`ProjectRootPolicy`);
+    /// - no component of `<root>/.scarf/miniapps/<id>` — the id segment
+    ///   included — is a symlink, so the anchor names the place it reaches;
+    /// - and the resolved spelling is FROZEN, so the per-request checks
+    ///   below (including the `F_GETPATH` re-check on the open descriptor)
+    ///   compare against the base as proven here rather than against
+    ///   whatever the base resolves to at the moment of the read. The
+    ///   mini-app directory is agent-writable, so those are different
+    ///   questions: symlinking the BASE to `/Users/me` used to relocate
+    ///   containment wholesale and every downstream check agreed.
+    ///
+    /// Computed once because it must be: an anchor re-derived per request
+    /// is not an anchor. Refusing here does NOT hide the project from the
+    /// sidebar — the row stays, the mini-app doesn't run.
+    private let anchor: Result<MiniAppAssetResolver.BaseAnchor, MiniAppAssetResolver.AnchorRefusal>
 
     init(baseDirectory: String) {
-        self.baseDirectory = baseDirectory
         // A mini-app is unpacked by the local installer and served to a
         // local `WKWebView`; `baseDirectory` is a path on this Mac, which is
         // why `.local` is the right context to judge it in (and why the read
         // below may use `open(2)` at all).
-        if let root = MiniAppAssetResolver.projectRoot(ofMiniAppBase: baseDirectory) {
-            self.rootRefusal = ProjectRootPolicy.refusalAtUse(for: root, context: .local)
-        } else {
-            self.rootRefusal = nil
-        }
+        self.anchor = MiniAppAssetResolver.anchor(baseDirectory: baseDirectory, context: .local)
     }
 
     /// Per-asset ceiling. Generous for anything a mini-app legitimately
@@ -76,18 +81,22 @@ final class MiniAppSchemeHandler: NSObject, WKURLSchemeHandler {
         }
         live.insert(ObjectIdentifier(urlSchemeTask))
 
-        // Time-of-use root check (see `rootRefusal`). 403 rather than 404:
-        // the file may well exist, we are declining to serve out of this
-        // root at all, and the page's own error handling should see the
-        // difference.
-        if let rootRefusal {
+        // Mount-time anchor check (see `anchor`). 403 rather than 404: the
+        // file may well exist, we are declining to serve out of this
+        // directory at all, and the page's own error handling should see
+        // the difference.
+        let base: MiniAppAssetResolver.BaseAnchor
+        switch anchor {
+        case .success(let resolved):
+            base = resolved
+        case .failure(let refusal):
             Self.logger.error(
-                "refusing to serve mini-app assets from an inadmissible project root: \(rootRefusal.message, privacy: .public)"
+                "refusing to serve mini-app assets: \(refusal.message, privacy: .public)"
             )
             respond(
                 urlSchemeTask, url: url, status: 403,
                 mime: "text/plain; charset=utf-8",
-                body: Data(rootRefusal.message.utf8)
+                body: Data(refusal.message.utf8)
             )
             return
         }
@@ -96,7 +105,6 @@ final class MiniAppSchemeHandler: NSObject, WKURLSchemeHandler {
         // function of the extension the page asked for, and deriving it here
         // keeps the read below the only thing that touches the filesystem.
         let mime = MiniAppAssetResolver.mimeType(forPath: url.path)
-        let base = baseDirectory
         let requestPath = url.path
 
         // ONE open, on the io queue, doing everything: containment,
@@ -118,9 +126,8 @@ final class MiniAppSchemeHandler: NSObject, WKURLSchemeHandler {
         Self.ioQueue.async { [weak self] in
             let result = MiniAppAssetResolver.readContainedFile(
                 requestPath: requestPath,
-                baseDirectory: base,
-                maxBytes: Self.maxAssetBytes,
-                isLocal: true
+                anchor: base,
+                maxBytes: Self.maxAssetBytes
             )
             DispatchQueue.main.async {
                 guard let self else { return }

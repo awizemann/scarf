@@ -184,6 +184,15 @@ public final class WatchBaselineStore: @unchecked Sendable {
 
     public init() {}
 
+    /// The key a whole-reply blob signature is filed under when a poll's
+    /// lines can't be matched to paths one-for-one. `\u{0}` cannot occur in
+    /// a POSIX path, so this can never collide with a real one.
+    public static let blobKey = "\u{0}blob"
+
+    /// Is `key` one of ours rather than a watched path? Reserved keys are
+    /// the store's own bookkeeping and outlive any single poll's path set.
+    private static func isReserved(_ key: String) -> Bool { key.hasPrefix("\u{0}") }
+
     /// Fold a fresh poll into the baseline.
     ///
     /// - Returns: `true` when a path we ALREADY had a signature for now has
@@ -191,6 +200,14 @@ public final class WatchBaselineStore: @unchecked Sendable {
     ///   reported as no change; paths absent from `fresh` are forgotten so
     ///   a shrinking watch set can't keep answering for paths nobody
     ///   watches.
+    ///
+    ///   RESERVED KEYS SURVIVE. `fresh` is authoritative about PATHS — it
+    ///   is a full poll — and about nothing else. Replacing the map
+    ///   wholesale also erased ``blobKey``, so on a host that alternates
+    ///   between aligned and misaligned replies the blob fallback was
+    ///   re-seeded as first-sight on every aligned poll, and every change it
+    ///   was the only witness to went unreported. The mirror image of the
+    ///   bug `merge` exists to fix.
     @discardableResult
     public func apply(_ fresh: [String: String]) -> Bool {
         lock.lock()
@@ -199,7 +216,11 @@ public final class WatchBaselineStore: @unchecked Sendable {
         for (path, signature) in fresh {
             if let known = signatures[path], known != signature { changed = true }
         }
-        signatures = fresh
+        var next = fresh
+        for (key, signature) in signatures where Self.isReserved(key) && next[key] == nil {
+            next[key] = signature
+        }
+        signatures = next
         return changed
     }
 

@@ -352,6 +352,25 @@ final class ProjectCockpitViewModel {
         lastMiniAppManifestPaths = result.miniApps.map {
             MiniAppService.manifestPath(forProjectPath: project.path, id: $0.id)
         }
+        // TOP UP THE SIGNATURE FOR THE PATHS WE ONLY JUST LEARNED ABOUT.
+        // The signature committed above was taken over `facetPaths()` as it
+        // stood BEFORE this load, which by definition did not include the
+        // manifests this load just discovered. The next tick's signature
+        // does include them, so the two maps could never match and every
+        // discovery bought exactly one guaranteed extra full reload — on
+        // first open of every project with mini-apps, and again whenever one
+        // is added. Stat only the new paths and fold them in; an untrusted
+        // stat just leaves the old behaviour (one extra reload) in place.
+        let newPaths = lastMiniAppManifestPaths.filter { lastFacetSignature?[$0] == nil }
+        if !newPaths.isEmpty, lastFacetSignature != nil {
+            let topUpContext = context
+            let extra = await Task.detached(priority: .utility) {
+                Self.signature(of: newPaths, transport: topUpContext.makeTransport())
+            }.value
+            if let extra {
+                for (path, value) in extra { lastFacetSignature?[path] = value }
+            }
+        }
         if let fresh = result.health {
             ProjectHealthCache.shared.store(fresh, for: context.id)
             health = fresh

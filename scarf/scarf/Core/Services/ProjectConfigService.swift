@@ -148,7 +148,27 @@ struct ProjectConfigService: Sendable {
             )
             return nil
         }
-        return try keychain.get(ref: ref)
+        let secret = try keychain.get(ref: ref)
+        // OPPORTUNISTIC RE-MINT. `belongs` still accepts the retired 8-hex
+        // FNV account so existing installs don't lose their secrets — and
+        // that branch is chosen-preimage-breakable, so the window has to
+        // actually close. Waiting for the user to re-save the field in the
+        // Configuration sheet closes it for a secret that is broken, never
+        // for one that works. Reading it is the event that reliably happens,
+        // so that is where the migration hangs: mint the SHA-256-bound item,
+        // repoint `config.json` through the guarded write, drop the legacy
+        // item. Best effort — the secret is returned either way.
+        if let secret, LegacyKeychainRefMigrator.isLegacy(ref) {
+            LegacyKeychainRefMigrator(
+                transport: context.makeTransport(), keychain: keychain
+            ).migrate(
+                ref: ref,
+                secret: secret,
+                projectPath: project.path,
+                configPath: Self.configPath(for: project)
+            )
+        }
+        return secret
     }
 
     /// Store a freshly-entered secret. Returns the `keychainRef` value

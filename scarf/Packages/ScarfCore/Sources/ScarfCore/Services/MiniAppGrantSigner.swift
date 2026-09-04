@@ -155,6 +155,47 @@ public struct MiniAppGrantSigner: Sendable {
         )
     }
 
+    // MARK: - Detached payloads (other consent records, same machine key)
+
+    /// Domain marker every detached payload is signed under, so a tag minted
+    /// for some other consent record can never be replayed as a grant tag
+    /// (or vice versa) however the two payloads happen to be spelled.
+    private static let detachedDomain = "scarf-detached-v1"
+
+    /// A tag over an arbitrary caller-composed payload, keyed by the SAME
+    /// machine key the grants file uses. `nil` when the Keychain won't
+    /// produce the key.
+    ///
+    /// **Why other consent records borrow this key.** The mini-app grants
+    /// file and the image-host allowlist are the same problem twice: a
+    /// record of what a person agreed to, stored somewhere the party asking
+    /// for the agreement can also write. The answer is the same too — a tag
+    /// only Scarf can mint — and minting a second machine key for it would
+    /// double the surface, the failure modes and the re-ask events for no
+    /// gain. Callers MUST version and domain-separate their own payload on
+    /// top of this; see `ImageHostConsentStore`.
+    public nonisolated func tag(forPayload payload: String) -> String? {
+        guard let key = signingKey() else { return nil }
+        let mac = HMAC<SHA256>.authenticationCode(
+            for: Data((Self.detachedDomain + Self.fieldSeparator + payload).utf8),
+            using: SymmetricKey(data: key)
+        )
+        return Data(mac).base64EncodedString()
+    }
+
+    /// Whether `tag` is one THIS machine minted for exactly `payload`.
+    /// False for an absent key, so a caller that can't verify treats every
+    /// record as unconsented — the same default-deny direction the grants
+    /// read path takes.
+    public nonisolated func isValidTag(_ tag: String, forPayload payload: String) -> Bool {
+        guard let recorded = Data(base64Encoded: tag), let key = signingKey() else { return false }
+        return HMAC<SHA256>.isValidAuthenticationCode(
+            recorded,
+            authenticating: Data((Self.detachedDomain + Self.fieldSeparator + payload).utf8),
+            using: SymmetricKey(data: key)
+        )
+    }
+
     /// The exact bytes the tag covers. Every security-relevant field of the
     /// grant is in here — most importantly `permissions` (what was
     /// approved), `manifestFingerprint` (what it was approved FOR) and the
@@ -175,6 +216,12 @@ public struct MiniAppGrantSigner: Sendable {
     /// component carrying `0x1F` or a comma is REFUSED at sign time rather
     /// than trusted to the encoding.
     ///
+    /// **v2 also carries a presence byte on the fingerprint.** Amended into
+    /// v2 rather than bumped to v3 because v2 has never shipped — it was
+    /// introduced and amended inside the same unreleased window (no release
+    /// tag contains it), so there is no stored tag anywhere to invalidate
+    /// and a v3 would only cost a re-ask no user would understand.
+    ///
     /// The format is versioned: changing it invalidates every stored tag,
     /// which drops every grant and re-asks. That is a survivable migration
     /// but not a silent one, so the version prefix makes it deliberate — v1
@@ -191,7 +238,13 @@ public struct MiniAppGrantSigner: Sendable {
             try validated(grant.miniAppId, field: "miniAppId"),
             permissions.joined(separator: ","),
             try validated(grant.decidedAt, field: "decidedAt"),
-            try validated(grant.manifestFingerprint ?? "", field: "manifestFingerprint"),
+            // PRESENCE BYTE, not a `?? ""`. `nil` (a pre-fingerprint grant,
+            // which `hasDecision(…matching:)` treats as "no content was
+            // approved, re-ask") and `""` (a grant that WAS made about a
+            // manifest whose fingerprint is the empty string) are different
+            // decisions, and collapsing them let one row's tag verify as the
+            // other's. `0` / `1:<value>` keeps them distinct at zero cost.
+            try grant.manifestFingerprint.map { "1:" + (try validated($0, field: "manifestFingerprint")) } ?? "0",
         ]
         return parts.joined(separator: Self.fieldSeparator)
     }

@@ -215,6 +215,26 @@ import ScarfCore
         #expect(error?.hasPrefix("not_found:") == true)
     }
 
+    /// F1, the other direction. The read is now anchored to a base resolved
+    /// ONCE and required to be where it claims — and the obvious way to get
+    /// that wrong is to refuse a project root that legitimately sits under a
+    /// symlinked prefix, which on macOS is most temp paths (`/tmp` →
+    /// `/private/tmp`) and any user who keeps projects behind a link. Both
+    /// sides of the anchor comparison resolve, so this must still read.
+    @Test func fileReadStillWorksWhenTheProjectRootSitsBehindALink() async throws {
+        let real = try Self.makeTempProject()
+        defer { try? FileManager.default.removeItem(atPath: real) }
+        try Data("hello".utf8).write(to: URL(fileURLWithPath: real + "/note.txt"))
+        let link = NSTemporaryDirectory() + "scarf-rootlink-" + UUID().uuidString
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: real)
+        defer { try? FileManager.default.removeItem(atPath: link) }
+
+        let bridge = makeBridge(projectPath: link, granted: [.fileRead])
+        let (result, error) = try await callDispatch(bridge, .fileRead, ["note.txt"])
+        #expect(error == nil)
+        #expect(result as? String == "hello")
+    }
+
     // MARK: - Harness
 
     /// Build a bridge with a chosen granted-permission set. `serverContext`

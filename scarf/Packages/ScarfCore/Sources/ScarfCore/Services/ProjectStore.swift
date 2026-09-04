@@ -538,7 +538,14 @@ public struct ProjectStore: Sendable {
                 ProjectEntry(name: project.name, path: project.rootPath, uuid: project.id)
             )
         }
-        try dashboardService.saveRegistry(registry)
+        // `expecting:` the bytes this edit was computed from. The
+        // cross-process lock above serialises same-MACHINE writers, which
+        // is everything a local registry can race; a REMOTE one is read and
+        // written seconds apart over SSH, where the lock has nothing to say
+        // and another host's write can land in between. This was the one
+        // locked read-modify-write still passing `nil` — i.e. the only one
+        // that would have silently won that race instead of refusing.
+        try dashboardService.saveRegistry(registry, expecting: loaded.contentFingerprint)
     }
 
     // MARK: - Facet readers (lightweight projections — the full manifest

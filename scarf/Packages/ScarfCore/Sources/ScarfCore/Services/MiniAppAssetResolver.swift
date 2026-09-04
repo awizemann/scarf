@@ -91,7 +91,9 @@ public enum MiniAppAssetResolver {
         guard let lexical = resolvedPath(requestPath: requestPath, baseDirectory: baseDirectory) else {
             return nil
         }
-        guard isSymlinkContained(path: lexical, baseDirectory: baseDirectory) else { return nil }
+        guard case .success(let anchor) = anchor(baseDirectory: baseDirectory),
+              isContained(path: lexical, inRealBase: anchor.real)
+        else { return nil }
 
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: lexical, isDirectory: &isDir), !isDir.boolValue else {
@@ -116,9 +118,120 @@ public enum MiniAppAssetResolver {
     public static func isSymlinkContained(path: String, baseDirectory: String) -> Bool {
         let baseReal = URL(fileURLWithPath: (baseDirectory as NSString).standardizingPath)
             .resolvingSymlinksInPath().path
+        return isContained(path: path, inRealBase: baseReal)
+    }
+
+    /// Containment against an ALREADY-RESOLVED base — the form every
+    /// mini-app read uses.
+    ///
+    /// `isSymlinkContained(path:baseDirectory:)` re-resolves the base every
+    /// time it is called, which is fine when the base is trusted and fatal
+    /// when it is not: `<root>/.scarf/miniapps/<id>` is agent-writable, so
+    /// an agent that replaces the BASE DIRECTORY ITSELF with a symlink to
+    /// `/Users/me` moves the anchor, and every check downstream — including
+    /// the `F_GETPATH` re-check on the open descriptor — then validates
+    /// against the relocated base and passes. The fd was never the weak
+    /// part; the thing it was compared to was. So the base is resolved and
+    /// verified ONCE (see ``BaseAnchor``) and that frozen answer is what
+    /// every subsequent check compares against.
+    public static func isContained(path: String, inRealBase baseReal: String) -> Bool {
         let fileReal = URL(fileURLWithPath: (path as NSString).standardizingPath)
             .resolvingSymlinksInPath().path
         return fileReal == baseReal || fileReal.hasPrefix(baseReal + "/")
+    }
+
+    // MARK: - The frozen base anchor
+
+    /// A mini-app base directory that has been resolved ONCE and proven to
+    /// sit where it claims to. Carries both spellings: `lexical` is what
+    /// the caller asked about (paths are joined against it), `real` is the
+    /// only thing containment is ever judged against.
+    ///
+    /// Only ``anchor(baseDirectory:context:)`` can make one, which is the
+    /// point — a `BaseAnchor` in hand IS the proof.
+    public struct BaseAnchor: Sendable, Equatable {
+        public let lexical: String
+        public let real: String
+    }
+
+    /// Why a base directory may not anchor a containment check.
+    public enum AnchorRefusal: Error, Sendable, Equatable {
+        /// Empty, or not an absolute path.
+        case notAbsolute
+        /// The owning project root is one no containment check can be
+        /// relative to (`/`, `$HOME`, a root containing `~/.hermes`…).
+        case inadmissibleRoot(String)
+        /// Some component between the project root and the base — or the
+        /// base itself — is a symlink, so the directory the base NAMES and
+        /// the directory it REACHES are different places. Carries the
+        /// place it actually reaches.
+        case relocatedBase(actual: String)
+        /// The path is not on this machine, so none of this can be checked.
+        case notLocal
+
+        public var message: String {
+            switch self {
+            case .notAbsolute:
+                return "A mini-app directory must be an absolute path."
+            case .inadmissibleRoot(let reason):
+                return reason
+            case .relocatedBase(let actual):
+                return "The mini-app directory is a link to \(actual), not a folder inside the "
+                    + "project. Refusing to serve files through it."
+            case .notLocal:
+                return "Mini-app files can only be read for projects on this Mac."
+            }
+        }
+    }
+
+    /// Freeze `baseDirectory` into a ``BaseAnchor``, or say why it cannot
+    /// be one.
+    ///
+    /// Three conditions, all required:
+    ///
+    /// 1. **Absolute.** A relative base has no fixed meaning at all.
+    /// 2. **Admissible root.** The `<root>` the base was derived from is
+    ///    re-run through `ProjectRootPolicy` at the moment of use, because
+    ///    `projects.json` is agent-writable and a row rewritten to
+    ///    `/Users/me` yields a base that looks perfectly contained. (A base
+    ///    that isn't `<root>/.scarf/miniapps/<id>`-shaped is judged as its
+    ///    own root — which is the bridge's case, where the base IS the
+    ///    project root.)
+    /// 3. **Unrelocated.** The base's physical resolution must equal the
+    ///    resolved root plus the base's own lexical tail. Any symlinked
+    ///    component — including the base directory itself — makes those two
+    ///    disagree. This is the `PathGuard` parent-chain rule, extended one
+    ///    component further to cover the leaf: `PathGuard` may leave a
+    ///    symlinked leaf alone because it UNLINKS it, whereas here the leaf
+    ///    is the anchor everything else is measured from.
+    ///
+    /// A root under a symlinked prefix (macOS `/tmp` → `/private/tmp`)
+    /// still anchors fine: both sides of the comparison resolve it.
+    public static func anchor(
+        baseDirectory: String, context: ServerContext = .local
+    ) -> Result<BaseAnchor, AnchorRefusal> {
+        switch context.kind {
+        case .local: break
+        case .ssh: return .failure(.notLocal)
+        }
+        let base = PhysicalPath.standardized(baseDirectory)
+        guard base.hasPrefix("/"), base.count > 1 else { return .failure(.notAbsolute) }
+
+        let root = projectRoot(ofMiniAppBase: base) ?? base
+        if let refusal = ProjectRootPolicy.refusalAtUse(for: root, context: context) {
+            return .failure(.inadmissibleRoot(refusal.message))
+        }
+
+        let rootStd = PhysicalPath.standardized(root)
+        let rootReal = PhysicalPath.physical(rootStd)
+        // The base's lexical tail below the root, re-attached to the
+        // RESOLVED root. If walking the real filesystem lands anywhere
+        // else, a component on the way was a link.
+        let tail = base == rootStd ? "" : String(base.dropFirst(rootStd.count))
+        let expected = rootReal + tail
+        let actual = PhysicalPath.physical(base)
+        guard actual == expected else { return .failure(.relocatedBase(actual: actual)) }
+        return .success(BaseAnchor(lexical: base, real: expected))
     }
 
     // MARK: - Trust at use: the base directory's owning project root
@@ -234,16 +347,35 @@ public enum MiniAppAssetResolver {
         isLocal: Bool = true
     ) -> Result<Asset, ReadRefusal> {
         guard isLocal else { return .failure(.notLocal) }
-        guard let path = containedFilePath(requestPath: requestPath, baseDirectory: baseDirectory) else {
-            // `containedFilePath` folds "escapes" and "missing" together;
-            // re-derive which it was so the caller can answer honestly.
-            guard let lexical = resolvedPath(requestPath: requestPath, baseDirectory: baseDirectory),
-                  isSymlinkContained(path: lexical, baseDirectory: baseDirectory) else {
-                return .failure(.notContained)
-            }
+        // ONE anchor for the whole read: resolved here, then handed to the
+        // fd check below. Re-deriving it there would reopen the very hole
+        // the anchor closes.
+        guard case .success(let anchor) = anchor(baseDirectory: baseDirectory) else {
+            return .failure(.notContained)
+        }
+        return readContainedFile(
+            requestPath: requestPath, anchor: anchor, maxBytes: maxBytes
+        )
+    }
+
+    /// ``readContainedFile(requestPath:baseDirectory:maxBytes:isLocal:)``
+    /// against a base a caller already froze — the form a long-lived caller
+    /// (a scheme handler bound to one webview) should use, so the anchor is
+    /// established at MOUNT and cannot be moved out from under a request.
+    public static func readContainedFile(
+        requestPath: String,
+        anchor: BaseAnchor,
+        maxBytes: Int
+    ) -> Result<Asset, ReadRefusal> {
+        guard let lexical = resolvedPath(requestPath: requestPath, baseDirectory: anchor.lexical),
+              isContained(path: lexical, inRealBase: anchor.real)
+        else { return .failure(.notContained) }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: lexical, isDirectory: &isDir) else {
             return .failure(.notFound)
         }
-        return readValidated(path: path, baseDirectory: baseDirectory, maxBytes: maxBytes)
+        guard !isDir.boolValue else { return .failure(.notRegularFile) }
+        return readValidated(path: lexical, anchor: anchor, maxBytes: maxBytes)
     }
 
     /// The fd half of `readContainedFile`, on an already-contained path.
@@ -253,6 +385,21 @@ public enum MiniAppAssetResolver {
     public static func readValidated(
         path: String,
         baseDirectory: String,
+        maxBytes: Int
+    ) -> Result<Asset, ReadRefusal> {
+        guard case .success(let anchor) = anchor(baseDirectory: baseDirectory) else {
+            return .failure(.notContained)
+        }
+        return readValidated(path: path, anchor: anchor, maxBytes: maxBytes)
+    }
+
+    /// ``readValidated(path:baseDirectory:maxBytes:)`` against a frozen
+    /// anchor. The `F_GETPATH` answer is checked against `anchor.real` —
+    /// the base as it was proven at mount — rather than against a base
+    /// re-resolved now, which an agent can move between the two moments.
+    public static func readValidated(
+        path: String,
+        anchor: BaseAnchor,
         maxBytes: Int
     ) -> Result<Asset, ReadRefusal> {
         // O_NOFOLLOW: refuse if the FINAL component is a symlink (ELOOP).
@@ -282,7 +429,7 @@ public enum MiniAppAssetResolver {
         var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
         guard fcntl(fd, F_GETPATH, &buffer) != -1 else { return .failure(.notContained) }
         let realPath = String(cString: buffer)
-        guard isSymlinkContained(path: realPath, baseDirectory: baseDirectory) else {
+        guard isContained(path: realPath, inRealBase: anchor.real) else {
             return .failure(.notContained)
         }
 

@@ -423,6 +423,59 @@ import Foundation
         }
     }
 
+    /// F1: `indexInRegistry` was the one locked read-modify-write still
+    /// passing `expecting: nil`.
+    ///
+    /// The lock serialises same-MACHINE writers, which is every writer a
+    /// local registry has — so the fingerprint only bites where the lock
+    /// cannot see, i.e. a remote registry read and written seconds apart.
+    /// Simulated here by changing the file UNDER the load: with the
+    /// baseline threaded through, the publish is refused instead of
+    /// silently erasing the change it never saw.
+    @Test func indexInRegistryRefusesToOverwriteAChangeItNeverRead() throws {
+        try Self.withTempHome { ctx, _ in
+            let service = ProjectDashboardService(context: ctx)
+            try service.saveRegistry(ProjectRegistry(projects: [
+                ProjectEntry(name: "Seed", path: "/p/seed")
+            ]))
+            // What `indexInRegistryLocked` would have loaded…
+            let loaded = service.loadRegistryDetailed()
+            let baseline = loaded.contentFingerprint
+            #expect(baseline != nil)
+
+            // …and then somebody else's write lands.
+            try service.saveRegistry(ProjectRegistry(projects: [
+                ProjectEntry(name: "Seed", path: "/p/seed"),
+                ProjectEntry(name: "Theirs", path: "/p/theirs"),
+            ]))
+
+            var edited = loaded.registry
+            edited.projects.append(ProjectEntry(name: "Mine", path: "/p/mine"))
+            #expect(throws: (any Error).self) {
+                try service.saveRegistry(edited, expecting: baseline)
+            }
+            // Their row is still there — which is the whole point.
+            #expect(service.loadRegistry().projects.contains { $0.name == "Theirs" })
+        }
+    }
+
+    /// …and the ordinary path still writes: a baseline that still matches
+    /// is not an obstacle, so threading the fingerprint costs nothing on
+    /// every normal save.
+    @Test func indexInRegistryStillWritesWhenTheBaselineHolds() throws {
+        try Self.withTempHome { ctx, _ in
+            let store = ProjectStore(context: ctx)
+            let dir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("scarf-f1-idx-\(UUID().uuidString)", isDirectory: true).path
+            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(atPath: dir) }
+            let id = UUID()
+            try store.indexInRegistry(ScarfProject(id: id, name: "Alpha", rootPath: dir))
+            let rows = ProjectDashboardService(context: ctx).loadRegistry().projects
+            #expect(rows.contains { $0.uuid == id })
+        }
+    }
+
     // MARK: - Lock ownership + context-aware bounds (t-07e909e0)
 
     /// DI-H4. `release()` used to remove whatever lock file was present.

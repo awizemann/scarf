@@ -340,7 +340,12 @@ import Foundation
 
     @Test func imageHostConsentIsPerProjectPerHostAndDefaultsDenied() {
         let suite = "com.scarf.tests.imagehost.\(UUID().uuidString)"
-        let store = ImageHostConsentStore(suiteName: suite)
+        // Records are HMAC-tagged (F1 SEC-M3) with the machine key — route
+        // it into a test-only Keychain service so this never touches the
+        // user's real one.
+        let store = ImageHostConsentStore(
+            suiteName: suite, testServiceSuffix: "f1-\(UUID().uuidString)"
+        )
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
 
         let url = URL(string: "https://beacon.example/p.png?d=leak")!
