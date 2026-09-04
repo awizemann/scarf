@@ -289,6 +289,54 @@ public struct ProjectDoctorService: Sendable {
             ))
         }
 
+        // Divergence between the two stores of one truth. The doctor
+        // reconciles ids and existence; it was blind to the two fields a
+        // user actually READS — the name and the path. Both divergences are
+        // silent by construction: nothing in the app ever showed the record's
+        // name (it renders into AGENTS.md, which the agent reads and the user
+        // doesn't), and nothing ever compared the record's declared rootPath
+        // to where the record was found.
+        if let record {
+            if record.name != row.name {
+                out.append(ProjectDoctorFinding(
+                    id: "recordNameMismatch:\(row.path)",
+                    kind: .recordNameMismatch,
+                    severity: .medium,
+                    title: "“\(row.name)” is called something else in its own file",
+                    detail: "Your projects list calls it “\(row.name)”, but the project's own file still says “\(record.name)” — the name Scarf tells the agent at the start of every chat in this project. Repairing copies the list's name into the file.",
+                    projectName: row.name,
+                    path: row.path,
+                    repair: pathIsDuplicated ? nil : .renameRecordFromRegistry(path: row.path)
+                ))
+            }
+            // A record found at X that says it belongs to Y. The overwhelming
+            // cause is a folder moved or copied by hand: the record travels
+            // with the files and keeps naming the old location, which bricks
+            // Upgrade (it addresses the project by `record.rootPath`) and
+            // silently mis-targets any writer that trusts the record. There
+            // is no safe automatic repair — rewriting `rootPath` when the
+            // move was actually a COPY detaches the original, and rewriting
+            // the registry row when the declared path still exists points two
+            // rows at one folder. So: say it, precisely, and let the user
+            // decide.
+            let declared = ProjectIdentity.normalizedPath(record.rootPath)
+            let actual = ProjectIdentity.normalizedPath(row.path)
+            if declared != actual {
+                let originalStillThere = transport.fileExists(record.rootPath)
+                out.append(ProjectDoctorFinding(
+                    id: "recordPathDivergence:\(row.path)",
+                    kind: .recordPathDivergence,
+                    severity: .high,
+                    title: "“\(row.name)” looks like it was moved",
+                    detail: originalStillThere
+                        ? "The project file in \(row.path) says the project lives at \(record.rootPath), and that folder still exists. This is what copying a project folder looks like. Scarf won't guess which one is real — until it's resolved, updates and template actions will act on \(record.rootPath), not on \(row.path)."
+                        : "The project file in \(row.path) says the project lives at \(record.rootPath), which no longer exists — this folder was most likely moved. Scarf's updates and template actions still target the old path, so they'll fail or do nothing. Fix the “rootPath” in \(row.path)/.scarf/project.json, then re-run this check.",
+                    projectName: row.name,
+                    path: row.path
+                ))
+            }
+        }
+
         // Agent-owned sidecars. Report-only, forever.
         for (file, label) in [
             ("dashboard.json", "dashboard"),
@@ -797,6 +845,25 @@ public struct ProjectDoctorService: Sendable {
                 throw ProjectDoctorError.nameTaken(toSave.name)
             }
             try store.save(toSave)
+
+        case .renameRecordFromRegistry(let path):
+            guard let row = registry.projects.first(where: {
+                ProjectIdentity.normalizedPath($0.path) == ProjectIdentity.normalizedPath(path)
+            }) else {
+                throw ProjectDoctorError.rowVanished(path)
+            }
+            // `recordDescribingThisPath` matters more here than anywhere:
+            // this repair writes a NAME, and `indexInRegistry` matches the
+            // row for `record.rootPath` — a record declaring someone else's
+            // path would rename the wrong project.
+            guard var record = try recordDescribingThisPath(path) else {
+                throw ProjectDoctorError.recordUnavailable(ProjectStore.recordPath(forProjectPath: path))
+            }
+            // Re-checked against a fresh read: the divergence may have been
+            // resolved (by a rename that now propagates) since the report.
+            guard record.name != row.name else { return }
+            record.name = row.name
+            try store.save(record)
 
         case .removeRegistryRow(let path):
             // Normalized match, converging with `ProjectStore.indexInRegistry`:

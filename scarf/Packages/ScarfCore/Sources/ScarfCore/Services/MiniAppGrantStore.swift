@@ -17,18 +17,26 @@ public struct MiniAppGrant: Codable, Sendable, Hashable {
     /// today's manifest" (→ re-review, seeded with this grant).
     public var manifestFingerprint: String?
 
+    /// Base64 HMAC-SHA256 over this row's fields, keyed by a secret only
+    /// Scarf holds — see `MiniAppGrantSigner`. `nil` for a row written
+    /// before signing shipped, or by anyone who isn't Scarf; either way the
+    /// row is dropped at load and its permission sheet reappears.
+    public var signature: String?
+
     public init(
         projectId: String,
         miniAppId: String,
         permissions: [String],
         decidedAt: String,
-        manifestFingerprint: String? = nil
+        manifestFingerprint: String? = nil,
+        signature: String? = nil
     ) {
         self.projectId = projectId
         self.miniAppId = miniAppId
         self.permissions = permissions
         self.decidedAt = decidedAt
         self.manifestFingerprint = manifestFingerprint
+        self.signature = signature
     }
 }
 
@@ -48,9 +56,14 @@ public struct MiniAppGrantStore: Sendable {
     public static let maxBytes = 4 * 1024 * 1024
 
     public let context: ServerContext
+    /// Authenticity, not integrity — see `MiniAppGrantSigner`. The store's
+    /// guarded I/O keeps the file from being destroyed; the signer keeps it
+    /// from being AUTHORED by the agent whose permissions it records.
+    private let signer: MiniAppGrantSigner
 
-    public nonisolated init(context: ServerContext = .local) {
+    public nonisolated init(context: ServerContext = .local, testKeySuffix: String? = nil) {
         self.context = context
+        self.signer = MiniAppGrantSigner(testServiceSuffix: testKeySuffix)
     }
 
     /// The permission set the user approved for this mini-app, or empty
@@ -74,13 +87,19 @@ public struct MiniAppGrantStore: Sendable {
     ) throws {
         try mutate { grants in
             grants.removeAll { $0.projectId == projectId && $0.miniAppId == miniAppId }
-            grants.append(MiniAppGrant(
+            var grant = MiniAppGrant(
                 projectId: projectId,
                 miniAppId: miniAppId,
                 permissions: permissions.map(\.rawValue).sorted(),
                 decidedAt: Self.iso8601.string(from: Date()),
                 manifestFingerprint: manifestFingerprint
-            ))
+            )
+            // Signed LAST, over the final field values. A Keychain that
+            // won't hand over the key leaves the row unsigned, which the
+            // next load drops — the user is re-asked rather than silently
+            // granted, and the sheet is the thing that was working anyway.
+            grant.signature = signer.tag(for: grant)
+            grants.append(grant)
             return true
         }
     }
@@ -93,6 +112,29 @@ public struct MiniAppGrantStore: Sendable {
             grants.removeAll { $0.projectId == projectId && $0.miniAppId == miniAppId }
             return grants.count != before
         }
+    }
+
+    /// Forget EVERY grant belonging to a project. Returns the number of
+    /// grants dropped.
+    ///
+    /// Called when a project leaves the registry. Grants outlive the
+    /// project's row otherwise, and project ids are DERIVED from
+    /// (host, path) — so a folder that is removed and later re-used for a
+    /// different project gets the same id and silently inherits the old
+    /// project's approvals: a mini-app id that matches (`dashboard`,
+    /// `notes` — names repeat) runs with permissions the user granted to
+    /// something else entirely. The fingerprint check narrows that but does
+    /// not close it, because a re-created app can carry the same manifest.
+    @discardableResult
+    public nonisolated func revokeAll(projectId: String) throws -> Int {
+        var dropped = 0
+        try mutate { grants in
+            let before = grants.count
+            grants.removeAll { $0.projectId == projectId }
+            dropped = before - grants.count
+            return dropped > 0
+        }
+        return dropped
     }
 
     /// Whether a decision is on record (used to decide whether to show the
@@ -146,7 +188,23 @@ public struct MiniAppGrantStore: Sendable {
         let (inspection, envelope) = store().inspectDecoding(
             Envelope.self, at: context.paths.miniAppGrantsJSON, maxBytes: Self.maxBytes
         )
-        return (envelope?.grants ?? [], inspection)
+        let raw = envelope?.grants ?? []
+        // THE AUTHENTICITY GATE. Anything Scarf did not sign is not a
+        // decision the USER made — the file is agent-writable and the
+        // manifest fingerprint a row carries is computable by whoever wrote
+        // the manifest. Dropped, not refused: a dropped grant is
+        // default-deny plus a permission sheet, which is a recovery; a
+        // refusal would freeze every legitimate write behind one forged row
+        // an agent can re-add at will.
+        let authentic = raw.filter { signer.isAuthentic($0) }
+        #if canImport(os)
+        if authentic.count != raw.count {
+            Self.logger.error(
+                "dropped \(raw.count - authentic.count) mini-app grant(s) that Scarf did not sign; those apps will ask for permission again"
+            )
+        }
+        #endif
+        return (authentic, inspection)
     }
 
     /// THE GRANTS CHOKEPOINT. Every write to `miniapp_grants.json` is a

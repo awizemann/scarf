@@ -65,6 +65,61 @@ public enum ProjectContextBlock {
         return prefix + block + suffix
     }
 
+    /// Strip the Scarf-managed region from `existing`, preserving
+    /// everything outside the markers byte-for-byte. Returns `existing`
+    /// unchanged when there is no complete marker pair — a file with only a
+    /// begin marker is not one we can bound, and guessing where the block
+    /// ends would eat the user's own text.
+    ///
+    /// The inverse of `applyBlock`, and the reason it exists: the block
+    /// names the project, its template, its cron jobs and its slash commands
+    /// and is injected into every chat that opens the folder. Nothing ever
+    /// removed it, so a project taken out of Scarf left an AGENTS.md that
+    /// went on telling every agent about a project that isn't there — cron
+    /// ids that no longer resolve, a `.scarf/` that was deleted.
+    public static func removeBlock(from existing: String) -> String {
+        guard let beginRange = existing.range(of: beginMarker),
+              let endRange = existing.range(
+                of: endMarker,
+                range: beginRange.upperBound..<existing.endIndex
+              )
+        else { return existing }
+        var upperBound = endRange.upperBound
+        while upperBound < existing.endIndex, existing[upperBound].isNewline {
+            upperBound = existing.index(after: upperBound)
+        }
+        let before = String(existing[existing.startIndex..<beginRange.lowerBound])
+        let after = String(existing[upperBound..<existing.endIndex])
+        if before.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return after
+        }
+        if after.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return trimmingRightNewlines(before) + "\n"
+        }
+        return trimmingRightNewlines(before) + "\n\n" + trimmingLeftNewlines(after)
+    }
+
+    /// Remove the managed block from `<project>/AGENTS.md` in place.
+    /// No-op — and never an error — when the file or the block is absent:
+    /// this runs on the project-removal path, where refusing to finish
+    /// because a markdown file was missing would be absurd.
+    public static func removeBlock(
+        forProjectAt projectPath: String,
+        context: ServerContext
+    ) throws {
+        let transport = context.makeTransport()
+        let agentsMdPath = projectPath + "/AGENTS.md"
+        guard transport.fileExists(agentsMdPath) else { return }
+        let existingData = try transport.readFile(agentsMdPath)
+        let existing = String(data: existingData, encoding: .utf8) ?? ""
+        let rewritten = removeBlock(from: existing)
+        guard rewritten != existing else { return }
+        guard let outData = rewritten.data(using: .utf8) else {
+            throw WriteError.encodingFailed
+        }
+        try transport.writeFile(agentsMdPath, data: outData)
+    }
+
     /// Read `<project>/AGENTS.md`, splice in the given block, write
     /// back — all via the provided context's transport. Idempotent on
     /// identical inputs.

@@ -97,9 +97,54 @@ struct KeychainEnvMirror: Sendable {
     /// the only key the env file knows. When the manifest is absent
     /// (uninstall path may have deleted it before we run), we fall
     /// back to `derivedSlug(forProject:)`.
+    /// **The slug is agent-written, so it is checked before it is obeyed.**
+    /// `~/.hermes/.env` is a shared file whose blocks are keyed by slug, and
+    /// the slug comes from `<project>/.scarf/manifest.json` — which the
+    /// agent working in THIS project can write. Setting it to another
+    /// registered project's slug turned "uninstall my template" into "delete
+    /// that project's secrets from the environment": a cross-project denial
+    /// of service, one file edit and one user click away, with no error
+    /// anywhere (the other project's cron jobs simply start 401-ing).
+    ///
+    /// So: strip the block only when this project is the ONLY registered
+    /// project that claims the slug. A slug two projects claim is either an
+    /// attack or two installs of one template sharing a block — and in both
+    /// cases removing it is wrong, because in the honest case the other
+    /// install still needs the values. Refusal is logged and non-fatal: a
+    /// stale block in `.env` is benign (its keys reference secrets whose
+    /// Keychain items the uninstall deletes anyway), while deleting the
+    /// wrong one is not recoverable from inside Scarf.
     nonisolated func unmirror(project: ProjectEntry) throws {
         let slug = cachedSlug(for: project) ?? Self.derivedSlug(forProject: project)
+        if let claimant = otherProjectClaiming(slug: slug, excluding: project) {
+            Self.logger.error(
+                "refusing to strip .env block for slug \(slug, privacy: .public): \(claimant, privacy: .public) claims it too"
+            )
+            return
+        }
         try unmirror(slug: slug, envPath: context.paths.envFile)
+    }
+
+    /// The name of another registered project whose own slug is `slug`, or
+    /// `nil` when this project's claim is uncontested. Compares against both
+    /// the cached-manifest slug and the name-derived fallback, because
+    /// `unmirror` uses the same two sources — a check of one would miss the
+    /// case the other produced.
+    ///
+    /// Rows are matched out by normalized PATH, not by name: the display
+    /// name is renameable and non-unique, so a name compare would let a
+    /// project exclude a rival by copying its name.
+    nonisolated private func otherProjectClaiming(
+        slug: String,
+        excluding project: ProjectEntry
+    ) -> String? {
+        let mine = ProjectIdentity.normalizedPath(project.path)
+        let rows = ProjectDashboardService(context: context).loadRegistry().projects
+        for row in rows where ProjectIdentity.normalizedPath(row.path) != mine {
+            let candidates = [cachedSlug(for: row), Self.derivedSlug(forProject: row)]
+            if candidates.contains(where: { $0 == slug }) { return row.name }
+        }
+        return nil
     }
 
     /// Splice-only unmirror: strips the block for `slug` from `envPath`.

@@ -127,6 +127,16 @@ public struct ProjectSlashCommandService: Sendable {
         named name: String,
         at projectPath: String
     ) throws {
+        // The name becomes a path component. Every name that reaches here
+        // SHOULD have come through `parse`, which now rejects anything
+        // `validateName` refuses — but this method takes a bare String from
+        // callers (including the commands sheet's selection) and a name like
+        // `../../.hermes/scarf/projects` would delete something else
+        // entirely. Validate at the boundary that builds the path, not only
+        // at the boundary that loaded it.
+        if let reason = ProjectSlashCommand.validateName(name) {
+            throw ServiceError.invalidName(reason)
+        }
         let path = Self.slashCommandsDir(for: projectPath) + "/" + name + ".md"
         let transport = context.makeTransport()
         guard transport.fileExists(path) else { return }
@@ -233,12 +243,22 @@ extension ProjectSlashCommandService {
             return nil
         }
         let parsed = HermesYAML.parseNestedYAML(frontmatter)
+        // The frontmatter is agent-writable, and the `name` it declares is
+        // NOT required to match the filename — it flows on into
+        // `delete(named:)` (which builds a path from it), into the
+        // `<!-- scarf-slash:… -->` marker prepended to a prompt, and into
+        // the AGENTS.md block. A file called `ok.md` declaring
+        // `name: ../../../.hermes/scarf/projects` was accepted before this
+        // check. Same rule the WRITE path has always enforced, applied on
+        // LOAD: a command whose name we would refuse to write is a command
+        // we refuse to read.
         guard let name = parsed.values["name"], !name.isEmpty,
+              ProjectSlashCommand.validateName(name) == nil,
               let description = parsed.values["description"], !description.isEmpty
         else {
             #if canImport(os)
             logger.warning(
-                "frontmatter missing required name/description at \(sourcePath, privacy: .public); skipping"
+                "frontmatter missing or invalid name/description at \(sourcePath, privacy: .public); skipping"
             )
             #endif
             return nil

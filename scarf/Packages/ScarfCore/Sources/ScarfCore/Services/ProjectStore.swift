@@ -232,10 +232,20 @@ public struct ProjectStore: Sendable {
     /// other on every chat start.
     public nonisolated func loadOrDerive(projectPath: String, name: String) -> ScarfProject {
         if let record = load(projectPath: projectPath) { return record }
+        // NORMALIZED, like every other path lookup in the projects surface.
+        // A raw `==` here missed the row whenever the registry and the
+        // caller spelled the same folder differently (`/a/b/` vs `/a/b`,
+        // a `.`-segment from an agent-written row) — and a missed row means
+        // deriving from a synthesized `uuid: nil` entry, which keys the
+        // AGENTS.md block on the interim path-derived id instead of the
+        // registry's. That is the exact two-platforms-fighting-over-one-block
+        // failure the doc comment below warns about, reached through the
+        // lookup rather than through a missing uuid.
+        let target = ProjectIdentity.normalizedPath(projectPath)
         let row = ProjectDashboardService(context: context)
             .loadRegistry()
             .projects
-            .first { $0.path == projectPath }
+            .first { ProjectIdentity.normalizedPath($0.path) == target }
         return derive(from: row ?? ProjectEntry(name: name, path: projectPath))
     }
 

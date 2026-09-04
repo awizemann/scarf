@@ -331,6 +331,13 @@ public final class ProjectsViewModel {
             fail("Couldn't add “\(name)”", reason: "A project with that name is already in the list.")
             return false
         }
+        // Same policy `project_register` enforces, at the app's own door.
+        // A root of `/` or `$HOME` makes every containment check downstream
+        // vacuous, and the folder picker will happily hand over either.
+        if let refusal = ProjectRootPolicy.refusal(for: path, context: context) {
+            fail("Couldn't add “\(name)”", reason: refusal.message)
+            return false
+        }
         let entry = ProjectEntry(name: name, path: path)
         registry.projects.append(entry)
         // The in-memory list is committed only on a successful write.
@@ -358,11 +365,24 @@ public final class ProjectsViewModel {
         // `allowEmpty` below deliberately bypasses Phase 1's
         // empty-overwrite refusal, blanking the file while reporting
         // success.
-        guard registry.projects.contains(where: { $0.name == project.name }) else {
+        // KEYED BY IDENTITY, NOT NAME. `uuid` when the row has one, a
+        // normalized path compare otherwise — the same rule
+        // `ProjectTemplateUninstaller.matches` uses. Matching on the display
+        // name meant removing one project deleted EVERY row that shared its
+        // name, and duplicate names are a state the doctor reports as
+        // survivable precisely because they were supposed to be
+        // individually resolvable. It also meant a rename racing a removal
+        // took out the wrong row.
+        let doomed: (ProjectEntry) -> Bool = { candidate in
+            if let target = project.uuid, let id = candidate.uuid { return id == target }
+            return ProjectIdentity.normalizedPath(candidate.path)
+                == ProjectIdentity.normalizedPath(project.path)
+        }
+        guard registry.projects.contains(where: doomed) else {
             fail("Couldn't remove “\(project.name)”", reason: "That project is no longer in the list.")
             return false
         }
-        registry.projects.removeAll { $0.name == project.name }
+        registry.projects.removeAll(where: doomed)
         do {
             // Deliberate removal: removing the user's last project must
             // still be able to leave the registry empty.
@@ -374,6 +394,10 @@ public final class ProjectsViewModel {
             return false
         }
         projects = registry.projects
+        // Only AFTER the registry write committed. Revoking grants and
+        // stripping the AGENTS.md block for a project that is still listed
+        // (because the save threw) would be damage, not cleanup.
+        ProjectLifecycleService(context: context).cleanUpAfterRemoval(of: project)
         if selectedProject?.name == project.name {
             selectedProject = nil
             dashboard = nil
@@ -436,10 +460,43 @@ public final class ProjectsViewModel {
             return false
         }
         projects = registry.projects
+        propagateRenameToRecord(registry.projects[index], from: project.name)
         if selectedProject?.name == project.name {
             selectedProject = registry.projects[index]
         }
         return true
+    }
+
+    /// Carry the new name into `<root>/.scarf/project.json`.
+    ///
+    /// The registry is the INDEX; the record is the portable, canonical
+    /// copy — and it is the one that renders. `ProjectStore.renderAgentContextBlock`
+    /// reads `project.name` off the record, so before this the old name was
+    /// injected into every project chat's AGENTS.md block forever, and
+    /// `project_get` / the fleet panel disagreed with the sidebar about what
+    /// the project is called. A rename that updates one of two stores is not
+    /// a rename.
+    ///
+    /// Best-effort ON PURPOSE, and after the registry write rather than
+    /// before it: the registry save is the one that must succeed (it is what
+    /// the user sees), and a record that is missing, unreadable or on an
+    /// unreachable remote must not roll back a rename that already landed.
+    /// The doctor's `recordNameMismatch` finding is the backstop — a
+    /// divergence that survives this is now SAID rather than silent.
+    private func propagateRenameToRecord(_ entry: ProjectEntry, from oldName: String) {
+        let store = ProjectStore(context: context)
+        guard var record = store.load(projectPath: entry.path) else { return }
+        guard record.name != entry.name else { return }
+        record.name = entry.name
+        do {
+            try store.save(record)
+        } catch {
+            // Not a `fail(...)`: the rename SUCCEEDED. Surfacing an alert
+            // here would tell the user their rename didn't work when it did.
+            logger.warning(
+                "renamed “\(oldName, privacy: .public)” in the registry but couldn't update its project record: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     /// Soft-archive a project. Stays on disk + in the registry; the
@@ -452,6 +509,26 @@ public final class ProjectsViewModel {
         guard mutateEntry(project, action: "archive “\(project.name)”", { $0.archived = true }) else {
             return false
         }
+        // Archive is no longer an inert display bool. The watchers stop
+        // (`dashboardPaths` / `projectScarfDirs` exclude archived rows) and
+        // the project's scheduled jobs are paused — otherwise "archived"
+        // named a state the system was not in: cron still firing into a
+        // folder the user had put away, and a tick still paying for it.
+        //
+        // Grants are deliberately NOT revoked here: archiving is reversible
+        // and unarchiving cannot restore a consent decision, so revoking
+        // would make a reversible action quietly lossy. Removal revokes;
+        // archive pauses.
+        //
+        // OFF THE MAIN ACTOR (charter C10). This spawns one `hermes cron
+        // pause` per job, each with a 30s timeout — on a wedged remote a
+        // project with six jobs would freeze the window for three minutes.
+        // Detached and fire-and-forget: the archive itself already
+        // committed, the pause is a best-effort follow-up, and nothing on
+        // screen is waiting for it.
+        let lifecycle = ProjectLifecycleService(context: context)
+        let target = project
+        Task.detached(priority: .utility) { lifecycle.setCronPaused(true, for: target) }
         if selectedProject?.name == project.name {
             selectedProject = nil
             dashboard = nil
@@ -462,7 +539,16 @@ public final class ProjectsViewModel {
     /// Restore an archived project to the default view.
     @discardableResult
     public func unarchiveProject(_ project: ProjectEntry) -> Bool {
-        mutateEntry(project, action: "restore “\(project.name)”") { $0.archived = false }
+        guard mutateEntry(project, action: "restore “\(project.name)”", { $0.archived = false })
+        else { return false }
+        // Symmetric with `archiveProject`. Without this, archiving would be
+        // a one-way door wearing a toggle's clothes: the jobs would stay
+        // paused and the user would have no reason to look for them.
+        // Detached for the same reason `archiveProject` detaches — see there.
+        let lifecycle = ProjectLifecycleService(context: context)
+        let target = project
+        Task.detached(priority: .utility) { lifecycle.setCronPaused(false, for: target) }
+        return true
     }
 
     /// Distinct folder labels across the current project set, sorted
@@ -511,8 +597,13 @@ public final class ProjectsViewModel {
         loadDashboard(for: project)
     }
 
+    /// Archived rows are EXCLUDED. Watching an archived project's dashboard
+    /// is per-tick transport cost (an SSH round-trip each, on a remote) for
+    /// a surface the sidebar hides — and it is half of what made "archived"
+    /// a lie: the project was still being polled, still refreshing, still
+    /// re-rendering, just invisible.
     public var dashboardPaths: [String] {
-        projects.map(\.dashboardPath)
+        projects.filter { !$0.archived }.map(\.dashboardPath)
     }
 
     /// Per-project `.scarf/` directories — watched alongside `dashboardPaths`
@@ -521,8 +612,9 @@ public final class ProjectsViewModel {
     /// directory by a cron job. In-place file appends within an existing
     /// file are NOT detected here; the cron job should write atomically
     /// (write-then-rename) or `touch` dashboard.json after each run.
+    /// Archived rows excluded — see `dashboardPaths`.
     public var projectScarfDirs: [String] {
-        projects.map(\.scarfDir)
+        projects.filter { !$0.archived }.map(\.scarfDir)
     }
 
     private func loadDashboard(for project: ProjectEntry) {

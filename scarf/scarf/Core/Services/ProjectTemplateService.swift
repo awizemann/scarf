@@ -305,7 +305,87 @@ struct ProjectTemplateService: Sendable {
     /// Shell out to `/usr/bin/unzip` — matches the existing profile-export
     /// pattern (`hermes profile import` shells to `unzip`) and avoids
     /// pulling in a third-party zip library.
+    /// Ceilings for a `.scarftemplate` bundle. A template is a handful of
+    /// markdown files, a dashboard and a cron spec — kilobytes. These are
+    /// two orders of magnitude above anything legitimate, so they can only
+    /// ever stop something that is not a template.
+    static let maxTemplateArchiveBytes: Int64 = 64 * 1024 * 1024
+    static let maxTemplateUnpackedBytes: Int64 = 256 * 1024 * 1024
+    static let maxTemplateEntries = 5_000
+
+    /// Refuse a bundle before extracting it.
+    ///
+    /// `.scarftemplate` files arrive from the catalog, from a `scarf://`
+    /// URL, or from a file the user was sent — none of which are trusted,
+    /// and `unzip` will happily expand a few hundred KB into as much disk as
+    /// the machine has. The user's clue would be a Mac that stops working.
+    ///
+    /// `unzip -Zt` reports the archive's own entry count and uncompressed
+    /// total, which is what a decompression bomb has to LIE about to be
+    /// effective — a lie that makes the archive fail its `verifyClaims`
+    /// pass anyway. The compressed-size cap catches the honest-header case.
+    /// Failure to read the listing is not a refusal: an `unzip` that can't
+    /// list will fail the extraction below with its own error.
+    private nonisolated func enforceArchiveBounds(zipPath: String) throws {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: zipPath)
+        if let size = attrs?[.size] as? Int64, size > Self.maxTemplateArchiveBytes {
+            throw ProjectTemplateError.unzipFailed(
+                "This template file is \(size / 1_048_576) MB. Templates are a few kilobytes; "
+                    + "refusing to open it."
+            )
+        }
+        guard let listing = try? Self.runToolCapturingOutput(
+            "/usr/bin/unzip", ["-Zt", zipPath], timeout: 20
+        ) else { return }
+        // `unzip -Zt` prints e.g. "12 files, 40960 bytes uncompressed, 8192 bytes compressed: 80.0%"
+        let fields = listing.split(separator: " ").map(String.init)
+        if let idx = fields.firstIndex(of: "files,"), idx > 0,
+           let entries = Int(fields[idx - 1]), entries > Self.maxTemplateEntries {
+            throw ProjectTemplateError.unzipFailed(
+                "This template declares \(entries) files. Templates hold a handful; refusing to open it."
+            )
+        }
+        if let idx = fields.firstIndex(of: "bytes"), idx > 0,
+           let uncompressed = Int64(fields[idx - 1]),
+           uncompressed > Self.maxTemplateUnpackedBytes {
+            throw ProjectTemplateError.unzipFailed(
+                "This template would expand to \(uncompressed / 1_048_576) MB. "
+                    + "Templates are a few kilobytes; refusing to open it."
+            )
+        }
+    }
+
+    /// Run a tool and return stdout, with a hard timeout. Charter C10: no
+    /// subprocess Scarf spawns is allowed to hang a caller forever, and both
+    /// of this file's `unzip` invocations are on a user-facing path.
+    private nonisolated static func runToolCapturingOutput(
+        _ executable: String, _ args: [String], timeout: TimeInterval
+    ) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = args
+        let outPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = Pipe()
+        defer {
+            try? outPipe.fileHandleForReading.close()
+            try? outPipe.fileHandleForWriting.close()
+        }
+        try process.run()
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        if process.isRunning {
+            process.terminate()
+            throw ProjectTemplateError.unzipFailed("timed out reading the template archive")
+        }
+        let data = (try? outPipe.fileHandleForReading.readToEnd()) ?? Data()
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
     private nonisolated func unzip(zipPath: String, intoDir: String) throws {
+        try enforceArchiveBounds(zipPath: zipPath)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
         process.arguments = ["-qq", "-o", zipPath, "-d", intoDir]
@@ -386,11 +466,50 @@ struct ProjectTemplateService: Sendable {
         } catch {
             throw ProjectTemplateError.requiredFileMissing("cron/jobs.json")
         }
+        let jobs: [TemplateCronJobSpec]
         do {
-            return try JSONDecoder().decode([TemplateCronJobSpec].self, from: data)
+            jobs = try JSONDecoder().decode([TemplateCronJobSpec].self, from: data)
         } catch {
             throw ProjectTemplateError.manifestParseFailed("cron/jobs.json: \(error.localizedDescription)")
         }
+        try jobs.forEach(rejectFlagShapedCronFields)
+        return jobs
+    }
+
+    /// Refuse a template cron job whose fields would be read by `hermes
+    /// cron create` as OPTIONS rather than as values.
+    ///
+    /// `ProjectTemplateInstaller.createCronJobs` builds an argv from this
+    /// spec, and two of the fields land as POSITIONALS: `schedule` and the
+    /// resolved `prompt`. A schedule of `--deliver` or a prompt of
+    /// `--skill`, coming from a `.scarftemplate` the user downloaded, is
+    /// then parsed by Hermes's argparse as a flag — quietly reconfiguring
+    /// the job the preview sheet just showed the user, with delivery
+    /// targets and skills they never approved. `skills` entries have the
+    /// same shape problem one flag along.
+    ///
+    /// The fix is a REFUSAL, not an escape. Inserting `--` before the
+    /// positionals would be the general answer, but charter C5 forbids
+    /// assuming an argv works because it looks right — `--` handling would
+    /// have to be verified against every supported Hermes tag, and a
+    /// mis-verified guess breaks cron creation for every template. Nothing
+    /// legitimate starts a cron schedule, prompt, skill or job name with
+    /// `-`, so refusing that shape costs real templates nothing and closes
+    /// the injection completely.
+    nonisolated private static func rejectFlagShapedCronFields(_ job: TemplateCronJobSpec) throws {
+        func check(_ value: String?, _ label: String) throws {
+            guard let value, value.hasPrefix("-") else { return }
+            throw ProjectTemplateError.manifestParseFailed(
+                "cron/jobs.json: job \"\(job.name)\" has a \(label) starting with “-” (\"\(value)\"), "
+                    + "which the cron command would read as an option rather than a value. "
+                    + "Refusing to install this template."
+            )
+        }
+        try check(job.name, "name")
+        try check(job.schedule, "schedule")
+        try check(job.prompt, "prompt")
+        try check(job.deliver, "delivery target")
+        for skill in job.skills ?? [] { try check(skill, "skill") }
     }
 
     /// Verify the manifest's `contents` claim exactly matches the unpacked

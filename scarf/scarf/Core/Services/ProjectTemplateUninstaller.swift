@@ -231,12 +231,26 @@ struct ProjectTemplateUninstaller: Sendable {
                 // leaving orphan skills/cron state
             }
         }
-        if plan.projectDirBecomesEmpty, transport.fileExists(plan.project.path) {
+        // 1a. Scarf's own record. Not lock-tracked (the installer doesn't
+        // write it) and not the user's, but its presence is what makes the
+        // doctor call this folder an unlisted project — see
+        // `scarfOwnedFiles`. Guarded like every other deletion here.
+        for file in Self.scarfOwnedFiles(in: plan.project.path + "/.scarf")
+        where guardian.admits(file, under: plan.project.path) && transport.fileExists(file) {
             do {
-                try transport.removeFile(plan.project.path)
+                try transport.removeFile(file)
             } catch {
-                Self.logger.warning("couldn't remove empty project dir \(plan.project.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                Self.logger.warning("couldn't remove \(file, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
+        }
+        // The `.scarf/` directory itself, when nothing is left in it. Same
+        // confirm-then-remove discipline as the project dir below: local
+        // `removeFile` is recursive, so "I think it's empty" is not enough.
+        if transport.fileExists(plan.project.path + "/.scarf") {
+            removeProjectDirIfEmpty(plan.project.path + "/.scarf", transport: transport)
+        }
+        if plan.projectDirBecomesEmpty, transport.fileExists(plan.project.path) {
+            removeProjectDirIfEmpty(plan.project.path, transport: transport)
         }
 
         // 2. Skills namespace dir (always removed wholesale — it's
@@ -354,10 +368,81 @@ struct ProjectTemplateUninstaller: Sendable {
             )
         }
 
+        // 6. The state that lives outside the registry — mini-app permission
+        // grants (which a re-used folder would otherwise inherit, ids being
+        // derived from (host, path)) and the Scarf-managed AGENTS.md block
+        // (which goes on describing the uninstalled template to every agent
+        // that opens the folder). Shared with the sidebar's own removal so
+        // the two paths cannot drift; best-effort by construction.
+        ProjectLifecycleService(context: context).cleanUpAfterRemoval(of: plan.project)
+
         Self.logger.info("uninstalled template \(plan.lock.templateId, privacy: .public) from \(plan.project.path, privacy: .public)")
     }
 
     // MARK: - Helpers
+
+    /// Remove the project directory — but only after CONFIRMING, at time of
+    /// use, that it holds nothing.
+    ///
+    /// Two failures met here, one on each transport:
+    ///
+    /// - **Locally**, `LocalTransport.removeFile` is `FileManager.removeItem`,
+    ///   which is RECURSIVE. `projectDirBecomesEmpty` was computed at plan
+    ///   time, from a scan that skipped `.scarf/` entirely; anything written
+    ///   into the folder between the plan and the click was invisible to it
+    ///   too. So a stale "empty" was a recursive delete of a folder that
+    ///   wasn't. The plan's flag is now a precondition, not a permission:
+    ///   the directory is listed again here and left alone unless it is
+    ///   actually empty.
+    /// - **Remotely**, `removeFile` is `rm -f`, which refuses a directory.
+    ///   The old code caught that, logged a warning nobody sees, and
+    ///   continued to delete the registry row — leaving a GHOST: a folder
+    ///   still holding `.scarf/project.json` with no row pointing at it,
+    ///   which the Project Doctor then reports as an orphan and offers to
+    ///   ADOPT. Accepting re-registers the project the user just
+    ///   uninstalled, with its original uuid, which re-attaches its cron
+    ///   jobs. An uninstall that half-happens must SAY so; `rmdir` is the
+    ///   verb that actually removes an empty directory, and a directory that
+    ///   survives both attempts is reported.
+    ///
+    /// Never throws: the destructive work is done by the time we get here
+    /// and the registry row still has to come out. The residue is logged and
+    /// left, which is the honest outcome — files the user can see and delete
+    /// beat a silent partial success.
+    nonisolated private func removeProjectDirIfEmpty(
+        _ path: String,
+        transport: any ServerTransport
+    ) {
+        guard let remaining = try? transport.listDirectory(path) else {
+            Self.logger.warning(
+                "couldn't list \(path, privacy: .public) to confirm it is empty; leaving it in place"
+            )
+            return
+        }
+        guard remaining.isEmpty else {
+            Self.logger.warning(
+                "leaving \(path, privacy: .public) in place — it still holds \(remaining.count) entries the uninstall did not track"
+            )
+            return
+        }
+        do {
+            try transport.removeFile(path)
+        } catch {
+            // `rm -f` on a directory. Retry with the verb that means it.
+            if transport.isRemote {
+                let rmdir = try? transport.runProcess(
+                    executable: "/bin/sh",
+                    args: ["-c", "rmdir -- \"$0\"", path],
+                    stdin: nil,
+                    timeout: 20
+                )
+                if rmdir?.exitCode == 0 { return }
+            }
+            Self.logger.warning(
+                "couldn't remove empty project dir \(path, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
 
     /// Does this registry row denote the project the plan is removing?
     /// UUID first (stable across renames and moves), path second for
@@ -409,16 +494,64 @@ struct ProjectTemplateUninstaller: Sendable {
         }
         for entry in entries {
             let full = projectDir + "/" + entry
-            // Skip the .scarf/ dir entirely when deciding "does the
-            // project dir have user content?" — the only files we put
-            // there (dashboard.json + lock) are tracked already, and
-            // if they're still there the overall project is not yet
-            // "empty."
-            if entry == ".scarf" { continue }
+            if entry == ".scarf" {
+                // NOT skipped wholesale any more. The old version assumed
+                // `.scarf/` holds only what the installer put there, and
+                // the assumption stopped being true the moment `.scarf/`
+                // became the project's home: `project.json` (the canonical
+                // record), `slash-commands/`, `miniapps/`, `config.json`,
+                // `dashboard.json` edits the agent made after install —
+                // none of it in the lock. Treating the directory as
+                // "nothing of the user's" made `projectDirBecomesEmpty`
+                // true with all of that still inside, and the removal
+                // below is a RECURSIVE delete on every local transport.
+                // The project's own record and every command the user
+                // wrote went with the template.
+                extras.append(contentsOf: untrackedEntries(
+                    in: full, trackedPaths: trackedPaths.union(Self.scarfOwnedFiles(in: full)),
+                    transport: transport
+                ))
+                continue
+            }
             if trackedPaths.contains(full) { continue }
             extras.append(full)
         }
         return extras
+    }
+
+    /// Absolute paths inside `dir` (one level, non-recursive) that the lock
+    /// does not track. An unreadable directory returns nothing — the caller
+    /// treats "no extras" as "safe to remove", so this must be reached only
+    /// for a directory we could actually list. `listDirectory` failing on a
+    /// present `.scarf/` therefore reports the directory ITSELF as an extra:
+    /// unknown contents are user content until proven otherwise.
+    /// The files in `<project>/.scarf/` that belong to SCARF rather than to
+    /// the user or the template: the canonical project record and its
+    /// rolling backup.
+    ///
+    /// They are neither "user content to preserve" nor lock-tracked, and
+    /// leaving them was what manufactured the ghost. `project.json` is the
+    /// file that makes a folder LOOK like a registered project — it is what
+    /// `ProjectDoctorService.orphanFindings` keys on — so a folder that
+    /// keeps it after its registry row is deleted comes back as an orphan
+    /// the doctor offers to adopt, re-registering the project the user just
+    /// uninstalled under its original uuid, with its `[proj:<uuid>]` cron
+    /// tags intact. The record's whole meaning is "this folder is a
+    /// registered project"; an uninstall must take it with the row.
+    nonisolated static func scarfOwnedFiles(in scarfDir: String) -> Set<String> {
+        [scarfDir + "/project.json", scarfDir + "/project.json.bak"]
+    }
+
+    nonisolated private func untrackedEntries(
+        in dir: String,
+        trackedPaths: Set<String>,
+        transport: any ServerTransport
+    ) -> [String] {
+        guard transport.fileExists(dir) else { return [] }
+        guard let names = try? transport.listDirectory(dir) else { return [dir] }
+        return names
+            .map { dir + "/" + $0 }
+            .filter { !trackedPaths.contains($0) }
     }
 
     /// Where a template's skills namespace dir is allowed to live —

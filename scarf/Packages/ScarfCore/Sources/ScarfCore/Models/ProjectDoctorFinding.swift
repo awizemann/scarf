@@ -62,6 +62,18 @@ public struct ProjectDoctorFinding: Sendable, Identifiable, Equatable {
         /// A cron job attributed to this project runs somewhere else —
         /// consistent with a reused path adopting a previous project's jobs.
         case pathReuseSuspicion
+        /// Registry row and `<root>/.scarf/project.json` disagree on the
+        /// project's NAME. The record is what renders into every chat's
+        /// AGENTS.md block; the row is what the sidebar shows. Repairable —
+        /// the row is the name the user actually typed.
+        case recordNameMismatch
+        /// The record at `<root>/.scarf/project.json` declares a different
+        /// `rootPath` than the folder it was found in — the signature of a
+        /// project folder that was moved (or copied) by hand. REPORT-ONLY:
+        /// every writer underneath addresses a project by `record.rootPath`,
+        /// so acting on it would rewrite whatever lives at the declared
+        /// path.
+        case recordPathDivergence
         /// A registry row survived, but one of its optional fields held a
         /// value the decode could not read and dropped — the row's folder
         /// or archived flag. Field salvage deliberately does NOT block
@@ -88,13 +100,19 @@ public struct ProjectDoctorFinding: Sendable, Identifiable, Equatable {
         /// `ProjectDashboardService.saveRegistry` minus this row.
         /// Destructive, explicit-only.
         case removeRegistryRow(path: String)
+        /// `ProjectStore.save(record with row's name)` — copy the registry
+        /// row's display name into the canonical record. Safe: the row's
+        /// name is the one the user typed into the rename sheet, and the
+        /// record's is the stale copy a pre-propagation rename left behind.
+        case renameRecordFromRegistry(path: String)
 
         /// Whether "Repair All (safe)" may run this unattended. Adoption
         /// changes what the user sees in their sidebar and removal deletes a
         /// row; both are the user's call, per finding.
         public var isSafe: Bool {
             switch self {
-            case .reindexRegistryFromRecord, .writeMissingRecord: return true
+            case .reindexRegistryFromRecord, .writeMissingRecord, .renameRecordFromRegistry:
+                return true
             case .adoptOrphan, .removeRegistryRow: return false
             }
         }
@@ -112,6 +130,7 @@ public struct ProjectDoctorFinding: Sendable, Identifiable, Equatable {
             case .writeMissingRecord: return "Create Record"
             case .adoptOrphan: return "Add to Projects"
             case .removeRegistryRow: return "Remove Row"
+            case .renameRecordFromRegistry: return "Fix Name"
             }
         }
     }
