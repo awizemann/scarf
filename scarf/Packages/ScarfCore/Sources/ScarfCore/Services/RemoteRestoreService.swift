@@ -388,12 +388,35 @@ public final class RemoteRestoreService: @unchecked Sendable {
     ) async throws {
         guard !mapping.isEmpty else { return }
         let registryPath = targetHome + "/.hermes/scarf/projects.json"
-        _ = try Self.mutateRemoteJSON(
-            transport: transport,
-            path: registryPath,
-            label: "Path re-anchor",
-            sortKeys: true
-        ) { root in
+        // A read-modify-write of projects.json like any other, so it takes
+        // the same lock (t-07e909e0 / DI-L1) — the restore's re-anchor and
+        // a sidebar save landing at once would otherwise have the loser's
+        // rows published away. The lock is keyed on THIS path rather than
+        // `context.paths.projectsRegistry` because a restore can target a
+        // home the options overrode. `mutateRemoteJSON` is synchronous, so
+        // the hold does not span the `async` boundary of this function.
+        let apply = {
+            _ = try Self.mutateRemoteJSON(
+                transport: transport,
+                path: registryPath,
+                label: "Path re-anchor",
+                sortKeys: true,
+                mutate: Self.reanchorMutation(mapping: mapping)
+            )
+        }
+        if let lock = RegistryWriteLock(context: context, path: registryPath) {
+            try lock.withLock(path: registryPath, apply)
+        } else {
+            try apply()
+        }
+    }
+
+    /// The re-anchor itself, split out so the locked and unlocked paths
+    /// cannot drift.
+    private static func reanchorMutation(
+        mapping: [String: String]
+    ) -> (inout [String: Any]) -> Int? {
+        { root in
             guard var entries = root["projects"] as? [[String: Any]] else { return nil }
             var changed = 0
             for index in entries.indices {

@@ -33,7 +33,14 @@ struct ProjectDetailView: View {
     /// foreground poll task compares this against a fresh stat to
     /// decide whether to re-parse — cheap when the file is unchanged,
     /// and the poll only runs while the view is visible.
-    @State private var lastDashboardMtime: Date?
+    /// `"<mtime-seconds>:<size>"` of the dashboard file the view is
+    /// currently showing, or `nil` when it wasn't there. Mtime ALONE was
+    /// not enough: SFTP reports whole seconds, every Scarf write is an
+    /// atomic replace, and two replaces inside one second are the shape
+    /// this app actually produces — so a same-second rewrite was
+    /// invisible. Pairing size with it is the same signature the Mac
+    /// watcher uses (PERF L3).
+    @State private var lastDashboardSignature: String?
     /// Resolved name of the project's bound model preset, or nil when
     /// the project inherits the global default. Read-only on iOS in
     /// v1 — Mac CRUD writes the binding; iOS just surfaces the name.
@@ -225,20 +232,20 @@ struct ProjectDetailView: View {
         defer { isLoading = false }
         let ctx = serverContext
         let proj = project
-        let result: (ProjectDashboard?, String?, Date?) = await Task.detached {
+        let result: (ProjectDashboard?, String?, String?) = await Task.detached {
             let service = ProjectDashboardService(context: ctx)
             if !service.dashboardExists(for: proj) {
                 return (nil, "No dashboard found at \(proj.dashboardPath)", nil)
             }
-            let mtime = service.dashboardModificationDate(for: proj)
+            let signature = service.dashboardSignature(for: proj)
             if let loaded = service.loadDashboard(for: proj) {
-                return (loaded, nil, mtime)
+                return (loaded, nil, signature)
             }
-            return (nil, "Failed to parse dashboard JSON", mtime)
+            return (nil, "Failed to parse dashboard JSON", signature)
         }.value
         dashboard = result.0
         dashboardError = result.1
-        lastDashboardMtime = result.2
+        lastDashboardSignature = result.2
     }
 
     /// Poll the dashboard file's mtime every 4 seconds while the view
@@ -253,22 +260,25 @@ struct ProjectDetailView: View {
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             if Task.isCancelled { break }
-            let fresh: Date? = await Task.detached {
+            let fresh: String? = await Task.detached {
                 ProjectDashboardService(context: ctx)
-                    .dashboardModificationDate(for: proj)
+                    .dashboardSignature(for: proj)
             }.value
-            // First tick after a missing-dashboard error: nil → nil is
-            // a no-op; nil → Date triggers a reload (file just appeared).
-            // Date → newer Date triggers a reload. Same Date is a no-op.
-            switch (lastDashboardMtime, fresh) {
-            case (nil, nil), (_, nil):
-                continue
-            case (nil, _):
+            // ANY difference reloads, not just a strictly LATER mtime: a
+            // file whose mtime went backwards (a restored backup, a
+            // clock skew, an `scp -p` from an older copy) is still a
+            // different file, and the old strictly-greater compare left
+            // the stale one on screen forever.
+            //
+            // A `nil` still does NOT reload, deliberately: over SFTP one
+            // dropped round-trip reads as "absent", and turning that into
+            // a reload would replace a perfectly good dashboard with a
+            // "no dashboard found" error on a transport blip. A genuinely
+            // deleted dashboard is caught the next time the view is
+            // opened — the same trade this poll has always made.
+            guard let fresh else { continue }
+            if fresh != lastDashboardSignature {
                 await loadDashboard()
-            case (let prev?, let now?) where now > prev:
-                await loadDashboard()
-            default:
-                continue
             }
         }
     }

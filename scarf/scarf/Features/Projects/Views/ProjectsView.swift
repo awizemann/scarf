@@ -142,17 +142,24 @@ struct ProjectsView: View {
         }
         .sheet(isPresented: $showingInstallSheet) {
             TemplateInstallSheet(viewModel: installerViewModel) { entry in
-                viewModel.load()
-                coordinator.selectedProjectName = entry.name
-                if let project = viewModel.projects.first(where: { $0.name == entry.name }) {
-                    viewModel.selectProject(project)
+                // `reload()`, not `load()`: the synchronous form does the
+                // registry read (and, on the damage path, a `.bak` stat)
+                // ON THE MAIN ACTOR — blocking SSH behind a sheet
+                // dismissal on a remote context (charter C10). Everything
+                // downstream of the read moves into the Task with it.
+                Task {
+                    await viewModel.reload()
+                    coordinator.selectedProjectName = entry.name
+                    if let project = viewModel.projects.first(where: { $0.name == entry.name }) {
+                        viewModel.selectProject(project)
+                    }
+                    fileWatcher.updateProjectWatches(dashboardPaths: viewModel.dashboardPaths, scarfDirs: viewModel.projectScarfDirs)
+                    // A template install changes exactly the install-time facts
+                    // the probe cache holds, and the cache no longer re-probes
+                    // per tick — so say so explicitly.
+                    menuProbes.invalidate()
+                    menuProbes.refresh(projects: viewModel.projects, context: serverContext)
                 }
-                fileWatcher.updateProjectWatches(dashboardPaths: viewModel.dashboardPaths, scarfDirs: viewModel.projectScarfDirs)
-                // A template install changes exactly the install-time facts
-                // the probe cache holds, and the cache no longer re-probes
-                // per tick — so say so explicitly.
-                menuProbes.invalidate()
-                menuProbes.refresh(projects: viewModel.projects, context: serverContext)
             }
         }
         .sheet(isPresented: $showingNewProjectSheet) {
@@ -166,15 +173,18 @@ struct ProjectsView: View {
                 // and switches `selectedSection` to `.chat`), so when
                 // the user comes back to Projects later, the project
                 // is already there.
-                viewModel.load()
-                coordinator.selectedProjectName = entry.name
-                if let project = viewModel.projects.first(where: { $0.name == entry.name }) {
-                    viewModel.selectProject(project)
+                // Off-main for the same reason the install sheet is.
+                Task {
+                    await viewModel.reload()
+                    coordinator.selectedProjectName = entry.name
+                    if let project = viewModel.projects.first(where: { $0.name == entry.name }) {
+                        viewModel.selectProject(project)
+                    }
+                    fileWatcher.updateProjectWatches(
+                        dashboardPaths: viewModel.dashboardPaths,
+                        scarfDirs: viewModel.projectScarfDirs
+                    )
                 }
-                fileWatcher.updateProjectWatches(
-                    dashboardPaths: viewModel.dashboardPaths,
-                    scarfDirs: viewModel.projectScarfDirs
-                )
             }
         }
         .sheet(item: $exportSheetProject) { project in
@@ -206,12 +216,15 @@ struct ProjectsView: View {
                 if coordinator.selectedProjectName == removed.name {
                     coordinator.selectedProjectName = nil
                 }
-                viewModel.load()
-                fileWatcher.updateProjectWatches(dashboardPaths: viewModel.dashboardPaths, scarfDirs: viewModel.projectScarfDirs)
-                // Symmetric with the install sheet: an uninstall removes the
-                // template lock file the probe cache answers from.
-                menuProbes.invalidate()
-                menuProbes.refresh(projects: viewModel.projects, context: serverContext)
+                // Off-main for the same reason the install sheet is.
+                Task {
+                    await viewModel.reload()
+                    fileWatcher.updateProjectWatches(dashboardPaths: viewModel.dashboardPaths, scarfDirs: viewModel.projectScarfDirs)
+                    // Symmetric with the install sheet: an uninstall removes the
+                    // template lock file the probe cache answers from.
+                    menuProbes.invalidate()
+                    menuProbes.refresh(projects: viewModel.projects, context: serverContext)
+                }
             }
         }
         .sheet(item: $configEditorProject) { project in
@@ -260,7 +273,15 @@ struct ProjectsView: View {
                     // Failure is non-fatal: a stale block in .env is
                     // benign (just unreachable env vars), and the
                     // mirror's own logger has recorded it.
-                    try? KeychainEnvMirror(context: serverContext).unmirror(project: project)
+                    // OFF THE MAIN ACTOR: unmirroring reads and rewrites
+                    // the project's `.env` through the transport, which on
+                    // a remote context is blocking SSH (charter C10).
+                    // Still awaited — the ordering guarantee below (and
+                    // the comment above) depends on it having finished.
+                    let ctx = serverContext
+                    await Task.detached(priority: .userInitiated) {
+                        try? KeychainEnvMirror(context: ctx).unmirror(project: project)
+                    }.value
                     if coordinator.selectedProjectName == project.name {
                         coordinator.selectedProjectName = nil
                     }

@@ -180,7 +180,10 @@ struct ProjectUpgradeService: Sendable {
     private nonisolated func readProvenanceVersion(projectPath: String) -> Int? {
         let path = provenancePath(projectPath: projectPath)
         let transport = context.makeTransport()
-        guard transport.fileExists(path), let data = try? transport.readFile(path) else { return nil }
+        // ONE probe, not two: a failed read is already "no provenance
+        // version" here, so the `fileExists` that preceded it only ever
+        // bought a second round-trip for the same answer (PERF L1).
+        guard let data = try? transport.readFile(path) else { return nil }
         return (try? JSONDecoder().decode(Provenance.self, from: data))?.upgradeVersion
     }
 

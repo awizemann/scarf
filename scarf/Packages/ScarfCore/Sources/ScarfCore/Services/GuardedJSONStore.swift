@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 #if canImport(os)
 import os
 #endif
@@ -218,11 +219,23 @@ public struct GuardedJSONStore: Sendable {
     ) -> String? {
         let dir = (path as NSString).deletingLastPathComponent
         let prefix = (path as NSString).lastPathComponent + ".corrupt-"
+        // MEMOIZED. A corrupt file stays corrupt until a human fixes it,
+        // and these loads run on watcher ticks — so the dedup scan below
+        // (`listDirectory` + a `stat` and a `readFile` per existing copy)
+        // was paying 1 + 2K transport round-trips SEVERAL TIMES A SECOND
+        // for an answer that had not changed since the first one. The memo
+        // is keyed by the exact bytes, so different corruption still
+        // scans, and it expires so a human deleting the quarantine copy is
+        // noticed within a window rather than never.
+        if let remembered = QuarantineMemo.shared.copy(forPath: path, bytes: data) {
+            return remembered
+        }
         if let names = try? transport.listDirectory(dir) {
             for name in names where name.hasPrefix(prefix) {
                 let candidate = dir + "/" + name
                 guard transport.stat(candidate)?.size == Int64(data.count) else { continue }
                 if let existing = try? transport.readFile(candidate), existing == data {
+                    QuarantineMemo.shared.remember(candidate, forPath: path, bytes: data)
                     return candidate
                 }
             }
@@ -241,6 +254,8 @@ public struct GuardedJSONStore: Sendable {
                 "Quarantined unusable \(label, privacy: .public) to \(destination, privacy: .public)"
             )
             #endif
+            QuarantineMemo.shared.remember(destination, forPath: path, bytes: data)
+            pruneQuarantineCopies(dir: dir, prefix: prefix, transport: transport)
             return destination
         } catch {
             #if canImport(os)
@@ -249,6 +264,32 @@ public struct GuardedJSONStore: Sendable {
             )
             #endif
             return nil
+        }
+    }
+
+    /// How many `<name>.corrupt-*` copies of one file are kept.
+    static let quarantineKeepCount = 5
+
+    /// Keep the newest `quarantineKeepCount` copies and delete the rest.
+    ///
+    /// Runs only after a copy was actually WRITTEN — a rare event — so it
+    /// costs nothing on the tick path the memo above protects. The stamp
+    /// format sorts lexicographically in time order by construction, and
+    /// the `-<uuid8>` collision suffix sorts after its own second, so a
+    /// name sort is a chronological sort here.
+    ///
+    /// An unbounded set is not merely untidy: every entry is a file the
+    /// dedup scan reads in full whenever the memo is cold.
+    private nonisolated static func pruneQuarantineCopies(
+        dir: String, prefix: String, transport: any ServerTransport
+    ) {
+        guard let names = try? transport.listDirectory(dir) else { return }
+        let copies = names.filter { $0.hasPrefix(prefix) }.sorted()
+        guard copies.count > quarantineKeepCount else { return }
+        for name in copies.dropLast(quarantineKeepCount) {
+            let doomed = dir + "/" + name
+            try? transport.removeFile(doomed)
+            QuarantineMemo.shared.forget(copy: doomed)
         }
     }
 
@@ -261,6 +302,78 @@ public struct GuardedJSONStore: Sendable {
         f.timeZone = TimeZone(identifier: "UTC")
         f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
         return f.string(from: date)
+    }
+}
+
+/// "These exact bytes at this exact path are already quarantined, and the
+/// copy is over there."
+///
+/// Process-wide rather than per-store because the stores are `struct`s
+/// built per call — a corrupt `miniapp_grants.json` is inspected through a
+/// fresh `GuardedJSONStore` on every watcher tick, so an instance-scoped
+/// memo would never hit.
+///
+/// **The invalidation edge is time.** The memo answers a question about
+/// the remote filesystem, and the user can delete the quarantine copy
+/// behind our back; entries therefore expire, after which the next
+/// inspection pays the full scan again and re-establishes (or corrects)
+/// the answer. Pruning also forgets what it deletes, so the memo can never
+/// point at a copy this process itself removed.
+final class QuarantineMemo: @unchecked Sendable {
+    static let shared = QuarantineMemo()
+
+    /// Long enough that a corrupt file being re-inspected several times a
+    /// second costs one scan rather than thousands; short enough that a
+    /// human cleaning up the quarantine directory is noticed while they
+    /// are still at the keyboard.
+    static let ttl: TimeInterval = 300
+
+    private struct Entry {
+        var copy: String
+        var digest: String
+        var at: Date
+    }
+
+    private let lock = NSLock()
+    private var entries: [String: Entry] = [:]
+
+    func copy(forPath path: String, bytes: Data) -> String? {
+        let digest = Self.digest(bytes)
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entry = entries[path], entry.digest == digest,
+              Date().timeIntervalSince(entry.at) < Self.ttl
+        else { return nil }
+        return entry.copy
+    }
+
+    func remember(_ copy: String, forPath path: String, bytes: Data) {
+        let digest = Self.digest(bytes)
+        lock.lock()
+        defer { lock.unlock() }
+        entries[path] = Entry(copy: copy, digest: digest, at: Date())
+    }
+
+    /// Drop any memo pointing at a copy that no longer exists.
+    func forget(copy: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        entries = entries.filter { $0.value.copy != copy }
+    }
+
+    /// Test seam.
+    func reset() {
+        lock.lock()
+        defer { lock.unlock() }
+        entries.removeAll()
+    }
+
+    private static func digest(_ data: Data) -> String {
+        // Content identity, not a security boundary — but SHA-256 is
+        // free here and a truncated non-cryptographic hash on
+        // attacker-writable bytes is exactly the shape the audit
+        // objected to elsewhere.
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }
 

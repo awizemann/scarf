@@ -76,7 +76,9 @@ public struct MiniAppService: Sendable {
         guard Self.isValidMiniAppId(id) else { return nil }
         let path = Self.manifestPath(forProjectPath: projectPath, id: id)
         let transport = context.makeTransport()
-        guard transport.fileExists(path), let data = try? transport.readFile(path) else { return nil }
+        // One probe: absent and unreadable are the same `nil` to this
+        // caller, so the extra `fileExists` round-trip bought nothing.
+        guard let data = try? transport.readFile(path) else { return nil }
         if data.count > Self.maxManifestBytes {
             #if canImport(os)
             Self.logger.warning("miniapp.json for \(id, privacy: .public) is \(data.count) bytes (cap \(Self.maxManifestBytes)); treating as missing")

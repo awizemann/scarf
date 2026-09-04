@@ -445,6 +445,16 @@ public struct ProjectDashboardService: Sendable {
         transport.stat(project.dashboardPath)?.mtime
     }
 
+    /// `"<mtime-seconds>:<size>"`, or `nil` when the dashboard isn't
+    /// there. The app-wide change signature (see `WatchBaselineStore`):
+    /// mtime alone is whole seconds over SSH/SFTP, which makes two atomic
+    /// replaces inside one second — the shape Scarf actually writes —
+    /// indistinguishable.
+    public func dashboardSignature(for project: ProjectEntry) -> String? {
+        guard let info = transport.stat(project.dashboardPath) else { return nil }
+        return "\(Int(info.mtime.timeIntervalSince1970)):\(info.size)"
+    }
+
     // MARK: - Dashboard writes
 
     /// Validate then write `<project>/.scarf/dashboard.json`.

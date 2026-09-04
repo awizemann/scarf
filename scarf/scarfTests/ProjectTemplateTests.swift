@@ -263,6 +263,48 @@ import ScarfCore
 /// suite needs no `.serialized` and runs in parallel safely.
 struct ProjectTemplateInstallerTests {
 
+    /// t-07e909e0 / DI-H5. The installer's registry registration is a
+    /// read-modify-write, and it used to run outside the cross-process
+    /// lock — so a `project_register` from the MCP helper landing between
+    /// its load and its save was published away. Proven the deterministic
+    /// way rather than with threads: hold the lock file the way another
+    /// process would, and the install must REPORT `registryBusy` instead of
+    /// walking through the window.
+    @Test func installRefusesWhileAnotherProcessHoldsTheRegistryLock() throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        let parentDir = scratch + "/parent"
+        try FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
+
+        let bundle = try ProjectTemplateServiceTests.makeBundle(dir: scratch, files: [
+            "README.md": "# Minimal",
+            "AGENTS.md": "# Agent notes",
+            "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
+        ])
+        let service = ProjectTemplateService(context: home.context)
+        let inspection = try service.inspect(zipPath: bundle)
+        defer { service.cleanupTempDir(inspection.unpackedDir) }
+        let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
+
+        // Stand in for the other process. Fresh mtime, so it is a LIVE
+        // hold rather than one the staleness bound would break.
+        let lockPath = home.context.paths.projectsRegistry + ".lock"
+        try FileManager.default.createDirectory(
+            atPath: (lockPath as NSString).deletingLastPathComponent,
+            withIntermediateDirectories: true
+        )
+        try Data("owner=SOMEBODY-ELSE\n".utf8).write(to: URL(fileURLWithPath: lockPath))
+        defer { try? FileManager.default.removeItem(atPath: lockPath) }
+
+        #expect(throws: ProjectRegistryError.self) {
+            try ProjectTemplateInstaller(context: home.context).install(plan: plan)
+        }
+        // The other process's lock is still its own.
+        #expect(FileManager.default.fileExists(atPath: lockPath))
+    }
+
     @Test func installsMinimalBundleAndWritesLockFile() throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
@@ -426,6 +468,47 @@ struct ProjectTemplateInstallerTests {
 /// never the real `~/.hermes` — replacing the old snapshot/restore +
 /// cross-suite `TestRegistryLock`. No shared state, no `.serialized`.
 struct ProjectTemplateUninstallerTests {
+
+    /// t-07e909e0 / DI-H5, the uninstaller's half: its row removal is a
+    /// read-modify-write and now takes the same cross-process lock, so a
+    /// concurrent registration can't be erased by a list loaded before it
+    /// landed. Same deterministic proof as the installer's.
+    @Test func uninstallRegistryRemovalRefusesWhileTheLockIsHeld() throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        let parentDir = scratch + "/parent"
+        try FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
+
+        let bundle = try ProjectTemplateServiceTests.makeBundle(dir: scratch, files: [
+            "README.md": "# Minimal",
+            "AGENTS.md": "# Agent notes",
+            "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
+        ])
+        let service = ProjectTemplateService(context: home.context)
+        let inspection = try service.inspect(zipPath: bundle)
+        defer { service.cleanupTempDir(inspection.unpackedDir) }
+        let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
+
+        let installer = ProjectTemplateInstaller(context: home.context)
+        let entry = try installer.install(plan: plan)
+        let uninstaller = ProjectTemplateUninstaller(context: home.context)
+        let uninstallPlan = try uninstaller.loadUninstallPlan(for: entry)
+
+        let lockPath = home.context.paths.projectsRegistry + ".lock"
+        try Data("owner=SOMEBODY-ELSE\n".utf8).write(to: URL(fileURLWithPath: lockPath))
+        defer { try? FileManager.default.removeItem(atPath: lockPath) }
+
+        #expect(throws: ProjectRegistryError.self) {
+            try uninstaller.uninstall(plan: uninstallPlan)
+        }
+        // The row is still there — a refusal, not a half-done removal that
+        // reports success.
+        #expect(ProjectDashboardService(context: home.context)
+            .loadRegistry().projects.contains { $0.path == entry.path })
+        #expect(FileManager.default.fileExists(atPath: lockPath))
+    }
 
     @Test func roundTripsInstallThenUninstall() throws {
         let home = try TempHermesHome()

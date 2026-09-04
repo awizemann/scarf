@@ -168,7 +168,8 @@ public final class ProjectsViewModel {
         apply(registry: loaded.registry)
         applyDamage(Self.damageNotice(for: loaded, service: service))
         if let selected = selectedProject {
-            selectedHasDashboard = service.dashboardExists(for: selected)
+            setSelectedHasDashboard(service.dashboardExists(for: selected))
+            lastDashboardProbe = (path: selected.path, at: Date())
         }
     }
 
@@ -198,22 +199,46 @@ public final class ProjectsViewModel {
                 return (result.registry, ProjectsViewModel.damageNotice(for: result, service: svc))
             }.value
             guard let self, generation == self.reloadGeneration else { return }
-            self.apply(registry: loaded.0)
+            let registryChanged = self.apply(registry: loaded.0)
             self.applyDamage(loaded.1)
             if let selected = self.selectedProject {
-                await self.refreshDashboardFlag(for: selected, generation: generation)
+                // A tick that changed nothing in the registry does not get
+                // to spend a round-trip on the glyph; see the gate there.
+                await self.refreshDashboardFlag(
+                    for: selected, generation: generation, force: registryChanged
+                )
             }
         }
         reloadTask = task
         await task.value
     }
 
-    private func apply(registry: ProjectRegistry) {
-        projects = registry.projects
+    /// EQUALITY-GUARDED. `@Observable` setters do not compare — assigning
+    /// an identical array is still a mutation, and every sidebar row,
+    /// folder DisclosureGroup and `folders` computation re-evaluates. The
+    /// overwhelmingly common call is a watcher tick during a chat stream
+    /// carrying a registry byte-identical to the one on screen, several
+    /// times a second, so "unchanged costs nothing" has to include the
+    /// observation graph, not just the transport.
+    /// - Returns: whether the project list actually changed.
+    @discardableResult
+    private func apply(registry: ProjectRegistry) -> Bool {
+        let changed = projects != registry.projects
+        if changed {
+            projects = registry.projects
+        }
         if let selected = selectedProject, !projects.contains(where: { $0.name == selected.name }) {
             selectedProject = nil
-            selectedHasDashboard = false
+            setSelectedHasDashboard(false)
+            lastDashboardProbe = nil
         }
+        return changed
+    }
+
+    /// The one writer of `selectedHasDashboard`, so the equality guard
+    /// cannot be forgotten at a call site.
+    private func setSelectedHasDashboard(_ value: Bool) {
+        if selectedHasDashboard != value { selectedHasDashboard = value }
     }
 
     /// Turn a registry load result into banner-ready damage, or `nil`
@@ -242,19 +267,25 @@ public final class ProjectsViewModel {
 
     /// Commit damage to the banner state, honouring a prior dismissal
     /// of this exact damage.
+    ///
+    /// Equality-guarded for the same reason `apply(registry:)` is: the
+    /// clean-load path runs on every watcher tick and used to write
+    /// `registryDamage = nil` over a `nil` several times a second, which
+    /// `@Observable` faithfully reports as a change to every view reading
+    /// the banner.
     private func applyDamage(_ notice: RegistryDamageNotice?) {
         guard let notice else {
             // The file reads cleanly again: drop the banner AND every
             // dismissal, so if it breaks again later the user is told.
-            registryDamage = nil
+            if registryDamage != nil { registryDamage = nil }
             dismissedDamageSignatures.removeAll()
             return
         }
         guard !dismissedDamageSignatures.contains(notice.signature) else {
-            registryDamage = nil
+            if registryDamage != nil { registryDamage = nil }
             return
         }
-        registryDamage = notice
+        if registryDamage != notice { registryDamage = notice }
     }
 
     /// Take the registry-damage banner down. The same damage will not
@@ -383,7 +414,7 @@ public final class ProjectsViewModel {
     /// and lands a moment later.
     public func selectProject(_ project: ProjectEntry) {
         selectedProject = project
-        selectedHasDashboard = false
+        setSelectedHasDashboard(false)
         reloadGeneration &+= 1
         let generation = reloadGeneration
         Task { [weak self] in
@@ -479,7 +510,7 @@ public final class ProjectsViewModel {
         }.value
         if selectedProject?.name == project.name {
             selectedProject = nil
-            selectedHasDashboard = false
+            setSelectedHasDashboard(false)
         }
         return true
     }
@@ -618,7 +649,7 @@ public final class ProjectsViewModel {
         Task.detached(priority: .utility) { lifecycle.setCronPaused(true, for: target) }
         if selectedProject?.name == project.name {
             selectedProject = nil
-            selectedHasDashboard = false
+            setSelectedHasDashboard(false)
         }
         return true
     }
@@ -707,15 +738,42 @@ public final class ProjectsViewModel {
         projects.filter { !$0.archived }.map(\.scarfDir)
     }
 
+    /// When and for which project the dashboard glyph was last probed.
+    /// The gate for the per-tick `stat` below.
+    @ObservationIgnored private var lastDashboardProbe: (path: String, at: Date)?
+
+    /// How long a dashboard-glyph answer is reused when nothing else
+    /// suggests it changed. Same shape (and same number) as
+    /// `ProjectMenuProbeCache`'s revalidation window, for the same
+    /// reason: the gate has to have a floor, or a file appearing behind
+    /// the gate is invisible forever.
+    private static let dashboardProbeRevalidation: TimeInterval = 60
+
     /// One off-main `stat` — not a read, not a decode. The cockpit view
     /// model owns loading and rendering the dashboard; this exists solely
     /// so the sidebar can pick a glyph.
-    private func refreshDashboardFlag(for project: ProjectEntry, generation: Int) async {
+    ///
+    /// **Gated**, because "one stat" was still one SSH round-trip on every
+    /// watcher tick — several a second during a chat stream — to answer a
+    /// question whose answer changes about once a month (PERF H3). It runs
+    /// when the caller says so (`force`: selection, explicit refresh, a
+    /// registry that actually changed) and otherwise at most once per
+    /// revalidation window, which is the invalidation edge for the case
+    /// nothing else can see: `dashboard.json` appearing or being deleted
+    /// under an unchanged registry and an unchanged selection.
+    private func refreshDashboardFlag(
+        for project: ProjectEntry, generation: Int, force: Bool = true
+    ) async {
+        if !force, let probe = lastDashboardProbe, probe.path == project.path,
+           Date().timeIntervalSince(probe.at) < Self.dashboardProbeRevalidation {
+            return
+        }
         let ctx = context
         let exists = await Task.detached {
             ProjectDashboardService(context: ctx).dashboardExists(for: project)
         }.value
         guard generation == reloadGeneration, selectedProject?.path == project.path else { return }
-        selectedHasDashboard = exists
+        lastDashboardProbe = (path: project.path, at: Date())
+        setSelectedHasDashboard(exists)
     }
 }

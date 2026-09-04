@@ -434,6 +434,39 @@ struct ProjectTemplateUninstaller: Sendable {
         // alone is too brittle — the same project dir can be spelled
         // `/tmp/x` or `/private/tmp/x`, with or without a trailing
         // slash, so both sides go through `Self.normalizedPath`.
+        //
+        // The load and the save are one read-modify-write, so they go
+        // inside the cross-process lock together (t-07e909e0 / DI-H5) —
+        // otherwise a `project_register` landing between them is published
+        // away by this removal. The load's fingerprint rides along as
+        // `expecting:` for the remote case the local lock cannot see.
+        // Synchronous frame: `uninstall` is `nonisolated` and has no
+        // suspension point, which is what the thread-local reentrancy
+        // requires.
+        if let lock = RegistryWriteLock(context: context) {
+            try lock.withLock(path: context.paths.projectsRegistry) {
+                try removeRegistryRow(plan: plan)
+            }
+        } else {
+            try removeRegistryRow(plan: plan)
+        }
+
+        // 6. The state that lives outside the registry — mini-app permission
+        // grants (which a re-used folder would otherwise inherit, ids being
+        // derived from (host, path)) and the Scarf-managed AGENTS.md block
+        // (which goes on describing the uninstalled template to every agent
+        // that opens the folder). Shared with the sidebar's own removal so
+        // the two paths cannot drift; best-effort by construction.
+        ProjectLifecycleService(context: context).cleanUpAfterRemoval(of: plan.project)
+
+        Self.logger.info("uninstalled template \(plan.lock.templateId, privacy: .public) from \(plan.project.path, privacy: .public)")
+    }
+
+    /// Step 5's read-modify-write, run under the registry write lock by
+    /// `uninstall`. Loading INSIDE the lock is the point: the row list this
+    /// publishes must be the one on disk right now, not one a concurrent
+    /// `project_register` has already added to.
+    nonisolated private func removeRegistryRow(plan: TemplateUninstallPlan) throws {
         let dashboardService = ProjectDashboardService(context: context)
         let loaded = dashboardService.loadRegistryDetailed()
         // A LOSSY load cannot support either conclusion: the row may be in
@@ -472,7 +505,9 @@ struct ProjectTemplateUninstaller: Sendable {
             do {
                 // Deliberate removal — uninstalling the only project must
                 // still be able to leave the registry empty.
-                try dashboardService.saveRegistry(registry, allowEmpty: true)
+                try dashboardService.saveRegistry(
+                    registry, allowEmpty: true, expecting: loaded.contentFingerprint
+                )
             } catch {
                 Self.logger.error("uninstall couldn't rewrite projects registry: \(error.localizedDescription, privacy: .public)")
                 throw ProjectTemplateError.registryUpdateFailed(error.localizedDescription)
@@ -485,16 +520,6 @@ struct ProjectTemplateUninstaller: Sendable {
                 "uninstall: no registry row matched \(plan.project.path, privacy: .public); leaving projects.json untouched"
             )
         }
-
-        // 6. The state that lives outside the registry — mini-app permission
-        // grants (which a re-used folder would otherwise inherit, ids being
-        // derived from (host, path)) and the Scarf-managed AGENTS.md block
-        // (which goes on describing the uninstalled template to every agent
-        // that opens the folder). Shared with the sidebar's own removal so
-        // the two paths cannot drift; best-effort by construction.
-        ProjectLifecycleService(context: context).cleanUpAfterRemoval(of: plan.project)
-
-        Self.logger.info("uninstalled template \(plan.lock.templateId, privacy: .public) from \(plan.project.path, privacy: .public)")
     }
 
     // MARK: - Helpers

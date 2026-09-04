@@ -153,10 +153,18 @@ final class ProjectCockpitViewModel {
         ] + lastMiniAppManifestPaths
     }
 
+    /// `nil` when the batched stat could not be trusted (see
+    /// `ServerTransport.statAll`). Deliberately NOT "every path absent":
+    /// that map is a lie about the filesystem, it never matches the
+    /// previous signature, and it therefore drove a full facet reload —
+    /// including the derive-and-save of a project record — over exactly
+    /// the transport that had just failed to answer a single `stat`.
+    /// That is the stripped-record shape D3 closed, re-entered through
+    /// the fast path.
     private nonisolated static func signature(
         of paths: [String], transport: any ServerTransport
-    ) -> [String: String] {
-        let stats = transport.statAll(paths)
+    ) -> [String: String]? {
+        guard let stats = transport.statAll(paths) else { return nil }
         var out: [String: String] = [:]
         for path in paths {
             guard let info = stats[path] else {
@@ -169,6 +177,28 @@ final class ProjectCockpitViewModel {
             out[path] = "\(Int(info.mtime.timeIntervalSince1970)):\(info.size)"
         }
         return out
+    }
+
+    /// The tick short-circuit decision, as a pure function of what we
+    /// asked and what the transport managed to tell us.
+    ///
+    /// Three outcomes, and the middle one is the fix: a signature that
+    /// MATCHES means nothing changed (skip); a signature that DIFFERS
+    /// means read; and NO signature at all — `statAll` refusing to
+    /// vouch for its own answer — means we learned nothing, which is not
+    /// the same as learning that everything changed. The old code
+    /// fabricated an all-absent map for that case, guaranteeing a
+    /// mismatch and sending a full facet reload (record derive + save
+    /// included) over the transport that had just failed.
+    static func shouldRead(
+        reason: LoadReason,
+        recheckHealth: Bool,
+        fresh: [String: String]?,
+        last: [String: String]?
+    ) -> Bool {
+        guard reason == .watcher, !recheckHealth else { return true }
+        guard let fresh else { return false }
+        return fresh != last
     }
 
     private func loadImpl(reason: LoadReason, recheckHealth: Bool) async {
@@ -186,13 +216,19 @@ final class ProjectCockpitViewModel {
         let freshSignature = await Task.detached(priority: .utility) {
             Self.signature(of: paths, transport: signatureContext.makeTransport())
         }.value
-        if reason == .watcher, !recheckHealth, freshSignature == lastFacetSignature {
-            return
-        }
+        guard Self.shouldRead(
+            reason: reason,
+            recheckHealth: recheckHealth,
+            fresh: freshSignature,
+            last: lastFacetSignature
+        ) else { return }
         // Captured BEFORE the reads below, so a write that lands while they
         // are in flight is seen by the next pass rather than assumed into
-        // the record.
-        lastFacetSignature = freshSignature
+        // the record. An untrusted stat leaves the PREVIOUS signature in
+        // place rather than clearing it: the user-initiated load below is
+        // running regardless, and a nil baseline would only buy a
+        // guaranteed extra reload on the next tick.
+        if let freshSignature { lastFacetSignature = freshSignature }
         facetLoadCount += 1
         hasLoaded = true
         isLoading = true

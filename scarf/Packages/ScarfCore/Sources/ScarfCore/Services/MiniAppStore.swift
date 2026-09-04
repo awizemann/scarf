@@ -52,7 +52,9 @@ public struct MiniAppStore: Sendable {
     private nonisolated func load(projectPath: String, miniAppId: String) -> [String: String] {
         let path = Self.statePath(projectPath: projectPath, miniAppId: miniAppId)
         let transport = context.makeTransport()
-        guard transport.fileExists(path), let data = try? transport.readFile(path) else { return [:] }
+        // One probe: both absent and unreadable already mean "empty
+        // state" to this caller.
+        guard let data = try? transport.readFile(path) else { return [:] }
         if data.count > Self.maxBytes {
             #if canImport(os)
             Self.logger.warning("mini-app state for \(miniAppId, privacy: .public) is \(data.count) bytes (cap \(Self.maxBytes)); treating as empty")

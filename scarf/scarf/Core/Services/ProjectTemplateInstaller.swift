@@ -295,9 +295,33 @@ struct ProjectTemplateInstaller: Sendable {
 
     // MARK: - Registry
 
+    /// Append this install's row to `projects.json`.
+    ///
+    /// A read-modify-write, so it takes the cross-process lock around the
+    /// WHOLE of it (t-07e909e0 / DI-H5) rather than leaving the load and
+    /// the save on either side of a window a concurrent `project_register`
+    /// can land in — which would append this row onto a list that no longer
+    /// has the agent's, and publish the agent's row away. The load moves
+    /// INSIDE the lock for the same reason, and its fingerprint travels to
+    /// the save as `expecting:` so the remote case (where the lock is only
+    /// a local stand-in) refuses instead of clobbering. Synchronous
+    /// throughout: the lock's reentrancy is thread-local and must not span
+    /// a suspension.
     nonisolated private func registerProject(plan: TemplateInstallPlan) throws -> ProjectEntry {
         let service = ProjectDashboardService(context: context)
-        var registry = service.loadRegistry()
+        guard let lock = RegistryWriteLock(context: context) else {
+            return try registerProjectLocked(plan: plan, service: service)
+        }
+        return try lock.withLock(path: context.paths.projectsRegistry) {
+            try registerProjectLocked(plan: plan, service: service)
+        }
+    }
+
+    nonisolated private func registerProjectLocked(
+        plan: TemplateInstallPlan, service: ProjectDashboardService
+    ) throws -> ProjectEntry {
+        let loaded = service.loadRegistryDetailed()
+        var registry = loaded.registry
         // Mint the stable UUID at install time (parity with the scaffolder),
         // so the project is first-class from its first byte rather than
         // waiting on lazy migration — fleet/portfolio only groups projects
@@ -311,7 +335,7 @@ struct ProjectTemplateInstaller: Sendable {
         // project doesn't show up in the sidebar" bug. If the registry
         // write fails, the whole install is surfaced as failed so the
         // user can see + address the underlying problem.
-        try service.saveRegistry(registry)
+        try service.saveRegistry(registry, expecting: loaded.contentFingerprint)
         return entry
     }
 

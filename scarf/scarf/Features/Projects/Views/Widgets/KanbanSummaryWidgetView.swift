@@ -22,6 +22,7 @@ struct KanbanSummaryWidgetView: View {
     @ScaledMetric(relativeTo: .caption2) private var badgeDiameter: CGFloat = 16
 
     @State private var tenant: String?
+    @State private var tenantProbe: TenantProbe?
     @State private var tasks: [HermesKanbanTask] = []
     @State private var stats: HermesKanbanStats = .empty
     @State private var isLoading = false
@@ -158,9 +159,7 @@ struct KanbanSummaryWidgetView: View {
 
     private func loadOnce() async {
         guard let projectRoot, !projectRoot.isEmpty else { return }
-        if tenant == nil {
-            tenant = readTenant(at: projectRoot, context: serverContext)
-        }
+        await refreshTenant(projectRoot: projectRoot)
         guard let tenant, !tenant.isEmpty else {
             tasks = []
             return
@@ -202,19 +201,58 @@ struct KanbanSummaryWidgetView: View {
         }
     }
 
-    // `context` passed in (read on MainActor by the caller) instead of
-    // touching the View's MainActor-isolated `serverContext` from this
-    // nonisolated method. (t-aud23)
-    private nonisolated func readTenant(at projectPath: String, context serverContext: ServerContext) -> String? {
-        let manifestPath = projectPath + "/.scarf/manifest.json"
-        let transport = serverContext.makeTransport()
-        guard transport.fileExists(manifestPath),
-              let data = try? transport.readFile(manifestPath),
-              let manifest = try? JSONDecoder().decode(ProjectTemplateManifest.self, from: data)
-        else {
-            return nil
-        }
-        return manifest.kanbanTenant
+    /// Resolve the project's kanban tenant, OFF THE MAIN ACTOR and at
+    /// most once per manifest change.
+    ///
+    /// Two things were wrong here (PERF M1, charter C10). It ran on the
+    /// main actor: `readTenant` is `nonisolated`, but calling it from this
+    /// `@MainActor` view ran it on the main thread anyway, and on a remote
+    /// context it is two blocking SSH round-trips with a 60s timeout each
+    /// — a beachball behind a dashboard widget. And a nil answer was never
+    /// cached, so a project without a tenant (the common case before the
+    /// user has opened the Kanban tab) re-paid that every 10 seconds
+    /// forever.
+    ///
+    /// The negative result is cached against the manifest's SIGNATURE, so
+    /// minting a tenant is picked up on the next poll: the signature is
+    /// what invalidates it, and the file changing is exactly the event
+    /// that can change the answer. The signature probe is one batched
+    /// `stat`; the read + decode happen only when it moves.
+    private func refreshTenant(projectRoot: String) async {
+        let ctx = serverContext
+        let manifestPath = projectRoot + "/.scarf/manifest.json"
+        let previous = tenantProbe
+        let probe = await Task.detached(priority: .utility) { () -> TenantProbe? in
+            let transport = ctx.makeTransport()
+            // `nil` from statAll is "don't trust this" — keep whatever we
+            // already resolved rather than re-reading over a sick link.
+            guard let stats = transport.statAll([manifestPath]) else { return nil }
+            let signature = stats[manifestPath].map {
+                "\(Int($0.mtime.timeIntervalSince1970)):\($0.size)"
+            } ?? "-"
+            if let previous, previous.path == manifestPath, previous.signature == signature {
+                return nil
+            }
+            let tenant: String? = {
+                guard signature != "-",
+                      let data = try? transport.readFile(manifestPath),
+                      let manifest = try? JSONDecoder().decode(
+                        ProjectTemplateManifest.self, from: data)
+                else { return nil }
+                return manifest.kanbanTenant
+            }()
+            return TenantProbe(path: manifestPath, signature: signature, tenant: tenant)
+        }.value
+        guard let probe, projectRoot == self.projectRoot else { return }
+        tenantProbe = probe
+        tenant = probe.tenant
+    }
+
+    /// What the manifest said, and the signature it said it at.
+    private struct TenantProbe: Sendable {
+        var path: String
+        var signature: String
+        var tenant: String?
     }
 
     private func initials(of name: String) -> String {

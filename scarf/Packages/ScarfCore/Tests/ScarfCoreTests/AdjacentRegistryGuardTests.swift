@@ -347,7 +347,7 @@ import Foundation
         let url = dir.appendingPathComponent("projects.json.lock")
         try Data("pid=1".utf8).write(to: url)
         try FileManager.default.setAttributes(
-            [.modificationDate: Date().addingTimeInterval(-(RegistryWriteLock.staleAfter + 60))],
+            [.modificationDate: Date().addingTimeInterval(-(RegistryWriteLock.localStaleAfter + 60))],
             ofItemAtPath: url.path
         )
 
@@ -420,6 +420,179 @@ import Foundation
 
             let names = Set(service.loadRegistry().projects.map(\.name))
             #expect(names.count == 9, "lost rows: \(names.sorted())")
+        }
+    }
+
+    // MARK: - Lock ownership + context-aware bounds (t-07e909e0)
+
+    /// DI-H4. `release()` used to remove whatever lock file was present.
+    /// The sequence that made that a data-loss bug: a slow remote holder is
+    /// declared stale, a contender breaks the lock and creates its OWN, and
+    /// then the first holder finishes and deletes the CONTENDER's file —
+    /// after which two writers run the registry RMW with nothing between
+    /// them. The token is what tells the two files apart.
+    @Test func releaseLeavesBehindALockItNoLongerOwns() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-lock-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("projects.json.lock")
+
+        try RegistryWriteLock(lockURL: url).withLock(path: "/r") {
+            // Stand in for the contender that broke ours as stale and took
+            // the lock for itself while we were still working.
+            try FileManager.default.removeItem(at: url)
+            try Data("owner=THE-SUCCESSOR\npid=999\n".utf8).write(to: url)
+        }
+
+        #expect(FileManager.default.fileExists(atPath: url.path),
+                "release() deleted the successor's lock")
+        #expect(RegistryWriteLock.ownerToken(atPath: url.path) == "THE-SUCCESSOR")
+    }
+
+    /// The happy path still tidies up: a lock we DID write is ours to
+    /// remove, and leaving it behind would wedge every later writer until
+    /// the staleness bound expired.
+    @Test func releaseRemovesTheLockItOwns() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-lock-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("projects.json.lock")
+
+        try RegistryWriteLock(lockURL: url).withLock(path: "/r") {
+            #expect(RegistryWriteLock.ownerToken(atPath: url.path) != nil)
+        }
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    /// DI-M5, the root cause under H4: a 60-second remote save is a LIVE
+    /// holder, not a crashed one. With the remote bounds it is left alone;
+    /// with the (correct, for local) 30s bound it would be broken — which
+    /// is the same file being both facts, and why the bounds are per
+    /// context rather than global.
+    @Test func aRemoteHoldPastTheLocalBoundIsNotBrokenAsStale() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-lock-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("projects.json.lock")
+
+        func plantAHoldOf(_ age: TimeInterval) throws {
+            try Data("owner=THE-SLOW-SCP\n".utf8).write(to: url)
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date().addingTimeInterval(-age)], ofItemAtPath: url.path
+            )
+        }
+
+        // 60s: a real remote save window the audit measured.
+        try plantAHoldOf(60)
+        let remote = RegistryWriteLock(
+            lockURL: url,
+            staleAfter: RegistryWriteLock.remoteStaleAfter,
+            acquireTimeout: 0.2
+        )
+        #expect(throws: ProjectRegistryError.registryBusy(path: "/r")) {
+            try remote.withLock(path: "/r") { }
+        }
+        #expect(RegistryWriteLock.ownerToken(atPath: url.path) == "THE-SLOW-SCP",
+                "a live remote holder's lock was broken")
+
+        // And the crashed-holder story still works: past the REMOTE bound,
+        // the lock is collected rather than bricking the registry forever.
+        try plantAHoldOf(RegistryWriteLock.remoteStaleAfter + 60)
+        var ran = false
+        try remote.withLock(path: "/r") { ran = true }
+        #expect(ran)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test func remoteContextsGetTheLongerBoundsAndLocalOnesDoNot() throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-bounds-\(UUID().uuidString)", isDirectory: true)
+        let local = try #require(RegistryWriteLock(context: .local(home: home)))
+        #expect(local.staleAfter == RegistryWriteLock.localStaleAfter)
+        #expect(local.acquireTimeout == RegistryWriteLock.localAcquireTimeout)
+
+        let remoteContext = ServerContext(
+            id: UUID(), displayName: "box",
+            kind: .ssh(SSHConfig(host: "box", remoteHome: "~/.hermes"))
+        )
+        let remote = try #require(RegistryWriteLock(context: remoteContext))
+        #expect(remote.staleAfter == RegistryWriteLock.remoteStaleAfter)
+        #expect(remote.acquireTimeout == RegistryWriteLock.remoteAcquireTimeout)
+    }
+
+    /// DI-M4. The sidecars take the lock too, but on their OWN file: a
+    /// permission grant has no business queueing behind a projects.json
+    /// save, and serialising them together would make one slow remote
+    /// registry write stall the permission sheet.
+    @Test func sidecarsLockOnTheirOwnFileNotTheRegistrys() throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-sidecarlock-\(UUID().uuidString)", isDirectory: true)
+        let ctx = ServerContext.local(home: home)
+        let registry = try #require(RegistryWriteLock.lockURL(for: ctx))
+        let grants = try #require(
+            RegistryWriteLock.lockURL(for: ctx, path: ctx.paths.miniAppGrantsJSON)
+        )
+        let sessions = try #require(
+            RegistryWriteLock.lockURL(for: ctx, path: ctx.paths.sessionProjectMap)
+        )
+        #expect(grants.path == ctx.paths.miniAppGrantsJSON + ".lock")
+        #expect(sessions.path == ctx.paths.sessionProjectMap + ".lock")
+        #expect(grants != registry)
+        #expect(sessions != registry)
+    }
+
+    /// DI-H5. The doctor's repair is a read-modify-write like every other,
+    /// and it used to run outside the lock — so "Repair All" racing a
+    /// `project_register` published the agent's new row away. Same 8-way
+    /// shape as `concurrentRegistryWritersDoNotLoseEachOthersRows`, with
+    /// the doctor's destructive row-removal in the middle of it.
+    @Test func doctorRepairsDoNotEraseAConcurrentWritersRow() throws {
+        try Self.withTempHome { ctx, home in
+            let projectsRoot = home.appendingPathComponent("projects", isDirectory: true)
+            try FileManager.default.createDirectory(at: projectsRoot, withIntermediateDirectories: true)
+            let service = ProjectDashboardService(context: ctx)
+            // One row whose folder does not exist → a `deadRootPath`
+            // finding offering `removeRegistryRow`.
+            let gone = projectsRoot.path + "/gone"
+            try service.saveRegistry(ProjectRegistry(projects: [
+                ProjectEntry(name: "Gone", path: gone)
+            ]))
+            let doctor = ProjectDoctorService(context: ctx)
+            let dead = try #require(
+                doctor.diagnose().findings.first { $0.repair == .removeRegistryRow(path: gone) }
+            )
+
+            let group = DispatchGroup()
+            for i in 0..<8 {
+                DispatchQueue.global().async(group: group) {
+                    guard let lock = RegistryWriteLock(context: ctx) else { return }
+                    try? lock.withLock(path: ctx.paths.projectsRegistry) {
+                        var registry = service.loadRegistry()
+                        registry.projects.append(ProjectEntry(name: "P\(i)", path: "/p/\(i)"))
+                        try service.saveRegistry(registry)
+                    }
+                }
+            }
+            DispatchQueue.global().async(group: group) {
+                try? doctor.repair(dead)
+            }
+            group.wait()
+
+            // Whether the repair landed before or after the appenders, not
+            // one of their rows may be missing.
+            let names = Set(service.loadRegistry().projects.map(\.name))
+            for i in 0..<8 {
+                #expect(names.contains("P\(i)"), "lost a concurrent row: \(names.sorted())")
+            }
+            // And the repair itself converges: re-run it if the race put it
+            // first (its finding is then already satisfied).
+            if names.contains("Gone") {
+                try doctor.repair(dead)
+            }
+            #expect(!Set(service.loadRegistry().projects.map(\.name)).contains("Gone"))
         }
     }
 }

@@ -729,18 +729,37 @@ public struct ProjectDoctorService: Sendable {
     /// Re-reads the registry itself rather than trusting the report: a
     /// report can be seconds old, and the file is agent-writable.
     ///
-    /// **Not serialized against the rest of the app.** A repair and a
-    /// concurrent `ProjectsViewModel` mutation each do their own
-    /// read-modify-write of `projects.json`, so the later save wins and the
-    /// earlier change is lost — the same exposure every registry writer here
-    /// has always had, not one this adds. The doctor narrows its own window
-    /// by reading immediately before writing and by touching one field; a
-    /// real fix is a registry-wide write lock, which belongs with the
-    /// structured agent write path rather than here.
+    /// **Serialized against the rest of the app (t-07e909e0 / DI-H5).**
+    /// This used to be documented as the exposure every registry writer
+    /// had: a repair and a concurrent `project_register` each did their own
+    /// read-modify-write and the later save silently erased the earlier
+    /// row. The registry-wide write lock the old note called for exists
+    /// now, so the whole repair — the authoritative load below AND every
+    /// write it leads to — happens inside it, and the `expecting:` baseline
+    /// travels from that same load to the save that mutates it.
+    ///
+    /// The lock is taken PER REPAIR, not once around `repairAllSafe`: the
+    /// repairs are independent and one can be slow (a record write over
+    /// SSH), holding a lock across a whole pass would stall every other
+    /// writer for the length of the pass, and re-reading per repair is what
+    /// makes the pass see rows that appeared while it was running. The lock
+    /// is reentrant within a thread, so the `indexInRegistry` /
+    /// `saveRegistry` calls underneath re-enter rather than deadlock — and
+    /// this frame is synchronous throughout, which is what makes the
+    /// thread-local reentrancy sound.
     public nonisolated func repair(_ finding: ProjectDoctorFinding) throws {
         guard let repair = finding.repair else {
             throw ProjectDoctorError.notRepairable(finding.title)
         }
+        guard let lock = RegistryWriteLock(context: context) else {
+            return try repairLocked(repair)
+        }
+        try lock.withLock(path: context.paths.projectsRegistry) {
+            try repairLocked(repair)
+        }
+    }
+
+    private nonisolated func repairLocked(_ repair: ProjectDoctorFinding.Repair) throws {
         let store = ProjectStore(context: context)
         let dashboardService = ProjectDashboardService(context: context)
 
@@ -893,7 +912,16 @@ public struct ProjectDoctorService: Sendable {
             // here. The protection against blanking a list we misread is
             // upstream and real: the lossy-load refusal in `saveRegistry` and
             // in `repair`'s own block check.
-            try dashboardService.saveRegistry(registry, allowEmpty: removed == before)
+            // `expecting:` carries the fingerprint of the very load this
+            // row-removal was computed from. Belt to the lock's braces, and
+            // not redundant: the lock is a LOCAL stand-in for a remote
+            // registry, so a second Mac's write between this load and this
+            // save is invisible to it and visible to this.
+            try dashboardService.saveRegistry(
+                registry,
+                allowEmpty: removed == before,
+                expecting: loaded.contentFingerprint
+            )
         }
     }
 

@@ -154,7 +154,34 @@ public struct SessionAttributionService: Sendable {
     /// Failures stay non-throwing here — attribution is best-effort and its
     /// callers are fire-and-forget — but they are logged, and the refusal
     /// means "did nothing" rather than "destroyed the file".
+    ///
+    /// **Serialised on this machine, last-write-wins across devices
+    /// (t-07e909e0 / DI-M4).** Same story as `MiniAppGrantStore`: the RMW
+    /// takes `RegistryWriteLock` on this file's own lock path, which ends
+    /// same-machine attribution loss; a Mac and an iPhone on one remote
+    /// `~/.hermes` remain unserialised by construction (their locks are
+    /// local stand-ins that cannot see each other) and the later write
+    /// wins whole-file. Documented in `RegistryWriteLock`'s header, and
+    /// tolerable here because an attribution is re-derived on the next
+    /// session rather than being the sole record of something the user
+    /// created. Non-throwing, like the rest of this path: a lock we could
+    /// not take is logged by `withLock` and the mutation is skipped, which
+    /// is "did nothing", not "destroyed the file".
     private nonisolated func mutate(_ body: (inout SessionProjectMap) -> Bool) {
+        let path = context.paths.sessionProjectMap
+        guard let lock = RegistryWriteLock(context: context, path: path) else {
+            return mutateLocked(body)
+        }
+        do {
+            try lock.withLock(path: path) { mutateLocked(body) }
+        } catch {
+            #if canImport(os)
+            Self.logger.error("couldn't take the session-project-map write lock at \(path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            #endif
+        }
+    }
+
+    private nonisolated func mutateLocked(_ body: (inout SessionProjectMap) -> Bool) {
         let path = context.paths.sessionProjectMap
         let (loaded, inspection) = inspect()
         var map = loaded

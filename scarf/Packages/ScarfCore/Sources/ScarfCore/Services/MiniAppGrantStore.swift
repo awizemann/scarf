@@ -225,7 +225,30 @@ public struct MiniAppGrantStore: Sendable {
     ///
     /// - Parameter body: mutates the grants in place and returns whether
     ///   anything actually changed. `false` writes nothing.
+    ///
+    /// **Serialised on this machine, last-write-wins across devices
+    /// (t-07e909e0 / DI-M4).** The read and the write are a whole-file RMW,
+    /// so two writers on ONE machine — the app and anything else in-process
+    /// — could interleave and drop a grant the other had just recorded.
+    /// They now take `RegistryWriteLock` on this file's own lock path (not
+    /// the registry's: a grant write has no business waiting behind a
+    /// projects.json save). What is deliberately NOT covered is a second
+    /// DEVICE: a Mac and an iPhone on one remote `~/.hermes` each hold a
+    /// local stand-in lock and cannot see each other, so an interleaved
+    /// pair still loses the earlier grant. That is stated rather than
+    /// half-fixed — see `RegistryWriteLock`'s header — and it is
+    /// survivable here in a way it is not for the registry: a lost grant
+    /// re-prompts the user with a default-deny sheet, where a lost project
+    /// row exists nowhere else.
     private nonisolated func mutate(_ body: (inout [MiniAppGrant]) -> Bool) throws {
+        guard let lock = RegistryWriteLock(context: context, path: context.paths.miniAppGrantsJSON)
+        else { return try mutateLocked(body) }
+        try lock.withLock(path: context.paths.miniAppGrantsJSON) {
+            try mutateLocked(body)
+        }
+    }
+
+    private nonisolated func mutateLocked(_ body: (inout [MiniAppGrant]) -> Bool) throws {
         let (loaded, inspection) = inspect()
         var grants = loaded
         guard body(&grants) else { return }

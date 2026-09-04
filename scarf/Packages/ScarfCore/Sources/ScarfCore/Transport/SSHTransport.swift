@@ -500,39 +500,101 @@ public struct SSHTransport: ServerTransport {
 
     /// One round-trip for every path, instead of one round-trip per path.
     ///
-    /// Emits `<size> <mtime> <type>` per path in the SAME ORDER as `paths`,
-    /// with a `- - -` placeholder for anything that doesn't stat, so the
-    /// reply lines can be zipped back onto the inputs without echoing the
-    /// paths (which would have to be parsed back out of a line that may
-    /// legally contain spaces).
-    public func statAll(_ paths: [String]) -> [String: FileStat] {
+    /// Each reply line is SELF-IDENTIFYING: the shell prints
+    /// `<marker><index> ` immediately before the stat output for that
+    /// path, so a line is matched back to its input by the index it
+    /// carries rather than by its position in the stream.
+    ///
+    /// Positional zipping is what this replaces, and it was not a
+    /// tidiness problem. One stray stdout line — a remote `.profile` that
+    /// echoes, a shell notice — shifted every signature by one, and the
+    /// wrong answer was STABLE: the cockpit's short-circuit compared two
+    /// equally-wrong signatures forever and never reloaded again until
+    /// the app restarted. A path containing a newline did the same thing
+    /// deliberately (DI M6); such paths are now REFUSED outright, since
+    /// nothing in Hermes legitimately has one and no framing survives it.
+    ///
+    /// Returns `nil` — not a partial map — whenever the reply cannot be
+    /// accounted for path-by-path. See the protocol doc: an untrustworthy
+    /// answer must be legible as untrustworthy.
+    public func statAll(_ paths: [String]) -> [String: FileStat]? {
         guard !paths.isEmpty else { return [:] }
         let unique = Array(Set(paths))
+        // A newline in a path cannot be framed back out of a line-oriented
+        // reply, so it is refused rather than misattributed.
+        guard !unique.contains(where: { $0.contains("\n") || $0.contains("\r") }) else {
+            // SAID OUT LOUD, because the consequence is a surface that
+            // stops live-updating: every caller treats nil as "keep what
+            // you have", so a path that permanently fails this guard
+            // permanently disables its caller's tick refresh (a manual
+            // refresh still works). Nothing in Hermes legitimately has a
+            // newline in a path, so this is a diagnostic, not a warning
+            // the user is expected to see.
+            #if canImport(os)
+            Self.logger.error("statAll refused: a watched path contains a newline")
+            #endif
+            return nil
+        }
         let argList = unique.map { Self.remotePathArg($0) }.joined(separator: " ")
         // GNU first, BSD fallback, placeholder last — the same ladder
-        // `stat(_:)` climbs, just once per path inside one shell.
+        // `stat(_:)` climbs, just once per path inside one shell. `i` is
+        // the echo that makes the reply self-describing.
+        let marker = Self.statAllMarker
         let cmd = """
-            for p in \(argList); do \
+            i=0; for p in \(argList); do i=$((i+1)); \
+            printf '%s%s ' '\(marker)' "$i"; \
             stat -c "%s %Y %F" "$p" 2>/dev/null \
             || stat -f "%z %m %HT" "$p" 2>/dev/null \
             || echo "- - -"; done
             """
-        guard let result = try? runRemoteShell(cmd), result.exitCode == 0 else { return [:] }
-        let lines = result.stdoutString.split(separator: "\n", omittingEmptySubsequences: false)
+        guard let result = try? runRemoteShell(cmd), result.exitCode == 0 else { return nil }
+        return Self.parseStatAllReply(result.stdoutString, paths: unique)
+    }
+
+    /// Reply parsing, split out so the framing can be tested without a
+    /// host. Returns `nil` for any reply it cannot account for
+    /// path-by-path — see `statAll`.
+    static func parseStatAllReply(_ stdout: String, paths: [String]) -> [String: FileStat]? {
+        let marker = Self.statAllMarker
         var out: [String: FileStat] = [:]
-        for (index, path) in unique.enumerated() {
-            guard index < lines.count else { break }
-            let line = lines[index].trimmingCharacters(in: .whitespaces)
+        var seen = Set<Int>()
+        for rawLine in stdout.split(separator: "\n", omittingEmptySubsequences: true) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            // Unmarked output is somebody else's (a profile banner, a
+            // warning). Ignored rather than counted — it is precisely the
+            // thing that used to shift the mapping.
+            guard line.hasPrefix(marker) else { continue }
+            let body = line.dropFirst(marker.count)
+            guard let space = body.firstIndex(of: " "),
+                  let index = Int(body[body.startIndex..<space]),
+                  index >= 1, index <= paths.count,
+                  seen.insert(index).inserted
+            else {
+                // A duplicate or out-of-range index means the framing is
+                // not what we think it is; refuse the whole reply.
+                return nil
+            }
+            let path = paths[index - 1]
+            let statText = body[body.index(after: space)...].trimmingCharacters(in: .whitespaces)
             // The placeholder must NOT parse: `parseStatOutput` would read
             // "- - -" as a zero-byte file at the epoch, turning "absent"
             // into "present and empty" — which is exactly the
             // absent-vs-unreadable confusion the registry work spent a
             // phase removing.
-            guard line != "- - -" else { continue }
-            if let info = Self.parseStatOutput(line) { out[path] = info }
+            guard statText != "- - -" else { continue }
+            if let info = Self.parseStatOutput(statText) { out[path] = info }
         }
+        // Every path must have been answered for. A short reply is a
+        // truncated / sick round-trip, and the paths missing from it are
+        // NOT "absent files".
+        guard seen.count == paths.count else { return nil }
         return out
     }
+
+    /// Prefix that tags each `statAll` reply line with its input index.
+    /// An ASCII unit separator keeps it out of any plausible stat output
+    /// or shell banner.
+    static let statAllMarker = "\u{1F}s"
 
     private static func parseStatOutput(_ s: String) -> FileStat? {
         // Expected: "<bytes> <unix-epoch-secs> <type>" where <type> is either
@@ -913,17 +975,31 @@ public struct SSHTransport: ServerTransport {
                         // what keeps a host whose `stat` we can't read
                         // line-by-line from having no watcher at all — the
                         // pre-existing behaviour, kept as the floor.
-                        var fresh: [String: String] = [:]
                         if lines.count == paths.count {
+                            var fresh: [String: String] = [:]
                             for (index, path) in paths.enumerated() { fresh[path] = lines[index] }
-                        } else if lines.isEmpty {
-                            continue
-                        } else {
-                            fresh["\u{0}blob"] = lines.joined(separator: "\n")
+                            if memory.apply(fresh) {
+                                continuation.yield(.anyChanged)
+                            }
+                        } else if !lines.isEmpty {
+                            // MISALIGNED, NOT AUTHORITATIVE. The blob is
+                            // still worth keeping — it is what lets a host
+                            // whose `stat` we can't read line-by-line have a
+                            // watcher at all — but it must be recorded
+                            // ALONGSIDE the per-path baselines, never
+                            // instead of them. `apply` replaces the whole
+                            // map, so a single misaligned reply used to
+                            // forget every per-path signature; the next
+                            // aligned reply then re-baselined silently and
+                            // swallowed every change that landed in the gap
+                            // (DI H6).
+                            if memory.merge(["\u{0}blob": lines.joined(separator: "\n")]) {
+                                continuation.yield(.anyChanged)
+                            }
                         }
-                        if memory.apply(fresh) {
-                            continuation.yield(.anyChanged)
-                        }
+                        // An empty reply falls through to the sleep: it is a
+                        // sick transport, and `continue`-ing past the sleep
+                        // turned that into a tight SSH loop (DI H7).
                     } catch {
                         // Transient failure (connection drop) — skip this tick.
                         #if canImport(os)

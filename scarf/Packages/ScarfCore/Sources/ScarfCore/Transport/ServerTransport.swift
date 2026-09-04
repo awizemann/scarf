@@ -42,7 +42,17 @@ public protocol ServerTransport: Sendable {
     /// re-read guards) asks that question, so it gets one call. Paths that
     /// do not exist are simply ABSENT from the result — the same
     /// information `stat` returning nil carries.
-    nonisolated func statAll(_ paths: [String]) -> [String: FileStat]
+    ///
+    /// **`nil` means DO NOT TRUST THIS ANSWER**, and is a different thing
+    /// from an empty map. A batched implementation has to line replies up
+    /// with inputs, and a reply it cannot line up (stray stdout, a path it
+    /// refuses to send, a sick connection) must not be turned into a map
+    /// of guesses: a wrong-but-STABLE signature freezes every
+    /// short-circuit that consumes it until the app is restarted, and a
+    /// fabricated all-absent map sends the caller down its full reload
+    /// path over the very transport that just failed. Callers treat `nil`
+    /// as "keep what you have and ask again next tick".
+    nonisolated func statAll(_ paths: [String]) -> [String: FileStat]?
     nonisolated func listDirectory(_ path: String) throws -> [String]
     /// Create directories including intermediates. No-op if already present.
     nonisolated func createDirectory(_ path: String) throws
@@ -193,6 +203,30 @@ public final class WatchBaselineStore: @unchecked Sendable {
         return changed
     }
 
+    /// Fold a PARTIAL poll into the baseline, keeping everything it does
+    /// not mention.
+    ///
+    /// `apply` is the authoritative form: it replaces the map, because a
+    /// full poll knows about every path. A partial one does not, and using
+    /// `apply` for it forgets the baselines it is silent about — after
+    /// which the next full poll re-baselines those paths silently and the
+    /// changes that landed in between are gone. That is exactly what a
+    /// misaligned SSH reply did to the whole per-path map.
+    ///
+    /// - Returns: `true` when a key it DOES mention had a different
+    ///   signature before.
+    @discardableResult
+    public func merge(_ fresh: [String: String]) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        var changed = false
+        for (path, signature) in fresh {
+            if let known = signatures[path], known != signature { changed = true }
+            signatures[path] = signature
+        }
+        return changed
+    }
+
     /// Test seam: the signature currently held for `path`, if any.
     public func signature(for path: String) -> String? {
         lock.lock()
@@ -211,7 +245,10 @@ public extension ServerTransport {
     /// Default: one `stat` per path. Correct everywhere and cheap on a
     /// local filesystem; `SSHTransport` overrides it with a single shell
     /// command so the remote case is one round-trip instead of N.
-    nonisolated func statAll(_ paths: [String]) -> [String: FileStat] {
+    ///
+    /// Never `nil`: a per-path loop has nothing to line up, so every
+    /// answer it gives is one it actually looked at.
+    nonisolated func statAll(_ paths: [String]) -> [String: FileStat]? {
         var result: [String: FileStat] = [:]
         for path in paths where result[path] == nil {
             if let info = stat(path) { result[path] = info }

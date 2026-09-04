@@ -68,7 +68,7 @@ import Foundation
         let missing = dir.appendingPathComponent("nope.txt").path
 
         let transport = LocalTransport()
-        let batched = transport.statAll([a.path, missing, dir.path])
+        let batched = try #require(transport.statAll([a.path, missing, dir.path]))
         #expect(batched[a.path]?.size == 5)
         #expect(batched[a.path]?.mtime == transport.stat(a.path)?.mtime)
         // ABSENT must be absent — not a zero-byte entry, which would make
@@ -80,7 +80,7 @@ import Foundation
 
     @Test("an empty path list is an empty result and no work")
     func statAllOfNothing() {
-        #expect(LocalTransport().statAll([]).isEmpty)
+        #expect(LocalTransport().statAll([])?.isEmpty == true)
     }
 }
 
