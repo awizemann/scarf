@@ -220,13 +220,30 @@ final class HermesFileWatcher {
         }
     }
 
+    /// Watch one path, surviving the atomic replaces that are how almost
+    /// everything here is written.
+    ///
+    /// A vnode source watches an INODE, not a name. `transport.writeFile`
+    /// is `Data.write(.atomic)` — temp file plus `rename(2)` over the
+    /// destination — so the watched inode is never modified; it is
+    /// unlinked, which delivers `.delete` and NOT `.write`. With a
+    /// `[.write, .extend, .rename]` mask the first atomic replace killed
+    /// the watch silently and every later change was invisible for the
+    /// rest of the process's life. Measured: that mask sees 0 events for
+    /// 2 atomic writes; `.delete` plus a re-arm sees 2.
+    ///
+    /// This was survivable while Scarf was the only writer — each view
+    /// model reloads after its own save. It stopped being survivable when
+    /// the bundled `scarf-projects` MCP server became a SECOND PROCESS
+    /// writing `projects.json`: without the re-arm, an agent registers a
+    /// project and the sidebar simply never shows it.
     private func makeSource(for path: String) -> DispatchSourceFileSystemObject? {
         let fd = Darwin.open(path, O_EVTONLY)
         guard fd >= 0 else { return nil }
 
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
-            eventMask: [.write, .extend, .rename],
+            eventMask: [.write, .extend, .rename, .delete],
             queue: .main
         )
         source.setEventHandler { [weak self] in
@@ -237,12 +254,46 @@ final class HermesFileWatcher {
             // suggest a runaway watcher install.
             ScarfMon.event(.transport, "mac.fileWatcher.localFire", count: 1)
             self?.scheduleCoalescedTick()
+            // The name we were asked to watch now points at a different
+            // inode (or none). Re-open it so the NEXT change is seen too.
+            let vanished = source.data.contains(.delete) || source.data.contains(.rename)
+            if vanished {
+                self?.rearm(source, for: path)
+            }
         }
         source.setCancelHandler {
             Darwin.close(fd)
         }
         source.resume()
         return source
+    }
+
+    /// Replace a dead source with one watching the new inode at `path`,
+    /// in whichever list held it.
+    ///
+    /// A path that is genuinely gone (an uninstalled project's `.scarf`
+    /// dir) simply drops out: `makeSource` returns nil and the old source
+    /// is not replaced, which is exactly the pre-existing behaviour for a
+    /// path that never existed. The next `updateProjectWatches` /
+    /// `startWatching` re-establishes it if it comes back.
+    private func rearm(_ dead: DispatchSourceFileSystemObject, for path: String) {
+        dead.cancel()
+        let replacement = makeSource(for: path)
+        if let index = coreSources.firstIndex(where: { $0 === dead }) {
+            if let replacement {
+                coreSources[index] = replacement
+            } else {
+                coreSources.remove(at: index)
+            }
+            return
+        }
+        if let index = projectSources.firstIndex(where: { $0 === dead }) {
+            if let replacement {
+                projectSources[index] = replacement
+            } else {
+                projectSources.remove(at: index)
+            }
+        }
     }
 
     deinit {
