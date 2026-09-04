@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import WebKit
 import ScarfCore
@@ -21,8 +22,31 @@ final class ScarfMiniAppBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// Largest project file `scarf.file.read` will return.
     private static let maxFileReadBytes = 4 * 1024 * 1024
 
+    /// At most this many `openURL` requests per minute, granted or not.
+    /// Lower than the prompt limiter: every one of these is a modal
+    /// question aimed at the user, and a human clicks links slowly.
+    private static let openURLLimiter = MiniAppRateLimiter(maxEvents: 5, windowSeconds: 60)
+
     private let projectPath: String
     private let miniAppId: String
+    /// The project UUID, for the open-url host consent records (the same
+    /// id `scarf.context.projectId` reports).
+    private let projectId: String
+    /// Per-(project, host) "Always Allow" records for `scarf.openURL`,
+    /// HMAC-tagged with the machine key — the mini-app can write the
+    /// defaults plist, but it cannot mint a tag, so a planted record is
+    /// ignored and the user is asked. Separate `Purpose` from the image
+    /// widget's records: allowing an image host does not allow opening
+    /// links to it.
+    private let openURLConsent = ImageHostConsentStore(purpose: .openURL)
+    /// Timestamps of accepted `openURL` calls, for the sliding window.
+    /// Main-thread only (every bridge call arrives there).
+    private var openURLHistory: [Date] = []
+    /// One confirmation at a time. A mini-app that calls `openURL` in a
+    /// loop must not be able to stack a wall of modal sheets over the
+    /// user's window (each of which is a chance to mis-click "Open"), so a
+    /// request that arrives while one is up is REFUSED, not queued.
+    private var isOpenURLConfirmationPending = false
     private let serverContext: ServerContext
     private let dispatcher: MiniAppBridgeDispatcher
     private let store: MiniAppStore
@@ -51,6 +75,7 @@ final class ScarfMiniAppBridge: NSObject, WKScriptMessageHandlerWithReply {
     ) {
         self.projectPath = projectPath
         self.miniAppId = miniAppId
+        self.projectId = context.projectId
         self.serverContext = serverContext
         self.dispatcher = dispatcher
         self.store = store
@@ -272,7 +297,155 @@ final class ScarfMiniAppBridge: NSObject, WKScriptMessageHandlerWithReply {
         case .kanbanRead:
             // Gated by preflight on query:kanban.tasks.
             handleQuery(kind: "kanban.tasks", replyHandler: reply)
+
+        case .openURL:
+            // Gated by preflight on `open_url`. The grant only buys the
+            // right to ASK; the destination is confirmed below.
+            handleOpenURL(raw: args.first ?? "", reply: reply)
         }
+    }
+
+    // MARK: - scarf.openURL
+
+    /// Ask to hand one https URL to the user's default browser.
+    ///
+    /// Three gates, in this order, and all three must pass:
+    /// 1. **The grant.** `open_url`, checked in `preflight` before we get
+    ///    here, like every other surface.
+    /// 2. **The shape.** `MiniAppOpenURLPolicy` — https only, real ASCII
+    ///    host, no embedded credentials, capped, no control characters. A
+    ///    URL that doesn't fit is refused, never repaired.
+    /// 3. **The destination.** The user confirms the host, with the URL in
+    ///    front of them, unless they previously chose "Always Allow" for
+    ///    that host in this project.
+    ///
+    /// Plus a pace limit and a one-at-a-time rule, because this is the one
+    /// bridge surface that puts a modal question on the user's screen: a
+    /// mini-app calling it in a loop would otherwise be a dialog cannon.
+    ///
+    /// It cannot fire on its own. Nothing here runs except from a bridge
+    /// call the page makes, and the page only makes one because something
+    /// in it ran — so a load-time `scarf.openURL` is possible and lands on
+    /// exactly the same confirmation, with the same host named, that a
+    /// clicked one does. The user's answer is the gate, not the gesture.
+    private func handleOpenURL(raw: String, reply: @escaping (Any?, String?) -> Void) {
+        let approved: MiniAppOpenURLPolicy.Approved
+        switch MiniAppOpenURLPolicy.validate(raw) {
+        case .failure(let refusal):
+            Self.logger.warning("refused mini-app openURL: \(refusal.rawValue, privacy: .public)")
+            reply(nil, "\(MiniAppBridgeErrorCode.badRequest.rawValue): \(refusal.message)")
+            return
+        case .success(let ok):
+            approved = ok
+        }
+
+        // Pace limit BEFORE anything is shown or opened, and it counts the
+        // already-allowed hosts too — "Always Allow example.com" is not a
+        // licence to open fifty tabs.
+        let (allowed, history) = Self.openURLLimiter.decide(now: Date(), history: openURLHistory)
+        openURLHistory = history
+        guard allowed else {
+            reply(nil, "\(MiniAppBridgeErrorCode.rateLimited.rawValue): too many link requests; try again in a moment")
+            return
+        }
+
+        if openURLConsent.isAllowed(url: approved.url, projectId: projectId) {
+            open(approved.url, reply: reply)
+            return
+        }
+
+        guard !isOpenURLConfirmationPending else {
+            reply(nil, "\(MiniAppBridgeErrorCode.userDenied.rawValue): a link confirmation is already open")
+            return
+        }
+        isOpenURLConfirmationPending = true
+        confirm(approved) { [weak self] decision in
+            // The reply MUST be settled even if the mini-app was torn down
+            // while its sheet was up — an unanswered promise is a hung
+            // `await` in the page, and "we're going away" is a no.
+            guard let self else {
+                reply(nil, "\(MiniAppBridgeErrorCode.userDenied.rawValue): the mini-app closed")
+                return
+            }
+            self.isOpenURLConfirmationPending = false
+            switch decision {
+            case .cancel:
+                reply(nil, "\(MiniAppBridgeErrorCode.userDenied.rawValue): the user declined to open this link")
+            case .once:
+                self.open(approved.url, reply: reply)
+            case .always:
+                // A failed record is not a failed open: the user said yes
+                // to THIS link either way; they will just be asked again
+                // next time (the same direction the grant store takes when
+                // it can't sign).
+                if self.openURLConsent.allow(url: approved.url, projectId: self.projectId) == nil {
+                    Self.logger.warning("couldn't record the open-url host consent; it will be asked again")
+                }
+                self.open(approved.url, reply: reply)
+            }
+        }
+    }
+
+    private enum OpenURLDecision { case cancel, once, always }
+
+    /// "Open example.com in your browser?" — host first (it is the decision),
+    /// full URL below it (it is what actually travels: the path and query go
+    /// to that host on the click, and the user is entitled to see them).
+    ///
+    /// Presented as a sheet on the mini-app's own window when there is one,
+    /// so it is unmistakably attached to the app that asked. `completion`
+    /// runs on the main thread, exactly once.
+    private func confirm(
+        _ approved: MiniAppOpenURLPolicy.Approved,
+        completion: @escaping (OpenURLDecision) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = String(localized: "Open \(approved.host) in your browser?")
+        // The mini-app id is a DIRECTORY NAME in an agent-writable folder,
+        // so it is sanitized (control characters, bidi overrides, length)
+        // before it goes anywhere near this sentence — same treatment the
+        // permission sheet gives an unknown permission string. Without it,
+        // an app could name itself into a second sentence and reframe the
+        // question the user is answering.
+        alert.informativeText = String(
+            localized: "“\(MiniAppPermission.displaySafe(miniAppId))” wants to open this link:\n\(MiniAppOpenURLPolicy.displayString(approved.url))"
+        )
+        alert.addButton(withTitle: String(localized: "Open Once"))
+        alert.addButton(withTitle: String(localized: "Always Allow \(approved.host)"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        // Cancel is the escape key AND the safe answer; Open Once is first
+        // (the default) because the user got here by asking for a link.
+        alert.buttons.last?.keyEquivalent = "\u{1b}"
+
+        let decide: (NSApplication.ModalResponse) -> Void = { response in
+            switch response {
+            case .alertFirstButtonReturn: completion(.once)
+            case .alertSecondButtonReturn: completion(.always)
+            default: completion(.cancel)
+            }
+        }
+        if let window = webView?.window {
+            alert.beginSheetModal(for: window) { decide($0) }
+        } else {
+            decide(alert.runModal())
+        }
+    }
+
+    /// Hand the URL to Launch Services. `NSWorkspace.open` is asynchronous
+    /// internally (it returns as soon as the request is dispatched), so
+    /// this is fine on the main actor — the browser launch does not block
+    /// the window (charter C10).
+    private func open(_ url: URL, reply: @escaping (Any?, String?) -> Void) {
+        // The URL itself is `.private`: it is page-authored and may carry a
+        // query the mini-app composed, which must not be laundered into the
+        // system log.
+        Self.logger.info("opening mini-app link in the default browser: \(url.absoluteString, privacy: .private)")
+        guard NSWorkspace.shared.open(url) else {
+            reply(nil, "\(MiniAppBridgeErrorCode.internalError.rawValue): no application could open this link")
+            return
+        }
+        reply(nil, nil)
     }
 
     // MARK: - Event streaming (scarf.onEvent)

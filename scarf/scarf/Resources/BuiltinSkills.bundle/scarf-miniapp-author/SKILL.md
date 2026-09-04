@@ -53,16 +53,17 @@ Do **not** invoke for: editing the project's `dashboard.json` (that's the Dashbo
 ```
 
 - Only `id` + `name` are required; `entry` defaults to `index.html`, `permissions` to `[]` (default-deny), `minBridgeVersion` to `"1.0"`, `generated` to `false`.
-- **Set `"generated": true`** for anything you author — it marks the app as agent-written, which forces stricter permission defaults (see below). This is the honest + safe flag.
+- **Set `"generated": true`** for anything you author — it labels the app as agent-written in the cockpit and on the permission sheet. It no longer buys or costs permissions (sensitive ones are off for everyone), so claiming otherwise gains nothing; be honest.
 - `permissions` must list every bridge surface the app uses (default-deny — an undeclared call is refused).
+- Raise `minBridgeVersion` only for a surface you actually need — `"1.1"` for `scarf.openURL`. An older Scarf refuses the app outright rather than half-running it.
 
-## The bridge — `window.scarf` (injected at document start; current version `1.0`)
+## The bridge — `window.scarf` (injected at document start; current version `1.1`)
 
 `scarf.context` and `scarf.version` are **synchronous** (baked in at load). Everything else is **async** (returns a Promise). Each async call is permission-checked host-side; a missing permission rejects.
 
 | Call | Permission needed | Sensitive?† | Returns |
 |---|---|---|---|
-| `scarf.version` | — | — | `"1.0"` (string) |
+| `scarf.version` | — | — | `"1.1"` (string) |
 | `scarf.context` | — | — | frozen `{ projectId, projectName, projectRoot, serverId, miniAppId, generated, bridgeVersion }` |
 | `scarf.ui.toast(msg)` | — | — | shows a host toast |
 | `scarf.ui.setTitle(title)` | — | — | sets the panel title |
@@ -74,14 +75,56 @@ Do **not** invoke for: editing the project's `dashboard.json` (that's the Dashbo
 | `scarf.file.read(path)` | `file:read` | no | UTF-8 contents of a project file (path is **relative to the project root**, read-only, ≤4 MB, contained — no escaping the project) |
 | `scarf.prompt(text, opts?)` | `prompt` | **yes** | sends a prompt to the project's bound agent session → resolves to the agent's final text (string); stream incremental output via `scarf.onEvent` |
 | `scarf.onEvent(cb)` | `events` | no | `cb(ev)` fires for streamed agent events (message chunks, tool calls, completion) — pair with `prompt` |
+| `scarf.openURL(url)` | `open_url` | no | opens one **https** URL in the user's default browser (bridge **1.1+**). Resolves once it opened; rejects `user_denied` / `rate_limited` / `bad_request` |
 
-† **Sensitive permissions** (`prompt`, `net`, `file:write`, `kanban:write`) default to **OFF** for `generated: true` apps until the user explicitly grants them in the permission sheet. Non-sensitive ones (`store`, `query:kanban.tasks`, `file:read`, `events`) default ON — note only the allow-listed `query:kanban.tasks` is non-sensitive (any other `query:<kind>` would be treated as sensitive, though none is implemented yet). **Prefer non-sensitive surfaces** so your app works immediately; only request `prompt` (and friends) when the app genuinely needs to drive the agent, and tell the user they'll be asked to grant it.
+† **Sensitive permissions** (`prompt`, `net`, `file:read`, `file:write`, `kanban:write`, and any unknown or non-allow-listed `query:<kind>`) start **OFF in the permission sheet for every app**, generated or not, until the user ticks them. Non-sensitive ones (`store`, `events`, `query:kanban.tasks`, `open_url`) start on. **Prefer non-sensitive surfaces** so your app works immediately; only request `prompt` (and friends) when the app genuinely needs to drive the agent, and tell the user they'll be asked to grant it.
 
 `net`, `file:write`, and `kanban:write` (move/create) are **not wired in this build** — don't rely on them. There is no external network: CSP blocks it and there's no `net` surface, so **bundle everything locally** (inline CSS/JS or local files; no CDNs, no `fetch()` to the internet).
 
+### External links — use `open_url`, never a bare `<a>`
+
+There is no browser inside the mini-app. Navigation is locked to
+`scarf-miniapp://`, so `<a href="https://…">` — with or without
+`target="_blank"` — is a **dead link**: the click is blocked and the user
+gets nothing. Don't write one and don't fake one with `window.open`.
+
+If your app shows links (an article list, a docs shortcut, a search result):
+
+1. Declare `"open_url"` in `permissions` and set `"minBridgeVersion": "1.1"`.
+2. Render the link as a button/anchor with your own click handler and call
+   `scarf.openURL(url)` **from that click**. Show the destination in the UI
+   (the host also names the site in its confirmation) and handle rejection —
+   the user may say no.
+3. Without the permission (or on an older Scarf), **fall back to
+   copy-to-clipboard** and say so: `navigator.clipboard.writeText(url)` plus a
+   `scarf.ui.toast("Link copied")`. Never leave a click doing nothing.
+
+```js
+async function openLink(url) {
+  try { await scarf.openURL(url); }
+  catch (e) {                                    // no grant, declined, or too fast
+    try { await navigator.clipboard.writeText(url); scarf.ui.toast("Link copied"); }
+    catch { scarf.ui.toast(url); }
+  }
+}
+```
+
+What the host enforces, so you can design for it:
+
+- **https only.** No `http:`, no `file:`, no app schemes, no embedded
+  credentials (`https://a.com@b.com` is refused), ≤2048 characters.
+- **The user confirms each new site** — "Open example.com in your browser?"
+  with Open Once / Always Allow / Cancel — and "Always" is remembered per
+  project + host. The permission alone opens nothing.
+- **Only from a real interaction, at human pace.** Calls are rate-limited
+  (a handful a minute) and only one confirmation can be on screen: firing
+  `openURL` on load or in a loop gets you rejections and annoys the user.
+- The path and query you put in the URL **do travel to that host** when the
+  user accepts. Don't smuggle project data into a link.
+
 ## Hard rules (the sandbox)
 
-1. **Self-contained.** Assets load over the `scarf-miniapp://` scheme scoped to the app dir. Reference local files by **relative path** (`./app.js`). No `file://`, no remote URLs, no external scripts/styles.
+1. **Self-contained.** Assets load over the `scarf-miniapp://` scheme scoped to the app dir. Reference local files by **relative path** (`./app.js`). No `file://`, no remote URLs, no external scripts/styles. A link OUT of the app is not an exception to this — it goes through `scarf.openURL`, which hands the URL to the user's browser rather than loading anything here.
 2. **Declare every permission** you use in `miniapp.json.permissions`, or the call is denied.
 3. **Never assume secrets/config/filesystem-at-large.** The bridge cannot reach `~/.hermes`, `config.yaml`, `auth.json`, env, or tools — by design.
 4. **Degrade gracefully.** Check `scarf.version` if you need a newer bridge; handle empty/permission-denied results without crashing the UI.
@@ -147,5 +190,6 @@ Needs only the non-sensitive `query:kanban.tasks` permission, so it runs immedia
 1. Pick a short kebab-case `<id>`; create `<project>/.scarf/miniapps/<id>/`.
 2. Write `miniapp.json` with `id` == dir name, `"generated": true`, and the **minimum** permissions.
 3. Write a self-contained `index.html` (inline CSS/JS or local files only).
-4. Use non-sensitive surfaces first (`context`, `ui`, `store`, `query`/`kanban.read`, `file.read`); request `prompt`/`events` only when needed, and tell the user they'll grant it.
-5. Tell the user it's ready in the cockpit's **Mini-apps** panel, and that they'll see a permission preview on first open (sensitive perms start off for generated apps).
+4. Use non-sensitive surfaces first (`context`, `ui`, `store`, `query`/`kanban.read`, `open_url`); request `prompt`/`events`/`file:read` only when needed, and tell the user they'll grant it.
+5. If the app shows any external link, declare `open_url` + `"minBridgeVersion": "1.1"` and call `scarf.openURL` from the click — with a copy-to-clipboard fallback. Never ship a bare `<a href="https://…">`; it does nothing.
+6. Tell the user it's ready in the cockpit's **Mini-apps** panel, and that they'll see a permission preview on first open (sensitive perms start off, for every app).

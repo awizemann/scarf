@@ -54,7 +54,49 @@ import Foundation
 /// Local files and project-contained images never reach here — they are
 /// resolved under the project root by `WidgetPathResolver` and involve no
 /// network at all.
+///
+/// **Two questions, one mechanism.** The same shape answers "may a mini-app
+/// hand a link at this host to your browser?" (`scarf.openURL`, the
+/// `open_url` permission). It is the same problem — a per-(project, host)
+/// record of something a person agreed to, kept where the agent asking can
+/// write — so it reuses the machinery instead of forking a second store.
+/// `Purpose` keeps the two sets of records apart, in both the defaults key
+/// and the signed payload, so neither decision can be read as the other.
 public struct ImageHostConsentStore: Sendable {
+
+    /// What a stored host consent is consent TO.
+    ///
+    /// Two different questions are asked about hosts — "may this dashboard
+    /// fetch an image from `x.example`?" and "may this mini-app open a link
+    /// at `x.example` in your browser?" — and they are not the same
+    /// decision, so they must not share a record. The purpose picks BOTH
+    /// the defaults key and the signed payload version, so a record cannot
+    /// be read, or its tag replayed, across purposes: allowing an image
+    /// host never silently allows opening links to it, or the reverse.
+    public enum Purpose: Sendable, Hashable {
+        /// Remote `<img>` hosts a project's dashboard may contact (P8 SEC-M4).
+        case remoteImage
+        /// Hosts a mini-app may hand to the user's default browser via
+        /// `scarf.openURL` — "Always Allow example.com".
+        case openURL
+
+        var keyPrefix: String {
+            switch self {
+            case .remoteImage: return "com.scarf.imageWidget.allowedHosts."
+            case .openURL: return "com.scarf.miniApp.openURLHosts."
+            }
+        }
+
+        /// Payload version, and the domain separator between the two
+        /// purposes. Bumping one invalidates only its own records, which
+        /// re-asks — the safe direction, and the only migration this needs.
+        var payloadVersion: String {
+            switch self {
+            case .remoteImage: return "scarf-image-consent-v1"
+            case .openURL: return "scarf-openurl-consent-v1"
+            }
+        }
+    }
 
     /// Held as a NAME rather than a `UserDefaults` instance so the store
     /// stays a `Sendable` value type (`UserDefaults` is not `Sendable`,
@@ -62,7 +104,7 @@ public struct ImageHostConsentStore: Sendable {
     /// lookup — these are user-interaction-rate operations.
     private let suiteName: String?
     private let signer: MiniAppGrantSigner
-    private static let keyPrefix = "com.scarf.imageWidget.allowedHosts."
+    private let purpose: Purpose
 
     /// Separator inside one stored record (`<host>\u{1F}<tag>`). Structural,
     /// and a normalized host can never contain it — but that is checked
@@ -70,18 +112,21 @@ public struct ImageHostConsentStore: Sendable {
     /// `dashboard.json`.
     private static let recordSeparator = "\u{1F}"
 
-    /// Payload version. Bumping it invalidates every stored record, which
-    /// re-asks — the safe direction, and the only migration this needs.
-    private static let payloadVersion = "scarf-image-consent-v1"
-
     /// - Parameter suiteName: a test-only defaults suite, so a suite can
     ///   allow and revoke without touching the user's real preferences.
     /// - Parameter testServiceSuffix: routes the signing key into a
     ///   test-only Keychain service, so a suite can sign and verify without
     ///   touching the user's real Keychain.
-    public nonisolated init(suiteName: String? = nil, testServiceSuffix: String? = nil) {
+    /// - Parameter purpose: which consent question these records answer.
+    ///   Defaults to `.remoteImage`, the original caller.
+    public nonisolated init(
+        suiteName: String? = nil,
+        testServiceSuffix: String? = nil,
+        purpose: Purpose = .remoteImage
+    ) {
         self.suiteName = suiteName
         self.signer = MiniAppGrantSigner(testServiceSuffix: testServiceSuffix)
+        self.purpose = purpose
     }
 
     private nonisolated var defaults: UserDefaults {
@@ -107,9 +152,9 @@ public struct ImageHostConsentStore: Sendable {
     /// fetching on a record it can't attribute to the user.
     public nonisolated func allowedHosts(projectId: String) -> Set<String> {
         var hosts: Set<String> = []
-        for record in defaults.stringArray(forKey: Self.key(projectId)) ?? [] {
+        for record in defaults.stringArray(forKey: key(projectId)) ?? [] {
             guard let (host, tag) = Self.split(record),
-                  signer.isValidTag(tag, forPayload: Self.payload(projectId: projectId, host: host))
+                  signer.isValidTag(tag, forPayload: payload(projectId: projectId, host: host))
             else { continue }
             hosts.insert(host)
         }
@@ -125,7 +170,7 @@ public struct ImageHostConsentStore: Sendable {
     public nonisolated func allow(url: URL, projectId: String) -> String? {
         guard let host = Self.normalizedHost(url),
               !host.contains(Self.recordSeparator),
-              let tag = signer.tag(forPayload: Self.payload(projectId: projectId, host: host))
+              let tag = signer.tag(forPayload: payload(projectId: projectId, host: host))
         else { return nil }
         var records = verifiedRecords(projectId: projectId)
         records[host] = tag
@@ -140,7 +185,7 @@ public struct ImageHostConsentStore: Sendable {
     }
 
     public nonisolated func revokeAll(projectId: String) {
-        defaults.removeObject(forKey: Self.key(projectId))
+        defaults.removeObject(forKey: key(projectId))
     }
 
     /// The host as it is compared and displayed: lowercased, with no
@@ -160,9 +205,9 @@ public struct ImageHostConsentStore: Sendable {
     /// allow/revoke instead of being carried forward.
     private nonisolated func verifiedRecords(projectId: String) -> [String: String] {
         var records: [String: String] = [:]
-        for record in defaults.stringArray(forKey: Self.key(projectId)) ?? [] {
+        for record in defaults.stringArray(forKey: key(projectId)) ?? [] {
             guard let (host, tag) = Self.split(record),
-                  signer.isValidTag(tag, forPayload: Self.payload(projectId: projectId, host: host))
+                  signer.isValidTag(tag, forPayload: payload(projectId: projectId, host: host))
             else { continue }
             records[host] = tag
         }
@@ -171,11 +216,11 @@ public struct ImageHostConsentStore: Sendable {
 
     private nonisolated func write(_ records: [String: String], projectId: String) {
         if records.isEmpty {
-            defaults.removeObject(forKey: Self.key(projectId))
+            defaults.removeObject(forKey: key(projectId))
         } else {
             defaults.set(
                 records.keys.sorted().map { $0 + Self.recordSeparator + records[$0]! },
-                forKey: Self.key(projectId)
+                forKey: key(projectId)
             )
         }
     }
@@ -186,18 +231,20 @@ public struct ImageHostConsentStore: Sendable {
         return (parts[0], parts[1])
     }
 
-    /// The bytes the tag covers: version, project, host. Every field that
-    /// decides WHAT was consented to and FOR WHOM is in here, so a tag
-    /// cannot be lifted from one project's record into another's, or from
-    /// one host onto a different host.
-    private nonisolated static func payload(projectId: String, host: String) -> String {
-        [payloadVersion, projectId, host].joined(separator: recordSeparator)
+    /// The bytes the tag covers: purpose-versioned prefix, project, host.
+    /// Every field that decides WHAT was consented to and FOR WHOM is in
+    /// here, so a tag cannot be lifted from one project's record into
+    /// another's, from one host onto a different host, or — since the
+    /// version string differs per purpose — from an image consent onto an
+    /// open-url consent.
+    private nonisolated func payload(projectId: String, host: String) -> String {
+        [purpose.payloadVersion, projectId, host].joined(separator: Self.recordSeparator)
     }
 
     /// Keyed by the project id the caller already has (its path, on the
     /// surfaces that lack a UUID) — consent is per project, because a
     /// dashboard the user trusts says nothing about another project's.
-    private nonisolated static func key(_ projectId: String) -> String {
-        keyPrefix + projectId
+    private nonisolated func key(_ projectId: String) -> String {
+        purpose.keyPrefix + projectId
     }
 }

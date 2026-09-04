@@ -98,11 +98,13 @@ import Foundation
     }
 
     @Test func minBridgeVersionGate() {
-        // Host provides miniAppBridgeVersion ("1.0").
-        #expect(MiniAppBridge.satisfiesMinBridgeVersion("1.0"))
+        // Host provides miniAppBridgeVersion ("1.1" — 1.1 added scarf.openURL).
+        #expect(miniAppBridgeVersion == "1.1")
+        #expect(MiniAppBridge.satisfiesMinBridgeVersion("1.1"))
+        #expect(MiniAppBridge.satisfiesMinBridgeVersion("1.0"))   // minors are additive
         #expect(MiniAppBridge.satisfiesMinBridgeVersion("0.9"))   // older requirement ok
         #expect(MiniAppBridge.satisfiesMinBridgeVersion("1"))     // "1" → 1.0
-        #expect(!MiniAppBridge.satisfiesMinBridgeVersion("1.1"))  // needs a newer minor
+        #expect(!MiniAppBridge.satisfiesMinBridgeVersion("1.2"))  // needs a newer minor
         #expect(!MiniAppBridge.satisfiesMinBridgeVersion("2.0"))  // needs a newer major
     }
 

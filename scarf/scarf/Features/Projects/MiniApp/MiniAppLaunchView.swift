@@ -483,6 +483,10 @@ extension MiniAppPermission {
         case .fileWrite: return String(localized: "Write files inside the project")
         case .store: return String(localized: "Save its own settings")
         case .net: return String(localized: "Make outbound network requests")
+        // Deliberately says what the user will still get to decide: this
+        // row grants the right to ask, and every new site is confirmed by
+        // name before anything opens.
+        case .openURL: return String(localized: "Open links in your browser (you confirm each new site)")
         case .unknown(let raw):
             // Sanitized, never verbatim: this is the consent sheet, and the
             // string comes from an agent-written manifest (P8 SEC-L4).

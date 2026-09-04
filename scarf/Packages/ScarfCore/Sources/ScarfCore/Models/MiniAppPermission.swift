@@ -34,6 +34,11 @@ public enum MiniAppPermission: Codable, Sendable, Hashable {
     case store
     /// Outbound network — only honored with an allowlist. Sensitive.
     case net
+    /// Hand one https URL to the user's default browser (`scarf.openURL`).
+    /// Never auto-fires: the mini-app can only ASK, and every new host is
+    /// confirmed by the user before anything opens (see
+    /// `MiniAppOpenURLPolicy` + the open-url host consent store).
+    case openURL
     /// A permission string this build doesn't recognize. Preserved verbatim
     /// so the preview sheet can show it and the host can hard-deny it.
     case unknown(String)
@@ -48,6 +53,7 @@ public enum MiniAppPermission: Codable, Sendable, Hashable {
         case .fileWrite: return "file:write"
         case .store: return "store"
         case .net: return "net"
+        case .openURL: return "open_url"
         case .unknown(let raw): return raw
         }
     }
@@ -62,6 +68,7 @@ public enum MiniAppPermission: Codable, Sendable, Hashable {
         case "file:write": self = .fileWrite
         case "store": self = .store
         case "net": self = .net
+        case "open_url": self = .openURL
         default:
             if trimmed.hasPrefix("query:") {
                 let kind = String(trimmed.dropFirst("query:".count))
@@ -150,6 +157,20 @@ public enum MiniAppPermission: Codable, Sendable, Hashable {
         // A query is non-sensitive only for an allow-listed read-only kind;
         // any other (or future privacy-relevant) kind defaults to sensitive.
         case .query(let kind): return !Self.nonSensitiveQueryKinds.contains(kind)
+        // `open_url` is NON-sensitive, deliberately, and it is the only
+        // permission whose safety rests on a gate outside this grant.
+        // Granting it buys the mini-app the right to ASK: it can read
+        // nothing, it cannot fire on load or on a timer without the user's
+        // click reaching it, and every host it names is confirmed by the
+        // user (naming that host) before anything opens — a second consent
+        // the user gives with the destination in front of them. A row that
+        // opened pre-ticked here still cannot open a link on its own, so
+        // making it sensitive would buy nothing and would train users to
+        // tick warning rows. What it DOES leak is accepted and documented:
+        // the URL's path and query go to that host on the click, so an app
+        // with something to say can say it in a link the user chooses to
+        // follow. That is the same power any rendered anchor has.
+        case .openURL: return false
         case .events, .store: return false
         }
     }
@@ -169,6 +190,7 @@ public enum MiniAppPermission: Codable, Sendable, Hashable {
         case .fileWrite: return "Write files inside the project"
         case .store: return "Save its own settings"
         case .net: return "Make outbound network requests"
+        case .openURL: return "Open links in your browser"
         case .unknown(let raw): return "Unknown permission \"\(Self.displaySafe(raw))\" (will be denied)"
         }
     }

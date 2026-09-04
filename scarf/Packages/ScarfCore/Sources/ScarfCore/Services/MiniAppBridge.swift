@@ -14,7 +14,11 @@ import Foundation
 
 /// Semver of the bridge contract. Mini-apps check it via `scarf.version`
 /// and declare `minBridgeVersion`; the host refuses/degrades on mismatch.
-public let miniAppBridgeVersion = "1.0"
+/// 1.1 added `scarf.openURL` (the `open_url` permission). Minors are
+/// additive, so a 1.0 mini-app still runs unchanged on a 1.1 host; an app
+/// that needs `openURL` declares `"minBridgeVersion": "1.1"` and is refused
+/// (with an explanation) by an older Scarf rather than half-working.
+public let miniAppBridgeVersion = "1.1"
 
 // MARK: - Methods
 
@@ -35,6 +39,7 @@ public enum MiniAppBridgeMethod: String, CaseIterable, Sendable {
     case query = "query"
     case fileRead = "file.read"
     case kanbanRead = "kanban.read"
+    case openURL = "open.url"
 
     /// Permission this method requires, or `nil` for ungated baseline
     /// surfaces (context + benign UI affordances carry no permission —
@@ -53,6 +58,8 @@ public enum MiniAppBridgeMethod: String, CaseIterable, Sendable {
             return .fileRead
         case .kanbanRead:
             return .query("kanban.tasks")
+        case .openURL:
+            return .openURL
         case .query:
             // The concrete `query:<kind>` permission depends on the call's
             // `kind` argument, so it's enforced in the handler.
@@ -68,7 +75,7 @@ public enum MiniAppBridgeMethod: String, CaseIterable, Sendable {
         switch self {
         case .contextGet, .uiToast, .uiSetTitle, .uiResize, .uiRequestClose,
              .storeGet, .storeSet, .promptSend, .eventsSubscribe,
-             .query, .fileRead, .kanbanRead:
+             .query, .fileRead, .kanbanRead, .openURL:
             return true
         }
         // A future surface added to the enum must decide its status here.
@@ -82,6 +89,14 @@ public enum MiniAppBridgeErrorCode: String, Sendable {
     case notImplemented = "not_implemented"
     case badRequest = "bad_request"
     case internalError = "internal_error"
+    /// The host-side sliding-window limit refused this call (see
+    /// `MiniAppRateLimiter`). Distinct from `permission_denied`: the grant
+    /// is fine, the pace is not.
+    case rateLimited = "rate_limited"
+    /// The user was asked and said no — or a confirmation was already on
+    /// screen, so this request was dropped rather than queued behind it.
+    /// Never retried automatically by the shim.
+    case userDenied = "user_denied"
 }
 
 /// Host → web reply. `result` is a JSON string (the shim `JSON.parse`s it);
@@ -231,6 +246,14 @@ public enum MiniAppBridge {
               requestClose: () => post("ui.requestClose", [])
             }),
             prompt: async (text, opts) => post("prompt.send", [String(text), JSON.stringify(opts || {})]),
+            // Hand one https URL to the user's default browser. Requires
+            // the `open_url` permission AND the user's confirmation of the
+            // destination host; resolves only once something actually
+            // opened, and rejects (user_denied / rate_limited /
+            // bad_request) otherwise. Call it FROM A CLICK — a burst is
+            // rate-limited and a second call while a confirmation is on
+            // screen is dropped, not queued.
+            openURL: async (url) => post("open.url", [String(url)]),
             query: async (kind, params) => {
               const r = await post("query", [String(kind), JSON.stringify(params || {})]);
               return (r === null || r === undefined || r === "") ? null : JSON.parse(r);
