@@ -67,27 +67,18 @@ Connecting takes about a minute: add a server (same details as `ssh user@host`),
 
 Scarf for macOS collects **anonymous usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames; no persistent identifier) to guide development. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/).
 
-## What's New in 3.0.1
+## What's New in 3.1.0
 
-- **Bot creation works for every profile** — Hermes wraps long values in `profile.yaml` across lines; Scarf's writer refused those files, so any bot with a longer role description couldn't be created or edited. Fixed on both the read and write side, verified against real Hermes-created profiles.
-- **Parser hunt** — every file Scarf reads or writes that Hermes authors was audited against Hermes's own serializer output: local-model reasoning overrides (`llama3:8b`) save again, long quick commands no longer silently truncate (or execute as a prefix of your pipeline), one bad cron record no longer blanks the board, and empty gateway sections aren't duplicated.
-- **Hardening** — Release builds now compile with warnings as errors; all 46 Swift 6 concurrency diagnostics cleared, including a live VoiceOver bug.
-- **Bot conversations actually reach the bot** — Hermes's ACP layer can't reopen the canonical Bot Chat (it's CLI/gateway-born); Scarf now delivers those messages the way Hermes's own bot-DM tool does and refreshes the transcript from state.db, proven end-to-end against the real binary.
-- **Friendlier bot creation** — the profile id derives from the bot's name as you type, and a disabled Create button now says why. Anonymous usage analytics extended to the bot lifecycle (same privacy contract; opt out in Settings → Advanced).
-- **Chat quality-of-life** — two-row session bar that never clips its numbers, on-the-spot toggles for tool calls and reasoning, a scrollable tool-approval dialog, live header updates on rename, and the Hermes version in the sidebar footer.
+- **A sidebar built around your projects** — projects live at the top of the sidebar in their own panel with folders, filtering, the full context menu, and a New Project button; the other sections collapse and expand, and Scarf remembers your arrangement.
+- **Project chats stop nagging** — flip "Auto-accept edits" in a project's Chat Settings and chats bound to that project apply edits without prompting (sensitive paths still ask, enforced by Hermes); or hit the approval dialog's new "Allow edits for this session" button. The setting is cryptographically bound to your machine, so an agent can't grant itself the bypass.
+- **Mini-apps can open links** — a new `open_url` permission hands links to your default browser: https-only, confirmed per host by name (Open once / Always allow), never without your click. The sandbox itself stays sealed.
+- **Projects that can't be destroyed** — atomic writes on every transport (iOS SFTP included), quarantine-and-refuse instead of overwrite on damage, rolling backups, a cross-process write lock, a Project Doctor that reconciles and repairs, and trust re-verified at time of use (uninstall containment, per-project keychain binding, signed mini-app grants).
+- **Agents get real tools** — the bundled scarf-projects MCP server covers the full project surface, including `project_set_config` with secrets routed straight to the Keychain; skills and slash commands now steer agents to tools instead of hand-editing JSON.
+- **Much faster while agents stream** — an unchanged watcher tick dropped from ~55–70 SSH round-trips to ~4; registry work moved fully off the main thread.
+- **Accessibility** — damage and repair announcements, severity spoken on doctor findings, Audio Graphs for charts, non-color status channels, and text that scales in dense widgets.
+- **Heads-up**: mini-apps re-ask for their permissions once after upgrading (grants are now signed); project keychain secrets migrate automatically on next read.
 
-Full notes: [v3.0.1](https://github.com/awizemann/scarf/releases/tag/v3.0.1)
-
-## What's New in 3.0.0
-
-- **Bots, complete** ⚙ — the bot editor now configures the agent itself: per-bot model pins with honest provenance, SOUL.md editing with conflict detection, per-bot toolset/MCP enablement, and a roster with search, activity previews, live presence — painting over SSH in one round-trip instead of sixty.
-- **The 3.0 audit** — every sidebar section independently audited for correctness, security, performance, translation, and accessibility; everything blocking fixed. Symlink and webview escapes closed, mini-app permissions fingerprinted, secrets out of argv, and five quietly-broken surfaces repaired (Plugins state, Webhooks list, Profiles export/delete, MCP adds, one-shot cron edits).
-- **Honest numbers** — "Last 7 days" means seven days, Insights uses one population, the Memory editor never discards unsaved text.
-- **Fully localized, for real** — a structural fix made previously-unreachable translations live; 2,374 keys across six languages with real plural grammar, regression-guarded by tests.
-- **Accessible throughout** — VoiceOver/Voice Control coverage extended across sessions, Kanban, tools, logs, health, and chat transcripts; Reduce Motion respected.
-- No breaking changes; Hermes v0.6.0–v0.21.0 compatibility unchanged.
-
-Full notes: [v3.0.0](https://github.com/awizemann/scarf/releases/tag/v3.0.0) · v2.24.0 introduced the Bots section with live streaming bot chats · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
+Full notes: [v3.1.0](https://github.com/awizemann/scarf/releases/tag/v3.1.0) · **all previous releases:** [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
 
 ## Features
 
