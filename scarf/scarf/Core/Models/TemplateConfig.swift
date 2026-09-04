@@ -198,9 +198,25 @@ nonisolated struct TemplateKeychainRef: Sendable, Equatable {
     /// `"keychain://<service>/<account>"` — what lands in `config.json`.
     nonisolated var uri: String { "keychain://\(service)/\(account)" }
 
+    /// The one service namespace Scarf ever reads or deletes. Every ref
+    /// Scarf mints is `com.scarf.template.<slug>`; a ref naming anything
+    /// else (`com.apple.…`, an SSH key service, another app's items) is
+    /// not ours and must never reach `SecItem*`.
+    nonisolated static let serviceNamespace = "com.scarf.template."
+
     /// Parse a `keychain://…` URI back into a ref. Returns `nil` when the
     /// input isn't well-formed so callers can distinguish a missing ref
     /// from a malformed one.
+    ///
+    /// **Trust boundary.** `config.json` and `template.lock.json` are
+    /// agent-writable, so the URIs that reach here are attacker-controlled
+    /// input, not records of what Scarf did. Parsing therefore enforces
+    /// the shape Scarf mints rather than accepting any (service, account)
+    /// pair: the service must live under `serviceNamespace` with a
+    /// non-empty slug, and the account must be `<fieldKey>:<8-hex-hash>`.
+    /// That confines every read/delete to items Scarf itself could have
+    /// created. Binding a ref to the OWNING project is a second, separate
+    /// check — see `belongs(toProjectPath:)`.
     nonisolated static func parse(_ uri: String) -> TemplateKeychainRef? {
         guard uri.hasPrefix("keychain://") else { return nil }
         let rest = String(uri.dropFirst("keychain://".count))
@@ -208,7 +224,69 @@ nonisolated struct TemplateKeychainRef: Sendable, Equatable {
         let service = String(rest[..<slash])
         let account = String(rest[rest.index(after: slash)...])
         guard !service.isEmpty, !account.isEmpty else { return nil }
+        // Namespace: com.scarf.template.<slug>, slug non-empty and free of
+        // separators that would let a crafted uri smuggle structure.
+        guard service.hasPrefix(serviceNamespace) else { return nil }
+        let slug = String(service.dropFirst(serviceNamespace.count))
+        guard !slug.isEmpty,
+              slug.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "." })
+        else { return nil }
+        // Account: <fieldKey>:<8 hex chars>. Split on the LAST colon so a
+        // field key containing one still parses.
+        guard let colon = account.lastIndex(of: ":") else { return nil }
+        let fieldKey = String(account[..<colon])
+        let hash = String(account[account.index(after: colon)...])
+        guard !fieldKey.isEmpty,
+              !fieldKey.contains("/"),
+              hash.count == 8,
+              hash.allSatisfy({ $0.isHexDigit && !$0.isUppercase })
+        else { return nil }
         return TemplateKeychainRef(service: service, account: account)
+    }
+
+    /// The project-path fingerprint baked into this ref's account, i.e.
+    /// which project's install minted it. Non-nil for any ref that came
+    /// through `parse` (which enforces the shape).
+    nonisolated var projectPathHash: String? {
+        guard let colon = account.lastIndex(of: ":") else { return nil }
+        return String(account[account.index(after: colon)...])
+    }
+
+    /// Is this ref one that an install rooted at `projectPath` could have
+    /// minted? Cross-project isolation lives here: project A's
+    /// `config.json` naming project B's ref fails this check, so B's
+    /// secret is never resolved into A's env block (or deleted by A's
+    /// uninstall).
+    ///
+    /// Both the raw and the symlink-resolved spelling of the path are
+    /// accepted, because a registry row can hold `/tmp/x` for a project
+    /// installed as `/private/tmp/x` (and vice versa) — the same
+    /// directory either way.
+    nonisolated func belongs(toProjectPath projectPath: String) -> Bool {
+        guard let hash = projectPathHash else { return false }
+        return Self.acceptableHashes(forProjectPath: projectPath).contains(hash)
+    }
+
+    /// Every path-hash that legitimately denotes `projectPath`. The
+    /// spellings differ in practice (`/tmp/x` vs `/private/tmp/x`, a
+    /// trailing slash, a symlinked parent), and `Foundation` normalizes
+    /// them inconsistently — `resolvingSymlinksInPath` STRIPS a `/private`
+    /// prefix rather than adding one — so enumerate the variants instead
+    /// of trusting one canonical form.
+    nonisolated static func acceptableHashes(forProjectPath projectPath: String) -> Set<String> {
+        var spellings: Set<String> = [projectPath]
+        let standardized = URL(fileURLWithPath: projectPath).standardizedFileURL.path
+        spellings.insert(standardized)
+        let resolved = URL(fileURLWithPath: standardized).resolvingSymlinksInPath().path
+        spellings.insert(resolved)
+        for path in Array(spellings) {
+            if path.hasPrefix("/private/") {
+                spellings.insert(String(path.dropFirst("/private".count)))
+            } else {
+                spellings.insert("/private" + path)
+            }
+        }
+        return Set(spellings.map(shortHash(of:)))
     }
 
     /// Build a ref from a template slug + field key + project path.

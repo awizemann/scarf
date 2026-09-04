@@ -121,9 +121,31 @@ struct ProjectConfigService: Sendable {
     /// Resolve a `keychainRef` value into the actual secret bytes.
     /// Returns `nil` if the Keychain entry has been removed (e.g.
     /// external user cleanup, a previous uninstall that didn't finish).
-    nonisolated func resolveSecret(ref value: TemplateConfigValue) throws -> Data? {
+    ///
+    /// **`config.json` is agent-writable**, so the uri is untrusted input:
+    /// it is admitted only when it parses into Scarf's own Keychain
+    /// namespace AND is bound to `project` (see
+    /// `TemplateKeychainRef.belongs(toProjectPath:)`). A ref pointing at
+    /// another project's item resolves to `nil` — the agent in project A
+    /// cannot make Scarf read project B's secret on its behalf.
+    ///
+    /// A project moved by hand fails the binding (its refs carry the old
+    /// path's fingerprint); the secret then reads as absent and the user
+    /// re-enters it in the Configuration sheet, which re-mints the ref
+    /// under the current path. That is the intended migration — there is
+    /// no supported hand-move flow today either way.
+    nonisolated func resolveSecret(
+        ref value: TemplateConfigValue,
+        for project: ProjectEntry
+    ) throws -> Data? {
         guard case .keychainRef(let uri) = value,
               let ref = TemplateKeychainRef.parse(uri) else {
+            return nil
+        }
+        guard ref.belongs(toProjectPath: project.path) else {
+            Self.logger.warning(
+                "refusing keychain ref \(uri, privacy: .public) — not bound to project \(project.path, privacy: .public)"
+            )
             return nil
         }
         return try keychain.get(ref: ref)

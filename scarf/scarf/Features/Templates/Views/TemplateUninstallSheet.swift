@@ -66,6 +66,9 @@ struct TemplateUninstallSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     projectFilesSection(plan: plan)
+                    if !plan.refusedEntries.isEmpty {
+                        refusedSection(plan: plan)
+                    }
                     if plan.skillsNamespaceDir != nil {
                         skillsSection(plan: plan)
                     }
@@ -151,6 +154,28 @@ struct TemplateUninstallSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.top, 4)
+                }
+            }
+        }
+    }
+
+    /// Anything the lock claimed that failed containment. Shown rather
+    /// than swallowed: a lock listing paths outside the project (or another
+    /// project's Keychain item) means the lock was tampered with or is
+    /// badly stale, and the user should know before confirming.
+    private func refusedSection(plan: TemplateUninstallPlan) -> some View {
+        section(
+            title: "Skipped — outside this project",
+            subtitle: "The lock file lists these, but they aren't inside the project. Scarf won't touch them."
+        ) {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(plan.refusedEntries, id: \.self) { entry in
+                    fileRow(
+                        label: entry,
+                        systemImage: "exclamationmark.shield",
+                        color: .orange,
+                        tag: "skipped"
+                    )
                 }
             }
         }

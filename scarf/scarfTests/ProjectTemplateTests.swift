@@ -1326,3 +1326,369 @@ struct ProjectTemplateConfigInstallTests {
         #expect(inspection.files.contains("AGENTS.md"))
     }
 }
+
+// MARK: - Trust-boundary tests (S1)
+
+/// `template.lock.json` is written into the project dir, which the agent
+/// can rewrite at will — so these tests come at the uninstaller as an
+/// ATTACKER, not as the installer's happy path: a lock that names files
+/// outside the project, a skills namespace dir outside the templates
+/// root, a symlink planted inside that namespace, and a `keychain://`
+/// uri belonging to somebody else. Every one of them must be refused,
+/// surfaced in the plan, and left untouched on disk.
+struct ProjectTemplateUninstallTrustBoundaryTests {
+
+    /// Install a minimal template into a fresh temp home and hand back
+    /// everything a hostile-lock test needs.
+    private struct Fixture {
+        let home: TempHermesHome
+        let scratch: String
+        let entry: ProjectEntry
+        let projectDir: String
+        let slug: String
+        var lockPath: String { projectDir + "/.scarf/template.lock.json" }
+
+        func cleanup() {
+            home.cleanup()
+            try? FileManager.default.removeItem(atPath: scratch)
+        }
+
+        /// Rewrite the lock the way a compromised agent would: read the
+        /// real one, mutate a field, write it back.
+        func rewriteLock(_ mutate: (inout [String: Any]) -> Void) throws {
+            let data = try Data(contentsOf: URL(fileURLWithPath: lockPath))
+            var json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            mutate(&json)
+            let out = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted])
+            try out.write(to: URL(fileURLWithPath: lockPath))
+        }
+    }
+
+    private static func makeFixture() throws -> Fixture {
+        let home = try TempHermesHome()
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        let parentDir = scratch + "/parent"
+        try FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
+        let bundle = try ProjectTemplateServiceTests.makeBundle(dir: scratch, files: [
+            "README.md": "# Minimal",
+            "AGENTS.md": "# Agent notes",
+            "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
+        ])
+        let service = ProjectTemplateService(context: home.context)
+        let inspection = try service.inspect(zipPath: bundle)
+        defer { service.cleanupTempDir(inspection.unpackedDir) }
+        let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
+        let entry = try ProjectTemplateInstaller(context: home.context).install(plan: plan)
+        return Fixture(
+            home: home,
+            scratch: scratch,
+            entry: entry,
+            projectDir: plan.projectDir,
+            slug: inspection.manifest.slug
+        )
+    }
+
+    // MARK: H1 — project files
+
+    @Test func lockPathOutsideTheProjectIsRefusedAndSurvives() throws {
+        let fixture = try Self.makeFixture()
+        defer { fixture.cleanup() }
+
+        let victim = fixture.scratch + "/precious.txt"
+        try Data("keep me".utf8).write(to: URL(fileURLWithPath: victim))
+        try fixture.rewriteLock { json in
+            var files = json["project_files"] as? [String] ?? []
+            files.append(victim)
+            json["project_files"] = files
+        }
+
+        let uninstaller = ProjectTemplateUninstaller(context: fixture.home.context)
+        let plan = try uninstaller.loadUninstallPlan(for: fixture.entry)
+        #expect(plan.refusedEntries.contains(victim))
+        #expect(plan.projectFilesToRemove.contains(victim) == false)
+
+        try uninstaller.uninstall(plan: plan)
+        #expect(FileManager.default.fileExists(atPath: victim))
+    }
+
+    @Test func lockPathEscapingViaDotDotIsRefused() throws {
+        let fixture = try Self.makeFixture()
+        defer { fixture.cleanup() }
+
+        let victim = fixture.scratch + "/escape.txt"
+        try Data("keep me".utf8).write(to: URL(fileURLWithPath: victim))
+        let traversal = fixture.projectDir + "/../../escape.txt"
+        try fixture.rewriteLock { json in
+            json["project_files"] = [traversal]
+        }
+
+        let uninstaller = ProjectTemplateUninstaller(context: fixture.home.context)
+        let plan = try uninstaller.loadUninstallPlan(for: fixture.entry)
+        #expect(plan.refusedEntries.contains(traversal))
+        try uninstaller.uninstall(plan: plan)
+        #expect(FileManager.default.fileExists(atPath: victim))
+    }
+
+    /// The nastiest local shape: a lock-tracked path that LOOKS contained
+    /// (`<project>/data/secrets.txt`) but reaches outside because `data`
+    /// is a symlink. Lexical containment alone passes it; the physical
+    /// re-derivation is what refuses it.
+    @Test func lockPathThroughSymlinkedDirectoryIsRefused() throws {
+        let fixture = try Self.makeFixture()
+        defer { fixture.cleanup() }
+
+        let outsideDir = fixture.scratch + "/outside"
+        try FileManager.default.createDirectory(atPath: outsideDir, withIntermediateDirectories: true)
+        let victim = outsideDir + "/secrets.txt"
+        try Data("keep me".utf8).write(to: URL(fileURLWithPath: victim))
+        let link = fixture.projectDir + "/data"
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: outsideDir)
+
+        let smuggled = link + "/secrets.txt"
+        try fixture.rewriteLock { json in
+            json["project_files"] = [smuggled]
+        }
+
+        let uninstaller = ProjectTemplateUninstaller(context: fixture.home.context)
+        let plan = try uninstaller.loadUninstallPlan(for: fixture.entry)
+        #expect(plan.refusedEntries.contains(smuggled))
+        #expect(plan.projectFilesToRemove.contains(smuggled) == false)
+
+        try uninstaller.uninstall(plan: plan)
+        #expect(FileManager.default.fileExists(atPath: victim))
+    }
+
+    // MARK: H1 — skills namespace dir
+
+    @Test func skillsNamespaceDirOutsideTemplatesRootIsRefused() throws {
+        let fixture = try Self.makeFixture()
+        defer { fixture.cleanup() }
+
+        let victimDir = fixture.scratch + "/not-a-skill"
+        try FileManager.default.createDirectory(atPath: victimDir, withIntermediateDirectories: true)
+        try Data("keep".utf8).write(to: URL(fileURLWithPath: victimDir + "/file.txt"))
+        try fixture.rewriteLock { json in
+            json["skills_namespace_dir"] = victimDir
+        }
+
+        let uninstaller = ProjectTemplateUninstaller(context: fixture.home.context)
+        let plan = try uninstaller.loadUninstallPlan(for: fixture.entry)
+        #expect(plan.skillsNamespaceDir == nil)
+        #expect(plan.refusedEntries.contains(victimDir))
+
+        try uninstaller.uninstall(plan: plan)
+        #expect(FileManager.default.fileExists(atPath: victimDir + "/file.txt"))
+    }
+
+    /// A legitimate namespace dir that contains a symlink to somewhere
+    /// else. The recursive delete must unlink the link and stop — not
+    /// walk through it and delete the linked tree's contents.
+    @Test func recursiveSkillsRemovalUnlinksSymlinksInsteadOfFollowingThem() throws {
+        let fixture = try Self.makeFixture()
+        defer { fixture.cleanup() }
+
+        let namespaceDir = fixture.home.context.paths.skillsDir + "/templates/" + fixture.slug
+        try FileManager.default.createDirectory(atPath: namespaceDir, withIntermediateDirectories: true)
+        try Data("skill".utf8).write(to: URL(fileURLWithPath: namespaceDir + "/SKILL.md"))
+
+        let outsideDir = fixture.scratch + "/outside"
+        try FileManager.default.createDirectory(atPath: outsideDir, withIntermediateDirectories: true)
+        let victim = outsideDir + "/precious.txt"
+        try Data("keep me".utf8).write(to: URL(fileURLWithPath: victim))
+        try FileManager.default.createSymbolicLink(
+            atPath: namespaceDir + "/linked",
+            withDestinationPath: outsideDir
+        )
+
+        try fixture.rewriteLock { json in
+            json["skills_namespace_dir"] = namespaceDir
+        }
+
+        let uninstaller = ProjectTemplateUninstaller(context: fixture.home.context)
+        let plan = try uninstaller.loadUninstallPlan(for: fixture.entry)
+        #expect(plan.skillsNamespaceDir == namespaceDir)
+        try uninstaller.uninstall(plan: plan)
+
+        // The namespace dir (and its symlink) are gone…
+        #expect(FileManager.default.fileExists(atPath: namespaceDir) == false)
+        // …but nothing on the other side of the link was touched.
+        #expect(FileManager.default.fileExists(atPath: victim))
+        #expect(FileManager.default.fileExists(atPath: outsideDir))
+    }
+
+    // MARK: H3 — keychain items
+
+    @Test func foreignKeychainRefInLockIsNotDeleted() throws {
+        let fixture = try Self.makeFixture()
+        defer { fixture.cleanup() }
+
+        // A secret belonging to a DIFFERENT project, stored for real.
+        let otherProject = ProjectEntry(name: "other", path: fixture.scratch + "/other-project")
+        let configService = ProjectConfigService()
+        let stored = try configService.storeSecret(
+            templateSlug: "victim-template",
+            fieldKey: "api_token",
+            project: otherProject,
+            secret: Data("not-yours".utf8)
+        )
+        guard case .keychainRef(let foreignURI) = stored,
+              let foreignRef = TemplateKeychainRef.parse(foreignURI) else {
+            Issue.record("expected a keychain ref")
+            return
+        }
+        defer { try? ProjectConfigKeychain().delete(ref: foreignRef) }
+
+        try fixture.rewriteLock { json in
+            json["config_keychain_items"] = [foreignURI, "keychain://com.apple.ssh/id_rsa"]
+        }
+
+        let uninstaller = ProjectTemplateUninstaller(context: fixture.home.context)
+        let plan = try uninstaller.loadUninstallPlan(for: fixture.entry)
+        #expect(plan.keychainItemsToDelete.isEmpty)
+        #expect(plan.refusedEntries.contains(foreignURI))
+        #expect(plan.refusedEntries.contains("keychain://com.apple.ssh/id_rsa"))
+
+        try uninstaller.uninstall(plan: plan)
+        #expect((try ProjectConfigKeychain().get(ref: foreignRef)) == Data("not-yours".utf8))
+    }
+
+    // MARK: PathGuard unit surface
+
+    @Test func pathGuardAdmitsContainedPathsOnly() throws {
+        let root = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        try FileManager.default.createDirectory(atPath: root + "/sub", withIntermediateDirectories: true)
+        let guardian = ProjectTemplateUninstaller.PathGuard(isRemote: false)
+
+        #expect(guardian.admits(root + "/sub/file.txt", under: root))
+        #expect(guardian.admits(root + "/gone.txt", under: root)) // absent is fine
+        #expect(guardian.admits(root, under: root) == false)      // root itself never
+        #expect(guardian.admits(root + "/..", under: root) == false)
+        #expect(guardian.admits(root + "/sub/../../x", under: root) == false)
+        #expect(guardian.admits("relative/path", under: root) == false)
+        #expect(guardian.admits("/etc/passwd", under: root) == false)
+        // A sibling whose path merely SHARES the root's prefix.
+        #expect(guardian.admits(root + "-evil/file.txt", under: root) == false)
+        // A root of "/" would make the check vacuous.
+        #expect(guardian.admits("/Users/someone/Documents", under: "/") == false)
+    }
+
+    @Test func pathGuardRefusesSymlinkedComponentsAndDetectsLinks() throws {
+        let root = try ProjectTemplateServiceTests.makeTempDir()
+        let outside = try ProjectTemplateServiceTests.makeTempDir()
+        defer {
+            try? FileManager.default.removeItem(atPath: root)
+            try? FileManager.default.removeItem(atPath: outside)
+        }
+        try FileManager.default.createSymbolicLink(
+            atPath: root + "/link",
+            withDestinationPath: outside
+        )
+        let guardian = ProjectTemplateUninstaller.PathGuard(isRemote: false)
+
+        // Through the link: refused (the parent resolves elsewhere).
+        #expect(guardian.admits(root + "/link/file.txt", under: root) == false)
+        // The link ITSELF is admitted — we want to be able to unlink it —
+        // and is reported as a symlink so the walk never descends.
+        #expect(guardian.admits(root + "/link", under: root))
+        #expect(guardian.isSymlink(root + "/link"))
+        #expect(guardian.isSymlink(root) == false)
+    }
+}
+
+/// H2: `keychain://` refs are namespace-restricted and bound to the
+/// project that minted them, so one project's agent can't name another
+/// project's item and have Scarf resolve (or delete) it.
+struct TemplateKeychainRefTrustTests {
+
+    @Test func parseRejectsRefsOutsideScarfsNamespace() {
+        #expect(TemplateKeychainRef.parse("keychain://com.apple.ssh/id_rsa") == nil)
+        #expect(TemplateKeychainRef.parse("keychain://com.scarf.template./k:0000abcd") == nil)
+        #expect(TemplateKeychainRef.parse("keychain://com.scarf.templateX/k:0000abcd") == nil)
+        // Well-formed account is required too — no free-form accounts.
+        #expect(TemplateKeychainRef.parse("keychain://com.scarf.template.t/anything") == nil)
+        #expect(TemplateKeychainRef.parse("keychain://com.scarf.template.t/:0000abcd") == nil)
+        #expect(TemplateKeychainRef.parse("keychain://com.scarf.template.t/k:0000ABCD") == nil)
+        #expect(TemplateKeychainRef.parse("keychain://com.scarf.template.t/k:zzzz") == nil)
+    }
+
+    @Test func parseAcceptsWhatMakeMints() {
+        let ref = TemplateKeychainRef.make(
+            templateSlug: "site-status",
+            fieldKey: "api_token",
+            projectPath: "/Users/a/proj"
+        )
+        #expect(TemplateKeychainRef.parse(ref.uri) == ref)
+    }
+
+    @Test func refsAreBoundToTheProjectThatMintedThem() {
+        let mine = TemplateKeychainRef.make(
+            templateSlug: "t", fieldKey: "k", projectPath: "/Users/a/proj-a"
+        )
+        #expect(mine.belongs(toProjectPath: "/Users/a/proj-a"))
+        #expect(mine.belongs(toProjectPath: "/Users/a/proj-b") == false)
+    }
+
+    @Test func bindingToleratesSymlinkedSpellingsOfTheSameDir() {
+        // A registry row can hold /tmp/x for a project installed as
+        // /private/tmp/x — same directory, so the binding must hold.
+        let ref = TemplateKeychainRef.make(
+            templateSlug: "t", fieldKey: "k", projectPath: "/private/tmp"
+        )
+        #expect(ref.belongs(toProjectPath: "/private/tmp"))
+        #expect(ref.belongs(toProjectPath: "/tmp"))
+    }
+
+    @Test func resolveSecretRefusesAnotherProjectsRef() throws {
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+
+        let owner = ProjectEntry(name: "owner", path: scratch + "/owner")
+        let attacker = ProjectEntry(name: "attacker", path: scratch + "/attacker")
+        let service = ProjectConfigService()
+        let stored = try service.storeSecret(
+            templateSlug: "t", fieldKey: "k", project: owner, secret: Data("s3cret".utf8)
+        )
+        defer {
+            if case .keychainRef(let uri) = stored, let ref = TemplateKeychainRef.parse(uri) {
+                try? ProjectConfigKeychain().delete(ref: ref)
+            }
+        }
+
+        // The owner can read it…
+        #expect(try service.resolveSecret(ref: stored, for: owner) == Data("s3cret".utf8))
+        // …and a project whose config.json merely NAMES the ref cannot.
+        #expect(try service.resolveSecret(ref: stored, for: attacker) == nil)
+    }
+}
+
+/// The env-mirror block markers carry the slug verbatim, and the manifest
+/// that supplies it is agent-writable — so a slug with a newline in it
+/// could forge markers and inject env vars outside any managed block.
+struct KeychainEnvMirrorSlugGuardTests {
+
+    @Test func refusesToMirrorAMalformedSlug() throws {
+        let dir = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let envPath = dir + "/.env"
+        try Data("EXISTING=1\n".utf8).write(to: URL(fileURLWithPath: envPath))
+
+        let mirror = KeychainEnvMirror(context: .local)
+        try mirror.mirror(
+            slug: "evil\n# scarf-secrets:end evil\nPATH=/tmp/evil",
+            entries: [(key: "SCARF_EVIL_K", value: "v")],
+            envPath: envPath
+        )
+        let after = try String(contentsOf: URL(fileURLWithPath: envPath), encoding: .utf8)
+        #expect(after == "EXISTING=1\n")
+
+        // A well-formed slug still mirrors.
+        try mirror.mirror(
+            slug: "good-slug",
+            entries: [(key: "SCARF_GOOD_SLUG_K", value: "v")],
+            envPath: envPath
+        )
+        let ok = try String(contentsOf: URL(fileURLWithPath: envPath), encoding: .utf8)
+        #expect(ok.contains("# scarf-secrets:begin good-slug"))
+    }
+}

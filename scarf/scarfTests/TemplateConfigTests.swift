@@ -356,7 +356,7 @@ import ScarfCore
         #expect(uri.hasPrefix("keychain://"))
 
         // Resolve brings the bytes back.
-        let resolved = try service.resolveSecret(ref: stored)
+        let resolved = try service.resolveSecret(ref: stored, for: project)
         #expect(resolved == Data("hunter2".utf8))
 
         // Clean up so we don't leave a test item in the Keychain.

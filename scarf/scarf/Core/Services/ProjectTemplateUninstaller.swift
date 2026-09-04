@@ -61,15 +61,48 @@ struct ProjectTemplateUninstaller: Sendable {
         // The lock file itself is always in `projectFiles` — the installer
         // doesn't explicitly record it, but the preview sheet and the
         // execute step must remove it.
+        //
+        // The lock is AGENT-WRITABLE, so every path in it is untrusted
+        // input, not a record of what the installer did: an edited
+        // `project_files` entry naming `/Users/me/Documents` would
+        // otherwise be deleted on one user click. Re-derive containment
+        // here against the project root — and again at time-of-use in
+        // `uninstall(plan:)`, because this plan can sit on screen while
+        // the agent rewrites the lock underneath it.
+        let guardian = PathGuard(isRemote: transport.isRemote)
         var lockTrackedFiles = lock.projectFiles
         lockTrackedFiles.append(path)
         var toRemove: [String] = []
         var alreadyGone: [String] = []
+        var refused: [String] = []
         for file in lockTrackedFiles {
+            guard guardian.admits(file, under: project.path) else {
+                Self.logger.error(
+                    "lock lists \(file, privacy: .public) which is not inside \(project.path, privacy: .public); refusing to delete it"
+                )
+                refused.append(file)
+                continue
+            }
             if transport.fileExists(file) {
                 toRemove.append(file)
             } else {
                 alreadyGone.append(file)
+            }
+        }
+
+        // Same treatment for the skills namespace dir: it must live under
+        // `<hermes>/skills/templates/` (where `ProjectTemplateService`
+        // puts it) and nowhere else — this one is deleted RECURSIVELY, so
+        // a lock pointing it at `~` is the worst case in the file.
+        var skillsDir: String? = nil
+        if let claimed = lock.skillsNamespaceDir {
+            if guardian.admits(claimed, under: Self.skillsTemplatesRoot(context: context)) {
+                skillsDir = claimed
+            } else {
+                Self.logger.error(
+                    "lock lists skills namespace dir \(claimed, privacy: .public) outside the template skills root; refusing to delete it"
+                )
+                refused.append(claimed)
             }
         }
 
@@ -116,6 +149,23 @@ struct ProjectTemplateUninstaller: Sendable {
             }
         }
 
+        // Keychain items: same shape of untrust. Admit only URIs in
+        // Scarf's own service namespace that are BOUND to this project's
+        // path — a lock naming another project's (or another app's) item
+        // must not reach `SecItemDelete`.
+        var keychainToDelete: [TemplateKeychainRef] = []
+        for uri in lock.configKeychainItems ?? [] {
+            guard let ref = TemplateKeychainRef.parse(uri),
+                  ref.belongs(toProjectPath: project.path) else {
+                Self.logger.error(
+                    "lock lists keychain uri \(uri, privacy: .public) that isn't this project's; refusing to delete it"
+                )
+                refused.append(uri)
+                continue
+            }
+            keychainToDelete.append(ref)
+        }
+
         return TemplateUninstallPlan(
             lock: lock,
             project: project,
@@ -123,7 +173,9 @@ struct ProjectTemplateUninstaller: Sendable {
             projectFilesAlreadyGone: alreadyGone,
             extraProjectEntries: extras,
             projectDirBecomesEmpty: projectDirBecomesEmpty,
-            skillsNamespaceDir: lock.skillsNamespaceDir,
+            refusedEntries: refused,
+            keychainItemsToDelete: keychainToDelete,
+            skillsNamespaceDir: skillsDir,
             cronJobsToRemove: cronToRemove,
             cronJobsAlreadyGone: cronGone,
             memoryBlockPresent: memoryBlockPresent,
@@ -140,6 +192,13 @@ struct ProjectTemplateUninstaller: Sendable {
     /// by hand.
     nonisolated func uninstall(plan: TemplateUninstallPlan) throws {
         let transport = context.makeTransport()
+        // Time-of-use re-derivation. The plan was built from the lock,
+        // and the lock is agent-writable: between planning and the user's
+        // click, both the file and the filesystem can change (a tracked
+        // path can become a symlink). Every deletion below re-checks
+        // containment through this guard rather than trusting the plan it
+        // was handed.
+        let guardian = PathGuard(isRemote: transport.isRemote)
 
         // 0. Strip the project's block from ~/.hermes/.env BEFORE we
         // delete project files — KeychainEnvMirror.unmirror reads the
@@ -158,6 +217,12 @@ struct ProjectTemplateUninstaller: Sendable {
 
         // 1. Project files (tracked only — user additions untouched).
         for file in plan.projectFilesToRemove {
+            guard guardian.admits(file, under: plan.project.path) else {
+                Self.logger.error(
+                    "skipping \(file, privacy: .public): no longer contained by \(plan.project.path, privacy: .public)"
+                )
+                continue
+            }
             do {
                 try transport.removeFile(file)
             } catch {
@@ -176,8 +241,15 @@ struct ProjectTemplateUninstaller: Sendable {
 
         // 2. Skills namespace dir (always removed wholesale — it's
         // isolated, never mixed with user skills).
-        if let skillsDir = plan.skillsNamespaceDir, transport.fileExists(skillsDir) {
-            try removeRecursively(skillsDir, transport: transport)
+        if let skillsDir = plan.skillsNamespaceDir,
+           guardian.admits(skillsDir, under: Self.skillsTemplatesRoot(context: context)),
+           transport.fileExists(skillsDir) {
+            try removeRecursively(
+                skillsDir,
+                root: Self.skillsTemplatesRoot(context: context),
+                guardian: guardian,
+                transport: transport
+            )
         }
 
         // 3. Cron jobs via CLI — `hermes cron remove <id>`. A non-zero
@@ -204,16 +276,22 @@ struct ProjectTemplateUninstaller: Sendable {
         // already deleted (e.g. user cleaned them with Keychain Access)
         // hit the `errSecItemNotFound` no-op path inside the wrapper, so
         // a stale lock doesn't abort the rest of the uninstall.
+        //
+        // The plan already filtered these to Scarf's own service
+        // namespace, bound to this project's path hash; re-check the
+        // binding here so a plan built elsewhere can't widen the blast
+        // radius of `SecItemDelete` (which is reachable for ANY item this
+        // app can see).
         let keychain = ProjectConfigKeychain()
-        for uri in plan.lock.configKeychainItems ?? [] {
-            guard let ref = TemplateKeychainRef.parse(uri) else {
-                Self.logger.warning("lock recorded unparseable keychain uri \(uri, privacy: .public); skipping")
+        for ref in plan.keychainItemsToDelete {
+            guard ref.belongs(toProjectPath: plan.project.path) else {
+                Self.logger.error("refusing to delete keychain item \(ref.uri, privacy: .public) — not this project's")
                 continue
             }
             do {
                 try keychain.delete(ref: ref)
             } catch {
-                Self.logger.warning("couldn't delete keychain item \(uri, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                Self.logger.warning("couldn't delete keychain item \(ref.uri, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
         }
 
@@ -343,23 +421,172 @@ struct ProjectTemplateUninstaller: Sendable {
         return extras
     }
 
+    /// Where a template's skills namespace dir is allowed to live —
+    /// mirrors `ProjectTemplateService`'s `skillsDir + "/templates/" + slug`.
+    /// The lock records the full path; this is the root we re-validate it
+    /// against instead of believing it.
+    nonisolated static func skillsTemplatesRoot(context: ServerContext) -> String {
+        context.paths.skillsDir + "/templates"
+    }
+
     /// Recursively delete a directory via the transport. The transport's
     /// `removeFile` works on files and on empty directories; we walk
     /// children first, then remove the now-empty parent.
+    ///
+    /// **Symlink-safe.** A symlinked child is UNLINKED, never descended
+    /// into: `stat`/`listDirectory` follow links, so the old version
+    /// would happily enumerate and delete whatever a
+    /// `<namespace>/x -> ~/Documents` link pointed at. Every child is also
+    /// re-checked for containment under `root`, so a link that survives
+    /// detection still can't take the walk outside the guarded tree.
+    /// Returns `false` when something under `path` was deliberately left
+    /// alone, so the caller knows not to try (and fail) to remove a
+    /// directory that isn't empty. A skipped entry must not turn into a
+    /// thrown error: steps 3-5 of the uninstall (cron, memory, registry)
+    /// still need to run.
+    @discardableResult
     nonisolated private func removeRecursively(
         _ path: String,
+        root: String,
+        guardian: PathGuard,
         transport: any ServerTransport
-    ) throws {
-        guard transport.fileExists(path) else { return }
+    ) throws -> Bool {
+        guard guardian.admits(path, under: root) else {
+            Self.logger.error("skipping \(path, privacy: .public): escapes \(root, privacy: .public)")
+            return false
+        }
+        guard transport.fileExists(path) || guardian.isSymlink(path) else { return true }
+        // A symlink (including a dangling one) is removed as a link.
+        if guardian.isSymlink(path) {
+            try transport.removeFile(path)
+            return true
+        }
         if transport.stat(path)?.isDirectory != true {
             try transport.removeFile(path)
-            return
+            return true
         }
         let entries = (try? transport.listDirectory(path)) ?? []
+        var complete = true
         for entry in entries {
-            try removeRecursively(path + "/" + entry, transport: transport)
+            let removed = try removeRecursively(
+                path + "/" + entry,
+                root: root,
+                guardian: guardian,
+                transport: transport
+            )
+            complete = complete && removed
+        }
+        guard complete else {
+            Self.logger.warning("leaving \(path, privacy: .public) in place — it still holds entries we refused to delete")
+            return false
         }
         try transport.removeFile(path)
+        return true
+    }
+
+    // MARK: - Containment guard
+
+    /// Re-derives "may this path be deleted?" from the filesystem at the
+    /// moment of use, instead of from the agent-writable lock that named
+    /// it. Two independent conditions, both required:
+    ///
+    /// 1. **Lexical.** The candidate is absolute, standardizes (no `.` /
+    ///    `..` left) to something strictly BELOW `root`, and root itself
+    ///    is never a target.
+    /// 2. **Physical (local only).** The candidate's parent chain, walked
+    ///    with symlinks resolved, still lands exactly where the lexical
+    ///    path says it should. Any symlinked component between `root` and
+    ///    the candidate makes the two disagree, and the path is refused —
+    ///    which is what stops `<project>/data -> /Users/me/Documents`
+    ///    from turning a project-scoped delete into a home-directory one.
+    ///
+    /// Remote transports get the lexical half only: there is no realpath
+    /// primitive on `ServerTransport`, and resolving locally would answer
+    /// questions about the WRONG filesystem. That is strictly better than
+    /// the previous "no check at all", and remote template installs don't
+    /// exist yet (`ProjectTemplateInstaller` is local-only today).
+    nonisolated struct PathGuard: Sendable {
+        let isRemote: Bool
+
+        nonisolated func admits(_ candidate: String, under root: String) -> Bool {
+            guard candidate.hasPrefix("/"), root.hasPrefix("/") else { return false }
+            let rootStd = Self.standardized(root)
+            // A root of `/` would make containment vacuous — every
+            // absolute path is "inside" it. A project registered at the
+            // filesystem root has nothing legitimate to uninstall anyway.
+            guard rootStd != "/" else { return false }
+            let pathStd = Self.standardized(candidate)
+            guard pathStd.hasPrefix(rootStd + "/") else { return false }
+            let relative = String(pathStd.dropFirst(rootStd.count + 1))
+            let components = relative.split(separator: "/", omittingEmptySubsequences: false)
+            guard !components.isEmpty,
+                  !components.contains(where: { $0.isEmpty || $0 == ".." || $0 == "." })
+            else { return false }
+            if isRemote { return true }
+            // Physical check: resolve the root once, then require the
+            // candidate's PARENT to resolve to exactly root-resolved +
+            // the lexical parent components. (The candidate itself may be
+            // a symlink — that's legal, we just unlink it rather than
+            // follow it; see `removeRecursively`.)
+            let rootReal = Self.physicalPath(rootStd)
+            let parentComponents = components.dropLast().map(String.init)
+            let expectedParent = ([rootReal] + parentComponents).joined(separator: "/")
+            let actualParent = Self.physicalPath(
+                ([rootStd] + parentComponents).joined(separator: "/")
+            )
+            return actualParent == expectedParent
+        }
+
+        /// Is `path` itself a symbolic link? Local only — `lstat` has no
+        /// transport primitive, and a remote answer derived from the local
+        /// filesystem would be a lie. Remote callers therefore keep the
+        /// containment guarantee but not the link guarantee.
+        nonisolated func isSymlink(_ path: String) -> Bool {
+            guard !isRemote else { return false }
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: path) else {
+                return false
+            }
+            return (attrs[.type] as? FileAttributeType) == .typeSymbolicLink
+        }
+
+        nonisolated static func standardized(_ path: String) -> String {
+            var out = URL(fileURLWithPath: path).standardizedFileURL.path
+            while out.count > 1, out.hasSuffix("/") { out.removeLast() }
+            return out
+        }
+
+        nonisolated static func resolved(_ path: String) -> String {
+            var out = URL(fileURLWithPath: path)
+                .standardizedFileURL.resolvingSymlinksInPath().path
+            while out.count > 1, out.hasSuffix("/") { out.removeLast() }
+            return out
+        }
+
+        /// Canonical on-disk spelling, tolerant of a path that doesn't
+        /// exist (yet / any more). `resolvingSymlinksInPath` gives up
+        /// entirely on a path whose leaf is missing — it returns the input
+        /// unresolved — which would make the comparison above depend on
+        /// whether a file happened to be there. So: resolve the deepest
+        /// EXISTING ancestor and re-attach the missing tail verbatim.
+        nonisolated static func physicalPath(_ path: String) -> String {
+            let std = standardized(path)
+            var components = std.split(separator: "/").map(String.init)
+            var tail: [String] = []
+            while !components.isEmpty {
+                let candidate = "/" + components.joined(separator: "/")
+                if exists(candidate) {
+                    return ([resolved(candidate)] + tail).joined(separator: "/")
+                }
+                tail.insert(components.removeLast(), at: 0)
+            }
+            return std
+        }
+
+        /// `lstat`-flavored existence: true for a dangling symlink too,
+        /// where `FileManager.fileExists` (which follows) says false.
+        nonisolated static func exists(_ path: String) -> Bool {
+            (try? FileManager.default.attributesOfItem(atPath: path)) != nil
+        }
     }
 
     /// Remove the `<!-- scarf-template:<id>:begin --> … :end -->` block

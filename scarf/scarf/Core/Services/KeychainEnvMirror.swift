@@ -77,6 +77,10 @@ struct KeychainEnvMirror: Sendable {
         entries: [(key: String, value: String)],
         envPath: String
     ) throws {
+        guard Self.isMirrorableSlug(slug) else {
+            Self.logger.warning("refusing to mirror block for malformed slug \(slug, privacy: .public)")
+            return
+        }
         let transport = context.makeTransport()
         if entries.isEmpty {
             try unmirrorBlock(slug: slug, envPath: envPath, transport: transport)
@@ -153,7 +157,14 @@ struct KeychainEnvMirror: Sendable {
             guard let value = values[field.key] else { continue }
             let resolved: Data?
             do {
-                resolved = try configService.resolveSecret(ref: value)
+                // Project-bound resolution: the manifest and config.json
+                // that named this ref are agent-writable, so a ref that
+                // isn't in Scarf's namespace or belongs to a DIFFERENT
+                // project resolves to nil and is skipped. Without this,
+                // `reconcileAll()` would happily copy project B's secret
+                // into project A's block in ~/.hermes/.env on every
+                // launch.
+                resolved = try configService.resolveSecret(ref: value, for: project)
             } catch {
                 Self.logger.warning(
                     "couldn't resolve secret \(field.key, privacy: .public) for \(project.name, privacy: .public): \(error.localizedDescription, privacy: .public)"
@@ -168,6 +179,17 @@ struct KeychainEnvMirror: Sendable {
             entries.append((key: key, value: str))
         }
         return ResolvedSecrets(slug: manifest.slug, entries: entries)
+    }
+
+    /// The block markers carry the slug verbatim on their own line, and
+    /// the manifest that supplies it is agent-writable — so a slug with a
+    /// newline (or a `=`) in it could forge markers and inject arbitrary
+    /// `KEY=value` lines into `~/.hermes/.env`, outside any block we'd
+    /// ever rewrite. Admit only the shape `ProjectScaffolder.suggestedSlug`
+    /// mints.
+    nonisolated static func isMirrorableSlug(_ slug: String) -> Bool {
+        guard !slug.isEmpty, slug.count <= 128 else { return false }
+        return slug.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "." }
     }
 
     // MARK: - File I/O

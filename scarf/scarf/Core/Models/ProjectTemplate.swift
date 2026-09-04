@@ -293,6 +293,21 @@ nonisolated struct TemplateUninstallPlan: Sendable {
     /// the dir and we leave it.
     let projectDirBecomesEmpty: Bool
 
+    /// Entries the lock file claimed but the uninstaller REFUSED to act
+    /// on, because they weren't contained by the root that owns them: a
+    /// `project_files` path outside the project dir, a skills namespace
+    /// dir outside `<hermes>/skills/templates`, a `keychain://` uri
+    /// belonging to another project. The lock is agent-writable, so this
+    /// list is how a tampered (or simply stale-and-wrong) lock becomes
+    /// visible instead of silently destructive.
+    let refusedEntries: [String]
+
+    /// Keychain items that will actually be deleted — already filtered to
+    /// Scarf's own service namespace AND bound to this project's path
+    /// hash. Parsed at plan time so the execute step never re-derives
+    /// trust from the raw lock strings.
+    let keychainItemsToDelete: [TemplateKeychainRef]
+
     /// Lock-recorded skills namespace dir. `nil` means the template never
     /// installed skills. Uninstaller removes the entire dir recursively.
     let skillsNamespaceDir: String?
