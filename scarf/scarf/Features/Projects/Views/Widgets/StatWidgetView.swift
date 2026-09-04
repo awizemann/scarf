@@ -26,6 +26,28 @@ struct SparklineView: View {
             }
             .stroke(tint.opacity(0.85), lineWidth: 1.2)
         }
+        // The trend line was pure `Path` drawing — completely invisible to
+        // VoiceOver. Speak the shape as a value instead of the pixels.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Trend"))
+        .accessibilityValue(Text(trendSummary))
+    }
+
+    private var trendSummary: String {
+        guard let first = values.first, let last = values.last else { return String(localized: "No data.") }
+        if values.count < 2 { return String(localized: "No trend.") }
+        let delta = last - first
+        if abs(delta) < 0.0001 {
+            return String(localized: "Flat, around \(formatted(last)).")
+        }
+        let direction = delta > 0 ? String(localized: "up") : String(localized: "down")
+        return String(localized: "Trending \(direction) from \(formatted(first)) to \(formatted(last)).")
+    }
+
+    private func formatted(_ value: Double) -> String {
+        value.truncatingRemainder(dividingBy: 1) == 0
+            ? String(Int(value))
+            : String(format: "%.2f", value)
     }
 }
 
@@ -67,5 +89,10 @@ struct StatWidgetView: View {
         .padding(12)
         .background(ScarfColor.backgroundSecondary)
         .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.lg))
+        // Ungrouped, VoiceOver walked title / value / subtitle / sparkline
+        // as four separate stops. Combine into one stat — title, value, and
+        // subtitle read together, and the sparkline's own trend value (set
+        // above) folds in as the last fragment.
+        .accessibilityElement(children: .combine)
     }
 }

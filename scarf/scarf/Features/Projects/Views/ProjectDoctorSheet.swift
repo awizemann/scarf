@@ -18,6 +18,14 @@ struct ProjectDoctorSheet: View {
     /// The destructive repair awaiting confirmation. Removing a row is the
     /// only thing here that throws something away, so it asks first.
     @State private var pendingDestructive: ProjectDoctorFinding?
+    /// Last repair summary we already announced — Repair All re-scans (which
+    /// republishes the same `repairSummary`), so this guards against a
+    /// double announcement rather than keying off `didSet`-style diffing.
+    @State private var announcedRepairSummary: String?
+    /// Focus lands here after Repair All finishes. Without it, focus stayed
+    /// on the (now possibly gone) "Repair All" button after the list
+    /// reshuffled — stranded with nothing under it.
+    @AccessibilityFocusState private var focusedOnStatus: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,6 +40,17 @@ struct ProjectDoctorSheet: View {
             let vm = viewModel ?? ProjectDoctorViewModel(context: serverContext)
             viewModel = vm
             await vm.scan()
+        }
+        .onChange(of: viewModel?.repairSummary) { _, summary in
+            // Doctor repair completion never announced anything — a
+            // VoiceOver user watching "Repairing…" had no signal it was
+            // done short of polling the button label. Announce once per
+            // summary, then move focus back to the status line so it isn't
+            // stranded on a button that may have disappeared.
+            guard let summary, summary != announcedRepairSummary else { return }
+            announcedRepairSummary = summary
+            AccessibilityNotification.Announcement(AttributedString(summary)).post()
+            focusedOnStatus = true
         }
         .alert(
             "Couldn't finish the repair",
@@ -75,6 +94,7 @@ struct ProjectDoctorSheet: View {
                 Text(statusLine)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityFocused($focusedOnStatus)
             }
             Spacer()
             if viewModel?.isScanning == true {
@@ -182,6 +202,11 @@ struct ProjectDoctorSheet: View {
                 }
             }
             .accessibilityElement(children: .combine)
+            // The icon carries severity visually but is `.accessibilityHidden`
+            // — copy StatusGridCellView's pattern (severity as a spoken
+            // value alongside the combined title/detail/path, not just a
+            // hidden glyph) so VoiceOver isn't blind to it.
+            .accessibilityValue(Text(severityLabel(finding.severity)))
             Spacer(minLength: 8)
             if let repair = finding.repair, !blocked {
                 Button(repair.actionLabel) {
@@ -197,6 +222,15 @@ struct ProjectDoctorSheet: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private func severityLabel(_ severity: ProjectDoctorSeverity) -> String {
+        switch severity {
+        case .info: return String(localized: "Info")
+        case .low: return String(localized: "Low severity")
+        case .medium: return String(localized: "Medium severity")
+        case .high: return String(localized: "High severity")
+        }
     }
 
     private func symbol(for severity: ProjectDoctorSeverity) -> String {

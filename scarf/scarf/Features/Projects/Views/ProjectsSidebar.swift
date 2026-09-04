@@ -90,6 +90,7 @@ struct ProjectsSidebar: View {
                         .scarfStyle(.caption)
                 }
                 .buttonStyle(.borderless)
+                .accessibilityLabel(Text("Clear filter"))
             }
         }
         .padding(.horizontal, 10)
@@ -242,6 +243,7 @@ struct ProjectsSidebar: View {
             }
             .buttonStyle(.borderless)
             .help("Add a project")
+            .accessibilityLabel(Text("Add a project"))
 
             Toggle(isOn: $showArchived) {
                 Image(systemName: showArchived ? "archivebox.fill" : "archivebox")
@@ -250,6 +252,7 @@ struct ProjectsSidebar: View {
             .toggleStyle(.button)
             .buttonStyle(.borderless)
             .help(showArchived ? "Hide archived projects" : "Show archived projects")
+            .accessibilityLabel(Text(showArchived ? "Hide archived projects" : "Show archived projects"))
 
             Spacer()
 
@@ -259,6 +262,7 @@ struct ProjectsSidebar: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Remove \(selected.name) from Scarf's project list (files are kept on disk)")
+                .accessibilityLabel(Text("Remove \(selected.name) from list"))
             }
         }
         .padding(8)

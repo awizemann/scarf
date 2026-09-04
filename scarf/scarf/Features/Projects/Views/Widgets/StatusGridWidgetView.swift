@@ -60,15 +60,22 @@ struct StatusGridWidgetView: View {
 private struct StatusGridCellView: View {
     let cell: StatusGridCell
 
+    // Fixed 9pt/18pt sizing defeated Dynamic Type entirely — a grid of 30+
+    // cells is exactly the data-dense case where the app's few hardcoded
+    // point sizes showed up. @ScaledMetric keeps the compact grid layout at
+    // the default size while still growing with the user's text setting.
+    @ScaledMetric(relativeTo: .caption2) private var labelSize: CGFloat = 9
+    @ScaledMetric(relativeTo: .caption2) private var swatchHeight: CGFloat = 18
+
     private var typedStatus: ListItemStatus { ListItemStatus(raw: cell.status) ?? .neutral }
 
     var body: some View {
         VStack(spacing: 2) {
             RoundedRectangle(cornerRadius: 3)
                 .fill(typedStatus.tint.opacity(0.85))
-                .frame(height: 18)
+                .frame(height: swatchHeight)
             Text(cell.label)
-                .font(.system(size: 9, weight: .medium))
+                .font(.system(size: labelSize, weight: .medium))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .foregroundStyle(.secondary)

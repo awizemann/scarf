@@ -185,6 +185,16 @@ struct NewProjectSheet: View {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .scarfStyle(.caption)
                     .foregroundStyle(.red)
+                    .accessibilityElement(children: .combine)
+                    .onAppear {
+                        // ProjectDoctorSheet's repair failure uses a native
+                        // `.alert`, which VoiceOver announces automatically.
+                        // This inline error has no such automatic announce —
+                        // it just silently appears in an already-open sheet.
+                        // Post explicitly rather than restructure to a modal
+                        // alert (would interrupt the in-progress form).
+                        AccessibilityNotification.Announcement(AttributedString(error)).post()
+                    }
             }
             HStack {
                 Button("Cancel") { dismiss() }

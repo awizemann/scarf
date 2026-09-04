@@ -16,6 +16,11 @@ struct KanbanSummaryWidgetView: View {
     @Environment(\.serverContext) private var serverContext
     @Environment(\.selectedProjectRoot) private var projectRoot
 
+    // The 9pt initials badge was a hardcoded point size in a fixed 16x16
+    // frame — defeats Dynamic Type. Scale both together.
+    @ScaledMetric(relativeTo: .caption2) private var initialsSize: CGFloat = 9
+    @ScaledMetric(relativeTo: .caption2) private var badgeDiameter: CGFloat = 16
+
     @State private var tenant: String?
     @State private var tasks: [HermesKanbanTask] = []
     @State private var stats: HermesKanbanStats = .empty
@@ -74,27 +79,49 @@ struct KanbanSummaryWidgetView: View {
             Spacer(minLength: 0)
             if let assignee = task.assignee, !assignee.isEmpty {
                 Text(initials(of: assignee))
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: initialsSize, weight: .semibold))
                     .foregroundStyle(ScarfColor.accentActive)
-                    .frame(width: 16, height: 16)
+                    .frame(width: badgeDiameter, height: badgeDiameter)
                     .background(ScarfColor.accentTint)
                     .clipShape(Circle())
+                    .accessibilityHidden(true)
             }
         }
         .padding(.vertical, 2)
+        // Status was an 8pt dot in color alone — invisible to VoiceOver and
+        // indistinguishable to anyone colorblind. Speak it as a value on the
+        // row instead of only on the dot glyph.
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(Text(statusLabel(for: task.status)))
     }
 
     private func statusDot(for status: String) -> some View {
         let color: Color
+        let symbol: String
         switch KanbanStatus.from(status) {
-        case .running:           color = ScarfColor.info
-        case .blocked:           color = ScarfColor.warning
-        case .done:              color = ScarfColor.success
-        default:                 color = ScarfColor.foregroundMuted
+        case .running:  color = ScarfColor.info;          symbol = "circle.fill"
+        case .blocked:  color = ScarfColor.warning;        symbol = "exclamationmark.circle.fill"
+        case .done:     color = ScarfColor.success;        symbol = "checkmark.circle.fill"
+        default:        color = ScarfColor.foregroundMuted; symbol = "circle"
         }
-        return Circle()
-            .fill(color)
+        // Shape, not just hue, distinguishes status — running/blocked/done/
+        // other now each draw a different glyph in addition to the color.
+        return Image(systemName: symbol)
+            .resizable()
             .frame(width: 8, height: 8)
+            .foregroundStyle(color)
+            .accessibilityHidden(true)
+    }
+
+    private func statusLabel(for status: String) -> String {
+        switch KanbanStatus.from(status) {
+        case .running:  return String(localized: "Running")
+        case .blocked:  return String(localized: "Blocked")
+        case .done:     return String(localized: "Done")
+        case .ready:    return String(localized: "Ready")
+        case .todo:     return String(localized: "To do")
+        default:        return status
+        }
     }
 
     private var emptyRow: some View {

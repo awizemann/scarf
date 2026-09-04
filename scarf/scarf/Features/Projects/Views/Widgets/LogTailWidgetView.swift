@@ -91,12 +91,25 @@ struct LogTailWidgetView: View {
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                        // Each line stays visually truncated (tail is a
+                        // dense monospaced view), but its accessibility
+                        // text carries the whole line, untruncated.
+                        .accessibilityLabel(Text(String(line)))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(8)
             .background(.quaternary.opacity(0.4))
             .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.sm))
+            // Twenty separate one-line VO stops per widget were a wall to
+            // walk through. Group into one element with the full tail as
+            // its value, so a single VO stop gives the whole content;
+            // reading line-by-line is still possible via the rotor into
+            // the child Texts if needed, since .contain (not .combine)
+            // keeps them addressable.
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(Text("Log tail"))
+            .accessibilityValue(Text(tail))
         }
     }
 

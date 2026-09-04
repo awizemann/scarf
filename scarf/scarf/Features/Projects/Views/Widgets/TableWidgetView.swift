@@ -17,16 +17,31 @@ struct TableWidgetView: View {
                             Text(col)
                                 .font(.caption.bold())
                                 .foregroundStyle(.secondary)
+                                // `Grid` has no native table semantics, so a
+                                // header row read exactly like a data row —
+                                // mark it so VoiceOver announces "header".
+                                .accessibilityAddTraits(.isHeader)
                         }
                     }
                     Divider()
-                    ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
                         GridRow {
-                            ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                            ForEach(Array(row.enumerated()), id: \.offset) { colIndex, cell in
                                 Text(cell)
                                     .font(.callout)
+                                    // Each cell speaks with its column name,
+                                    // so cross-referencing a row doesn't
+                                    // require holding the header row in
+                                    // memory while VoiceOver walks the grid.
+                                    .accessibilityLabel(
+                                        Text(columns.indices.contains(colIndex)
+                                             ? "\(columns[colIndex]): \(cell)"
+                                             : cell)
+                                    )
                             }
                         }
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel(Text("Row \(rowIndex + 1)"))
                     }
                 }
             }

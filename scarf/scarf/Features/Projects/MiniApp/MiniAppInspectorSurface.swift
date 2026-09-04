@@ -44,6 +44,17 @@ struct MiniAppInspectorSurface<Content: View>: View {
                         Rectangle().frame(width: 1).foregroundStyle(Color(nsColor: .separatorColor))
                     }
                     .shadow(color: .black.opacity(0.18), radius: 14, x: -3, y: 0)
+                    // Mouse/keyboard users can still reach the sidebar and
+                    // cockpit behind this panel (the doc comment above
+                    // explains why — it's an overlay, not a real `.inspector`
+                    // column). But nothing told VoiceOver the panel had just
+                    // appeared and mattered most: it had equal standing with
+                    // the content behind it, so VO could wander off into a
+                    // half-obscured cockpit. `.isModal` scopes VO navigation
+                    // to the panel while it's open, which is the closer match
+                    // to what a sighted user's attention actually does.
+                    .accessibilityAddTraits(.isModal)
+                    .accessibilitySortPriority(1)
             }
         }
     }

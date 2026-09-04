@@ -78,6 +78,9 @@ struct MiniAppHostView: NSViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = false
+        // Unlabeled, VoiceOver announced the container as a bare "web
+        // content" region with no way to tell which mini-app it was.
+        webView.setAccessibilityLabel(String(localized: "\(manifest.name) mini-app"))
         // Let the bridge push streamed agent events into this page (weak ref).
         bridge.webView = webView
         load(into: webView)

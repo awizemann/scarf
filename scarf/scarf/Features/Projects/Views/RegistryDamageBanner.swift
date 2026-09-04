@@ -67,5 +67,14 @@ struct RegistryDamageBanner: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(ScarfColor.warning.opacity(0.14))
+        .onAppear {
+            // Registry damage used to arrive silently — a project just
+            // vanished from the sidebar. VoiceOver users get no visual
+            // banner to scan into, so announce it the moment it appears
+            // (matches the macOS pattern used for repair completion, below).
+            AccessibilityNotification.Announcement(
+                AttributedString("\(damage.headline). \(damage.summary)")
+            ).post()
+        }
     }
 }
