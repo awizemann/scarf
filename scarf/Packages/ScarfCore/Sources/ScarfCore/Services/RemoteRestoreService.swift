@@ -203,14 +203,22 @@ public final class RemoteRestoreService: @unchecked Sendable {
         // Make sure the projects root exists so `tar -xzf` doesn't
         // fail on a missing -C target.
         let mkdirCmd = "mkdir -p \(Self.shellQuote(projectsRoot))"
-        let mkdirResult = try? transport.runProcess(
-            executable: "/bin/bash",
-            args: ["-lc", mkdirCmd],
-            stdin: nil,
-            timeout: 30
-        )
-        if let r = mkdirResult, r.exitCode != 0 {
-            throw RestoreError.remoteCommandFailed("mkdir \(projectsRoot) failed: \(r.stderrString)")
+        // `try?` here used to turn "the host is unreachable" into "the
+        // directory is fine" — the restore then pushed tarballs into a
+        // path nothing had created and reported success either way.
+        let mkdirResult: ProcessResult
+        do {
+            mkdirResult = try transport.runProcess(
+                executable: "/bin/bash",
+                args: ["-lc", mkdirCmd],
+                stdin: nil,
+                timeout: 30
+            )
+        } catch {
+            throw RestoreError.remoteCommandFailed("mkdir \(projectsRoot) failed: \(error.localizedDescription)")
+        }
+        if mkdirResult.exitCode != 0 {
+            throw RestoreError.remoteCommandFailed("mkdir \(projectsRoot) failed: \(mkdirResult.stderrString)")
         }
 
         // Stage 1: hermes home. Pushes into $HOME so the inner
@@ -358,80 +366,133 @@ public final class RemoteRestoreService: @unchecked Sendable {
     /// from source-host paths to target-host paths. We do this on the
     /// remote rather than mutating the tarball locally — the Hermes
     /// home tarball can be GBs and re-packing would double the
-    /// transfer cost. Python is universally present on droplets and
-    /// keeps the JSON shape intact (preserves keys we don't know
-    /// about).
-    private func reanchorProjectsRegistry(
+    /// transfer cost.
+    ///
+    /// **Was a truncating Python rewrite** (`open(path,'w')` after a
+    /// `json.load`), which is the one shape the rest of the projects code
+    /// exists to prevent: no absent-vs-unreadable probe, no `.bak`, no
+    /// refusal, and a destination zeroed before the new bytes land. It ran
+    /// through `try?`, so a transport that never executed it at all
+    /// reported a clean restore. Now the whole thing goes through
+    /// `mutateRemoteJSON`, which reads via the transport and publishes via
+    /// `transport.writeFile` — atomic on every transport — and throws on
+    /// every failure it used to swallow.
+    ///
+    /// Unknown keys still survive: the mutation runs over the parsed
+    /// `JSONSerialization` object graph, not a Codable projection, so
+    /// fields this Scarf doesn't model are re-emitted untouched.
+    func reanchorProjectsRegistry(
         transport: any ServerTransport,
         targetHome: String,
         mapping: [String: String]
     ) async throws {
         guard !mapping.isEmpty else { return }
         let registryPath = targetHome + "/.hermes/scarf/projects.json"
-        let mappingJSON: String
-        do {
-            let data = try JSONSerialization.data(withJSONObject: mapping)
-            mappingJSON = String(data: data, encoding: .utf8) ?? "{}"
-        } catch {
-            throw RestoreError.localIO("Couldn't encode path mapping: \(error.localizedDescription)")
-        }
-        let script = """
-        import json, os, sys
-        path = os.path.expanduser(\(Self.pythonQuote(registryPath)))
-        if not os.path.exists(path):
-            sys.exit(0)
-        try:
-            with open(path) as f: data = json.load(f)
-        except Exception as e:
-            print(f"projects.json parse failed: {e}", file=sys.stderr); sys.exit(1)
-        mapping = json.loads(\(Self.pythonQuote(mappingJSON)))
-        for entry in data.get('projects', []):
-            old = entry.get('path')
-            if old in mapping: entry['path'] = mapping[old]
-        with open(path, 'w') as f: json.dump(data, f, indent=2)
-        """
-        let cmd = "python3 -c \(Self.shellQuote(script))"
-        let result = try? transport.runProcess(
-            executable: "/bin/bash",
-            args: ["-lc", cmd],
-            stdin: nil,
-            timeout: 60
-        )
-        if let r = result, r.exitCode != 0 {
-            throw RestoreError.remoteCommandFailed("Path re-anchor failed: \(r.stderrString)")
+        _ = try Self.mutateRemoteJSON(
+            transport: transport,
+            path: registryPath,
+            label: "Path re-anchor",
+            sortKeys: true
+        ) { root in
+            guard var entries = root["projects"] as? [[String: Any]] else { return nil }
+            var changed = 0
+            for index in entries.indices {
+                guard let old = entries[index]["path"] as? String, let new = mapping[old] else { continue }
+                entries[index]["path"] = new
+                changed += 1
+            }
+            guard changed > 0 else { return nil }
+            root["projects"] = entries
+            return changed
         }
     }
 
     /// Set `enabled: false` on every cron job. Returns the count
     /// flipped (0 if jobs.json is absent).
-    private func pauseAllCronJobs(transport: any ServerTransport, targetHome: String) async throws -> Int {
+    ///
+    /// Same rewrite as `reanchorProjectsRegistry`, and the same reason: a
+    /// truncating write that failed used to be indistinguishable from one
+    /// that worked, so a restore could report "12 cron jobs paused" — or
+    /// "0", which reads as "nothing to pause" — while every restored job
+    /// stayed armed with the source host's credentials.
+    func pauseAllCronJobs(transport: any ServerTransport, targetHome: String) async throws -> Int {
         let path = targetHome + "/.hermes/cron/jobs.json"
-        let script = """
-        import json, os, sys
-        path = os.path.expanduser(\(Self.pythonQuote(path)))
-        if not os.path.exists(path):
-            print(0); sys.exit(0)
-        with open(path) as f: data = json.load(f)
-        count = 0
-        for job in data.get('jobs', []):
-            if job.get('enabled', False):
-                job['enabled'] = False
+        return try Self.mutateRemoteJSON(
+            transport: transport,
+            path: path,
+            label: "Cron pause",
+            sortKeys: false
+        ) { root in
+            guard var jobs = root["jobs"] as? [[String: Any]] else { return nil }
+            var count = 0
+            for index in jobs.indices where (jobs[index]["enabled"] as? Bool) == true {
+                jobs[index]["enabled"] = false
                 count += 1
-        with open(path, 'w') as f: json.dump(data, f, indent=2)
-        print(count)
-        """
-        let cmd = "python3 -c \(Self.shellQuote(script))"
-        let result = try? transport.runProcess(
-            executable: "/bin/bash",
-            args: ["-lc", cmd],
-            stdin: nil,
-            timeout: 60
-        )
-        if let r = result, r.exitCode == 0 {
-            let count = Int(r.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+            }
+            guard count > 0 else { return nil }
+            root["jobs"] = jobs
             return count
+        } ?? 0
+    }
+
+    /// Read a JSON file on the target, hand its object graph to `mutate`,
+    /// and publish the result atomically. Returns whatever `mutate`
+    /// reported (a count), `nil` when the file is absent or the mutation
+    /// was a no-op — and THROWS on everything in between.
+    ///
+    /// The absent-vs-unreadable discrimination is the registry's, in
+    /// miniature: a read failure only counts as damage when `stat`
+    /// confirms the file and a second read also fails. Absent is a
+    /// legitimate outcome here (a home restored without cron jobs);
+    /// unreadable is not something to write over.
+    static func mutateRemoteJSON(
+        transport: any ServerTransport,
+        path: String,
+        label: String,
+        sortKeys: Bool,
+        mutate: (inout [String: Any]) -> Int?
+    ) throws -> Int? {
+        var read = try? transport.readFile(path)
+        if read == nil {
+            guard transport.stat(path) != nil else { return nil }  // genuinely absent
+            read = try? transport.readFile(path)
+            if read == nil {
+                throw RestoreError.remoteCommandFailed(
+                    "\(label) failed: \(path) exists but could not be read."
+                )
+            }
         }
-        return 0
+        guard let data = read, !data.isEmpty else {
+            throw RestoreError.remoteCommandFailed("\(label) failed: \(path) is empty.")
+        }
+        guard var root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            throw RestoreError.remoteCommandFailed("\(label) failed: \(path) is not a JSON object.")
+        }
+        guard let changed = mutate(&root) else { return nil }
+
+        var options: JSONSerialization.WritingOptions = [.prettyPrinted]
+        if sortKeys { options.insert(.sortedKeys) }
+        guard let encoded = try? JSONSerialization.data(withJSONObject: root, options: options) else {
+            throw RestoreError.remoteCommandFailed("\(label) failed: could not re-encode \(path).")
+        }
+        // One-deep backup of what we are replacing, best effort — the
+        // same courtesy `saveRegistry` extends, and the only copy of the
+        // pre-restore file once the write lands.
+        if encoded != data {
+            do {
+                try transport.writeFile(path + ".bak", data: data)
+            } catch {
+                #if canImport(os)
+                Self.logger.warning("Could not back up \(path, privacy: .public) before restore rewrite: \(error.localizedDescription, privacy: .public)")
+                #endif
+            }
+        }
+        do {
+            try transport.writeFile(path, data: encoded)
+        } catch {
+            throw RestoreError.remoteCommandFailed("\(label) failed writing \(path): \(error.localizedDescription)")
+        }
+        return changed
     }
 
     // MARK: - Helpers
@@ -486,16 +547,5 @@ public final class RemoteRestoreService: @unchecked Sendable {
 
     private static func shellQuote(_ s: String) -> String {
         "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
-    }
-
-    /// Python source-literal quoting. Triple-quoted with backslash
-    /// escapes for embedded triple-quotes, backslashes, and the
-    /// language's own escape sequences. Used to safely embed JSON +
-    /// path strings into a `python3 -c '...'` invocation.
-    private static func pythonQuote(_ s: String) -> String {
-        let escaped = s
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"\"\"", with: "\\\"\\\"\\\"")
-        return "\"\"\"" + escaped + "\"\"\""
     }
 }

@@ -321,6 +321,21 @@ public struct SSHTransport: ServerTransport {
         return "\"\(p)\""
     }
 
+    /// Quote the path half of an `scp` `host:path` argument.
+    ///
+    /// `scp`'s remote spec is expanded by a shell on the far side, so an
+    /// unquoted path containing a space (`~/My Projects/…`) is split into
+    /// two arguments and the transfer either fails or lands somewhere
+    /// unintended. A leading `~/` is deliberately left OUTSIDE the quotes:
+    /// tilde expansion doesn't happen inside them, and every remote path
+    /// Scarf writes is home-relative.
+    nonisolated static func scpRemoteSpec(_ path: String) -> String {
+        if path.hasPrefix("~/") {
+            return "~/" + shellQuote(String(path.dropFirst(2)))
+        }
+        return shellQuote(path)
+    }
+
     /// Run a remote shell command. Wraps in `sh -c '<command>'` and uses
     /// the standard ssh-after-host placement (no `--` separator — that
     /// would be sent to the remote shell as a literal first token, which
@@ -330,6 +345,14 @@ public struct SSHTransport: ServerTransport {
     @discardableResult
     nonisolated private func runRemoteShell(_ command: String, timeout: TimeInterval? = 60) throws -> ProcessResult {
         var args = sshArgs()
+        // `-T` disables pty allocation, exactly as `makeProcess` /
+        // `streamLines` / `streamRawBytes` already do. Without it a user's
+        // `RequestTTY yes` in `~/.ssh/config` — or an interactive-shell
+        // banner from a chatty `~/.zshenv` — gets interleaved into stdout,
+        // which for `readFile` means `cat` bytes come back with junk
+        // prepended: the registry then decodes as damage and is quarantined
+        // on a file that was never corrupt.
+        args.insert("-T", at: 0)
         args.append(hostSpec)
         args.append("sh")
         args.append("-c")
@@ -359,10 +382,18 @@ public struct SSHTransport: ServerTransport {
 
     public func writeFile(_ path: String, data: Data) throws {
         // Atomic pattern:
-        //   1. scp to `<path>.scarf.tmp` on the remote
+        //   1. scp to `<path>.scarf-<nonce>.tmp` on the remote
         //   2. ssh `mv <tmp> <path>` — atomic on POSIX within the same FS
         // Hermes never sees a partial write.
-        let tmp = path + ".scarf.tmp"
+        //
+        // The staging name carries a per-write nonce. A constant
+        // `<path>.scarf.tmp` made the PUBLISH atomic but the STAGING shared:
+        // two writers (the app and the MCP helper, or two windows on one
+        // host) uploading concurrently interleave their bytes in the one
+        // temp file, and whichever `mv` runs second publishes the other
+        // writer's partial content — an atomic rename of corrupt bytes,
+        // which no refusal guard upstream can see.
+        let tmp = path + ".scarf-\(UUID().uuidString.prefix(8)).tmp"
 
         // scp from a local temp file (scp reads from disk, not stdin).
         let localTmpURL = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -387,11 +418,24 @@ public struct SSHTransport: ServerTransport {
         if let port = config.port { scpArgs += ["-P", String(port)] }
         if let id = config.identityFile, !id.isEmpty { scpArgs += ["-i", id] }
         scpArgs.append(localTmpURL.path)
-        scpArgs.append("\(hostSpec):\(tmp)")
+        scpArgs.append("\(hostSpec):\(Self.scpRemoteSpec(tmp))")
 
-        let scpResult = try runLocal(executable: scpBinary, args: scpArgs, stdin: nil, timeout: 60, gate: .admitOnly)
+        var scpResult = try runLocal(executable: scpBinary, args: scpArgs, stdin: nil, timeout: 60, gate: .admitOnly)
         if scpResult.exitCode != 0 {
-            throw TransportError.classifySSHFailure(host: config.host, exitCode: scpResult.exitCode, stderr: scpResult.stderrString)
+            // Parity with `LocalTransport`, which mkdir -p's the parent
+            // before writing: a caller handing us a path whose directory
+            // was never created (a profile's first `.env`, a project's
+            // first `.scarf/`) fails here with "No such file or directory"
+            // where the same call succeeds locally. Retry ONCE behind a
+            // `mkdir -p`, so the happy path still costs exactly one scp.
+            let parent = (path as NSString).deletingLastPathComponent
+            if !parent.isEmpty, parent != path {
+                _ = try? runRemoteShell("mkdir -p \(Self.remotePathArg(parent))")
+                scpResult = try runLocal(executable: scpBinary, args: scpArgs, stdin: nil, timeout: 60, gate: .admitOnly)
+            }
+            if scpResult.exitCode != 0 {
+                throw TransportError.classifySSHFailure(host: config.host, exitCode: scpResult.exitCode, stderr: scpResult.stderrString)
+            }
         }
 
         // Now atomic mv on the remote. Note: scp/sftp DOES expand `~` (it
@@ -406,10 +450,24 @@ public struct SSHTransport: ServerTransport {
         // Mirrors LocalTransport, via the shared basename list — the local
         // side has enforced 0600 on these since day one and the remote side
         // silently did not.
-        let chmodPrefix = TransportPrivateMode.shouldEnforce(for: path)
-            ? "chmod 600 \(Self.remotePathArg(tmp)) && "
-            : ""
-        let mvResult = try runRemoteShell("\(chmodPrefix)mv \(Self.remotePathArg(tmp)) \(Self.remotePathArg(path))")
+        //
+        // When the destination already exists and is NOT a private-mode
+        // file, its mode is carried over to the staged copy first: `scp`
+        // creates the upload with the remote umask, so a plain rename
+        // would silently re-permission a file the user (or Hermes) had
+        // deliberately tightened or loosened. Mode preservation is
+        // best-effort (`;`, not `&&`) — a `stat` that doesn't understand
+        // either flavour must not block the write; the `mv` is last, so
+        // its exit code is still what we check.
+        let dst = Self.remotePathArg(path)
+        let src = Self.remotePathArg(tmp)
+        var command = "m=$(stat -c %a \(dst) 2>/dev/null || stat -f %Lp \(dst) 2>/dev/null || echo); "
+            + "if [ -n \"$m\" ]; then chmod \"$m\" \(src) 2>/dev/null; fi; "
+        if TransportPrivateMode.shouldEnforce(for: path) {
+            command += "chmod 600 \(src) && "
+        }
+        command += "mv \(src) \(dst)"
+        let mvResult = try runRemoteShell(command)
         if mvResult.exitCode != 0 {
             // Best-effort cleanup of the orphan tmp.
             _ = try? runRemoteShell("rm -f \(Self.remotePathArg(tmp))")

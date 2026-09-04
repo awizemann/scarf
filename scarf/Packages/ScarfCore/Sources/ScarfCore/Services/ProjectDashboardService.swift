@@ -345,9 +345,17 @@ public struct ProjectDashboardService: Sendable {
         }
 
         // `transport.writeFile` is atomic on every transport — Local
-        // writes `.atomic` (temp + rename(2)), SSH scps to `<path>.scarf.tmp`
-        // and `mv`s it into place. A second temp-file dance here would
-        // add a non-atomic window over SSH, not remove one.
+        // writes `.atomic` (temp + rename(2)), SSH scps to a per-write
+        // `<path>.scarf-<nonce>.tmp` and `mv`s it into place, and iOS
+        // Citadel stages the same way over SFTP and renames. A second
+        // temp-file dance here would add a non-atomic window over SSH,
+        // not remove one.
+        //
+        // That third clause was FALSE until t-a6f22379: Citadel opened
+        // the destination with `.truncate` and streamed 32KB chunks into
+        // it, so a dropped cellular link left this file a fragment. If a
+        // fourth transport ever appears, it owes this contract before any
+        // of the guarding above means anything.
         try transport.writeFile(path, data: writeData)
     }
 

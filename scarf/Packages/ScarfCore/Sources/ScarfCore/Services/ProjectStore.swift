@@ -36,10 +36,18 @@ public enum ProjectStoreError: LocalizedError, Sendable, Equatable {
     /// just uninstalled or deleted out from under the UI.
     case projectRootMissing(String)
 
+    /// `project.json` is provably THERE (a `stat` confirmed it) but could
+    /// not be read — twice. Writing anyway would replace a record we never
+    /// saw with one rebuilt from facets the same sick transport just
+    /// failed to read: board, presets and miniApps silently nulled.
+    case refusedUnreadableRecord(path: String)
+
     public var errorDescription: String? {
         switch self {
         case .projectRootMissing(let path):
             return "Project directory no longer exists at \(path); refusing to re-create it."
+        case .refusedUnreadableRecord(let path):
+            return "The project record at \(path) exists but could not be read; refusing to overwrite it."
         }
     }
 }
@@ -63,6 +71,16 @@ public struct ProjectStore: Sendable {
         self.transport = context.makeTransport()
     }
 
+    /// Test seam: a store whose transport is supplied rather than built
+    /// from `context`. The absent-vs-unreadable probe is only observable
+    /// against a transport that can be made to fail on demand, and
+    /// `ServerContext.sshTransportFactory` is a process-global that only
+    /// one serialized suite may touch.
+    nonisolated init(context: ServerContext, transport: any ServerTransport) {
+        self.context = context
+        self.transport = transport
+    }
+
     // MARK: - Paths
 
     /// Canonical record path for a project rooted at `projectPath`.
@@ -75,21 +93,75 @@ public struct ProjectStore: Sendable {
     /// Read `<projectPath>/.scarf/project.json`. `nil` when absent,
     /// oversize, or unparseable — the caller falls back to `derive`.
     public nonisolated func load(projectPath: String) -> ScarfProject? {
+        if case .loaded(let project) = loadDetailed(projectPath: projectPath) { return project }
+        return nil
+    }
+
+    /// What a record read actually found. `load` collapses the last two
+    /// cases to `nil`; the writers must not.
+    public enum RecordLoad: Sendable, Equatable {
+        case loaded(ScarfProject)
+        /// No file there — the normal pre-migration state, and safe to
+        /// write over.
+        case absent
+        /// A file is there (stat-confirmed) whose bytes we couldn't get.
+        /// NOT the same as unparseable: a record we read and can't decode
+        /// is regenerable damage, while this is a transport symptom and
+        /// the record underneath may be perfectly good.
+        case unreadable(path: String)
+    }
+
+    /// Read the canonical record, distinguishing ABSENT from UNREADABLE.
+    ///
+    /// The distinction is the whole point, and it is the same one
+    /// `ProjectDashboardService.inspectRegistry` draws for `projects.json`,
+    /// by the same two probes:
+    ///
+    /// 1. `stat` must CONFIRM the file before we call a read failure
+    ///    damage. A transport too sick to stat reports `.absent`, which
+    ///    refuses nothing — the write then fails on its own with the real
+    ///    transport error rather than a misleading refusal.
+    /// 2. The read is RETRIED once past a confirming stat, so one dropped
+    ///    `cat` / SFTP round-trip doesn't freeze every record write until
+    ///    the next healthy load.
+    ///
+    /// Both probes run only on the failure path; a healthy load is still
+    /// exactly one read.
+    public nonisolated func loadDetailed(projectPath: String) -> RecordLoad {
+        inspectRecord(projectPath: projectPath).load
+    }
+
+    /// The record as it is on disk, plus the raw bytes behind it — one
+    /// read answering both questions `save` has to ask (is this damage,
+    /// and what should the `.bak` capture). Two separate reads would mean
+    /// two SFTP/SSH round-trips on every save.
+    private nonisolated func inspectRecord(projectPath: String) -> (load: RecordLoad, bytes: Data?) {
         let path = Self.recordPath(forProjectPath: projectPath)
-        guard let data = try? transport.readFile(path) else { return nil }
+        var read = try? transport.readFile(path)
+        if read == nil {
+            guard let info = transport.stat(path) else { return (.absent, nil) }
+            read = try? transport.readFile(path)
+            if read == nil {
+                #if canImport(os)
+                Self.logger.error("project.json at \(path, privacy: .public) exists (\(info.size) bytes) but could not be read twice; treating as damaged")
+                #endif
+                return (.unreadable(path: path), nil)
+            }
+        }
+        guard let data = read else { return (.absent, nil) }
         if data.count > Self.maxJSONBytes {
             #if canImport(os)
             Self.logger.warning("project.json at \(path, privacy: .public) is \(data.count) bytes (cap \(Self.maxJSONBytes)); treating as missing")
             #endif
-            return nil
+            return (.absent, data)
         }
         do {
-            return try JSONDecoder().decode(ScarfProject.self, from: data)
+            return (.loaded(try JSONDecoder().decode(ScarfProject.self, from: data)), data)
         } catch {
             #if canImport(os)
             Self.logger.error("failed to decode project.json at \(path, privacy: .public): \(error.localizedDescription, privacy: .public)")
             #endif
-            return nil
+            return (.absent, data)
         }
     }
 
@@ -121,7 +193,19 @@ public struct ProjectStore: Sendable {
                 throw ProjectStoreError.projectRootMissing(project.rootPath)
             }
         }
-        try writeRecord(project)
+        // THE RECORD CHOKEPOINT, mirroring `saveRegistry`'s. Nearly every
+        // caller in the app is shaped `load(…) ?? derive(from: entry)` then
+        // `save(…)` — so a transport blip that nils the load hands `save` a
+        // record rebuilt from facets that same blip also failed to read
+        // (board, presets, miniApps, secrets scope all nulled), and the
+        // atomic write publishes it as canonical. Refusing HERE means a
+        // forgotten call site silently does nothing instead of silently
+        // stripping a record; call sites keep their `try?`.
+        let existing = inspectRecord(projectPath: project.rootPath)
+        if case .unreadable(let path) = existing.load {
+            throw ProjectStoreError.refusedUnreadableRecord(path: path)
+        }
+        try writeRecord(project, replacing: existing.bytes)
         try indexInRegistry(project)
     }
 
@@ -168,18 +252,27 @@ public struct ProjectStore: Sendable {
         let registry = dashboardService.loadRegistry()
         var migrated = 0
         for entry in registry.projects {
-            let hasRecord = transport.fileExists(Self.recordPath(forProjectPath: entry.path))
-            if hasRecord && entry.uuid != nil { continue }  // already migrated
+            // One probe, three answers — and the `.unreadable` one is why
+            // this is no longer a bare `fileExists`. `fileExists` is false
+            // for "not there" AND for "transport down", so a sick remote
+            // used to take this path straight to `save(derive(…))`: the
+            // facet readers all fail over the same transport, and the
+            // stripped result is committed atomically over a record that
+            // was fine.
+            let record = loadDetailed(projectPath: entry.path)
+            if case .unreadable(let path) = record {
+                #if canImport(os)
+                Self.logger.error("derive() skipping \(entry.name, privacy: .public): record at \(path, privacy: .public) is unreadable")
+                #endif
+                continue
+            }
+            if case .loaded = record, entry.uuid != nil { continue }  // already migrated
             do {
-                if hasRecord {
+                if case .loaded(let existing) = record {
                     // Record is canonical — only the index UUID is stale.
                     // Don't rewrite project.json (avoid file-watcher churn);
                     // just back-fill the registry.
-                    if let existing = load(projectPath: entry.path) {
-                        try indexInRegistry(existing)
-                    } else {
-                        try save(derive(from: entry))
-                    }
+                    try indexInRegistry(existing)
                 } else {
                     try save(derive(from: entry))
                 }
@@ -312,14 +405,31 @@ public struct ProjectStore: Sendable {
 
     // MARK: - Private writers
 
-    private nonisolated func writeRecord(_ project: ScarfProject) throws {
+    /// - Parameter replacing: the bytes currently at the record path, when
+    ///   the caller already read them (`save` always has). `nil` means
+    ///   "unknown" and costs one read; it never means "nothing there".
+    private nonisolated func writeRecord(_ project: ScarfProject, replacing: Data? = nil) throws {
         let scarfDir = project.rootPath + "/.scarf"
         // createDirectory is mkdir -p across every transport.
         try transport.createDirectory(scarfDir)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(project)
-        try transport.writeFile(Self.recordPath(forProjectPath: project.rootPath), data: data)
+        let path = Self.recordPath(forProjectPath: project.rootPath)
+        // Rolling one-deep backup, same shape as `saveRegistry`'s: this is
+        // the only copy of a project's canonical identity, and the writes
+        // that reach here are mostly derived rewrites. Best effort —
+        // losing the backup is not a reason to fail the save.
+        if let existing = replacing ?? (try? transport.readFile(path)), !existing.isEmpty, existing != data {
+            do {
+                try transport.writeFile(path + ".bak", data: existing)
+            } catch {
+                #if canImport(os)
+                Self.logger.warning("Could not refresh project.json.bak: \(error.localizedDescription, privacy: .public)")
+                #endif
+            }
+        }
+        try transport.writeFile(path, data: data)
     }
 
     /// Ensure the registry has a row for this project carrying its

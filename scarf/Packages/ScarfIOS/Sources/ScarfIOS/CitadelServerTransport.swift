@@ -375,15 +375,88 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         }
     }
 
+    /// Atomic write: stage into a sibling temp file, then rename over the
+    /// destination. Matches the contract `ServerTransport.writeFile`
+    /// states and the other two transports already honour (`LocalTransport`
+    /// writes `.atomic`, `SSHTransport` scps to a temp and `mv`s).
+    ///
+    /// The previous implementation opened the DESTINATION with `.truncate`
+    /// and wrote chunks into it: on a phone, where the link drops for a
+    /// lift-out-of-coverage as routinely as it stays up, that zeroed
+    /// `AGENTS.md` / the session map / `cron/jobs.json` and left whatever
+    /// chunks had landed. Nothing upstream can recover from that — the
+    /// salvage/quarantine guards only ever see the file AFTER it was
+    /// destroyed.
+    ///
+    /// Two details worth keeping:
+    /// - The temp name carries a nonce, so two writers never share staging.
+    /// - SFTP v3 `SSH_FXP_RENAME` is not POSIX rename: OpenSSH's
+    ///   `sftp-server` FAILS when the destination exists. So a failed
+    ///   rename falls back to remove-then-rename. That window is a few
+    ///   milliseconds wide and, unlike truncate-first, the complete new
+    ///   bytes already exist on the far side the whole time.
     private func asyncWriteFile(_ path: String, data: Data) async throws {
         let sftp = try await connectionHolder.sftp()
         let resolved = try await resolveSFTPPath(path)
+        let tmp = resolved + ".scarf-\(UUID().uuidString.prefix(8)).tmp"
         let byteBuffer = ByteBuffer(bytes: data)
-        try await sftp.withFile(
-            filePath: resolved,
-            flags: [.write, .create, .truncate]
-        ) { file in
-            try await file.write(byteBuffer, at: 0)
+
+        // `attributes` is applied at CREATE time, so a private-mode file is
+        // never observable in a loose mode — the same chmod-before-publish
+        // ordering `SSHTransport` uses. Citadel enforced no mode at all
+        // before this, which left remote `.env` / `auth.json` written from
+        // the phone world-readable where the Mac wrote them 0600.
+        var attributes = SFTPFileAttributes()
+        if TransportPrivateMode.shouldEnforce(for: path) {
+            attributes.permissions = 0o600
+        }
+
+        do {
+            try await sftp.withFile(
+                filePath: tmp,
+                flags: [.write, .create, .truncate],
+                attributes: attributes
+            ) { file in
+                try await file.write(byteBuffer, at: 0)
+            }
+        } catch {
+            try? await sftp.remove(at: tmp)
+            throw error
+        }
+
+        // Belt to the create-time braces: some servers ignore the
+        // attributes on OPEN. Applied to the STAGED path, so the file is
+        // never observable at its real path in a loose mode — the same
+        // chmod-before-publish ordering `SSHTransport` uses. Best effort:
+        // a server that refuses `setstat` must not fail the write.
+        if attributes.permissions != nil {
+            try? await sftp.setAttributes(at: tmp, to: attributes)
+        }
+
+        do {
+            try await sftp.rename(at: tmp, to: resolved)
+        } catch {
+            do {
+                try await sftp.remove(at: resolved)
+            } catch {
+                // The destination is still intact, so the staging copy is
+                // redundant — clear it rather than leave one behind per
+                // failed write.
+                try? await sftp.remove(at: tmp)
+                throw error
+            }
+            do {
+                try await sftp.rename(at: tmp, to: resolved)
+            } catch {
+                // The destination is gone and `tmp` is now the ONLY copy of
+                // these bytes. Deleting it here would be the same data loss
+                // this method exists to prevent, so it stays — named in the
+                // error so a human can move it back.
+                throw TransportError.fileIO(
+                    path: path,
+                    underlying: "write staged at \(tmp) but could not be renamed into place: \(error.localizedDescription)"
+                )
+            }
         }
     }
 

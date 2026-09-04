@@ -13,12 +13,16 @@ import Foundation
 /// profile's `.env` under `~/.hermes/profiles/<id>/` holds the same class of
 /// secret as the root one, and a path-prefix rule would have to enumerate
 /// every profile layout to say so.
-enum TransportPrivateMode {
+/// `public` because the iOS transport (`CitadelServerTransport`, in the
+/// ScarfIOS package) is the third writer of these same files and owes them
+/// the same mode — a rule that lives in one place only if both packages can
+/// read it.
+public enum TransportPrivateMode {
 
     /// Heuristic: files that conventionally hold secrets should be created
     /// with restrictive permissions so a future `scp` or editor doesn't end
     /// up exposing them.
-    static func shouldEnforce(for path: String) -> Bool {
+    public static func shouldEnforce(for path: String) -> Bool {
         let name = (path as NSString).lastPathComponent
         return name == ".env" || name == "auth.json" || name.hasSuffix("-tokens.json")
     }
