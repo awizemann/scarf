@@ -127,7 +127,21 @@ final class ProjectCockpitViewModel {
                 sp = loaded
             } else {
                 let derived = store.derive(from: project)
-                try? store.save(derived)
+                do {
+                    try store.save(derived)
+                } catch {
+                    // Still best-effort — the in-memory record is usable and
+                    // the cockpit must open — but no longer SILENT. Since the
+                    // registry write refuses a lossy `projects.json` from
+                    // inside `saveRegistry`, this is the path a damaged
+                    // registry now takes: opening a project simply doesn't
+                    // migrate it, where before it would have written the
+                    // salvaged short list back over the file. That is a thing
+                    // worth finding in a log.
+                    Logger(subsystem: "com.scarf", category: "ProjectCockpitViewModel").warning(
+                        "cockpit couldn't persist derived record for \(project.name, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    )
+                }
                 sp = derived
             }
 

@@ -213,19 +213,14 @@ public struct ProjectMCPTools: Sendable {
         // when nothing has asserted one, never a fresh `UUID()`.
         let project = store.derive(from: ProjectEntry(name: name, path: path))
 
-        // `derive` reads the manifest, config, template lock, cron jobs and
-        // mini-apps off disk — tens of milliseconds during which the
-        // registry can go lossy under us. `indexInRegistry` re-loads
-        // through the SALVAGE-BLIND `loadRegistry()` and writes the result
-        // back, so the refusal above is a check-then-act unless it is
-        // re-asserted here, against a fresh read, immediately before the
-        // write. (It still isn't atomic — closing that needs the registry
-        // lock this phase deferred — but the window shrinks from "the
-        // whole call" to "one load".)
-        if let refusal = lossyRefusal(dashboards.loadRegistryDetailed(), verb: "register “\(name)”") {
-            return .failure(refusal)
-        }
-
+        // The re-assert that used to sit here is GONE. `derive` reads the
+        // manifest, config, lock, cron and mini-apps off disk — tens of
+        // milliseconds in which the registry can go lossy — and this
+        // re-checked against a fresh read to shrink that window, because
+        // `indexInRegistry` was salvage-BLIND. It no longer is: it and
+        // `saveRegistry` both refuse a lossy registry from inside, against
+        // the very read they write back, so re-checking here would only be
+        // a third read of the same file with no window closed.
         do {
             // Writes `<path>/.scarf/project.json` AND upserts the registry
             // row carrying the id — the two halves the skill's step 8 did
@@ -530,26 +525,22 @@ public struct ProjectMCPTools: Sendable {
         return .object(fields)
     }
 
-    /// The Phase-2 rule, verbatim: a mutation refuses a lossy load,
-    /// because saving one drops the unreadable rows for good.
+    /// The refusal an AGENT reads, for the app-wide lossy rule
+    /// (`RegistryLoadResult.loss`). Field-level salvage does not block:
+    /// the dropped field held an invalid value, and writing without it is
+    /// the repair.
+    ///
+    /// Advisory only — `ProjectDashboardService.saveRegistry` refuses the
+    /// write itself. What this adds is a message the model can act on
+    /// (which tool, which file, what to run next) instead of a thrown
+    /// error surfacing as a generic tool failure.
     private func lossyRefusal(
         _ loaded: ProjectDashboardService.RegistryLoadResult,
         verb: String
     ) -> String? {
-        guard loaded.salvaged else { return nil }
-        if let quarantine = loaded.quarantinePath {
-            return "Refusing to \(verb): the projects registry at "
-                + "\(context.paths.projectsRegistry) could not be read at all and was set aside "
-                + "at \(quarantine). Writing now would replace every project with just this one."
-        }
-        if loaded.salvage.droppedCount > 0 {
-            return "Refusing to \(verb): \(loaded.salvage.droppedCount) row(s) in "
-                + "\(context.paths.projectsRegistry) could not be read, and saving would drop "
-                + "them permanently. Repair the file first — project_validate reports what is wrong."
-        }
-        // Field-level salvage alone does not block: the dropped field held
-        // an invalid value, and writing without it is the repair.
-        return nil
+        guard let loss = loaded.loss else { return nil }
+        return "Refusing to \(verb). \(loss.message) "
+            + "Run project_validate for what is wrong with \(context.paths.projectsRegistry)."
     }
 
     private func render(_ fields: [String: JSONValue]) throws -> String {

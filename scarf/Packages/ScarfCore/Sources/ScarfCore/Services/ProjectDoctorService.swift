@@ -102,16 +102,13 @@ public struct ProjectDoctorService: Sendable {
 
         findings += duplicateFindings(rows: rows)
         findings += orphanFindings(rows: rows, cronJobs: cronJobs)
+        findings += salvagedFieldFindings(loaded: loaded, alreadyReported: findings)
         findings += historyFindings(loaded: loaded)
 
-        let block: ProjectDoctorRepairBlock?
-        if let quarantine = loaded.quarantinePath {
-            block = .registryQuarantined(path: quarantine)
-        } else if loaded.salvage.droppedCount > 0 {
-            block = .rowsDropped(loaded.salvage.droppedCount)
-        } else {
-            block = nil
-        }
+        // One definition of lossy, asked once: `RegistryLoss` decides, the
+        // block is its presentation. The doctor no longer re-derives the
+        // rule, so it can't drift from the one `saveRegistry` enforces.
+        let block = ProjectDoctorRepairBlock(loaded.loss)
 
         // Finding ids key on the SUBJECT (a path, a name), and two registry
         // rows can share a subject — duplicate rows at one path each produce
@@ -486,6 +483,66 @@ public struct ProjectDoctorService: Sendable {
         }
     }
 
+    /// Fields the salvaging decode had to drop from rows that survived.
+    ///
+    /// The counterpart to the rule that field salvage does not BLOCK: it
+    /// doesn't block, so it has to be visible, or a project quietly loses
+    /// its folder / archived flag on the next save with nobody ever told.
+    /// One finding per row (fields listed together) — a row with three bad
+    /// fields is one problem with one fix, not three rows in a list.
+    ///
+    /// A dropped `uuid` is excluded only when `invalidRegistryUUID` was
+    /// ACTUALLY raised for that row — it carries the repair that fixes it,
+    /// and reporting the same damage twice buries the actionable row under
+    /// an un-actionable one. Conditional rather than blanket, because that
+    /// finding is withheld for a duplicated path: skipping the field
+    /// unconditionally left a garbage uuid reported NOWHERE, on its way to
+    /// being dropped for good by the next save.
+    private nonisolated func salvagedFieldFindings(
+        loaded: ProjectDashboardService.RegistryLoadResult,
+        alreadyReported: [ProjectDoctorFinding]
+    ) -> [ProjectDoctorFinding] {
+        let uuidCovered = Set(
+            alreadyReported
+                .filter { $0.kind == .invalidRegistryUUID }
+                .compactMap(\.projectName)
+        )
+        let dropped = loaded.salvage.salvaged.filter {
+            $0.field != "uuid" || !uuidCovered.contains($0.row)
+        }
+        guard !dropped.isEmpty else { return [] }
+
+        var fieldsByRow: [String: [String]] = [:]
+        for entry in dropped where !(fieldsByRow[entry.row]?.contains(entry.field) ?? false) {
+            fieldsByRow[entry.row, default: []].append(entry.field)
+        }
+
+        return fieldsByRow.keys.sorted().map { row in
+            let fields = fieldsByRow[row] ?? []
+            let list = fields.map { "“\($0)”" }.joined(separator: " and ")
+            // The row's own path, when exactly one row answers to the name
+            // — the report is filtered by path in the cockpit, and pointing
+            // at the wrong project is worse than pointing at none.
+            let matches = loaded.registry.projects.filter { $0.name == row }
+            let path = matches.count == 1 ? matches[0].path : nil
+            return ProjectDoctorFinding(
+                id: "registryFieldSalvaged:\(row):\(fields.joined(separator: ","))",
+                kind: .registryFieldSalvaged,
+                severity: .medium,
+                title: fields.count == 1
+                    ? "One detail of “\(row)” couldn't be read"
+                    : "\(fields.count) details of “\(row)” couldn't be read",
+                detail: "The \(list) \(fields.count == 1 ? "value" : "values") in your projects file "
+                    + "\(fields.count == 1 ? "wasn't" : "weren't") readable, so the project is listed "
+                    + "without \(fields.count == 1 ? "it" : "them"). "
+                    + "Set \(fields.count == 1 ? "it" : "them") again in Scarf, or fix the file — "
+                    + "the next change Scarf saves will write the row without \(fields.count == 1 ? "that value" : "those values").",
+                projectName: row,
+                path: path
+            )
+        }
+    }
+
     private nonisolated func historyFindings(
         loaded: ProjectDashboardService.RegistryLoadResult
     ) -> [ProjectDoctorFinding] {
@@ -568,11 +625,12 @@ public struct ProjectDoctorService: Sendable {
         // Reading twice left a window in which the file could go lossy
         // between "repairs are allowed" and "here is what I'm writing back".
         let loaded = dashboardService.loadRegistryDetailed()
-        if let quarantine = loaded.quarantinePath {
-            throw ProjectDoctorError.repairsBlocked(.registryQuarantined(path: quarantine))
-        }
-        if loaded.salvage.droppedCount > 0 {
-            throw ProjectDoctorError.repairsBlocked(.rowsDropped(loaded.salvage.droppedCount))
+        // UX, not enforcement: `saveRegistry` refuses a lossy write on its
+        // own now, and would do so from underneath every branch below. This
+        // says it in the doctor's own words, before a repair does half its
+        // work (writing a record) and fails on the registry half.
+        if let block = ProjectDoctorRepairBlock(loaded.loss) {
+            throw ProjectDoctorError.repairsBlocked(block)
         }
         var registry = loaded.registry
 
@@ -670,15 +728,11 @@ public struct ProjectDoctorService: Sendable {
         return failures
     }
 
-    /// Fresh read of whether repairs are currently refused. Used by
-    /// `repair(_:)` so a registry that broke AFTER the report was built
-    /// can't be written over.
-    nonisolated func repairBlockReason() -> ProjectDoctorRepairBlock? {
-        let loaded = ProjectDashboardService(context: context).loadRegistryDetailed()
-        if let quarantine = loaded.quarantinePath { return .registryQuarantined(path: quarantine) }
-        if loaded.salvage.droppedCount > 0 { return .rowsDropped(loaded.salvage.droppedCount) }
-        return nil
-    }
+    // (`repairBlockReason()` used to live here, documented as the guard
+    // `repair(_:)` relied on. It was never called — `repair(_:)` derives the
+    // block from its own single authoritative read, precisely so the check
+    // and the write see one file. Deleted rather than wired up: a
+    // second read would reintroduce the window it was written to close.)
 
     // MARK: - Helpers
 

@@ -34,17 +34,24 @@ public struct RegistryDamageNotice: Equatable, Sendable {
     public var droppedCount: Int
     /// `"<project>.<field>"` for each field dropped from a surviving row.
     public var salvagedFields: [String]
+    /// The file is there but empty or unreadable. Nothing was dropped and
+    /// nothing was quarantined, yet the list on screen is not the file's
+    /// contents — without this the banner stayed silent while every
+    /// registry write was being refused.
+    public var unreadable: Bool
 
     public init(
         quarantinePath: String? = nil,
         backupPath: String? = nil,
         droppedCount: Int = 0,
-        salvagedFields: [String] = []
+        salvagedFields: [String] = [],
+        unreadable: Bool = false
     ) {
         self.quarantinePath = quarantinePath
         self.backupPath = backupPath
         self.droppedCount = droppedCount
         self.salvagedFields = salvagedFields
+        self.unreadable = unreadable
     }
 
     /// Identity of THIS damage, so a dismissal sticks across the many
@@ -56,7 +63,7 @@ public struct RegistryDamageNotice: Equatable, Sendable {
     /// later save creating `projects.json.bak` flipped the signature
     /// and reopened a banner the user had already dismissed.
     public var signature: String {
-        "\(quarantinePath ?? "-")|\(droppedCount)|\(salvagedFields.joined(separator: ","))"
+        "\(quarantinePath ?? "-")|\(droppedCount)|\(salvagedFields.joined(separator: ","))|\(unreadable)"
     }
 
     /// The copy the user backed up to, if any — what "Show in Finder"
@@ -78,7 +85,14 @@ public struct RegistryDamageNotice: Equatable, Sendable {
     /// did not write this file and should not have to know its shape.
     public var summary: String {
         if quarantinePath != nil {
-            return "Scarf couldn't read your projects file, so it set the old one aside and started a fresh list."
+            // NOT "and started a fresh list" any more: since the write
+            // chokepoint refuses a lossy registry, nothing is written until
+            // the file is fixed. Saying otherwise would tell the user their
+            // projects had been replaced when in fact everything is paused.
+            return "Scarf couldn't read your projects file, so it kept a copy of it aside. Changes are paused until the file is repaired or removed."
+        }
+        if unreadable {
+            return "Your projects file is empty or couldn't be read, so this list may not be your real one. Changes are paused until it's restored or removed."
         }
         if droppedCount > 0, !salvagedFields.isEmpty {
             return "\(droppedCount) \(droppedCount == 1 ? "project" : "projects") couldn't be read and were left out, and some details on other projects were skipped."
@@ -212,7 +226,8 @@ public final class ProjectsViewModel {
             quarantinePath: result.quarantinePath,
             backupPath: service.transport.fileExists(backup) ? backup : nil,
             droppedCount: result.salvage.droppedCount,
-            salvagedFields: result.salvage.salvagedFields
+            salvagedFields: result.salvage.salvagedFields,
+            unreadable: result.unreadablePath != nil
         )
     }
 
@@ -271,13 +286,20 @@ public final class ProjectsViewModel {
         reloadGeneration &+= 1
         let loaded = service.loadRegistryDetailed()
         applyDamage(Self.damageNotice(for: loaded, service: service))
-        guard !loaded.salvaged else {
-            fail(
-                "Couldn't \(action)",
-                reason: "Scarf couldn't read all of your projects file, and changing it now would "
-                    + "throw away the parts it couldn't read. A copy has been saved alongside it. "
-                    + "Repair \(service.context.paths.projectsRegistry) first, then try again."
-            )
+        // UX, not enforcement. `ProjectDashboardService.saveRegistry` is the
+        // guard — it refuses this write whether or not we look. What this
+        // adds is the ALERT: the verb the user clicked, before the mutator
+        // does its collision checks and commits in-memory state.
+        //
+        // It refuses on `loss`, the app-wide definition (whole rows gone,
+        // file quarantined, file unreadable), NOT on `salvaged`. Refusing
+        // every salvage — which is what this did — meant one row with a
+        // hand-typed uuid froze renaming, archiving and folders for every
+        // project, while the doctor happily repaired the same file. The
+        // banner still reports field salvage; the doctor now raises a
+        // finding for it; neither stops the user working.
+        if let loss = loaded.loss {
+            fail("Couldn't \(action)", reason: loss.message)
             return nil
         }
         return loaded.registry

@@ -201,9 +201,18 @@ import Foundation
             #expect(throws: ProjectRegistryError.self) {
                 try service.saveRegistry(result.registry)
             }
-            try service.saveRegistry(ProjectRegistry(projects: [ProjectEntry(name: "new", path: "/tmp/new")]))
+            // A NON-empty save over the same file is refused too, as of the
+            // chokepoint guard: the quarantine copy means the bytes are not
+            // lost, but the live list would silently become "just this one"
+            // while the user's real projects sat in a `.corrupt-` file they
+            // never asked for. Every write is paused until the file is
+            // repaired or removed — the same rule the sidebar, the doctor
+            // and the MCP tools state.
+            #expect(throws: ProjectRegistryError.self) {
+                try service.saveRegistry(ProjectRegistry(projects: [ProjectEntry(name: "new", path: "/tmp/new")]))
+            }
             #expect(try Self.read(quarantine) == garbage)
-            #expect(service.loadRegistry().projects.map(\.name) == ["new"])
+            #expect(try Self.read(path) == garbage)
         }
     }
 

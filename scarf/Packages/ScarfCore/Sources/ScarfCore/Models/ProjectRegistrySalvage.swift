@@ -12,18 +12,40 @@ import Foundation
 public struct RegistrySalvageReport: Sendable, Equatable {
     /// Rows that could not be decoded at all and were skipped.
     public var droppedCount: Int
-    /// `"<project name>.<field>"` for every optional field that held an
-    /// undecodable value and was dropped, the row surviving without it.
-    public var salvagedFields: [String]
+    /// Every optional field that held an undecodable value and was
+    /// dropped, the row surviving without it. Structured rather than
+    /// pre-joined so the doctor can attach a finding to the ROW it
+    /// belongs to: a project name may legally contain a `.`, which makes
+    /// splitting `"<row>.<field>"` back apart a guess.
+    public var salvaged: [SalvagedField]
 
-    public static let clean = RegistrySalvageReport(droppedCount: 0, salvagedFields: [])
+    public static let clean = RegistrySalvageReport(droppedCount: 0, salvaged: [])
 
-    public init(droppedCount: Int = 0, salvagedFields: [String] = []) {
+    public init(droppedCount: Int = 0, salvaged: [SalvagedField] = []) {
         self.droppedCount = droppedCount
-        self.salvagedFields = salvagedFields
+        self.salvaged = salvaged
     }
 
-    public var isClean: Bool { droppedCount == 0 && salvagedFields.isEmpty }
+    /// `"<project name>.<field>"` per dropped field — the flattened form
+    /// the Phase-2 banner's dismissal signature is built from.
+    public var salvagedFields: [String] { salvaged.map(\.description) }
+
+    public var isClean: Bool { droppedCount == 0 && salvaged.isEmpty }
+}
+
+/// One optional field dropped from a surviving registry row.
+public struct SalvagedField: Sendable, Equatable, Hashable, CustomStringConvertible {
+    /// The row's display name (the registry's identity key).
+    public let row: String
+    /// The JSON key whose value could not be read (`uuid`, `folder`, `archived`).
+    public let field: String
+
+    public init(row: String, field: String) {
+        self.row = row
+        self.field = field
+    }
+
+    public var description: String { "\(row).\(field)" }
 }
 
 /// Collector threaded through `JSONDecoder.userInfo` so a salvaging
@@ -34,7 +56,7 @@ public struct RegistrySalvageReport: Sendable, Equatable {
 public final class RegistrySalvageLog: @unchecked Sendable {
     private let lock = NSLock()
     private var droppedCount = 0
-    private var salvagedFields: [String] = []
+    private var salvaged: [SalvagedField] = []
 
     public init() {}
 
@@ -46,14 +68,60 @@ public final class RegistrySalvageLog: @unchecked Sendable {
 
     public func recordSalvagedField(_ field: String, row: String) {
         lock.lock()
-        salvagedFields.append("\(row).\(field)")
+        salvaged.append(SalvagedField(row: row, field: field))
         lock.unlock()
     }
 
     public var report: RegistrySalvageReport {
         lock.lock()
         defer { lock.unlock() }
-        return RegistrySalvageReport(droppedCount: droppedCount, salvagedFields: salvagedFields)
+        return RegistrySalvageReport(droppedCount: droppedCount, salvaged: salvaged)
+    }
+}
+
+// MARK: - The one definition of "lossy"
+
+/// Damage that makes rewriting `projects.json` DESTRUCTIVE, and therefore
+/// blocks every registry write.
+///
+/// **This enum is the single definition of "lossy" in the app.** It used
+/// to be spelled three different ways — `ProjectsViewModel` refused any
+/// salvage at all, the doctor and the MCP tools refused only row loss —
+/// so the same broken file blocked a rename while allowing a repair.
+/// Everything now asks `RegistryLoadResult.loss`, and the chokepoint
+/// (`ProjectDashboardService.saveRegistry`) enforces it, so a caller
+/// cannot forget.
+///
+/// The rule: **losing whole ROWS blocks; losing a FIELD does not.** A
+/// dropped row exists only in the file — rewriting deletes a project for
+/// good. A dropped field held a value nothing could read; writing without
+/// it is what the uuid repairs are FOR. Field damage is still not
+/// invisible: `ProjectDoctorService` raises a finding per row so the user
+/// can see (and restore) what was skipped.
+public enum RegistryLoss: Sendable, Equatable {
+    /// The decode skipped whole rows; those projects exist only in the
+    /// file on disk, which is why the path travels with the count — every
+    /// message about this damage has to say which file to go and fix.
+    case rowsDropped(count: Int, path: String)
+    /// The file could not be parsed as a registry at all and was copied
+    /// aside to `path`.
+    case quarantined(path: String)
+    /// The file EXISTS but yielded no usable bytes — zero-length, or a
+    /// read that failed. Indistinguishable from a healthy empty registry
+    /// once decoded, which is exactly why it has to be named: treating it
+    /// as "no projects yet" let the next save persist that emptiness.
+    case unreadable(path: String)
+
+    /// One plain sentence, phrased for a user who did not write this file.
+    public var message: String {
+        switch self {
+        case let .rowsDropped(n, path):
+            return "\(n) \(n == 1 ? "project" : "projects") in \(path) couldn't be read. Changes are paused so saving doesn't drop \(n == 1 ? "it" : "them") permanently — fix or restore the file first."
+        case .quarantined(let path):
+            return "Your projects file couldn't be read at all and was set aside at \(path). Changes are paused until it's restored — repair the file, or delete it to start a fresh list."
+        case .unreadable(let path):
+            return "Your projects file at \(path) is empty or couldn't be read. Changes are paused because Scarf can't tell an empty list from a file it failed to read — restore it from the backup beside it, or delete it to start a fresh list."
+        }
     }
 }
 
@@ -61,15 +129,22 @@ public final class RegistrySalvageLog: @unchecked Sendable {
 /// can tell "the disk said no" from "we refused to do this".
 public enum ProjectRegistryError: LocalizedError, Sendable, Equatable {
     /// Refused to persist an empty project list over a file that still
-    /// holds projects (or holds bytes we could not read).
-    /// `existingCount` is `nil` when the existing file was unparseable.
+    /// holds projects. `existingCount` is `nil` when the existing file was
+    /// unparseable — unreachable since the lossy refusal below runs first
+    /// and covers that case, but kept so the error's shape is stable.
     case refusedEmptyOverwrite(path: String, existingCount: Int?)
+    /// Refused to write over a registry whose last read LOST something —
+    /// the chokepoint guard. Thrown by `ProjectDashboardService.saveRegistry`
+    /// and by `ProjectStore.indexInRegistry` before it appends anything.
+    case refusedLossyOverwrite(path: String, loss: RegistryLoss)
 
     public var errorDescription: String? {
         switch self {
         case let .refusedEmptyOverwrite(path, existingCount):
             let existing = existingCount.map { "\($0) project(s)" } ?? "unreadable content"
             return "Refused to overwrite \(path) (\(existing)) with an empty project list."
+        case let .refusedLossyOverwrite(_, loss):
+            return loss.message
         }
     }
 }

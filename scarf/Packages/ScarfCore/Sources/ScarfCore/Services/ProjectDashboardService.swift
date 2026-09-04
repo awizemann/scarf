@@ -36,20 +36,51 @@ public struct ProjectDashboardService: Sendable {
         /// Path the unreadable file was copied to, when the file could
         /// not be parsed as a registry at all. `nil` otherwise.
         public var quarantinePath: String?
+        /// The file existed but produced no usable bytes — zero-length or
+        /// a failed read. `registry` is empty in that case, and that
+        /// emptiness is a lie about the file, not a fact about it.
+        /// Carries the path so `loss` can name it.
+        public var unreadablePath: String?
+        /// The registry file this result describes. Carried so `loss` can
+        /// name the file in a message the user has to act on.
+        public var registryPath: String
 
         public init(
             registry: ProjectRegistry,
             salvage: RegistrySalvageReport = .clean,
-            quarantinePath: String? = nil
+            quarantinePath: String? = nil,
+            unreadablePath: String? = nil,
+            registryPath: String = ""
         ) {
             self.registry = registry
             self.salvage = salvage
             self.quarantinePath = quarantinePath
+            self.unreadablePath = unreadablePath
+            self.registryPath = registryPath
         }
 
-        /// `true` when the file on disk did not decode cleanly — a row
-        /// or field was dropped, or the whole file was quarantined.
-        public var salvaged: Bool { !salvage.isClean || quarantinePath != nil }
+        /// `true` when the file on disk did not read cleanly — a row or
+        /// field was dropped, the file was quarantined, or its bytes were
+        /// unusable. This is the BANNER's question ("tell the user
+        /// something happened"), NOT the write guard's: field-level
+        /// salvage is worth saying out loud and is not worth blocking on.
+        public var salvaged: Bool {
+            !salvage.isClean || quarantinePath != nil || unreadablePath != nil
+        }
+
+        /// Why writing this registry back would DESTROY something, or
+        /// `nil` when a rewrite is safe. The single definition of "lossy"
+        /// (see `RegistryLoss`) — every refusal in the app asks this, and
+        /// `saveRegistry` enforces it whether or not a caller remembered.
+        public var loss: RegistryLoss? {
+            if let quarantinePath { return .quarantined(path: quarantinePath) }
+            if let unreadablePath { return .unreadable(path: unreadablePath) }
+            if salvage.droppedCount > 0 {
+                return .rowsDropped(count: salvage.droppedCount, path: registryPath)
+            }
+            return nil
+        }
+
         public var droppedCount: Int { salvage.droppedCount }
     }
 
@@ -61,38 +92,119 @@ public struct ProjectDashboardService: Sendable {
         // Tracks time spent reading + decoding projects.json from the transport
         // (local file or SSH). Helps spot slow remote round-trips.
         ScarfMon.measure(.diskIO, "dashboard.loadRegistry") {
-            let path = context.paths.projectsRegistry
-            guard let data = try? transport.readFile(path), !data.isEmpty else {
-                return RegistryLoadResult(registry: ProjectRegistry(projects: []))
+            inspectRegistry().result
+        }
+    }
+
+    /// The registry as it is on disk, plus the raw bytes behind it.
+    ///
+    /// One read serves three questions `saveRegistry` has to answer — is
+    /// this file lossy, how many projects does it still hold, and what
+    /// should the `.bak` capture — so a save costs the same single read it
+    /// always did rather than one per question.
+    private func inspectRegistry() -> (result: RegistryLoadResult, bytes: Data?) {
+        let path = context.paths.projectsRegistry
+        var read = try? transport.readFile(path)
+        if read == nil {
+            // ABSENT vs UNREADABLE, and the answer gates every write in the
+            // app, so it takes PROOF rather than an inference.
+            //
+            // A registry that isn't there is the normal first-launch state
+            // and must stay writable. A file that is there but won't read is
+            // damage: handing back a clean-looking empty list is what let a
+            // save persist that emptiness over the user's projects.
+            //
+            // Two things make this safe on a remote context, where
+            // `readFile` is `cat` over SSH and a dropped connection, a
+            // timeout or a re-auth all look exactly like a read failure:
+            //
+            // 1. `stat` has to CONFIRM the file. No stat, no damage — a
+            //    transport too sick to stat is reported as absent, which
+            //    refuses nothing (the write then fails on its own with the
+            //    real transport error rather than a misleading refusal).
+            // 2. The read is RETRIED once past a confirming stat. A blip
+            //    that took out one `cat` rarely takes out the retry too, so
+            //    a healthy remote file stops being reported as damage —
+            //    which would otherwise have frozen every registry write
+            //    until the next successful load.
+            //
+            // Both probes run only on the failure path; a healthy load is
+            // still exactly one read.
+            guard let info = transport.stat(path) else {
+                return (RegistryLoadResult(registry: ProjectRegistry(projects: []), registryPath: path), nil)
             }
-            if data.count > Self.maxJSONBytes {
-                Self.logger.warning(
-                    "Project registry at \(path, privacy: .public) is \(data.count) bytes (cap \(Self.maxJSONBytes)); treating as missing"
+            read = try? transport.readFile(path)
+            if read == nil {
+                Self.logger.error(
+                    "Project registry at \(path, privacy: .public) exists (\(info.size) bytes) but could not be read twice; treating as damaged"
                 )
-                // Quarantined like any other unusable file: we are about
-                // to hand callers an empty registry, and the next save
-                // would otherwise write over content we never read.
-                return RegistryLoadResult(
-                    registry: ProjectRegistry(projects: []),
-                    quarantinePath: quarantineRegistry(data: data, path: path)
-                )
-            }
-            do {
-                let (registry, salvage) = try ProjectRegistry.decodeSalvaging(from: data)
-                if !salvage.isClean {
-                    Self.logger.warning(
-                        "Project registry salvaged: dropped \(salvage.droppedCount) row(s), dropped fields \(salvage.salvagedFields.joined(separator: ", "), privacy: .public)"
-                    )
-                }
-                return RegistryLoadResult(registry: registry, salvage: salvage)
-            } catch {
-                Self.logger.error("Failed to decode project registry: \(error.localizedDescription, privacy: .public)")
-                return RegistryLoadResult(
-                    registry: ProjectRegistry(projects: []),
-                    quarantinePath: quarantineRegistry(data: data, path: path)
+                return (
+                    RegistryLoadResult(
+                        registry: ProjectRegistry(projects: []), unreadablePath: path, registryPath: path
+                    ),
+                    nil
                 )
             }
         }
+        guard let data = read else {
+            return (RegistryLoadResult(registry: ProjectRegistry(projects: []), registryPath: path), nil)
+        }
+        guard !data.isEmpty else {
+            // Zero bytes is never something Scarf writes (the smallest
+            // registry it encodes is `{"projects":[]}`), so it is a
+            // truncation by somebody else — damage, not an empty list.
+            Self.logger.error(
+                "Project registry at \(path, privacy: .public) is zero bytes; treating as damaged"
+            )
+            return (RegistryLoadResult(registry: ProjectRegistry(projects: []), unreadablePath: path, registryPath: path), data)
+        }
+        return (decodeRegistry(data: data, path: path), data)
+    }
+
+    private func decodeRegistry(data: Data, path: String) -> RegistryLoadResult {
+        if data.count > Self.maxJSONBytes {
+            Self.logger.warning(
+                "Project registry at \(path, privacy: .public) is \(data.count) bytes (cap \(Self.maxJSONBytes)); treating as missing"
+            )
+            // Quarantined like any other unusable file: we are about
+            // to hand callers an empty registry, and the next save
+            // would otherwise write over content we never read.
+            return unusable(data: data, path: path)
+        }
+        do {
+            let (registry, salvage) = try ProjectRegistry.decodeSalvaging(from: data)
+            if !salvage.isClean {
+                Self.logger.warning(
+                    "Project registry salvaged: dropped \(salvage.droppedCount) row(s), dropped fields \(salvage.salvagedFields.joined(separator: ", "), privacy: .public)"
+                )
+            }
+            return RegistryLoadResult(registry: registry, salvage: salvage, registryPath: path)
+        } catch {
+            Self.logger.error("Failed to decode project registry: \(error.localizedDescription, privacy: .public)")
+            return unusable(data: data, path: path)
+        }
+    }
+
+    /// A file we hold bytes for but cannot use: quarantine it and report
+    /// the damage.
+    ///
+    /// If the quarantine copy itself fails to write, the result is marked
+    /// `unreadable` instead — otherwise a failed copy would leave a load
+    /// that looks CLEAN and empty (no quarantine path, no dropped rows),
+    /// and the next save would overwrite bytes that now exist nowhere else.
+    private func unusable(data: Data, path: String) -> RegistryLoadResult {
+        if let quarantine = quarantineRegistry(data: data, path: path) {
+            return RegistryLoadResult(
+                registry: ProjectRegistry(projects: []),
+                quarantinePath: quarantine,
+                registryPath: path
+            )
+        }
+        return RegistryLoadResult(
+            registry: ProjectRegistry(projects: []),
+            unreadablePath: path,
+            registryPath: path
+        )
     }
 
     /// Copy an unparseable registry aside as `projects.json.corrupt-<ts>`
@@ -169,31 +281,59 @@ public struct ProjectDashboardService: Sendable {
     ///   accidental one: a load that failed for any reason hands the
     ///   caller `[]`, and the caller's next mutation would persist that
     ///   emptiness over a file full of real projects.
+    ///
+    /// **THE CHOKEPOINT.** Every registry write in the app lands here
+    /// (`ProjectStore.indexInRegistry` included), so this is where the
+    /// lossy-write refusal belongs — not at call sites. It used to live in
+    /// `ProjectsViewModel.registryForMutation`, the doctor and the MCP
+    /// tools, which left five writers with no guard at all: the cockpit's
+    /// `try? store.save(derived)`, `ProjectUpgradeService`, the template
+    /// installer (twice) and `FleetApplyExecutor` could all persist a
+    /// salvaged short list over a file that still held the missing rows.
+    /// Guarding here means a forgotten call site now silently does
+    /// NOTHING instead of silently destroying something. Call-site checks
+    /// that survive exist only to say it better (a named verb, an alert),
+    /// never to be the enforcement.
+    ///
+    /// - Throws: `ProjectRegistryError.refusedLossyOverwrite` when the file
+    ///   currently on disk lost rows, was quarantined, or is unreadable
+    ///   (see `RegistryLoss`); `.refusedEmptyOverwrite` per `allowEmpty`.
     public func saveRegistry(_ registry: ProjectRegistry, allowEmpty: Bool = false) throws {
         let path = context.paths.projectsRegistry
         // Encode BEFORE touching the filesystem, so an encode failure
         // can't leave a half-updated directory behind.
         let writeData = try Self.encodeRegistry(registry)
+
+        // ONE read of what is already there, answering all three
+        // questions below. Reading per question would also mean three
+        // SSH round-trips per save on a remote context.
+        let (existingState, existingBytes) = inspectRegistry()
+
+        // 1. Never write over damage: the rows we could not read exist
+        //    only in that file, and this write would be their end.
+        if let loss = existingState.loss {
+            throw ProjectRegistryError.refusedLossyOverwrite(path: path, loss: loss)
+        }
+
         let dir = context.paths.scarfDir
         // `createDirectory` is mkdir -p across every transport (Local
         // uses withIntermediateDirectories, SSH/Citadel both ignore
         // "already exists"), so we don't need to fileExists-guard it.
         try transport.createDirectory(dir)
 
-        if let existing = try? transport.readFile(path), !existing.isEmpty {
+        if let existing = existingBytes, !existing.isEmpty {
+            // 2. Never blank a file that still holds projects, unless the
+            //    caller says the emptying is the point.
             if registry.projects.isEmpty, !allowEmpty {
-                // An unparseable existing file counts as "content worth
-                // keeping" (count `nil`): we could not read it, so we
-                // certainly must not blank it.
-                let existingCount = (try? ProjectRegistry.decodeSalvaging(from: existing))?.registry.projects.count
-                if (existingCount ?? 1) > 0 {
+                let existingCount = existingState.registry.projects.count
+                if existingCount > 0 {
                     throw ProjectRegistryError.refusedEmptyOverwrite(path: path, existingCount: existingCount)
                 }
             }
+            // 3. Rolling one-deep backup of the previous contents. Best
+            //    effort: losing the backup is not a reason to fail the
+            //    save the user asked for.
             if existing != writeData {
-                // Rolling one-deep backup of the previous contents. Best
-                // effort: losing the backup is not a reason to fail the
-                // save the user asked for.
                 do {
                     try transport.writeFile(path + ".bak", data: existing)
                 } catch {

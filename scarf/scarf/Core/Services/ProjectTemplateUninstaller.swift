@@ -225,23 +225,55 @@ struct ProjectTemplateUninstaller: Sendable {
         // `/tmp/x` or `/private/tmp/x`, with or without a trailing
         // slash, so both sides go through `Self.normalizedPath`.
         let dashboardService = ProjectDashboardService(context: context)
-        var registry = dashboardService.loadRegistry()
+        let loaded = dashboardService.loadRegistryDetailed()
+        // A LOSSY load cannot support either conclusion: the row may be in
+        // the part we couldn't read, so "nothing matched" is not a fact.
+        // Fail loudly — a silent success here is the "sheet says
+        // uninstalled, sidebar still shows it" bug. (`saveRegistry` would
+        // refuse the write anyway; this reports it as the uninstall's own
+        // failure instead of as a write error, and skips the pointless
+        // attempt.)
+        if let loss = loaded.loss {
+            Self.logger.error(
+                "uninstall couldn't read the projects registry: \(loss.message, privacy: .public)"
+            )
+            throw ProjectTemplateError.registryUpdateFailed(loss.message)
+        }
+        var registry = loaded.registry
+        let rowsBefore = registry.projects.count
         registry.projects.removeAll { Self.matches($0, project: plan.project) }
-        // A failed registry write is NOT cosmetic: the row survives,
-        // the sidebar keeps showing a project whose files are gone, and
-        // the success screen would claim a clean removal. Surface it
-        // the way every other hard failure in this method surfaces —
-        // by throwing — so `TemplateUninstallerViewModel` lands on
-        // `.failed` and the user sees why. Everything destructive has
-        // already run at this point, so a retry is safe: the plan's
-        // remaining steps are all no-ops on second pass.
-        do {
-            // Deliberate removal — uninstalling the only project must
-            // still be able to leave the registry empty.
-            try dashboardService.saveRegistry(registry, allowEmpty: true)
-        } catch {
-            Self.logger.error("uninstall couldn't rewrite projects registry: \(error.localizedDescription, privacy: .public)")
-            throw ProjectTemplateError.registryUpdateFailed(error.localizedDescription)
+        // Mirrors `ProjectsViewModel.removeProject`'s presence check, and
+        // for the same reason: the `allowEmpty: true` below deliberately
+        // bypasses the empty-overwrite guard, so a removal that removed
+        // NOTHING would write the list it just loaded — and if that list
+        // came back empty (a load that failed for any reason), this
+        // blanked the registry while reporting a clean uninstall. Removing
+        // nothing means the row is already gone: the rest of the uninstall
+        // succeeded, so this is a no-op, not a failure.
+        if registry.projects.count < rowsBefore {
+            // A failed registry write is NOT cosmetic: the row survives,
+            // the sidebar keeps showing a project whose files are gone, and
+            // the success screen would claim a clean removal. Surface it
+            // the way every other hard failure in this method surfaces —
+            // by throwing — so `TemplateUninstallerViewModel` lands on
+            // `.failed` and the user sees why. Everything destructive has
+            // already run at this point, so a retry is safe: the plan's
+            // remaining steps are all no-ops on second pass.
+            do {
+                // Deliberate removal — uninstalling the only project must
+                // still be able to leave the registry empty.
+                try dashboardService.saveRegistry(registry, allowEmpty: true)
+            } catch {
+                Self.logger.error("uninstall couldn't rewrite projects registry: \(error.localizedDescription, privacy: .public)")
+                throw ProjectTemplateError.registryUpdateFailed(error.localizedDescription)
+            }
+        } else {
+            // Nothing matched: the row is already gone (or was never
+            // there). Writing anyway is the whole hazard described above,
+            // and there is nothing left to remove — a no-op, not a failure.
+            Self.logger.info(
+                "uninstall: no registry row matched \(plan.project.path, privacy: .public); leaving projects.json untouched"
+            )
         }
 
         Self.logger.info("uninstalled template \(plan.lock.templateId, privacy: .public) from \(plan.project.path, privacy: .public)")

@@ -576,6 +576,102 @@ import Foundation
         }
     }
 
+    /// M8: a zero-byte registry is damage, not an empty list — the doctor
+    /// has to SAY so, because every repair underneath is now refused by
+    /// `saveRegistry` and a silent "0 projects checked, no issues" would
+    /// leave the user with nowhere to go.
+    @Test func repairsAreBlockedWhenTheRegistryIsUnreadable() throws {
+        try Self.withTempHome { ctx, _ in
+            try Self.writeRegistryJSON(ctx, "")
+            let report = ProjectDoctorService(context: ctx).diagnose()
+            #expect(report.repairBlock == .registryUnreadable(path: ctx.paths.projectsRegistry))
+            #expect(report.repairable.isEmpty)
+            // The summary is the block's message, so the sheet and the
+            // cockpit health row both explain the dead end.
+            #expect(report.summary.contains("empty or couldn't be read"))
+        }
+    }
+
+    // MARK: - M1/M2: field salvage is a FINDING, not a block
+
+    /// Field-level salvage does not block writes, so the next save drops
+    /// the unreadable value for good. That makes it the doctor's job to
+    /// say what was dropped, per row, while the value is still recoverable
+    /// from the file.
+    @Test func salvagedFieldsBecomeAFindingRatherThanABlock() throws {
+        try Self.withTempHome { ctx, projectsRoot in
+            let dir = try Self.makeProjectDir(projectsRoot, slug: "alpha")
+            try ProjectStore(context: ctx).save(ScarfProject(name: "Alpha", rootPath: dir))
+            // `folder` and `archived` hold values that cannot be read. No
+            // second copy of either exists anywhere — unlike `uuid`, which
+            // the record carries — so silently defaulting them was a loss
+            // nothing in the app mentioned.
+            try Self.writeRegistryJSON(ctx, """
+            { "projects": [
+              { "name": "Alpha", "path": "\(dir)", "folder": 17, "archived": "yes" }
+            ] }
+            """)
+
+            let report = ProjectDoctorService(context: ctx).diagnose()
+            #expect(report.repairBlock == nil)          // not blocking
+            let finding = try #require(report.findings.first { $0.kind == .registryFieldSalvaged })
+            #expect(finding.projectName == "Alpha")
+            #expect(finding.path == dir)                // attaches to the project
+            #expect(finding.repair == nil)              // report-only
+            #expect(finding.severity == .medium)
+            #expect(finding.detail.contains("folder"))
+            #expect(finding.detail.contains("archived"))
+            // One row's damage is one finding, not one per field.
+            #expect(report.findings.filter { $0.kind == .registryFieldSalvaged }.count == 1)
+            // And it is the project's own problem, so the cockpit shows it.
+            #expect(report.issues(forProjectPath: dir, name: "Alpha").contains(finding))
+        }
+    }
+
+    /// A dropped `uuid` already has `invalidRegistryUUID` — which carries
+    /// the repair that fixes it. Reporting it a second time as an
+    /// un-actionable field would bury the actionable row.
+    @Test func salvagedUUIDIsNotReportedTwice() throws {
+        try Self.withTempHome { ctx, projectsRoot in
+            let dir = try Self.makeProjectDir(projectsRoot, slug: "alpha")
+            try ProjectStore(context: ctx).save(ScarfProject(name: "Alpha", rootPath: dir))
+            try Self.writeRegistryJSON(ctx, """
+            { "projects": [
+              { "name": "Alpha", "path": "\(dir)", "uuid": "SHABUBOX-SEO-TRACKER-2026-09-03" }
+            ] }
+            """)
+
+            let report = ProjectDoctorService(context: ctx).diagnose()
+            #expect(report.findings.contains { $0.kind == .invalidRegistryUUID })
+            #expect(!report.findings.contains { $0.kind == .registryFieldSalvaged })
+        }
+    }
+
+    /// …but the uuid exclusion is CONDITIONAL on that other finding
+    /// actually being raised. Identity findings are withheld for a path more
+    /// than one row claims, so a blanket exclusion reported a garbage uuid
+    /// nowhere at all — while the next save dropped it for good.
+    @Test func salvagedUUIDIsStillReportedWhenTheIdentityFindingIsWithheld() throws {
+        try Self.withTempHome { ctx, projectsRoot in
+            let dir = try Self.makeProjectDir(projectsRoot, slug: "alpha")
+            try ProjectStore(context: ctx).save(ScarfProject(name: "Alpha", rootPath: dir))
+            // Two rows at ONE path: identity repairs are withheld, so
+            // `invalidRegistryUUID` is not raised for this row.
+            try Self.writeRegistryJSON(ctx, """
+            { "projects": [
+              { "name": "Alpha", "path": "\(dir)", "uuid": "NOT-A-UUID" },
+              { "name": "Alpha Again", "path": "\(dir)" }
+            ] }
+            """)
+
+            let report = ProjectDoctorService(context: ctx).diagnose()
+            #expect(!report.findings.contains { $0.kind == .invalidRegistryUUID })
+            let finding = try #require(report.findings.first { $0.kind == .registryFieldSalvaged })
+            #expect(finding.projectName == "Alpha")
+            #expect(finding.detail.contains("uuid"))
+        }
+    }
+
     @Test func repairIsRefusedWhenTheRegistryBreaksAfterTheReport() throws {
         try Self.withTempHome { ctx, projectsRoot in
             let dir = try Self.makeProjectDir(projectsRoot, slug: "alpha")

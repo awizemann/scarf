@@ -62,6 +62,14 @@ public struct ProjectDoctorFinding: Sendable, Identifiable, Equatable {
         /// A cron job attributed to this project runs somewhere else —
         /// consistent with a reused path adopting a previous project's jobs.
         case pathReuseSuspicion
+        /// A registry row survived, but one of its optional fields held a
+        /// value the decode could not read and dropped — the row's folder
+        /// or archived flag. Field salvage deliberately does NOT block
+        /// writes (see `RegistryLoss`), which is exactly why it needs to be
+        /// SAID: the next save persists the row without that field, and
+        /// nothing else in the app would ever mention it. Report-only —
+        /// the value is unrecoverable, so re-setting it is the user's call.
+        case registryFieldSalvaged
     }
 
     /// A repair, named by the existing writer it goes through. Cases carry
@@ -150,18 +158,38 @@ public struct ProjectDoctorFinding: Sendable, Identifiable, Equatable {
 ///
 /// The doctor's repairs all end in a registry rewrite, and a rewrite of a
 /// LOSSY load makes the loss permanent — the rows the decode couldn't read
-/// disappear from `projects.json` for good. Same rule as
-/// `ProjectsViewModel.registryForMutation`, for the same reason.
+/// disappear from `projects.json` for good.
+///
+/// This is a PRESENTATION wrapper around `RegistryLoss`, which is the one
+/// definition of lossy the whole app shares (and which
+/// `ProjectDashboardService.saveRegistry` enforces whether or not the
+/// doctor asks). It exists only so the doctor sheet can say "repairs" where
+/// the sidebar says "changes"; the cases are the loss's cases, and adding
+/// one there must add one here.
 ///
 /// Field-level salvage deliberately does NOT block: a dropped field held an
 /// invalid value, and re-writing without it is exactly what the uuid repairs
-/// are for.
+/// are for. It surfaces as a `registryFieldSalvaged` FINDING instead.
 public enum ProjectDoctorRepairBlock: Sendable, Equatable {
     /// The decode skipped whole rows; they are only in the file, not in
     /// anything we could write back.
     case rowsDropped(Int)
     /// The file couldn't be parsed at all and was set aside.
     case registryQuarantined(path: String)
+    /// The file is there but empty or unreadable — we cannot tell "no
+    /// projects" from "couldn't read your projects".
+    case registryUnreadable(path: String)
+
+    /// The doctor's view of a registry load's `loss`. `nil` in, `nil` out:
+    /// nothing to block.
+    public init?(_ loss: RegistryLoss?) {
+        switch loss {
+        case .none: return nil
+        case .rowsDropped(let count, _): self = .rowsDropped(count)
+        case .quarantined(let path): self = .registryQuarantined(path: path)
+        case .unreadable(let path): self = .registryUnreadable(path: path)
+        }
+    }
 
     public var message: String {
         switch self {
@@ -169,6 +197,8 @@ public enum ProjectDoctorRepairBlock: Sendable, Equatable {
             return "\(n) \(n == 1 ? "project" : "projects") in your projects file couldn't be read. Repairs are paused so saving doesn't drop \(n == 1 ? "it" : "them") permanently — fix or restore the file first."
         case .registryQuarantined(let path):
             return "Your projects file couldn't be read at all and was set aside at \(path). Repairs are paused until it's restored."
+        case .registryUnreadable(let path):
+            return "Your projects file at \(path) is empty or couldn't be read. Repairs are paused because Scarf can't tell an empty list from a file it failed to read — restore it from the backup beside it, or delete it to start fresh."
         }
     }
 }

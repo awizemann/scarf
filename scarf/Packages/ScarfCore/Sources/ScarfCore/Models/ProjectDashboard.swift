@@ -210,7 +210,18 @@ public struct DashboardSection: Codable, Sendable, Identifiable {
         self.columns = columns
         self.widgets = widgets
     }
-    public var columnCount: Int { columns ?? 3 }
+    /// Columns to lay the section's widgets out in, CLAMPED on the read
+    /// path.
+    ///
+    /// `dashboard.json` is agent-written, and both renderers hand this
+    /// straight to a grid: SwiftUI's `LazyVGrid` traps on a zero/negative
+    /// column count (confirmed SIGTRAP), and a four-figure count builds
+    /// thousands of empty grid items. Clamping HERE rather than in each
+    /// renderer means the validator, the Mac view and the iOS view can
+    /// never disagree — and a section that was going to crash the app
+    /// merely looks wrong instead. 12 is the ceiling because a dashboard
+    /// section wider than that is unreadable at any window size.
+    public var columnCount: Int { min(max(columns ?? 3, 1), 12) }
 }
 
 public struct DashboardWidget: Codable, Sendable, Identifiable {

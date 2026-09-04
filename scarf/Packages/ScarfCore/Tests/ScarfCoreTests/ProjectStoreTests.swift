@@ -240,6 +240,43 @@ import Foundation
         #expect(ProjectIdentity.hostKey(for: hostAAlt) != ProjectIdentity.hostKey(for: hostA))
     }
 
+    /// The host key is a FROZEN wire format, so its canonicalization had to
+    /// be settled before release: one machine spelled two ways must not
+    /// derive two identities for the same project, and two different
+    /// accounts must not collapse into one (an id collision across accounts
+    /// is the fleet hazard the salt exists to prevent).
+    @Test func hostKeyCanonicalizesTheSpellingsOfOneHost() throws {
+        func key(_ host: String, user: String? = "deploy", port: Int? = nil) -> String {
+            ProjectIdentity.hostKey(for: ServerContext(
+                id: UUID(), displayName: "h",
+                kind: .ssh(SSHConfig(host: host, user: user, port: port))
+            ))
+        }
+
+        let canonical = key("a.example")
+        #expect(canonical == "deploy@a.example:22")
+        // Surrounding whitespace is a text-field artefact, never identity.
+        #expect(key("  a.example  ") == canonical)
+        #expect(key("a.example", user: " deploy ") == canonical)
+        // Omitted port means SSH's own default — genuinely the same host.
+        #expect(key("a.example", port: 22) == canonical)
+        #expect(key("a.example", port: 2222) != canonical)
+        // NOTHING is case-folded. `host` is as often an ~/.ssh/config alias
+        // as a DNS name, and OpenSSH matches `Host` patterns
+        // case-sensitively, so `Prod` and `prod` may be two machines;
+        // usernames are case-sensitive too. Folding either would trade a
+        // cheap extra derived id for an id COLLISION across hosts — the
+        // fleet-writes-to-the-wrong-machine hazard this salt exists for.
+        #expect(key("A.Example") != canonical)
+        #expect(key("a.example.") != canonical)
+        #expect(key("a.example", user: "Deploy") != canonical)
+        // An omitted user stays empty rather than being invented.
+        #expect(key("a.example", user: nil) == "@a.example:22")
+        #expect(key("a.example", user: "") == "@a.example:22")
+        // The local Mac is still the empty key.
+        #expect(ProjectIdentity.hostKey(for: .local).isEmpty)
+    }
+
     /// Lexical normalization: equivalent spellings of one path agree, and a
     /// remote `~`-rooted relative path is never resolved against the local
     /// process CWD.

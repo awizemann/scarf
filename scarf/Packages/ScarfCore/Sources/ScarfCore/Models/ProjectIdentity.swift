@@ -86,13 +86,54 @@ public enum ProjectIdentity {
     /// stable SSH coordinates for a remote. Deliberately NOT `context.id`,
     /// which is a per-registration random UUID — two Macs managing the same
     /// host would then disagree, and re-adding a server would re-identify its
-    /// unpersisted projects. Also part of the frozen contract.
+    /// unpersisted projects.
+    ///
+    /// **FROZEN CONTRACT — canonical form `<user>@<host>:<port>`.** Same
+    /// standing as the namespace and the path normalization: a key change
+    /// re-identifies every project whose id was derived rather than minted.
+    /// The canonicalization below is the LAST word on it, settled before
+    /// release precisely because it cannot be settled after one.
+    ///
+    /// The governing asymmetry, which decides every rule below: **a
+    /// COLLISION is catastrophic and a DIVERGENCE is cheap.** Two hosts
+    /// seeded identically derive one id for two unrelated projects —
+    /// `FleetService` then groups them and a fleet apply writes presets,
+    /// tenants and cron jobs to the wrong machine. Two spellings of one host
+    /// seeded differently merely cost a second derived id: visible to the
+    /// doctor, harmless, and moot the moment an id is persisted, since a
+    /// minted or recorded id always beats a derived one. So this normalizes
+    /// ONLY what cannot possibly denote a different machine.
+    ///
+    /// - **host and user are trimmed** of surrounding whitespace. That is a
+    ///   text-field artefact, never part of an identity.
+    /// - **port omitted means 22**, SSH's own default, so `host` and
+    ///   `host:22` are genuinely one host.
+    /// - **NOTHING is case-folded — not the user, not the host.** Unix
+    ///   accounts are case-sensitive. And `SSHConfig.host` is not
+    ///   necessarily a DNS name: it is just as often an `~/.ssh/config`
+    ///   ALIAS, whose `Host` patterns OpenSSH matches case-sensitively, so
+    ///   `Prod` and `prod` may legally be two different machines. Lowercase
+    ///   folding — the obvious "hostnames are case-insensitive" move —
+    ///   would trade the cheap failure for the catastrophic one on exactly
+    ///   the input we cannot tell apart. Same reasoning retires trailing-dot
+    ///   stripping (`example.com.`): a valid FQDN spelling of one host, but
+    ///   also a legal, distinct alias pattern.
+    /// - **user omitted stays empty** (`@host:22`). It is NOT resolved
+    ///   against `~/.ssh/config` or the local username: resolving means I/O
+    ///   in a pure function, and the answer would differ per Mac.
+    ///
+    /// KNOWN RESIDUALS, accepted, all of them the cheap failure: an alias
+    /// and the hostname it resolves to are different keys; so are two
+    /// case-spellings of one host, and a host registered once with an
+    /// explicit user and once without. Each costs one extra derived id.
     public static func hostKey(for context: ServerContext) -> String {
         switch context.kind {
         case .local:
             return ""
         case .ssh(let config):
-            return "\(config.user ?? "")@\(config.host):\(config.port ?? 22)"
+            let user = config.user?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let host = config.host.trimmingCharacters(in: .whitespacesAndNewlines)
+            return "\(user)@\(host):\(config.port ?? 22)"
         }
     }
 

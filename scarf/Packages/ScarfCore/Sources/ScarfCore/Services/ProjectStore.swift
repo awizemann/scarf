@@ -328,13 +328,24 @@ public struct ProjectStore: Sendable {
     ///
     /// `public` so `ProjectDoctorService` can back-fill a registry row's
     /// `uuid` without touching an intact `project.json` (and without
-    /// inventing a second writer for the same job). It loads the registry
-    /// through the salvaging decoder and writes the result back, so a caller
-    /// that could be looking at a LOSSY load must refuse before calling it —
-    /// see `ProjectDoctorService.repairBlockReason`.
+    /// inventing a second writer for the same job).
+    ///
+    /// It read-modify-writes the registry, so it is the SECOND chokepoint
+    /// (with `ProjectDashboardService.saveRegistry`, which it calls) where
+    /// the lossy refusal is enforced rather than asked of callers. Checking
+    /// here as well as in `saveRegistry` is not belt-and-braces: it refuses
+    /// BEFORE appending a row to a salvaged list, so the error names the
+    /// damage instead of describing a list that should never have been
+    /// built.
     public nonisolated func indexInRegistry(_ project: ScarfProject) throws {
         let dashboardService = ProjectDashboardService(context: context)
-        var registry = dashboardService.loadRegistry()
+        let loaded = dashboardService.loadRegistryDetailed()
+        if let loss = loaded.loss {
+            throw ProjectRegistryError.refusedLossyOverwrite(
+                path: context.paths.projectsRegistry, loss: loss
+            )
+        }
+        var registry = loaded.registry
         if let idx = registry.projects.firstIndex(where: { $0.path == project.rootPath }) {
             guard registry.projects[idx].uuid != project.id else { return }  // already indexed
             registry.projects[idx].uuid = project.id

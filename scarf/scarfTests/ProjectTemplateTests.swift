@@ -648,6 +648,53 @@ struct ProjectTemplateUninstallerTests {
         #expect(FileManager.default.fileExists(atPath: plan.projectDir) == false)
     }
 
+    /// **H2 — an uninstall that removes NO row must not write the
+    /// registry.** The save below passes `allowEmpty: true`, which
+    /// deliberately bypasses the empty-overwrite refusal, so a removal that
+    /// matched nothing wrote back whatever the load produced — and a load
+    /// that produced `[]` (the registry deleted or unreadable under a
+    /// concurrent uninstall) BLANKED the file while reporting a clean
+    /// uninstall. Mirrors `ProjectsViewModel.removeProject`'s presence
+    /// check. Removing nothing is a no-op, not a failure: everything else
+    /// about the uninstall succeeded.
+    @Test func uninstallWithNoMatchingRegistryRowLeavesTheRegistryAlone() throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let scratch = try ProjectTemplateServiceTests.makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        let parentDir = scratch + "/parent"
+        try FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
+
+        let bundle = try ProjectTemplateServiceTests.makeBundle(dir: scratch, files: [
+            "README.md": "# Minimal",
+            "AGENTS.md": "# Agent notes",
+            "dashboard.json": ProjectTemplateServiceTests.sampleDashboardJSON
+        ])
+        let service = ProjectTemplateService(context: home.context)
+        let inspection = try service.inspect(zipPath: bundle)
+        defer { service.cleanupTempDir(inspection.unpackedDir) }
+        let plan = try service.buildPlan(inspection: inspection, parentDir: parentDir)
+        let installer = ProjectTemplateInstaller(context: home.context)
+        let entry = try installer.install(plan: plan)
+
+        let uninstaller = ProjectTemplateUninstaller(context: home.context)
+        let uninstallPlan = try uninstaller.loadUninstallPlan(for: entry)
+
+        // The registry vanishes underneath the uninstall — the shape of
+        // every load that comes back empty for a reason that isn't "the
+        // user has no projects".
+        let registryPath = home.context.paths.projectsRegistry
+        try FileManager.default.removeItem(atPath: registryPath)
+
+        try uninstaller.uninstall(plan: uninstallPlan)
+
+        // Nothing matched, so nothing was written: no blank registry
+        // conjured where the user's file used to be.
+        #expect(FileManager.default.fileExists(atPath: registryPath) == false)
+        // …and the rest of the uninstall still ran.
+        #expect(FileManager.default.fileExists(atPath: plan.projectDir) == false)
+    }
+
     @Test func loadUninstallPlanRejectsProjectWithoutLock() throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }

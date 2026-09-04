@@ -201,8 +201,12 @@ import Foundation
             #expect(vm.moveProject(target, toFolder: "Work") == false)
             let failure = try #require(vm.mutationError)
             #expect(failure.title == "Couldn't move “real”")
-            #expect(failure.message.contains("couldn't read all of your projects file"))
-            #expect(vm.registryDamage?.quarantinePath != nil)
+            // The message is the app-wide `RegistryLoss` wording now, so
+            // the alert, the doctor's block and the MCP refusal all say the
+            // same thing about the same file.
+            #expect(failure.message.contains("couldn't be read at all and was set aside"))
+            let quarantine = try #require(vm.registryDamage?.quarantinePath)
+            #expect(failure.message.contains(quarantine))
         }
     }
 
@@ -235,6 +239,45 @@ import Foundation
 
             // The unreadable row is still on disk, untouched.
             #expect(try Self.read(path) == original)
+        }
+    }
+
+    /// The M1 relaxation, and the other half of the rule above: a row that
+    /// lost a FIELD is not a row that was lost. Refusing these froze every
+    /// mutation in the app over one hand-typed uuid — while the doctor
+    /// cheerfully repaired the same file — so the refusal now asks
+    /// `RegistryLoss`, which field salvage does not produce.
+    ///
+    /// The damage is not swept under the rug by allowing the write: the
+    /// banner still raises (asserted here), and the doctor raises a
+    /// `registryFieldSalvaged` finding.
+    @Test func mutationProceedsWhenOnlyAFieldWasSalvaged() throws {
+        try Self.withTempHome { ctx, path in
+            try Self.write("""
+            {
+              "projects": [
+                { "name": "good", "path": "/tmp/good", "uuid": "NOT-A-UUID" },
+                { "name": "other", "path": "/tmp/other" }
+              ]
+            }
+            """, to: path)
+            let vm = ProjectsViewModel(context: ctx)
+            vm.load()
+
+            // Fixture honesty: damage that is NOT row loss.
+            let damage = try #require(vm.registryDamage)
+            #expect(damage.droppedCount == 0)
+            #expect(damage.salvagedFields == ["good.uuid"])
+
+            let target = try #require(vm.projects.first { $0.name == "good" })
+            #expect(vm.moveProject(target, toFolder: "Work"))
+            #expect(vm.mutationError == nil)
+
+            // Both rows survive the write; the unreadable uuid does not,
+            // which is precisely what the doctor's finding warns about.
+            let after = ProjectDashboardService(context: ctx).loadRegistry()
+            #expect(after.projects.map(\.name) == ["good", "other"])
+            #expect(after.projects.first?.folder == "Work")
         }
     }
 
