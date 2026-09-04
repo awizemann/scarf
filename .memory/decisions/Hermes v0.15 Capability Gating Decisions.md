@@ -2,15 +2,16 @@
 title: Hermes v0.15 Capability Gating Decisions
 type: note
 permalink: scarf/decisions/hermes-v0.15-capability-gating-decisions
-tags:
-- hermes
-- capabilities
-- v015
+tags: [hermes, capabilities, v015]
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-09-04
 ---
 
 ## Observations
+
+- [decision] t-05f33e75 builds on the set_mode surface two ways: a per-project "auto-accept edits" setting that issues `session/set_mode accept_edits` after every `session/new` / `session/load` (and after autostart + reconnect, since the mode is scoped to the ACP session and each of those is a fresh one), and an "Allow edits for this session" third button on the tool-approval dialog. Both gate on the SAME `hasSessionEditAutoApproval` flag the header picker uses; both leave enforcement Hermes-side. The setting's trust placement is documented in [[Integrity is not authenticity: agent-writable Scarf sidecars need a Keychain-held MAC]] #safety
+- [gotcha] Edit-shape on a permission request is `toolCall.kind == "edit"` — the same field the dialog's pencil icon already keys off, verified against `acp_adapter/edit_approval.py` which builds every file-edit approval as `kind="edit"` with exactly `allow_once` + `deny`. Scarf renders Hermes's own options and only APPENDS its button when exactly one option reads as an affirmative allow, so a reduced or deny-only option set (v0.20 generic parsing) grows nothing #safety
+
 - [decision] Vercel AI Gateway + Sandbox removed from Hermes in v0.15 — Scarf drops `vercel` from demotedProviders, modelAliases, and terminalBackends (unconditional, no flag) #providers
 - [decision] OpenAI is now a first-class provider with wire ID `openai-api` (distinct from `openai-codex`). Bare `openai` is a Hermes alias for `openrouter` so Scarf does not register it #providers
 - [decision] xAI May-15 retired Grok model IDs (grok-4-0709, grok-4-fast-*, grok-3, grok-code-fast-1, grok-imagine-image-pro, etc.) resolve forward to grok-4.3 / grok-imagine-image-quality in modelAliases — mirrors hermes_cli/xai_retirement.py #providers

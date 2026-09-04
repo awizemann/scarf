@@ -6,7 +6,7 @@ tags: [models, presets, acp]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ModelPreset.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPresetService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectModelPresetReader.swift, scarf/scarf/Core/Services/ProjectModelPresetBinding.swift, scarf/scarf/Features/Models/Views/ModelPresetsView.swift]
 source_sha: 73ff36e8d264366ed074a105fe88d39d73b27f7b
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-09-04
 reviewed: 2026-09-02
 reviewed_by: audit:claude-code (background)
 ---
@@ -26,3 +26,9 @@ reviewed_by: audit:claude-code (background)
 ## Relations
 - uses_capability [[Hermes Capability Gating Pattern]]
 - relates_to [[Project-Scoped Chat and AGENTS.md Context]]
+
+
+## t-3b855719: the actor was serializing nothing
+
+- [gotcha] An `actor` serializes calls to ONE INSTANCE. Six call sites each constructed their own `ModelPresetService(context:)` (ChatViewModel, ChatModelBadge, ProjectModelPresetSheet, ProjectCockpitViewModel, ModelPresetsViewModel, iOS ProjectDetailView), so `model_presets.json` had six unserialized read-modify-write cycles over it — two overlapping upserts and the later full-file write dropped the earlier preset. Fixed with `ModelPresetService.shared(for: context)`, an NSLock-guarded per-`ServerContext` table; every call site now goes through it. Constructing the actor directly is still possible and still wrong. #concurrency
+- [gotcha] `ModelPresetStoreReader.presetIDs()` still collapses "no store" and "unreadable store" to `[]` — the safe direction for a WRITE decision (skip, never dangle) — but it now LOGS the unreadable case and `probe()` returns `.presets/.absent/.unreadable` for callers that must tell them apart. `FleetApplyViewModel` has NOT been switched over: it would still tell the user "preset not on this host" for a host whose store merely failed to read.

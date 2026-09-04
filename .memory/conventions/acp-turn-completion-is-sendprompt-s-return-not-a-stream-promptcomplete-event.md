@@ -2,16 +2,9 @@
 title: ACP turn completion is sendPrompt's return, not a stream .promptComplete event
 type: note
 permalink: scarf/conventions/acp-turn-completion-is-sendprompt-s-return-not-a-stream-promptcomplete-event
-tags:
-- acp
-- miniapps
-- bug
-- fix
-- testing
-- concurrency
-- security
+tags: [acp, miniapps, bug, fix, testing, concurrency, security]
 created: 2026-06-16
-updated: 2026-07-12
+updated: 2026-09-04
 ---
 
 Every ACP consumer must derive turn-completion from `sendPrompt`'s return; the event stream does not carry it. Missing this shipped a hung happy-path in the M2 mini-app agent channel. Branch `feat/projects`.
@@ -35,3 +28,12 @@ Every ACP consumer must derive turn-completion from `sendPrompt`'s return; the e
 - [gotcha] The iOS `ChatController._sendImpl` ALSO discarded `sendPrompt`'s result (`_ = try await client.sendPrompt(...)`) — the pre-existing third consumer, reported externally with a near-perfect diagnosis. Symptom: streaming bubble never finalized, `isAgentWorking`/`isPostProcessing` stuck, transcript sits in "Finishing up…" after the reply lands. Fix mirrors Mac exactly: synthesize `.promptComplete` on success AND an error-stopReason completion in the general catch; the `.reconnecting` early-return skips it because `pauseInBackground` already ran `finalizeOnDisconnect()`. #bug #fix
 - [convention] When adding ANY new `sendPrompt` caller, wire the completion synthesis in the same change — grep for `_ = try await client.sendPrompt` in review; that pattern is always wrong.
 - [testing] Controller-level regression: `Scarf iOSTests/ChatControllerPromptCompleteTests` drives the real `start()`/`send()` over an in-memory `AutoReplyChannel` (chunk → prompt result), asserts finalization + working-state exit. Teeth-verified (reverting the fix fails 3 assertions). Enablement: `ChatController.clientFactory` test seam (mirrors MiniAppAgentSession); the "Scarf iOSTests" target is RUNNABLE for the first time — shared "scarf mobile" scheme now lists it, stale TEST_HOST (pre-rename "Scarf iOS.app") corrected, `@testable import scarf_mobile` (module name after the target rename). Run: `xcodebuild test -scheme "scarf mobile" -destination "platform=iOS Simulator,name=iPhone 17 Pro" -only-testing:"Scarf iOSTests"`. #testing
+
+
+## The hang-guard deadlines had to be scaled for the parallel suite (t-05a6bb8b)
+
+`MiniAppAgentSessionTests` failed roughly one full-suite run in three at `waitFor`, and was green every time it ran alone. It was never a behaviour failure: every assertion in that suite is about WHETHER a turn resolves, and the only thing that failed was the deadline.
+
+- [gotcha-tests] The suite owns no file, no port and no subprocess — it is a `FakeACPChannel` actor and a real `ACPClient`, entirely in memory. What it contends on is CPU and the scheduler, shared with sibling suites that spawn real `Process`es (the same contention behind the flaky `RemoteSQLiteBackend` subprocess race, t-aud32). Nine tests each spinning a 10-15 ms polling loop against a 2 s deadline is a deadline tuned to an idle machine. Look for the contention before padding: "flaky under parallel load" is not automatically a shared-resource bug. #testing
+- [decision] Two fixes for the two halves. `.serialized` removes the contention the suite creates FOR ITSELF (nine concurrent polling loops become one); it cannot touch the sibling suites, because `.serialized` covers a suite and its subgroups, never the rest of the run — the same limit `TestRegistryLock` ran into. The deadlines then moved into a `Deadline` enum scaled by `activeProcessorCount` (1x at 8+ cores, up to 4x on one core), because a timeout in this suite is a HANG GUARD, not an assertion: its only job is to stop a genuinely leaked continuation from hanging CI, so headroom costs nothing on a green run.
+- [fact] Verified across four consecutive full `scarfTests` runs (723 tests, 93 suites) — green every time, where the suite previously failed about one run in three.

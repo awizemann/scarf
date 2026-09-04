@@ -18,7 +18,6 @@ reviewed_by: audit:claude-code (background)
 - [decision] Curator adopt: bulk "Adopt All" requires a confirmation alert; adopt/adoptAll always pass --yes because hermes curator adopt prompts [y/N] on TTY. skills uninstall has NO --yes flag and prompts unconditionally — Scarf feeds stdin "y\n". #decision
 - [decision] A2A deliberately NOT added to the platform roster (infrastructure plugin, no user config surface). Buzz added with NO GatewayAllowlistKind mapping (user-gated via allowed_users). #decision
 - [decision] Parsers are version-agnostic (curator status accepts both header generations); only UI surfaces and CLI invocations are capability-gated. #convention
-- [fact] Phase 3 (new settings key surfaces: compression knobs, reasoning_overrides via direct-YAML, STT/TTS, excluded_providers, profile_routes editor, import-agent, sync) is queued as Memophant task t-1cc0a505 — deliberately deferred. #todo
 
 ## Relations
 - extends [[Hermes v0.18 Compatibility Decisions]]

@@ -2,15 +2,9 @@
 title: Cache feature VMs in AppCoordinator to stop re-fetch on sidebar section switches
 type: note
 permalink: scarf/architecture/cache-feature-vms-in-appcoordinator-to-stop-re-fetch-on-sidebar-section-switches
-tags:
-- navigation
-- performance
-- swiftui
-- observation
-- appcoordinator
-- macos
+tags: [navigation, performance, swiftui, observation, appcoordinator, macos]
 created: 2026-06-13
-updated: 2026-06-13
+updated: 2026-09-04
 ---
 
 macOS `ContentView`'s detail pane is a `@ViewBuilder switch` over `coordinator.selectedSection` (26 sections). A `switch` in a `@ViewBuilder` yields a different view type per case, so SwiftUI **destroys + recreates** the section view on every sidebar switch — recreating its `@State` VM and re-running `load()` over SSH on every re-entry. Swapping `.onAppear`→`.task` does NOT fix this (the view is recreated, so `.task` fires every switch too — see [[prefer-task-over-onappear-for-view-load-fetches-behind-switch-based-navigation]], which this note supersedes for the *re-fetch* problem).
@@ -31,3 +25,10 @@ The fix (t-aud24, Option A/B): cache the VM in the coordinator so it (and its lo
 - supersedes [[prefer-task-over-onappear-for-view-load-fetches-behind-switch-based-navigation]]
 - relates_to [[Scarf Architecture Rules]]
 - relates_to [[macos-must-mirror-ios-scene-phase-pause-and-resume-for-background-work]]
+
+
+Extended 2026-09-04 by the sidebar restructure (t-e5bc2ad4), which found a second job for this cache.
+
+- [decision] The coordinator's feature-VM cache is also the SHARING seam, not just a survival one: the main sidebar's projects well and `ProjectsView` both resolve `featureViewModel(for: .projects)`, so the always-visible list and the cockpit read one `ProjectsViewModel` — one registry read per window instead of two, and no way for the two surfaces to disagree about selection or damage #navigation
+- [gotcha] A view that takes a cached VM must switch from `@State private var vm` (built in `init`) to `@Bindable var vm` passed in — leaving it as `@State` silently keeps a SECOND instance alive and the shared-state guarantee is quietly false #swiftui
+- [convention] Only ONE surface should subscribe a shared VM to `fileWatcher.lastChangeDate`. When the well was added it deliberately did NOT add a second `.onChange` — `ProjectsView` already reloads the same instance per tick, and a second subscriber doubles every registry read over SSH during a chat stream #performance
