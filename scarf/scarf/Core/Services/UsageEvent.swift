@@ -332,6 +332,7 @@ nonisolated extension UsageEvent {
         case skills
         case slashCommands = "slash_commands"
         case envMirror = "env_mirror"
+        case projectsMCP = "projects_mcp"
     }
 
     enum DeepLinkKind: String, CaseIterable, Sendable {

@@ -25,6 +25,14 @@ let package = Package(
             name: "ScarfCore",
             targets: ["ScarfCore"]
         ),
+        // The MCP server Scarf.app bundles in Contents/Helpers and
+        // registers into the local Hermes config. It lives here, in the
+        // package that owns the project services, so every tool wraps the
+        // SAME writers the UI uses instead of a second implementation.
+        .executable(
+            name: "scarf-projects-mcp",
+            targets: ["scarf-projects-mcp"]
+        ),
     ],
     targets: [
         .target(
@@ -42,10 +50,49 @@ let package = Package(
                 .swiftLanguageMode(.v5),
             ]
         ),
+        // Protocol + tool handlers, split out of the executable so they
+        // can be `@testable import`ed. An executable target cannot be,
+        // and the handlers are the half worth testing.
+        .target(
+            name: "ScarfProjectsMCPKit",
+            dependencies: ["ScarfCore"],
+            path: "Sources/ScarfProjectsMCPKit",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        // Thin shell: resolve the Hermes home, run the stdio loop.
+        .executableTarget(
+            name: "scarf-projects-mcp",
+            dependencies: ["ScarfCore", "ScarfProjectsMCPKit"],
+            path: "Sources/scarf-projects-mcp",
+            swiftSettings: [.swiftLanguageMode(.v5)],
+            linkerSettings: [
+                // Xcode builds ScarfCore as a DYNAMIC framework for the app
+                // and embeds it at `Scarf.app/Contents/Frameworks`. Without
+                // this rpath the copy of the helper inside the bundle links
+                // against `…/Build/Products/…/PackageFrameworks` — a path
+                // that exists only on the machine that built it, so the
+                // shipped binary dies at dyld before it reads a byte of
+                // stdin. Harmless for `swift build`, which links the
+                // package statically and never consults it.
+                .unsafeFlags(
+                    ["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"],
+                    .when(platforms: [.macOS])
+                ),
+            ]
+        ),
         .testTarget(
             name: "ScarfCoreTests",
             dependencies: ["ScarfCore"],
             path: "Tests/ScarfCoreTests"
+        ),
+        .testTarget(
+            name: "ScarfProjectsMCPKitTests",
+            // The executable is a dependency so `swift test` BUILDS it
+            // into the products directory — without it the stdio smoke
+            // test has nothing to spawn and silently skips, which is a
+            // smoke test that never smokes.
+            dependencies: ["ScarfProjectsMCPKit", "ScarfCore", "scarf-projects-mcp"],
+            path: "Tests/ScarfProjectsMCPKitTests"
         ),
     ]
 )

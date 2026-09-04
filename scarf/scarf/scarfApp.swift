@@ -140,6 +140,22 @@ struct ScarfApp: App {
             }
         }
 
+        // Register the bundled `scarf-projects` MCP server into the local
+        // Hermes config, so agents get validated project CRUD instead of
+        // hand-appending rows to projects.json. Unconditional and
+        // untoggled — it is part of what Scarf is, not a preference. The
+        // `command` is re-asserted every launch so moving the app doesn't
+        // strand Hermes on a path that no longer exists; a launch where
+        // nothing moved writes nothing.
+        Task.detached(priority: .utility) {
+            let outcome = ProjectsMCPRegistrar(context: .local).ensureRegistered()
+            if case .failed(let reason) = outcome {
+                Logger(subsystem: "com.scarf", category: "scarfApp")
+                    .warning("projects MCP registration failed: \(reason, privacy: .public)")
+                Analytics.record(.bootstrapTaskFailed(task: .projectsMCP))
+            }
+        }
+
         // Test-mode launch-URL handoff. When XCUITest passes
         // `--scarf-test-install-url <https-url>`, route the URL
         // through `TemplateURLRouter` so `ProjectsView`'s onAppear

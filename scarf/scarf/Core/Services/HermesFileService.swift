@@ -605,6 +605,27 @@ struct HermesFileService: Sendable {
         }
     }
 
+    /// Re-points an existing stdio server's `command` scalar.
+    ///
+    /// Creation still belongs to `hermes mcp add` — this is for the one
+    /// case the CLI has no verb for: a bundled server binary whose PATH
+    /// moved (the user dragged Scarf.app to a different folder), where
+    /// remove-then-add would discard every tool filter and env the user
+    /// set on the entry. Quoted through `yamlScalar` because an app can
+    /// live at a path with a space or a colon in it.
+    @discardableResult
+    nonisolated func setMCPServerCommand(name: String, command: String) -> Bool {
+        let trimmed = command.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return false }
+        return patchMCPServerField(name: name) { entryLines in
+            Self.replaceOrInsertScalar(
+                key: "command",
+                value: Self.yamlScalar(trimmed),
+                in: &entryLines
+            )
+        }
+    }
+
     @discardableResult
     nonisolated func removeMCPServer(name: String) -> (exitCode: Int32, output: String) {
         runHermesCLI(args: ["mcp", "remove", name], timeout: 30)

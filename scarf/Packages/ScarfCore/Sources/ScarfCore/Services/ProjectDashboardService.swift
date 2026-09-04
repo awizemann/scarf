@@ -249,4 +249,104 @@ public struct ProjectDashboardService: Sendable {
     public func dashboardModificationDate(for project: ProjectEntry) -> Date? {
         transport.stat(project.dashboardPath)?.mtime
     }
+
+    // MARK: - Dashboard writes
+
+    /// Validate then write `<project>/.scarf/dashboard.json`.
+    ///
+    /// The dashboard has always been an agent-authored file with no
+    /// writer on Scarf's side, which is precisely why broken ones reach
+    /// the renderer. This is the one writer, and it refuses anything the
+    /// renderer could not draw: the bytes must decode as a
+    /// `ProjectDashboard` AND satisfy `DashboardWidgetCatalog`.
+    ///
+    /// Bytes in are re-serialized pretty-printed with sorted keys — the
+    /// same formatting contract `encodeRegistry` keeps, since agents read
+    /// this file by hand — but through `JSONSerialization`, NOT through
+    /// `ProjectDashboard`'s encoder: a round-trip through the model would
+    /// silently delete every key the model doesn't declare, and this file
+    /// belongs to whoever wrote it.
+    ///
+    /// One write, one FSEvent: `transport.writeFile` is atomic on every
+    /// transport, so `HermesFileWatcher` sees a single change rather than
+    /// a truncate followed by a fill.
+    public func saveDashboard(rawJSON: Data, for project: ProjectEntry) throws {
+        guard rawJSON.count <= Self.maxJSONBytes else {
+            throw ProjectDashboardWriteError.tooLarge(bytes: rawJSON.count, cap: Self.maxJSONBytes)
+        }
+
+        let decoded: ProjectDashboard
+        do {
+            decoded = try JSONDecoder().decode(ProjectDashboard.self, from: rawJSON)
+        } catch {
+            throw ProjectDashboardWriteError.undecodable(Self.describe(error))
+        }
+
+        let problems = DashboardWidgetCatalog.validate(decoded)
+        guard problems.isEmpty else {
+            throw ProjectDashboardWriteError.invalid(problems)
+        }
+
+        // Preserves keys the model doesn't declare; normalizes layout.
+        let writeData: Data
+        if let object = try? JSONSerialization.jsonObject(with: rawJSON),
+           let formatted = try? JSONSerialization.data(
+               withJSONObject: object, options: [.prettyPrinted, .sortedKeys]
+           ) {
+            writeData = formatted
+        } else {
+            writeData = rawJSON
+        }
+
+        try transport.createDirectory(project.scarfDir)
+        try transport.writeFile(project.dashboardPath, data: writeData)
+    }
+
+    /// A `DecodingError` rendered as one line an agent can act on —
+    /// `localizedDescription` on a decoding error is famously "The data
+    /// couldn’t be read because it isn’t in the correct format."
+    static func describe(_ error: any Error) -> String {
+        guard let decoding = error as? DecodingError else { return error.localizedDescription }
+        func path(_ context: DecodingError.Context) -> String {
+            let joined = context.codingPath
+                .map { $0.intValue.map { i in "[\(i)]" } ?? ".\($0.stringValue)" }
+                .joined()
+            return joined.isEmpty ? "(root)" : String(joined.drop(while: { $0 == "." }))
+        }
+        switch decoding {
+        case .keyNotFound(let key, let context):
+            return "\(path(context)): missing required key \"\(key.stringValue)\""
+        case .typeMismatch(let type, let context):
+            return "\(path(context)): expected \(type)"
+        case .valueNotFound(let type, let context):
+            return "\(path(context)): expected \(type), found null"
+        case .dataCorrupted(let context):
+            return "\(path(context)): \(context.debugDescription)"
+        @unknown default:
+            return decoding.localizedDescription
+        }
+    }
+}
+
+/// Why a dashboard write was refused. Every case is phrased for the
+/// agent that sent the JSON, not for a log line.
+public enum ProjectDashboardWriteError: LocalizedError, Sendable, Equatable {
+    /// The bytes are not a `ProjectDashboard` at all.
+    case undecodable(String)
+    /// It decoded, but carries something the renderer cannot draw.
+    case invalid([String])
+    case tooLarge(bytes: Int, cap: Int)
+
+    public var errorDescription: String? {
+        switch self {
+        case .undecodable(let detail):
+            return "dashboard.json is not a valid dashboard: \(detail)"
+        case .invalid(let problems):
+            return "dashboard.json has \(problems.count) problem"
+                + (problems.count == 1 ? "" : "s") + ": "
+                + problems.joined(separator: "; ")
+        case .tooLarge(let bytes, let cap):
+            return "dashboard.json is \(bytes) bytes; the cap is \(cap)."
+        }
+    }
 }

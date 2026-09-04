@@ -12,6 +12,7 @@
 		53SCARFCORE0010 /* ScarfCore in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFCORE0001 /* ScarfCore */; };
 		53SCARFCORE0011 /* ScarfCore in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFCORE0002 /* ScarfCore */; };
 		53SCARFDESIGN0010 /* ScarfDesign in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFDESIGN0001 /* ScarfDesign */; };
+		53PROJMCP0010 /* scarf-projects-mcp in Embed scarf-projects-mcp */ = {isa = PBXBuildFile; productRef = 53PROJMCP0001 /* scarf-projects-mcp */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		53SCARFDESIGN0011 /* ScarfDesign in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFDESIGN0002 /* ScarfDesign */; };
 		53SCARFIOS0010 /* ScarfIOS in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFIOS0001 /* ScarfIOS */; };
 		53SPARKLE00010 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 53SPARKLE00011 /* Sparkle */; };
@@ -175,6 +176,20 @@
 		};
 /* End PBXFrameworksBuildPhase section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		53PROJMCP0030 /* Embed scarf-projects-mcp */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
+			files = (
+				53PROJMCP0010 /* scarf-projects-mcp in Embed scarf-projects-mcp */,
+			);
+			name = "Embed scarf-projects-mcp";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXGroup section */
 		534959372F7B83B600BD31AD = {
 			isa = PBXGroup;
@@ -292,6 +307,7 @@
 				5349593C2F7B83B600BD31AD /* Sources */,
 				5349593D2F7B83B600BD31AD /* Frameworks */,
 				5349593E2F7B83B600BD31AD /* Resources */,
+				53PROJMCP0030 /* Embed scarf-projects-mcp */,
 			);
 			buildRules = (
 			);
@@ -304,6 +320,7 @@
 			packageProductDependencies = (
 				53SWIFTTERM0001 /* SwiftTerm */,
 				53MARKER00001 /* Marker */,
+				53PROJMCP0001 /* scarf-projects-mcp */,
 				53SCARFCORE0001 /* ScarfCore */,
 				53SCARFDESIGN0001 /* ScarfDesign */,
 				53SPARKLE00011 /* Sparkle */,
@@ -1142,6 +1159,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 53MARKER00020 /* XCRemoteSwiftPackageReference "Marker" */;
 			productName = Marker;
+		};
+		53PROJMCP0001 /* scarf-projects-mcp */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = "scarf-projects-mcp";
 		};
 		53SCARFCORE0001 /* ScarfCore */ = {
 			isa = XCSwiftPackageProductDependency;
