@@ -1,7 +1,7 @@
 ---
 id: t-c1ed7f7c
 title: Decide 0.18 update-nudge + prep v2.17 release (local models + session-layer)
-status: todo
+status: done
 added: 2026-07-14
 ---
 
@@ -15,5 +15,5 @@ Two open decisions from the 2026-07-14 close, awaiting Alan (release now planned
 
 ## Artifacts
 
-
+Superseded by events: repo now tracks Hermes v0.21 (memory: hermes-v0-20/v0-20-4/v0-20-5 compatibility decisions, post-v2-24 backfill decisions) — the 0.18 floor decision and v2.17 release both resolved and shipped in intervening releases. Closing as stale; nothing left to execute.
 
