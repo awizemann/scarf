@@ -208,7 +208,7 @@ struct ProjectDetailView: View {
             guard let idString = reader.presetID(forProjectPath: path),
                   let uuid = UUID(uuidString: idString)
             else { return nil }
-            let service = ModelPresetService(context: ctx)
+            let service = ModelPresetService.shared(for: ctx)
             let preset = try? await service.get(id: uuid)
             return preset?.name
         }.value

@@ -219,7 +219,7 @@ final class ProjectCockpitViewModel {
 
         // Resolve the bound preset's display name (actor hop), if any.
         if let presetID = result.project.modelPresetId, let uuid = UUID(uuidString: presetID) {
-            modelPresetName = (try? await ModelPresetService(context: context).get(id: uuid))?.name
+            modelPresetName = (try? await ModelPresetService.shared(for: context).get(id: uuid))?.name
         } else {
             modelPresetName = nil
         }

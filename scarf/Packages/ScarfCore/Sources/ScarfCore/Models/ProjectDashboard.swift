@@ -5,13 +5,21 @@ import Foundation
 public struct ProjectRegistry: Codable, Sendable {
     public var projects: [ProjectEntry]
 
+    /// Top-level keys this model doesn't declare, carried through the
+    /// round-trip for the same reason `ProjectEntry.extra` is: the file is
+    /// agent-writable, and a save must not delete a `schemaVersion` or a
+    /// future fleet-wide key just because this build predates it.
+    public var extra: [String: JSONValue]
+
     public init(
-        projects: [ProjectEntry]
+        projects: [ProjectEntry],
+        extra: [String: JSONValue] = [:]
     ) {
         self.projects = projects
+        self.extra = extra
     }
 
-    private enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
         case projects
     }
 
@@ -31,6 +39,26 @@ public struct ProjectRegistry: Codable, Sendable {
         let log = decoder.userInfo[.projectRegistrySalvage] as? RegistrySalvageLog
         for row in rows where row.entry == nil { log?.recordDroppedRow() }
         self.projects = rows.compactMap(\.entry)
+
+        let known = Set(CodingKeys.allCases.map(\.rawValue))
+        var extras: [String: JSONValue] = [:]
+        if let raw = try? decoder.container(keyedBy: AnyCodingKey.self) {
+            for key in raw.allKeys where !known.contains(key.stringValue) {
+                if let value = try? raw.decode(JSONValue.self, forKey: key) {
+                    extras[key.stringValue] = value
+                }
+            }
+        }
+        self.extra = extras
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(projects, forKey: .projects)
+        var raw = encoder.container(keyedBy: AnyCodingKey.self)
+        for (key, value) in extra {
+            try raw.encode(value, forKey: AnyCodingKey(stringValue: key))
+        }
     }
 }
 
@@ -67,18 +95,37 @@ public struct ProjectEntry: Codable, Sendable, Identifiable, Hashable {
     /// equality and never disturbs selection highlight.
     public var uuid: UUID?
 
+    /// Every key in this row that `ProjectEntry` does not model, carried
+    /// verbatim through decode → edit → encode.
+    ///
+    /// Without it, ANY save rewrites the whole registry from the model and
+    /// silently deletes what the model doesn't declare: a newer Scarf's
+    /// field erased by an older build, an agent's own annotation erased by
+    /// a rename, the future `bots` binding erased by a folder drag. Same
+    /// contract `HermesCronJob.extra` keeps for `cron/jobs.json` and
+    /// `saveDashboard` keeps by re-serializing through `JSONSerialization`
+    /// — a model round-trip is only safe on a file the model owns, and
+    /// `projects.json` is agent-writable by design.
+    ///
+    /// Excluded from `Equatable`/`Hashable` for the same reason `uuid` is:
+    /// logical identity is name+path+folder+archived, and an unknown key
+    /// appearing must not disturb sidebar selection.
+    public var extra: [String: JSONValue]
+
     public init(
         name: String,
         path: String,
         folder: String? = nil,
         archived: Bool = false,
-        uuid: UUID? = nil
+        uuid: UUID? = nil,
+        extra: [String: JSONValue] = [:]
     ) {
         self.name = name
         self.path = path
         self.folder = folder
         self.archived = archived
         self.uuid = uuid
+        self.extra = extra
     }
 
     // MARK: - Equatable / Hashable (logical identity, sans `uuid`)
@@ -113,7 +160,7 @@ public struct ProjectEntry: Codable, Sendable, Identifiable, Hashable {
 
     // MARK: - Codable (custom for backward compat)
 
-    private enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
         case name, path, folder, archived, uuid
     }
 
@@ -143,6 +190,24 @@ public struct ProjectEntry: Codable, Sendable, Identifiable, Hashable {
         self.folder = salvage(String.self, .folder)
         self.archived = salvage(Bool.self, .archived) ?? false
         self.uuid = salvage(UUID.self, .uuid)
+
+        // Sweep up every key this model doesn't declare — explicit nulls
+        // included — so `encode(to:)` puts them back untouched. A key whose
+        // VALUE won't even decode as JSON is impossible from a JSONDecoder
+        // (every JSON value is a `JSONValue`), so nothing is silently lost
+        // here; a key we can't read at all is recorded as salvage.
+        let known = Set(CodingKeys.allCases.map(\.rawValue))
+        var extras: [String: JSONValue] = [:]
+        if let raw = try? decoder.container(keyedBy: AnyCodingKey.self) {
+            for key in raw.allKeys where !known.contains(key.stringValue) {
+                if let value = try? raw.decode(JSONValue.self, forKey: key) {
+                    extras[key.stringValue] = value
+                } else {
+                    log?.recordSalvagedField(key.stringValue, row: row)
+                }
+            }
+        }
+        self.extra = extras
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -154,6 +219,14 @@ public struct ProjectEntry: Codable, Sendable, Identifiable, Hashable {
             try c.encode(archived, forKey: .archived)
         }
         try c.encodeIfPresent(uuid, forKey: .uuid)
+
+        // Unknown keys go back last. They cannot collide with the declared
+        // ones (they were filtered against exactly this key set on the way
+        // in), so this never overwrites a modelled field.
+        var raw = encoder.container(keyedBy: AnyCodingKey.self)
+        for (key, value) in extra {
+            try raw.encode(value, forKey: AnyCodingKey(stringValue: key))
+        }
     }
 }
 

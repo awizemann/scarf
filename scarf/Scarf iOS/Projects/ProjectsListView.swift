@@ -22,6 +22,17 @@ struct ProjectsListView: View {
     @State private var isLoading: Bool = true
     @State private var loadError: String?
 
+    /// One sentence naming the damage the last registry read had to work
+    /// around, or `nil` for a clean read.
+    ///
+    /// iOS called plain `loadRegistry()` everywhere, which throws the
+    /// salvage report away — so a registry that dropped rows, or was
+    /// quarantined outright, rendered on the phone as a SHORT LIST with no
+    /// banner and nothing to click. The Mac has said this out loud since
+    /// Phase 2; the phone now says it too (P7 addendum). Read-only surface,
+    /// so it explains and points at the Mac rather than offering a repair.
+    @State private var damage: String?
+
     private var serverContext: ServerContext {
         config.toServerContext(id: Self.sharedContextID)
     }
@@ -37,10 +48,17 @@ struct ProjectsListView: View {
                     Text(err)
                 }
             } else if visibleProjects.isEmpty {
+                // A damaged registry reads as an EMPTY one. Saying "no
+                // projects yet" there is the single most misleading thing
+                // this screen can say — the projects exist, we just
+                // couldn't read them.
                 ContentUnavailableView {
-                    Label("No projects yet", systemImage: "square.grid.2x2")
+                    Label(
+                        damage == nil ? "No projects yet" : "Projects couldn't be read",
+                        systemImage: damage == nil ? "square.grid.2x2" : "exclamationmark.triangle.fill"
+                    )
                 } description: {
-                    Text("Use the Mac app to add and configure projects — they'll appear here automatically.")
+                    Text(damage ?? "Use the Mac app to add and configure projects — they'll appear here automatically.")
                 }
             } else {
                 projectList
@@ -59,6 +77,21 @@ struct ProjectsListView: View {
     private var projectList: some View {
         let folders = folderLabels
         List {
+            if let damage {
+                Section {
+                    Label {
+                        Text(damage)
+                            .font(.footnote)
+                            .foregroundStyle(ScarfColor.foregroundMuted)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                    .listRowBackground(ScarfColor.backgroundSecondary)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Projects registry damaged. \(damage)")
+                }
+            }
             // Top-level (no folder) projects first, then folder
             // disclosure sections — same shape as Mac
             // ProjectsSidebar.swift renders.
@@ -137,11 +170,28 @@ struct ProjectsListView: View {
         let ctx = serverContext
         // `loadRegistry()` is non-throwing (returns an empty registry on any
         // read failure), so the detached task can't throw — no do/catch.
-        let loaded: [ProjectEntry] = await Task.detached {
+        let loaded: (projects: [ProjectEntry], damage: String?) = await Task.detached {
             let service = ProjectDashboardService(context: ctx)
-            return service.loadRegistry().projects
+            let result = service.loadRegistryDetailed()
+            return (result.registry.projects, Self.damageMessage(result))
         }.value
-        projects = loaded
+        projects = loaded.projects
+        damage = loaded.damage
         loadError = nil
+    }
+
+    /// The user-facing sentence for a damaged read. `RegistryLoss.message`
+    /// is the app-wide wording for the blocking kinds (dropped rows,
+    /// quarantine, unreadable); field-level salvage isn't blocking but is
+    /// still worth saying, so it gets its own line rather than silence.
+    private static func damageMessage(
+        _ result: ProjectDashboardService.RegistryLoadResult
+    ) -> String? {
+        if let loss = result.loss { return loss.message }
+        guard result.salvaged else { return nil }
+        let fields = result.salvage.salvagedFields
+        guard !fields.isEmpty else { return nil }
+        return "Some project details in \(result.registryPath) couldn't be read and were skipped: "
+            + fields.joined(separator: ", ") + ". Fix them in the Mac app."
     }
 }

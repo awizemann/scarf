@@ -163,7 +163,7 @@ struct ChatModelBadge: View {
     private func loadIfNeeded() async {
         guard !isLoading else { return }
         isLoading = true
-        let service = ModelPresetService(context: serverContext)
+        let service = ModelPresetService.shared(for: serverContext)
         if let loaded = try? await service.list() {
             self.presets = loaded
         }

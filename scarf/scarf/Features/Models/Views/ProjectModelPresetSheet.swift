@@ -153,7 +153,7 @@ struct ProjectModelPresetSheet: View {
 
     @MainActor
     private func load() async {
-        let service = ModelPresetService(context: context)
+        let service = ModelPresetService.shared(for: context)
         do {
             let loaded = try await service.list()
             self.presets = loaded

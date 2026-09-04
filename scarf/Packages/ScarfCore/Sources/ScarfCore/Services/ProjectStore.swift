@@ -448,6 +448,21 @@ public struct ProjectStore: Sendable {
     /// damage instead of describing a list that should never have been
     /// built.
     public nonisolated func indexInRegistry(_ project: ScarfProject) throws {
+        // This is a read-modify-write of the registry, so the cross-process
+        // lock has to cover the WHOLE of it, not just the `saveRegistry`
+        // publish at the end (t-db8c745b) — otherwise the helper's write
+        // can land between the load below and that publish, and this row
+        // edit erases it. `RegistryWriteLock` is reentrant, so the inner
+        // `saveRegistry` re-enters rather than deadlocking.
+        guard let lock = RegistryWriteLock(context: context) else {
+            return try indexInRegistryLocked(project)
+        }
+        try lock.withLock(path: context.paths.projectsRegistry) {
+            try indexInRegistryLocked(project)
+        }
+    }
+
+    private nonisolated func indexInRegistryLocked(_ project: ScarfProject) throws {
         let dashboardService = ProjectDashboardService(context: context)
         let loaded = dashboardService.loadRegistryDetailed()
         if let loss = loaded.loss {

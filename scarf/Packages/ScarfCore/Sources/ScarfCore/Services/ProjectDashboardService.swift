@@ -217,51 +217,19 @@ public struct ProjectDashboardService: Sendable {
     /// file stays corrupt until a human fixes it — one copy per load
     /// would bury the directory.
     private func quarantineRegistry(data: Data, path: String) -> String? {
-        let dir = (path as NSString).deletingLastPathComponent
-        let prefix = (path as NSString).lastPathComponent + ".corrupt-"
-        if let names = try? transport.listDirectory(dir) {
-            for name in names where name.hasPrefix(prefix) {
-                let candidate = dir + "/" + name
-                // Size first: this runs on every load while the registry
-                // stays corrupt, and the oversize case (up to
-                // `maxJSONBytes`) would otherwise re-read megabytes per
-                // watcher tick just to find the copy it already made.
-                guard transport.stat(candidate)?.size == Int64(data.count) else { continue }
-                if let existing = try? transport.readFile(candidate), existing == data {
-                    return candidate
-                }
-            }
-        }
-        // Second-resolution stamp, so two DIFFERENT corruptions inside
-        // the same second would otherwise land on the same name and the
-        // later one would eat the earlier copy.
-        var destination = dir + "/" + prefix + Self.quarantineStamp(Date())
-        if transport.fileExists(destination) {
-            destination += "-" + UUID().uuidString.prefix(8)
-        }
-        do {
-            try transport.writeFile(destination, data: data)
-            Self.logger.error(
-                "Quarantined unreadable project registry to \(destination, privacy: .public)"
-            )
-            return destination
-        } catch {
-            Self.logger.error(
-                "Could not quarantine unreadable project registry: \(error.localizedDescription, privacy: .public)"
-            )
-            return nil
-        }
+        // Shared with every other guarded sidecar (grants, session map) —
+        // the dedup-by-size-then-bytes and the filename-safe stamp are one
+        // implementation in `GuardedJSONStore`, not a copy per store.
+        GuardedJSONStore.quarantine(
+            data: data, path: path, transport: transport, label: "projects.json"
+        )
     }
 
     /// Filename-safe UTC stamp (`20260903T142530Z`). Deliberately not
     /// ISO-8601-with-colons: those are legal on APFS but not on every
     /// remote filesystem Scarf writes to over SSH.
     static func quarantineStamp(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "UTC")
-        f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
-        return f.string(from: date)
+        GuardedJSONStore.quarantineStamp(date)
     }
 
     /// Persist the project registry to `~/.hermes/scarf/projects.json`.
@@ -301,9 +269,30 @@ public struct ProjectDashboardService: Sendable {
     public func saveRegistry(_ registry: ProjectRegistry, allowEmpty: Bool = false) throws {
         let path = context.paths.projectsRegistry
         // Encode BEFORE touching the filesystem, so an encode failure
-        // can't leave a half-updated directory behind.
+        // can't leave a half-updated directory behind — and before the
+        // lock, so a doomed write never contends for it.
         let writeData = try Self.encodeRegistry(registry)
 
+        // CROSS-PROCESS LOCK (t-db8c745b). Everything from the inspect to
+        // the publish happens inside it: without one, the refusal above is
+        // a TOCTOU against the `scarf-projects` MCP helper — both sides
+        // inspect a healthy file, both publish atomically, and the loser's
+        // rows are gone with `.bak` holding the loser's state rather than
+        // the user's previous one. Reentrant, so `indexInRegistry` can hold
+        // it across its own read-modify-write. A context with no derivable
+        // lock path proceeds unlocked rather than losing the ability to
+        // save at all.
+        guard let lock = RegistryWriteLock(context: context) else {
+            return try saveRegistryLocked(writeData, registry: registry, allowEmpty: allowEmpty, path: path)
+        }
+        try lock.withLock(path: path) {
+            try saveRegistryLocked(writeData, registry: registry, allowEmpty: allowEmpty, path: path)
+        }
+    }
+
+    private func saveRegistryLocked(
+        _ writeData: Data, registry: ProjectRegistry, allowEmpty: Bool, path: String
+    ) throws {
         // ONE read of what is already there, answering all three
         // questions below. Reading per question would also mean three
         // SSH round-trips per save on a remote context.

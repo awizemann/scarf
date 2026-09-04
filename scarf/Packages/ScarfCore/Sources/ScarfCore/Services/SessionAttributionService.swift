@@ -49,26 +49,23 @@ public struct SessionAttributionService: Sendable {
     /// is a convenience index, not a source of truth for anything
     /// load-bearing.
     public nonisolated func load() -> SessionProjectMap {
-        let path = context.paths.sessionProjectMap
-        let transport = context.makeTransport()
-        guard transport.fileExists(path) else {
-            return SessionProjectMap()
-        }
-        do {
-            let data = try transport.readFile(path)
-            if data.count > Self.maxSidecarBytes {
-                #if canImport(os)
-                Self.logger.warning("session-project-map at \(path, privacy: .public) is \(data.count) bytes (cap \(Self.maxSidecarBytes)); treating as missing")
-                #endif
-                return SessionProjectMap()
-            }
-            return try JSONDecoder().decode(SessionProjectMap.self, from: data)
-        } catch {
-            #if canImport(os)
-            Self.logger.warning("session-project-map parse failed at \(path, privacy: .public): \(error.localizedDescription, privacy: .public); returning empty map")
-            #endif
-            return SessionProjectMap()
-        }
+        inspect().map
+    }
+
+    private nonisolated func store() -> GuardedJSONStore {
+        GuardedJSONStore(transport: context.makeTransport(), label: "session_project_map.json")
+    }
+
+    /// One read serving both the map and the state of the bytes behind it —
+    /// the state `persist` needs to know whether writing would destroy
+    /// something. Two reads would be two SFTP round-trips per attribution.
+    private nonisolated func inspect() -> (map: SessionProjectMap, inspection: GuardedJSONStore.Inspection) {
+        let (inspection, decoded) = store().inspectDecoding(
+            SessionProjectMap.self,
+            at: context.paths.sessionProjectMap,
+            maxBytes: Self.maxSidecarBytes
+        )
+        return (decoded ?? SessionProjectMap(), inspection)
     }
 
     /// Look up the project path a given session was attributed to.
@@ -112,39 +109,62 @@ public struct SessionAttributionService: Sendable {
     /// Record that `sessionID` was created under the given project
     /// path. Idempotent.
     public nonisolated func attribute(sessionID: String, toProjectPath projectPath: String) {
-        var map = load()
-        if map.mappings[sessionID] == projectPath {
-            return
+        mutate { map in
+            let now = SessionProjectMap.nowISO8601()
+            if map.mappings[sessionID] == projectPath {
+                // Idempotent, as it has always been — the one exception is
+                // a pre-t-3b855719 row that carries no recency stamp: give
+                // it one so pruning can rank it, then never write again.
+                guard map.touched?[sessionID] == nil else { return false }
+                map.touched = (map.touched ?? [:]).merging([sessionID: now]) { _, new in new }
+                return true
+            }
+            map.mappings[sessionID] = projectPath
+            map.touched = (map.touched ?? [:]).merging([sessionID: now]) { _, new in new }
+            map.updatedAt = now
+            return true
         }
-        map.mappings[sessionID] = projectPath
-        map.updatedAt = SessionProjectMap.nowISO8601()
-        persist(map)
     }
 
     /// Remove a mapping. Exposed for future "detach from project"
     /// UIs and tests; today's Mac + iOS call sites don't invoke it
     /// because Hermes owns session lifecycle.
     public nonisolated func forget(sessionID: String) {
-        var map = load()
-        guard map.mappings.removeValue(forKey: sessionID) != nil else { return }
-        map.updatedAt = SessionProjectMap.nowISO8601()
-        persist(map)
+        mutate { map in
+            guard map.mappings.removeValue(forKey: sessionID) != nil else { return false }
+            map.touched?.removeValue(forKey: sessionID)
+            map.updatedAt = SessionProjectMap.nowISO8601()
+            return true
+        }
     }
 
     // MARK: - Private
 
-    private func persist(_ map: SessionProjectMap) {
+    /// THE SIDECAR CHOKEPOINT. This file is the SOLE record of
+    /// session↔project attribution, and every write is a whole-file
+    /// read-modify-write. The old shape returned an empty map on ANY read
+    /// failure and then wrote that emptiness back over the file — one SFTP
+    /// blip on iOS (the likeliest trigger: it shares this exact path) erased
+    /// every attribution the install had ever made, silently, with no
+    /// backup. Now the read and the write share ONE inspection, a
+    /// stat-confirmed twice-failed read REFUSES the write, undecodable
+    /// bytes are quarantined before the rebuild, and the replaced bytes
+    /// land in `session_project_map.json.bak`.
+    ///
+    /// Failures stay non-throwing here — attribution is best-effort and its
+    /// callers are fire-and-forget — but they are logged, and the refusal
+    /// means "did nothing" rather than "destroyed the file".
+    private nonisolated func mutate(_ body: (inout SessionProjectMap) -> Bool) {
         let path = context.paths.sessionProjectMap
-        let transport = context.makeTransport()
-        let dir = context.paths.scarfDir
+        let (loaded, inspection) = inspect()
+        var map = loaded
+        guard body(&map) else { return }
+        map.prune()
         do {
-            if !transport.fileExists(dir) {
-                try transport.createDirectory(dir)
-            }
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(map)
-            try transport.writeFile(path, data: data)
+            try store().write(data, to: path, after: inspection)
         } catch {
             #if canImport(os)
             Self.logger.error("failed to persist session-project-map at \(path, privacy: .public): \(error.localizedDescription, privacy: .public)")

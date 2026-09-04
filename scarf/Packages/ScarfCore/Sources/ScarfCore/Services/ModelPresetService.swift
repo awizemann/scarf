@@ -22,6 +22,9 @@ import os
 public actor ModelPresetService {
     #if canImport(os)
     private static let logger = Logger(subsystem: "com.scarf", category: "ModelPresetService")
+    /// Reachable from `ModelPresetStoreReader`, which is a struct outside
+    /// the actor and cannot see the private one.
+    static let readerLogger = Logger(subsystem: "com.scarf", category: "ModelPresetStoreReader")
     #endif
 
     private let context: ServerContext
@@ -29,6 +32,32 @@ public actor ModelPresetService {
     public init(context: ServerContext = .local) {
         self.context = context
     }
+
+    /// The instance every call site must use for a given host.
+    ///
+    /// **The actor was serializing nothing.** Six call sites each built
+    /// their OWN `ModelPresetService(context:)` (chat, the model badge,
+    /// the project preset sheet, the cockpit, the presets list, iOS's
+    /// project detail) — and an `actor` serializes calls to ONE instance,
+    /// so six instances over one file is six unserialized read-modify-write
+    /// cycles. Two overlapping upserts and the later full-file write drops
+    /// the earlier preset. Sharing the instance per context makes the
+    /// serialization the doc comment always claimed.
+    ///
+    /// Keyed by `ServerContext` (its `Hashable` covers id + kind + home
+    /// override), so each window's host gets its own serialization domain
+    /// and tests with temp homes never share one with production.
+    public static func shared(for context: ServerContext) -> ModelPresetService {
+        instancesLock.lock()
+        defer { instancesLock.unlock() }
+        if let existing = instances[context] { return existing }
+        let created = ModelPresetService(context: context)
+        instances[context] = created
+        return created
+    }
+
+    private static let instancesLock = NSLock()
+    nonisolated(unsafe) private static var instances: [ServerContext: ModelPresetService] = [:]
 
     // MARK: - Public surface
 
@@ -137,17 +166,57 @@ public struct ModelPresetStoreReader: Sendable {
         self.context = context
     }
 
-    /// Every preset id present on this host. Empty on a missing/corrupt
-    /// store — the caller treats "not listed" as "not available", which is
-    /// the safe direction (skip, don't dangle).
-    public nonisolated func presetIDs() -> Set<UUID> {
+    /// What a probe of this host's preset store actually found. The
+    /// distinction matters to the fleet diagnosis: "this host has no such
+    /// preset" and "we could not read this host's presets" produce the same
+    /// skip but are not the same fact, and reporting the second as the
+    /// first sends the user looking for a preset that is right there.
+    public enum Probe: Sendable, Equatable {
+        case presets(Set<UUID>)
+        /// No store on this host yet — a fresh install has none.
+        case absent
+        /// The store is there and could not be read or decoded.
+        case unreadable(path: String)
+
+        /// The ids, with both failure modes collapsed to empty — the safe
+        /// direction for a WRITE decision (skip, never dangle).
+        public var ids: Set<UUID> {
+            if case .presets(let ids) = self { return ids }
+            return []
+        }
+    }
+
+    /// Probe this host's store, keeping absent and unreadable apart.
+    public nonisolated func probe() -> Probe {
         let transport = context.makeTransport()
         let path = context.paths.modelPresetsJSON
-        guard transport.fileExists(path), let data = try? transport.readFile(path) else { return [] }
+        guard transport.fileExists(path) else { return .absent }
+        guard let data = try? transport.readFile(path) else { return .unreadable(path: path) }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        guard let store = try? decoder.decode(ModelPresetStore.self, from: data) else { return [] }
-        return Set(store.presets.map(\.id))
+        guard let store = try? decoder.decode(ModelPresetStore.self, from: data) else {
+            return .unreadable(path: path)
+        }
+        return .presets(Set(store.presets.map(\.id)))
+    }
+
+    /// Every preset id present on this host. Empty on a missing/corrupt
+    /// store — the caller treats "not listed" as "not available", which is
+    /// the safe direction (skip, don't dangle). A failure is LOGGED rather
+    /// than swallowed silently: the fleet's "preset not on this host"
+    /// explanation used to be the only trace an unreadable store left, and
+    /// it named the wrong cause. Callers that need to tell the two apart
+    /// ask ``probe()``.
+    public nonisolated func presetIDs() -> Set<UUID> {
+        let probed = probe()
+        #if canImport(os)
+        if case .unreadable(let path) = probed {
+            ModelPresetService.readerLogger.error(
+                "model_presets.json at \(path, privacy: .public) exists but could not be read/decoded; reporting no presets for this host"
+            )
+        }
+        #endif
+        return probed.ids
     }
 
     /// Whether `id` resolves to a preset on this host.

@@ -72,26 +72,27 @@ public struct MiniAppGrantStore: Sendable {
         permissions: Set<MiniAppPermission>,
         manifestFingerprint: String? = nil
     ) throws {
-        var grants = load()
-        grants.removeAll { $0.projectId == projectId && $0.miniAppId == miniAppId }
-        grants.append(MiniAppGrant(
-            projectId: projectId,
-            miniAppId: miniAppId,
-            permissions: permissions.map(\.rawValue).sorted(),
-            decidedAt: Self.iso8601.string(from: Date()),
-            manifestFingerprint: manifestFingerprint
-        ))
-        try persist(grants)
+        try mutate { grants in
+            grants.removeAll { $0.projectId == projectId && $0.miniAppId == miniAppId }
+            grants.append(MiniAppGrant(
+                projectId: projectId,
+                miniAppId: miniAppId,
+                permissions: permissions.map(\.rawValue).sorted(),
+                decidedAt: Self.iso8601.string(from: Date()),
+                manifestFingerprint: manifestFingerprint
+            ))
+            return true
+        }
     }
 
     /// Forget a mini-app's grant entirely (back to default-deny / "never
     /// decided"). No-op when none exists.
     public nonisolated func revoke(projectId: String, miniAppId: String) throws {
-        var grants = load()
-        let before = grants.count
-        grants.removeAll { $0.projectId == projectId && $0.miniAppId == miniAppId }
-        guard grants.count != before else { return }
-        try persist(grants)
+        try mutate { grants in
+            let before = grants.count
+            grants.removeAll { $0.projectId == projectId && $0.miniAppId == miniAppId }
+            return grants.count != before
+        }
     }
 
     /// Whether a decision is on record (used to decide whether to show the
@@ -128,29 +129,52 @@ public struct MiniAppGrantStore: Sendable {
 
     // MARK: - Private I/O
 
+    /// Read-only view. A file we can't read reads as "no decisions on
+    /// record", which is default-DENY and therefore the safe direction for
+    /// every read — but it is a lie about the file, which is exactly why
+    /// `mutate` re-inspects rather than trusting this.
     private nonisolated func load() -> [MiniAppGrant] {
-        let path = context.paths.miniAppGrantsJSON
-        let transport = context.makeTransport()
-        guard transport.fileExists(path), let data = try? transport.readFile(path) else { return [] }
-        if data.count > Self.maxBytes {
-            #if canImport(os)
-            Self.logger.warning("miniapp_grants.json is \(data.count) bytes (cap \(Self.maxBytes)); treating as empty")
-            #endif
-            return []
-        }
-        return (try? JSONDecoder().decode(Envelope.self, from: data))?.grants ?? []
+        inspect().grants
     }
 
-    private nonisolated func persist(_ grants: [MiniAppGrant]) throws {
-        let transport = context.makeTransport()
-        let dir = context.paths.scarfDir
-        if !transport.fileExists(dir) {
-            try transport.createDirectory(dir)
-        }
+    private nonisolated func store() -> GuardedJSONStore {
+        GuardedJSONStore(transport: context.makeTransport(), label: "miniapp_grants.json")
+    }
+
+    /// One read: the grants AND the state of the bytes behind them.
+    private nonisolated func inspect() -> (grants: [MiniAppGrant], inspection: GuardedJSONStore.Inspection) {
+        let (inspection, envelope) = store().inspectDecoding(
+            Envelope.self, at: context.paths.miniAppGrantsJSON, maxBytes: Self.maxBytes
+        )
+        return (envelope?.grants ?? [], inspection)
+    }
+
+    /// THE GRANTS CHOKEPOINT. Every write to `miniapp_grants.json` is a
+    /// whole-file read-modify-write, and the old shape was
+    /// `try? decode ?? []` + full replace — so ONE failed read (an SSH
+    /// blip, an SFTP timeout on iOS) silently converted every recorded
+    /// permission decision into an empty file on the next grant. Now the
+    /// read and the write share one inspection, and a stat-confirmed,
+    /// twice-failed read REFUSES the write instead of publishing the
+    /// emptiness it invented.
+    ///
+    /// Bytes that are present but undecodable are quarantined by
+    /// `GuardedJSONStore` and then rebuilt from empty rather than refused
+    /// forever — the same call `ProjectStore` makes for `project.json`.
+    /// Grants are re-grantable (the permission sheet reappears, seeded
+    /// default-deny) and the original bytes survive in the quarantine copy;
+    /// `projects.json` refuses instead because its rows exist nowhere else.
+    ///
+    /// - Parameter body: mutates the grants in place and returns whether
+    ///   anything actually changed. `false` writes nothing.
+    private nonisolated func mutate(_ body: (inout [MiniAppGrant]) -> Bool) throws {
+        let (loaded, inspection) = inspect()
+        var grants = loaded
+        guard body(&grants) else { return }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(Envelope(version: 1, grants: grants))
-        try transport.writeFile(context.paths.miniAppGrantsJSON, data: data)
+        try store().write(data, to: context.paths.miniAppGrantsJSON, after: inspection)
     }
 
     private struct Envelope: Codable, Sendable {

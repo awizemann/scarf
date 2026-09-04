@@ -19,6 +19,18 @@ public final class IOSCronViewModel {
     public private(set) var isSaving: Bool = false
     public private(set) var lastError: String?
 
+    /// The exact bytes `load()` last saw on the host — the baseline every
+    /// save is checked against.
+    ///
+    /// iOS rewrites `cron/jobs.json` WHOLE from the in-memory list, and the
+    /// list can be minutes old (a phone that slept, a sheet left open) while
+    /// Hermes has been writing `next_run_at` / `last_run_at` / `state` into
+    /// the same file on every tick. Without a baseline the save silently
+    /// clobbers all of it. With one, a changed file stops the write and asks
+    /// for a reload — the same "never write over what you didn't read"
+    /// rule `saveRegistry` enforces for `projects.json`.
+    private var baseline: Data?
+
     public init(context: ServerContext) {
         self.context = context
     }
@@ -34,23 +46,27 @@ public final class IOSCronViewModel {
         // snappy on most remotes; this measure point makes the cost
         // visible in ScarfMon traces alongside the rest of the iOS
         // load paths.
-        let result: Result<CronJobsFile, Error> = await ScarfMon.measureAsync(.diskIO, "ios.cron.load") {
+        let result: Result<(CronJobsFile, Data), Error> = await ScarfMon.measureAsync(.diskIO, "ios.cron.load") {
             await Task.detached {
                 do {
                     guard let data = ctx.readData(path) else {
                         throw LoadError.missingFile(path: path)
                     }
                     let decoded = try JSONDecoder().decode(CronJobsFile.self, from: data)
-                    return .success(decoded)
+                    return .success((decoded, data))
                 } catch {
-                    return Result<CronJobsFile, Error>.failure(error)
+                    return Result<(CronJobsFile, Data), Error>.failure(error)
                 }
             }.value
         }
 
         switch result {
-        case .success(let file):
+        case .success(let (file, data)):
             jobs = Self.sorted(file.jobs)
+            // Every save from here on is checked against exactly these
+            // bytes; a failed/absent load leaves it nil, which means
+            // "we have no baseline" and blocks the whole-file rewrite.
+            baseline = data
             isLoading = false
 
         case .failure(let err as LoadError):
@@ -59,6 +75,9 @@ public final class IOSCronViewModel {
             // list + hint in the UI.
             if case .missingFile = err {
                 jobs = []
+                // No file → nothing to clobber; an empty baseline is the
+                // truthful one and a first write is allowed.
+                baseline = Data()
             } else {
                 lastError = err.localizedDescription
             }
@@ -254,46 +273,82 @@ public final class IOSCronViewModel {
 
     // MARK: - Internal
 
-    /// Shared persistence path: serialize `CronJobsFile` as pretty
-    /// JSON, write it atomically through the transport, and update
-    /// the in-memory list on success.
+    /// Shared persistence path: serialize `CronJobsFile` as pretty JSON and
+    /// publish it through the GUARDED shape, then update the in-memory list.
+    ///
+    /// This is `cron/jobs.json` — a HERMES-owned file this view model
+    /// rewrites whole — so it owes three checks the bespoke version had
+    /// none of (P7 addendum):
+    ///
+    /// 1. **Damage refusal.** A stat-confirmed, twice-failed read means the
+    ///    file is there and we can't see it; writing would replace it with
+    ///    a list assembled from a read that failed. `GuardedJSONStore`
+    ///    refuses.
+    /// 2. **Stale-clobber refusal.** The write must be based on the bytes
+    ///    we actually loaded. Hermes rewrites this file on every tick
+    ///    (`next_run_at`, `last_run_at`, `state`, run claims); an
+    ///    hours-old in-memory list would erase all of it. A changed file
+    ///    asks for a reload instead.
+    /// 3. **`.bak`.** The replaced bytes land in `jobs.json.bak`, so even a
+    ///    write we should not have made is recoverable.
+    ///
+    /// Unknown per-job keys were already safe — `HermesCronJob.extra`
+    /// round-trips them — which is why this fix is about WHEN to write, not
+    /// what.
     private func saveJobs(_ newJobs: [HermesCronJob]) async -> Bool {
         guard !isSaving else { return false }
         isSaving = true
         lastError = nil
         let ctx = context
         let path = ctx.paths.cronJobsJSON
+        let expected = baseline
 
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
         let file = CronJobsFile(jobs: newJobs, updatedAt: iso.string(from: Date()))
 
-        let ok: Bool = await Task.detached {
+        enum SaveOutcome: Sendable { case saved(Data), failed(String) }
+
+        let outcome: SaveOutcome = await Task.detached {
             do {
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                 let data = try encoder.encode(file)
-                let transport = ctx.makeTransport()
-                // Ensure the cron/ directory exists — on a fresh
-                // Hermes install this file won't be present.
-                // `createDirectory` is mkdir -p across all transports;
-                // call unconditionally and let writeFile surface any
-                // real failure.
-                let parent = (path as NSString).deletingLastPathComponent
-                try? transport.createDirectory(parent)
-                try transport.writeFile(path, data: data)
-                return true
+                let store = GuardedJSONStore(transport: ctx.makeTransport(), label: "jobs.json")
+                let inspection = store.inspect(path, maxBytes: ProjectDashboardService.maxJSONBytes)
+
+                let onDisk: Data
+                switch inspection.state {
+                case .absent:            onDisk = Data()
+                case .present:           onDisk = inspection.bytes ?? Data()
+                case .quarantined:       onDisk = inspection.bytes ?? Data()
+                case .unreadable(let p):
+                    return .failed("\(p) exists but couldn't be read — refusing to overwrite it. Check the connection and try again.")
+                }
+                // A nil baseline means this view model never loaded — the
+                // staleness question has no answer, so it isn't asked. The
+                // UI always loads before it can offer an edit (`CronListView`
+                // has a `.task { load() }`), so this is the direct-construct
+                // path in tests, not a route a user can take. The damage
+                // refusal and the `.bak` still apply.
+                if let expected, onDisk != expected {
+                    return .failed("Cron jobs changed on the host since this list was loaded. Pull to refresh so the change isn't overwritten.")
+                }
+                try store.write(data, to: path, after: inspection)
+                return .saved(data)
             } catch {
-                return false
+                return .failed("Couldn't save jobs.json — check the connection and try again.")
             }
         }.value
 
         isSaving = false
-        if ok {
+        switch outcome {
+        case .saved(let data):
             jobs = Self.sorted(newJobs)
+            baseline = data
             return true
-        } else {
-            lastError = "Couldn't save jobs.json — check the connection and try again."
+        case .failed(let message):
+            lastError = message
             return false
         }
     }

@@ -1502,7 +1502,7 @@ final class ChatViewModel {
             return
         }
 
-        let service = ModelPresetService(context: context)
+        let service = ModelPresetService.shared(for: context)
         let preset: ModelPreset?
         do {
             preset = try await service.get(id: presetID)

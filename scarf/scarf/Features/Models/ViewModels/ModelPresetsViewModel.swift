@@ -26,7 +26,7 @@ final class ModelPresetsViewModel {
 
     init(context: ServerContext) {
         self.context = context
-        self.service = ModelPresetService(context: context)
+        self.service = ModelPresetService.shared(for: context)
     }
 
     // MARK: - Load

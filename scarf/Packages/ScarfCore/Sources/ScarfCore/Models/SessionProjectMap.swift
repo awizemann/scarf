@@ -21,9 +21,53 @@ public struct SessionProjectMap: Codable, Sendable {
     public var mappings: [String: String]
     public var updatedAt: String?
 
-    public init(mappings: [String: String] = [:], updatedAt: String? = nil) {
+    /// Per-session last-write stamp (`sessionID` → ISO-8601), the recency
+    /// signal pruning needs. Additive and optional: files written before
+    /// t-3b855719 have none, and an entry with no stamp is simply treated
+    /// as the oldest thing in the file.
+    ///
+    /// It exists because the sidecar is capped at 1 MB and had NO pruning —
+    /// a long-lived install grows one mapping per session forever until it
+    /// crosses the cap, at which point every read returns empty and the
+    /// whole attribution history reads as "nothing attributed". Dropping
+    /// the oldest entries costs the Sessions tab an old chat's project
+    /// label; hitting the cap costs all of them.
+    public var touched: [String: String]?
+
+    public init(
+        mappings: [String: String] = [:],
+        updatedAt: String? = nil,
+        touched: [String: String]? = nil
+    ) {
         self.mappings = mappings
         self.updatedAt = updatedAt
+        self.touched = touched
+    }
+
+    /// The most a sidecar may hold. Chosen so the encoded file stays an
+    /// order of magnitude under `SessionAttributionService.maxSidecarBytes`
+    /// even with long project paths (~200 bytes per entry incl. its stamp).
+    public static let maxMappings = 2_000
+
+    /// Drop the least-recently-written mappings until at most
+    /// ``maxMappings`` remain. Entries with no stamp go first (they predate
+    /// the stamp, so they are by construction the oldest); ties break on
+    /// the session id so the result is deterministic and two windows
+    /// pruning the same file agree.
+    public mutating func prune(limit: Int = SessionProjectMap.maxMappings) {
+        guard mappings.count > limit else { return }
+        let stamps = touched ?? [:]
+        let survivors = mappings.keys
+            .sorted { lhs, rhs in
+                let l = stamps[lhs] ?? ""
+                let r = stamps[rhs] ?? ""
+                if l != r { return l > r }   // newest first
+                return lhs < rhs
+            }
+            .prefix(limit)
+        let keep = Set(survivors)
+        mappings = mappings.filter { keep.contains($0.key) }
+        touched = stamps.filter { keep.contains($0.key) }
     }
 
     /// Current time in ISO-8601 format, suitable for the

@@ -137,6 +137,11 @@ public enum ProjectRegistryError: LocalizedError, Sendable, Equatable {
     /// the chokepoint guard. Thrown by `ProjectDashboardService.saveRegistry`
     /// and by `ProjectStore.indexInRegistry` before it appends anything.
     case refusedLossyOverwrite(path: String, loss: RegistryLoss)
+    /// Another process (the `scarf-projects` MCP helper, a second Scarf
+    /// window) held the registry write lock past the wait budget. The write
+    /// did NOT happen — see `RegistryWriteLock`. A failure the caller can
+    /// report and the user can retry, rather than a clobber nobody sees.
+    case registryBusy(path: String)
 
     public var errorDescription: String? {
         switch self {
@@ -145,6 +150,8 @@ public enum ProjectRegistryError: LocalizedError, Sendable, Equatable {
             return "Refused to overwrite \(path) (\(existing)) with an empty project list."
         case let .refusedLossyOverwrite(_, loss):
             return loss.message
+        case .registryBusy(let path):
+            return "Another Scarf process is updating \(path) right now. Nothing was changed — try again in a moment."
         }
     }
 }

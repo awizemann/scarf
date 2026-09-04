@@ -127,10 +127,20 @@ struct ProjectPickerSheet: View {
         isLoading = true
         defer { isLoading = false }
         let ctx = context
-        let loaded: [ProjectEntry] = await Task.detached {
+        let loaded: (projects: [ProjectEntry], damage: String?) = await Task.detached {
             let service = ProjectDashboardService(context: ctx)
-            return service.loadRegistry().projects
+            let result = service.loadRegistryDetailed()
+            // iOS used plain `loadRegistry()` here, which throws the salvage
+            // report away — so a registry that couldn't be parsed at all
+            // rendered as "No Scarf projects registered yet", which is the
+            // opposite of the truth (P7 addendum). Only the damage that
+            // EMPTIES the list is promoted to the error slot, because that
+            // slot replaces the list: with rows still standing, showing them
+            // beats hiding them behind a warning.
+            let blocking = result.registry.projects.isEmpty ? result.loss?.message : nil
+            return (result.registry.projects, blocking)
         }.value
-        projects = loaded
+        projects = loaded.projects
+        loadError = loaded.damage
     }
 }
