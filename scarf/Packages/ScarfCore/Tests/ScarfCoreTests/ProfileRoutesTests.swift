@@ -255,6 +255,19 @@ final class ProfileRoutesTests: XCTestCase {
         XCTAssertFalse(HermesProfileName.isValid(String(repeating: "a", count: 65)))
     }
 
+    /// SEC-L1: `\A…\z`, not `^…$` — ICU's `$` matches before a trailing
+    /// newline, so the old pattern accepted `"work\n"` and callers went on
+    /// to serialize the raw (newline-bearing) string into config.yaml.
+    /// Deliberately stricter than Hermes, which strips before matching.
+    func testProfileNameWithTrailingNewlineIsRejected() {
+        XCTAssertTrue(HermesProfileName.isValid("work"))
+        XCTAssertFalse(HermesProfileName.isValid("work\n"))
+        XCTAssertFalse(HermesProfileName.isValid("\nwork"))
+        XCTAssertFalse(HermesProfileName.isValid("work\r\n"))
+        XCTAssertFalse(HermesProfileName.isValid("work\nrm-rf"))
+        XCTAssertFalse(HermesProfileName.isValid("default\n"))
+    }
+
     // MARK: - Writing
 
     func testWriterCreatesNestedBlockWhenAbsent() {

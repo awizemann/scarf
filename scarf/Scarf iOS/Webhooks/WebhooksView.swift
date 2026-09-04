@@ -154,7 +154,9 @@ struct WebhooksView: View {
             if !line.hasPrefix(" ") && !line.hasPrefix("\t") {
                 flush()
                 let candidate = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: ":"))
-                if candidate.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil {
+                // \A…\z, not ^…$: ICU's $ matches before a trailing line
+                // terminator (SEC-L1); the name feeds a rendered route path.
+                if candidate.range(of: "\\A[A-Za-z0-9_-]+\\z", options: .regularExpression) != nil {
                     name = candidate
                 }
                 continue

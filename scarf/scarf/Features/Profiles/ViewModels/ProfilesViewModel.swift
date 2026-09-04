@@ -314,7 +314,9 @@ final class ProfilesViewModel {
             guard let name = nameStr else { continue }
             // Reject rows whose extracted name is something like "Tip:" or a localized
             // label — real profile names/ids are lowercase alphanumeric with - or _.
-            guard name.range(of: "^[a-zA-Z0-9_-]+$", options: .regularExpression) != nil else { continue }
+            // \A…\z, not ^…$: ICU's $ matches before a trailing newline
+            // (SEC-L1), and this name becomes a `hermes -p` argument.
+            guard name.range(of: "\\A[a-zA-Z0-9_-]+\\z", options: .regularExpression) != nil else { continue }
             if isActive { active = name }
             results.append(HermesProfile(name: name, isActive: isActive, path: ""))
         }

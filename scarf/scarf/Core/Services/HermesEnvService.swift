@@ -169,7 +169,9 @@ nonisolated struct HermesEnvService: Sendable {
         let key = String(work[work.startIndex..<eq]).trimmingCharacters(in: .whitespaces)
         // Reject non-identifier looking keys to avoid matching prose in comments
         // (e.g. "# This is a note about something = nice").
-        guard key.range(of: "^[A-Za-z_][A-Za-z0-9_]*$", options: .regularExpression) != nil else {
+        // \A…\z, not ^…$: ICU's $ matches before a trailing newline (SEC-L1),
+        // and the key is written back into .env lines.
+        guard key.range(of: "\\A[A-Za-z_][A-Za-z0-9_]*\\z", options: .regularExpression) != nil else {
             return nil
         }
         return (key, active)

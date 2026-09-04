@@ -37,8 +37,11 @@ public enum HermesProfileResolver {
     private static let logger = Logger(subsystem: "com.scarf", category: "HermesProfileResolver")
 
     private static let profileNameRegex: NSRegularExpression = {
-        // Mirrors Hermes's own validation in hermes_cli/profiles.py.
-        try! NSRegularExpression(pattern: "^[a-z0-9][a-z0-9_-]{0,63}$")
+        // Mirrors Hermes's own validation in hermes_cli/profiles.py, but with
+        // \A…\z anchors: ICU's `$` matches before a trailing newline (SEC-L1),
+        // and the validated name becomes a filesystem path component below.
+        // (Today's caller trims first, so this is defence for future callers.)
+        try! NSRegularExpression(pattern: "\\A[a-z0-9][a-z0-9_-]{0,63}\\z")
     }()
 
     private struct CacheState {

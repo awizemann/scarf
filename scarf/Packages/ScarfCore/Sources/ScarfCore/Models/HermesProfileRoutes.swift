@@ -134,8 +134,12 @@ public struct HermesProfileRoute: Sendable, Equatable, Identifiable, Hashable {
 /// at tag v2026.8.3. `parse_profile_routes` runs both on every route's
 /// `profile`, so a name these reject makes Hermes drop the whole rule.
 public enum HermesProfileName {
-    /// `_PROFILE_ID_RE` (profiles.py:37).
-    private static let idPattern = "^[a-z0-9][a-z0-9_-]{0,63}$"
+    /// `_PROFILE_ID_RE` (profiles.py:37) — Hermes writes it `^…$`, but ICU's
+    /// `$` matches before a trailing newline (SEC-L1), so `"work\n"` passed
+    /// and was serialized into config.yaml verbatim. `\A…\z` is a deliberate
+    /// divergence: stricter than Hermes (which strips before matching), never
+    /// looser — callers here validate the raw string they go on to use.
+    private static let idPattern = "\\A[a-z0-9][a-z0-9_-]{0,63}\\z"
     /// `_RESERVED_NAMES` (profiles.py:247). `default` is listed there but
     /// `validate_profile_name` returns early for it — it's a valid alias.
     private static let reserved: Set<String> = ["hermes", "test", "tmp", "root", "sudo"]

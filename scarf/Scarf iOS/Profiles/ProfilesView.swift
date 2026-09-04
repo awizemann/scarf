@@ -239,7 +239,10 @@ struct ProfilesView: View {
     /// A token is a profile name if it matches Hermes' id grammar — keeps
     /// table headers ("Profile", "Gateway", "Tip:") out of the list.
     nonisolated private static func isProfileName(_ s: String) -> Bool {
-        s.range(of: "^[a-z0-9][a-z0-9_-]{0,63}$", options: .regularExpression) != nil
+        // \A…\z, not ^…$: ICU's $ matches before a trailing line terminator
+        // (SEC-L1) — a token carrying a stray \r would otherwise validate and
+        // then travel into the profile selection.
+        s.range(of: "\\A[a-z0-9][a-z0-9_-]{0,63}\\z", options: .regularExpression) != nil
     }
 
     /// A selectable profile: the default (root) profile or a named one.
