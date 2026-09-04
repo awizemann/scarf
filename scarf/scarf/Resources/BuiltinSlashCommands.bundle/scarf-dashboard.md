@@ -17,6 +17,6 @@ Workflow:
 2. Understand the user's intent (add a widget? rearrange? change a query? add a section?).
 3. Reference the widget vocabulary documented in `~/.hermes/skills/scarf/scarf-template-author/SKILL.md` § Widget Catalog. Supported widget `kind` values include: `text`, `markdown`, `file_glob`, `command_output`, `sqlite_query`, `recent_messages`, `kanban_summary`, `chart`. Each has a typed schema.
 4. Propose the change as a JSON diff or a complete updated file. Confirm with the user before writing.
-5. Write the updated `dashboard.json`. Scarf's file watcher will pick up the change automatically and re-render the Projects tab.
+5. Write the updated dashboard: if the `scarf-projects` MCP tools are available, prefer `project_update_dashboard` (`project`, `dashboard`) — it validates against Scarf's real dashboard schema and widget catalog before anything is written, so a bad shape is refused instead of landing on disk. Only if those tools are NOT available, fall back to writing `dashboard.json` directly. Scarf's file watcher will pick up the change automatically and re-render the Projects tab.
 
 Don't break existing widgets the user didn't ask you to change. If the dashboard.json file is malformed, fix only what's needed for your change to land and tell the user about the broader issues.

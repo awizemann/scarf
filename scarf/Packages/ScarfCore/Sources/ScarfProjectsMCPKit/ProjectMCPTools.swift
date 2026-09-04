@@ -68,6 +68,7 @@ public struct ProjectMCPTools: Sendable {
             case "project_update_dashboard": return try updateDashboard(arguments)
             case "project_add_slash_command": return try addSlashCommand(arguments)
             case "project_validate": return try validate(arguments)
+            case "project_set_config": return try setConfig(arguments)
             default:
                 return .failure(
                     "Unknown tool \"\(name)\". Available: "
@@ -355,6 +356,191 @@ public struct ProjectMCPTools: Sendable {
             "project": .string(entry.name),
             "path": .string(commandPath),
         ]))
+    }
+
+    // MARK: - project_set_config
+
+    /// Write one key into `<project>/.scarf/config.json` — the file
+    /// `ProjectConfigService` (Mac app target) and `TemplateConfigSheet`
+    /// read and write today. This tool does not depend on that service:
+    /// `ProjectConfigService` and `TemplateConfigSchema`/`Field` are
+    /// app-target-only types a package executable cannot link against.
+    /// What it DOES reuse is the actual Keychain code —
+    /// `ScarfCore.ProjectConfigKeychain` / `TemplateKeychainRef` /
+    /// `TemplateSlug`, lifted out of the app target specifically so this
+    /// tool and the app's Configuration UI mint and resolve the exact
+    /// same `com.scarf.template.<slug>` refs through the exact same
+    /// `SecItem*` calls — never a second, reimplemented keychain path.
+    ///
+    /// Secret-ness is decided by the CALLER (`secret: true`), cross-
+    /// checked against the project's cached `manifest.json` schema when
+    /// one exists (schema says secret → the call must say secret; schema
+    /// says non-secret → the call must not). A schema-less project (no
+    /// cached manifest, e.g. hand-registered) has no authority to check
+    /// against, so the caller's flag is trusted alone — same trust level
+    /// `project_register` already extends to a hand-supplied path.
+    ///
+    /// Whatever the flag says, a plaintext `keychain://` value is
+    /// refused outright: accepting one would let an agent hand-mint a
+    /// ref pointing at ANY service/account this process can read,
+    /// including another project's secret — the exact bypass
+    /// `TemplateKeychainRef.belongs(toProjectPath:)` exists to prevent
+    /// on the READ side. Minting only ever happens inside this tool via
+    /// `TemplateKeychainRef.make`.
+    private func setConfig(_ arguments: [String: JSONValue]) throws -> Outcome {
+        let selector = try requiredString(arguments, "project")
+        let loaded = dashboards.loadRegistryDetailed()
+        guard let entry = resolve(selector, in: loaded.registry.projects) else {
+            return .failure(notFoundMessage(selector, in: loaded))
+        }
+
+        let key = try requiredString(arguments, "key")
+        guard key.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "." }) else {
+            return .failure(
+                "\"key\" (\"\(key)\") must contain only letters, digits, '-', '_' or '.'."
+            )
+        }
+        guard let rawValue = arguments["value"] else {
+            throw ArgumentError(message: "Missing required argument \"value\".")
+        }
+        let requestedSecret = try optionalBool(arguments, "secret") ?? false
+
+        // Untrusted-input guard: a caller can never smuggle a keychain
+        // ref through the plaintext `value` field, secret or not — the
+        // only way a ref is ever written is by this tool minting one
+        // below.
+        if case .string(let s) = rawValue, s.hasPrefix("keychain://") {
+            return .failure(
+                "\"value\" may not be a keychain:// reference — refs are minted internally by "
+                    + "this tool when secret: true. Pass the plaintext secret instead."
+            )
+        }
+
+        // Cross-check against the cached manifest schema when one
+        // exists. `manifest.json` is read as raw JSON here (rather than
+        // through `ProjectTemplateManifest`, which is app-target-only)
+        // to look up whether `key` is a declared field and, if so,
+        // whether the author typed it `secret`.
+        let manifestPath = entry.path + "/.scarf/manifest.json"
+        var templateID: String?
+        var schemaFieldIsSecret: Bool?
+        var schemaKnowsField = false
+        if transport.fileExists(manifestPath) {
+            if let data = try? transport.readFile(manifestPath),
+               let manifest = try? JSONDecoder().decode(JSONValue.self, from: data),
+               case .object(let root) = manifest {
+                if case .string(let id) = root["id"] { templateID = id }
+                if case .object(let config) = root["config"],
+                   case .array(let fields) = config["schema"] {
+                    for field in fields {
+                        guard case .object(let f) = field,
+                              case .string(let fieldKey) = f["key"] else { continue }
+                        if fieldKey == key {
+                            schemaKnowsField = true
+                            if case .string(let type) = f["type"] {
+                                schemaFieldIsSecret = (type == "secret")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if schemaKnowsField, let declaredSecret = schemaFieldIsSecret,
+           declaredSecret != requestedSecret {
+            return .failure(
+                declaredSecret
+                    ? "\"\(key)\" is declared `secret` in this project's template. "
+                        + "Pass secret: true."
+                    : "\"\(key)\" is not a secret field in this project's template. "
+                        + "Pass secret: false (or omit it)."
+            )
+        }
+
+        let configPath = entry.path + "/.scarf/config.json"
+        var values: [String: JSONValue] = [:]
+        var existingTemplateID = templateID ?? "unknown"
+        if transport.fileExists(configPath) {
+            if let data = try? transport.readFile(configPath),
+               let existing = try? JSONDecoder().decode(JSONValue.self, from: data),
+               case .object(let root) = existing {
+                if case .object(let existingValues) = root["values"] { values = existingValues }
+                if case .string(let id) = root["templateId"] { existingTemplateID = id }
+            }
+        }
+
+        let responseFields: [String: JSONValue]
+        if requestedSecret {
+            guard case .string(let secretText) = rawValue, !secretText.isEmpty else {
+                return .failure("A secret \"value\" must be a non-empty string.")
+            }
+            guard let slugSource = templateID else {
+                return .failure(
+                    "This project has no cached template manifest (\(manifestPath)), so there is "
+                        + "no template slug to namespace the Keychain item under. Secret fields "
+                        + "require a template-installed project; set non-secret values instead, "
+                        + "or use Scarf's Configuration UI."
+                )
+            }
+            let slug = TemplateSlug.derive(fromID: slugSource)
+            let ref = TemplateKeychainRef.make(
+                templateSlug: slug,
+                fieldKey: key,
+                projectPath: entry.path
+            )
+            do {
+                try ProjectConfigKeychain().set(ref: ref, secret: Data(secretText.utf8))
+            } catch {
+                return .failure("Could not write \"\(key)\" to the Keychain: \(error.localizedDescription)")
+            }
+            values[key] = .string(ref.uri)
+            responseFields = [
+                "written": .bool(true),
+                "project": .string(entry.name),
+                "key": .string(key),
+                "secret": .bool(true),
+                "keychainService": .string(ref.service),
+                "path": .string(configPath),
+            ]
+        } else {
+            switch rawValue {
+            case .string, .int, .double, .bool: break
+            case .array(let items):
+                guard items.allSatisfy({ if case .string = $0 { return true } else { return false } }) else {
+                    return .failure("\"value\" arrays must contain only strings.")
+                }
+            default:
+                return .failure(
+                    "\"value\" must be a string, number, boolean, or array of strings."
+                )
+            }
+            values[key] = rawValue
+            responseFields = [
+                "written": .bool(true),
+                "project": .string(entry.name),
+                "key": .string(key),
+                "secret": .bool(false),
+                "path": .string(configPath),
+            ]
+        }
+
+        let file: JSONValue = .object([
+            "schemaVersion": .int(2),
+            "templateId": .string(existingTemplateID),
+            "values": .object(values),
+            "updatedAt": .string(ISO8601DateFormatter().string(from: Date())),
+        ])
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(file)
+            let parent = (configPath as NSString).deletingLastPathComponent
+            try transport.createDirectory(parent)
+            try transport.writeFile(configPath, data: data)
+        } catch {
+            return .failure("Could not write \(configPath): \(error.localizedDescription)")
+        }
+
+        return .ok(try render(responseFields))
     }
 
     // MARK: - project_validate

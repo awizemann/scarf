@@ -26,7 +26,7 @@ Workflow:
 
 1. Identify the widget kind. If the user named one, use it; otherwise ask, listing the options above with one-line examples.
 2. Ask for the required parameters for that kind (e.g. for `sqlite_query`: db path, query, columns to render).
-3. Read the current `dashboard.json`, append the new widget to the appropriate section (or create a new section if needed), and write it back.
+3. Read the current `dashboard.json`, append the new widget to the appropriate section (or create a new section if needed), and write it back: if the `scarf-projects` MCP tools are available, prefer `project_update_dashboard` (`project`, `dashboard`) — it validates against Scarf's real dashboard schema and widget catalog before anything is written, so a bad shape is refused instead of landing on disk. Only if those tools are NOT available, fall back to writing `dashboard.json` directly.
 4. Tell the user the change is live — Scarf's file watcher re-renders the Projects tab automatically.
 
 Don't reformat the rest of the file. Preserve existing widget ordering and section structure unless the user explicitly asks otherwise.

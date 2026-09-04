@@ -63,7 +63,7 @@ import Foundation
             Issue.record("no tools array")
             return
         }
-        #expect(tools.count == 6)
+        #expect(tools.count == 7)
 
         var names: [String] = []
         for tool in tools {
@@ -85,7 +85,8 @@ import Foundation
         }
         #expect(names.sorted() == [
             "project_add_slash_command", "project_get", "project_list",
-            "project_register", "project_update_dashboard", "project_validate",
+            "project_register", "project_set_config", "project_update_dashboard",
+            "project_validate",
         ])
     }
 

@@ -136,7 +136,7 @@ import Foundation
 
         #expect(byID[1]?["protocolVersion"] == .string("2025-06-18"))
         if case .array(let tools)? = byID[2]?["tools"] {
-            #expect(tools.count == 6)
+            #expect(tools.count == 7)
         } else {
             Issue.record("tools/list returned no tools")
         }

@@ -55,15 +55,10 @@ nonisolated struct ProjectTemplateManifest: Codable, Sendable, Equatable {
     /// Filesystem-safe slug derived from `id` (`"owner/name"` → `"owner-name"`).
     /// Used for the install directory name, skills namespace, and cron-job tag.
     nonisolated var slug: String {
-        let ascii = id.unicodeScalars.map { scalar -> Character in
-            let c = Character(scalar)
-            if c.isLetter || c.isNumber || c == "-" || c == "_" { return c }
-            return "-"
-        }
-        let collapsed = String(ascii)
-            .split(separator: "-", omittingEmptySubsequences: true)
-            .joined(separator: "-")
-        return collapsed.isEmpty ? "template" : collapsed
+        // Lifted into ScarfCore.TemplateSlug so the scarf-projects MCP
+        // server's project_set_config tool derives the identical slug
+        // from a manifest id — see that type's doc comment.
+        TemplateSlug.derive(fromID: id)
     }
 }
 

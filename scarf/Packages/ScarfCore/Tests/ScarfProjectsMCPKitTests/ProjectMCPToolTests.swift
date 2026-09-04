@@ -512,6 +512,201 @@ import Foundation
         }
     }
 
+    // MARK: - project_set_config
+
+    static let schemaManifest = """
+        {"schemaVersion": 2, "id": "awizemann/site-status-checker", "name": "Demo", \
+        "version": "1.0.0", "description": "d", "contents": {"dashboard": false, \
+        "agentsMd": false}, "config": {"schema": [\
+        {"key": "apiToken", "type": "secret", "label": "API Token", "required": true}, \
+        {"key": "endpoint", "type": "string", "label": "Endpoint", "required": false}\
+        ]}}
+        """
+
+    @Test("a non-secret value is written inline into config.json")
+    func setConfigNonSecret() throws {
+        try Self.withHarness { h in
+            _ = h.tools.call(name: "project_register", arguments: [
+                "name": .string("Demo"), "path": .string(h.projectRoot.path),
+            ])
+            let outcome = h.tools.call(name: "project_set_config", arguments: [
+                "project": .string("Demo"),
+                "key": .string("endpoint"),
+                "value": .string("https://example.com"),
+            ])
+            #expect(!outcome.isError)
+            let fields = try Self.payload(outcome)
+            #expect(fields["secret"] == .bool(false))
+
+            let configPath = h.projectRoot.path + "/.scarf/config.json"
+            let data = try Data(contentsOf: URL(fileURLWithPath: configPath))
+            guard case .object(let root) = try JSONDecoder().decode(JSONValue.self, from: data),
+                  case .object(let values)? = root["values"] else {
+                Issue.record("config.json did not decode")
+                return
+            }
+            #expect(values["endpoint"] == .string("https://example.com"))
+        }
+    }
+
+    @Test("a secret value is minted into Keychain, never written to config.json in plaintext")
+    func setConfigSecret() throws {
+        try Self.withHarness { h in
+            _ = h.tools.call(name: "project_register", arguments: [
+                "name": .string("Demo"), "path": .string(h.projectRoot.path),
+            ])
+            try FileManager.default.createDirectory(
+                atPath: h.projectRoot.path + "/.scarf", withIntermediateDirectories: true
+            )
+            try Self.write(Self.schemaManifest, to: h.projectRoot.path + "/.scarf/manifest.json")
+
+            // `project_set_config` always routes through the REAL (non-test)
+            // Keychain namespace — there is no test-suffix hook on this path,
+            // matching the app's Configuration UI. The item minted here is
+            // cleaned up below.
+            let outcome = h.tools.call(name: "project_set_config", arguments: [
+                "project": .string("Demo"),
+                "key": .string("apiToken"),
+                "value": .string("s3cr3t-value"),
+                "secret": .bool(true),
+            ])
+            #expect(!outcome.isError)
+            let fields = try Self.payload(outcome)
+            #expect(fields["secret"] == .bool(true))
+            if case .string(let service)? = fields["keychainService"] {
+                #expect(service == "com.scarf.template.awizemann-site-status-checker")
+            } else {
+                Issue.record("no keychainService in response")
+            }
+
+            let configPath = h.projectRoot.path + "/.scarf/config.json"
+            let data = try Data(contentsOf: URL(fileURLWithPath: configPath))
+            let text = String(decoding: data, as: UTF8.self)
+            #expect(!text.contains("s3cr3t-value"))
+            guard case .object(let root) = try JSONDecoder().decode(JSONValue.self, from: data),
+                  case .object(let values)? = root["values"],
+                  case .string(let ref)? = values["apiToken"] else {
+                Issue.record("config.json did not decode a keychainRef for apiToken")
+                return
+            }
+            #expect(ref.hasPrefix("keychain://com.scarf.template.awizemann-site-status-checker/apiToken:"))
+
+            // Clean up the real Keychain item this test minted (best-effort;
+            // ignore failures on CI machines without login-Keychain access).
+            if let parsedRef = TemplateKeychainRef.parse(ref) {
+                try? ProjectConfigKeychain().delete(ref: parsedRef)
+            }
+        }
+    }
+
+    @Test("secret-ness must match the cached manifest schema")
+    func setConfigRejectsSchemaMismatch() throws {
+        try Self.withHarness { h in
+            _ = h.tools.call(name: "project_register", arguments: [
+                "name": .string("Demo"), "path": .string(h.projectRoot.path),
+            ])
+            try FileManager.default.createDirectory(
+                atPath: h.projectRoot.path + "/.scarf", withIntermediateDirectories: true
+            )
+            try Self.write(Self.schemaManifest, to: h.projectRoot.path + "/.scarf/manifest.json")
+
+            let missingFlag = h.tools.call(name: "project_set_config", arguments: [
+                "project": .string("Demo"),
+                "key": .string("apiToken"),
+                "value": .string("nope"),
+            ])
+            #expect(missingFlag.isError)
+            #expect(missingFlag.text.contains("secret: true"))
+
+            let wrongFlag = h.tools.call(name: "project_set_config", arguments: [
+                "project": .string("Demo"),
+                "key": .string("endpoint"),
+                "value": .string("https://example.com"),
+                "secret": .bool(true),
+            ])
+            #expect(wrongFlag.isError)
+            #expect(wrongFlag.text.contains("secret: false"))
+        }
+    }
+
+    @Test("a caller cannot smuggle a keychain:// reference through the plaintext value")
+    func setConfigRejectsSmuggledRef() throws {
+        try Self.withHarness { h in
+            _ = h.tools.call(name: "project_register", arguments: [
+                "name": .string("Demo"), "path": .string(h.projectRoot.path),
+            ])
+            let outcome = h.tools.call(name: "project_set_config", arguments: [
+                "project": .string("Demo"),
+                "key": .string("token"),
+                "value": .string("keychain://com.scarf.template.other/field:deadbeef"),
+            ])
+            #expect(outcome.isError)
+            #expect(outcome.text.contains("keychain://"))
+
+            let secretOutcome = h.tools.call(name: "project_set_config", arguments: [
+                "project": .string("Demo"),
+                "key": .string("token"),
+                "value": .string("keychain://com.scarf.template.other/field:deadbeef"),
+                "secret": .bool(true),
+            ])
+            #expect(secretOutcome.isError)
+        }
+    }
+
+    @Test("a secret write is refused for a project with no cached template manifest")
+    func setConfigSecretRequiresManifest() throws {
+        try Self.withHarness { h in
+            _ = h.tools.call(name: "project_register", arguments: [
+                "name": .string("Demo"), "path": .string(h.projectRoot.path),
+            ])
+            let outcome = h.tools.call(name: "project_set_config", arguments: [
+                "project": .string("Demo"),
+                "key": .string("token"),
+                "value": .string("s3cr3t"),
+                "secret": .bool(true),
+            ])
+            #expect(outcome.isError)
+            #expect(outcome.text.contains("manifest"))
+        }
+    }
+
+    @Test("invalid key format, empty value, and bad value types are refused")
+    func setConfigRejectsBadInput() throws {
+        try Self.withHarness { h in
+            _ = h.tools.call(name: "project_register", arguments: [
+                "name": .string("Demo"), "path": .string(h.projectRoot.path),
+            ])
+            let badKey = h.tools.call(name: "project_set_config", arguments: [
+                "project": .string("Demo"),
+                "key": .string("bad key!"),
+                "value": .string("x"),
+            ])
+            #expect(badKey.isError)
+
+            let badType = h.tools.call(name: "project_set_config", arguments: [
+                "project": .string("Demo"),
+                "key": .string("k"),
+                "value": .object(["nested": .string("no")]),
+            ])
+            #expect(badType.isError)
+
+            let emptySecret = h.tools.call(name: "project_set_config", arguments: [
+                "project": .string("Demo"),
+                "key": .string("k"),
+                "value": .string(""),
+                "secret": .bool(true),
+            ])
+            #expect(emptySecret.isError)
+
+            let unknownProject = h.tools.call(name: "project_set_config", arguments: [
+                "project": .string("Nope"),
+                "key": .string("k"),
+                "value": .string("v"),
+            ])
+            #expect(unknownProject.isError)
+        }
+    }
+
     // MARK: - project_validate
 
     @Test("validate reports a registry row with no record, and repair: true fixes it")

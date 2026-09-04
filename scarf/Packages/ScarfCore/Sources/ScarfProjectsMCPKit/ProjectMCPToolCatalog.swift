@@ -149,6 +149,45 @@ public enum ProjectMCPToolCatalog {
                 required: []
             )
         ),
+        Tool(
+            name: "project_set_config",
+            description: """
+                Write one key into a project's .scarf/config.json. Non-secret values (string, \
+                number, boolean, or array of strings) are written inline. Pass secret: true for a \
+                value that must never appear in config.json in plaintext: it is routed through \
+                macOS Keychain (the same code path Scarf's Configuration UI uses) and only a \
+                "keychain://com.scarf.template.<slug>/..." reference is written to disk. A field \
+                declared `secret` in the project's cached template manifest MUST be written with \
+                secret: true, and vice versa; a plaintext "keychain://" value in `value` is always \
+                refused. Secret fields require a template-installed project (a cached \
+                .scarf/manifest.json) so there is a template slug to namespace the Keychain item \
+                under — for a hand-registered project without one, set secrets from Scarf's \
+                Configuration UI instead.
+                """,
+            inputSchema: object(
+                properties: [
+                    "project": schema("string", "Project display name, or its absolute path."),
+                    "key": schema(
+                        "string",
+                        "Config key. Letters, digits, '-', '_' or '.' only."
+                    ),
+                    "value": .object([
+                        "description": .string(
+                            "The value to write. A plaintext string, number, boolean, or array "
+                                + "of strings. When secret: true, this is the plaintext secret "
+                                + "itself — never a keychain:// reference, which is always refused."
+                        ),
+                    ]),
+                    "secret": schema(
+                        "boolean",
+                        "Route the value through Keychain instead of writing it inline. Defaults "
+                            + "to false. Must match the field's declared type in the project's "
+                            + "cached template manifest when one exists."
+                    ),
+                ],
+                required: ["project", "key", "value"]
+            )
+        ),
     ]
 
     /// `tools/list` result.

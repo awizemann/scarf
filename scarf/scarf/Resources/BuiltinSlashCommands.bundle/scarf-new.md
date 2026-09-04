@@ -22,6 +22,6 @@ Once you've gathered enough to scaffold:
 3. Write `AGENTS.md` with project-specific instructions BELOW the `<!-- scarf-project -->` marker region (never edit inside the markers — Scarf rewrites that on every project-scoped chat start).
 4. If the project takes user-supplied inputs (URLs, API tokens, etc.), also write `<project>/.scarf/manifest.json` with a `config.schema`.
 5. If the project needs scheduled refresh, run `hermes cron create --workdir <project.path> …` to register a job.
-6. Register the project yourself by appending a `{ "name": "<project-name>", "path": "<absolute-project-dir>" }` entry to `~/.hermes/scarf/projects.json` (read it, append to the `projects` array, write it back; create the file with `{ "projects": [...] }` if missing). Scarf picks up the change on next sidebar refresh, then tell the user where the project landed.
+6. Register the project: if the `scarf-projects` MCP tools are available, prefer `project_register` (`name`, `path`) — it's the same code Scarf's UI runs and refuses malformed input instead of corrupting the registry. Only if those tools are NOT available, fall back to editing `~/.hermes/scarf/projects.json` by hand: append a `{ "name": "<project-name>", "path": "<absolute-project-dir>" }` entry to the `projects` array (create the file with `{ "projects": [...] }` if missing). Scarf picks up the change on next sidebar refresh, then tell the user where the project landed.
 
 Confirm the project is ready, then suggest they open a chat scoped to it for further work.
