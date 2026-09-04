@@ -77,7 +77,13 @@ struct ContentView: View {
         case .insights:         InsightsView(context: serverContext)
         case .sessions:         SessionsView(context: serverContext)
         case .activity:         ActivityView(context: serverContext)
-        case .projects:         ProjectsView(context: serverContext)
+        // Shares its view model with the sidebar's projects well via the
+        // coordinator cache: one registry read per window, and the well
+        // and the cockpit can't drift out of sync.
+        case .projects:         ProjectsView(
+                                    viewModel: cachedVM(.projects) { ProjectsViewModel(context: serverContext) },
+                                    context: serverContext
+                                )
         // Cached like Cron/Peers: the roster is a per-profile file scan
         // plus avatar reads, all over the transport — rebuilding it on
         // every section switch would re-read every profile over SSH.

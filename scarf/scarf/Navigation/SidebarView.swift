@@ -28,6 +28,11 @@ struct SidebarView: View {
     /// user runs `hermes profile use` from a terminal mid-session.
     @State private var activeProfileName: String = HermesProfileResolver.activeProfileName()
 
+    /// Which nav sections the user has collapsed. App-wide and
+    /// persisted; Monitor / Bots / Interact default open, Configure /
+    /// Manage default closed.
+    @State private var collapseStore = SidebarSectionCollapseStore.shared
+
     /// Capability-gated sections. Curator is v0.12+ only; older Hermes
     /// hosts get the same Interact section minus the Curator row.
     /// Building the list lazily off the env keeps the sidebar honest
@@ -77,12 +82,11 @@ struct SidebarView: View {
             configure.append(.proxy)
         }
 
+        // Projects is no longer in this list: it is rendered above as an
+        // inline well holding the actual project list, not as one nav
+        // row that leads to a second sidebar.
         var sections: [Section] = [
-            // Projects sits first now — promoting it to a first-class
-            // entry point reflects how users actually open Scarf
-            // (start with a project, not the dashboard).
-            Section(title: "Projects", items: [.projects]),
-            Section(title: "Monitor",  items: monitor),
+            Section(title: "Monitor", items: monitor),
         ]
 
         // Bots — its own top-level section immediately above Interact, so
@@ -110,6 +114,19 @@ struct SidebarView: View {
             header
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    // The project list itself, in a well — the first
+                    // thing in the sidebar because it's how people
+                    // actually start a session (with a project, not the
+                    // dashboard). Shares the coordinator's cached
+                    // `ProjectsViewModel` with `ProjectsView`, so the
+                    // well and the cockpit can never disagree and the
+                    // registry is read once per window, not twice.
+                    SidebarProjectsWell(
+                        viewModel: coordinator.featureViewModel(for: .projects) {
+                            ProjectsViewModel(context: serverContext)
+                        },
+                        context: serverContext
+                    )
                     ForEach(sections) { section in
                         sectionView(section)
                     }
@@ -206,17 +223,49 @@ struct SidebarView: View {
 
     @ViewBuilder
     private func sectionView(_ section: Section) -> some View {
+        let isCollapsed = collapseStore.isCollapsed(section.title)
         VStack(alignment: .leading, spacing: 1) {
-            Text(section.title)
-                .scarfStyle(.captionUppercase)
-                .foregroundStyle(ScarfColor.foregroundMuted)
-                .padding(.horizontal, ScarfSpace.s2 + 2)
-                .padding(.top, ScarfSpace.s2)
-                .padding(.bottom, ScarfSpace.s1)
-            ForEach(section.items) { item in
-                row(item)
+            sectionHeader(section, isCollapsed: isCollapsed)
+            if !isCollapsed {
+                ForEach(section.items) { item in
+                    row(item)
+                }
             }
         }
+        // A group, so VoiceOver can skip a collapsed section wholesale
+        // instead of walking a header that has nothing under it.
+        .accessibilityElement(children: .contain)
+    }
+
+    /// Section header doubles as the disclosure control. Hand-rolled
+    /// rather than a `DisclosureGroup` because the sidebar deliberately
+    /// owns its own row chrome (see the type doc); the accessibility
+    /// affordances a DisclosureGroup would have given us — a real
+    /// button, a spoken expanded/collapsed state, a hint — are supplied
+    /// explicitly below.
+    private func sectionHeader(_ section: Section, isCollapsed: Bool) -> some View {
+        Button {
+            collapseStore.toggle(section.title)
+        } label: {
+            HStack(spacing: 4) {
+                Text(section.title)
+                    .scarfStyle(.captionUppercase)
+                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .accessibilityHidden(true)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(ScarfColor.foregroundMuted)
+            .padding(.horizontal, ScarfSpace.s2 + 2)
+            .padding(.top, ScarfSpace.s2)
+            .padding(.bottom, ScarfSpace.s1)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(verbatim: section.title))
+        .accessibilityValue(Text(isCollapsed ? "collapsed" : "expanded"))
+        .accessibilityHint(Text("Shows or hides this section's items"))
+        .accessibilityIdentifier("sidebar.sectionHeader.\(section.title)")
     }
 
     private func row(_ item: SidebarSection) -> some View {

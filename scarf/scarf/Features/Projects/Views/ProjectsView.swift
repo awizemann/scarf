@@ -4,61 +4,32 @@ import ScarfDesign
 import UniformTypeIdentifiers
 
 struct ProjectsView: View {
-    @State private var viewModel: ProjectsViewModel
+    /// Owned by `AppCoordinator`'s per-window cache and SHARED with the
+    /// main sidebar's projects well, which is now the only project
+    /// navigation. This view no longer renders a list of its own.
+    @Bindable var viewModel: ProjectsViewModel
     @State private var installerViewModel: TemplateInstallerViewModel
-    @State private var uninstallerViewModel: TemplateUninstallerViewModel
     @Environment(AppCoordinator.self) private var coordinator
     @Environment(HermesFileWatcher.self) private var fileWatcher
     @Environment(\.serverContext) private var serverContext
     @Environment(\.hermesCapabilities) private var capabilitiesStore
+    /// "Add existing folder" from the empty state. The sidebar well has
+    /// its own copy of this affordance; this one exists so a user with
+    /// zero projects has something to click in the middle of the window.
     @State private var showingAddSheet = false
-    @State private var showingNewProjectSheet = false
     @State private var showingInstallSheet = false
     @State private var exportSheetProject: ProjectEntry?
     @State private var showingInstallURLPrompt = false
     @State private var installURLInput = ""
     @State private var showingCatalogSheet = false
-    @State private var showingUninstallSheet = false
-    @State private var configEditorProject: ProjectEntry?
-    /// Project queued for the "remove from list" confirmation dialog.
-    /// Non-nil while the dialog is up; the `confirmationDialog` binding
-    /// flips based on presence. We store the full entry (not just a
-    /// flag) so the dialog's action closure knows which project to
-    /// drop from the registry.
-    @State private var pendingRemoveFromList: ProjectEntry?
-
-    /// Last mutation-failure title seen, so the alert keeps its title
-    /// while it animates away. See the `.alert` below.
-    @State private var lastMutationErrorTitle = ""
-
-    /// Project queued for the rename sheet (v2.3). Sheet state lives
-    /// on the parent view so the sidebar stays a pure presentation
-    /// layer; rename logic routes through `ProjectsViewModel.renameProject`.
-    @State private var renameTarget: ProjectEntry?
-
-    /// Project queued for the move-to-folder sheet (v2.3). Same
-    /// pattern as renameTarget: parent owns sheet state, sidebar
-    /// delegates up.
-    @State private var moveTarget: ProjectEntry?
-
-    /// Project queued for the model-preset binding sheet.
-    /// Parent owns the sheet state; the sidebar context-menu
-    /// item only routes the user intent up via `onSetModel`.
-    @State private var modelPresetTarget: ProjectEntry?
-
-    /// Answers the context menu's two file-existence questions from a cache
-    /// probed off-main, instead of two blocking transport stats per menu
-    /// evaluation. See `ProjectMenuProbeCache`.
-    @State private var menuProbes = ProjectMenuProbeCache()
 
     /// Project Doctor sheet, opened from the registry-damage banner —
     /// Phase 2 left that banner with nothing to act on.
     @State private var showingDoctorSheet = false
 
-    init(context: ServerContext) {
-        _viewModel = State(initialValue: ProjectsViewModel(context: context))
+    init(viewModel: ProjectsViewModel, context: ServerContext) {
+        self.viewModel = viewModel
         _installerViewModel = State(initialValue: TemplateInstallerViewModel(context: context))
-        _uninstallerViewModel = State(initialValue: TemplateUninstallerViewModel(context: context))
     }
 
 
@@ -68,9 +39,10 @@ struct ProjectsView: View {
         // widgets unnecessarily.
         let _: Void = ScarfMon.event(.render, "mac.dashboard.body")
         return VStack(spacing: 0) {
-            // Registry damage spans both panes: the sidebar is what
-            // went wrong, so the notice sits above the split rather
-            // than inside either half.
+            // The full notice lives here, above the cockpit, because it
+            // needs the width to explain itself and to offer the backup
+            // path + Project Doctor. The main sidebar's well shows a
+            // compact warning that routes here.
             if let damage = viewModel.registryDamage {
                 RegistryDamageBanner(
                     damage: damage,
@@ -80,12 +52,11 @@ struct ProjectsView: View {
                 )
                 Divider()
             }
-            HSplitView {
-                projectList
-                    .frame(minWidth: 180, maxWidth: 220)
-                dashboardArea
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            // No second sidebar any more — the main sidebar's projects
+            // well IS the navigation, so the cockpit takes the whole
+            // content area.
+            dashboardArea
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationTitle("Projects")
         .toolbar { templatesToolbar }
@@ -112,7 +83,6 @@ struct ProjectsView: View {
                 viewModel.selectProject(project)
             }
             fileWatcher.updateProjectWatches(dashboardPaths: viewModel.dashboardPaths, scarfDirs: viewModel.projectScarfDirs)
-            menuProbes.refresh(projects: viewModel.projects, context: serverContext)
             // Cold-launch deep link or Finder double-click: the router may
             // have a URL staged before this view installed the onChange
             // observer below. Without this first-appearance check,
@@ -131,7 +101,6 @@ struct ProjectsView: View {
             Task {
                 await viewModel.reload()
                 fileWatcher.updateProjectWatches(dashboardPaths: viewModel.dashboardPaths, scarfDirs: viewModel.projectScarfDirs)
-                menuProbes.refresh(projects: viewModel.projects, context: serverContext)
             }
         }
         .onChange(of: TemplateURLRouter.shared.pendingInstallURL) { _, new in
@@ -154,32 +123,16 @@ struct ProjectsView: View {
                         viewModel.selectProject(project)
                     }
                     fileWatcher.updateProjectWatches(dashboardPaths: viewModel.dashboardPaths, scarfDirs: viewModel.projectScarfDirs)
-                    // A template install changes exactly the install-time facts
-                    // the probe cache holds, and the cache no longer re-probes
-                    // per tick — so say so explicitly.
-                    menuProbes.invalidate()
-                    menuProbes.refresh(projects: viewModel.projects, context: serverContext)
                 }
             }
         }
-        .sheet(isPresented: $showingNewProjectSheet) {
-            NewProjectSheet(
-                viewModel: NewProjectViewModel(context: serverContext)
-            ) { entry in
-                // Reload the registry so the new project shows in the
-                // sidebar, then select it. The chat handoff is staged
-                // by `NewProjectSheet.runCommit` (it sets
-                // `coordinator.pendingProjectChat` + `pendingInitialPrompt`
-                // and switches `selectedSection` to `.chat`), so when
-                // the user comes back to Projects later, the project
-                // is already there.
-                // Off-main for the same reason the install sheet is.
-                Task {
-                    await viewModel.reload()
-                    coordinator.selectedProjectName = entry.name
-                    if let project = viewModel.projects.first(where: { $0.name == entry.name }) {
-                        viewModel.selectProject(project)
-                    }
+        .sheet(isPresented: $showingAddSheet) {
+            AddProjectSheet(context: serverContext) { name, path in
+                // Running the mutation on the next main-actor turn keeps
+                // its failure alert (hosted by the sidebar well) out of
+                // this sheet's dismissal transaction.
+                Task { @MainActor in
+                    await viewModel.addProject(name: name, path: path)
                     fileWatcher.updateProjectWatches(
                         dashboardPaths: viewModel.dashboardPaths,
                         scarfDirs: viewModel.projectScarfDirs
@@ -206,127 +159,6 @@ struct ProjectsView: View {
                 showingInstallSheet = true
             }
         }
-        .sheet(isPresented: $showingUninstallSheet) {
-            TemplateUninstallSheet(viewModel: uninstallerViewModel) { removed in
-                // Refresh the registry and clear selection if we just
-                // removed the project the user was viewing.
-                if viewModel.selectedProject?.path == removed.path {
-                    viewModel.selectedProject = nil
-                }
-                if coordinator.selectedProjectName == removed.name {
-                    coordinator.selectedProjectName = nil
-                }
-                // Off-main for the same reason the install sheet is.
-                Task {
-                    await viewModel.reload()
-                    fileWatcher.updateProjectWatches(dashboardPaths: viewModel.dashboardPaths, scarfDirs: viewModel.projectScarfDirs)
-                    // Symmetric with the install sheet: an uninstall removes the
-                    // template lock file the probe cache answers from.
-                    menuProbes.invalidate()
-                    menuProbes.refresh(projects: viewModel.projects, context: serverContext)
-                }
-            }
-        }
-        .sheet(item: $configEditorProject) { project in
-            ConfigEditorSheet(
-                context: serverContext,
-                project: project
-            )
-        }
-        .sheet(item: $modelPresetTarget) { project in
-            ProjectModelPresetSheet(
-                context: serverContext,
-                project: project
-            )
-        }
-        // Confirmation dialog for the sidebar's "Remove from List" action.
-        // The action is registry-only (doesn't touch disk), but the name
-        // historically confused users into thinking it was a full delete.
-        // A confirmation with explicit wording clarifies scope before the
-        // click is destructive-looking but actually harmless.
-        .confirmationDialog(
-            removeFromListDialogTitle,
-            isPresented: Binding(
-                get: { pendingRemoveFromList != nil },
-                set: { if !$0 { pendingRemoveFromList = nil } }
-            ),
-            titleVisibility: .visible,
-            presenting: pendingRemoveFromList
-        ) { project in
-            Button("Remove from List") {
-                pendingRemoveFromList = nil
-                // Deferred so the registry write — and any failure
-                // alert it raises — happens after this dialog has
-                // finished dismissing, rather than flipping an alert
-                // inside the same presentation transaction.
-                Task { @MainActor in
-                    // The removal has to succeed BEFORE the
-                    // irreversible side work: stripping the secrets
-                    // block and clearing the coordinator's selection
-                    // for a project that is still in the registry
-                    // leaves a worse state than not trying at all.
-                    guard await viewModel.removeProject(project) else { return }
-                    // Safe to unmirror AFTER the registry write: the
-                    // slug comes from `<project>/.scarf/manifest.json`,
-                    // which "Remove from List" never touches, so it
-                    // resolves the same before and after.
-                    // Failure is non-fatal: a stale block in .env is
-                    // benign (just unreachable env vars), and the
-                    // mirror's own logger has recorded it.
-                    // OFF THE MAIN ACTOR: unmirroring reads and rewrites
-                    // the project's `.env` through the transport, which on
-                    // a remote context is blocking SSH (charter C10).
-                    // Still awaited — the ordering guarantee below (and
-                    // the comment above) depends on it having finished.
-                    let ctx = serverContext
-                    await Task.detached(priority: .userInitiated) {
-                        try? KeychainEnvMirror(context: ctx).unmirror(project: project)
-                    }.value
-                    if coordinator.selectedProjectName == project.name {
-                        coordinator.selectedProjectName = nil
-                    }
-                }
-            }
-            Button("Cancel", role: .cancel) {
-                pendingRemoveFromList = nil
-            }
-        } message: { project in
-            Text(
-                "\(project.name) will be removed from Scarf's project list. " +
-                "Nothing on disk is touched — the folder, cron job, skills, and memory block all stay. " +
-                "To actually remove installed files, use \"Uninstall Template…\" instead."
-            )
-        }
-        // A mutation the user asked for that didn't happen. Modal on
-        // purpose: they just clicked something, the click had no
-        // effect, and the sidebar looks identical either way — a
-        // passive notice would be missed.
-        // Title is cached rather than read straight off the view model:
-        // dismissing clears `mutationError` first, which would collapse
-        // the title to "" for the frames the alert is still animating
-        // out.
-        .onChange(of: viewModel.mutationError) { _, new in
-            if let new { lastMutationErrorTitle = new.title }
-        }
-        .alert(
-            lastMutationErrorTitle,
-            isPresented: Binding(
-                get: { viewModel.mutationError != nil },
-                set: { if !$0 { viewModel.dismissMutationError() } }
-            ),
-            presenting: viewModel.mutationError
-        ) { _ in
-            Button("OK", role: .cancel) { viewModel.dismissMutationError() }
-        } message: { failure in
-            Text(failure.message)
-        }
-    }
-
-    /// Title string for the remove-from-list confirmation dialog. Kept
-    /// as a computed property so the dialog and any future reuse share
-    /// the exact same copy.
-    private var removeFromListDialogTitle: LocalizedStringKey {
-        "Remove from Scarf's project list?"
     }
 
     // MARK: - Toolbar
@@ -335,11 +167,9 @@ struct ProjectsView: View {
     private var templatesToolbar: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             Menu {
-                Button("New Project from Scratch…", systemImage: "sparkles") {
-                    showingNewProjectSheet = true
-                }
-                .accessibilityIdentifier("templates.newProject")
-                Divider()
+                // "New Project from Scratch…" moved to the sidebar's
+                // projects well, next to the list it adds to. This menu
+                // is now purely about templates.
                 Button("Browse Catalog…", systemImage: "books.vertical") {
                     showingCatalogSheet = true
                 }
@@ -444,70 +274,6 @@ struct ProjectsView: View {
         if panel.runModal() == .OK, let url = panel.url {
             installerViewModel.openLocalFile(url.path)
             showingInstallSheet = true
-        }
-    }
-
-    // MARK: - Project List
-
-    private var projectList: some View {
-        // Sidebar is an extracted view; this view stays the owner of
-        // sheet state (add / rename / move / uninstall / remove-from-
-        // list confirmation) and routes intents down as closures.
-        ProjectsSidebar(
-            viewModel: viewModel,
-            canConfigureProject: { menuProbes.isConfigurable($0) },
-            isTemplateInstalled: { menuProbes.hasInstalledTemplate($0) },
-            onConfigure: { configEditorProject = $0 },
-            onUpgrade: { project in
-                let hasKanban = capabilitiesStore?.capabilities.hasKanban ?? false
-                Task { await coordinator.upgradeProject(project, context: serverContext, hasKanban: hasKanban) }
-            },
-            onUninstallTemplate: { project in
-                uninstallerViewModel.begin(project: project)
-                showingUninstallSheet = true
-            },
-            onRemoveFromList: { pendingRemoveFromList = $0 },
-            onRename: { renameTarget = $0 },
-            onMoveToFolder: { moveTarget = $0 },
-            onAddProject: { showingAddSheet = true },
-            // Gate the "Set Model…" context menu entry on the host
-            // supporting the session/set_model RPC (v0.13+). Pre-v0.13
-            // hosts hide the menu item so users don't bind a preset
-            // that wouldn't apply at runtime.
-            onSetModel: (capabilitiesStore?.capabilities.hasACPSetSessionModel ?? false)
-                ? { modelPresetTarget = $0 }
-                : nil
-        )
-        .sheet(isPresented: $showingAddSheet) {
-            // Each of these three sheets calls back and then dismisses
-            // itself. Running the mutation on the next main-actor turn
-            // keeps its failure alert out of the sheet's own dismissal
-            // transaction, where AppKit can drop the presentation and
-            // the user would see nothing at all.
-            AddProjectSheet(context: serverContext) { name, path in
-                Task { @MainActor in
-                    await viewModel.addProject(name: name, path: path)
-                    fileWatcher.updateProjectWatches(dashboardPaths: viewModel.dashboardPaths, scarfDirs: viewModel.projectScarfDirs)
-                }
-            }
-        }
-        .sheet(item: $renameTarget) { target in
-            RenameProjectSheet(
-                project: target,
-                existingNames: viewModel.projects
-                    .filter { $0.name != target.name }
-                    .map(\.name)
-            ) { newName in
-                Task { @MainActor in await viewModel.renameProject(target, to: newName) }
-            }
-        }
-        .sheet(item: $moveTarget) { target in
-            MoveToFolderSheet(
-                project: target,
-                existingFolders: viewModel.folders
-            ) { newFolder in
-                Task { @MainActor in await viewModel.moveProject(target, toFolder: newFolder) }
-            }
         }
     }
 
