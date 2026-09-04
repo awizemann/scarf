@@ -18,7 +18,31 @@ import ScarfCore
 /// `.promptComplete` (only `ChatViewModel` synthesizes one for the chat
 /// path), which is exactly the gap that left the happy path unresolved
 /// before the fix landed.
-@Suite struct MiniAppAgentSessionTests {
+/// **Why `.serialized`, and why the deadlines are generous (t-05a6bb8b).**
+///
+/// Every test here is in-memory — a `FakeACPChannel` actor and a real
+/// `ACPClient` — so the suite owns no file, no port and no subprocess, and
+/// it is green every time it runs alone. What it does own is nine tests that
+/// each spin a 10-15 ms polling loop against a 2 s deadline, and the deadline
+/// is the only thing that can fail: the assertions are about *whether* a turn
+/// resolves, never about how fast. Run in the full `scarfTests` suite, those
+/// loops share a machine with suites that spawn real `Process`es (the same
+/// cross-suite CPU/scheduler contention behind the flaky
+/// `RemoteSQLiteBackend` subprocess race, t-aud32), and a poll that should
+/// take 30 ms takes seconds — so the suite failed roughly one run in three
+/// on a deadline, never on a behaviour.
+///
+/// Two changes, addressing the two halves of the contention:
+///
+/// 1. `.serialized` removes the contention this suite creates FOR ITSELF —
+///    nine concurrent polling loops become one. It does not (and cannot)
+///    stop sibling suites running alongside: `.serialized` covers a suite and
+///    its subgroups, not the rest of the run.
+/// 2. The deadlines are scaled for load (`Deadline`). A timeout here is a
+///    hang guard, not an assertion, so its only job is to keep a genuinely
+///    leaked continuation from hanging CI forever. Two seconds was tuned to
+///    an idle machine and had no headroom for a loaded one.
+@Suite(.serialized) struct MiniAppAgentSessionTests {
 
     // MARK: - Fake channel
 
@@ -472,10 +496,32 @@ import ScarfCore
         }
     }
 
+    /// Hang-guard deadlines, scaled for a loaded machine.
+    ///
+    /// These bound how long a *stuck* test waits before reporting; nothing
+    /// here asserts on latency. Under the full parallel suite this process is
+    /// sharing cores with suites that spawn real subprocesses, and a 15 ms
+    /// poll can be descheduled for far longer than its own period — which is
+    /// what turned a 2 s deadline into an intermittent failure. The factor is
+    /// derived from the machine rather than hard-coded so a small CI box
+    /// (where oversubscription bites hardest) waits longest.
+    enum Deadline {
+        /// 1x on an 8-core-or-better machine, rising to 4x on a single core.
+        static let loadFactor: Double = {
+            let cores = Double(max(1, ProcessInfo.processInfo.activeProcessorCount))
+            return min(4, max(1, 8 / cores))
+        }()
+
+        /// A precondition that should be reached in tens of milliseconds.
+        static var precondition: TimeInterval { 15 * loadFactor }
+        /// An operation that should resolve as soon as the fake replies.
+        static var operation: TimeInterval { 20 * loadFactor }
+    }
+
     /// Poll `predicate` until true or `timeout` elapses; throws on timeout
-    /// so a stalled precondition fails fast instead of hanging CI.
+    /// so a stalled precondition fails instead of hanging CI.
     private func waitFor(
-        timeout: TimeInterval = 2,
+        timeout: TimeInterval = Deadline.precondition,
         _ predicate: @Sendable () async -> Bool
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
@@ -497,7 +543,7 @@ import ScarfCore
     /// helper return cleanly and orphan the stuck task (harmless: a
     /// suspended task burns no CPU and dies with the test process).
     private func withTimeout<T: Sendable>(
-        _ seconds: TimeInterval = 3,
+        _ seconds: TimeInterval = Deadline.operation,
         _ op: @escaping @Sendable () async throws -> T
     ) async throws -> T {
         let box = ResultBox<T>()

@@ -436,6 +436,15 @@ private struct CockpitDashboardPanel: View {
     let projectRoot: String
     let isLoading: Bool
 
+    /// ONE stat per tick for every file-reading widget below, instead of one
+    /// per widget — see `WidgetSignatureBatch`. Lives here because this is
+    /// the view that knows the whole widget set.
+    @State private var signatureBatch = WidgetSignatureBatch()
+
+    private var widgetFilePaths: [String] {
+        WidgetSignatureBatch.filePaths(in: dashboard, projectRoot: projectRoot)
+    }
+
     var body: some View {
         Group {
             if let dashboard {
@@ -449,6 +458,10 @@ private struct CockpitDashboardPanel: View {
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
                 .environment(\.selectedProjectRoot, projectRoot)
+                .environment(
+                    \.widgetSignatureScope,
+                    WidgetSignatureScope(batch: signatureBatch, paths: widgetFilePaths)
+                )
             } else if isLoading {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {

@@ -185,8 +185,24 @@ public struct SessionAttributionService: Sendable {
         let path = context.paths.sessionProjectMap
         let (loaded, inspection) = inspect()
         var map = loaded
-        guard body(&map) else { return }
+        // PRUNE ON EVERY WRITE PATH, INCLUDING THE ONES THAT CHANGE NOTHING.
+        // `map.prune()` is what keeps this file under
+        // `maxSidecarBytes` — cross it and `GuardedJSONStore` quarantines the
+        // whole thing and EVERY session loses its project at once. It runs
+        // here, in the single chokepoint both writers (Mac `ChatViewModel`,
+        // iOS `ChatView`) reach through `attribute` / `forget`, so there is
+        // no writer that can grow the file without pruning it.
+        //
+        // Note the order: prune is evaluated even when `body` reported no
+        // change. An install that only ever RE-attributes sessions it already
+        // knows takes the idempotent early-return every time, and an
+        // over-cap file inherited from an older Scarf (or from a device that
+        // wrote before pruning existed) would then never be trimmed by the
+        // one process that could trim it.
+        let changed = body(&map)
+        let countBefore = map.mappings.count
         map.prune()
+        guard changed || map.mappings.count != countBefore else { return }
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

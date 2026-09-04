@@ -12,6 +12,10 @@ struct MarkdownFileWidgetView: View {
     @Environment(\.serverContext) private var serverContext
     @Environment(\.selectedProjectRoot) private var projectRoot
     @Environment(HermesFileWatcher.self) private var fileWatcher
+    /// The dashboard-wide batched stat, when this widget is rendered inside a
+    /// panel that installs one. `nil` elsewhere — the widget then stats for
+    /// itself exactly as it always did.
+    @Environment(\.widgetSignatureScope) private var signatureScope
 
     @State private var loadedContent: String?
     @State private var ioError: String?
@@ -31,7 +35,7 @@ struct MarkdownFileWidgetView: View {
                 )
             case .success(let resolved):
                 content(for: resolved)
-                    .task(id: "\(resolved)|\(fileWatcher.lastChangeDate.timeIntervalSince1970)") {
+                    .task(id: "\(resolved)|\(tickKey)") {
                         await reload(absPath: resolved)
                     }
             }
@@ -67,21 +71,42 @@ struct MarkdownFileWidgetView: View {
         .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.lg))
     }
 
+    /// The coalesced watcher tick this render belongs to. Shared with the
+    /// dashboard-wide signature batch so every widget on one tick joins one
+    /// `statAll` pass.
+    private var tickKey: String {
+        String(fileWatcher.lastChangeDate.timeIntervalSince1970)
+    }
+
     private func reload(absPath: String) async {
         let context = serverContext
-        isLoading = true
-        defer { isLoading = false }
         let known = loadedSignature
         let hasContent = loadedContent != nil
+        // STAT FIRST, AND ONCE FOR THE WHOLE DASHBOARD. This view re-runs on
+        // every coalesced watcher tick (`.task(id:)` is keyed on
+        // `lastChangeDate`), and the tick fires per persisted message during
+        // a stream — so without a stat the widget re-read and re-rendered its
+        // file several times a second because something unrelated changed.
+        // The stat itself is now shared: `WidgetSignatureBatch` answers for
+        // every file-reading widget on this dashboard in ONE round-trip, and
+        // only the first widget to ask pays for it. `.unknown` (no scope, an
+        // uncovered path, or a `statAll` that declined to vouch for itself)
+        // falls back to this widget's own single stat below.
+        let batched = await signatureScope.lookup(
+            path: absPath, tick: tickKey, context: context
+        )
+        // Nothing changed and we already have the bytes: don't even build a
+        // transport.
+        if case .known(let sig) = batched, let sig, sig == known, hasContent { return }
+        isLoading = true
+        defer { isLoading = false }
         let outcome: (result: WidgetIOResult<String>?, signature: String?) = await Task.detached {
             let transport = context.makeTransport()
-            // STAT FIRST. This view re-runs on every coalesced watcher tick
-            // (`.task(id:)` is keyed on `lastChangeDate`), and the tick
-            // fires per persisted message during a stream — so without this
-            // the widget re-read and re-rendered its file several times a
-            // second because something unrelated changed. One stat, then
-            // nothing.
-            let signature = WidgetFileRead.signature(absPath, transport: transport)
+            let signature: String?
+            switch batched {
+            case .known(let sig): signature = sig
+            case .unknown: signature = WidgetFileRead.signature(absPath, transport: transport)
+            }
             if let signature, signature == known, hasContent { return (nil, signature) }
             // Measures disk/transport latency for reading the markdown file.
             let read = ScarfMon.measure(.diskIO, "widget.markdown_file.load") {

@@ -15,6 +15,9 @@ struct ImageWidgetView: View {
     @Environment(\.serverContext) private var serverContext
     @Environment(\.selectedProjectRoot) private var projectRoot
     @Environment(HermesFileWatcher.self) private var fileWatcher
+    /// Dashboard-wide batched stat — see `WidgetSignatureBatch`. `nil` when
+    /// this widget renders outside a panel that installs one.
+    @Environment(\.widgetSignatureScope) private var signatureScope
 
     @State private var localImage: NSImage?
     @State private var loadError: String?
@@ -165,7 +168,7 @@ struct ImageWidgetView: View {
                     ProgressView().controlSize(.small)
                 }
             }
-            .task(id: "\(resolved)|\(fileWatcher.lastChangeDate.timeIntervalSince1970)") {
+            .task(id: "\(resolved)|\(tickKey)") {
                 await loadLocal(absPath: resolved)
             }
         }
@@ -254,10 +257,24 @@ struct ImageWidgetView: View {
         }
     }
 
+    /// The coalesced watcher tick this render belongs to — the key the
+    /// dashboard-wide signature batch coalesces on.
+    private var tickKey: String {
+        String(fileWatcher.lastChangeDate.timeIntervalSince1970)
+    }
+
     private func loadLocal(absPath: String) async {
         let context = serverContext
         let known = loadedSignature
         let hasImage = localImage != nil
+        // STAT FIRST — see `MarkdownFileWidgetView.reload`. Decoding is the
+        // expensive half here, so skipping it matters even on a local
+        // context; the stat itself is shared across every file-reading
+        // widget on this dashboard (`WidgetSignatureBatch`).
+        let batched = await signatureScope.lookup(
+            path: absPath, tick: tickKey, context: context
+        )
+        if case .known(let sig) = batched, let sig, sig == known, hasImage { return }
         // The panel this draws into is a few hundred points wide, and the
         // file is agent-written — a 6000px screenshot decoded at full size
         // is ~140 MB of backing store to show a thumbnail, every time.
@@ -265,10 +282,11 @@ struct ImageWidgetView: View {
         let outcome: (result: WidgetIOResult<NSImage>?, signature: String?) =
             await Task.detached {
                 let transport = context.makeTransport()
-                // STAT FIRST — see `MarkdownFileWidgetView.reload`. Decoding
-                // is the expensive half here, so skipping it matters even on
-                // a local context.
-                let signature = WidgetFileRead.signature(absPath, transport: transport)
+                let signature: String?
+                switch batched {
+                case .known(let sig): signature = sig
+                case .unknown: signature = WidgetFileRead.signature(absPath, transport: transport)
+                }
                 if let signature, signature == known, hasImage { return (nil, signature) }
                 // Measures disk/transport latency for reading the image file.
                 let read = ScarfMon.measure(.diskIO, "widget.image.load") {

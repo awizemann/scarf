@@ -88,6 +88,132 @@ import Foundation
         }
     }
 
+    // MARK: - Pruning fires on the WRITE path (t-682b7f47)
+
+    /// Seed the sidecar directly with `count` mappings, bypassing the
+    /// service — this is the shape a long-lived install (or an older Scarf
+    /// that predates pruning) leaves behind.
+    private static func seedSidecar(
+        _ ctx: ServerContext, count: Int, stamped: Bool = true
+    ) throws {
+        var map = SessionProjectMap()
+        for i in 0..<count {
+            // Zero-padded so the ISO-8601-shaped stamps sort the same way the
+            // ids do, and "newest" is unambiguous.
+            let id = String(format: "s%06d", i)
+            map.mappings[id] = "/Projects/p\(i % 20)"
+            if stamped {
+                map.touched = (map.touched ?? [:]).merging(
+                    [id: String(format: "2026-01-01T00:00:%02d.%03dZ", i % 60, i % 1000)]
+                ) { _, new in new }
+            }
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let dir = (ctx.paths.sessionProjectMap as NSString).deletingLastPathComponent
+        try FileManager.default.createDirectory(
+            atPath: dir, withIntermediateDirectories: true
+        )
+        try encoder.encode(map).write(to: URL(fileURLWithPath: ctx.paths.sessionProjectMap))
+    }
+
+    private static func sidecarBytes(_ ctx: ServerContext) throws -> Int {
+        try Data(contentsOf: URL(fileURLWithPath: ctx.paths.sessionProjectMap)).count
+    }
+
+    /// The reason this matters: crossing `maxSidecarBytes` makes
+    /// `GuardedJSONStore` quarantine the file, and EVERY session loses its
+    /// project at once. Pruning has to fire before the file gets there, on
+    /// the write path both writers (Mac `ChatViewModel`, iOS `ChatView`)
+    /// share — `attribute` → `mutate` → `mutateLocked`.
+    @Test func attributePrunesToTheCap() throws {
+        try Self.withTempHome { ctx in
+            try Self.seedSidecar(ctx, count: SessionProjectMap.maxMappings + 500)
+            let svc = SessionAttributionService(context: ctx)
+            svc.attribute(sessionID: "brand-new", toProjectPath: "/Projects/new")
+            let after = svc.load()
+            #expect(after.mappings.count == SessionProjectMap.maxMappings)
+            // The write that triggered the prune is itself the newest entry,
+            // so it must survive its own pruning pass.
+            #expect(after.mappings["brand-new"] == "/Projects/new")
+            // The oldest seeded entry is the one that went.
+            #expect(after.mappings["s000000"] == nil)
+            // Stamps are pruned in lockstep — a stamp map that outgrew the
+            // mappings would defeat the whole point.
+            #expect((after.touched ?? [:]).count <= SessionProjectMap.maxMappings)
+        }
+    }
+
+    /// A capped file must land comfortably under the quarantine ceiling, not
+    /// merely under the entry count — the count is a proxy for the bytes.
+    @Test func aPrunedSidecarStaysWellUnderTheQuarantineCap() throws {
+        try Self.withTempHome { ctx in
+            try Self.seedSidecar(ctx, count: SessionProjectMap.maxMappings + 500)
+            let svc = SessionAttributionService(context: ctx)
+            svc.attribute(sessionID: "brand-new", toProjectPath: "/Projects/new")
+            let bytes = try Self.sidecarBytes(ctx)
+            #expect(bytes < SessionAttributionService.maxSidecarBytes)
+            // And the load that follows actually decodes — i.e. the store did
+            // not quarantine it.
+            #expect(svc.load().mappings.count == SessionProjectMap.maxMappings)
+        }
+    }
+
+    /// THE GAP THAT WAS OPEN. `attribute` of a session already pointing at
+    /// the same project reports "no change" and used to return before
+    /// pruning ran. An install that only ever re-attributes sessions it
+    /// already knows (every resume of an existing project chat does exactly
+    /// this) would then never trim an over-cap file it inherited.
+    @Test func idempotentReAttributionStillPrunesAnOverCapFile() throws {
+        try Self.withTempHome { ctx in
+            try Self.seedSidecar(ctx, count: SessionProjectMap.maxMappings + 500)
+            let svc = SessionAttributionService(context: ctx)
+            // Idempotent by construction: same id, same path already on file.
+            svc.attribute(sessionID: "s002400", toProjectPath: svc.projectPath(for: "s002400")!)
+            #expect(svc.load().mappings.count == SessionProjectMap.maxMappings)
+        }
+    }
+
+    /// Unstamped entries predate the recency stamp, so they are by
+    /// construction the oldest — and a file made ENTIRELY of them must still
+    /// prune deterministically rather than refusing to choose.
+    @Test func prunesAFileWithNoRecencyStampsAtAll() throws {
+        try Self.withTempHome { ctx in
+            try Self.seedSidecar(ctx, count: SessionProjectMap.maxMappings + 100, stamped: false)
+            let svc = SessionAttributionService(context: ctx)
+            svc.attribute(sessionID: "brand-new", toProjectPath: "/Projects/new")
+            let after = svc.load()
+            #expect(after.mappings.count == SessionProjectMap.maxMappings)
+            #expect(after.mappings["brand-new"] == "/Projects/new")
+        }
+    }
+
+    /// The other write verb reaches the same chokepoint.
+    @Test func forgetAlsoPrunes() throws {
+        try Self.withTempHome { ctx in
+            try Self.seedSidecar(ctx, count: SessionProjectMap.maxMappings + 500)
+            let svc = SessionAttributionService(context: ctx)
+            svc.forget(sessionID: "s002400")
+            #expect(svc.load().mappings.count == SessionProjectMap.maxMappings)
+            #expect(svc.projectPath(for: "s002400") == nil)
+        }
+    }
+
+    /// A map that is already under the cap is left completely alone — pruning
+    /// must not cost a write (or an entry) on the overwhelmingly common path.
+    @Test func anUnderCapMapIsUntouched() throws {
+        try Self.withTempHome { ctx in
+            try Self.seedSidecar(ctx, count: 10)
+            let svc = SessionAttributionService(context: ctx)
+            let before = try Self.sidecarBytes(ctx)
+            // Idempotent AND under the cap → nothing to change, nothing to
+            // prune, so the file must not be rewritten at all.
+            svc.attribute(sessionID: "s000003", toProjectPath: svc.projectPath(for: "s000003")!)
+            #expect(try Self.sidecarBytes(ctx) == before)
+            #expect(svc.load().mappings.count == 10)
+        }
+    }
+
     @Test func resolveReturnsNilForUnattributedOrMissingSession() throws {
         try Self.withTempHome { ctx in
             let svc = SessionAttributionService(context: ctx)

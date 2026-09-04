@@ -14,11 +14,32 @@ struct LogTailWidgetView: View {
     @Environment(\.serverContext) private var serverContext
     @Environment(\.selectedProjectRoot) private var projectRoot
     @Environment(HermesFileWatcher.self) private var fileWatcher
+    /// Dashboard-wide batched stat — see `WidgetSignatureBatch`. `nil` when
+    /// this widget renders outside a panel that installs one.
+    @Environment(\.widgetSignatureScope) private var signatureScope
 
     @State private var loadedTail: String?
     @State private var loadError: WidgetPathResolver.ResolveError?
     @State private var ioError: String?
     @State private var isLoading = false
+    /// `"<mtime>:<size>"` of the file the rendered tail came from, and the
+    /// line count it was rendered at.
+    ///
+    /// This widget used to re-run `tail` on EVERY tick — a process spawn (an
+    /// SSH round-trip on a remote context) per tick per widget, for a log
+    /// that had not changed. It has the same stat available as the other
+    /// file-reading widgets, and now uses it. The line count is stored
+    /// alongside because the rendered tail is a function of BOTH: an
+    /// unchanged file re-rendered at a new `lines` value must still re-read.
+    ///
+    /// The narrowing this accepts, deliberately and in line with the other
+    /// file-reading widgets: `stat` reports whole seconds, so an in-place
+    /// rewrite of the SAME byte count inside one second is invisible until
+    /// something else about the file changes. Logs are appended to, so their
+    /// size moves; the alternative is a `tail` spawn per widget per tick
+    /// forever.
+    @State private var loadedSignature: String?
+    @State private var loadedLineCount: Int?
 
     private var lineCount: Int { max(1, min(200, widget.lines ?? 20)) }
 
@@ -43,7 +64,13 @@ struct LogTailWidgetView: View {
     private func refreshKey(_ resolved: String) -> String {
         // Force a reload whenever either the widget config or any project
         // file changes (the latter via fileWatcher.lastChangeDate).
-        "\(resolved)|\(lineCount)|\(fileWatcher.lastChangeDate.timeIntervalSince1970)"
+        "\(resolved)|\(lineCount)|\(tickKey)"
+    }
+
+    /// The coalesced watcher tick this render belongs to — the key the
+    /// dashboard-wide signature batch coalesces on.
+    private var tickKey: String {
+        String(fileWatcher.lastChangeDate.timeIntervalSince1970)
     }
 
     @ViewBuilder
@@ -116,10 +143,27 @@ struct LogTailWidgetView: View {
     private func reload(absPath: String) async {
         let context = serverContext
         let n = lineCount
+        let known = loadedSignature
+        // Same bytes AND the same window over them: nothing to spawn.
+        let renderedAtSameSize = loadedTail != nil && loadedLineCount == n
+        let batched = await signatureScope.lookup(
+            path: absPath, tick: tickKey, context: context
+        )
+        if case .known(let sig) = batched, let sig, sig == known, renderedAtSameSize { return }
         isLoading = true
         defer { isLoading = false }
-        let outcome: WidgetIOResult<String> = await Task.detached {
+        let outcome: (result: WidgetIOResult<String>?, signature: String?) = await Task.detached {
             let transport = context.makeTransport()
+            let signature: String?
+            switch batched {
+            case .known(let sig): signature = sig
+            case .unknown: signature = WidgetFileRead.signature(absPath, transport: transport)
+            }
+            // A signature we could not obtain is NOT "unchanged" — fall
+            // through and read, exactly as this widget always did.
+            if let signature, signature == known, renderedAtSameSize {
+                return (nil, signature)
+            }
             do {
                 // BOUNDED. This widget shows the last `n` lines of a log, and
                 // it used to pull the WHOLE file across the transport to get
@@ -148,11 +192,11 @@ struct LogTailWidgetView: View {
                 }
                 let stripped = AnsiStripper.strip(text)
                 let parts = stripped.split(separator: "\n", omittingEmptySubsequences: false)
-                return .success(parts.suffix(n).joined(separator: "\n"))
+                return (.success(parts.suffix(n).joined(separator: "\n")), signature)
             } catch is WidgetTailError {
-                return .failure("File is not UTF-8 — log_tail expects text.")
+                return (.failure("File is not UTF-8 — log_tail expects text."), signature)
             } catch {
-                return .failure("Could not read file: \(error.localizedDescription)")
+                return (.failure("Could not read file: \(error.localizedDescription)"), signature)
             }
         }.value
         // GENERATION GUARD. `.task(id:)` cancels this body when the widget's
@@ -162,7 +206,12 @@ struct LogTailWidgetView: View {
         // earlier watcher tick resumed AFTER the newer one had already
         // committed, and overwrote it with older content.
         guard !Task.isCancelled else { return }
-        switch outcome {
+        // Nothing changed — leave the rendered tail (and the @State it lives
+        // in) exactly as it is, so SwiftUI has nothing to re-evaluate.
+        guard let result = outcome.result else { return }
+        self.loadedSignature = outcome.signature
+        self.loadedLineCount = n
+        switch result {
         case .success(let s):
             self.loadedTail = s
             self.ioError = nil
