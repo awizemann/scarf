@@ -38,6 +38,12 @@ struct SkillBootstrapService: Sendable {
     /// log and continue — a failed bootstrap shouldn't block app
     /// launch.
     nonisolated func ensureBundledSkillsInstalled() throws {
+        // Ahead of the bundle guard on purpose: removing a skill that
+        // misinforms the agent doesn't depend on us having anything to
+        // install, and a build whose bundled skills are missing is exactly
+        // a build that shouldn't also skip the cleanup.
+        pruneKnownBadSkills()
+
         guard let bundleSkillsDir = Self.bundleSkillsDir() else {
             Self.logger.info("no bundled Skills/ directory; skipping bootstrap")
             return
@@ -105,6 +111,95 @@ struct SkillBootstrapService: Sendable {
         case 2...5: return "2_5"
         default: return "gt_5"
         }
+    }
+
+    // MARK: - Known-bad skills
+
+    /// Skills that claim Scarf's name but describe a Scarf that doesn't
+    /// exist, removed from the namespace this service owns on every
+    /// bootstrap.
+    ///
+    /// `scarf-project-workflows` is the founding member: an installed
+    /// skill (found on a user's machine 2026-09-03, predating the real
+    /// bundled ones) documenting fabricated CLI verbs, a dashboard schema
+    /// Scarf never rendered, and a link to an unrelated company that
+    /// happens to share the name. It competed for activation with
+    /// `scarf-template-author` on every project task, and an agent that
+    /// won the coin flip wrote files Scarf couldn't read. Prose in a skill
+    /// can't out-argue another skill; deleting it can.
+    ///
+    /// **Deliberately narrow.** Only exact directory-name matches, and
+    /// only under the `scarf/` category directory this service writes
+    /// (plus the legacy flat path it used to write, which
+    /// `installSkill`'s migration also owns). A user's own skill of the
+    /// same name would have to be sitting inside Scarf's namespace to be
+    /// caught, and nothing outside `~/.hermes/skills/scarf/` is ever
+    /// touched — the user's other skills, and every category folder Scarf
+    /// didn't create, are none of this pass's business.
+    nonisolated static let knownBadSkillNames: Set<String> = [
+        "scarf-project-workflows",
+    ]
+
+    /// Delete every denylisted skill from the two locations this service
+    /// owns. Failures are logged and skipped: a stale bad skill is worse
+    /// than the alternative but not worth failing a launch over, and the
+    /// next bootstrap tries again.
+    /// - Returns: the directories actually removed, for the tests and the
+    ///   log. Empty on the steady state — every launch after the first.
+    @discardableResult
+    nonisolated func pruneKnownBadSkills() -> [String] {
+        let transport = context.makeTransport()
+        var removed: [String] = []
+        let categorizedRoot = context.paths.skillsDir + "/" + Self.bundledSkillCategory
+        for name in Self.knownBadSkillNames.sorted() {
+            for dir in [categorizedRoot + "/" + name, context.paths.skillsDir + "/" + name] {
+                guard transport.fileExists(dir) else { continue }
+                do {
+                    // The whole directory in ONE call, and deliberately
+                    // before any walk of its children.
+                    //
+                    // Locally this is `FileManager.removeItem`, which
+                    // handles a populated directory on its own AND unlinks
+                    // a SYMLINK without following it. Walking children
+                    // first would invert that: `listDirectory` resolves
+                    // through a symlink, so a `scarf-project-workflows`
+                    // that is a link into the user's own skills would have
+                    // us deleting files on the far side of it — outside
+                    // the namespace this pass is allowed to touch.
+                    try transport.removeFile(dir)
+                    removed.append(dir)
+                    Self.logger.info(
+                        "removed known-bad skill \(name, privacy: .public) from \(dir, privacy: .public)"
+                    )
+                } catch {
+                    // SSH's `removeFile` is `rm -f`, which refuses a
+                    // populated directory (and, being `-f` not `-r`, can
+                    // never recurse anywhere it shouldn't). Empty it and
+                    // retry — one level, because skills don't ship trees.
+                    // A symlink never reaches here: `rm -f` unlinks it in
+                    // the attempt above.
+                    var recovered = false
+                    if let entries = try? transport.listDirectory(dir) {
+                        for entry in entries {
+                            try? transport.removeFile(dir + "/" + entry)
+                        }
+                        if (try? transport.removeFile(dir)) != nil {
+                            removed.append(dir)
+                            recovered = true
+                            Self.logger.info(
+                                "removed known-bad skill \(name, privacy: .public) from \(dir, privacy: .public)"
+                            )
+                        }
+                    }
+                    if !recovered {
+                        Self.logger.warning(
+                            "couldn't remove known-bad skill \(name, privacy: .public) at \(dir, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                        )
+                    }
+                }
+            }
+        }
+        return removed
     }
 
     // MARK: - Per-skill install

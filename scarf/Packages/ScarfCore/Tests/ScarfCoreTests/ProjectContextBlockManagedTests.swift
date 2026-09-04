@@ -140,6 +140,31 @@ import Foundation
         #expect(block.contains("### Scarf platform reference"))
     }
 
+    /// The platform reference points the agent at the `scarf-projects`
+    /// tools before it points it at any file. An agent that reads this
+    /// block and still hand-appends to the registry is the 2026-09-02
+    /// corruption again, so the steer is pinned here rather than left to
+    /// the skill alone — the block is injected on every project chat,
+    /// the skill only when it activates.
+    @Test func managedBlockPrefersTheProjectToolsOverHandEditing() {
+        let block = ProjectContextBlock.renderManagedBlock(.init(
+            projectName: "Tools", projectPath: "/srv/tools", configFieldsLine: "(none)"
+        ))
+        #expect(block.contains("`scarf-projects`"))
+        for tool in [
+            "project_list", "project_get", "project_register",
+            "project_update_dashboard", "project_add_slash_command", "project_validate",
+        ] {
+            #expect(block.contains(tool), "platform reference should name \(tool)")
+        }
+        #expect(block.contains("PREFER its tools"))
+        // The skill lives under the `scarf/` category folder as of
+        // v2.10.1; the block used to advertise the pre-migration flat
+        // path, which resolves to nothing on a current install.
+        #expect(block.contains("~/.hermes/skills/scarf/scarf-template-author/SKILL.md"))
+        #expect(!block.contains("~/.hermes/skills/scarf-template-author/SKILL.md"))
+    }
+
     @Test func managedBlockIsPureAndIdempotent() {
         let input = ProjectContextBlock.ManagedBlockInput(
             projectName: "Idem", projectPath: "/srv/idem", configFieldsLine: "(none)",
