@@ -6,6 +6,123 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 3.1.0</title>
+      <sparkle:version>69</sparkle:version>
+      <sparkle:shortVersionString>3.1.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Fri, 04 Sep 2026 21:42:47 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v3.1.0</p>
+<p>Projects grow up in this release. The whole projects surface — registry, per-project files, mini-apps, dashboards — was put through four rounds of adversarial security, data-integrity, performance, and accessibility auditing, and everything found was fixed: an agent session can no longer destroy Scarf&#x27;s project state, a flaky connection can no longer truncate your files, and the app does dramatically less work while an agent streams. On top of that foundation: a redesigned sidebar with your projects front and center, per-project edit approval so project chats stop nagging you, and mini-apps that can finally open links in your browser — with your consent, per host.</p>
+<h2>A sidebar built around your projects</h2>
+<p>Your projects now live at the top of the sidebar in their own panel: every project listed with its status, folders and filtering for big collections, the full context menu (Upgrade, Configuration, Chat Settings, Rename, Archive, Uninstall…), and a <strong>New Project</strong> button that opens the wizard directly. The old secondary project list inside the Projects area is gone — one list, one selection, everywhere. The other sidebar sections now collapse and expand: Monitor, Bots, and Interact start open; Configure and Manage start tucked away, and Scarf remembers your arrangement.</p>
+<h2>Project chats stop asking permission for every edit</h2>
+<p>Hermes asks before every file edit by default, which is the right posture — until it&#x27;s your own project and the tenth prompt of the session. Two fixes:</p>
+<ul>
+  <li><strong>Per-project auto-accept</strong>: flip &quot;Auto-accept edits&quot; in a project&#x27;s Chat Settings and every chat bound to that project starts in Hermes&#x27;s accept-edits mode — edits inside the project apply without prompting, while sensitive paths (SSH keys, credentials) still ask, enforced by Hermes itself.</li>
+  <li><strong>&quot;Allow edits for this session&quot;</strong>: the approval dialog now offers a third button on edit prompts that approves the pending edit and stops asking for the rest of the session. One click, where you&#x27;re already looking.</li>
+</ul>
+<p>The auto-accept setting is stored tamper-proof: it&#x27;s cryptographically bound to your machine, so an agent can&#x27;t quietly grant itself the bypass.</p>
+<h2>Mini-apps can open links — with your consent</h2>
+<p>Mini-apps run in a hermetic sandbox with no network access, which previously made every external link a dead end. A new <code>open_url</code> permission lets a mini-app hand a link to your default browser: https-only, and the first link to any new host asks you by name — <strong>Open once</strong>, <strong>Always allow this host</strong>, or <strong>Cancel</strong>. Nothing opens without your click, homograph domains display in their honest punycode form, and each mini-app is limited to a handful of requests per minute. The sandbox itself is unchanged: mini-apps still can&#x27;t reach the network themselves.</p>
+<h2>Projects that can&#x27;t be destroyed</h2>
+<p>The headline of the hardening campaign: <strong>every file Scarf owns now survives bad writes, bad reads, and bad connections.</strong></p>
+<ul>
+  <li><strong>Atomic writes on every transport</strong> — including iOS over SFTP, where a dropped cellular connection used to be able to leave AGENTS.md or your cron jobs as a truncated fragment. Every write now stages to a temp file and publishes with a rename; the destination is never in a half-written state.</li>
+  <li><strong>Damage is quarantined, never amplified.</strong> If a registry or project file won&#x27;t parse, Scarf copies the bytes aside, tells you with a banner, and refuses to overwrite what it can&#x27;t read — a network blip can no longer make Scarf &quot;helpfully&quot; replace your data with an empty rebuild. Rolling <code>.bak</code> files back up the registry, project records, and now AGENTS.md.</li>
+  <li><strong>The Project Doctor</strong> reconciles the registry, per-project records, and what&#x27;s actually on disk — it detects renames that didn&#x27;t propagate, moved folders, name collisions, and ghost projects, repairs what&#x27;s safe to repair, and reports honestly on what isn&#x27;t.</li>
+  <li><strong>One writer at a time.</strong> Scarf&#x27;s app and its agent-facing tools now coordinate through a cross-process lock, so simultaneous writes can&#x27;t silently erase each other.</li>
+  <li><strong>Trust is verified at time of use.</strong> Uninstalling a template re-validates every deletion against the project&#x27;s own boundaries (symlink tricks included); keychain references are cryptographically bound to their owning project so one project&#x27;s agent can&#x27;t read or delete another&#x27;s secrets; and mini-app permission grants are signed, so an agent can&#x27;t forge its own approvals.</li>
+</ul>
+<h2>Agents get real tools instead of file surgery</h2>
+<p>The bundled <code>scarf-projects</code> MCP server now covers the full project surface — including a new <code>project_set_config</code> tool that routes secret values straight to the macOS Keychain, never to a plaintext file. The built-in project skills and slash commands now direct agents to these tools instead of hand-editing JSON, which is how most historical project damage happened in the first place.</p>
+<h2>Much faster while agents stream</h2>
+<p>During an active chat, Scarf&#x27;s file watcher ticks every half-second — and previously, every tick reloaded everything: <strong>~55–70 SSH round-trips per tick</strong> on a remote host with a screenful of projects. Now every surface asks &quot;did anything change?&quot; before reading: one batched stat covers the cockpit, another covers all dashboard widgets, the sidebar re-renders only on real changes, and the health scan runs only when you ask for it. An unchanged tick costs <strong>~4 round-trips</strong>. Registry mutations also moved fully off the main thread, so a slow SSH host can no longer freeze the window.</p>
+<h2>Accessibility</h2>
+<p>VoiceOver now hears what sighted users see across the projects surface: registry damage and repair completion are announced; doctor findings speak their severity; charts expose real data through Audio Graphs; sparklines and stat cards read as single sensible elements; kanban status uses shapes, not just colors; tables have proper headers; and the small fixed fonts in dense widgets now scale with your text size.</p>
+<h2>Under the hood</h2>
+<ul>
+  <li>The remote-restore flow rewrites files through the same guarded, atomic path as everything else and reports failures honestly instead of claiming success.</li>
+  <li>Cross-project path normalization unified; project removal is id-keyed (no more removing two same-named rows); archiving a project now actually pauses its cron jobs and stops watching it.</li>
+  <li>Release builds are part of CI hygiene again — two strict-concurrency issues that only Release surfaced are fixed, and the lesson is recorded so it stays fixed.</li>
+  <li>Test suites grew from 1,838 to <strong>2,176 ScarfCore tests</strong> plus 745 app tests, including adversarial suites that attack the new guarantees directly: forged grants, symlinked uninstall targets, concurrent writers, torn connections mid-write.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li><strong>Mini-apps will re-ask for their permissions once.</strong> Permission grants are now cryptographically signed, and grants from earlier versions can&#x27;t be verified after upgrading — each mini-app shows its consent sheet one more time. One click per app, per machine; nothing else to migrate.</li>
+  <li>Project keychain secrets migrate to stronger bindings automatically the next time they&#x27;re read — no action needed.</li>
+  <li>Updates arrive via Sparkle&#x27;s built-in updater; or grab the zip from this release.</li>
+  <li>macOS 14.6+ (Apple Silicon and Intel). ScarfGo for iOS ships separately via TestFlight — the iOS transport-atomicity fixes ride the next TestFlight build.</li>
+  <li>Compatible with Hermes v0.6.0 through v0.21.0, unchanged from 3.0.x.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v3.1.0/Scarf-v3.1.0-Universal.zip"
+                 sparkle:edSignature="Nx5FJM7K8gb62L2J2pPO8PepYhsPypVFUaDIXhx2ffG6aCKhL2JuppjaIkyhR48/Mo31YyUKafhkeK2zMxIXBA=="
+                 length="30603116"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 3.0.1</title>
       <sparkle:version>68</sparkle:version>
       <sparkle:shortVersionString>3.0.1</sparkle:shortVersionString>
