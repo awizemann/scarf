@@ -2,15 +2,9 @@
 title: Project Upgrade — one-click structure pass + chat enrichment (deterministic ProjectUpgradeService + skills)
 type: note
 permalink: scarf/decisions/project-upgrade-one-click-structure-pass-chat-enrichment-deterministic-projectupgradeservice-skills
-tags:
-- projects
-- upgrade
-- skills
-- mini-app
-- decision
-- phase-1
+tags: [projects, upgrade, skills, mini-app, decision, phase-1]
 created: 2026-06-20
-updated: 2026-06-20
+updated: 2026-09-03
 ---
 
 How "Upgrade Project" was built — the one-click path for the ~1000+ existing installs to bring a basic/legacy project up to the full first-class cockpit experience. Built on `feat/projects` after the Fleet (M3) + cockpit-consolidation work. **Fleet is excluded from upgrade** (per the design + user). Importing Hermes-only projects is **part 2, deferred** — its enumeration design lives in [[Hermes has no project concept — infer working dirs from checkpoints, sessions.cwd, cron, kanban]].
@@ -25,7 +19,7 @@ How "Upgrade Project" was built — the one-click path for the ~1000+ existing i
 
 - [skills] Two bundled Hermes agent skills (in `scarf/scarf/Resources/BuiltinSkills.bundle/`, auto-installed because `SkillBootstrapService` ENUMERATES the bundle, semver-gated):
   - **`scarf-miniapp-author` (NEW)** — the net-new gap. M2 shipped the `scarf-miniapp://` runtime + `window.scarf` bridge but nothing taught the agent to *author* a mini-app. The skill documents the ACTUAL contract (verified against `MiniAppBridge.javaScriptSource`): `scarf.context` (frozen sync object) / `scarf.version` / `scarf.ui.*` / `scarf.store.*` / `scarf.query` / `scarf.kanban.read` / `scarf.file.read` / `scarf.prompt` / `scarf.onEvent`, each with its permission + the sensitive-set (`prompt`/`net`/`file:write`/`kanban:write` default OFF for `generated:true`; `store`/`query:*`/`file:read`/`events` default ON), the `.scarf/miniapps/<id>/` layout (`<id>` == dir name), and a runnable kanban-board example. Doc the API from the SHIM, not the design doc (the design proposed a wider surface than M2 shipped).
-  - **`scarf-template-author` (extended → 1.3.0)** — added an "enrich an EXISTING project" mode (read first, replace the placeholder dashboard, add slash/cron, build a starter mini-app via the miniapp skill, BOUNDED). #skills
+  - **`scarf-template-author` (extended → 1.3.0)** — added an "enrich an EXISTING project" mode (read first, replace the placeholder dashboard, add slash/cron, build a starter mini-app via the miniapp skill, BOUNDED). **SUPERSEDED at 2.0.0 (Phase 6, 2026-09-03):** the skill is now tool-first — registration, dashboard writes, slash commands and validation go through the `scarf-projects` MCP tools, and hand-editing `projects.json` survives only as an explicitly-labelled remote-host fallback. See [[The skill is tool-first and Scarf deletes skills that lie about it]]. #skills
 
 - [ui] `AppCoordinator.upgradeProject(_:context:hasKanban:)` is the one entry point: runs the service + `SkillBootstrapService` off-main in a `Task.detached`, then sets `pendingProjectChat`/`pendingInitialPrompt` + `selectedSection = .chat` (the same hand-off slots New Project uses; ChatView drains them). The kickoff prompt uses the `SKILL: scarf-template-author` invocation convention in ENRICH mode. An in-flight guard (`upgradingProjectPaths`, keyed on path) prevents a double-tap from spawning two chat sessions (the review-caught MED). Surfaces: a cockpit **banner** gated on `viewModel.needsUpgrade` (loaded off-main) + a sidebar **context-menu** item. A failed structure pass leaves the banner up (provenance unstamped → `needsUpgrade` stays true) so the user can retry — richer error UI is a follow-up. #ui
 

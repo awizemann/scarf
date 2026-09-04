@@ -6,7 +6,7 @@ tags: [projects, phase-1, milestone-1, decision, scarfproject, architecture]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ScarfProject.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectDashboard.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift]
 source_sha: c09ee3811bd75bae2d7416178d880f5d5b8c64b6
 created: 2026-06-15
-updated: 2026-06-15
+updated: 2026-09-03
 reviewed: 2026-09-01
 reviewed_by: audit:claude-code (background)
 ---
@@ -23,7 +23,7 @@ How Milestone 1 (the first-class `ScarfProject`) was actually built, and the non
 - [secrets] `secretsScope` = `config.json` keys whose value is a `keychain://…` ref — NAMES only, never values (SECRET-SAFE). ScarfCore can't see the Mac-target manifest/config Codable types, so `ProjectStore` uses lightweight JSON projections, same trick as `KanbanTenantReader` / `ProjectModelPresetReader`. #secret-safe
 - [cockpit] `ProjectCockpitView` is a `DashboardTab.cockpit` tab inside the Projects feature (not a new sidebar section). Header (name/path/model badge/host badges) + panel bar reusing `ProjectSessionsView` + `ProjectKanbanTab` (gated on `hasKanban`) + 5 new lightweight read-only panels (Context/Cron/Memory/Secrets/Templates). Backed by `ProjectCockpitViewModel` (one off-main load). #cockpit
 - [deferred] Tool/skill scoping NOT built — `scopedToolsets`/`scopedSkills` always empty; ACP adapter hardcodes `enabled_toolsets`, no per-session seam. Unblocks on NousResearch/hermes-agent#45958. Mini-apps = Milestone 2 (will add `ScarfProject.miniApps` + the `scarf-miniapp://` bridge). #deferred
-- [followup] Installer parity gap: `ProjectTemplateInstaller` still registers projects WITHOUT minting a uuid / writing `project.json` — it relies on lazy migration to backfill. The scaffolder mints explicitly. Small follow-up to make the installer symmetric with the scaffolder. #followup
+- [done] Installer parity gap CLOSED (in commit 9be1e2f): `ProjectTemplateInstaller.registerProject` mints the uuid and `install()` writes `.scarf/project.json` after the lock file lands, symmetric with the scaffolder. Phase 3 (9be1e2f) then removed the underlying hazard — `derive(from:)` no longer mints a fresh random uuid per call; see [[Project ids are derived from (host, path), never minted on a read]]. #done
 - [tests] ScarfCore: 637 pass incl. new `ScarfProjectTests` (4) + `ProjectStoreTests` (8). App: `ProjectAgentContextServiceTests` 13/13 (SECRET-SAFE + IDEMPOTENT held), `ProjectScaffolderTests` 3/3. See [[Fast test-iteration commands (swift test vs xcodebuild)]]. #testing
 
 ## Relations
