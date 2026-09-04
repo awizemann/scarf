@@ -57,6 +57,29 @@ struct ProjectTemplateUninstaller: Sendable {
             throw ProjectTemplateError.lockFileParseFailed(error.localizedDescription)
         }
 
+        // TIME-OF-USE ROOT CHECK — before anything below anchors on
+        // `project.path`. Everything the plan does is "delete things
+        // contained by the root", which is sound given a sane root and
+        // vacuous given an insane one: with a root of `/Users/me`, a lock
+        // listing `/Users/me/Documents/taxes.pdf` passes containment and one
+        // click deletes it. `project_register` applies `ProjectRootPolicy`
+        // at mint time, but the registry row need never have gone through
+        // it — `projects.json` is agent-writable, and an appended row is
+        // just as real to every reader.
+        //
+        // Refusing produces a plan with NOTHING to remove and the reason in
+        // `refusedEntries`, which the preview sheet already renders: the
+        // user sees why the uninstall won't run instead of watching it
+        // silently do nothing. The project is NOT dropped from the registry
+        // or the sidebar — see `ProjectRootPolicy`'s doc comment on why a
+        // policy that disappears rows is worse than one that refuses acts.
+        if let refusal = ProjectRootPolicy.refusalAtUse(for: project.path, context: context) {
+            Self.logger.error(
+                "refusing to build an uninstall plan for \(project.path, privacy: .public): \(refusal.message, privacy: .public)"
+            )
+            return Self.refusedPlan(lock: lock, project: project, refusal: refusal, context: context)
+        }
+
         // Partition tracked project files into present vs. already-gone.
         // The lock file itself is always in `projectFiles` — the installer
         // doesn't explicitly record it, but the preview sheet and the
@@ -164,6 +187,29 @@ struct ProjectTemplateUninstaller: Sendable {
                 continue
             }
             keychainToDelete.append(ref)
+            // MIGRATION COMPANION. A lock entry in the retired 8-hex FNV
+            // form names an item that may since have been RE-MINTED: saving
+            // that field again in the Configuration sheet writes the new
+            // SHA-256-bound account and rewrites `config.json`, but nothing
+            // rewrites the lock. Deleting only what the lock names would
+            // leave the live secret in the login Keychain after an uninstall
+            // that told the user everything was removed.
+            //
+            // The modern account is derivable from what we already trust
+            // here — this ref's own service slug, its field key, and the
+            // project path we just bound it to — so mint it and queue it
+            // too. An item that was never re-minted simply isn't there, and
+            // `delete` treats absent as a no-op.
+            if ref.projectPathHash?.count == TemplateKeychainRef.legacyHashLength,
+               let slug = ref.templateSlug,
+               let fieldKey = Self.fieldKey(of: ref) {
+                let modern = TemplateKeychainRef.make(
+                    templateSlug: slug, fieldKey: fieldKey, projectPath: project.path
+                )
+                if modern != ref, !keychainToDelete.contains(modern) {
+                    keychainToDelete.append(modern)
+                }
+            }
         }
 
         return TemplateUninstallPlan(
@@ -183,6 +229,50 @@ struct ProjectTemplateUninstaller: Sendable {
         )
     }
 
+    /// The field-key half of a ref's account (`<fieldKey>:<hash>`), split on
+    /// the LAST colon so a field key containing one survives — the same rule
+    /// `TemplateKeychainRef.parse` applies, and only ever called on a ref
+    /// that already came through it.
+    nonisolated static func fieldKey(of ref: TemplateKeychainRef) -> String? {
+        guard let colon = ref.account.lastIndex(of: ":") else { return nil }
+        let key = String(ref.account[..<colon])
+        return key.isEmpty ? nil : key
+    }
+
+    /// An uninstall plan that does nothing, because the project's root is
+    /// not one Scarf will anchor destructive containment on. Every
+    /// to-remove list is empty (so `totalRemoveCount` is 0 and the sheet has
+    /// nothing to offer) and the reason leads `refusedEntries`, alongside
+    /// the entries that would have been acted on — so the user can see
+    /// exactly what was spared and why.
+    nonisolated static func refusedPlan(
+        lock: TemplateLock,
+        project: ProjectEntry,
+        refusal: ProjectRootPolicy.Refusal,
+        context: ServerContext
+    ) -> TemplateUninstallPlan {
+        var refused: [String] = [refusal.message]
+        refused.append(contentsOf: lock.projectFiles)
+        if let skills = lock.skillsNamespaceDir { refused.append(skills) }
+        refused.append(contentsOf: lock.configKeychainItems ?? [])
+        return TemplateUninstallPlan(
+            lock: lock,
+            project: project,
+            projectFilesToRemove: [],
+            projectFilesAlreadyGone: [],
+            extraProjectEntries: [],
+            projectDirBecomesEmpty: false,
+            refusedEntries: refused,
+            keychainItemsToDelete: [],
+            skillsNamespaceDir: nil,
+            cronJobsToRemove: [],
+            cronJobsAlreadyGone: lock.cronJobNames,
+            memoryBlockPresent: false,
+            memoryPath: context.paths.memoryMD,
+            rootRefused: true
+        )
+    }
+
     // MARK: - Execution
 
     /// Execute the plan. Non-atomic: steps run in order, and if any step
@@ -191,6 +281,21 @@ struct ProjectTemplateUninstaller: Sendable {
     /// failure leaves enough breadcrumbs for the user to retry or finish
     /// by hand.
     nonisolated func uninstall(plan: TemplateUninstallPlan) throws {
+        // TIME-OF-USE ROOT CHECK, again — the plan was built earlier and
+        // `PathGuard` below derives every containment answer from
+        // `plan.project.path`. The plan can sit on screen while the agent
+        // rewrites the registry row underneath it, and a plan built
+        // elsewhere reaches here unexamined. Same rule as at plan build, so
+        // a root that was fine then and isn't now stops the uninstall
+        // BEFORE the first deletion (and before `unmirror` touches `.env`).
+        // Throws rather than skipping: silently doing nothing here is the
+        // "the sheet said it worked" failure.
+        if let refusal = ProjectRootPolicy.refusalAtUse(for: plan.project.path, context: context) {
+            Self.logger.error(
+                "refusing to uninstall from \(plan.project.path, privacy: .public): \(refusal.message, privacy: .public)"
+            )
+            throw ProjectTemplateError.inadmissibleProjectRoot(refusal.message)
+        }
         let transport = context.makeTransport()
         // Time-of-use re-derivation. The plan was built from the lock,
         // and the lock is agent-writable: between planning and the user's
@@ -236,6 +341,19 @@ struct ProjectTemplateUninstaller: Sendable {
         // doctor call this folder an unlisted project — see
         // `scarfOwnedFiles`. Guarded like every other deletion here.
         for file in Self.scarfOwnedFiles(in: plan.project.path + "/.scarf")
+        where guardian.admits(file, under: plan.project.path) && transport.fileExists(file) {
+            do {
+                try transport.removeFile(file)
+            } catch {
+                Self.logger.warning("couldn't remove \(file, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        // 1b. Same for the guard artifacts Scarf leaves at the project ROOT
+        // — today just `AGENTS.md.bak`, the one-deep backup the guarded
+        // AGENTS.md writer keeps (t-e2cd2861). Scarf wrote it, the lock
+        // doesn't know it, and leaving it behind would both litter the
+        // user's folder and keep the directory from being removed.
+        for file in Self.scarfOwnedProjectRootFiles(in: plan.project.path)
         where guardian.admits(file, under: plan.project.path) && transport.fileExists(file) {
             do {
                 try transport.removeFile(file)
@@ -514,6 +632,9 @@ struct ProjectTemplateUninstaller: Sendable {
                 continue
             }
             if trackedPaths.contains(full) { continue }
+            // Scarf's own root-level artifacts (`AGENTS.md.bak`) are not
+            // user content — `uninstall` removes them explicitly.
+            if Self.scarfOwnedProjectRootFiles(in: projectDir).contains(full) { continue }
             extras.append(full)
         }
         return extras
@@ -540,6 +661,15 @@ struct ProjectTemplateUninstaller: Sendable {
     /// registered project"; an uninstall must take it with the row.
     nonisolated static func scarfOwnedFiles(in scarfDir: String) -> Set<String> {
         [scarfDir + "/project.json", scarfDir + "/project.json.bak"]
+    }
+
+    /// The same idea one level up: files SCARF writes into the project root
+    /// that no lock tracks. `AGENTS.md.bak` is the one-deep backup the
+    /// guarded AGENTS.md writer keeps (t-e2cd2861) — Scarf's artifact, not
+    /// the user's content, so it must neither count as an "extra" that
+    /// blocks removing the folder nor survive the uninstall.
+    nonisolated static func scarfOwnedProjectRootFiles(in projectDir: String) -> Set<String> {
+        [projectDir + "/AGENTS.md.bak"]
     }
 
     nonisolated private func untrackedEntries(

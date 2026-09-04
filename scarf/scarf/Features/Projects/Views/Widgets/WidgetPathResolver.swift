@@ -30,10 +30,48 @@ enum WidgetPathResolver {
         case missingPath
         case absolutePath
         case escapesProject
+        /// The project ROOT itself may not anchor a containment check —
+        /// `/`, the user's home, a system directory, or something that
+        /// resolves to one. Carries the policy's own message.
+        case inadmissibleRoot(String)
+    }
+
+    /// Is this root allowed to anchor a widget's file read AT ALL?
+    ///
+    /// Containment below is relative to `projectRoot`, and the root comes
+    /// from a registry row — `projects.json` is agent-writable (P8 SEC-H1),
+    /// so a row rewritten to `/Users/me` turns "inside the project" into
+    /// "anywhere in the user's home" and a `markdown_file` widget reads any
+    /// document the user owns. `project_register` checks this policy once at
+    /// mint time; that check is not a fact about a row that never went
+    /// through it, so it is re-derived here, at the moment of use.
+    ///
+    /// A root that exists locally is judged in full (home, Hermes home, and
+    /// the physical/firmlink spellings — all questions about THIS machine).
+    /// A root that doesn't is presumed remote and gets only the universal
+    /// rules — `/` and the POSIX system directories, which are absurd on any
+    /// host — because the local home and the local filesystem describe a
+    /// different computer. That mirrors the existing gate on the symlink
+    /// layer a few lines down, and for the same reason.
+    ///
+    /// Refusal fails the READ, not the project: the row stays in the
+    /// sidebar and the widget shows why. Silently dropping projects that
+    /// fail a newly-tightened policy would break legitimate users far more
+    /// often than it stops an agent that can rewrite the file again anyway.
+    private static func rootRefusal(_ projectRoot: String) -> ProjectRootPolicy.Refusal? {
+        if FileManager.default.fileExists(atPath: (projectRoot as NSString).standardizingPath) {
+            return ProjectRootPolicy.refusalAtUse(for: projectRoot, context: .local)
+        }
+        return ProjectRootPolicy.refusal(
+            for: projectRoot, hermesHome: "", userHome: nil, resolveSymlinks: false
+        )
     }
 
     static func resolve(_ relativePath: String?, projectRoot: String?) -> Result<String, ResolveError> {
         guard let projectRoot, !projectRoot.isEmpty else { return .failure(.noProject) }
+        if let refusal = rootRefusal(projectRoot) {
+            return .failure(.inadmissibleRoot(refusal.message))
+        }
         guard let relativePath, !relativePath.isEmpty else { return .failure(.missingPath) }
         if relativePath.hasPrefix("/") { return .failure(.absolutePath) }
         // Strip a single leading "./" — common in template-authored paths.
@@ -89,6 +127,9 @@ extension WidgetPathResolver.ResolveError {
         case .missingPath:     return String(localized: "Missing required `path` field.")
         case .absolutePath:    return String(localized: "Path must be relative to the project root, not absolute.")
         case .escapesProject:  return String(localized: "Path escapes the project root (`..` segments and symlinks that lead outside are not allowed).")
+        case .inadmissibleRoot(let reason):
+            // Already localized by `ProjectRootPolicy.Refusal.message`.
+            return reason
         }
     }
 }

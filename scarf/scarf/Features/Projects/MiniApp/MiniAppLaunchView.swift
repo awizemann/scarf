@@ -224,11 +224,17 @@ struct MiniAppPermissionPreview: View {
                     }
                     ForEach(unknowns, id: \.self) { perm in
                         HStack(spacing: 8) {
-                            Image(systemName: "questionmark.circle").foregroundStyle(ScarfColor.warning)
+                            Image(systemName: "questionmark.circle")
+                                .foregroundStyle(ScarfColor.warning)
+                                .accessibilityHidden(true)
                             Text(verbatim: perm.localizedSummary).font(.callout).foregroundStyle(.secondary)
                             Spacer()
                             Text("denied").font(.caption2).foregroundStyle(.secondary)
                         }
+                        // Unknown-permission row reads as one stop ("<name>,
+                        // denied") instead of a bare "question mark" glyph
+                        // ahead of the text.
+                        .accessibilityElement(children: .combine)
                     }
                 }
                 .listStyle(.inset)
@@ -242,6 +248,7 @@ struct MiniAppPermissionPreview: View {
                 Button("Approve & Run") { onApprove(checked) }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
+                    .accessibilityHint("Grants only the checked permissions")
             }
             .padding()
         }
@@ -250,8 +257,13 @@ struct MiniAppPermissionPreview: View {
 
     private func permissionRow(_ perm: MiniAppPermission) -> some View {
         HStack(spacing: 8) {
+            // Sensitivity is already spoken via the "sensitive" text below
+            // (and, for the plain case, by the absence of it) — the glyph
+            // is redundant and would otherwise read as "warning" or
+            // "checkmark" ahead of the permission's own name.
             Image(systemName: perm.isSensitive ? "exclamationmark.triangle.fill" : "checkmark.circle")
                 .foregroundStyle(perm.isSensitive ? ScarfColor.warning : .secondary)
+                .accessibilityHidden(true)
             Text(verbatim: perm.localizedSummary).font(.callout)
             if perm.isSensitive {
                 Text("sensitive").font(.caption2).foregroundStyle(ScarfColor.warning)

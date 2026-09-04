@@ -26,18 +26,29 @@ struct ImageWidgetView: View {
         widget.height.map { CGFloat($0) }
     }
 
+    /// The header caption already says `widget.title` visually; reuse it as
+    /// the loaded image's own name so VoiceOver doesn't land on a blank
+    /// "image" stop when the outer group is walked with the rotor.
+    private var imageAccessibilityLabel: Text {
+        widget.title.isEmpty ? Text("Image") : Text(verbatim: widget.title)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: "photo")
                     .foregroundStyle(.secondary)
                     .scarfStyle(.caption)
+                    .accessibilityHidden(true)
                 Text(widget.title)
                     .scarfStyle(.caption)
                     .foregroundStyle(.secondary)
             }
             content
         }
+        // Title + loaded image read as one VO stop instead of a "photo"
+        // icon, a blank "image", and a separate caption.
+        .accessibilityElement(children: .combine)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(ScarfColor.backgroundSecondary)
@@ -110,6 +121,7 @@ struct ImageWidgetView: View {
                         .scaledToFit()
                         .frame(maxWidth: .infinity, maxHeight: displayHeight)
                         .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.sm))
+                        .accessibilityLabel(imageAccessibilityLabel)
                 } else if let loadError {
                     Text(loadError)
                         .font(.caption)
@@ -134,6 +146,7 @@ struct ImageWidgetView: View {
                     .scaledToFit()
                     .frame(maxWidth: .infinity, maxHeight: displayHeight)
                     .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.sm))
+                    .accessibilityLabel(imageAccessibilityLabel)
             case .failure(let err):
                 Text("Could not load image: \(err.localizedDescription)")
                     .font(.caption)

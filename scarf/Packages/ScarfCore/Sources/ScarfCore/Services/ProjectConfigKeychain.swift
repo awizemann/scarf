@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Security
 import os
@@ -185,8 +186,10 @@ public enum TemplateSlug {
 public struct TemplateKeychainRef: Sendable, Equatable {
     /// Macro service name, e.g. `com.scarf.template.awizemann-site-status-checker`.
     public let service: String
-    /// Account name: `<fieldKey>:<projectPathHashShort>`. The hash suffix
-    /// guarantees uniqueness across multiple installs of the same template.
+    /// Account name: `<fieldKey>:<bindingHash>`. The hash binds the item to
+    /// the owning (template slug, project path) pair, so it is unique across
+    /// multiple installs of the same template AND unforgeable from another
+    /// template's namespace. See `bindingHash(templateSlug:projectPath:)`.
     public let account: String
 
     public nonisolated init(service: String, account: String) {
@@ -230,17 +233,29 @@ public struct TemplateKeychainRef: Sendable, Equatable {
         guard !slug.isEmpty,
               slug.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "." })
         else { return nil }
-        // Account: <fieldKey>:<8 hex chars>. Split on the LAST colon so a
-        // field key containing one still parses.
+        // Account: <fieldKey>:<hash>. Split on the LAST colon so a field key
+        // containing one still parses. The hash is 16 hex chars for refs
+        // minted since the SHA-256 binding landed, 8 for the legacy FNV
+        // form — see `bindingHash` / `legacyShortHash`.
         guard let colon = account.lastIndex(of: ":") else { return nil }
         let fieldKey = String(account[..<colon])
         let hash = String(account[account.index(after: colon)...])
         guard !fieldKey.isEmpty,
               !fieldKey.contains("/"),
-              hash.count == 8,
+              hash.count == bindingHashLength || hash.count == legacyHashLength,
               hash.allSatisfy({ $0.isHexDigit && !$0.isUppercase })
         else { return nil }
         return TemplateKeychainRef(service: service, account: account)
+    }
+
+    /// The template slug this ref's SERVICE names, i.e. which template's
+    /// namespace the item lives in. Non-nil for any ref that came through
+    /// `parse`. The binding hash covers this value, so a path collision
+    /// alone can't reach another template's items.
+    public nonisolated var templateSlug: String? {
+        guard service.hasPrefix(Self.serviceNamespace) else { return nil }
+        let slug = String(service.dropFirst(Self.serviceNamespace.count))
+        return slug.isEmpty ? nil : slug
     }
 
     /// The project-path fingerprint baked into this ref's account, i.e.
@@ -251,11 +266,35 @@ public struct TemplateKeychainRef: Sendable, Equatable {
         return String(account[account.index(after: colon)...])
     }
 
-    /// Is this ref one that an install rooted at `projectPath` could have
-    /// minted? Cross-project isolation lives here: project A's
-    /// `config.json` naming project B's ref fails this check, so B's
-    /// secret is never resolved into A's env block (or deleted by A's
+    /// Is this ref one that an install of THIS ref's template, rooted at
+    /// `projectPath`, could have minted? Cross-project isolation lives here:
+    /// project A's `config.json` naming project B's ref fails this check, so
+    /// B's secret is never resolved into A's env block (or deleted by A's
     /// uninstall).
+    ///
+    /// **Why this is no longer an FNV compare** (P8 SEC-H2). The binding
+    /// used to be a 32-bit FNV-1a of the path alone. Both halves of that
+    /// were broken: 32 bits of a non-cryptographic hash has chosen
+    /// preimages an attacker computes in milliseconds — pick a sibling
+    /// directory name whose path collides with the victim's, register it,
+    /// and `belongs` says yes — and the SERVICE half wasn't covered at all,
+    /// so one collision reached every template's items, not just the one
+    /// that minted it. The binding is now the leading 64 bits of a SHA-256
+    /// over BOTH the template slug and the normalized path, which has no
+    /// tractable preimage and can't be aimed at another template's
+    /// namespace.
+    ///
+    /// **Legacy acceptance is READ-side only, and time-boxed.** Items minted
+    /// before this change carry the 8-hex FNV account, and refusing them
+    /// outright would make every already-configured project's secret vanish
+    /// at once. So an 8-hex hash is still accepted here — which means those
+    /// items keep the old weakness until they are re-minted — while `make`
+    /// mints nothing but the new form, so the next time the user saves a
+    /// value in the Configuration sheet that field moves over for good. The
+    /// exposure is bounded to a legacy item's own field, requires the
+    /// attacker to have already gotten a colliding directory registered,
+    /// and shrinks with every save. Remove the legacy branch (and this
+    /// paragraph) once the deprecation window closes.
     ///
     /// Both the raw and the symlink-resolved spelling of the path are
     /// accepted, because a registry row can hold `/tmp/x` for a project
@@ -263,16 +302,61 @@ public struct TemplateKeychainRef: Sendable, Equatable {
     /// directory either way.
     public nonisolated func belongs(toProjectPath projectPath: String) -> Bool {
         guard let hash = projectPathHash else { return false }
-        return Self.acceptableHashes(forProjectPath: projectPath).contains(hash)
+        if hash.count == Self.bindingHashLength {
+            guard let slug = templateSlug else { return false }
+            return Self.acceptableBindingHashes(
+                templateSlug: slug, projectPath: projectPath
+            ).contains(hash)
+        }
+        if hash.count == Self.legacyHashLength {
+            return Self.acceptableLegacyHashes(forProjectPath: projectPath).contains(hash)
+        }
+        return false
     }
 
-    /// Every path-hash that legitimately denotes `projectPath`. The
-    /// spellings differ in practice (`/tmp/x` vs `/private/tmp/x`, a
-    /// trailing slash, a symlinked parent), and `Foundation` normalizes
+    /// Hex length of a current (SHA-256) binding hash: 16 chars = 64 bits.
+    public nonisolated static let bindingHashLength = 16
+    /// Hex length of the retired FNV-1a hash: 8 chars = 32 bits.
+    public nonisolated static let legacyHashLength = 8
+
+    /// Every current-form binding hash that legitimately denotes
+    /// (`templateSlug`, `projectPath`).
+    ///
+    /// The path spellings differ in practice (`/tmp/x` vs `/private/tmp/x`,
+    /// a trailing slash, a symlinked parent) and `Foundation` normalizes
     /// them inconsistently — `resolvingSymlinksInPath` STRIPS a `/private`
-    /// prefix rather than adding one — so enumerate the variants instead
-    /// of trusting one canonical form.
+    /// prefix rather than adding one — so the variants are enumerated
+    /// rather than trusted to one canonical form. That enumeration is
+    /// carried over verbatim from the FNV version: it is about spelling,
+    /// not about the hash, and dropping it would have silently orphaned
+    /// every project whose registry row and install path disagree on
+    /// `/private`.
+    public nonisolated static func acceptableBindingHashes(
+        templateSlug: String,
+        projectPath: String
+    ) -> Set<String> {
+        Set(pathSpellings(of: projectPath).map {
+            bindingHash(templateSlug: templateSlug, projectPath: $0)
+        })
+    }
+
+    /// Legacy (FNV-1a) equivalent of `acceptableBindingHashes`, kept for the
+    /// read-side deprecation window described on `belongs(toProjectPath:)`.
+    /// Never used to MINT a ref.
+    public nonisolated static func acceptableLegacyHashes(
+        forProjectPath projectPath: String
+    ) -> Set<String> {
+        Set(pathSpellings(of: projectPath).map(legacyShortHash(of:)))
+    }
+
+    /// Retained under the old name so existing call sites keep compiling.
+    @available(*, deprecated, renamed: "acceptableLegacyHashes(forProjectPath:)")
     public nonisolated static func acceptableHashes(forProjectPath projectPath: String) -> Set<String> {
+        acceptableLegacyHashes(forProjectPath: projectPath)
+    }
+
+    /// The spellings of one project path that all denote the same directory.
+    nonisolated static func pathSpellings(of projectPath: String) -> Set<String> {
         var spellings: Set<String> = [projectPath]
         let standardized = URL(fileURLWithPath: projectPath).standardizedFileURL.path
         spellings.insert(standardized)
@@ -285,13 +369,13 @@ public struct TemplateKeychainRef: Sendable, Equatable {
                 spellings.insert("/private" + path)
             }
         }
-        return Set(spellings.map(shortHash(of:)))
+        return spellings
     }
 
-    /// Build a ref from a template slug + field key + project path.
-    /// The hash suffix is a fingerprint of the absolute project path.
-    /// Stable across launches, different between `/Users/a/proj1` and
-    /// `/Users/a/proj2`.
+    /// Build a ref from a template slug + field key + project path. The hash
+    /// suffix binds the item to BOTH, so it is stable across launches,
+    /// different between `/Users/a/proj1` and `/Users/a/proj2`, and
+    /// different between two templates installed into the same directory.
     public nonisolated static func make(
         templateSlug: String,
         fieldKey: String,
@@ -299,13 +383,32 @@ public struct TemplateKeychainRef: Sendable, Equatable {
     ) -> TemplateKeychainRef {
         TemplateKeychainRef(
             service: "com.scarf.template.\(templateSlug)",
-            account: "\(fieldKey):\(Self.shortHash(of: projectPath))"
+            account: "\(fieldKey):\(bindingHash(templateSlug: templateSlug, projectPath: projectPath))"
         )
     }
 
-    public nonisolated static func shortHash(of string: String) -> String {
-        // 8 hex chars is 32 bits of uniqueness — plenty for
-        // distinguishing a handful of project dirs per template install.
+    /// The binding: leading 64 bits of SHA-256 over a domain-separated
+    /// (slug, path) pair, lowercase hex.
+    ///
+    /// The `\u{0}` separator matters — it cannot occur in either a slug
+    /// (`TemplateSlug.derive` emits only letters/digits/`-`/`_`) or a POSIX
+    /// path, so no (slug, path) pair can be re-parsed as a different one by
+    /// sliding the boundary. The version tag keeps this hash from ever
+    /// colliding with some other SHA-256 Scarf computes over similar bytes.
+    public nonisolated static func bindingHash(templateSlug: String, projectPath: String) -> String {
+        var input = Data("scarf-template-keychain-v2\u{0}".utf8)
+        input.append(Data(templateSlug.utf8))
+        input.append(0)
+        input.append(Data(projectPath.utf8))
+        let digest = SHA256.hash(data: input)
+        return digest.prefix(bindingHashLength / 2)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    /// The RETIRED 32-bit FNV-1a fingerprint. Read-side only — see
+    /// `belongs(toProjectPath:)`. Do not mint with this.
+    public nonisolated static func legacyShortHash(of string: String) -> String {
         let data = Data(string.utf8)
         var hash: UInt32 = 0x811c9dc5
         for byte in data {
@@ -313,5 +416,10 @@ public struct TemplateKeychainRef: Sendable, Equatable {
             hash &*= 0x01000193
         }
         return String(format: "%08x", hash)
+    }
+
+    @available(*, deprecated, renamed: "legacyShortHash(of:)")
+    public nonisolated static func shortHash(of string: String) -> String {
+        legacyShortHash(of: string)
     }
 }

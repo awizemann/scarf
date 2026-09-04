@@ -66,6 +66,7 @@ struct KanbanSummaryWidgetView: View {
             Spacer()
             Image(systemName: "rectangle.split.3x1")
                 .foregroundStyle(ScarfColor.foregroundMuted)
+                .accessibilityHidden(true)
         }
     }
 

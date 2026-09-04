@@ -323,8 +323,20 @@ nonisolated struct TemplateUninstallPlan: Sendable {
     /// `memoryBlockPresent` is true.
     let memoryPath: String
 
+    /// `true` when the project's own ROOT failed `ProjectRootPolicy` at plan
+    /// time, so this plan performs nothing at all — not even the registry
+    /// removal. `refusedEntries` leads with the reason. Defaulted so the
+    /// ordinary construction site doesn't have to mention it.
+    var rootRefused: Bool = false
+
     nonisolated var totalRemoveCount: Int {
-        projectFilesToRemove.count
+        // A root-refused plan removes NOTHING. The registry row is normally
+        // an unconditional part of any uninstall, which is why it was a bare
+        // `+ 1`; here `uninstall(plan:)` throws before reaching it, so
+        // counting it would have the sheet promise one removal that cannot
+        // happen.
+        guard !rootRefused else { return 0 }
+        return projectFilesToRemove.count
             + (skillsNamespaceDir == nil ? 0 : 1)
             + cronJobsToRemove.count
             + (memoryBlockPresent ? 1 : 0)
@@ -351,6 +363,13 @@ nonisolated enum ProjectTemplateError: LocalizedError, Sendable {
     /// The uninstall removed the project's files but couldn't rewrite
     /// `~/.hermes/scarf/projects.json`, so the sidebar row survives.
     case registryUpdateFailed(String)
+    /// The project's registered root is not one Scarf will anchor a
+    /// destructive containment check on (`/`, the user's home, a system
+    /// directory, or something that resolves to one — see
+    /// `ProjectRootPolicy`). NOTHING was removed: this is refused before the
+    /// first deletion, which is why it can't reuse `registryUpdateFailed`,
+    /// whose message promises the files are already gone.
+    case inadmissibleProjectRoot(String)
 
     var errorDescription: String? {
         switch self {
@@ -382,6 +401,8 @@ nonisolated enum ProjectTemplateError: LocalizedError, Sendable {
             return "Couldn't read template.lock.json: \(s)"
         case .registryUpdateFailed(let s):
             return "Removed the template's files, but couldn't update the projects list: \(s). The project may still appear in the sidebar — try the uninstall again."
+        case .inadmissibleProjectRoot(let s):
+            return "Nothing was removed. \(s)"
         }
     }
 }

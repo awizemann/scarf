@@ -38,9 +38,29 @@ final class MiniAppSchemeHandler: NSObject, WKURLSchemeHandler {
     private static let logger = Logger(subsystem: "com.scarf", category: "MiniAppSchemeHandler")
 
     private let baseDirectory: String
+    /// Non-nil when the registry row this mini-app's directory was derived
+    /// from names a root that may not anchor a containment check — see
+    /// `ProjectRootPolicy`. Every request is then refused rather than
+    /// served, because "inside `/Users/me/.scarf/miniapps/x`" is a guarantee
+    /// about a directory the agent chose inside the user's home.
+    ///
+    /// Computed ONCE, at mount: the policy consults the filesystem, and the
+    /// answer can't change under us for the lifetime of one webview without
+    /// the row changing, which remounts. Refusing here does NOT hide the
+    /// project from the sidebar — the row stays, the mini-app doesn't run.
+    private let rootRefusal: ProjectRootPolicy.Refusal?
 
     init(baseDirectory: String) {
         self.baseDirectory = baseDirectory
+        // A mini-app is unpacked by the local installer and served to a
+        // local `WKWebView`; `baseDirectory` is a path on this Mac, which is
+        // why `.local` is the right context to judge it in (and why the read
+        // below may use `open(2)` at all).
+        if let root = MiniAppAssetResolver.projectRoot(ofMiniAppBase: baseDirectory) {
+            self.rootRefusal = ProjectRootPolicy.refusalAtUse(for: root, context: .local)
+        } else {
+            self.rootRefusal = nil
+        }
     }
 
     /// Per-asset ceiling. Generous for anything a mini-app legitimately
@@ -56,52 +76,77 @@ final class MiniAppSchemeHandler: NSObject, WKURLSchemeHandler {
         }
         live.insert(ObjectIdentifier(urlSchemeTask))
 
-        // `containedFilePath` adds the symlink-resolved containment +
-        // existence/non-dir check on top of the lexical resolve, so a
-        // symlink planted inside the mini-app dir can't be read through to
-        // escape the directory.
-        guard let filePath = MiniAppAssetResolver.containedFilePath(
-            requestPath: url.path,
-            baseDirectory: baseDirectory
-        ) else {
-            Self.logger.warning("blocked out-of-bounds / escaping mini-app request: \(url.path, privacy: .public)")
-            respond(urlSchemeTask, url: url, status: 404, mime: "text/plain; charset=utf-8", body: Data("Not found".utf8))
-            return
-        }
-
-        // SIZE CAP. `FileManager.contents(atPath:)` reads the whole file into
-        // memory, and a mini-app's asset directory is AGENT-GENERATED — a
-        // stray multi-gigabyte artefact dropped next to index.html would have
-        // been loaded in full to serve one `<img>`. Stat first and refuse
-        // anything over the ceiling with a real HTTP status, so the page's own
-        // error handling fires instead of the app quietly ballooning.
-        let attributes = try? FileManager.default.attributesOfItem(atPath: filePath)
-        let byteSize = (attributes?[.size] as? NSNumber)?.intValue
-        if let byteSize, byteSize > Self.maxAssetBytes {
-            Self.logger.warning(
-                "mini-app asset over the \(Self.maxAssetBytes, privacy: .public)-byte cap refused: \(url.path, privacy: .public) (\(byteSize, privacy: .public) bytes)"
+        // Time-of-use root check (see `rootRefusal`). 403 rather than 404:
+        // the file may well exist, we are declining to serve out of this
+        // root at all, and the page's own error handling should see the
+        // difference.
+        if let rootRefusal {
+            Self.logger.error(
+                "refusing to serve mini-app assets from an inadmissible project root: \(rootRefusal.message, privacy: .public)"
             )
             respond(
-                urlSchemeTask, url: url, status: 413,
+                urlSchemeTask, url: url, status: 403,
                 mime: "text/plain; charset=utf-8",
-                body: Data("Asset exceeds the \(Self.maxAssetBytes / (1024 * 1024)) MB mini-app limit.".utf8)
+                body: Data(rootRefusal.message.utf8)
             )
             return
         }
 
-        let mime = MiniAppAssetResolver.mimeType(forPath: filePath)
+        // MIME is decided from the REQUESTED path, before any I/O — it is a
+        // function of the extension the page asked for, and deriving it here
+        // keeps the read below the only thing that touches the filesystem.
+        let mime = MiniAppAssetResolver.mimeType(forPath: url.path)
+        let base = baseDirectory
+        let requestPath = url.path
+
+        // ONE open, on the io queue, doing everything: containment,
+        // `O_NOFOLLOW`, fd validation (regular file, `F_GETPATH` still
+        // inside the base), the size cap, and the read.
+        //
+        // The previous shape checked containment on the main queue, stat-ed
+        // the path for the size cap, then re-opened the same path on the io
+        // queue — three separate resolutions of an attacker-writable path,
+        // with an async hop in the middle. `MiniAppAssetResolver.readContainedFile`
+        // collapses them into a single descriptor that is checked and read.
+        //
+        // Locality: this handler has always read with `FileManager`, i.e. it
+        // has only ever been able to serve LOCAL files — a mini-app is
+        // unpacked by the local installer and served to a local `WKWebView`,
+        // and `baseDirectory` is a local filesystem path by construction.
+        // Passing `isLocal: true` records that assumption at the call site
+        // rather than leaving it implicit.
         Self.ioQueue.async { [weak self] in
-            let data = FileManager.default.contents(atPath: filePath)
+            let result = MiniAppAssetResolver.readContainedFile(
+                requestPath: requestPath,
+                baseDirectory: base,
+                maxBytes: Self.maxAssetBytes,
+                isLocal: true
+            )
             DispatchQueue.main.async {
                 guard let self else { return }
-                guard let data else {
+                switch result {
+                case .success(let asset):
+                    self.respond(urlSchemeTask, url: url, status: 200, mime: mime, body: asset.data)
+                case .failure(.tooLarge(let bytes)):
+                    Self.logger.warning(
+                        "mini-app asset over the \(Self.maxAssetBytes, privacy: .public)-byte cap refused: \(requestPath, privacy: .public) (\(bytes, privacy: .public) bytes)"
+                    )
+                    self.respond(
+                        urlSchemeTask, url: url, status: 413,
+                        mime: "text/plain; charset=utf-8",
+                        body: Data("Asset exceeds the \(Self.maxAssetBytes / (1024 * 1024)) MB mini-app limit.".utf8)
+                    )
+                case .failure(let refusal):
+                    if refusal != .notFound {
+                        Self.logger.warning(
+                            "blocked mini-app request \(requestPath, privacy: .public): \(String(describing: refusal), privacy: .public)"
+                        )
+                    }
                     self.respond(
                         urlSchemeTask, url: url, status: 404,
                         mime: "text/plain; charset=utf-8", body: Data("Not found".utf8)
                     )
-                    return
                 }
-                self.respond(urlSchemeTask, url: url, status: 200, mime: mime, body: data)
             }
         }
     }

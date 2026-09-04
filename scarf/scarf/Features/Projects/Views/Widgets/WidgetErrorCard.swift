@@ -34,6 +34,7 @@ struct WidgetErrorCard: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(ScarfColor.warning)
                     .font(.caption)
+                    .accessibilityHidden(true)
                 (title.isEmpty ? Text("Widget error") : Text(verbatim: title))
                     .scarfStyle(.caption)
                     .foregroundStyle(.secondary)
@@ -49,6 +50,10 @@ struct WidgetErrorCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        // Every NEW refusal state (image policy, size caps) routes through
+        // this shared card — group title+reason+hint into one VO stop
+        // instead of 2-4, matching the P7 list-row convention.
+        .accessibilityElement(children: .combine)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(ScarfColor.warning.opacity(0.08))

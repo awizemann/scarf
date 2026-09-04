@@ -206,11 +206,42 @@ final class ScarfMiniAppBridge: NSObject, WKScriptMessageHandlerWithReply {
                 reply(nil, "bad_request: file.read needs a path"); return
             }
             let projectPath = projectPath
+            // Locality is a PRECONDITION, not a detail. The read below is
+            // `open(2)` on this Mac; for a project whose files live on an
+            // SSH host, `projectPath` would name a local file of the same
+            // name — a different file entirely — so a remote project must
+            // refuse rather than answer with the wrong machine's bytes.
+            let isLocal: Bool
+            switch serverContext.kind {
+            case .local: isLocal = true
+            case .ssh: isLocal = false
+            }
+            guard isLocal else {
+                reply(nil, "not_supported: file.read is only available for projects on this Mac")
+                return
+            }
+            // Time-of-use root check. `projectPath` came from a registry row
+            // and `projects.json` is agent-writable, so a row rewritten to
+            // `/Users/me` would make "contained by the project root" mean
+            // "anywhere in the user's home". Refuse the read and say why —
+            // the project itself stays in the sidebar.
+            if let refusal = ProjectRootPolicy.refusalAtUse(for: projectPath, context: serverContext) {
+                Self.logger.error(
+                    "refusing file.read: \(refusal.message, privacy: .public)"
+                )
+                reply(nil, "permission_denied: \(refusal.message)")
+                return
+            }
             DispatchQueue.global(qos: .userInitiated).async {
-                guard let path = MiniAppAssetResolver.containedFilePath(requestPath: rel, baseDirectory: projectPath),
-                      let data = FileManager.default.contents(atPath: path),
-                      data.count <= Self.maxFileReadBytes,
-                      let text = String(data: data, encoding: .utf8) else {
+                // Single fd: contained, `O_NOFOLLOW`, fstat-validated,
+                // `F_GETPATH`-rechecked, then read. Closes the symlink-flip
+                // window the old check-path-then-open-path shape left open.
+                guard case .success(let file) = MiniAppAssetResolver.readContainedFile(
+                    requestPath: rel,
+                    baseDirectory: projectPath,
+                    maxBytes: Self.maxFileReadBytes,
+                    isLocal: true
+                ), let text = String(data: file.data, encoding: .utf8) else {
                     DispatchQueue.main.async {
                         reply(nil, "not_found: file is missing, too large, outside the project, or not UTF-8 text")
                     }
