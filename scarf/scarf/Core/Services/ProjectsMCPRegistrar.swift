@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import ScarfCore
 import os
@@ -38,10 +39,17 @@ struct ProjectsMCPRegistrar: Sendable {
     let context: ServerContext
     /// Injectable for tests; production resolves the running bundle.
     let binaryURL: URL?
+    /// Injectable for tests so a suite never writes the real defaults.
+    let unmanageableMarker: UnmanageableMarker
 
-    init(context: ServerContext = .local, binaryURL: URL? = nil) {
+    init(
+        context: ServerContext = .local,
+        binaryURL: URL? = nil,
+        unmanageableMarker: UnmanageableMarker = UnmanageableMarker()
+    ) {
         self.context = context
         self.binaryURL = binaryURL
+        self.unmanageableMarker = unmanageableMarker
     }
 
     /// The bundled helper, or `nil` when it isn't there — a developer
@@ -77,10 +85,91 @@ struct ProjectsMCPRegistrar: Sendable {
         // The dev copy is a stable path, so it WORKS — but registering it
         // makes the dev and release copies fight over the entry on every
         // launch. The installed app wins by default.
-        if path.contains("-dev.app/") {
-            return "running the dev copy — leaving the Hermes config to the installed app"
+        //
+        // Matched on the BUNDLE NAME, not on the literal `-dev.app/`: this
+        // machine has `/Applications/scarf-dev.app` AND
+        // `/Applications/scarf-dev-next.app`, and only the first was caught
+        // — so the second re-pointed `command` at itself on every launch
+        // while the installed app re-pointed it back, a rewrite war on a
+        // file Hermes watches. Bundle id can't tell them apart:
+        // `build-detached.sh` keeps `com.scarf.app` on purpose so iCloud
+        // keeps working.
+        if let bundle = devBundleName(in: path) {
+            return "running the dev copy (\(bundle)) — leaving the Hermes config to the installed app"
         }
         return nil
+    }
+
+    /// The `.app` bundle name in `path` when it names a dev build, else nil.
+    ///
+    /// "Dev" is a whole word in the bundle name — `scarf-dev.app`,
+    /// `scarf-dev-next.app`, `Scarf Dev.app` — so a user whose app is called
+    /// `Devon.app` (or who keeps Scarf under `~/Developer/`) is not mistaken
+    /// for one. Only the bundle name is examined; the folders above it are
+    /// somebody's filing system, not a statement about the build.
+    static func devBundleName(in path: String) -> String? {
+        for component in path.split(separator: "/") where component.hasSuffix(".app") {
+            let name = component.dropLast(".app".count).lowercased()
+            let tokens = name.split(whereSeparator: { $0 == "-" || $0 == " " || $0 == "_" || $0 == "." })
+            if tokens.contains("dev") { return String(component) }
+        }
+        return nil
+    }
+
+    // MARK: - "Don't ask again until the file changes"
+
+    /// SHA-256 over the current `config.yaml` AND the binary path we would
+    /// register, or `nil` when the config can't be read (which is also the
+    /// first-launch case — there is nothing to remember).
+    ///
+    /// The binary path is in the key because not every failure is the file's
+    /// fault: a broken `hermes` install fails identically on a perfectly good
+    /// config, and keying on the config alone would latch that failure until
+    /// something happened to edit a file nobody has a reason to edit. Folding
+    /// in the target path means a Sparkle update, a move to /Applications, or
+    /// any reinstall that relocates the bundle un-latches it on its own.
+    static func configFingerprint(context: ServerContext, targetPath: String) -> String? {
+        let transport = context.makeTransport()
+        guard var data = try? transport.readFile(context.paths.configYAML) else { return nil }
+        data.append(Data(("\n" + targetPath).utf8))
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// The one thing standing between a config Scarf cannot manage and a
+    /// 90-second subprocess on every single launch, forever.
+    ///
+    /// When the parser can't find the entry — a CRLF file, a quoted key, a
+    /// shape the patcher refuses — the registrar concludes the server is
+    /// absent and shells `hermes mcp add`, which fails the same way every
+    /// time. That is a minute and a half of a spawned CLI per launch, on a
+    /// background task nobody is watching, producing nothing.
+    ///
+    /// Keyed on the config's CONTENT, not on a "we gave up" boolean: the
+    /// moment the user (or Hermes, or another tool) changes the file, the
+    /// fingerprint changes and Scarf tries again on its own. There is no
+    /// state to reset by hand and no way for the marker to outlive the
+    /// problem it describes.
+    struct UnmanageableMarker: Sendable {
+        private let key = "ProjectsMCPRegistrar.unmanageableConfigSHA256"
+        private let defaults: @Sendable () -> UserDefaults
+
+        init(defaults: @escaping @Sendable () -> UserDefaults = { .standard }) {
+            self.defaults = defaults
+        }
+
+        func matches(_ fingerprint: String) -> Bool {
+            defaults().string(forKey: key) == fingerprint
+        }
+
+        func record(_ fingerprint: String?) {
+            guard let fingerprint else { return }
+            defaults().set(fingerprint, forKey: key)
+        }
+
+        func clear() {
+            guard defaults().string(forKey: key) != nil else { return }
+            defaults().removeObject(forKey: key)
+        }
     }
 
     enum Outcome: Equatable {
@@ -120,6 +209,15 @@ struct ProjectsMCPRegistrar: Sendable {
         let fileService = HermesFileService(context: context)
         let existing = fileService.loadMCPServers().first { $0.name == Self.serverName }
 
+        // A config we already failed on, unchanged since. See
+        // `unmanageableMarker`.
+        let configFingerprint = Self.configFingerprint(context: context, targetPath: path)
+        if let configFingerprint, unmanageableMarker.matches(configFingerprint) {
+            return .skipped(
+                "this Hermes config could not be updated on a previous launch and hasn't changed since"
+            )
+        }
+
         guard let existing else {
             // Creation goes through `hermes mcp add`, the argv Scarf
             // already ships and has verified against Hermes's argparse
@@ -134,9 +232,18 @@ struct ProjectsMCPRegistrar: Sendable {
                 Self.logger.warning(
                     "hermes mcp add \(Self.serverName, privacy: .public) failed: \(result.output, privacy: .public)"
                 )
+                // Re-read: `hermes mcp add` is an external process that can
+                // rewrite the config even on a non-zero exit, and recording
+                // the pre-spawn hash would leave the marker never matching —
+                // the 90-second spawn back on every launch, which is the one
+                // thing this exists to stop.
+                unmanageableMarker.record(
+                    Self.configFingerprint(context: context, targetPath: path)
+                )
                 return .failed(result.output)
             }
             Self.logger.info("registered \(Self.serverName, privacy: .public) at \(path, privacy: .public)")
+            unmanageableMarker.clear()
             return .added(path: path)
         }
 
@@ -148,9 +255,16 @@ struct ProjectsMCPRegistrar: Sendable {
                 "an MCP server named \(Self.serverName) already exists and is not a stdio server"
             )
         }
-        guard currentCommand != path else { return .unchanged(path: path) }
+        guard currentCommand != path else {
+            unmanageableMarker.clear()
+            return .unchanged(path: path)
+        }
 
         guard fileService.setMCPServerCommand(name: Self.serverName, command: path) else {
+            // The patcher refused (a shape it won't touch) or its read-back
+            // failed and it restored the file. Either way the next launch
+            // would refuse identically — mark it and stop asking.
+            unmanageableMarker.record(configFingerprint)
             return .failed("could not re-point \(Self.serverName) to \(path)")
         }
         // `patchMCPServerField` reports success even when the write itself
@@ -160,11 +274,15 @@ struct ProjectsMCPRegistrar: Sendable {
         // would have caught it.
         let written = fileService.loadMCPServers().first { $0.name == Self.serverName }?.command
         guard written == path else {
+            unmanageableMarker.record(
+                Self.configFingerprint(context: context, targetPath: path)
+            )
             return .failed(
                 "re-point of \(Self.serverName) did not stick (config still says "
                     + "\(written ?? "nothing"))"
             )
         }
+        unmanageableMarker.clear()
         Self.logger.info(
             "re-pointed \(Self.serverName, privacy: .public): \(currentCommand, privacy: .public) → \(path, privacy: .public)"
         )

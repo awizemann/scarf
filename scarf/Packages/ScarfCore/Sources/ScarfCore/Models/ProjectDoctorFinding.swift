@@ -130,6 +130,16 @@ public struct ProjectDoctorFinding: Sendable, Identifiable, Equatable {
     /// Subject path — a project root, or a sidecar file for `malformedSidecar`.
     public let path: String?
     public let repair: Repair?
+    /// How many registry rows this finding's repair will actually touch.
+    ///
+    /// Only ever more than 1 for `removeRegistryRow`, whose writer matches
+    /// rows by NORMALIZED path: `/a/b` and `/a/b/` are two spellings of one
+    /// folder, so a dead folder claimed by both is one finding whose repair
+    /// removes two rows. The confirm copy is derived from this rather than
+    /// assumed, because "Remove “X” from the list?" over a button that
+    /// deletes two rows is the kind of quiet inaccuracy that makes a user
+    /// distrust every other thing the doctor says.
+    public let affectedRowCount: Int
 
     public init(
         id: String,
@@ -139,7 +149,8 @@ public struct ProjectDoctorFinding: Sendable, Identifiable, Equatable {
         detail: String,
         projectName: String? = nil,
         path: String? = nil,
-        repair: Repair? = nil
+        repair: Repair? = nil,
+        affectedRowCount: Int = 1
     ) {
         self.id = id
         self.kind = kind
@@ -149,6 +160,27 @@ public struct ProjectDoctorFinding: Sendable, Identifiable, Equatable {
         self.projectName = projectName
         self.path = path
         self.repair = repair
+        self.affectedRowCount = max(1, affectedRowCount)
+    }
+
+    /// Title for the destructive confirmation, derived from what the repair
+    /// will do rather than from what the single-row case used to do.
+    public var confirmTitle: String {
+        guard affectedRowCount == 1 else {
+            return "Remove \(affectedRowCount) entries from the list?"
+        }
+        guard let projectName else { return "Remove this entry from the list?" }
+        return "Remove “\(projectName)” from the list?"
+    }
+
+    /// Body for the destructive confirmation. Says "entry"/"entries" to
+    /// match, and repeats the one reassurance that matters: nothing on disk
+    /// is touched.
+    public var confirmMessage: String {
+        affectedRowCount == 1
+            ? "This removes the entry from your projects list only. No files are deleted."
+            : "\(affectedRowCount) entries point at this folder. This removes all of them from your "
+                + "projects list only. No files are deleted."
     }
 }
 
@@ -295,6 +327,11 @@ public enum ProjectDoctorError: LocalizedError, Sendable, Equatable {
     /// Adopting a folder would create a second project with an existing
     /// name, and the sidebar removes projects BY NAME.
     case nameTaken(String)
+    /// The `project.json` found in this folder declares a DIFFERENT
+    /// `rootPath`. Every writer underneath addresses a project by
+    /// `record.rootPath`, so acting on it would rewrite the record and the
+    /// registry row of whatever project that path belongs to.
+    case recordPathMismatch(path: String, declared: String)
 
     public var errorDescription: String? {
         switch self {
@@ -308,6 +345,9 @@ public enum ProjectDoctorError: LocalizedError, Sendable, Equatable {
             return "Couldn't read the project record at \(path). Scarf won't replace it — that would throw away whatever it holds."
         case .nameTaken(let name):
             return "Another project is already called “\(name)”. Rename it first, then add this folder."
+        case .recordPathMismatch(let path, let declared):
+            return "The project file in \(path) says it belongs to \(declared). Scarf won't act on it — "
+                + "that would rewrite whatever is at \(declared). Fix the “rootPath” in that file first."
         }
     }
 }

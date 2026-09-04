@@ -346,7 +346,19 @@ public struct ProjectStore: Sendable {
             )
         }
         var registry = loaded.registry
-        if let idx = registry.projects.firstIndex(where: { $0.path == project.rootPath }) {
+        // NORMALIZED match, not `==`. `projects.json` is hand- and
+        // agent-written, and `/a/b`, `/a/b/` and `/a/./b` are three
+        // spellings of one folder. A raw comparison misses the twin and
+        // APPENDS — a phantom second row for a project that already exists,
+        // which then shows up twice in the sidebar, splits its identity
+        // across two uuids, and makes the doctor's `duplicatePath` finding
+        // the only way out. The doctor compares normalized everywhere, so
+        // this is also what keeps the two convergent: the store must not be
+        // able to create the damage the doctor reports.
+        let target = ProjectIdentity.normalizedPath(project.rootPath)
+        if let idx = registry.projects.firstIndex(where: {
+            ProjectIdentity.normalizedPath($0.path) == target
+        }) {
             guard registry.projects[idx].uuid != project.id else { return }  // already indexed
             registry.projects[idx].uuid = project.id
         } else {

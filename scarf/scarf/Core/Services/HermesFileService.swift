@@ -617,12 +617,16 @@ struct HermesFileService: Sendable {
     nonisolated func setMCPServerCommand(name: String, command: String) -> Bool {
         let trimmed = command.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return false }
-        return patchMCPServerField(name: name) { entryLines in
-            Self.replaceOrInsertScalar(
-                key: "command",
-                value: Self.yamlScalar(trimmed),
-                in: &entryLines
-            )
+        let value = Self.yamlScalar(trimmed)
+        // This is the one patch that runs unattended on every launch, so it
+        // states what it expects to find afterwards and lets the read-back
+        // prove it — rather than reporting success because the write threw
+        // no error it was in a position to see.
+        return patchMCPServerField(
+            name: name,
+            expecting: ["    command: \(value)"]
+        ) { entryLines in
+            Self.replaceOrInsertScalar(key: "command", value: value, in: &entryLines)
         }
     }
 
@@ -767,10 +771,15 @@ struct HermesFileService: Sendable {
                 }
                 continue
             }
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let trimmed = Self.trimYAMLLine(line)
             if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
-            let indent = line.prefix(while: { $0 == " " }).count
-            if indent == 0 && trimmed.contains(":") {
+            // "Top level" means NO leading whitespace of any kind. Counting
+            // spaces alone made a tab-indented line look top-level, which cut
+            // the block short right before it — so the block handed to the
+            // patcher ended above the very lines that made the file
+            // unpatchable, and the tab check downstream never saw them.
+            let isTopLevel = !(line.first.map { $0 == " " || $0 == "\t" } ?? false)
+            if isTopLevel && trimmed.contains(":") {
                 blockEnd = index
                 break
             }
@@ -785,7 +794,7 @@ struct HermesFileService: Sendable {
         // after the trailing comments.
         while blockEnd > blockStart + 1 {
             let line = lines[blockEnd - 1]
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let trimmed = Self.trimYAMLLine(line)
             if trimmed.isEmpty || trimmed.hasPrefix("#") {
                 blockEnd -= 1
             } else {
@@ -956,33 +965,55 @@ struct HermesFileService: Sendable {
             identityHeaderValue = nil
         }
 
+        /// `key: value` split shared by every scalar site below: trims CRLF,
+        /// unquotes the key (a hand-edited `"command":` is the same key), and
+        /// drops an unquoted trailing `# comment` from the value.
+        func keyValue(_ trimmed: String) -> (key: String, value: String)? {
+            guard let colonIdx = trimmed.firstIndex(of: ":") else { return nil }
+            let key = Self.unquote(
+                String(trimmed[..<colonIdx]).trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            let value = Self.stripInlineComment(
+                String(trimmed[trimmed.index(after: colonIdx)...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            return (key, value)
+        }
+
         for rawLine in location.block.dropFirst() {
-            let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
+            let trimmed = Self.trimYAMLLine(rawLine)
             if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
             let indent = rawLine.prefix(while: { $0 == " " }).count
 
-            if indent == 2 && trimmed.hasSuffix(":") && !trimmed.contains(" ") {
-                flush()
-                currentName = String(trimmed.dropLast())
-                subSection = nil
-                continue
+            // A quoted entry key CONTAINS no space but is wrapped in quotes;
+            // a quoted key with a space in it (`"my server":`) is a legal
+            // entry name too, so the no-space test runs on the UNQUOTED name
+            // — where it still does its real job of rejecting `key: value`
+            // lines that happen to end in a colon.
+            if indent == 2, trimmed.hasSuffix(":") {
+                let candidate = Self.unquote(String(trimmed.dropLast()))
+                let wasQuoted = candidate != String(trimmed.dropLast())
+                if wasQuoted || !candidate.contains(" ") {
+                    flush()
+                    currentName = candidate
+                    subSection = nil
+                    continue
+                }
             }
 
             guard currentName != nil else { continue }
 
             if indent == 4 {
                 if trimmed.hasPrefix("- ") && subSection == "args" {
-                    argsList.append(Self.unquote(String(trimmed.dropFirst(2))))
+                    argsList.append(Self.unquote(Self.stripInlineComment(String(trimmed.dropFirst(2)))))
                     continue
                 }
                 subSection = nil
                 if trimmed.hasSuffix(":") {
-                    subSection = String(trimmed.dropLast())
+                    subSection = Self.unquote(String(trimmed.dropLast()))
                     continue
                 }
-                if let colonIdx = trimmed.firstIndex(of: ":") {
-                    let key = String(trimmed[..<colonIdx]).trimmingCharacters(in: .whitespaces)
-                    let value = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
+                if let (key, value) = keyValue(trimmed) {
                     fields[key] = value
                 }
                 continue
@@ -992,18 +1023,14 @@ struct HermesFileService: Sendable {
                 switch subSection {
                 case "args":
                     if trimmed.hasPrefix("- ") {
-                        argsList.append(Self.unquote(String(trimmed.dropFirst(2))))
+                        argsList.append(Self.unquote(Self.stripInlineComment(String(trimmed.dropFirst(2)))))
                     }
                 case "env":
-                    if let colonIdx = trimmed.firstIndex(of: ":") {
-                        let key = String(trimmed[..<colonIdx]).trimmingCharacters(in: .whitespaces)
-                        let value = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
+                    if let (key, value) = keyValue(trimmed) {
                         envMap[key] = Self.unquote(value)
                     }
                 case "headers":
-                    if let colonIdx = trimmed.firstIndex(of: ":") {
-                        let key = String(trimmed[..<colonIdx]).trimmingCharacters(in: .whitespaces)
-                        let value = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
+                    if let (key, value) = keyValue(trimmed) {
                         headersMap[key] = Self.unquote(value)
                     }
                 case "tools":
@@ -1025,9 +1052,7 @@ struct HermesFileService: Sendable {
                         excludeList.append(Self.unquote(String(trimmed.dropFirst(2))))
                     }
                 case "identity_header":
-                    if let colonIdx = trimmed.firstIndex(of: ":") {
-                        let key = String(trimmed[..<colonIdx]).trimmingCharacters(in: .whitespaces)
-                        let value = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
+                    if let (key, value) = keyValue(trimmed) {
                         switch key {
                         case "name": identityHeaderName = value
                         case "value_from": identityHeaderValueFrom = value
@@ -1053,20 +1078,68 @@ struct HermesFileService: Sendable {
 
     // MARK: - MCP YAML: surgical patcher
 
-    nonisolated private func patchMCPServerField(name: String, mutate: (inout [String]) -> Void) -> Bool {
+    /// Surgically rewrite one `mcp_servers` entry, or refuse.
+    ///
+    /// **Fail-closed, because the blast radius is the whole file.** Every
+    /// mutator below is line-based and assumes the exact shape Hermes writes:
+    /// the entry header at indent 2, scalars at indent 4, nested blocks at 6
+    /// or deeper, spaces only, no block scalars, no anchors. Handed anything
+    /// else it used to guess — most damagingly by INSERTING a hardcoded
+    /// 4-space line into an entry indented 3, which is not a mis-edit of one
+    /// value but a YAML parse error for `config.yaml` as a whole: Hermes
+    /// stops reading its own configuration, and the app that broke it is the
+    /// one that runs this on every single launch. So an entry whose shape we
+    /// don't recognise is left untouched and the patch reports failure.
+    ///
+    /// Three layers, in order:
+    /// 1. `unpatchableReason` gates the entry BEFORE any mutation.
+    /// 2. A timestamped backup of `config.yaml` is taken before this
+    ///    process's first mutating patch.
+    /// 3. The written file is re-verified by an INDEPENDENT structural
+    ///    reader (`verifyPatchedConfig`), not by the same naive parser that
+    ///    produced the edit, and a failure restores the original bytes.
+    ///
+    /// - Parameter expecting: exact lines that must appear in the patched
+    ///   entry afterwards. The read-back proof for callers that know what
+    ///   they wrote; an empty list still gets the structural verification.
+    nonisolated private func patchMCPServerField(
+        name: String,
+        expecting: [String] = [],
+        mutate: (inout [String]) -> Void
+    ) -> Bool {
         guard let yaml = readFile(context.paths.configYAML) else { return false }
         let location = extractMCPBlock(yaml: yaml)
         guard !location.block.isEmpty else { return false }
 
         var block = location.block
 
+        // Tabs are checked over the WHOLE block, before the entry is even
+        // located. Indent is counted in SPACES everywhere here, so a
+        // tab-indented line reads as indent 0 — which ends the entry early,
+        // hides the keys below it, and leaves an insert landing in the
+        // middle of somebody else's mapping. The entry-level gate below
+        // cannot catch that: by then the tabbed lines have already been cut
+        // out of the entry.
+        if block.contains(where: { $0.prefix(while: { $0 == " " || $0 == "\t" }).contains("\t") }) {
+            Self.logger.warning(
+                "refusing to patch MCP server \(name, privacy: .public): tab indentation in the mcp_servers block"
+            )
+            return false
+        }
+
         var entryStart = -1
         var entryEnd = block.count
         for (index, line) in block.enumerated() {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let trimmed = Self.trimYAMLLine(line)
             let indent = line.prefix(while: { $0 == " " }).count
             if entryStart < 0 {
-                if indent == 2 && trimmed == "\(name):" {
+                // A quoted key is the same key: Hermes writes `name:` but a
+                // hand-edited `"name":` is valid YAML for the same entry, and
+                // failing to match it here made the registrar conclude the
+                // server was absent and shell `hermes mcp add` on every
+                // launch.
+                if indent == 2, trimmed.hasSuffix(":"),
+                   Self.unquote(String(trimmed.dropLast())) == name {
                     entryStart = index
                 }
                 continue
@@ -1085,7 +1158,7 @@ struct HermesFileService: Sendable {
         // footer when this is the last entry in the block).
         while entryEnd > entryStart + 1 {
             let line = block[entryEnd - 1]
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let trimmed = Self.trimYAMLLine(line)
             if trimmed.isEmpty || trimmed.hasPrefix("#") {
                 entryEnd -= 1
             } else {
@@ -1094,6 +1167,16 @@ struct HermesFileService: Sendable {
         }
 
         var entryLines = Array(block[entryStart..<entryEnd])
+
+        if let reason = Self.unpatchableReason(entryLines: entryLines) {
+            Self.logger.warning(
+                "refusing to patch MCP server \(name, privacy: .public) in \(self.context.paths.configYAML, privacy: .public): \(reason, privacy: .public)"
+            )
+            return false
+        }
+
+        let namesBefore = Self.entryNames(inYAML: yaml)
+
         mutate(&entryLines)
 
         block.replaceSubrange(entryStart..<entryEnd, with: entryLines)
@@ -1103,20 +1186,292 @@ struct HermesFileService: Sendable {
         combined.append(contentsOf: block)
         combined.append(contentsOf: location.suffix)
         let newYAML = combined.joined(separator: "\n")
+        guard newYAML != yaml else { return true }
+
+        backUpConfigOnceForThisLaunch(originalText: yaml)
         writeFile(context.paths.configYAML, content: newYAML)
+
+        // Read the file BACK OFF DISK — the write goes through a transport
+        // that logs and swallows its failures, so "we built a good string" is
+        // not evidence that a good string landed.
+        guard let written = readFile(context.paths.configYAML) else {
+            Self.logger.error(
+                "could not re-read \(self.context.paths.configYAML, privacy: .public) after patching \(name, privacy: .public); restoring"
+            )
+            writeFile(context.paths.configYAML, content: yaml)
+            return false
+        }
+        if let reason = Self.verifyPatchedConfig(
+            text: written, name: name, expecting: expecting, namesBefore: namesBefore
+        ) {
+            Self.logger.error(
+                "patch of MCP server \(name, privacy: .public) failed verification (\(reason, privacy: .public)); restoring \(self.context.paths.configYAML, privacy: .public)"
+            )
+            writeFile(context.paths.configYAML, content: yaml)
+            return false
+        }
         return true
     }
 
+    // MARK: - MCP YAML: fail-closed gate + independent verification
+
+    /// Trailing `\r` is framing, not content. `.whitespaces` does NOT
+    /// contain it, so every `hasSuffix(":")` / `== "\(name):"` test in this
+    /// file silently failed on a CRLF `config.yaml` — the entry became
+    /// invisible and the registrar re-ran a 90-second `hermes mcp add` on
+    /// every launch, forever.
+    nonisolated static func trimYAMLLine(_ line: String) -> String {
+        line.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Drop an unquoted trailing `# comment` from a scalar value.
+    ///
+    /// YAML only starts a comment at a `#` that begins the value or follows
+    /// whitespace, and never inside a quoted scalar — both exceptions matter
+    /// here, since a `command:` path may legitimately contain a `#`.
+    /// Without this, `command: /bin/x  # ours` parsed as the value
+    /// `/bin/x  # ours`, which never equals the binary path, so the
+    /// registrar re-pointed (rewriting a file Hermes watches) on every
+    /// launch and never converged.
+    nonisolated static func stripInlineComment(_ value: String) -> String {
+        var inSingle = false
+        var inDouble = false
+        var previous: Character?
+        for (offset, char) in value.enumerated() {
+            switch char {
+            case "'" where !inDouble: inSingle.toggle()
+            case "\"" where !inSingle && previous != "\\": inDouble.toggle()
+            case "#" where !inSingle && !inDouble:
+                if offset == 0 || previous == " " || previous == "\t" {
+                    return String(value.prefix(offset))
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            default: break
+            }
+            previous = char
+        }
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Why the line-based mutators must not touch this entry, or `nil` when
+    /// its shape is the one they were written for.
+    ///
+    /// Everything rejected here is legal YAML that Hermes reads fine; the
+    /// point is not to judge the file but to know when we are out of our
+    /// depth, and to leave a config we don't understand exactly as we found
+    /// it rather than half-rewrite it.
+    nonisolated static func unpatchableReason(entryLines: [String]) -> String? {
+        guard let header = entryLines.first else { return "empty entry" }
+        if header.contains("\t") { return "tab in the entry header's indentation" }
+        guard header.prefix(while: { $0 == " " }).count == 2 else {
+            return "entry header is not at indent 2"
+        }
+        let headerTrimmed = trimYAMLLine(header)
+        guard headerTrimmed.hasSuffix(":") else {
+            // `name: {command: x}` — a flow mapping holds the whole entry on
+            // one line, and there are no key lines to rewrite.
+            return "entry is a flow mapping or has content on the header line"
+        }
+
+        var sawFirstKey = false
+        for line in entryLines.dropFirst() {
+            let trimmed = trimYAMLLine(line)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            let leading = line.prefix(while: { $0 == " " || $0 == "\t" })
+            if leading.contains("\t") { return "tab indentation" }
+            let indent = leading.count
+            // The entry's OWN keys must be at indent 4, which is the indent
+            // every mutator writes. An entry whose keys start deeper is
+            // consistent YAML that Hermes reads — and into which
+            // `replaceOrInsertScalar`, finding no indent-4 key to replace,
+            // would insert one, giving a single mapping two indentations and
+            // the file a parse error.
+            if !sawFirstKey {
+                sawFirstKey = true
+                guard indent == 4 else {
+                    return "the entry's keys are at indent \(indent), not 4"
+                }
+            }
+            // The mutators read indent 4 as "a key of this entry" and 6+ as
+            // "inside a nested block". A 3- or 5-space entry is legal YAML
+            // that they would both misread AND write back at the wrong
+            // indent, mixing two indentations inside one mapping — the parse
+            // error that takes the whole file down.
+            guard indent == 4 || indent >= 6 else {
+                return "unexpected indentation (\(indent) spaces)"
+            }
+            if trimmed.hasPrefix("- ") || trimmed == "-" { continue }
+            if trimmed.hasPrefix("<<:") { return "merge key" }
+            if trimmed.hasPrefix("&") || trimmed.hasPrefix("*") {
+                return "anchor or alias"
+            }
+            guard let colon = trimmed.firstIndex(of: ":") else {
+                return "line is not a key"
+            }
+            let value = trimmed[trimmed.index(after: colon)...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if value.hasPrefix("&") || value.hasPrefix("*") {
+                return "anchor or alias"
+            }
+            // `key: |` / `key: >-` / `key: |2` — the lines that follow are
+            // literal CONTENT whose indentation is part of the value, and
+            // every mutator here would read them as keys.
+            if let first = value.first, first == "|" || first == ">" {
+                let rest = value.dropFirst()
+                if rest.isEmpty || rest.allSatisfy({ "+-0123456789".contains($0) }) {
+                    return "block scalar"
+                }
+            }
+        }
+        return nil
+    }
+
+    /// The `mcp_servers` entry names in a config, read by a walker that
+    /// shares no code with `parseMCPServersBlock`.
+    ///
+    /// Deliberately independent: verifying a write by re-running the parser
+    /// that produced it proves only that the parser is self-consistent. This
+    /// answers the question that actually matters after a surgical edit —
+    /// is the block still a block, and are all the servers still in it?
+    nonisolated static func entryNames(inYAML yaml: String) -> [String] {
+        var names: [String] = []
+        var inBlock = false
+        for line in yaml.components(separatedBy: "\n") {
+            let trimmed = trimYAMLLine(line)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            let indent = line.prefix(while: { $0 == " " }).count
+            if !inBlock {
+                if indent == 0, trimmed.hasPrefix("mcp_servers:") { inBlock = true }
+                continue
+            }
+            if indent == 0 { break }
+            if indent == 2, trimmed.hasSuffix(":") {
+                names.append(unquote(String(trimmed.dropLast())))
+            }
+        }
+        return names
+    }
+
+    /// Why the file we just wrote is not acceptable, or `nil` when it is.
+    /// A non-nil answer makes the caller restore the original bytes.
+    nonisolated static func verifyPatchedConfig(
+        text: String,
+        name: String,
+        expecting: [String],
+        namesBefore: [String]
+    ) -> String? {
+        let namesAfter = entryNames(inYAML: text)
+        guard namesAfter == namesBefore else {
+            return "the server list changed (\(namesBefore) → \(namesAfter))"
+        }
+        guard namesAfter.contains(name) else { return "\(name) is no longer in the block" }
+
+        // Re-cut the entry from the written text and re-run the shape gate:
+        // a patch that produced something we could not patch AGAIN is a
+        // patch that produced something we no longer understand.
+        var entry: [String] = []
+        var inEntry = false
+        var inBlock = false
+        for line in text.components(separatedBy: "\n") {
+            let trimmed = trimYAMLLine(line)
+            let indent = line.prefix(while: { $0 == " " }).count
+            if !inBlock {
+                if indent == 0, trimmed.hasPrefix("mcp_servers:") { inBlock = true }
+                continue
+            }
+            if inEntry {
+                if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+                if indent <= 2 { break }
+                entry.append(line)
+                continue
+            }
+            if indent == 2, trimmed.hasSuffix(":"),
+               unquote(String(trimmed.dropLast())) == name {
+                inEntry = true
+                entry.append(line)
+            }
+        }
+        if let reason = unpatchableReason(entryLines: entry) {
+            return "the patched entry is malformed: \(reason)"
+        }
+        // Compared trimmed: the indent is already proven by the shape gate,
+        // and a CRLF config carries a `\r` the caller has no reason to know
+        // about.
+        let normalized = entry.map { trimYAMLLine($0) }
+        for expected in expecting where !normalized.contains(trimYAMLLine(expected)) {
+            return "expected line is missing: \(trimYAMLLine(expected))"
+        }
+        return nil
+    }
+
+    /// One timestamped copy of `config.yaml` per launch, taken before the
+    /// first patch this process performs.
+    ///
+    /// Per launch rather than per patch: the point is a copy of what the
+    /// user had before Scarf touched anything today, and a per-patch backup
+    /// would overwrite that with a copy of Scarf's own second edit. Best
+    /// effort — a backup we cannot write is not a reason to refuse a change
+    /// the user asked for, and the restore path does not depend on it.
+    nonisolated private func backUpConfigOnceForThisLaunch(originalText: String) {
+        let path = context.paths.configYAML
+        guard Self.backedUpConfigPaths.insertIfAbsent(path) else { return }
+        let stamp = Self.backupTimestampFormatter.string(from: Date())
+        let destination = path + ".scarf-backup-" + stamp
+        guard let data = originalText.data(using: .utf8) else { return }
+        do {
+            try transport.writeFile(destination, data: data)
+            Self.logger.info("backed up \(path, privacy: .public) to \(destination, privacy: .public)")
+        } catch {
+            Self.logger.warning(
+                "could not back up \(path, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    private static let backupTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
+
+    /// Config paths this process has already backed up. A tiny lock-guarded
+    /// set rather than a `@MainActor` flag, because every caller here is
+    /// `nonisolated` and runs off-main by charter C10.
+    private final class PathSet: @unchecked Sendable {
+        private let lock = NSLock()
+        private var paths: Set<String> = []
+        /// - Returns: `true` when the path was NOT already present.
+        func insertIfAbsent(_ path: String) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return paths.insert(path).inserted
+        }
+    }
+    private static let backedUpConfigPaths = PathSet()
+
     // MARK: - MCP YAML: mutators
 
+    /// Replace (or add) one `indent-4` scalar in an entry.
+    ///
+    /// Safe to write a hardcoded four-space line here ONLY because
+    /// `patchMCPServerField` has already refused every entry that isn't
+    /// four-space indented — this used to insert into a 3-space entry and
+    /// hand Hermes a `config.yaml` it could no longer parse. See
+    /// `unpatchableReason`.
     nonisolated private static func replaceOrInsertScalar(key: String, value: String, in lines: inout [String]) {
         // entry header is at lines[0] at indent 2. Scalars live at indent 4.
         for index in 1..<lines.count {
             let line = lines[index]
             let indent = line.prefix(while: { $0 == " " }).count
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let trimmed = Self.trimYAMLLine(line)
             if indent == 4, trimmed.hasPrefix(key + ":") || trimmed == key + ":" {
-                lines[index] = "    \(key): \(value)"
+                // Keep the line ending this file uses: rewriting one line of
+                // a CRLF config with an LF one is a diff on a line nobody
+                // edited, in a file the user may well have in git.
+                let carriageReturn = line.hasSuffix("\r") ? "\r" : ""
+                lines[index] = "    \(key): \(value)\(carriageReturn)"
                 return
             }
             if indent <= 2 && !trimmed.isEmpty && !trimmed.hasPrefix("#") {
@@ -1132,7 +1487,7 @@ struct HermesFileService: Sendable {
         for index in 1..<lines.count {
             let line = lines[index]
             let indent = line.prefix(while: { $0 == " " }).count
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let trimmed = Self.trimYAMLLine(line)
             if indent == 4, trimmed.hasPrefix(key + ":") || trimmed == key + ":" {
                 removeIndex = index
                 break
@@ -1152,7 +1507,7 @@ struct HermesFileService: Sendable {
         for index in 1..<lines.count {
             let line = lines[index]
             let indent = line.prefix(while: { $0 == " " }).count
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let trimmed = Self.trimYAMLLine(line)
             if indent == 4 && trimmed == "\(header):" {
                 headerIndex = index
                 continue
@@ -1194,7 +1549,7 @@ struct HermesFileService: Sendable {
             for index in 1..<lines.count {
                 let line = lines[index]
                 let indent = line.prefix(while: { $0 == " " }).count
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                let trimmed = Self.trimYAMLLine(line)
                 if indent <= 2 && !trimmed.isEmpty && !trimmed.hasPrefix("#") {
                     insertAt = index
                     break
@@ -1217,7 +1572,7 @@ struct HermesFileService: Sendable {
         for index in 1..<lines.count {
             let line = lines[index]
             let indent = line.prefix(while: { $0 == " " }).count
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let trimmed = Self.trimYAMLLine(line)
             if indent == 4 && trimmed == "identity_header:" {
                 headerIndex = index
                 continue
@@ -1258,7 +1613,7 @@ struct HermesFileService: Sendable {
             for index in 1..<lines.count {
                 let line = lines[index]
                 let indent = line.prefix(while: { $0 == " " }).count
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                let trimmed = Self.trimYAMLLine(line)
                 if indent <= 2 && !trimmed.isEmpty && !trimmed.hasPrefix("#") {
                     insertAt = index
                     break
@@ -1274,7 +1629,7 @@ struct HermesFileService: Sendable {
         for index in 1..<lines.count {
             let line = lines[index]
             let indent = line.prefix(while: { $0 == " " }).count
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let trimmed = Self.trimYAMLLine(line)
             if indent == 4 && trimmed == "tools:" {
                 headerIndex = index
                 continue
@@ -1307,7 +1662,7 @@ struct HermesFileService: Sendable {
             for index in 1..<lines.count {
                 let line = lines[index]
                 let indent = line.prefix(while: { $0 == " " }).count
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                let trimmed = Self.trimYAMLLine(line)
                 if indent <= 2 && !trimmed.isEmpty && !trimmed.hasPrefix("#") {
                     insertAt = index
                     break
@@ -1317,7 +1672,7 @@ struct HermesFileService: Sendable {
         }
     }
 
-    nonisolated private static func yamlScalar(_ value: String) -> String {
+    nonisolated static func yamlScalar(_ value: String) -> String {
         if value.isEmpty { return "\"\"" }
         // YAML 1.2 reserved indicators that change meaning at the start of a
         // scalar: @ * & ? | > ! % , [ ] { } < ` ' " — plus space (would be
@@ -1341,10 +1696,43 @@ struct HermesFileService: Sendable {
         return value
     }
 
-    nonisolated private static func unquote(_ value: String) -> String {
-        var v = value
-        if (v.hasPrefix("\"") && v.hasSuffix("\"") && v.count >= 2) || (v.hasPrefix("'") && v.hasSuffix("'") && v.count >= 2) {
-            v = String(v.dropFirst().dropLast())
+    /// The inverse of ``yamlScalar``.
+    ///
+    /// It used to strip the quotes and stop, which made the pair asymmetric
+    /// for the one thing quoting exists to carry: `yamlScalar` writes
+    /// `\\` for a backslash and `\"` for a quote, and reading them back
+    /// verbatim turned `/a\b` into `/a\\b` one save later, and again the
+    /// save after that. The registrar compares this value against a real
+    /// filesystem path, so an unescape that doesn't undo the escape is a
+    /// permanent "the command moved" — a rewrite of a file Hermes watches,
+    /// every launch, forever.
+    nonisolated static func unquote(_ value: String) -> String {
+        let v = value
+        if v.count >= 2, v.hasPrefix("\""), v.hasSuffix("\"") {
+            // Double-quoted YAML: `\\` and `\"` are the escapes we emit.
+            // Other escape sequences are left as written rather than
+            // half-decoded — we never produce them, and inventing a partial
+            // decoder for `\n`/`\uXXXX` would be a new way to be wrong.
+            var out = ""
+            var escaped = false
+            for char in v.dropFirst().dropLast() {
+                if escaped {
+                    if char != "\\" && char != "\"" { out.append("\\") }
+                    out.append(char)
+                    escaped = false
+                } else if char == "\\" {
+                    escaped = true
+                } else {
+                    out.append(char)
+                }
+            }
+            if escaped { out.append("\\") }
+            return out
+        }
+        if v.count >= 2, v.hasPrefix("'"), v.hasSuffix("'") {
+            // Single-quoted YAML has exactly one escape: `''` is a quote.
+            return String(v.dropFirst().dropLast())
+                .replacingOccurrences(of: "''", with: "'")
         }
         return v
     }

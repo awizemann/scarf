@@ -150,4 +150,44 @@ import Foundation
             atPath: home.path + "/scarf/projects.json"
         ))
     }
+
+    /// A client that closes stdout while still holding stdin open used to
+    /// leave this loop parsing frames forever, handling and serializing
+    /// requests whose answers had nowhere to go — the stderr line says
+    /// "stopping", and it wasn't true. Bounded here by the fact that the
+    /// call must RETURN with unread bytes still in the pipe.
+    @Test("a closed stdout stops the read loop instead of parsing into the void")
+    func closedStdoutEndsTheLoop() throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-mcp-epipe-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+
+        let input = Pipe(), output = Pipe()
+        // Hang up on the reading side FIRST: the server's first write then
+        // fails with EPIPE (SIGPIPE is ignored inside `run`).
+        try output.fileHandleForReading.close()
+
+        let requests = Array(repeating: #"{"jsonrpc":"2.0","id":1,"method":"ping"}"#, count: 8)
+            .joined(separator: "\n") + "\n"
+        input.fileHandleForWriting.write(Data(requests.utf8))
+        // stdin stays OPEN on purpose — EOF must not be what ends this.
+
+        let server = ProjectMCPServer(context: ServerContext.local(home: home))
+        let finished = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            ProjectMCPStdioLoop.run(
+                server: server,
+                input: input.fileHandleForReading,
+                output: output.fileHandleForWriting
+            )
+            finished.signal()
+        }
+
+        #expect(
+            finished.wait(timeout: .now() + 5) == .success,
+            "run() never returned — the loop kept reading after stdout closed"
+        )
+        try? input.fileHandleForWriting.close()
+    }
 }

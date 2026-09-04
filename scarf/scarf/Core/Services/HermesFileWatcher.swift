@@ -6,6 +6,20 @@ final class HermesFileWatcher {
     private(set) var lastChangeDate = Date()
     private var coreSources: [DispatchSourceFileSystemObject] = []
     private var projectSources: [DispatchSourceFileSystemObject] = []
+    /// Core paths with no live source: either absent when `startWatching`
+    /// ran, or deleted with a gap before anything re-created them.
+    ///
+    /// Core paths are not optional the way a project's `.scarf` dir is — a
+    /// `projects.json` that is deleted and written fresh a second later (an
+    /// agent's `rm` plus a rewrite, a restore from `.bak`, a git checkout)
+    /// left `state.db`, `config.yaml` or the registry unwatched for the rest
+    /// of the process's life, and nothing but a window reopen brought them
+    /// back. Retried on the coalesced tick — the other core paths tick
+    /// constantly on a live host, and this costs one `open(2)` per still-
+    /// missing path per burst, only while the set is non-empty.
+    private var unarmedCorePaths: Set<String> = []
+    /// Test seam: how many core paths are currently unwatched.
+    var unarmedCorePathCount: Int { unarmedCorePaths.count }
     private var timer: Timer?
     /// Remote polling task. Non-nil only when `context.isRemote`. Cancelled
     /// on `stopWatching()`.
@@ -93,6 +107,14 @@ final class HermesFileWatcher {
             if let source = makeSource(for: path) {
                 coreSources.append(source)
             }
+            // A path that isn't there YET is not a drop-out and is
+            // deliberately NOT remembered. Several core paths are legitimately
+            // absent on a normal machine (`mcp-tokens/`, `memories/MEMORY.md`,
+            // the session map), so seeding the retry set from here would leave
+            // it permanently non-empty — reinstating, under another name, the
+            // unconditional heartbeat this watcher removed on purpose. The
+            // next `startWatching` picks them up; `rearm` handles the case
+            // that actually loses a live watch.
         }
         // No heartbeat timer: every observing view runs its `.onChange`
         // refresh whenever `lastChangeDate` ticks, so a 5s unconditional
@@ -162,10 +184,62 @@ final class HermesFileWatcher {
             guard let self, let date = self.pendingTickDate else { return }
             self.pendingTickDate = nil
             self.burstStartDate = nil
+            self.reestablishUnarmedCoreWatches()
             self.lastChangeDate = date
         }
         pendingCoalesceTimer = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// Re-open any core path that has come back since it dropped out.
+    /// Cheap and self-limiting: one `open(2)` per still-missing path, and
+    /// the set empties as they succeed.
+    private func reestablishUnarmedCoreWatches() {
+        guard !unarmedCorePaths.isEmpty, !context.isRemote else {
+            stopRetryTimer()
+            return
+        }
+        for path in unarmedCorePaths {
+            guard let source = makeSource(for: path) else { continue }
+            coreSources.append(source)
+            unarmedCorePaths.remove(path)
+        }
+        if unarmedCorePaths.isEmpty { stopRetryTimer() } else { startRetryTimer() }
+    }
+
+    /// Drives `reestablishUnarmedCoreWatches` when nothing else can.
+    ///
+    /// The coalesced tick is the free driver, but it only fires when some
+    /// OTHER watch is alive — and a home where the deleted file was the only
+    /// thing being written is exactly the case where none is. So: a bounded
+    /// burst of retries after a drop-out, not a heartbeat. It stops the
+    /// moment the path comes back, and stops anyway after
+    /// `maxRetries` × 5s ≈ a minute, after which the coalesced tick is the
+    /// only (free) retry. The steady state is a watcher with no timers, which
+    /// is the property the removed 5s heartbeat cost us.
+    private static let retryInterval: TimeInterval = 5
+    private static let maxRetries = 12
+    private var retriesLeft = 0
+
+    private func startRetryTimer() {
+        retriesLeft = Self.maxRetries
+        guard timer == nil else { return }
+        timer = Timer.scheduledTimer(
+            withTimeInterval: Self.retryInterval, repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.retriesLeft -= 1
+                self.reestablishUnarmedCoreWatches()
+                if self.retriesLeft <= 0 { self.stopRetryTimer() }
+            }
+        }
+    }
+
+    private func stopRetryTimer() {
+        timer?.invalidate()
+        timer = nil
+        retriesLeft = 0
     }
 
     func stopWatching() {
@@ -174,6 +248,7 @@ final class HermesFileWatcher {
         }
         coreSources.removeAll()
         projectSources.removeAll()
+        unarmedCorePaths.removeAll()
         timer?.invalidate()
         timer = nil
         remotePollTask?.cancel()
@@ -238,6 +313,33 @@ final class HermesFileWatcher {
     /// writing `projects.json`: without the re-arm, an agent registers a
     /// project and the sidebar simply never shows it.
     private func makeSource(for path: String) -> DispatchSourceFileSystemObject? {
+        // Bounded retries for the arm-time race below. Three is generous: it
+        // takes a replace landing inside a few microseconds of our `open`,
+        // three times running, and the alternative to a bound is a loop that
+        // spins for as long as a writer keeps replacing the file.
+        for _ in 0..<3 {
+            guard let source = armSource(for: path) else { return nil }
+            // The window between `open(2)` and `resume()`: an atomic replace
+            // that lands in it unlinks the inode we just opened BEFORE the
+            // source is listening, so the `.delete` that drives the re-arm is
+            // never delivered and the watch is dead on arrival — watching a
+            // file nobody will ever write again. Compare what the NAME points
+            // at now with what we opened; if they differ, the replace already
+            // happened and we simply arm again on the new inode.
+            var onDisk = stat()
+            var opened = stat()
+            let named = stat(path, &onDisk) == 0
+            let armed = fstat(source.handle, &opened) == 0
+            if !named || !armed { return source }
+            if onDisk.st_dev == opened.st_dev && onDisk.st_ino == opened.st_ino {
+                return source
+            }
+            source.cancel()
+        }
+        return armSource(for: path)
+    }
+
+    private func armSource(for path: String) -> DispatchSourceFileSystemObject? {
         let fd = Darwin.open(path, O_EVTONLY)
         guard fd >= 0 else { return nil }
 
@@ -284,6 +386,11 @@ final class HermesFileWatcher {
                 coreSources[index] = replacement
             } else {
                 coreSources.remove(at: index)
+                // Remembered, not abandoned: a core path that comes back
+                // gets its watch back on the next tick (or the retry timer,
+                // when nothing is left alive to tick).
+                unarmedCorePaths.insert(path)
+                startRetryTimer()
             }
             return
         }

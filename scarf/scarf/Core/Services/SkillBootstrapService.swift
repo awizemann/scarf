@@ -146,14 +146,32 @@ struct SkillBootstrapService: Sendable {
     /// next bootstrap tries again.
     /// - Returns: the directories actually removed, for the tests and the
     ///   log. Empty on the steady state — every launch after the first.
+    ///
+    /// **The flat level is not Scarf's to delete.** `~/.hermes/skills/<name>/`
+    /// is where Hermes puts EVERY skill a user installs by hand — dozens of
+    /// them on a working machine — and this pass ran there with nothing but a
+    /// name to go on. A user who wrote their own `scarf-project-workflows`
+    /// (a plausible name for a skill about Scarf) would have watched Scarf
+    /// silently delete it at launch, with no undo and no mention. The
+    /// namespace directory `~/.hermes/skills/scarf/` is Scarf's; the flat
+    /// level is the user's, and a flat deletion now requires POSITIVE proof
+    /// that the file there is one Scarf wrote (`isScarfAuthored`) rather than
+    /// the absence of proof that it isn't.
     @discardableResult
     nonisolated func pruneKnownBadSkills() -> [String] {
         let transport = context.makeTransport()
         var removed: [String] = []
         let categorizedRoot = context.paths.skillsDir + "/" + Self.bundledSkillCategory
         for name in Self.knownBadSkillNames.sorted() {
-            for dir in [categorizedRoot + "/" + name, context.paths.skillsDir + "/" + name] {
+            let flatDir = context.paths.skillsDir + "/" + name
+            for dir in [categorizedRoot + "/" + name, flatDir] {
                 guard transport.fileExists(dir) else { continue }
+                if dir == flatDir, !Self.isScarfAuthoredSkill(at: dir, transport: transport) {
+                    Self.logger.info(
+                        "leaving \(dir, privacy: .public) alone — it isn't a Scarf-authored skill"
+                    )
+                    continue
+                }
                 do {
                     // The whole directory in ONE call, and deliberately
                     // before any walk of its children.
@@ -202,6 +220,48 @@ struct SkillBootstrapService: Sendable {
         return removed
     }
 
+    /// Whether the skill directory at `dir` holds a SKILL.md that Scarf
+    /// itself shipped.
+    ///
+    /// The signature is the pair of frontmatter fields every bundled skill
+    /// carries and a third-party skill has no reason to: `author: Alan
+    /// Wizemann` together with a homepage under this project's own
+    /// repository. Both must be inside the frontmatter block, so a skill
+    /// that merely mentions either in its prose doesn't qualify.
+    ///
+    /// Deliberately a POSITIVE test. The question at the flat level is never
+    /// "can I rule out that this is the user's?" — it is "can I prove this is
+    /// mine?", and anything short of proof leaves the directory alone.
+    /// Symlinks: `readFile` follows one, so a link pointing into the user's
+    /// own skills yields the user's SKILL.md, which fails this test and is
+    /// spared.
+    nonisolated static func isScarfAuthoredSkill(
+        at dir: String,
+        transport: any ServerTransport
+    ) -> Bool {
+        guard let data = try? transport.readFile(dir + "/SKILL.md"),
+              let text = String(data: data, encoding: .utf8)
+        else { return false }
+        var inFrontmatter = false
+        var sawAuthor = false
+        var sawHomepage = false
+        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
+            if trimmed == "---" {
+                if !inFrontmatter { inFrontmatter = true; continue }
+                break
+            }
+            guard inFrontmatter else { break }
+            if trimmed.hasPrefix("author:"),
+               trimmed.dropFirst("author:".count)
+                   .trimmingCharacters(in: CharacterSet(charactersIn: " \"'")) == "Alan Wizemann" {
+                sawAuthor = true
+            }
+            if trimmed.contains("github.com/awizemann/scarf") { sawHomepage = true }
+        }
+        return sawAuthor && sawHomepage
+    }
+
     // MARK: - Per-skill install
 
     /// Hermes treats `~/.hermes/skills/<dir>/` as either a category folder
@@ -238,7 +298,14 @@ struct SkillBootstrapService: Sendable {
         let destDir = categorizedRoot + "/" + skillName
         let destSkillMd = destDir + "/SKILL.md"
 
-        if transport.fileExists(flatSkillMd) && flatDir != destDir {
+        // Same rule as `pruneKnownBadSkills`: the flat level is the user's,
+        // and a name collision is not evidence of authorship. A flat copy
+        // v2.7.0 installed carries Scarf's own frontmatter and still
+        // migrates; a user's own skill that happens to share the name is
+        // left where it is (they'll see it twice in the Skills view, which
+        // is a great deal better than seeing it never again).
+        if transport.fileExists(flatSkillMd), flatDir != destDir,
+           Self.isScarfAuthoredSkill(at: flatDir, transport: transport) {
             do {
                 try transport.removeFile(flatSkillMd)
                 // Best-effort cleanup of companion files + the now-empty
@@ -290,15 +357,36 @@ struct SkillBootstrapService: Sendable {
         // ships alongside SKILL.md. Walks one level deep — skills don't
         // ship deep trees today and wider compat for that can wait
         // until a use case appears.
+        //
+        // Companion failures are LOGGED, never thrown. `SKILL.md` is already
+        // written at this point, so throwing here reported the whole install
+        // as failed while leaving a perfectly good skill on disk — and since
+        // the version check then said "current", the missing companions were
+        // never retried on any later launch. A skill shipping a companion
+        // SUBDIRECTORY made `Data(contentsOf:)` throw exactly that way.
         if let extras = try? FileManager.default.contentsOfDirectory(
             at: sourceDir,
-            includingPropertiesForKeys: nil,
+            includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) {
             for url in extras where url.lastPathComponent != "SKILL.md" {
-                let data = try Data(contentsOf: url)
-                let dest = destDir + "/" + url.lastPathComponent
-                try transport.writeFile(dest, data: data)
+                let isRegularFile = (try? url.resourceValues(forKeys: [.isRegularFileKey]))?
+                    .isRegularFile ?? false
+                guard isRegularFile else {
+                    Self.logger.warning(
+                        "skipping non-file companion \(url.lastPathComponent, privacy: .public) in bundled skill \(skillName, privacy: .public) — one level deep only"
+                    )
+                    continue
+                }
+                do {
+                    try transport.writeFile(
+                        destDir + "/" + url.lastPathComponent, data: try Data(contentsOf: url)
+                    )
+                } catch {
+                    Self.logger.warning(
+                        "couldn't install companion \(url.lastPathComponent, privacy: .public) for \(skillName, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    )
+                }
             }
         }
 
@@ -340,16 +428,32 @@ struct SkillBootstrapService: Sendable {
         return nil
     }
 
-    /// Three-component numeric semver compare. Returns -1, 0, +1.
-    /// Non-numeric components fall back to lexicographic — fine for
-    /// the conservative "skip if installed >= bundled" use case.
+    /// Semver compare. Returns -1, 0, +1.
+    ///
+    /// The numeric core is compared component-wise, and — per semver §11 —
+    /// a version WITH a prerelease tag ranks BELOW the same core without
+    /// one. Splitting on "." alone got that exactly backwards: `2.0.0-rc1`
+    /// became `["2", "0", "0-rc1"]`, whose last component compares
+    /// lexicographically GREATER than `"0"`, so an installed release
+    /// candidate outranked the finished `2.0.0` and the bundled skill was
+    /// never installed over it — the one case this comparison exists to
+    /// catch, since a prerelease is precisely what a shipped version
+    /// replaces.
+    ///
+    /// Build metadata (`+sha`) is ignored, as semver requires.
     nonisolated static func semverCompare(_ a: String, _ b: String) -> Int {
-        let lhs = a.split(separator: ".").map { String($0) }
-        let rhs = b.split(separator: ".").map { String($0) }
-        let count = max(lhs.count, rhs.count)
-        for i in 0..<count {
-            let l = i < lhs.count ? lhs[i] : "0"
-            let r = i < rhs.count ? rhs[i] : "0"
+        func split(_ version: String) -> (core: [String], prerelease: String?) {
+            let withoutBuild = version.split(separator: "+", maxSplits: 1).first.map(String.init) ?? ""
+            let parts = withoutBuild.split(separator: "-", maxSplits: 1).map(String.init)
+            let core = (parts.first ?? "").split(separator: ".").map(String.init)
+            return (core, parts.count > 1 ? parts[1] : nil)
+        }
+        let lhs = split(a)
+        let rhs = split(b)
+
+        for i in 0..<max(lhs.core.count, rhs.core.count) {
+            let l = i < lhs.core.count ? lhs.core[i] : "0"
+            let r = i < rhs.core.count ? rhs.core[i] : "0"
             if let li = Int(l), let ri = Int(r) {
                 if li < ri { return -1 }
                 if li > ri { return 1 }
@@ -358,7 +462,15 @@ struct SkillBootstrapService: Sendable {
                 if l > r { return 1 }
             }
         }
-        return 0
+
+        switch (lhs.prerelease, rhs.prerelease) {
+        case (nil, nil): return 0
+        case (nil, _): return 1     // 2.0.0 > 2.0.0-rc1
+        case (_, nil): return -1    // 2.0.0-rc1 < 2.0.0
+        case (let l?, let r?):
+            if l == r { return 0 }
+            return l < r ? -1 : 1
+        }
     }
 
     // MARK: - Bundle access

@@ -86,17 +86,17 @@ public struct ProjectDoctorService: Sendable {
         // other unrepaired and the finding un-clearable — a button that
         // silently does nothing. The `duplicatePath` finding is the one that
         // actually resolves the situation.
-        var pathCounts: [String: Int] = [:]
-        for row in rows { pathCounts[ProjectIdentity.normalizedPath(row.path), default: 0] += 1 }
-        let duplicatedPaths = Set(pathCounts.filter { $0.value > 1 }.keys)
+        var rowsByPath: [String: [ProjectEntry]] = [:]
+        for row in rows { rowsByPath[ProjectIdentity.normalizedPath(row.path), default: []].append(row) }
 
         for row in rows {
+            let group = rowsByPath[ProjectIdentity.normalizedPath(row.path)] ?? [row]
             findings += diagnoseRow(
                 row,
                 store: store,
                 rawInvalidUUIDPaths: rawInvalidUUIDPaths,
                 cronJobs: cronJobs,
-                pathIsDuplicated: duplicatedPaths.contains(ProjectIdentity.normalizedPath(row.path))
+                rowsAtSamePath: group
             )
         }
 
@@ -135,9 +135,10 @@ public struct ProjectDoctorService: Sendable {
         store: ProjectStore,
         rawInvalidUUIDPaths: Set<String>,
         cronJobs: [HermesCronJob],
-        pathIsDuplicated: Bool
+        rowsAtSamePath: [ProjectEntry]
     ) -> [ProjectDoctorFinding] {
         var out: [ProjectDoctorFinding] = []
+        let pathIsDuplicated = rowsAtSamePath.count > 1
 
         // Dead vs unreachable, told apart exactly the way `ProjectStore.save`
         // tells them apart: `fileExists` is false both for "gone" and for
@@ -146,15 +147,30 @@ public struct ProjectDoctorService: Sendable {
         // every project row the moment an SSH host went offline.
         if !transport.fileExists(row.path) {
             if transport.fileExists(parentPath(row.path)) {
+                // One finding per FOLDER, not per row. The removal matches
+                // rows by normalized path, so `/a/b` and `/a/b/` are one
+                // dead folder claimed twice — two findings would mean a
+                // second button that can only ever throw `rowVanished`
+                // after the first one removed both. Keyed on the normalized
+                // path so the two spellings collapse here, and carrying the
+                // row count so the confirm copy says what will happen.
+                let normalized = ProjectIdentity.normalizedPath(row.path)
+                let group = rowsAtSamePath
+                let names = group.map { "“\($0.name)”" }.joined(separator: ", ")
                 out.append(ProjectDoctorFinding(
-                    id: "deadRootPath:\(row.path)",
+                    id: "deadRootPath:\(normalized)",
                     kind: .deadRootPath,
                     severity: .high,
-                    title: "“\(row.name)” no longer exists on disk",
-                    detail: "The folder at \(row.path) is gone, but the project is still listed. Removing the row won't delete anything else.",
-                    projectName: row.name,
+                    title: group.count == 1
+                        ? "“\(row.name)” no longer exists on disk"
+                        : "\(group.count) entries point at a folder that no longer exists",
+                    detail: group.count == 1
+                        ? "The folder at \(row.path) is gone, but the project is still listed. Removing the row won't delete anything else."
+                        : "The folder at \(normalized) is gone, but \(names) are all still listed. Removing them takes out all \(group.count) entries and deletes nothing else.",
+                    projectName: group.count == 1 ? row.name : nil,
                     path: row.path,
-                    repair: .removeRegistryRow(path: row.path)
+                    repair: .removeRegistryRow(path: row.path),
+                    affectedRowCount: group.count
                 ))
             } else {
                 out.append(ProjectDoctorFinding(
@@ -378,49 +394,17 @@ public struct ProjectDoctorService: Sendable {
     ) -> [ProjectDoctorFinding] {
         let known = Set(rows.map { ProjectIdentity.normalizedPath($0.path) })
         let home = ProjectIdentity.normalizedPath(context.paths.home)
-        let profiles = home + "/profiles"
 
-        /// `~/.hermes` is not a project, and every `~/.hermes/profiles/<name>`
-        /// is a whole separate Hermes home rather than a working directory.
-        /// Deliberately NOT the whole `~/.hermes` subtree: a Hermes home can
-        /// legitimately sit above a projects directory (every test home
-        /// does), and blanket-excluding it would blind the scan there.
         func isExcluded(_ normalized: String) -> Bool {
-            normalized == home
-                || normalized == profiles
-                || normalized.hasPrefix(profiles + "/")
+            Self.isExcludedFromScan(normalized, home: home)
         }
-
-        /// The scan compares paths TEXTUALLY against the registry, and
-        /// `ProjectIdentity` deliberately never expands `~` (it must answer
-        /// identically for a remote path it cannot stat). So a `~`-rooted
-        /// path can't be matched against the absolute paths registry rows
-        /// carry: on an SSH context `defaultProjectsRoot` is the unexpanded
-        /// `~/projects` while its rows are `/home/<user>/projects/…`, and
-        /// scanning it would report EVERY listed remote project as an
-        /// unlisted orphan. Absolute paths only.
         func isComparable(_ normalized: String) -> Bool { normalized.hasPrefix("/") }
 
-        var scanRoots: [String] = []
-        var seenRoots: Set<String> = []
-        func addRoot(_ path: String) {
-            let normalized = ProjectIdentity.normalizedPath(path)
-            guard isComparable(normalized), !isExcluded(normalized),
-                  seenRoots.insert(normalized).inserted
-            else { return }
-            guard scanRoots.count < Self.maxScanRoots else { return }
-            scanRoots.append(normalized)
-        }
-        // The user's home itself is never a scan root: a single project kept
-        // directly under `~` would otherwise make the doctor list the whole
-        // home directory, one `fileExists` pair per entry. `~/.hermes`'s
-        // parent is the closest thing to `$HOME` available on both transports
-        // without expanding anything.
-        let userHome = (home as NSString).deletingLastPathComponent
-        for row in rows where parentPath(row.path) != userHome {
-            addRoot(parentPath(row.path))
-        }
-        addRoot(context.defaultProjectsRoot)
+        let scanRoots = Self.scanRoots(
+            rowPaths: rows.map(\.path),
+            home: home,
+            defaultProjectsRoot: context.defaultProjectsRoot
+        )
 
         var candidates: [String] = []
         var seenCandidates: Set<String> = []
@@ -448,39 +432,130 @@ public struct ProjectDoctorService: Sendable {
         }
 
         let takenNames = Set(rows.map(\.name))
+        let store = ProjectStore(context: context)
         return candidates.compactMap { path in
             let recordPath = path + "/.scarf/project.json"
-            let recordState = sidecarState(recordPath)
+            // Decodability, not JSON-validity: adoption may DERIVE a record
+            // and write it here, and `{"note": "wip"}` is valid JSON that
+            // would be silently replaced. See `recordState`.
+            let state = recordState(recordPath)
             let name = (path as NSString).lastPathComponent
 
             // An unreadable record makes this a project we must NOT adopt:
             // adoption derives a record and writes it, which would overwrite
             // the only copy of whatever is in there. Report the damage
             // instead — the same rule that governs a LISTED project's record.
-            if case .malformed = recordState {
+            if case .malformed = state {
                 return malformedSidecarFinding(path: recordPath, projectName: name, label: "project record")
             }
-            let looksLikeProject = recordState == .ok
+            let looksLikeProject = state == .ok
                 || transport.fileExists(path + "/.scarf/manifest.json")
             guard looksLikeProject else { return nil }
 
             // Adopting under a name another row already uses would make the
             // sidebar's name-keyed delete remove BOTH rows. Report it, and
             // let the user rename first.
-            let nameTaken = takenNames.contains(name)
+            //
+            // The name that will actually LAND is the guarded one: adoption
+            // saves the on-disk record when there is one, and
+            // `indexInRegistry` writes `record.name` — which an agent-written
+            // record can set to anything, including another project's name.
+            // Guarding the folder basename while writing `record.name` was
+            // a check of a string the write never uses.
+            // Only worth a read when there IS a decodable record — `.absent`
+            // already told us the read would miss, and this runs once per
+            // orphan candidate (up to 400) with an SSH round-trip each.
+            let adoptedName = state == .ok
+                ? adoptionName(path: path, store: store, fallback: name)
+                : name
+            let nameTaken = takenNames.contains(adoptedName)
             return ProjectDoctorFinding(
                 id: "orphanProjectDir:\(path)",
                 kind: .orphanProjectDir,
                 severity: .medium,
                 title: "“\(name)” looks like a project but isn't listed",
                 detail: nameTaken
-                    ? "\(path) has Scarf project files but no entry in your projects list, and another project is already called “\(name)”. Rename that one first — two projects sharing a name can't be told apart when removing one."
+                    ? "\(path) has Scarf project files but no entry in your projects list, and adding it would list it as “\(adoptedName)” — a name another project already uses. Rename that one first — two projects sharing a name can't be told apart when removing one."
                     : "\(path) has Scarf project files but no entry in your projects list — usually a project whose entry was lost, or one created outside Scarf. Adding it keeps its existing ID and settings.",
                 projectName: name,
                 path: path,
                 repair: nameTaken ? nil : .adoptOrphan(path: path, name: name)
             )
         }
+    }
+
+    /// `~/.hermes` is not a project, and every `~/.hermes/profiles/<name>`
+    /// is a whole separate Hermes home rather than a working directory.
+    /// Deliberately NOT the whole `~/.hermes` subtree: a Hermes home can
+    /// legitimately sit above a projects directory (every test home does),
+    /// and blanket-excluding it would blind the scan there.
+    static func isExcludedFromScan(_ normalized: String, home: String) -> Bool {
+        let profiles = home + "/profiles"
+        return normalized == home
+            || normalized == profiles
+            || normalized.hasPrefix(profiles + "/")
+    }
+
+    /// The directories the orphan scan will list, in order.
+    ///
+    /// Pulled out of `orphanFindings` as a pure function because the one
+    /// rule that matters most here — never scan a user's home directory —
+    /// cannot be exercised through a local `ServerContext`, and it was
+    /// broken for years precisely in the case a local test can't reach.
+    ///
+    /// **The `~`-home hole.** The scan compares paths TEXTUALLY against the
+    /// registry, and `ProjectIdentity` deliberately never expands `~` (it
+    /// must answer identically for a remote path it cannot stat). On an SSH
+    /// context `paths.home` is the UNEXPANDED `~/.hermes`, which makes the
+    /// home exclusion and the `userHome` guard below comparisons against a
+    /// string no absolute path can ever equal — inert exactly where they
+    /// mattered. A row at `/home/alan/proj` then turned `/home/alan` into a
+    /// scan root: up to 300 entries listed with two `fileExists` each, over
+    /// SSH, for one health check, reporting the user's whole home as
+    /// candidate projects.
+    ///
+    /// With no expandable home we cannot NAME the home directory, but we can
+    /// decline to scan anything shallow enough to BE one: a user home is two
+    /// absolute segments on every platform Hermes runs on (`/home/alan`,
+    /// `/Users/alan`, `/var/root`), so a scan root needs three.
+    /// `/home/alan/projects` still scans; `/home/alan` never does. Applied
+    /// ONLY when the home is non-comparable — a local context keeps its
+    /// exact `userHome` guard and its existing behaviour.
+    static func scanRoots(
+        rowPaths: [String],
+        home: String,
+        defaultProjectsRoot: String
+    ) -> [String] {
+        let homeIsComparable = home.hasPrefix("/")
+        func parent(_ path: String) -> String {
+            (ProjectIdentity.normalizedPath(path) as NSString).deletingLastPathComponent
+        }
+
+        var roots: [String] = []
+        var seen: Set<String> = []
+        func add(_ path: String) {
+            let normalized = ProjectIdentity.normalizedPath(path)
+            guard normalized.hasPrefix("/"),
+                  !isExcludedFromScan(normalized, home: home),
+                  homeIsComparable
+                    || normalized.split(separator: "/", omittingEmptySubsequences: true).count >= 3,
+                  seen.insert(normalized).inserted,
+                  roots.count < maxScanRoots
+            else { return }
+            roots.append(normalized)
+        }
+
+        // The user's home itself is never a scan root: a single project kept
+        // directly under `~` would otherwise make the doctor list the whole
+        // home directory, one `fileExists` pair per entry. `~/.hermes`'s
+        // parent is the closest thing to `$HOME` available on both transports
+        // without expanding anything.
+        let userHome = (home as NSString).deletingLastPathComponent
+        for path in rowPaths where parent(path) != userHome {
+            add(parent(path))
+        }
+        add(defaultProjectsRoot)
+        return roots
     }
 
     /// Fields the salvaging decode had to drop from rows that survived.
@@ -634,29 +709,59 @@ public struct ProjectDoctorService: Sendable {
         }
         var registry = loaded.registry
 
-        /// A record that exists but doesn't parse must never be written over
-        /// — the same rule `diagnose` applies, re-checked here because the
-        /// file can change between the report and the button.
+        /// A record that exists but doesn't decode as a `ScarfProject` must
+        /// never be written over — the same rule `diagnose` applies,
+        /// re-checked here because the file can change between the report
+        /// and the button. Decodability rather than JSON-validity: a
+        /// `{"note": "wip"}` that parses as JSON is still not a record, and
+        /// the write that follows this check replaces it wholesale.
         func refuseIfRecordIsUnreadable(_ path: String) throws {
-            if case .malformed = sidecarState(ProjectStore.recordPath(forProjectPath: path)) {
+            if case .malformed = recordState(ProjectStore.recordPath(forProjectPath: path)) {
                 throw ProjectDoctorError.recordUnavailable(ProjectStore.recordPath(forProjectPath: path))
             }
         }
 
+        /// The record at `path`, but only when it actually describes THIS
+        /// project.
+        ///
+        /// `project.json` is agent-writable, and every writer underneath
+        /// addresses a project by `record.rootPath`: `ProjectStore.save`
+        /// writes `<record.rootPath>/.scarf/project.json` and
+        /// `indexInRegistry` matches (or appends) the row for
+        /// `record.rootPath`. So a record found at `/a/foo` that declares
+        /// `rootPath: /a/bar` makes a repair of `/a/foo` silently rewrite
+        /// `/a/bar`'s record and re-point `/a/bar`'s registry row — one
+        /// hand-edited field, and the doctor damages a project the user
+        /// never touched. There is no safe reconciliation to guess at
+        /// (which of the two is wrong?), so it is refused and reported.
+        func recordDescribingThisPath(_ path: String) throws -> ScarfProject? {
+            guard let record = store.load(projectPath: path) else { return nil }
+            guard ProjectIdentity.normalizedPath(record.rootPath)
+                    == ProjectIdentity.normalizedPath(path)
+            else {
+                throw ProjectDoctorError.recordPathMismatch(
+                    path: path, declared: record.rootPath
+                )
+            }
+            return record
+        }
+
         switch repair {
         case .reindexRegistryFromRecord(let path):
-            guard let record = store.load(projectPath: path) else {
+            guard let record = try recordDescribingThisPath(path) else {
                 throw ProjectDoctorError.recordUnavailable(ProjectStore.recordPath(forProjectPath: path))
             }
             try store.indexInRegistry(record)
 
         case .writeMissingRecord(let path):
-            guard let row = registry.projects.first(where: { $0.path == path }) else {
+            guard let row = registry.projects.first(where: {
+                ProjectIdentity.normalizedPath($0.path) == ProjectIdentity.normalizedPath(path)
+            }) else {
                 throw ProjectDoctorError.rowVanished(path)
             }
             // A record that appeared since the report is canonical — index it
             // instead of deriving a second answer over the top of it.
-            if let existing = store.load(projectPath: path) {
+            if let existing = try recordDescribingThisPath(path) {
                 try store.indexInRegistry(existing)
             } else {
                 try refuseIfRecordIsUnreadable(path)
@@ -669,7 +774,7 @@ public struct ProjectDoctorService: Sendable {
             }) {
                 // Someone added it between diagnose and repair. Finish the
                 // job rather than duplicating the row.
-                if let existing = store.load(projectPath: row.path) {
+                if let existing = try recordDescribingThisPath(row.path) {
                     try store.indexInRegistry(existing)
                 } else {
                     try refuseIfRecordIsUnreadable(row.path)
@@ -677,28 +782,51 @@ public struct ProjectDoctorService: Sendable {
                 }
                 return
             }
-            // Two rows sharing a name make the sidebar's name-keyed delete
-            // remove both, so a collision that appeared since the report is
-            // refused rather than created.
-            guard !registry.projects.contains(where: { $0.name == name }) else {
-                throw ProjectDoctorError.nameTaken(name)
-            }
             try refuseIfRecordIsUnreadable(path)
-            let synthesized = ProjectEntry(name: name, path: path)
+            let existing = try recordDescribingThisPath(path)
             // The record on disk, when there is one, keeps its own id and
             // settings — deriving only fills in what isn't there.
-            try store.save(store.load(projectPath: path) ?? store.derive(from: synthesized))
+            let toSave = existing ?? store.derive(from: ProjectEntry(name: name, path: path))
+            // Two rows sharing a name make the sidebar's name-keyed delete
+            // remove both, so a collision that appeared since the report is
+            // refused rather than created. Guarded on `toSave.name` — the
+            // string `indexInRegistry` will actually write — and not on the
+            // folder basename, which is only what we'd have called it if
+            // there had been no record.
+            guard !registry.projects.contains(where: { $0.name == toSave.name }) else {
+                throw ProjectDoctorError.nameTaken(toSave.name)
+            }
+            try store.save(toSave)
 
         case .removeRegistryRow(let path):
+            // Normalized match, converging with `ProjectStore.indexInRegistry`:
+            // a row spelled `/a/b/` is the row for `/a/b`, and a raw `==`
+            // here would leave the trailing-slash twin behind claiming a
+            // folder we just proved is gone.
+            let target = ProjectIdentity.normalizedPath(path)
             let before = registry.projects.count
-            registry.projects.removeAll { $0.path == path }
-            guard registry.projects.count < before else {
+            registry.projects.removeAll {
+                ProjectIdentity.normalizedPath($0.path) == target
+            }
+            let removed = before - registry.projects.count
+            guard removed > 0 else {
                 throw ProjectDoctorError.rowVanished(path)
             }
-            // `allowEmpty` because removing a dead row may legitimately empty
-            // the list; the guard it bypasses protects against an ACCIDENTAL
-            // empty save, and we just proved the row was there.
-            try dashboardService.saveRegistry(registry, allowEmpty: true)
+            // `allowEmpty` states the condition under which emptying is the
+            // point: every row we loaded was a row at this dead path.
+            //
+            // Honest note, because the alternative is a comment that flatters
+            // the code: `saveRegistry` consults `allowEmpty` only when the
+            // list being written is empty, and `removed == before` is true in
+            // exactly that case — so this is behaviourally identical to the
+            // `true` it replaces. It is written as the condition anyway
+            // because the condition is what we can actually justify, and
+            // because a future `saveRegistry` that widens what the flag
+            // permits would then not silently inherit a blanket exemption
+            // here. The protection against blanking a list we misread is
+            // upstream and real: the lossy-load refusal in `saveRegistry` and
+            // in `repair`'s own block check.
+            try dashboardService.saveRegistry(registry, allowEmpty: removed == before)
         }
     }
 
@@ -736,6 +864,24 @@ public struct ProjectDoctorService: Sendable {
 
     // MARK: - Helpers
 
+    /// The name adopting `path` would actually list it under: the on-disk
+    /// record's `name` when there is a record that describes this very
+    /// folder, otherwise the folder's own basename.
+    ///
+    /// A record whose `rootPath` points somewhere else is not this project's
+    /// record — `repair` refuses to adopt from it — so it must not lend its
+    /// name to the collision check either, or a mismatched record would make
+    /// the doctor report a name collision that the refusal makes moot.
+    private nonisolated func adoptionName(
+        path: String, store: ProjectStore, fallback: String
+    ) -> String {
+        guard let record = store.load(projectPath: path),
+              ProjectIdentity.normalizedPath(record.rootPath)
+                == ProjectIdentity.normalizedPath(path)
+        else { return fallback }
+        return record.name
+    }
+
     private nonisolated func parentPath(_ path: String) -> String {
         (ProjectIdentity.normalizedPath(path) as NSString).deletingLastPathComponent
     }
@@ -771,6 +917,24 @@ public struct ProjectDoctorService: Sendable {
         guard let data = try? transport.readFile(path) else { return .absent }
         guard data.count <= ProjectDashboardService.maxJSONBytes else { return .malformed }
         return (try? JSONSerialization.jsonObject(with: data)) != nil ? .ok : .malformed
+    }
+
+    /// `sidecarState` for the one sidecar that is not merely READ but
+    /// potentially DERIVED AND OVERWRITTEN: `<root>/.scarf/project.json`.
+    ///
+    /// Valid JSON is not the bar here. `{"note": "wip"}` parses, so the
+    /// generic classifier calls it `.ok` — and every path that trusts `.ok`
+    /// then goes on to `derive()` a fresh record and write it straight over
+    /// the note. What makes a record safe to replace-if-missing is that it
+    /// decodes as a `ScarfProject`; anything else in that filename is
+    /// somebody's file, and the doctor's standing rule is that an
+    /// agent-owned file it cannot read is reported, never rewritten.
+    ///
+    /// Same single read as `sidecarState` — the decode is free.
+    private nonisolated func recordState(_ path: String) -> SidecarState {
+        guard let data = try? transport.readFile(path) else { return .absent }
+        guard data.count <= ProjectDashboardService.maxJSONBytes else { return .malformed }
+        return (try? JSONDecoder().decode(ScarfProject.self, from: data)) != nil ? .ok : .malformed
     }
 
     private nonisolated func loadCronJobs() -> [HermesCronJob] {

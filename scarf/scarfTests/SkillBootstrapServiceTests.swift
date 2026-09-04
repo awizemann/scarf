@@ -47,16 +47,122 @@ struct SkillBootstrapServiceTests {
 
     /// The pre-v2.10.1 flat layout is the other place Scarf's bootstrap
     /// ever wrote, so it's the other place a bad skill can be hiding.
-    @Test("the legacy flat install path is pruned too")
-    func prunePicksUpTheLegacyFlatLayout() throws {
+    /// The flat level is where Hermes puts EVERY hand-installed skill —
+    /// around fifty of them on the machine this defect was found on. Scarf
+    /// deleting by name there means a user who wrote their own skill about
+    /// Scarf watches it disappear at launch, with no undo and no mention.
+    @Test("a flat skill Scarf did not write is left alone, name match or not")
+    func pruneSparesAUserOwnedFlatSkill() throws {
         let home = try Self.makeHome()
         defer { try? FileManager.default.removeItem(at: home) }
         let flat = try Self.plantSkill("scarf-project-workflows", in: home)
 
         let removed = SkillBootstrapService(context: .local(home: home)).pruneKnownBadSkills()
 
+        #expect(removed.isEmpty)
+        #expect(
+            FileManager.default.fileExists(atPath: flat.appendingPathComponent("SKILL.md").path),
+            "a user's own skill was deleted on a name match alone"
+        )
+    }
+
+    /// The legacy migration still works — but on PROOF of authorship rather
+    /// than on the absence of proof to the contrary.
+    @Test("a flat skill carrying Scarf's own signature is still pruned")
+    func prunePicksUpTheLegacyFlatLayoutWhenScarfWroteIt() throws {
+        let home = try Self.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let flat = home.appendingPathComponent("skills/scarf-project-workflows")
+        try FileManager.default.createDirectory(at: flat, withIntermediateDirectories: true)
+        try Data(Self.scarfAuthoredFrontmatter.utf8)
+            .write(to: flat.appendingPathComponent("SKILL.md"))
+
+        let removed = SkillBootstrapService(context: .local(home: home)).pruneKnownBadSkills()
+
         #expect(removed == [flat.path])
         #expect(!FileManager.default.fileExists(atPath: flat.path))
+    }
+
+    /// The frontmatter every bundled skill carries, and a third-party one
+    /// has no reason to.
+    private static let scarfAuthoredFrontmatter = """
+        ---
+        name: scarf-project-workflows
+        version: 1.0.0
+        author: Alan Wizemann
+        license: MIT
+        metadata:
+          hermes:
+            homepage: https://github.com/awizemann/scarf/wiki/Project-Templates
+        ---
+
+        body
+        """
+
+    /// The signature has to match the artifact it gates, not a sample the
+    /// test wrote for itself. Read the SHIPPED files — including the
+    /// frontmatter shape the v2.7.0-era FLAT installs carry, which is what
+    /// the migration must still recognise on a real user's disk.
+    @Test("every skill Scarf actually ships passes its own authorship signature")
+    func bundledSkillsCarryTheSignature() throws {
+        let home = try Self.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let transport = ServerContext.local(home: home).makeTransport()
+        let bundleDir = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()          // scarfTests
+            .deletingLastPathComponent()          // scarf
+            .appendingPathComponent("scarf/Resources/BuiltinSkills.bundle")
+
+        let skills = try FileManager.default.contentsOfDirectory(
+            at: bundleDir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ).filter { FileManager.default.fileExists(atPath: $0.appendingPathComponent("SKILL.md").path) }
+        #expect(!skills.isEmpty, "no bundled skills found at \(bundleDir.path)")
+
+        for skill in skills {
+            #expect(
+                SkillBootstrapService.isScarfAuthoredSkill(at: skill.path, transport: transport),
+                Comment(
+                    rawValue: "\(skill.lastPathComponent) would no longer be recognised as "
+                        + "Scarf's own — the flat-install migration silently stops for it"
+                )
+            )
+        }
+    }
+
+    @Test("the authorship signature needs BOTH halves, inside the frontmatter")
+    func authorshipSignatureIsStrict() throws {
+        let home = try Self.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let transport = ServerContext.local(home: home).makeTransport()
+
+        func plant(_ text: String) throws -> String {
+            let dir = home.appendingPathComponent("skills/probe-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: dir.appendingPathComponent("SKILL.md"))
+            return dir.path
+        }
+
+        #expect(SkillBootstrapService.isScarfAuthoredSkill(
+            at: try plant(Self.scarfAuthoredFrontmatter), transport: transport
+        ))
+        // Author alone.
+        #expect(!SkillBootstrapService.isScarfAuthoredSkill(
+            at: try plant("---\nauthor: Alan Wizemann\n---\n"), transport: transport
+        ))
+        // Homepage alone.
+        #expect(!SkillBootstrapService.isScarfAuthoredSkill(
+            at: try plant("---\nhomepage: https://github.com/awizemann/scarf\n---\n"),
+            transport: transport
+        ))
+        // Both, but in the BODY — where anyone can copy them.
+        #expect(!SkillBootstrapService.isScarfAuthoredSkill(
+            at: try plant("---\nname: x\n---\nauthor: Alan Wizemann github.com/awizemann/scarf\n"),
+            transport: transport
+        ))
+        // No SKILL.md at all.
+        #expect(!SkillBootstrapService.isScarfAuthoredSkill(
+            at: home.appendingPathComponent("skills/nope").path, transport: transport
+        ))
     }
 
     /// The blast radius, stated as a test. A denylisted NAME sitting
@@ -136,6 +242,21 @@ struct SkillBootstrapServiceTests {
         // Shorter is not newer: 2 == 2.0.0.
         #expect(SkillBootstrapService.semverCompare("2", "2.0.0") == 0)
         #expect(SkillBootstrapService.semverCompare("1.10.0", "1.9.0") > 0)
+    }
+
+    /// A release replaces its own release candidate. Splitting on "." alone
+    /// made `2.0.0-rc1` sort ABOVE `2.0.0` (because `"0-rc1" > "0"`), so an
+    /// installed prerelease blocked the finished version forever — the one
+    /// case this gate exists for.
+    @Test("a prerelease ranks below the release it precedes")
+    func semverPrereleaseOrdering() {
+        #expect(SkillBootstrapService.semverCompare("2.0.0-rc1", "2.0.0") < 0)
+        #expect(SkillBootstrapService.semverCompare("2.0.0", "2.0.0-rc1") > 0)
+        #expect(SkillBootstrapService.semverCompare("2.0.0-rc1", "2.0.0-rc2") < 0)
+        #expect(SkillBootstrapService.semverCompare("2.0.0-rc1", "2.0.0-rc1") == 0)
+        #expect(SkillBootstrapService.semverCompare("2.0.0-rc1", "1.9.0") > 0)
+        // Build metadata is not part of precedence.
+        #expect(SkillBootstrapService.semverCompare("2.0.0+abc", "2.0.0") == 0)
     }
 
     @Test("the bundled skill declares the version the gate needs")

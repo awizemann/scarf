@@ -108,8 +108,8 @@ struct ProjectsMCPRegistrarTests {
         #expect(try String(contentsOfFile: home.context.paths.configYAML, encoding: .utf8) == afterFirst)
     }
 
-    @Test("a path with a space is quoted, so the YAML still parses")
-    func spacedPathIsQuoted() throws {
+    @Test("a path with a space round-trips through the config")
+    func spacedPathRoundTrips() throws {
         let home = try TempHermesHome()
         try Self.config(command: "/old/path/scarf-projects-mcp")
             .write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
@@ -124,6 +124,100 @@ struct ProjectsMCPRegistrarTests {
         let entry = HermesFileService(context: home.context)
             .loadMCPServers().first { $0.name == "scarf-projects" }
         #expect(entry?.command == helper.path)
+        // The name used to promise quoting this test never checked — and a
+        // space needs none: an interior space is a legal plain YAML scalar,
+        // and `yamlScalar` deliberately leaves it alone rather than churning
+        // quotes into the user's file. What matters is the round-trip, so
+        // that is what is asserted, plus the fact that it is NOT quoted.
+        let written = try String(contentsOfFile: home.context.paths.configYAML, encoding: .utf8)
+        #expect(written.contains("    command: \(helper.path)"))
+        #expect(!written.contains("command: \""))
+    }
+
+    @Test("every dev-copy bundle name is recognised, not just -dev.app")
+    func devCopiesAreAllSkipped() {
+        // All three exist on the maintainer's Mac; only the first was caught,
+        // so `scarf-dev-next.app` and the installed app re-pointed the entry
+        // at each other on every launch.
+        for name in ["scarf-dev.app", "scarf-dev-next.app", "Scarf Dev.app", "scarf_dev.app"] {
+            #expect(
+                ProjectsMCPRegistrar.devBundleName(
+                    in: "/Applications/\(name)/Contents/Helpers/scarf-projects-mcp"
+                ) == name,
+                "\(name) should be recognised as a dev copy"
+            )
+        }
+        // Not dev copies: the installed app, and words that merely contain
+        // "dev" — including a perfectly normal folder above the bundle.
+        for path in [
+            "/Applications/scarf.app/Contents/Helpers/scarf-projects-mcp",
+            "/Applications/Devon.app/Contents/Helpers/scarf-projects-mcp",
+            "/Users/me/Developer/Scarf/scarf.app/Contents/Helpers/scarf-projects-mcp",
+        ] {
+            #expect(ProjectsMCPRegistrar.devBundleName(in: path) == nil, "\(path)")
+        }
+    }
+
+    @Test("an unmanageable config is retried only after it changes")
+    func unmanageableConfigIsNotRetriedEveryLaunch() throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        // An anchored command: legal YAML that parses as a stdio entry (so
+        // this takes the re-point path, no CLI spawn) whose value can never
+        // equal the binary path, and which the patcher refuses to rewrite.
+        // Without the marker that is a failed patch attempt on every single
+        // launch; the `hermes mcp add` path it also guards is the one that
+        // costs 90 seconds of spawned CLI each time.
+        let unmanageable = """
+            mcp_servers:
+              scarf-projects:
+                command: &cmd /old/path
+            """
+        try unmanageable.write(
+            toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8
+        )
+        let helper = try Self.makeHelper(
+            named: "scarf-projects-mcp",
+            in: home.url.appendingPathComponent("bundle", isDirectory: true)
+        )
+        let suiteName = "registrar-test-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
+        let registrar = ProjectsMCPRegistrar(
+            context: home.context,
+            binaryURL: helper,
+            unmanageableMarker: .init(defaults: { defaults })
+        )
+
+        let first = registrar.ensureRegistered()
+        guard case .failed = first else {
+            Issue.record("expected the patch to fail closed, got \(first)")
+            return
+        }
+
+        // Second launch, same bytes: skipped without touching the config.
+        let second = registrar.ensureRegistered()
+        guard case .skipped(let reason) = second else {
+            Issue.record("expected a skip on the unchanged config, got \(second)")
+            return
+        }
+        #expect(reason.contains("hasn't changed"))
+        #expect(
+            try String(contentsOfFile: home.context.paths.configYAML, encoding: .utf8)
+                == unmanageable
+        )
+
+        // The user fixes the file — and Scarf tries again on its own.
+        try """
+            mcp_servers:
+              scarf-projects:
+                command: /old/path
+            """.write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+        let third = registrar.ensureRegistered()
+        guard case .repointed = third else {
+            Issue.record("expected the changed config to be retried, got \(third)")
+            return
+        }
     }
 
     @Test("a user's own non-stdio server squatting the name is left alone")

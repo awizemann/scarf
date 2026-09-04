@@ -34,9 +34,17 @@ public enum ProjectMCPStdioLoop {
         // fresh request and the client receives a parse error it never
         // asked for.
         var discardingUntilNewline = false
+        /// Set once a write to stdout has failed. The client is gone, so
+        /// every remaining request would be handled, serialized and thrown
+        /// away — and a client that closed stdout while still writing stdin
+        /// (a supervisor tearing a server down, a broken pipe on one half of
+        /// the pair) kept this loop parsing frames nobody would ever read.
+        /// The message on stderr says "stopping"; this is what makes that
+        /// true.
+        var stdoutClosed = false
 
         func drain() {
-            while let newline = buffer.firstIndex(of: 0x0A) {
+            while !stdoutClosed, let newline = buffer.firstIndex(of: 0x0A) {
                 let line = buffer[buffer.startIndex..<newline]
                 buffer.removeSubrange(buffer.startIndex...newline)
                 if discardingUntilNewline {
@@ -88,13 +96,14 @@ public enum ProjectMCPStdioLoop {
             do {
                 try output.write(contentsOf: response.encoded())
             } catch {
+                stdoutClosed = true
                 FileHandle.standardError.write(Data(
                     "scarf-projects: stdout closed (\(error.localizedDescription)); stopping\n".utf8
                 ))
             }
         }
 
-        while true {
+        while !stdoutClosed {
             let chunk = input.availableData
             if chunk.isEmpty { break }  // EOF: client hung up.
             buffer.append(chunk)
@@ -104,8 +113,10 @@ public enum ProjectMCPStdioLoop {
 
         // Anything left has no terminating newline, so it was never a
         // frame. Say so on stderr rather than vanishing: a client whose
-        // last write was truncated otherwise sees only silence.
-        if !buffer.isEmpty, !discardingUntilNewline {
+        // last write was truncated otherwise sees only silence. A closed
+        // stdout is a different story with its own message already printed
+        // — the leftovers there are frames we chose not to answer.
+        if !buffer.isEmpty, !discardingUntilNewline, !stdoutClosed {
             FileHandle.standardError.write(Data(
                 ("scarf-projects: stdin ended mid-frame; \(buffer.count) unterminated "
                     + "byte(s) were not processed\n").utf8

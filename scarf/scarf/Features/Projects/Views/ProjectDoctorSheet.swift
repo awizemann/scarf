@@ -45,7 +45,9 @@ struct ProjectDoctorSheet: View {
             Text(viewModel?.repairError ?? "")
         }
         .confirmationDialog(
-            pendingDestructive.map { "Remove “\($0.projectName ?? "this project")” from the list?" } ?? "",
+            // The finding says what its own repair will do — one row or
+            // several — rather than the sheet assuming one.
+            pendingDestructive?.confirmTitle ?? "",
             isPresented: Binding(
                 get: { pendingDestructive != nil },
                 set: { if !$0 { pendingDestructive = nil } }
@@ -59,7 +61,7 @@ struct ProjectDoctorSheet: View {
             }
             Button("Cancel", role: .cancel) { pendingDestructive = nil }
         } message: {
-            Text("This removes the entry from your projects list only. No files are deleted.")
+            Text(pendingDestructive?.confirmMessage ?? "")
         }
     }
 
