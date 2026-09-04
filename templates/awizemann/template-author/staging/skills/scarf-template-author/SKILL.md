@@ -1,7 +1,7 @@
 ---
 name: scarf-template-author
-description: Scaffold a new Scarf project — dashboard, optional configuration schema, optional cron job, and AGENTS.md — from a short conversational interview with the user. Output is immediately usable locally and cleanly exportable as a .scarftemplate bundle.
-version: 1.2.0
+description: Scaffold a new Scarf project OR enrich an existing one after a Scarf "Upgrade Project" — dashboard, optional configuration schema, optional cron job, AGENTS.md, and (via the scarf-miniapp-author skill) a starter mini-app — from a short conversational interview. Output is immediately usable locally and cleanly exportable as a .scarftemplate bundle.
+version: 2.0.0
 author: Alan Wizemann
 license: MIT
 platforms: [macos]
@@ -17,6 +17,34 @@ prerequisites:
 
 Scaffold a new Scarf-compatible project from a conversational interview. The output is both (a) a working project on disk the user can register with Scarf and use immediately, and (b) correctly shaped to be exported as a `.scarftemplate` bundle via Scarf's Export flow later.
 
+## READ THIS FIRST — use the `scarf-projects` tools, don't hand-edit Scarf's files
+
+Scarf ships an MCP server called **`scarf-projects`**. When you can see its tools, they are the **only** way you register a project, write a dashboard, add a slash command, or check a project's health. They are not a convenience wrapper — they are the same code Scarf's own UI runs, so a write that goes through them cannot produce a shape Scarf can't read.
+
+| What you want to do | Tool | Required arguments |
+|---|---|---|
+| See every project on this machine | `project_list` | *(none)* — optional `includeArchived` (bool, default true) |
+| Inspect one project in full | `project_get` | `project` |
+| Register an existing directory as a Scarf project | `project_register` | `name`, `path` |
+| Write or replace `.scarf/dashboard.json` | `project_update_dashboard` | `project`, `dashboard` |
+| Add a `/command` to a project | `project_add_slash_command` | `project`, `name`, `description`, `body` |
+| Reconcile and report on project health | `project_validate` | *(none)* — optional `project`, `repair` |
+
+Notes that save you a retry:
+
+- `project` accepts a display **name** or an **absolute path**. `~` is never expanded — pass the resolved path.
+- `dashboard` takes the complete document, as a JSON object or as a string containing one. It **replaces** the file, so if you are enriching rather than authoring from scratch, read the existing `.scarf/dashboard.json` first and send it back whole. (`project_get` reports whether a dashboard exists and parses, and where it lives — it does not hand you its contents; read the file for that.)
+- `project_add_slash_command` also takes optional `argumentHint`, `model`, `tags` (array of strings) and `overwrite` (bool, default false).
+- `project_validate` takes `repair: true` to apply only the repairs Scarf considers safe.
+- A tool that refuses tells you **why**, by JSON path for a bad dashboard (`sections[0].widgets[0].type: unknown widget type`), and writes nothing. Read the reason and fix your input — do not fall back to editing the file by hand because a tool said no. A refusal is the system working.
+- Read tools report the **registry's health**. If they say it is damaged, stop and run `project_validate` rather than working around it. `project_register` refuses outright in that state, on purpose: rewriting a damaged registry would make the unreadable rows permanently lost. The project-local writes (dashboard, slash commands) aren't blocked, but they still resolve their target through the registry — so a project whose row is unreadable can't be addressed either way. "No projects found" from a damaged registry does **not** mean the user has no projects; never respond to it by re-registering everything.
+
+**There is no tool for configuration.** `.scarf/manifest.json` and `.scarf/config.json` are still authored as files; see Config Schema Design below.
+
+### When the tools are absent
+
+`scarf-projects` is registered for a **local** Hermes only. On a remote/SSH host you will not see these tools — and only then do you fall back to writing Scarf's files directly, using the file-format reference sections in this skill. The fallback is a last resort, not a shortcut: a hand-written registry row with a malformed field is how projects disappear from Scarf's sidebar. Check whether the tools exist before you decide.
+
 ## When to invoke this skill
 
 Activate when the user says things like:
@@ -26,14 +54,27 @@ Activate when the user says things like:
 - *"Set up a project that runs a daily check on …"*
 - *"Help me author a Scarf template."*
 - *"Build me a Scarf project to monitor …"*
+- *"Upgrade this project to use Scarf's full feature set."* (the **upgrade/enrichment** path — see below)
 
 Do **not** activate for pure reference questions like *"what widget types does Scarf support?"* or *"how does Scarf handle secrets?"* — answer those inline from the reference sections below.
 
-Also do not activate when the user explicitly wants to edit an existing project's dashboard — that's a plain file edit, not a scaffold.
+Also do not activate for a one-off "tweak this one widget" edit — that's a plain file edit, not a scaffold.
+
+## Upgrading / enriching an EXISTING project
+
+Scarf hands off here right after a one-click **"Upgrade Project"** runs its deterministic structure pass on an existing project. By the time you're invoked, Scarf has already ensured: the stable id (`.scarf/project.json`), the AGENTS.md managed block, a Kanban tenant (if the host has Kanban), and a **placeholder** `.scarf/dashboard.json`. Your job is to **enrich it in place** — do NOT re-scaffold and do NOT clobber the user's files:
+
+1. **Read what's already there first** — README, the project's source, existing `.scarf/` files, the placeholder dashboard — so the enrichment fits THIS project.
+2. **Replace the placeholder dashboard** (the single "Configure this project" text widget) with a real one tailored to the project, using the widget catalog below. Read the existing `.scarf/dashboard.json` first, then send the complete new document with `project_update_dashboard` — it replaces the file. If the dashboard already has real widgets, read-merge — never delete the user's widgets.
+3. Add **slash commands** with `project_add_slash_command` and, where a recurring job fits, **cron jobs** (`hermes cron create`, created paused) — see the Cron section.
+4. **Build a starter mini-app or two** — invoke the **`scarf-miniapp-author`** skill for the bridge contract + `.scarf/miniapps/<id>/` format. A task board, an approval queue, or a status panel makes the upgrade tangible. Prefer non-sensitive bridge permissions so it runs immediately.
+5. **BOUNDED:** the structure pass already wrote the safe scaffolding (managed AGENTS.md block, identity, tenant). Only ADD or REPLACE-THE-PLACEHOLDER; never write outside managed markers or overwrite user content.
+
+Everything below (widget catalog, config schema, cron, file-writing rules) applies to both new scaffolds and upgrades.
 
 ## How a Scarf project is shaped on disk
 
-A Scarf project is just a directory registered in `~/.hermes/scarf/projects.json`. For Scarf to render a useful dashboard and for the project to be exportable as a `.scarftemplate`, it needs these files at minimum:
+A Scarf project is a directory that Scarf knows about: it carries a canonical record at `<project>/.scarf/project.json` and a row in the registry at `~/.hermes/scarf/projects.json`. `project_register` writes both halves in one call, with a stable id — that is why you never write either file yourself when the tools are there. For Scarf to render a useful dashboard and for the project to be exportable as a `.scarftemplate`, it needs these files at minimum:
 
 ```
 <project>/
@@ -105,7 +146,9 @@ For v1 just write `AGENTS.md` — every modern agent reads it, and if you need a
 
 ## Widget Catalog (JSON shapes)
 
-All widgets require `type` and `title`. Type-specific fields:
+All widgets require `type` and `title`. Type-specific fields below.
+
+`project_update_dashboard` validates every widget against this exact catalog before it writes anything, so a type or a missing required field that isn't in here comes back as a refusal rather than a broken dashboard. The accepted types are: `stat`, `progress`, `text`, `table`, `chart`, `list`, `webview`, `markdown_file`, `log_tail`, `cron_status`, `image`, `status_grid`, `kanban_summary`.
 
 ### `stat` — single metric
 ```json
@@ -132,7 +175,7 @@ All widgets require `type` and `title`. Type-specific fields:
   "columns": ["Test", "Duration", "Last Passed"],
   "rows": [["testFoo", "4.2s", "Apr 20"], ["testBar", "0.9s", "Apr 18"]] }
 ```
-Every row MUST have the same length as `columns`.
+Every row should have the same length as `columns`. Nothing validates this — the tool won't refuse a ragged table and the renderer won't complain, it will just draw a table that looks wrong. Check it yourself.
 
 ### `chart` — line / bar / area / pie with series
 ```json
@@ -145,7 +188,7 @@ Every row MUST have the same length as `columns`.
   }]
 }
 ```
-`chartType` is `"line"`, `"bar"`, `"area"`, or `"pie"`.
+`chartType` is `"line"`, `"bar"` or `"pie"`. Any other value — including `"area"`, which the schema still advertises — renders as a **line** chart. Don't promise the user an area chart.
 
 ### `list` — items with optional status badge
 ```json
@@ -206,6 +249,12 @@ Either `path` (local, relative to project root) OR `url` (remote). `path` wins w
 ```
 Reuses the typed status enum from `list`. Auto-fits columns when `gridColumns` is omitted. Denser than a `list` when monitoring 12+ services at a glance.
 
+### `kanban_summary` — top open tasks from this project's Kanban board
+```json
+{ "type": "kanban_summary", "title": "Board", "value": 5 }
+```
+Needs nothing but `title`. Pulls the project's own Kanban tenant (the `kanbanTenant` in `manifest.json`) and renders the top in-progress / blocked / todo tasks plus a glance line like "12 todo · 3 running · 5 blocked". Optional `value` sets how many rows to show (default 3). Only useful on a host that has Kanban.
+
 ### `stat` — sparkline (v2.7+ additive field)
 ```json
 { "type": "stat", "title": "Releases this month", "value": 4,
@@ -235,7 +284,7 @@ If the project needs user-configurable values, design a schema. Put it in `<proj
   "name": "My Project",
   "version": "1.0.0",
   "description": "Short one-liner.",
-  "contents": { "dashboard": true, "agentsMd": true, "config": 2 },
+  "contents": { "dashboard": true, "agentsMd": true, "config": 2, "cron": 1 },
   "config": {
     "schema": [
       { "key": "sites", "type": "list", "itemType": "string", "label": "Sites",
@@ -251,7 +300,7 @@ If the project needs user-configurable values, design a schema. Put it in `<proj
 }
 ```
 
-Note: `contents.config` is the **count of schema fields**, not a boolean. In the example above it's `2` because there are two fields.
+Note: `contents.config` is the **count of schema fields**, not a boolean. In the example above it's `2` because there are two fields. `contents.cron` is likewise a count — set it to the number of cron jobs the bundle ships (`1` above), or leave it out only when there are none.
 
 ### Field types and constraints
 
@@ -289,25 +338,32 @@ Same rule for long file paths, API endpoints, or any other unbreakable token —
 - **Enum fields MUST have non-empty `options`.**
 - **List fields MUST have `itemType: "string"`** in v1 (only itemType supported).
 - **Field keys MUST be unique** within a schema.
-- **`schemaVersion` MUST be 2** when a `config` block is present; it stays 1 if there's no config.
+- **`schemaVersion` is 1, 2 or 3** — pick the lowest that covers what the template ships. 1 = dashboard/AGENTS only; **2** = adds the `config` block; **3** = adds `contents.slashCommands`. A bundle that ships `slash-commands/` files MUST be schemaVersion 3 and MUST list every one of them in `contents.slashCommands`, or the validator rejects it both ways (claimed-but-missing, and present-but-unclaimed).
 - **`contents.config`** must equal the actual count of schema fields — a claim mismatch is rejected.
+- **`contents.cron`** must equal the number of cron jobs in the bundle. It defaults to 0, so a template that exports one cron job and forgets this line is rejected.
 
 ## Cron Job Design
 
-If the project has a scheduled task, register a cron job via `hermes cron create` AND — if you expect the user to export this as a `.scarftemplate` — author a `cron/jobs.json` in the staging layout so the exporter picks it up.
+If the project has a scheduled task, register a cron job via `hermes cron create`. That is the whole job for a live project.
 
-### Staging shape (for exportable templates)
+### How cron jobs reach an exported template
+
+**You do not hand-author `cron/jobs.json` into a live project.** Scarf's exporter *writes* that file into the staging directory from the real Hermes jobs the user picks in the Export sheet. A `cron/jobs.json` you drop into a project directory is read by nothing. So: register the job with `hermes cron create` and let Export carry it.
+
+The staging/bundle layout the exporter produces is **flat**, and is not a copy of the project directory — there is no `.scarf/` inside a bundle, and the manifest is named `template.json`, not `manifest.json`:
 
 ```
-<project>/
-├── .scarf/
+staging/
+├── template.json      # the manifest (`.scarf/manifest.json` becomes this)
+├── dashboard.json     # from .scarf/dashboard.json
 ├── AGENTS.md
 ├── README.md
-└── cron/
-    └── jobs.json
+├── cron/
+│   └── jobs.json      # WRITTEN BY THE EXPORTER from the user's real cron jobs
+└── slash-commands/    # only when the template ships commands
 ```
 
-Where `cron/jobs.json` is:
+Each entry the exporter writes into `cron/jobs.json` is shaped like this — useful to recognize, not to author by hand:
 
 ```json
 [
@@ -321,7 +377,7 @@ Where `cron/jobs.json` is:
 
 ### Using secrets in cron prompts
 
-`secret`-typed config fields land in the macOS Keychain at install time, with `keychain://` URIs in `<project>/.scarf/config.json` (never plaintext on disk). At install + on every config save, **Scarf mirrors the resolved values into `~/.hermes/.env`** under env var names like `SCARF_<UPPERCASE_SLUG>_<UPPERCASE_FIELDKEY>`. Hermes's cron scheduler reloads `~/.hermes/.env` fresh on every tick, so the values are reachable from any tool the agent invokes.
+`secret`-typed config fields land in the macOS Keychain at install time, with `keychain://` URIs in `<project>/.scarf/config.json` (never plaintext on disk). At install + on every config save, **Scarf mirrors the resolved SECRET values — and only those — into `~/.hermes/.env`**. Non-secret fields (URLs, thresholds, lists) are never mirrored: they stay in `.scarf/config.json`, and a prompt that wants one has the agent read that file. Writing `$SCARF_<SLUG>_<SOME_PLAIN_FIELD>` in a prompt gets you an empty string, because that variable was never set. under env var names like `SCARF_<UPPERCASE_SLUG>_<UPPERCASE_FIELDKEY>`. Hermes's cron scheduler reloads `~/.hermes/.env` fresh on every tick, so the values are reachable from any tool the agent invokes.
 
 **The agent reads them via the terminal or code_exec tool — not from prompt-text substitution.** Hermes does not interpolate env vars into prompt bodies. Tool-invoked subprocesses (the only path through which env vars become visible) DO see them via shell-level expansion or `os.environ`. Cron prompts should reference secrets in tool invocations, not in inline text.
 
@@ -333,7 +389,7 @@ Where `cron/jobs.json` is:
 {
   "name": "Daily news digest",
   "schedule": "0 9 * * *",
-  "prompt": "Use the terminal tool to fetch the RSS feed: `curl -sS -H \"Authorization: Bearer $SCARF_LOCAL_NEWS_API_TOKEN\" \"$SCARF_LOCAL_NEWS_RSS_URL\" -o {{PROJECT_DIR}}/.scarf/feed.xml`. Then summarise the top 5 items into {{PROJECT_DIR}}/.scarf/digest.md."
+  "prompt": "Read {{PROJECT_DIR}}/.scarf/config.json and take values.rss_url from it — that field is not a secret and is NOT in the environment. Then use the terminal tool to fetch it: `curl -sS -H \"Authorization: Bearer $SCARF_LOCAL_NEWS_API_TOKEN\" \"<the rss_url you just read>\" -o {{PROJECT_DIR}}/.scarf/feed.xml`. Then summarise the top 5 items into {{PROJECT_DIR}}/.scarf/digest.md."
 }
 ```
 
@@ -380,24 +436,46 @@ Make sure the parent exists and is writable. Make sure `<parent>/<project-name>`
 mkdir -p <parent>/<project-name>/.scarf
 ```
 
-### Step 3 — write `dashboard.json`
+### Step 3 — register the project with Scarf
+
+```
+project_register(name: "<project-name>", path: "<absolute-project-dir>")
+```
+
+This comes BEFORE the dashboard, because `project_update_dashboard` resolves its target through the registry. The tool writes `<project>/.scarf/project.json` with a stable id and adds the registry row in one call. The directory must already exist (Step 2 made it) — registering never creates it. It refuses a duplicate name, and refuses a path that is already registered; if you hit either, run `project_get` to see what is already there rather than picking a variant name.
+
+Scarf watches the registry and picks the project up within a second — there is no manual UI step.
+
+**Fallback, remote hosts only** (no `scarf-projects` tools): append a `{ "name": "<project-name>", "path": "<absolute-project-dir>" }` entry to the `projects` array in `~/.hermes/scarf/projects.json` — read it, parse it, append, write it back. Creating the file from scratch means `{ "projects": [ … ] }`. Add **no other fields**. In particular do not write a `uuid` — Scarf derives project identity itself, and a hand-invented value there is exactly the mistake that has taken projects out of the sidebar before. A row Scarf can read is a row it can repair; a row carrying a made-up ID is not.
+
+### Step 4 — write the dashboard
+
+```
+project_update_dashboard(project: "<project-name>", dashboard: { … })
+```
+
+The document replaces `.scarf/dashboard.json` wholesale. Only when the tools are absent do you write that file yourself.
 
 Use the Widget Catalog above. Always include:
 
 - `version: 1`
 - `title` (the project's display name)
 - `description` (a one-liner shown under the title)
-- `sections` (array; each has `title`, optional `columns` (1–4, default 3), `widgets`)
+- `sections` (array; each has a non-empty `title`, optional `columns` (1–12, default 3), `widgets`)
 
 Keep section titles short. Group related widgets. First section is usually "Current Status" or similar with the key stats.
 
-### Step 4 — write `manifest.json` (only if the project has a config schema)
+If the tool refuses, it names the offending field by JSON path and nothing was written — fix that field and send the whole document again.
+
+### Step 5 — write `manifest.json` (only if the project has a config schema)
 
 Put the full manifest shape from Config Schema Design above. Use `schemaVersion: 2`, match `contents.config` to the actual field count, and ensure every secret field has no `default`.
 
 If there's no config schema, skip this file — the project still works, it just won't have a Configuration button. You can add it later.
 
-### Step 5 — write `AGENTS.md`
+There is no tool for this file, on any host: write `<project>/.scarf/manifest.json` directly. Same for `.scarf/config.json` — and never put a secret value in either (see the secrets rules above).
+
+### Step 6 — write `AGENTS.md`
 
 Every scaffolded project needs an `AGENTS.md` that covers:
 
@@ -411,16 +489,16 @@ Every scaffolded project needs an `AGENTS.md` that covers:
 
 Use `{{PROJECT_DIR}}` placeholders in AGENTS.md only if the template will be installed through the installer (which substitutes the token). For a hand-scaffolded local-only project, substitute the absolute path yourself — `{{PROJECT_DIR}}` only resolves at install time.
 
-### Step 6 — write `README.md`
+### Step 7 — write `README.md`
 
 User-facing. Keep it short:
 
 - One-paragraph purpose.
-- How to install / first run (for an unexported project: "the scaffolding agent appends a `{name, path}` entry to `~/.hermes/scarf/projects.json` and Scarf picks it up on next sidebar refresh — no manual UI step needed").
+- How to install / first run (for an unexported project: "the scaffolding agent registered the project with Scarf, so it appears in the Projects sidebar within a second — no manual UI step needed").
 - How to trigger the cron job manually (Cron sidebar → Run Now).
 - A pointer at `AGENTS.md` for agents.
 
-### Step 7 — register the cron job (if any)
+### Step 8 — register the cron job (if any)
 
 For a local non-exported project:
 
@@ -430,31 +508,43 @@ hermes cron create --name "<descriptive name>" "<schedule>" "<prompt with absolu
 hermes cron pause <newly-created-job-id>
 ```
 
-Read the id back from `hermes cron list --json` or parse the create output.
+Read the id back by parsing the create output, or from `hermes cron list`.
 
 For an exportable template (one you're staging in `templates/<author>/<name>/staging/`): just author `cron/jobs.json` — the installer registers + pauses at install time, and prefixes the name with `[tmpl:<id>]`.
 
-### Step 8 — register the project with Scarf
+### Step 9 — add slash commands (if any fit)
 
-Append a `{ "name": "<project-name>", "path": "<absolute-project-dir>" }` entry to `~/.hermes/scarf/projects.json` yourself (read it, parse it, append to the `projects` array, write it back). Scarf watches the file and picks up the change on next sidebar refresh — no manual UI step needed.
-
-If the file doesn't exist yet, create it with `{ "projects": [ { "name": ..., "path": ... } ] }`. Then tell the user: *"I've written the files and registered the project — it'll appear in Scarf's Projects sidebar within a second."*
-
-### Step 9 (optional) — log to the Template Author project's list
-
-If the user has the `awizemann/template-author` project installed (the one that shipped this skill), append an entry to its `dashboard.json`'s `Scaffolded Projects` list widget:
-
-```json
-{ "text": "<absolute-project-dir> — <one-line purpose>", "status": "ok" }
+```
+project_add_slash_command(project: "<project-name>", name: "<command>", description: "<one line>", body: "<prompt text>")
 ```
 
-This gives the user a running audit trail of everything you've scaffolded for them. Preserve every other field in the dashboard as-is.
+Command names are lowercase letters, digits and hyphens, must start with a letter, and are capped at 64 characters — pass the name without the leading slash. The body may use `{{argument}}` and `{{argument | default: "..."}}`. Adding a command that already exists is refused unless you pass `overwrite: true`; optional `argumentHint`, `model` and `tags` shape how it appears in the slash menu.
+
+**Fallback, remote hosts only:** write `<project>/.scarf/slash-commands/<name>.md` — YAML frontmatter with `name` and `description`, optionally `argumentHint`, `model` and a `tags` list, then the prompt body below the closing `---`. The key is `argumentHint`; a `hint` key is ignored.
+
+### Step 10 — check your work
+
+```
+project_validate(project: "<project-name>")
+```
+
+Runs Scarf's Project Doctor over what you just built and reports anything that disagrees — a missing record, a dashboard that doesn't parse, an orphan. Do this before you tell the user you're done. `repair: true` applies only the repairs Scarf considers safe, and never any while the registry is damaged.
+
+### Step 11 (optional) — log to the Template Author project's list
+
+If the user has the `awizemann/template-author` project installed (the one that shipped this skill), add an entry to its `Scaffolded Projects` list widget:
+
+```json
+{ "text": "<absolute-project-dir> — <one-line purpose>", "status": "success" }
+```
+
+Use `project_get` to find that project's dashboard path, read the file, add the item, and send the whole document back through `project_update_dashboard` — it replaces the file, so preserve every other field as-is. This gives the user a running audit trail of everything you've scaffolded for them.
 
 ## Testing your scaffold
 
 ### Minimum smoke test
 
-1. Confirm you've appended the project entry to `~/.hermes/scarf/projects.json` (per Step 8) and tell the user the dashboard will appear in Scarf's Projects sidebar within a second.
+1. Run `project_validate` on the project (Step 10) and confirm it reports nothing wrong, then tell the user the project will appear in Scarf's Projects sidebar within a second.
 2. Dashboard appears — sanity check every widget renders correctly.
 3. If there's a cron job: click the job in Scarf's Cron sidebar → **Run Now**. The agent executes the prompt; dashboard updates when it finishes.
 
@@ -481,12 +571,15 @@ Validates every template in `templates/<author>/<name>/` against the Python vali
 
 Things to check before declaring the scaffold done:
 
+- [ ] **You used the `scarf-projects` tools** for registration, the dashboard and slash commands — and hand-edited Scarf's files only because the tools genuinely weren't there.
+- [ ] **You never invented a registry field.** No `uuid` you made up, no extra keys. On the fallback path, a row is `{name, path}` and nothing else.
+- [ ] `project_validate` reports the project healthy.
 - [ ] Every cron prompt uses `{{PROJECT_DIR}}` (for exported) OR an absolute path (for local-only). Relative paths will fail.
 - [ ] `contents.config` in the manifest equals the actual field count. Claim mismatch = rejected.
 - [ ] No `default` on any `secret` field.
 - [ ] Every enum field has non-empty `options`.
 - [ ] Every list field has `itemType: "string"`.
-- [ ] Every table widget has rows of length equal to `columns`.
+- [ ] Every table widget has rows of length equal to `columns` — unenforced, so it's on you.
 - [ ] Every webview widget has an https URL that renders something meaningful even pre-first-run (Scarf homepage is a decent placeholder).
 - [ ] `dashboard.json` has `version: 1` at the top.
 - [ ] `AGENTS.md` documents every config field, every updated widget, and the cron behaviour — the user relies on it as the source of truth when things drift.
@@ -495,7 +588,9 @@ Things to check before declaring the scaffold done:
 
 ## Reference — source of truth files
 
-- **Dashboard widget schema** — `scarf/scarf/Core/Models/ProjectDashboard.swift` in the Scarf repo. If you need exact field types or defaults, read it.
+- **Dashboard widget schema** — `scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectDashboard.swift` in the Scarf repo. If you need exact field types or defaults, read it.
+- **What `project_update_dashboard` will accept** — `scarf/Packages/ScarfCore/Sources/ScarfCore/Models/DashboardWidgetCatalog.swift`: the exact per-type required fields the tool validates against before writing.
+- **The `scarf-projects` tools themselves** — `scarf/Packages/ScarfCore/Sources/ScarfProjectsMCPKit/`. `ProjectMCPToolCatalog.swift` is the argument schema the agent sees; `ProjectMCPTools.swift` is what each tool actually does and every reason it refuses.
 - **Config schema + validation** — `scarf/scarf/Core/Models/TemplateConfig.swift` and `scarf/scarf/Core/Services/ProjectConfigService.swift`.
 - **Exporter behaviour** — `scarf/scarf/Core/Services/ProjectTemplateExporter.swift`. Verifies what files the exporter will pick up from a live project and what it'll carry into a bundle.
 - **Installer contract** — `scarf/scarf/Core/Services/ProjectTemplateInstaller.swift`. Verifies what `{{PROJECT_DIR}}` substitution covers and where installed files land.
