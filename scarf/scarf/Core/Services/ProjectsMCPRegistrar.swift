@@ -25,7 +25,13 @@ import os
 /// **Local only.** An MCP server runs where the agent runs, and the
 /// bundled binary is a Mach-O for this Mac. SSH contexts are skipped
 /// entirely; remote hosts keep the skill-driven fallback.
-struct ProjectsMCPRegistrar: Sendable {
+/// `nonisolated` on the whole type, deliberately: the app target builds with
+/// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` (SE-0466), which would otherwise
+/// make `init` — and, invisibly, its DEFAULT ARGUMENTS — main-actor-isolated,
+/// so the charter-C10 detached call in `scarfApp` could not construct one.
+/// Nothing here touches UI or main-actor state; every member is blocking
+/// transport/subprocess work that belongs off-main.
+nonisolated struct ProjectsMCPRegistrar: Sendable {
     private static let logger = Logger(subsystem: "com.scarf", category: "ProjectsMCPRegistrar")
 
     /// The config key, and the name agents see. Stable forever: renaming
@@ -149,7 +155,10 @@ struct ProjectsMCPRegistrar: Sendable {
     /// fingerprint changes and Scarf tries again on its own. There is no
     /// state to reset by hand and no way for the marker to outlive the
     /// problem it describes.
-    struct UnmanageableMarker: Sendable {
+    /// `nonisolated` for the same reason as the enclosing type: nested types do
+    /// not inherit the outer declaration's isolation opt-out, and this type's
+    /// `init` is a default argument of `ProjectsMCPRegistrar.init`.
+    nonisolated struct UnmanageableMarker: Sendable {
         private let key = "ProjectsMCPRegistrar.unmanageableConfigSHA256"
         private let defaults: @Sendable () -> UserDefaults
 

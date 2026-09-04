@@ -32,6 +32,12 @@ struct ProjectsListView: View {
     /// Phase 2; the phone now says it too (P7 addendum). Read-only surface,
     /// so it explains and points at the Mac rather than offering a repair.
     @State private var damage: String?
+    /// Last value `damage` was announced for. Refresh polls this screen
+    /// repeatedly (`.refreshable` / `.task`); without tracking this, an
+    /// unchanged damage string would re-announce on every pull-to-refresh
+    /// instead of only when it newly appears (Mac `RegistryDamageBanner`
+    /// parity — announce on transition, not on every read).
+    @State private var lastAnnouncedDamage: String?
 
     private var serverContext: ServerContext {
         config.toServerContext(id: Self.sharedContextID)
@@ -178,6 +184,14 @@ struct ProjectsListView: View {
         projects = loaded.projects
         damage = loaded.damage
         loadError = nil
+
+        // Announce only when damage NEWLY appears (nil -> non-nil, or a
+        // different message) — not on every refresh, which would re-speak
+        // the same sentence on each pull-to-refresh / auto-reload.
+        if let damage, damage != lastAnnouncedDamage {
+            AccessibilityNotification.Announcement(AttributedString(damage)).post()
+        }
+        lastAnnouncedDamage = damage
     }
 
     /// The user-facing sentence for a damaged read. `RegistryLoss.message`
