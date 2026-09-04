@@ -24,14 +24,36 @@ public enum ProjectContextBlock {
     /// Errors surfaced by writers. Narrow set — most callers just log
     /// and continue; a missing project-context block is a polish
     /// degradation, not a chat-start blocker.
-    public enum WriteError: Error, LocalizedError {
+    public enum WriteError: Error, LocalizedError, Equatable {
         case encodingFailed
+        /// The file is stat-confirmed and two reads of it failed. Writing
+        /// the block would replace prose nobody has seen.
+        case refusedUnreadable(path: String)
+        /// The bytes are there and are NOT valid UTF-8. They were read, so
+        /// they are not "unreadable" in the transport sense — but they are
+        /// not text we can splice, and `String(data:encoding:) ?? ""` used
+        /// to turn them into an empty document that the splice then
+        /// published as a block-only file. Refused instead.
+        case refusedUndecodableText(path: String)
+
         public var errorDescription: String? {
             switch self {
             case .encodingFailed: return "Couldn't encode AGENTS.md block as UTF-8"
+            case let .refusedUnreadable(path):
+                return "\(path) exists but couldn't be read; refusing to replace it with a Scarf block."
+            case let .refusedUndecodableText(path):
+                return "\(path) is not valid UTF-8 text; refusing to replace it with a Scarf block."
             }
         }
     }
+
+    /// Deliberately effectively uncapped. `GuardedJSONStore`'s size cap
+    /// exists so a phone doesn't try to DECODE a huge JSON index, and it
+    /// reacts by copying the file aside as `.corrupt-<stamp>`. AGENTS.md is
+    /// the user's own prose: quarantining it (and re-uploading megabytes on
+    /// every chat start) is not ours to do, and the read that would blow
+    /// the budget is the same read the old code already did.
+    static let maxAgentsBytes = Int.max
 
     /// Splice `block` into `existing`, preserving everything outside
     /// the markers. Three cases:
@@ -111,7 +133,9 @@ public enum ProjectContextBlock {
         let agentsMdPath = projectPath + "/AGENTS.md"
         guard transport.fileExists(agentsMdPath) else { return }
         let existingData = try transport.readFile(agentsMdPath)
-        let existing = String(data: existingData, encoding: .utf8) ?? ""
+        // Bytes we can't decode as text are left ALONE — the block can't be
+        // in them, and `?? ""` would offer the splice an empty document.
+        guard let existing = String(data: existingData, encoding: .utf8) else { return }
         let rewritten = removeBlock(from: existing)
         guard rewritten != existing else { return }
         guard let outData = rewritten.data(using: .utf8) else {
@@ -128,6 +152,20 @@ public enum ProjectContextBlock {
     /// user picks "In project…". Mac's ProjectAgentContextService is
     /// a richer wrapper that constructs the block first, but the
     /// persistence step uses the same splice logic under the hood.
+    /// **Why this is guarded (P8 DI-C2).** This runs on EVERY project-scoped
+    /// chat start, on Mac and iOS, against the user's own AGENTS.md — the
+    /// most valuable file Scarf writes and the only one that never had a
+    /// `.bak`. It used to open with `if !transport.fileExists(agentsMdPath)
+    /// { write block-only }`: one dropped SSH/SFTP round-trip made that
+    /// false and the user's whole file became the Scarf block. The second
+    /// half of the same bug was `String(data:encoding:.utf8) ?? ""` — a
+    /// single non-UTF-8 byte collapsed the document to empty and the splice
+    /// republished it block-only.
+    ///
+    /// Now: PROOF, not inference (`GuardedJSONStore.inspect` — stat-confirm
+    /// plus a retried read), a refusal when the file is provably there and
+    /// unreadable, a refusal when the bytes aren't text, and a one-deep
+    /// `AGENTS.md.bak` of whatever gets replaced.
     public static func writeBlock(
         _ block: String,
         forProjectAt projectPath: String,
@@ -135,25 +173,44 @@ public enum ProjectContextBlock {
     ) throws {
         let transport = context.makeTransport()
         let agentsMdPath = projectPath + "/AGENTS.md"
+        let guarded = GuardedJSONStore(transport: transport, label: "AGENTS.md")
+        var inspection = guarded.inspect(agentsMdPath, maxBytes: maxAgentsBytes)
 
-        if !transport.fileExists(projectPath) {
-            try transport.createDirectory(projectPath)
+        // Zero bytes is damage to a JSON sidecar (Scarf never writes an
+        // empty one). An empty AGENTS.md is just an empty markdown file a
+        // person made, and it has nothing to lose — so it is writable, and
+        // refusing forever on it would be the degradation, not the guard.
+        if case .unreadable = inspection.state, inspection.bytes?.isEmpty == true {
+            inspection = GuardedJSONStore.Inspection(state: .absent, bytes: nil)
         }
 
-        if !transport.fileExists(agentsMdPath) {
-            let data = (block + "\n").data(using: .utf8) ?? Data()
-            try transport.writeFile(agentsMdPath, data: data)
-            return
+        switch inspection.state {
+        case .unreadable(let damaged):
+            throw WriteError.refusedUnreadable(path: damaged)
+        case .quarantined:
+            // Unreachable with an uncapped `maxAgentsBytes`; refuse rather
+            // than replace bytes we already decided were unusable.
+            throw WriteError.refusedUnreadable(path: agentsMdPath)
+        case .absent:
+            // `GuardedJSONStore.write` mkdir -p's the parent, so the old
+            // `fileExists(projectPath)`-then-create dance is gone with the
+            // rest of the inference.
+            guard let data = (block + "\n").data(using: .utf8) else {
+                throw WriteError.encodingFailed
+            }
+            try guarded.write(data, to: agentsMdPath, after: inspection)
+        case .present:
+            let existingData = inspection.bytes ?? Data()
+            guard let existing = String(data: existingData, encoding: .utf8) else {
+                throw WriteError.refusedUndecodableText(path: agentsMdPath)
+            }
+            let rewritten = applyBlock(block, to: existing)
+            guard let outData = rewritten.data(using: .utf8) else {
+                throw WriteError.encodingFailed
+            }
+            guard outData != existingData else { return }
+            try guarded.write(outData, to: agentsMdPath, after: inspection)
         }
-
-        let existingData = try transport.readFile(agentsMdPath)
-        let existing = String(data: existingData, encoding: .utf8) ?? ""
-        let rewritten = applyBlock(block, to: existing)
-        guard let outData = rewritten.data(using: .utf8) else {
-            throw WriteError.encodingFailed
-        }
-        guard outData != existingData else { return }
-        try transport.writeFile(agentsMdPath, data: outData)
     }
 
     // MARK: - Full managed block (shared Mac + iOS — single source of truth)

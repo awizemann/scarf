@@ -80,15 +80,17 @@ public actor ModelPresetService {
     /// `updatedAt` is overwritten to now on every upsert so the JSON
     /// reflects last-write time.
     public func upsert(_ preset: ModelPreset) async throws {
-        var store = try await loadStore()
         var copy = preset
         copy.updatedAt = Date()
-        if let idx = store.presets.firstIndex(where: { $0.id == preset.id }) {
-            store.presets[idx] = copy
-        } else {
-            store.presets.append(copy)
+        let inserted = copy
+        try await mutate { store in
+            if let idx = store.presets.firstIndex(where: { $0.id == inserted.id }) {
+                store.presets[idx] = inserted
+            } else {
+                store.presets.append(inserted)
+            }
+            return true
         }
-        try await persist(store)
         #if canImport(os)
         Self.logger.info("upsert preset \(preset.id.uuidString, privacy: .public) name=\(preset.name, privacy: .public)")
         #endif
@@ -98,11 +100,12 @@ public actor ModelPresetService {
     /// isn't present — matches `Set.remove` semantics so callers can
     /// idempotently retry a delete.
     public func delete(id: UUID) async throws {
-        var store = try await loadStore()
-        let before = store.presets.count
-        store.presets.removeAll(where: { $0.id == id })
-        guard store.presets.count != before else { return }
-        try await persist(store)
+        let removed = try await mutate { store in
+            let before = store.presets.count
+            store.presets.removeAll(where: { $0.id == id })
+            return store.presets.count != before
+        }
+        guard removed else { return }
         #if canImport(os)
         Self.logger.info("deleted preset \(id.uuidString, privacy: .public)")
         #endif
@@ -110,42 +113,82 @@ public actor ModelPresetService {
 
     // MARK: - Private I/O
 
-    private func loadStore() async throws -> ModelPresetStore {
-        let context = self.context
-        return try await Task.detached(priority: .utility) { () throws -> ModelPresetStore in
-            let transport = context.makeTransport()
-            let path = context.paths.modelPresetsJSON
-            guard transport.fileExists(path) else {
-                return ModelPresetStore()
-            }
-            let data = try transport.readFile(path)
+    /// Presets are a handful of small records; anything past this cap is
+    /// not a preset store we should try to decode on a phone.
+    static let maxBytes = 1 * 1024 * 1024
+
+    /// ONE inspection serving both the decode and the write.
+    ///
+    /// **Why this replaced `fileExists`.** `loadStore` used to open with
+    /// `guard transport.fileExists(path) else { return ModelPresetStore() }`
+    /// — the same absent-vs-unreadable INFERENCE the guarded stores exist
+    /// to forbid, spelled differently. One dropped SSH round-trip made
+    /// `fileExists` false, the load returned an EMPTY store, and the next
+    /// `upsert` published a one-preset file over the user's full one, with
+    /// no `.bak` behind it. `GuardedJSONStore` takes proof instead
+    /// (stat-confirm + retried read), so a stat-confirmed unreadable file
+    /// REFUSES the write.
+    ///
+    /// Undecodable bytes are NOT quarantined-and-rebuilt the way
+    /// `miniapp_grants.json` is: a preset is user-authored and exists
+    /// nowhere else, so — like `projects.json` — the store refuses until a
+    /// human looks at it.
+    private nonisolated static func inspect(
+        _ context: ServerContext
+    ) throws -> (store: ModelPresetStore, inspection: GuardedJSONStore.Inspection, guarded: GuardedJSONStore, path: String) {
+        let path = context.paths.modelPresetsJSON
+        let guarded = GuardedJSONStore(transport: context.makeTransport(), label: "model_presets.json")
+        let inspection = guarded.inspect(path, maxBytes: maxBytes)
+        switch inspection.state {
+        case .absent:
+            return (ModelPresetStore(), inspection, guarded, path)
+        case .unreadable(let damaged):
+            throw ModelPresetServiceError.unreadableStore(path: damaged)
+        case .quarantined(let copy):
+            throw ModelPresetServiceError.corruptStore(
+                underlying: "store was past the \(maxBytes)-byte cap; copied aside to \(copy)"
+            )
+        case .present:
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
             do {
-                let decoder = JSONDecoder()
-                decoder.dateDecodingStrategy = .iso8601
-                return try decoder.decode(ModelPresetStore.self, from: data)
+                let store = try decoder.decode(ModelPresetStore.self, from: inspection.bytes ?? Data())
+                return (store, inspection, guarded, path)
             } catch {
                 throw ModelPresetServiceError.corruptStore(underlying: error.localizedDescription)
             }
+        }
+    }
+
+    private func loadStore() async throws -> ModelPresetStore {
+        let context = self.context
+        return try await Task.detached(priority: .utility) { () throws -> ModelPresetStore in
+            try Self.inspect(context).store
         }.value
     }
 
-    private func persist(_ store: ModelPresetStore) async throws {
+    /// Read-modify-write in ONE detached pass, so the write is checked
+    /// against the very read it was computed from. Reverting to
+    /// `loadStore()` + `persist()` would reopen the hole even with the
+    /// guard in place.
+    ///
+    /// - Parameter body: mutates the store and returns whether anything
+    ///   actually changed. `false` writes nothing.
+    @discardableResult
+    private func mutate(_ body: @Sendable @escaping (inout ModelPresetStore) -> Bool) async throws -> Bool {
         let context = self.context
-        var updated = store
-        updated.version = ModelPresetStore.currentVersion
-        updated.updatedAt = ModelPresetStore.nowISO8601()
-        try await Task.detached(priority: .utility) { [updated] in
-            let transport = context.makeTransport()
-            let path = context.paths.modelPresetsJSON
-            let scarfDir = context.paths.scarfDir
-            if !transport.fileExists(scarfDir) {
-                try transport.createDirectory(scarfDir)
-            }
+        return try await Task.detached(priority: .utility) { () throws -> Bool in
+            let probe = try Self.inspect(context)
+            var store = probe.store
+            guard body(&store) else { return false }
+            store.version = ModelPresetStore.currentVersion
+            store.updatedAt = ModelPresetStore.nowISO8601()
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             encoder.dateEncodingStrategy = .iso8601
-            let data = try encoder.encode(updated)
-            try transport.writeFile(path, data: data)
+            let data = try encoder.encode(store)
+            try probe.guarded.write(data, to: probe.path, after: probe.inspection)
+            return true
         }.value
     }
 }
@@ -187,17 +230,26 @@ public struct ModelPresetStoreReader: Sendable {
     }
 
     /// Probe this host's store, keeping absent and unreadable apart.
+    ///
+    /// Proof-based, like the writer: `fileExists` false on a dropped
+    /// round-trip used to report `.absent` — "this host has no presets" —
+    /// about a host whose store is right there.
     public nonisolated func probe() -> Probe {
-        let transport = context.makeTransport()
         let path = context.paths.modelPresetsJSON
-        guard transport.fileExists(path) else { return .absent }
-        guard let data = try? transport.readFile(path) else { return .unreadable(path: path) }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let store = try? decoder.decode(ModelPresetStore.self, from: data) else {
-            return .unreadable(path: path)
+        let guarded = GuardedJSONStore(transport: context.makeTransport(), label: "model_presets.json")
+        let inspection = guarded.inspect(path, maxBytes: ModelPresetService.maxBytes)
+        switch inspection.state {
+        case .absent: return .absent
+        case .unreadable, .quarantined: return .unreadable(path: path)
+        case .present:
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            guard let data = inspection.bytes,
+                  let store = try? decoder.decode(ModelPresetStore.self, from: data) else {
+                return .unreadable(path: path)
+            }
+            return .presets(Set(store.presets.map(\.id)))
         }
-        return .presets(Set(store.presets.map(\.id)))
     }
 
     /// Every preset id present on this host. Empty on a missing/corrupt
@@ -225,8 +277,21 @@ public struct ModelPresetStoreReader: Sendable {
 
 /// Errors raised by `ModelPresetService`. Missing file is *not* an error
 /// — see `list()`. Only conditions that need user attention surface here.
-public enum ModelPresetServiceError: Error, Sendable, Equatable {
+public enum ModelPresetServiceError: LocalizedError, Sendable, Equatable {
     /// The file exists but couldn't be decoded as `ModelPresetStore`.
     /// `underlying` carries the JSON decoder's message for diagnostics.
     case corruptStore(underlying: String)
+    /// The file is stat-confirmed (or zero bytes) and two reads of it
+    /// failed. Reads report it rather than lying "no presets", and writes
+    /// never get far enough to replace bytes nobody has seen.
+    case unreadableStore(path: String)
+
+    public var errorDescription: String? {
+        switch self {
+        case let .corruptStore(underlying):
+            return "The model preset store couldn't be read: \(underlying)"
+        case let .unreadableStore(path):
+            return "model_presets.json at \(path) exists but couldn't be read; refusing to replace it."
+        }
+    }
 }

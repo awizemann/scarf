@@ -440,31 +440,14 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
             try? await sftp.setAttributes(at: tmp, to: attributes)
         }
 
-        do {
-            try await sftp.rename(at: tmp, to: resolved)
-        } catch {
-            do {
-                try await sftp.remove(at: resolved)
-            } catch {
-                // The destination is still intact, so the staging copy is
-                // redundant — clear it rather than leave one behind per
-                // failed write.
-                try? await sftp.remove(at: tmp)
-                throw error
-            }
-            do {
-                try await sftp.rename(at: tmp, to: resolved)
-            } catch {
-                // The destination is gone and `tmp` is now the ONLY copy of
-                // these bytes. Deleting it here would be the same data loss
-                // this method exists to prevent, so it stays — named in the
-                // error so a human can move it back.
-                throw TransportError.fileIO(
-                    path: path,
-                    underlying: "write staged at \(tmp) but could not be renamed into place: \(error.localizedDescription)"
-                )
-            }
-        }
+        try await SFTPRenamePublisher.publish(
+            stagedPath: tmp,
+            reportPath: path,
+            rename: { try await sftp.rename(at: tmp, to: resolved) },
+            destinationExists: { (try? await sftp.getAttributes(at: resolved)) != nil },
+            removeDestination: { try await sftp.remove(at: resolved) },
+            removeStaged: { try? await sftp.remove(at: tmp) }
+        )
     }
 
     private func asyncFileExists(_ path: String) async throws -> Bool {
@@ -846,6 +829,76 @@ private actor ConnectionHolder {
             throw TransportError.other(
                 message: SSHConnectPolicy.describeConnectFailure(error, host: config.host)
             )
+        }
+    }
+}
+
+/// The PUBLISH half of an atomic SFTP write: stage under a nonce name,
+/// then rename into place. Factored out of `CitadelServerTransport` so its
+/// policy is testable without a live SFTP server (`TransportError.fileIO`
+/// and the closures are the whole surface).
+///
+/// **The rule it encodes (P8 DI-H1).** SFTP v3's `SSH_FXP_RENAME` is not
+/// POSIX rename — OpenSSH's sftp-server FAILS when the destination exists,
+/// so a fallback that displaces the destination is required. But a failed
+/// rename is not PROOF that the destination is what failed it: SFTP hands
+/// back one undifferentiated status, and a dropped cellular link produces
+/// the same one. The previous fallback deleted the destination on ANY
+/// rename error, so a blip deleted the user's file and then failed the
+/// retry too. Two proofs are taken before the destination is touched:
+/// the plain rename is retried once (a transient blip clears), and only
+/// then is the destination probed for existence. Without both, the
+/// destination is left exactly as it was and the staged bytes — the only
+/// copy of the new content — are named in the thrown error, never removed.
+enum SFTPRenamePublisher {
+    static func publish(
+        stagedPath: String,
+        reportPath: String,
+        rename: () async throws -> Void,
+        destinationExists: () async -> Bool,
+        removeDestination: () async throws -> Void,
+        removeStaged: () async -> Void
+    ) async throws {
+        do {
+            try await rename()
+            return
+        } catch {
+            // 1. A transient failure clears on a retry, and a retry costs
+            //    one round-trip against destroying a file.
+            if (try? await rename()) != nil { return }
+
+            // 2. Only a destination that is actually there justifies
+            //    removing it.
+            guard await destinationExists() else {
+                throw TransportError.fileIO(
+                    path: reportPath,
+                    underlying: "write staged at \(stagedPath) but could not be renamed into place "
+                        + "(the destination was left untouched): \(error.localizedDescription)"
+                )
+            }
+
+            do {
+                try await removeDestination()
+            } catch {
+                // The destination is still intact, so the staging copy is
+                // redundant — clear it rather than leave one behind per
+                // failed write.
+                await removeStaged()
+                throw error
+            }
+
+            do {
+                try await rename()
+            } catch {
+                // The destination is gone and the staged file is now the
+                // ONLY copy of these bytes. Deleting it here would be the
+                // same data loss this path exists to prevent, so it stays —
+                // named in the error so a human can move it back.
+                throw TransportError.fileIO(
+                    path: reportPath,
+                    underlying: "write staged at \(stagedPath) but could not be renamed into place: \(error.localizedDescription)"
+                )
+            }
         }
     }
 }

@@ -74,7 +74,6 @@ struct ProjectAgentContextService: Sendable {
         let store = ProjectStore(context: context)
         let scarfProject = store.load(projectPath: project.path) ?? store.derive(from: project)
         let block = renderBlock(for: scarfProject)
-        let path = agentsMdPath(forProjectPath: project.path)
         let transport = context.makeTransport()
 
         // Ensure the project directory exists — this service is the
@@ -103,27 +102,15 @@ struct ProjectAgentContextService: Sendable {
             try transport.createDirectory(project.path)
         }
 
-        if !transport.fileExists(path) {
-            // Fresh AGENTS.md with just our block + a trailing
-            // newline so editors render it cleanly.
-            let data = (block + "\n").data(using: .utf8) ?? Data()
-            try transport.writeFile(path, data: data)
-            Self.logger.info("created AGENTS.md with Scarf block for \(project.name, privacy: .public)")
-            return
-        }
-
-        // Read existing, splice in the new block.
-        let existingData = try transport.readFile(path)
-        let existing = String(data: existingData, encoding: .utf8) ?? ""
-        let rewritten = Self.applyBlock(block: block, to: existing)
-        guard let outData = rewritten.data(using: .utf8) else {
-            throw ProjectAgentContextError.encodingFailed
-        }
-        // Skip the write when nothing changed — avoids unnecessary
-        // file-watcher churn. Matches what disk snapshot shows.
-        guard outData != existingData else { return }
-        try transport.writeFile(path, data: outData)
-        Self.logger.info("refreshed Scarf block in AGENTS.md for \(project.name, privacy: .public)")
+        // The persistence step is `ProjectContextBlock.writeBlock` — the
+        // SAME guarded writer iOS uses (P8 DI-C2). The Mac used to carry a
+        // second copy of the splice-and-replace, with the same
+        // `fileExists`-then-write-block-only and `?? ""` holes: a dropped
+        // round-trip or one non-UTF-8 byte replaced the user's whole
+        // AGENTS.md with the Scarf block. One writer, one proof-based
+        // probe, one `.bak`.
+        try ProjectContextBlock.writeBlock(block, forProjectAt: project.path, context: context)
+        Self.logger.info("wrote Scarf block into AGENTS.md for \(project.name, privacy: .public)")
     }
 
     // MARK: - Marker splice (testable in isolation)
@@ -149,9 +136,6 @@ struct ProjectAgentContextService: Sendable {
 
     // MARK: - Helpers
 
-    nonisolated private func agentsMdPath(forProjectPath projectPath: String) -> String {
-        projectPath + "/AGENTS.md"
-    }
 }
 
 enum ProjectAgentContextError: LocalizedError {

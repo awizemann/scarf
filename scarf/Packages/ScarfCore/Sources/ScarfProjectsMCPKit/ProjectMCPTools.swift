@@ -368,6 +368,10 @@ public struct ProjectMCPTools: Sendable {
 
     // MARK: - project_set_config
 
+    /// A project's `config.json` is a handful of typed fields; past this
+    /// it is not a config file we should decode on the agent's behalf.
+    static let configMaxBytes = 1 * 1024 * 1024
+
     /// Write one key into `<project>/.scarf/config.json` — the file
     /// `ProjectConfigService` (Mac app target) and `TemplateConfigSheet`
     /// read and write today. This tool does not depend on that service:
@@ -464,17 +468,39 @@ public struct ProjectMCPTools: Sendable {
             )
         }
 
+        // GUARDED read-modify-write (P8 DI-H3 / SEC-M6 write half).
+        //
+        // This used to be `fileExists` + `try? read` + `try? decode`, then a
+        // fresh four-key object written over the top. A read that failed on
+        // a file that IS there rebuilt `config.json` from nothing — every
+        // other field, including every other `keychain://` reference, was
+        // orphaned in the Keychain with no pointer left to it — and even on
+        // the happy path every top-level key Scarf doesn't know about was
+        // dropped. Now: one proof-based inspection (stat-confirm + retried
+        // read) that REFUSES the write when the file is provably there and
+        // unreadable, quarantines bytes that won't decode, preserves the
+        // whole object graph, and leaves a one-deep `.bak`.
+        //
+        // Inspected BEFORE the Keychain write below, so a refusal doesn't
+        // leave a secret in the Keychain that nothing references.
         let configPath = entry.path + "/.scarf/config.json"
+        let guarded = GuardedJSONStore(transport: transport, label: "config.json")
+        let (inspection, existingRoot) = guarded.inspectDecoding(
+            JSONValue.self, at: configPath, maxBytes: Self.configMaxBytes
+        )
+        if case .unreadable = inspection.state {
+            return .failure(
+                "\(configPath) exists but couldn't be read. Refusing to rewrite it — that would "
+                    + "orphan every other value in it, including any Keychain references. Fix the "
+                    + "file (or its permissions) and retry."
+            )
+        }
+        var root: [String: JSONValue] = [:]
+        if let existingRoot, case .object(let object) = existingRoot { root = object }
         var values: [String: JSONValue] = [:]
         var existingTemplateID = templateID ?? "unknown"
-        if transport.fileExists(configPath) {
-            if let data = try? transport.readFile(configPath),
-               let existing = try? JSONDecoder().decode(JSONValue.self, from: data),
-               case .object(let root) = existing {
-                if case .object(let existingValues) = root["values"] { values = existingValues }
-                if case .string(let id) = root["templateId"] { existingTemplateID = id }
-            }
-        }
+        if case .object(let existingValues) = root["values"] { values = existingValues }
+        if case .string(let id) = root["templateId"] { existingTemplateID = id }
 
         let responseFields: [String: JSONValue]
         if requestedSecret {
@@ -531,19 +557,17 @@ public struct ProjectMCPTools: Sendable {
             ]
         }
 
-        let file: JSONValue = .object([
-            "schemaVersion": .int(2),
-            "templateId": .string(existingTemplateID),
-            "values": .object(values),
-            "updatedAt": .string(ISO8601DateFormatter().string(from: Date())),
-        ])
+        // Mutate the graph we read — every top-level key we don't own
+        // (comments, per-tool sections, a future schema's fields) survives.
+        root["schemaVersion"] = .int(2)
+        root["templateId"] = .string(existingTemplateID)
+        root["values"] = .object(values)
+        root["updatedAt"] = .string(ISO8601DateFormatter().string(from: Date()))
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(file)
-            let parent = (configPath as NSString).deletingLastPathComponent
-            try transport.createDirectory(parent)
-            try transport.writeFile(configPath, data: data)
+            let data = try encoder.encode(JSONValue.object(root))
+            try guarded.write(data, to: configPath, after: inspection)
         } catch {
             return .failure("Could not write \(configPath): \(error.localizedDescription)")
         }

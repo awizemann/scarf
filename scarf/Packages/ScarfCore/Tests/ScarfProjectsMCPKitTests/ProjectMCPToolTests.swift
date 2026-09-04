@@ -599,6 +599,124 @@ import Foundation
         }
     }
 
+
+    // MARK: - project_set_config: guarded write (P8 DI-H3 / SEC-M6)
+
+    @Test("set_config preserves top-level keys it doesn't own")
+    func setConfigPreservesUnknownKeys() throws {
+        try Self.withHarness { h in
+            _ = h.tools.call(name: "project_register", arguments: [
+                "name": .string("Demo"), "path": .string(h.projectRoot.path),
+            ])
+            let configPath = h.projectRoot.path + "/.scarf/config.json"
+            try FileManager.default.createDirectory(
+                atPath: h.projectRoot.path + "/.scarf", withIntermediateDirectories: true
+            )
+            try Self.write("""
+                {"schemaVersion": 2, "templateId": "acme/thing", \
+                "values": {"kept": "yes"}, "authoredByHand": {"note": "do not lose me"}}
+                """, to: configPath)
+
+            let outcome = h.tools.call(name: "project_set_config", arguments: [
+                "project": .string("Demo"),
+                "key": .string("endpoint"),
+                "value": .string("https://example.com"),
+            ])
+            #expect(!outcome.isError)
+
+            let data = try Data(contentsOf: URL(fileURLWithPath: configPath))
+            guard case .object(let root) = try JSONDecoder().decode(JSONValue.self, from: data),
+                  case .object(let values)? = root["values"] else {
+                Issue.record("config.json did not decode")
+                return
+            }
+            #expect(root["authoredByHand"] != nil, "an unknown top-level key was dropped")
+            #expect(root["templateId"] == .string("acme/thing"))
+            #expect(values["kept"] == .string("yes"))
+            #expect(values["endpoint"] == .string("https://example.com"))
+        }
+    }
+
+    /// The destroy shape: a read that fails on a file that IS there used to
+    /// rebuild config.json from nothing, orphaning every other value —
+    /// including every other `keychain://` reference — in the Keychain.
+    @Test("set_config refuses when config.json is there but unreadable")
+    func setConfigRefusesUnreadableConfig() throws {
+        try #require(getuid() != 0)
+        try Self.withHarness { h in
+            _ = h.tools.call(name: "project_register", arguments: [
+                "name": .string("Demo"), "path": .string(h.projectRoot.path),
+            ])
+            let configPath = h.projectRoot.path + "/.scarf/config.json"
+            try FileManager.default.createDirectory(
+                atPath: h.projectRoot.path + "/.scarf", withIntermediateDirectories: true
+            )
+            let original = Data("""
+                {"schemaVersion": 2, "templateId": "acme/thing", \
+                "values": {"other": "keychain://com.scarf.template.acme/other:beef"}}
+                """.utf8)
+            try original.write(to: URL(fileURLWithPath: configPath))
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o000], ofItemAtPath: configPath
+            )
+
+            let outcome = h.tools.call(name: "project_set_config", arguments: [
+                "project": .string("Demo"),
+                "key": .string("endpoint"),
+                "value": .string("https://example.com"),
+            ])
+            #expect(outcome.isError)
+            #expect(outcome.text.contains("couldn't be read"))
+
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: configPath
+            )
+            #expect(try Data(contentsOf: URL(fileURLWithPath: configPath)) == original)
+        }
+    }
+
+    /// Zero bytes is damage, not an empty document — Scarf never writes an
+    /// empty config.json.
+    @Test("set_config refuses over a zero-byte config.json")
+    func setConfigRefusesZeroByteConfig() throws {
+        try Self.withHarness { h in
+            _ = h.tools.call(name: "project_register", arguments: [
+                "name": .string("Demo"), "path": .string(h.projectRoot.path),
+            ])
+            try FileManager.default.createDirectory(
+                atPath: h.projectRoot.path + "/.scarf", withIntermediateDirectories: true
+            )
+            let configPath = h.projectRoot.path + "/.scarf/config.json"
+            FileManager.default.createFile(atPath: configPath, contents: Data())
+
+            let outcome = h.tools.call(name: "project_set_config", arguments: [
+                "project": .string("Demo"),
+                "key": .string("endpoint"),
+                "value": .string("https://example.com"),
+            ])
+            #expect(outcome.isError)
+            #expect(try Data(contentsOf: URL(fileURLWithPath: configPath)).isEmpty)
+        }
+    }
+
+    @Test("set_config keeps a one-deep .bak of the config it replaces")
+    func setConfigKeepsBackup() throws {
+        try Self.withHarness { h in
+            _ = h.tools.call(name: "project_register", arguments: [
+                "name": .string("Demo"), "path": .string(h.projectRoot.path),
+            ])
+            let configPath = h.projectRoot.path + "/.scarf/config.json"
+            _ = h.tools.call(name: "project_set_config", arguments: [
+                "project": .string("Demo"), "key": .string("a"), "value": .string("1"),
+            ])
+            let first = try Data(contentsOf: URL(fileURLWithPath: configPath))
+            _ = h.tools.call(name: "project_set_config", arguments: [
+                "project": .string("Demo"), "key": .string("b"), "value": .string("2"),
+            ])
+            #expect(try Data(contentsOf: URL(fileURLWithPath: configPath + ".bak")) == first)
+        }
+    }
+
     @Test("secret-ness must match the cached manifest schema")
     func setConfigRejectsSchemaMismatch() throws {
         try Self.withHarness { h in
