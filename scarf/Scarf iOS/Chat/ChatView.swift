@@ -2265,8 +2265,7 @@ final class ChatController {
         let ctx = context
         let writeResult: Result<Void, Error> = await Task.detached {
             let store = ProjectStore(context: ctx)
-            let scarfProject = store.load(projectPath: projectPath)
-                ?? store.derive(from: ProjectEntry(name: projectName, path: projectPath))
+            let scarfProject = store.loadOrDerive(projectPath: projectPath, name: projectName)
             let block = store.renderAgentContextBlock(for: scarfProject)
             do {
                 try ProjectContextBlock.writeBlock(block, forProjectAt: projectPath, context: ctx)

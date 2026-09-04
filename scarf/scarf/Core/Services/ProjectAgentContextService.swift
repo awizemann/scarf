@@ -82,7 +82,24 @@ struct ProjectAgentContextService: Sendable {
         // scaffolds a bare project via `+` + starts a chat. Normally
         // the dir exists (registered project = dir exists); belt-
         // and-suspenders for edge cases.
+        //
+        // Only for a project the registry still lists. A missing dir is
+        // otherwise a project that was just deleted or uninstalled out from
+        // under a stale in-memory entry, and re-creating it here is the
+        // first half of a resurrection: the cockpit's load-or-derive would
+        // then pass `ProjectStore.save`'s `projectRootMissing` guard (the
+        // dir exists again) and re-register the project — now carrying the
+        // SAME id it had before deletion, since ids derive from the path.
+        // That re-attaches its old `[proj:<uuid>]` cron jobs and mini-app
+        // grants to a directory the user deleted.
         if !transport.fileExists(project.path) {
+            let registered = ProjectDashboardService(context: context)
+                .loadRegistry()
+                .projects
+                .contains { $0.path == project.path }
+            guard registered else {
+                throw ProjectAgentContextError.projectDirectoryMissing(project.path)
+            }
             try transport.createDirectory(project.path)
         }
 
@@ -137,6 +154,19 @@ struct ProjectAgentContextService: Sendable {
     }
 }
 
-enum ProjectAgentContextError: Error {
+enum ProjectAgentContextError: LocalizedError {
     case encodingFailed
+    /// The project's directory is gone and the registry no longer lists it —
+    /// refusing to re-create it (see `refresh`). Every caller treats a failed
+    /// refresh as non-fatal, so the chat still starts, just without the block.
+    case projectDirectoryMissing(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .encodingFailed:
+            return "Couldn't encode the Scarf project block."
+        case .projectDirectoryMissing(let path):
+            return "Project directory no longer exists at \(path); refusing to re-create it."
+        }
+    }
 }

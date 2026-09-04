@@ -189,19 +189,13 @@ final class ProjectCockpitViewModel {
     }
 
     /// `(id, version)` from `<project>/.scarf/manifest.json`, suppressing
-    /// the `KanbanTenantResolver` sentinel (`scarf/…` + `0.0.0`). Matches
-    /// `ProjectAgentContextService.readTemplateInfo` / `ProjectStore`.
+    /// the `KanbanTenantResolver` sentinel. Forwards to `ProjectStore` so
+    /// the sentinel rule has exactly one implementation.
     nonisolated static func readTemplateInfo(
         context: ServerContext,
         projectPath: String
     ) -> (id: String, version: String)? {
-        let path = projectPath + "/.scarf/manifest.json"
-        let transport = context.makeTransport()
-        guard transport.fileExists(path), let data = try? transport.readFile(path) else { return nil }
-        struct Projection: Decodable { let id: String; let version: String }
-        guard let p = try? JSONDecoder().decode(Projection.self, from: data) else { return nil }
-        if p.id.hasPrefix("scarf/") && p.version == "0.0.0" { return nil }
-        return (p.id, p.version)
+        ProjectStore(context: context).templateInfo(projectPath: projectPath)
     }
 
     private struct Loaded: Sendable {

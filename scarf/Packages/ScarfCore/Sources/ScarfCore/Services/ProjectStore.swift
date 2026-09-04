@@ -136,6 +136,25 @@ public struct ProjectStore: Sendable {
         }
     }
 
+    /// The project at `projectPath` as a `ScarfProject`, for a caller that
+    /// has only a path and a display name (the iOS chat-start block writer).
+    /// Read-only — never persists.
+    ///
+    /// Consults the REGISTRY ROW before deriving, because a row often carries
+    /// the `uuid` while the record is still missing. Deriving from a
+    /// synthesized `uuid: nil` entry instead would key the rendered block on
+    /// the interim path-derived id while the Mac keyed it on the registry's
+    /// id — two platforms writing different `AGENTS.md` blocks over each
+    /// other on every chat start.
+    public nonisolated func loadOrDerive(projectPath: String, name: String) -> ScarfProject {
+        if let record = load(projectPath: projectPath) { return record }
+        let row = ProjectDashboardService(context: context)
+            .loadRegistry()
+            .projects
+            .first { $0.path == projectPath }
+        return derive(from: row ?? ProjectEntry(name: name, path: projectPath))
+    }
+
     // MARK: - Migration
 
     /// Additive, idempotent, non-destructive migration. For every
@@ -176,9 +195,17 @@ public struct ProjectStore: Sendable {
 
     /// Build a `ScarfProject` from a registry entry by reading the
     /// facets that already exist on disk. Pure read — does not persist.
-    /// Reuses the entry's UUID when set (stable id), mints one otherwise.
+    /// Reuses the entry's UUID when set, otherwise DERIVES one from the
+    /// project's root path (`ProjectIdentity.deterministicID`) so repeated
+    /// derives of an unpersisted project all agree. Never `UUID()`: a fresh
+    /// mint per call let `list()`, the cockpit and the render-only
+    /// `ProjectAgentContextService.refresh` each observe a different id for
+    /// the same project.
     public nonisolated func derive(from entry: ProjectEntry) -> ScarfProject {
-        let id = entry.uuid ?? UUID()
+        let id = entry.uuid ?? ProjectIdentity.deterministicID(
+            forProjectPath: entry.path,
+            hostKey: ProjectIdentity.hostKey(for: context)
+        )
         let projectPath = entry.path
 
         let modelPresetId = ProjectModelPresetReader(context: context)
@@ -317,15 +344,18 @@ public struct ProjectStore: Sendable {
 
     /// `(id, version)` from `<project>/.scarf/manifest.json`, or `nil`
     /// for a bare project or a `KanbanTenantResolver`-minted sentinel
-    /// manifest (`id` "scarf/…" + version "0.0.0"). Matches the
-    /// suppression rule in `ProjectAgentContextService.readTemplateInfo`.
-    private nonisolated func templateInfo(projectPath: String) -> (id: String, version: String)? {
+    /// manifest. The single reader for template identity across both app
+    /// targets — the suppression rule lives in `ProjectManifestProjection`.
+    public nonisolated func templateInfo(projectPath: String) -> (id: String, version: String)? {
         let path = projectPath + "/.scarf/manifest.json"
         guard transport.fileExists(path), let data = try? transport.readFile(path) else { return nil }
-        struct Projection: Decodable { let id: String; let version: String }
-        guard let p = try? JSONDecoder().decode(Projection.self, from: data) else { return nil }
-        if p.id.hasPrefix("scarf/") && p.version == "0.0.0" { return nil }
-        return (p.id, p.version)
+        guard data.count <= Self.maxJSONBytes else {
+            #if canImport(os)
+            Self.logger.warning("manifest.json at \(path, privacy: .public) is \(data.count) bytes (cap \(Self.maxJSONBytes)); treating as missing")
+            #endif
+            return nil
+        }
+        return ProjectManifestProjection.templateInfo(from: data)
     }
 
     /// Ids of cron jobs attributed to this project — either the new

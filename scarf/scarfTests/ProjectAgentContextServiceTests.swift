@@ -251,6 +251,42 @@ import ScarfCore
         #expect(after.contains("# Template"))
     }
 
+    // MARK: - Resurrection guard
+
+    /// A chat started against a project whose directory is gone and whose
+    /// registry row is gone must NOT re-create the directory. Doing so is the
+    /// first half of a resurrection: `ProjectStore.save`'s `projectRootMissing`
+    /// guard would then pass for the cockpit's load-or-derive, re-registering
+    /// the project under the id its path derives — old cron tags and all.
+    @Test func refreshRefusesToRecreateAnUnregisteredMissingDirectory() throws {
+        let home = URL(fileURLWithPath: try Self.makeTempDir())
+        defer { try? FileManager.default.removeItem(at: home) }
+        let ctx = ServerContext.local(home: home)
+        let dir = home.path + "/projects/deleted"  // never created
+
+        let project = ProjectEntry(name: "Deleted", path: dir)
+        #expect(throws: ProjectAgentContextError.self) {
+            try ProjectAgentContextService(context: ctx).refresh(for: project)
+        }
+        #expect(!FileManager.default.fileExists(atPath: dir))
+    }
+
+    /// The belt-and-braces creation still works for a project the registry
+    /// lists — the bare-`+`-scaffold-then-chat path.
+    @Test func refreshCreatesDirectoryForARegisteredProject() throws {
+        let home = URL(fileURLWithPath: try Self.makeTempDir())
+        defer { try? FileManager.default.removeItem(at: home) }
+        let ctx = ServerContext.local(home: home)
+        let dir = home.path + "/projects/registered"
+
+        try ProjectDashboardService(context: ctx).saveRegistry(
+            ProjectRegistry(projects: [ProjectEntry(name: "Registered", path: dir)])
+        )
+        try ProjectAgentContextService(context: ctx).refresh(for: ProjectEntry(name: "Registered", path: dir))
+
+        #expect(FileManager.default.fileExists(atPath: dir + "/AGENTS.md"))
+    }
+
     // MARK: - Helpers
 
     nonisolated static func makeTempDir() throws -> String {

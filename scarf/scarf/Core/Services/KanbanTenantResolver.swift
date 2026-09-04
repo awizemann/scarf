@@ -114,7 +114,7 @@ struct KanbanTenantResolver: Sendable {
     /// Collect every Scarf-minted tenant currently on disk, excluding
     /// the given project. Used to dedup new mints.
     nonisolated private func allMintedTenants(excluding project: ProjectEntry) -> [String] {
-        let registryPath = context.paths.home + "/scarf/projects.json"
+        let registryPath = context.paths.projectsRegistry
         guard let data = context.readData(registryPath),
               let registry = try? JSONDecoder().decode(ProjectRegistry.self, from: data)
         else {
@@ -165,9 +165,9 @@ struct KanbanTenantResolver: Sendable {
         } else {
             updated = ProjectTemplateManifest(
                 schemaVersion: 3,
-                id: "scarf/\(project.id)",
+                id: ProjectManifestProjection.sentinelIDPrefix + project.id,
                 name: project.name,
-                version: "0.0.0",
+                version: ProjectManifestProjection.sentinelVersion,
                 minScarfVersion: nil,
                 minHermesVersion: nil,
                 author: nil,

@@ -179,6 +179,239 @@ import Foundation
         }
     }
 
+    // MARK: - Sentinel manifest (one shared suppression rule)
+
+    /// A `KanbanTenantResolver`-minted manifest carries no template
+    /// identity — `templateInfo` (the single reader both app targets use)
+    /// suppresses it, while a real installed template reads through.
+    @Test func templateInfoSuppressesSentinelManifest() throws {
+        try Self.withTempHome { ctx, projectsRoot in
+            let dir = try Self.makeProjectDir(projectsRoot, slug: "sentinel")
+            let store = ProjectStore(context: ctx)
+            try Self.write(
+                #"{"id":"\#(ProjectManifestProjection.sentinelIDPrefix)sentinel","version":"\#(ProjectManifestProjection.sentinelVersion)"}"#,
+                to: dir + "/.scarf/manifest.json"
+            )
+            #expect(store.templateInfo(projectPath: dir) == nil)
+
+            try Self.write(#"{"id":"acme/tracker","version":"1.2.0"}"#, to: dir + "/.scarf/manifest.json")
+            let info = store.templateInfo(projectPath: dir)
+            #expect(info?.id == "acme/tracker")
+            #expect(info?.version == "1.2.0")
+        }
+    }
+
+    // MARK: - Stable identity (Phase 3)
+
+    /// The derived value is a well-formed UUID: RFC 9562 version 8 (custom)
+    /// with the RFC 4122 variant bits, so it round-trips through every
+    /// `UUID`/string boundary it crosses (registry JSON, `[proj:<uuid>]`
+    /// cron tags, grant keys). Also pins the wire format: these bytes are
+    /// frozen, and a change to the namespace or digest breaks this test
+    /// deliberately.
+    @Test func derivedIDIsAWellFormedUUIDv8() throws {
+        let id = ProjectIdentity.deterministicID(forProjectPath: "/Users/x/Projects/alpha")
+        let bytes = withUnsafeBytes(of: id.uuid) { Array($0) }
+        #expect(bytes[6] >> 4 == 8)          // version 8
+        #expect(bytes[8] & 0xC0 == 0x80)     // variant 10xx
+        #expect(UUID(uuidString: id.uuidString) == id)
+        // Frozen: the id for a given path never changes across versions.
+        #expect(id == ProjectIdentity.deterministicID(forProjectPath: "/Users/x/Projects/alpha"))
+    }
+
+    /// Two SSH hosts must never derive the same id. They share a default
+    /// projects root (`~/projects`, unexpanded), so without the host salt
+    /// same-named projects on unrelated hosts collide — and a persisted
+    /// collision lets a fleet apply write to the wrong machine.
+    @Test func derivedIDIsSaltedPerHost() throws {
+        let path = "~/projects/api"
+        let hostA = ServerContext(id: UUID(), displayName: "A", kind: .ssh(SSHConfig(host: "a.example", user: "root")))
+        let hostB = ServerContext(id: UUID(), displayName: "B", kind: .ssh(SSHConfig(host: "b.example", user: "root")))
+        let a = ProjectIdentity.deterministicID(forProjectPath: path, hostKey: ProjectIdentity.hostKey(for: hostA))
+        let b = ProjectIdentity.deterministicID(forProjectPath: path, hostKey: ProjectIdentity.hostKey(for: hostB))
+        #expect(a != b)
+        // Same host, same path — still stable.
+        #expect(a == ProjectIdentity.deterministicID(forProjectPath: path, hostKey: ProjectIdentity.hostKey(for: hostA)))
+        // The local Mac's key is empty, and differs from any remote's.
+        #expect(ProjectIdentity.hostKey(for: .local).isEmpty)
+        #expect(ProjectIdentity.deterministicID(forProjectPath: path) != a)
+        // A different user or port on the same host is a different host key.
+        let hostAAlt = ServerContext(id: UUID(), displayName: "A", kind: .ssh(SSHConfig(host: "a.example", user: "deploy")))
+        #expect(ProjectIdentity.hostKey(for: hostAAlt) != ProjectIdentity.hostKey(for: hostA))
+    }
+
+    /// Lexical normalization: equivalent spellings of one path agree, and a
+    /// remote `~`-rooted relative path is never resolved against the local
+    /// process CWD.
+    @Test func derivedIDNormalizesPathSpellings() throws {
+        let canonical = ProjectIdentity.deterministicID(forProjectPath: "/Users/x/Projects/alpha")
+        #expect(ProjectIdentity.deterministicID(forProjectPath: "/Users/x/Projects/alpha/") == canonical)
+        #expect(ProjectIdentity.deterministicID(forProjectPath: "/Users//x/Projects/alpha") == canonical)
+        #expect(ProjectIdentity.deterministicID(forProjectPath: "/Users/x/./Projects/alpha") == canonical)
+        #expect(ProjectIdentity.deterministicID(forProjectPath: "/Users/x/Projects/beta/../alpha") == canonical)
+        // Case is load-bearing (no folding), and unrelated paths differ.
+        #expect(ProjectIdentity.deterministicID(forProjectPath: "/Users/x/Projects/Alpha") != canonical)
+        // Remote tilde paths keep their `~` root rather than becoming absolute.
+        let remote = ProjectIdentity.deterministicID(forProjectPath: "~/projects/api")
+        #expect(remote == ProjectIdentity.deterministicID(forProjectPath: "~/projects/./api/"))
+        #expect(remote != ProjectIdentity.deterministicID(forProjectPath: "/projects/api"))
+    }
+
+    /// The regression this phase exists for: an UNPERSISTED project must
+    /// yield the same id no matter who derives it, or how often.
+    @Test func deriveIsStableForUnpersistedProject() throws {
+        try Self.withTempHome { ctx, projectsRoot in
+            let dir = try Self.makeProjectDir(projectsRoot, slug: "unpersisted")
+            let entry = ProjectEntry(name: "Unpersisted", path: dir)
+            let store = ProjectStore(context: ctx)
+            let first = store.derive(from: entry).id
+            #expect(store.derive(from: entry).id == first)
+            // A separate store instance (a different caller, another
+            // launch) must agree too.
+            #expect(ProjectStore(context: ctx).derive(from: entry).id == first)
+            #expect(first == ProjectIdentity.deterministicID(forProjectPath: dir))
+        }
+    }
+
+    /// No double-mint across the three observers of an unmigrated row:
+    /// `list()`, a bare `derive(from:)` (what the render-only
+    /// `ProjectAgentContextService.refresh` does), and the persisting
+    /// `derive()` migration. The id the readers saw is the id that lands.
+    @Test func deriveListAndMigrationAgreeOnOneID() throws {
+        try Self.withTempHome { ctx, projectsRoot in
+            let dir = try Self.makeProjectDir(projectsRoot, slug: "observed")
+            let entry = ProjectEntry(name: "Observed", path: dir)
+            try ProjectDashboardService(context: ctx).saveRegistry(ProjectRegistry(projects: [entry]))
+
+            let store = ProjectStore(context: ctx)
+            let listed = store.list().first { $0.rootPath == dir }?.id
+            let refreshed = store.derive(from: entry).id
+            #expect(listed == refreshed)
+
+            #expect(store.derive() == 1)
+            #expect(store.load(projectPath: dir)?.id == listed)
+            let row = ProjectDashboardService(context: ctx).loadRegistry().projects.first { $0.path == dir }
+            #expect(row?.uuid == listed)
+        }
+    }
+
+    /// A registry row that loses its `uuid` (bad agent write, salvaged
+    /// decode) recovers the id it had rather than detaching from its
+    /// record — the id is a function of the path.
+    @Test func lostRegistryUUIDIsRederivedNotReminted() throws {
+        try Self.withTempHome { ctx, projectsRoot in
+            let dir = try Self.makeProjectDir(projectsRoot, slug: "amnesiac")
+            let dashboard = ProjectDashboardService(context: ctx)
+            let store = ProjectStore(context: ctx)
+            try dashboard.saveRegistry(ProjectRegistry(projects: [ProjectEntry(name: "Amnesiac", path: dir)]))
+            #expect(store.derive() == 1)
+            let original = store.load(projectPath: dir)?.id
+
+            // Row rewritten without the uuid, record removed.
+            try dashboard.saveRegistry(ProjectRegistry(projects: [ProjectEntry(name: "Amnesiac", path: dir)]))
+            try FileManager.default.removeItem(atPath: ProjectStore.recordPath(forProjectPath: dir))
+
+            #expect(store.derive(from: ProjectEntry(name: "Amnesiac", path: dir)).id == original)
+        }
+    }
+
+    /// An ASSERTED id (randomly minted by the scaffolder/installer, frozen
+    /// into `project.json`) always beats the path-derived one — through
+    /// `derive(from:)`, through `list()`, and through the `derive()`
+    /// migration's registry back-fill. The derived id is an interim value,
+    /// never a claim that overrides one somebody made.
+    @Test func mintedIDAlwaysBeatsDerivedID() throws {
+        try Self.withTempHome { ctx, projectsRoot in
+            let dir = try Self.makeProjectDir(projectsRoot, slug: "asserted")
+            let store = ProjectStore(context: ctx)
+            let minted = ScarfProject(name: "Asserted", rootPath: dir)
+            #expect(minted.id != ProjectIdentity.deterministicID(forProjectPath: dir))
+            try store.writeRecordForTest(minted)
+            // Registry row has no uuid — the lossy-write case.
+            try ProjectDashboardService(context: ctx).saveRegistry(
+                ProjectRegistry(projects: [ProjectEntry(name: "Asserted", path: dir)])
+            )
+
+            #expect(store.list().first { $0.rootPath == dir }?.id == minted.id)
+            #expect(store.derive() == 1)
+            let row = ProjectDashboardService(context: ctx).loadRegistry().projects.first { $0.path == dir }
+            #expect(row?.uuid == minted.id)
+            // And with the uuid restored, derive agrees with the record.
+            #expect(store.derive(from: ProjectEntry(name: "Asserted", path: dir, uuid: minted.id)).id == minted.id)
+        }
+    }
+
+    /// `loadOrDerive` honours the registry row's uuid when the record is
+    /// missing, so a path-only caller (iOS chat-start) renders the same
+    /// identity the Mac does instead of the interim derived one.
+    @Test func loadOrDeriveHonoursRegistryUUID() throws {
+        try Self.withTempHome { ctx, projectsRoot in
+            let dir = try Self.makeProjectDir(projectsRoot, slug: "pathonly")
+            let id = UUID()
+            try ProjectDashboardService(context: ctx).saveRegistry(
+                ProjectRegistry(projects: [ProjectEntry(name: "PathOnly", path: dir, uuid: id)])
+            )
+            let store = ProjectStore(context: ctx)
+            #expect(store.loadOrDerive(projectPath: dir, name: "PathOnly").id == id)
+            // No registry row at all — falls back to the derived id.
+            let orphan = try Self.makeProjectDir(projectsRoot, slug: "orphan")
+            #expect(store.loadOrDerive(projectPath: orphan, name: "Orphan").id
+                == ProjectIdentity.deterministicID(forProjectPath: orphan))
+            // And it stays read-only.
+            #expect(store.load(projectPath: dir) == nil)
+        }
+    }
+
+    /// Deriving is pure: no record, no registry row, no directory gets
+    /// written — the render-only refresh path must not churn files.
+    @Test func deriveWritesNothing() throws {
+        try Self.withTempHome { ctx, projectsRoot in
+            let dir = try Self.makeProjectDir(projectsRoot, slug: "quiet")
+            let store = ProjectStore(context: ctx)
+            _ = store.derive(from: ProjectEntry(name: "Quiet", path: dir))
+            #expect(store.load(projectPath: dir) == nil)
+            #expect(ProjectDashboardService(context: ctx).loadRegistry().projects.isEmpty)
+        }
+    }
+
+    /// Distinct paths get distinct ids; the same path is stable across
+    /// name changes (a rename must never change the identifier).
+    @Test func derivedIDKeysOnPathNotName() throws {
+        try Self.withTempHome { ctx, projectsRoot in
+            let dirA = try Self.makeProjectDir(projectsRoot, slug: "one")
+            let dirB = try Self.makeProjectDir(projectsRoot, slug: "two")
+            let store = ProjectStore(context: ctx)
+            #expect(store.derive(from: ProjectEntry(name: "X", path: dirA)).id
+                != store.derive(from: ProjectEntry(name: "X", path: dirB)).id)
+            #expect(store.derive(from: ProjectEntry(name: "Before", path: dirA)).id
+                == store.derive(from: ProjectEntry(name: "After", path: dirA)).id)
+            // Trailing-separator spellings of the same path agree.
+            #expect(ProjectIdentity.deterministicID(forProjectPath: dirA)
+                == ProjectIdentity.deterministicID(forProjectPath: dirA + "/"))
+        }
+    }
+
+    /// `indexInRegistry` matches the existing row by PATH — a project
+    /// renamed in the registry gets its uuid back-filled in place, not a
+    /// duplicate row appended under the new name.
+    @Test func indexInRegistryMatchesByPath() throws {
+        try Self.withTempHome { ctx, projectsRoot in
+            let dir = try Self.makeProjectDir(projectsRoot, slug: "renamed")
+            let dashboard = ProjectDashboardService(context: ctx)
+            try dashboard.saveRegistry(ProjectRegistry(projects: [
+                ProjectEntry(name: "New Name", path: dir)
+            ]))
+            let store = ProjectStore(context: ctx)
+            let project = ScarfProject(name: "Old Name", rootPath: dir)
+            try store.save(project)
+
+            let rows = dashboard.loadRegistry().projects
+            #expect(rows.count == 1)
+            #expect(rows.first?.name == "New Name")
+            #expect(rows.first?.uuid == project.id)
+        }
+    }
+
     // MARK: - Migration
 
     @Test func migrationIsAdditiveAndIdempotent() throws {

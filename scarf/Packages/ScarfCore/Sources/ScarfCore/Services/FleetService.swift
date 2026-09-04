@@ -77,12 +77,15 @@ public struct FleetService: Sendable {
     /// registry row that already holds a `uuid`.
     ///
     /// **Why not `ProjectStore.list()`.** `list()` falls back to
-    /// `derive(from:)`, which mints a *fresh random* `UUID` for a registry
-    /// row that has neither a record nor a uuid (the transient-id trap M1
-    /// warned about). A per-gather random id can never group across hosts:
-    /// it would surface the project as a flickering single-host phantom
-    /// that changes identity on every reload. So the fleet gather is
-    /// stricter than `list()` — it **skips** rows without a stable id.
+    /// `derive(from:)`, whose id for a row with neither a record nor a uuid
+    /// is derived from the project's `(host, path)` pair. That is stable
+    /// across reloads (it no longer mints a fresh random `UUID` — the
+    /// transient-id trap M1 warned about) and cannot collide across hosts
+    /// (`ProjectIdentity.hostKey` salts it), but it is still not an identity
+    /// CLAIM — nobody asserted it, and the migration may not have run. So the
+    /// fleet gather stays stricter than `list()`: it **skips** rows with
+    /// neither a record nor a uuid, rather than surfacing a project whose id
+    /// is provisional.
     /// Those rows acquire one through normal migration (opening the
     /// project / cockpit, or the per-host eager `derive()` pass) and then
     /// appear in the fleet. Read-only — never persists.

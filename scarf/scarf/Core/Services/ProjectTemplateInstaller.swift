@@ -298,13 +298,11 @@ struct ProjectTemplateInstaller: Sendable {
     nonisolated private func registerProject(plan: TemplateInstallPlan) throws -> ProjectEntry {
         let service = ProjectDashboardService(context: context)
         var registry = service.loadRegistry()
-        // Mint the stable UUID at install time (parity with the scaffolder).
-        // Without it the project stays pre-Phase-1 until lazy migration runs,
-        // and `derive()` mints a FRESH uuid on each call until it persists —
-        // so anything keying on `project.id` in the meantime (mini-app
-        // grants, `[proj:<id>]` cron tags, fleet/portfolio) could observe an
-        // unstable id. The canonical `project.json` is written after the lock
-        // file lands (see install()).
+        // Mint the stable UUID at install time (parity with the scaffolder),
+        // so the project is first-class from its first byte rather than
+        // waiting on lazy migration — fleet/portfolio only groups projects
+        // whose id somebody actually asserted. The canonical `project.json`
+        // is written after the lock file lands (see install()).
         let entry = ProjectEntry(name: plan.projectRegistryName, path: plan.projectDir, uuid: UUID())
         registry.projects.append(entry)
         // Must throw on failure — silent failure here used to make the
