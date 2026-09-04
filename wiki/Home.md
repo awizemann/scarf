@@ -2,7 +2,7 @@
 title: Home
 type: note
 permalink: scarf-wiki/home
-updated: 2026-09-02
+updated: 2026-09-04
 created: 2026-05-29
 ---
 
@@ -10,7 +10,7 @@ created: 2026-05-29
 
 **The native Mac & iOS app for the [Hermes AI agent](https://github.com/hermes-ai/hermes-agent).** Full visibility into what Hermes is doing, when, and what it creates — on your Mac against one local install or many remote ones, and from your iPhone over SSH with **ScarfGo**.
 
-**Latest release:** [v3.0.1](https://github.com/awizemann/scarf/releases/tag/v3.0.1) — post-3.0 fixes: **bot creation works for every profile** (Scarf's writer refused Hermes's own line-wrapped `profile.yaml` values), plus a parser hunt against Hermes's real serializer output — local-model reasoning overrides (`llama3:8b`) save again, long quick commands no longer silently truncate, one bad cron record no longer blanks the board — and Release builds now compile with warnings as errors. Previous: [v3.0.0](https://github.com/awizemann/scarf/releases/tag/v3.0.0) — the milestone release: Bots grows up (per-bot model pins, SOUL.md editing with conflict detection, per-bot toolset/MCP enablement, one-round-trip SSH scanning) and the whole app went through a five-lens audit (security escapes closed, five quietly-broken surfaces repaired, honest numbers, 2,374 localized keys × six languages, accessibility throughout). Earlier: [v2.24.0](https://github.com/awizemann/scarf/releases/tag/v2.24.0) introduced the Bots section with live streaming bot chats. All earlier versions: [Release Notes Index](Release-Notes-Index).
+**Latest release:** [v3.1.0](https://github.com/awizemann/scarf/releases/tag/v3.1.0) — projects grow up: the whole projects surface went through four rounds of adversarial security/data-integrity/performance/accessibility auditing and everything found was fixed — **atomic writes on every transport** (iOS SFTP included), quarantine-and-refuse instead of destructive overwrites, a cross-process registry lock, a Project Doctor, time-of-use trust checks, and signed mini-app grants (each mini-app re-asks once after upgrading). Plus a **redesigned sidebar** with projects first, **per-project auto-accept edits** so project chats stop prompting on every file change, a mini-app **`open_url`** permission with per-host consent, and an unchanged watcher tick dropping from ~55–70 SSH round-trips to ~4. Previous: [v3.0.1](https://github.com/awizemann/scarf/releases/tag/v3.0.1) — bot creation works for every profile, plus a parser hunt against Hermes's real serializer output. Earlier: [v3.0.0](https://github.com/awizemann/scarf/releases/tag/v3.0.0) — the milestone release: Bots grows up and the whole app went through a five-lens audit. All earlier versions: [Release Notes Index](Release-Notes-Index).
 
 **Mobile:** [Join the ScarfGo public TestFlight](https://testflight.apple.com/join/qCrRpcTz) — see [ScarfGo](ScarfGo) for the feature tour and [ScarfGo Onboarding](ScarfGo-Onboarding) for the one-minute SSH setup.
 
@@ -58,4 +58,4 @@ Scarf 2.0+ is a multi-window app — one window per Hermes server, local or remo
 Open-source (MIT), actively maintained. See [Roadmap](Roadmap) for what's coming.
 
 ---
-_Last updated: 2026-09-02 — Scarf 3.0.1 (bot-creation fix + the Hermes-serializer parser hunt)._
+_Last updated: 2026-09-04 — Scarf 3.1.0 (projects hardening campaign + sidebar redesign + per-project edit approval + mini-app open_url)._
