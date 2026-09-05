@@ -40,17 +40,62 @@ final class ServerRegistry {
     private static let logger = Logger(subsystem: "com.scarf", category: "ServerRegistry")
     private static let currentSchemaVersion = 1
 
+    /// A `servers.json` bigger than this is not a server list — it is
+    /// something else wearing the name, and decoding it on the launch path
+    /// is the wrong risk. Generous: 4 MB is tens of thousands of entries.
+    private static let maxRegistryBytes = 4 * 1024 * 1024
+
     /// Remote (user-added) entries. Observable: views redraw on mutation.
     private(set) var entries: [ServerEntry] = []
 
-    private let storeURL: URL
+    /// What went wrong with `servers.json`, if anything. Non-nil means the
+    /// list on screen is NOT what is on disk and every save is being
+    /// refused — `ManageServersView` renders it, because a silent refusal
+    /// is exactly the failure this conversion exists to end.
+    ///
+    /// (`ProjectsViewModel.registryDamage` is the same idea for
+    /// `projects.json`; this file has no watcher and no doctor, so the
+    /// notice is deliberately simpler.)
+    struct StoreDamage: Equatable, Sendable {
+        /// The file we could not use.
+        var path: String
+        /// Where unusable bytes were copied for the user, when we held
+        /// bytes at all.
+        var quarantinePath: String?
+        /// A save has already been attempted and refused since the damage
+        /// appeared — i.e. the user's edit is in memory only.
+        var refusedSave: Bool = false
+    }
 
-    init() {
+    private(set) var storeDamage: StoreDamage?
+
+    private let storePath: String
+    private let store: GuardedJSONStore
+
+    /// The inspection the in-memory `entries` were built from — the same
+    /// one every save is validated against, so a save can never publish a
+    /// list derived from a read that failed. Seeded `.absent` so a save
+    /// before any load (impossible today: `init` loads) is not refused
+    /// for the wrong reason.
+    private var lastInspection = GuardedJSONStore.Inspection(state: .absent, bytes: nil)
+
+    /// - Parameters:
+    ///   - storeURL: override for tests; production uses
+    ///     `~/Library/Application Support/scarf/servers.json`.
+    ///   - transport: the guarded store's transport. `servers.json` is a
+    ///     Mac-local file, so this is always `LocalTransport` in the app;
+    ///     the seam exists so tests can inject a blip-injecting fake.
+    init(storeURL: URL? = nil, transport: any ServerTransport = LocalTransport()) {
+        self.storePath = (storeURL ?? Self.defaultStoreURL()).path
+        self.store = GuardedJSONStore(transport: transport, label: "servers.json")
+        load()
+    }
+
+    private static func defaultStoreURL() -> URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support")
         let dir = support.appendingPathComponent("scarf", isDirectory: true)
-        self.storeURL = dir.appendingPathComponent("servers.json")
-        load()
+        return dir.appendingPathComponent("servers.json")
     }
 
     // MARK: - Lookup
@@ -304,32 +349,117 @@ final class ServerRegistry {
 
     // MARK: - Persistence
 
+    /// Read `servers.json` under the `GuardedJSONStore` discipline
+    /// (GW-E2b). Before this, `load()` was `try? read; catch { entries = [] }`
+    /// and `save()` was a bare `Data.write(.atomic)` — the `projects.json`
+    /// destroy shape verbatim, on the one file that holds every server the
+    /// user configured, and entirely outside the transport layer where no
+    /// enforcement could see it.
+    ///
+    /// **This file REFUSES; it does not quarantine-and-rebuild.** The rows
+    /// are the user's SSH connections and exist nowhere else (the export
+    /// file is opt-in and usually absent), so the `projects.json` rule
+    /// applies: unusable bytes are copied aside for the human and every
+    /// write stays refused until the file is readable again. That is why
+    /// `inspect` + a local decode is used here rather than
+    /// `inspectDecoding`, whose `.quarantined` state is deliberately
+    /// WRITABLE for rebuildable indices.
+    ///
+    /// Cost on the launch path (Charter C10): one local `read` on the happy
+    /// path, exactly as before. The stat + retry probe runs only when that
+    /// read already failed. No sleeps, no retry loops.
     private func load() {
-        guard FileManager.default.fileExists(atPath: storeURL.path) else {
+        let inspection = store.inspect(storePath, maxBytes: Self.maxRegistryBytes)
+        switch inspection.state {
+        case .absent:
+            // Proven-absent (or nothing we can prove is there): a fresh
+            // install has no servers, and an empty list IS the truth.
+            lastInspection = inspection
             entries = []
-            return
-        }
-        do {
-            let data = try Data(contentsOf: storeURL)
-            let file = try JSONDecoder().decode(RegistryFile.self, from: data)
-            entries = file.entries
-        } catch {
-            Self.logger.error("Failed to load servers.json: \(error.localizedDescription)")
-            entries = []
+            storeDamage = nil
+
+        case .present:
+            guard let data = inspection.bytes else {
+                lastInspection = inspection
+                entries = []
+                storeDamage = nil
+                return
+            }
+            do {
+                let file = try JSONDecoder().decode(RegistryFile.self, from: data)
+                lastInspection = inspection
+                entries = file.entries
+                storeDamage = nil
+            } catch {
+                // We HELD the bytes but they are not a server list. Copy
+                // them aside so the user (or a support session) can
+                // recover the hosts by hand, then refuse: rebuilding from
+                // empty here would publish `[]` over a recoverable file.
+                let copy = GuardedJSONStore.quarantine(
+                    data: data, path: storePath, transport: store.transport, label: "servers.json"
+                )
+                Self.logger.error(
+                    "servers.json could not be decoded: \(error.localizedDescription, privacy: .public); refusing writes"
+                )
+                lastInspection = GuardedJSONStore.Inspection(
+                    state: .unreadable(path: storePath), bytes: data
+                )
+                storeDamage = StoreDamage(path: storePath, quarantinePath: copy)
+            }
+
+        case .unreadable(let path):
+            // Stat-confirmed but unreadable twice, or zero bytes (Scarf
+            // never writes an empty servers.json, so zero bytes is somebody
+            // else's truncation). `entries` is deliberately left ALONE —
+            // the old code's `entries = []` here is the whole bug.
+            Self.logger.error(
+                "servers.json at \(path, privacy: .public) is unreadable; keeping the in-memory list and refusing writes"
+            )
+            lastInspection = inspection
+            storeDamage = StoreDamage(path: path)
+
+        case .quarantined(let copy):
+            // Only reachable via the size cap: bytes we never decoded.
+            // `GuardedJSONStore` treats `.quarantined` as writable for
+            // rebuildable sidecars; this file is not one, so reclassify.
+            Self.logger.error(
+                "servers.json is over the \(Self.maxRegistryBytes) byte cap; copied to \(copy, privacy: .public) and refusing writes"
+            )
+            lastInspection = GuardedJSONStore.Inspection(
+                state: .unreadable(path: storePath), bytes: inspection.bytes
+            )
+            storeDamage = StoreDamage(path: storePath, quarantinePath: copy)
         }
     }
 
+    /// Publish the in-memory list, refusing when the last load was damage
+    /// and keeping a one-deep `.bak` of the bytes being replaced (both are
+    /// `GuardedJSONStore.write`'s job). Healthy-path bytes are unchanged:
+    /// same envelope, same `[.prettyPrinted, .sortedKeys]` encoder, same
+    /// atomic replace — `LocalTransport.unguardedWriteFile` is
+    /// `Data.write(options: .atomic)` with the same `mkdir -p` the old code
+    /// did by hand.
     private func save() {
         do {
-            try FileManager.default.createDirectory(
-                at: storeURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
             let file = RegistryFile(schemaVersion: Self.currentSchemaVersion, entries: entries)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(file)
-            try data.write(to: storeURL, options: .atomic)
+            try store.write(data, to: storePath, after: lastInspection)
+            // The file now provably holds exactly these bytes, so the next
+            // save backs THEM up rather than re-reading.
+            lastInspection = GuardedJSONStore.Inspection(state: .present, bytes: data)
+            storeDamage = nil
+        } catch let refusal as GuardedStoreError {
+            // Not "failed to save" — REFUSED to save. The user's edit lives
+            // in `entries` and the banner says so; retrying would only
+            // overwrite a file nobody has read.
+            Self.logger.error("Refusing to save servers.json: \(refusal.localizedDescription, privacy: .public)")
+            storeDamage = StoreDamage(
+                path: storePath,
+                quarantinePath: storeDamage?.quarantinePath,
+                refusedSave: true
+            )
         } catch {
             Self.logger.error("Failed to save servers.json: \(error.localizedDescription)")
         }

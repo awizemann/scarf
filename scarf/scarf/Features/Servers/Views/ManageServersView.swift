@@ -28,6 +28,10 @@ struct ManageServersView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
+            if let damage = registry.storeDamage {
+                damageBanner(damage)
+                Divider()
+            }
             if registry.entries.isEmpty {
                 empty
             } else {
@@ -85,6 +89,34 @@ struct ManageServersView: View {
     private struct IdentifiableContext: Identifiable {
         var id: ServerID { context.id }
         let context: ServerContext
+    }
+
+    /// `servers.json` is damaged, so the list below is whatever Scarf holds
+    /// in memory and every add/remove/rename is being REFUSED rather than
+    /// published over a file nobody could read (GW-E2b). Without this the
+    /// refusal would be silent and the user would think their edit stuck.
+    @ViewBuilder
+    private func damageBanner(_ damage: ServerRegistry.StoreDamage) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label("Your server list couldn't be read", systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .scarfStyle(.headline)
+            Text(damage.refusedSave
+                 ? "Changes you make here are kept in this session only — Scarf won't overwrite \(damage.path) until it can read it again."
+                 : "Scarf won't overwrite \(damage.path) until it can read it again, so changes you make here stay in this session only.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let quarantine = damage.quarantinePath {
+                Text("A copy of the unreadable file is at \(quarantine).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .accessibilityElement(children: .combine)
     }
 
     private var header: some View {
