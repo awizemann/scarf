@@ -31,7 +31,7 @@ import os
 /// The sentinel is still written — a bare project genuinely has no manifest
 /// — but now only when the file is PROVABLY absent (or was quarantined),
 /// never when a read merely failed.
-nonisolated struct ProjectManifestStore: Sendable {
+nonisolated struct ProjectManifestStore: GuardedSidecarStore, Sendable {
     private nonisolated static let logger = Logger(
         subsystem: "com.scarf", category: "ProjectManifestStore"
     )
@@ -39,6 +39,17 @@ nonisolated struct ProjectManifestStore: Sendable {
     /// Manifests are small documents; past this it is not one, and the
     /// bytes are quarantined rather than parsed or replaced.
     nonisolated static let maxBytes = 1 * 1024 * 1024
+
+    static let label = "manifest.json"
+    /// REBUILDABLE — but only just, and only because the rebuild is the
+    /// caller's `sentinel` stub rather than an empty file. A manifest that
+    /// will not decode is not a manifest; its bytes are copied aside for the
+    /// human and the project keeps working. The state this policy must NOT
+    /// reach is the one that motivated the type: a stat-confirmed unreadable
+    /// file, which refuses under either policy.
+    static let damagePolicy = GuardedDamagePolicy.quarantineAndRebuild
+
+    nonisolated var transport: any ServerTransport { context.makeTransport() }
 
     let context: ServerContext
 
@@ -90,10 +101,7 @@ nonisolated struct ProjectManifestStore: Sendable {
             try transport.createDirectory(scarfDir)
         }
 
-        let guarded = GuardedJSONStore(transport: transport, label: "manifest.json")
-        let (inspection, existing) = guarded.inspectDecoding(
-            JSONValue.self, at: path, maxBytes: Self.maxBytes
-        )
+        let (inspection, existing) = inspectDecoding(JSONValue.self, at: path)
         if case .unreadable(let damaged) = inspection.state {
             Self.logger.error(
                 "refusing to write manifest.json at \(damaged, privacy: .public) — it exists but couldn't be read; a sentinel here would erase the real manifest"
@@ -130,6 +138,6 @@ nonisolated struct ProjectManifestStore: Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(JSONValue.object(root))
-        try guarded.write(data, to: path, after: inspection)
+        try publish(data, to: path, after: inspection)
     }
 }

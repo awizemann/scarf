@@ -41,6 +41,15 @@ import os
 ///
 /// Everything is `nonisolated` and transport-based, so Mac and iOS share
 /// the code path exactly as the stores that use it do.
+///
+/// **Writing a NEW store? Start at `GuardedSidecarStore`** (GW-E3), not
+/// here. This type is the mechanism; that protocol is the adoption path —
+/// it makes the rebuildable-vs-irreplaceable choice in rule 3 an explicit
+/// per-file declaration (`damagePolicy`) and applies it to BOTH the decode
+/// failure and the size cap, which is the branch a hand-rolled adopter
+/// forgets. Its doc comment is the guide: which policy, which shape
+/// (closure vs held inspection), unknown-key preservation, and `.bak`
+/// semantics.
 public struct GuardedJSONStore: Sendable {
     #if canImport(os)
     private static let logger = Logger(subsystem: "com.scarf", category: "GuardedJSONStore")
@@ -66,15 +75,22 @@ public struct GuardedJSONStore: Sendable {
         /// The bytes behind `.present` (and behind `.quarantined`, so a
         /// caller can still look at them). `nil` otherwise.
         public var bytes: Data?
+        /// Where unusable bytes were copied aside, when they were. Set on
+        /// `.quarantined`, and DELIBERATELY PRESERVED when a
+        /// `.refuseForever` store reclassifies that to `.unreadable`
+        /// (`GuardedSidecarStore`): the write is refused, but the user still
+        /// has to be told where their file went.
+        public var quarantineCopy: String?
 
         /// `public` so out-of-module writers of NON-JSON text files
         /// (`AGENTS.md`, `MEMORY.md`, `.env`) can reclassify a zero-byte
         /// read as `.absent`: zero bytes is damage for a JSON sidecar Scarf
         /// never writes empty, but an empty markdown or env file is a real,
         /// writable state a person made.
-        public init(state: State, bytes: Data?) {
+        public init(state: State, bytes: Data?, quarantineCopy: String? = nil) {
             self.state = state
             self.bytes = bytes
+            self.quarantineCopy = quarantineCopy
         }
 
         public var isDamaged: Bool {
@@ -251,7 +267,7 @@ public struct GuardedJSONStore: Sendable {
 
     private nonisolated func quarantining(data: Data, path: String) -> Inspection {
         if let copy = Self.quarantine(data: data, path: path, transport: transport, label: label) {
-            return Inspection(state: .quarantined(copy: copy), bytes: data)
+            return Inspection(state: .quarantined(copy: copy), bytes: data, quarantineCopy: copy)
         }
         // A failed copy must NOT look clean: the bytes would then exist
         // nowhere and the next write would be their end.
@@ -441,10 +457,17 @@ public enum GuardedStoreError: LocalizedError, Sendable, Equatable {
     /// with content rebuilt from a read that failed.
     case refusedUnreadableOverwrite(path: String, label: String)
 
+    /// A publish was attempted with no inspection behind it — the store
+    /// never read the file, or dropped what it read. Validating against
+    /// nothing is the destroy shape; see `GuardedSidecarStore.publish`.
+    case refusedUninspectedWrite(path: String, label: String)
+
     public var errorDescription: String? {
         switch self {
         case let .refusedUnreadableOverwrite(path, label):
             return "\(label) at \(path) exists but couldn't be read; refusing to overwrite it."
+        case let .refusedUninspectedWrite(path, label):
+            return "\(label) at \(path) wasn't read before this save; refusing to overwrite it."
         }
     }
 }

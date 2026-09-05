@@ -48,12 +48,22 @@ public struct MiniAppGrant: Codable, Sendable, Hashable {
 /// surface only works after the user approved it here. Grants are keyed by
 /// (projectId, miniAppId) and live OUTSIDE the portable project record on
 /// purpose — see `HermesPathSet.miniAppGrantsJSON`.
-public struct MiniAppGrantStore: Sendable {
+public struct MiniAppGrantStore: GuardedSidecarStore, Sendable {
     #if canImport(os)
     private static let logger = Logger(subsystem: "com.scarf", category: "MiniAppGrantStore")
     #endif
 
+    public static let label = "miniapp_grants.json"
     public static let maxBytes = 4 * 1024 * 1024
+    /// REBUILDABLE. A dropped grant means the permission sheet reappears
+    /// seeded default-deny — a recovery. Freezing the file forever would be
+    /// worse than the damage, and the original bytes survive in the
+    /// `.corrupt-<stamp>` copy either way. (`projects.json` and
+    /// `servers.json` take the opposite policy because their rows exist
+    /// nowhere else.)
+    public static let damagePolicy = GuardedDamagePolicy.quarantineAndRebuild
+
+    public nonisolated var transport: any ServerTransport { context.makeTransport() }
 
     public let context: ServerContext
     /// Authenticity, not integrity — see `MiniAppGrantSigner`. The store's
@@ -188,14 +198,10 @@ public struct MiniAppGrantStore: Sendable {
         inspect().grants
     }
 
-    private nonisolated func store() -> GuardedJSONStore {
-        GuardedJSONStore(transport: context.makeTransport(), label: "miniapp_grants.json")
-    }
-
     /// One read: the grants AND the state of the bytes behind them.
     private nonisolated func inspect() -> (grants: [MiniAppGrant], inspection: GuardedJSONStore.Inspection) {
-        let (inspection, envelope) = store().inspectDecoding(
-            Envelope.self, at: context.paths.miniAppGrantsJSON, maxBytes: Self.maxBytes
+        let (inspection, envelope) = inspectDecoding(
+            Envelope.self, at: context.paths.miniAppGrantsJSON
         )
         let raw = envelope?.grants ?? []
         // THE AUTHENTICITY GATE. Anything Scarf did not sign is not a
@@ -277,7 +283,7 @@ public struct MiniAppGrantStore: Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(Envelope(version: 1, grants: grants))
-        try store().write(data, to: context.paths.miniAppGrantsJSON, after: inspection)
+        try publish(data, to: context.paths.miniAppGrantsJSON, after: inspection)
     }
 
     private struct Envelope: Codable, Sendable {

@@ -36,14 +36,24 @@ private struct RegistryFile: Codable {
 /// added, renamed, or removed.
 @Observable
 @MainActor
-final class ServerRegistry {
+final class ServerRegistry: GuardedSidecarStore {
     private static let logger = Logger(subsystem: "com.scarf", category: "ServerRegistry")
     private static let currentSchemaVersion = 1
 
     /// A `servers.json` bigger than this is not a server list — it is
     /// something else wearing the name, and decoding it on the launch path
     /// is the wrong risk. Generous: 4 MB is tens of thousands of entries.
-    private static let maxRegistryBytes = 4 * 1024 * 1024
+    nonisolated static let maxBytes = 4 * 1024 * 1024
+    nonisolated static let label = "servers.json"
+    /// REFUSE FOREVER. The rows are the user's SSH connections and exist
+    /// nowhere else (the `.scarfservers` export is opt-in and usually
+    /// absent), so unusable bytes are copied aside for the human and every
+    /// write stays refused until the file is readable again. The
+    /// reclassification this used to hand-roll — for the decode failure AND
+    /// for the size cap — now comes from `GuardedSidecarStore`.
+    nonisolated static let damagePolicy = GuardedDamagePolicy.refuseForever
+
+    nonisolated let transport: any ServerTransport
 
     /// Remote (user-added) entries. Observable: views redraw on mutation.
     private(set) var entries: [ServerEntry] = []
@@ -70,14 +80,13 @@ final class ServerRegistry {
     private(set) var storeDamage: StoreDamage?
 
     private let storePath: String
-    private let store: GuardedJSONStore
 
     /// The inspection the in-memory `entries` were built from — the same
     /// one every save is validated against, so a save can never publish a
-    /// list derived from a read that failed. Seeded `.absent` so a save
-    /// before any load (impossible today: `init` loads) is not refused
-    /// for the wrong reason.
-    private var lastInspection = GuardedJSONStore.Inspection(state: .absent, bytes: nil)
+    /// list derived from a read that failed. `nil` means "never inspected",
+    /// which `GuardedSidecarStore.publish` REFUSES rather than treating as
+    /// a proven-absent file (unreachable today: `init` loads).
+    private var lastInspection: GuardedJSONStore.Inspection?
 
     /// - Parameters:
     ///   - storeURL: override for tests; production uses
@@ -87,7 +96,7 @@ final class ServerRegistry {
     ///     the seam exists so tests can inject a blip-injecting fake.
     init(storeURL: URL? = nil, transport: any ServerTransport = LocalTransport()) {
         self.storePath = (storeURL ?? Self.defaultStoreURL()).path
-        self.store = GuardedJSONStore(transport: transport, label: "servers.json")
+        self.transport = transport
         load()
     }
 
@@ -369,7 +378,7 @@ final class ServerRegistry {
     /// path, exactly as before. The stat + retry probe runs only when that
     /// read already failed. No sleeps, no retry loops.
     private func load() {
-        let inspection = store.inspect(storePath, maxBytes: Self.maxRegistryBytes)
+        let inspection = inspect(storePath)
         switch inspection.state {
         case .absent:
             // Proven-absent (or nothing we can prove is there): a fresh
@@ -396,13 +405,13 @@ final class ServerRegistry {
                 // recover the hosts by hand, then refuse: rebuilding from
                 // empty here would publish `[]` over a recoverable file.
                 let copy = GuardedJSONStore.quarantine(
-                    data: data, path: storePath, transport: store.transport, label: "servers.json"
+                    data: data, path: storePath, transport: transport, label: Self.label
                 )
                 Self.logger.error(
                     "servers.json could not be decoded: \(error.localizedDescription, privacy: .public); refusing writes"
                 )
                 lastInspection = GuardedJSONStore.Inspection(
-                    state: .unreadable(path: storePath), bytes: data
+                    state: .unreadable(path: storePath), bytes: data, quarantineCopy: copy
                 )
                 storeDamage = StoreDamage(path: storePath, quarantinePath: copy)
             }
@@ -416,19 +425,19 @@ final class ServerRegistry {
                 "servers.json at \(path, privacy: .public) is unreadable; keeping the in-memory list and refusing writes"
             )
             lastInspection = inspection
-            storeDamage = StoreDamage(path: path)
+            storeDamage = StoreDamage(path: path, quarantinePath: inspection.quarantineCopy)
 
-        case .quarantined(let copy):
-            // Only reachable via the size cap: bytes we never decoded.
-            // `GuardedJSONStore` treats `.quarantined` as writable for
-            // rebuildable sidecars; this file is not one, so reclassify.
-            Self.logger.error(
-                "servers.json is over the \(Self.maxRegistryBytes) byte cap; copied to \(copy, privacy: .public) and refusing writes"
-            )
+        case .quarantined:
+            // Unreachable: `damagePolicy == .refuseForever` reclassifies the
+            // size-cap quarantine to `.unreadable` before we see it, which
+            // is precisely the branch this file used to hand-roll. Kept
+            // exhaustive rather than defaulted so a policy change surfaces
+            // here as a compile-time decision.
+            Self.logger.error("servers.json quarantine reached the writable branch; refusing writes")
             lastInspection = GuardedJSONStore.Inspection(
                 state: .unreadable(path: storePath), bytes: inspection.bytes
             )
-            storeDamage = StoreDamage(path: storePath, quarantinePath: copy)
+            storeDamage = StoreDamage(path: storePath, quarantinePath: inspection.quarantineCopy)
         }
     }
 
@@ -445,7 +454,7 @@ final class ServerRegistry {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(file)
-            try store.write(data, to: storePath, after: lastInspection)
+            try publish(data, to: storePath, after: lastInspection)
             // The file now provably holds exactly these bytes, so the next
             // save backs THEM up rather than re-reading.
             lastInspection = GuardedJSONStore.Inspection(state: .present, bytes: data)
