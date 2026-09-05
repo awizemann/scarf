@@ -111,7 +111,7 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         try runSync { try await self.asyncReadFile(path) }
     }
 
-    public func writeFile(_ path: String, data: Data) throws {
+    public func unguardedWriteFile(_ path: String, data: Data) throws {
         try runSync { try await self.asyncWriteFile(path, data: data) }
     }
 

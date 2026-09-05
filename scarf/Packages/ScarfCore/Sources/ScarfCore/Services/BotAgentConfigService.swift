@@ -454,7 +454,8 @@ public struct BotAgentConfigService: Sendable {
         guard let data = content.data(using: .utf8), data.count <= Self.maxSoulBytes else {
             throw BotsError.unsafeToWrite(path: path)
         }
-        try transport.writeFile(path, data: data)
+        // UNGUARDED-WRITE(O): whole-file SOUL.md replace from editor content; readSoul re-verified above and throws on unreadable.
+        try transport.unguardedWriteFile(path, data: data)
     }
 
     // MARK: - CLI plumbing

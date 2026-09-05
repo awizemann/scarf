@@ -194,7 +194,8 @@ struct KanbanTenantResolver: Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(updated)
-        try transport.writeFile(path, data: data)
+        // UNGUARDED-WRITE(R): readManifest nil publishes a SENTINEL manifest over the real one — E2 converts.
+        try transport.unguardedWriteFile(path, data: data)
     }
 
     nonisolated private func manifestPath(for project: ProjectEntry) -> String {

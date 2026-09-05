@@ -572,7 +572,7 @@ struct AllConfigWritersParityTests {
             // `SettingsWriteReadParityTests` already pins by template and
             // expands into concrete keys.
             // …plus 1 direct-YAML site (`saveDirectYAML`'s shared
-            // `context.writeText(path, …)`), whose three callers name the
+            // `context.unguardedWriteText(path, …)`), whose three callers name the
             // key they splice in their `label:`.
             Writer(path: "scarf/Features/Settings/ViewModels/SettingsViewModel.swift",
                    nonLiteralKeySites: 9,
@@ -681,8 +681,8 @@ struct AllConfigWritersParityTests {
         // the write can appear either way round in a file; requiring BOTH
         // tokens keeps non-config `writeText` callers (SOUL.md, the iOS
         // memory snapshot) out of the discovered set.
-        #"paths\.configYAML[\s\S]*?\.writeText\("#,
-        #"\.writeText\([\s\S]*?paths\.configYAML"#,
+        #"paths\.configYAML[\s\S]*?\.unguardedWriteText\("#,
+        #"\.unguardedWriteText\([\s\S]*?paths\.configYAML"#,
     ]
 
     private static func swiftFiles() -> [String] {
@@ -905,7 +905,7 @@ struct AllConfigWritersParityTests {
             // write itself (it lives in the transform / the caller's
             // arguments), so each one is by definition a non-literal site
             // and must be declared.
-            let directYAMLSites = Self.count(#"\.writeText\(\s*path\s*,"#, in: source)
+            let directYAMLSites = Self.count(#"\.unguardedWriteText\(\s*path\s*,"#, in: source)
             let sites = argvSites + setSettingSites + configKVSites + directYAMLSites
             // …minus those whose key the scan captured as a FULLY STATIC
             // literal. An interpolated literal (`"quick_commands.\(name).type"`)

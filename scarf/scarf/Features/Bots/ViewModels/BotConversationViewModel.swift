@@ -528,7 +528,8 @@ final class BotConversationViewModel {
             }
             _ = try? transport.runProcess(executable: "/bin/chmod", args: ["700", dir], stdin: nil, timeout: 15)
             do {
-                try transport.writeFile(path, data: Data(text.utf8))
+                // UNGUARDED-WRITE(C): staging file in a freshly minted per-send 0700 temp dir.
+                try transport.unguardedWriteFile(path, data: Data(text.utf8))
             } catch {
                 return "Couldn’t stage the message for \(name): \(error.localizedDescription)"
             }

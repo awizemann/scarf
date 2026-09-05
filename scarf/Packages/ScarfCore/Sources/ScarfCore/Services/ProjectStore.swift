@@ -469,14 +469,16 @@ public struct ProjectStore: Sendable {
            let existing = replacing ?? (try? transport.readFile(path)),
            !existing.isEmpty, existing != data {
             do {
-                try transport.writeFile(path + ".bak", data: existing)
+                // UNGUARDED-WRITE(G): writeRecord's own one-deep .bak, inside the project.json guard.
+                try transport.unguardedWriteFile(path + ".bak", data: existing)
             } catch {
                 #if canImport(os)
                 Self.logger.warning("Could not refresh project.json.bak: \(error.localizedDescription, privacy: .public)")
                 #endif
             }
         }
-        try transport.writeFile(path, data: data)
+        // UNGUARDED-WRITE(G): writeRecord's own guarded publish (inspectRecord refusal upstream).
+        try transport.unguardedWriteFile(path, data: data)
     }
 
     /// Ensure the registry has a row for this project carrying its

@@ -199,7 +199,7 @@ import Foundation
             readCount += 1
             return try inner.readFile(path)
         }
-        func writeFile(_ path: String, data: Data) throws { try inner.writeFile(path, data: data) }
+        func unguardedWriteFile(_ path: String, data: Data) throws { try inner.unguardedWriteFile(path, data: data) }
         func fileExists(_ path: String) -> Bool { inner.fileExists(path) }
         func stat(_ path: String) -> FileStat? {
             statCount += 1

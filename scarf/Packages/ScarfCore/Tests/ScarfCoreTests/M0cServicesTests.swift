@@ -563,7 +563,7 @@ import Foundation
             ProjectEntry(name: "beta",  path: "/tmp/beta")
         ])
         let encoded = try JSONEncoder().encode(registry)
-        try localTransport.writeFile(fakeRegistry, data: encoded)
+        try localTransport.unguardedWriteFile(fakeRegistry, data: encoded)
 
         // Read it back via decoder (the service's loadRegistry pattern,
         // verified independently of the service since the service reads
@@ -588,7 +588,7 @@ import Foundation
           "sections": []
         }
         """
-        try localTransport.writeFile(projectDir + "/.scarf/dashboard.json", data: Data(dashJSON.utf8))
+        try localTransport.unguardedWriteFile(projectDir + "/.scarf/dashboard.json", data: Data(dashJSON.utf8))
 
         let entry = ProjectEntry(name: "demo", path: projectDir)
         #expect(svc.dashboardExists(for: entry) == true)

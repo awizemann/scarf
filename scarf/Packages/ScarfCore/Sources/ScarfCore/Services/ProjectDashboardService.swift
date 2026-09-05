@@ -382,7 +382,8 @@ public struct ProjectDashboardService: Sendable {
             //    save the user asked for.
             if existing != writeData {
                 do {
-                    try transport.writeFile(path + ".bak", data: existing)
+                    // UNGUARDED-WRITE(G): saveRegistry's own one-deep .bak, inside the registry guard.
+                    try transport.unguardedWriteFile(path + ".bak", data: existing)
                 } catch {
                     Self.logger.warning(
                         "Could not refresh projects.json.bak: \(error.localizedDescription, privacy: .public)"
@@ -403,7 +404,8 @@ public struct ProjectDashboardService: Sendable {
         // it, so a dropped cellular link left this file a fragment. If a
         // fourth transport ever appears, it owes this contract before any
         // of the guarding above means anything.
-        try transport.writeFile(path, data: writeData)
+        // UNGUARDED-WRITE(G): saveRegistry's own guarded publish (loss/stale/empty refusals above).
+        try transport.unguardedWriteFile(path, data: writeData)
     }
 
     /// Pretty-printed + sorted-keys JSON. Agents read this file by hand,
@@ -504,7 +506,8 @@ public struct ProjectDashboardService: Sendable {
         }
 
         try transport.createDirectory(project.scarfDir)
-        try transport.writeFile(project.dashboardPath, data: writeData)
+        // UNGUARDED-WRITE(O): dashboard bytes are the caller's, validated and reformatted; the destination is never read into them.
+        try transport.unguardedWriteFile(project.dashboardPath, data: writeData)
     }
 
     /// A `DecodingError` rendered as one line an agent can act on —

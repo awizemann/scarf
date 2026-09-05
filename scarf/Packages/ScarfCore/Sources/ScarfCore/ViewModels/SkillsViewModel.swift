@@ -744,7 +744,8 @@ public final class SkillsViewModel {
         guard isValidSkillPath(path) else { return }
         guard let data = content.data(using: .utf8) else { return }
         do {
-            try transport.writeFile(path, data: data)
+            // UNGUARDED-WRITE(R): loadSkillContent returns "" on a failed read, so the editor can save an empty buffer over the skill — E2 converts.
+            try transport.unguardedWriteFile(path, data: data)
         } catch {
             logger.error("saveSkillContent(\(path, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
         }

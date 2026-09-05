@@ -95,7 +95,8 @@ struct ProjectScaffolder: Sendable {
                 name: cleanedName,
                 description: cleanedDescription
             )
-            try transport.writeFile(
+            // UNGUARDED-WRITE(C): first write into a freshly created, collision-checked project dir.
+            try transport.unguardedWriteFile(
                 projectDir + "/.scarf/dashboard.json",
                 data: dashboardData
             )
@@ -104,7 +105,8 @@ struct ProjectScaffolder: Sendable {
             // refresh() call below populates between the markers.
             let agentsMd = ProjectContextBlock.beginMarker + "\n"
                 + ProjectContextBlock.endMarker + "\n"
-            try transport.writeFile(
+            // UNGUARDED-WRITE(C): first write into a freshly created, collision-checked project dir.
+            try transport.unguardedWriteFile(
                 projectDir + "/AGENTS.md",
                 data: Data(agentsMd.utf8)
             )

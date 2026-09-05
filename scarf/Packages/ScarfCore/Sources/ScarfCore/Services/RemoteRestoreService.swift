@@ -503,7 +503,8 @@ public final class RemoteRestoreService: @unchecked Sendable {
         // pre-restore file once the write lands.
         if encoded != data {
             do {
-                try transport.writeFile(path + ".bak", data: data)
+                // UNGUARDED-WRITE(G): mutateRemoteJSON's own .bak, inside its stat+retry guard.
+                try transport.unguardedWriteFile(path + ".bak", data: data)
             } catch {
                 #if canImport(os)
                 Self.logger.warning("Could not back up \(path, privacy: .public) before restore rewrite: \(error.localizedDescription, privacy: .public)")
@@ -511,7 +512,8 @@ public final class RemoteRestoreService: @unchecked Sendable {
             }
         }
         do {
-            try transport.writeFile(path, data: encoded)
+            // UNGUARDED-WRITE(G): mutateRemoteJSON's own guarded publish (stat+retry probe above).
+            try transport.unguardedWriteFile(path, data: encoded)
         } catch {
             throw RestoreError.remoteCommandFailed("\(label) failed writing \(path): \(error.localizedDescription)")
         }

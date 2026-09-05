@@ -437,10 +437,11 @@ extension ServerContext {
     /// Atomic write. Returns `true` on success, `false` on any error
     /// (caller is expected to surface failures via UI when relevant).
     @discardableResult
-    public nonisolated func writeText(_ path: String, content: String) -> Bool {
+    public nonisolated func unguardedWriteText(_ path: String, content: String) -> Bool {
         guard let data = content.data(using: .utf8) else { return false }
         do {
-            try makeTransport().writeFile(path, data: data)
+            // UNGUARDED-WRITE(O): generic writeText seam — bytes are the caller's; this frame reads nothing. Callers own their own read-then-write discipline.
+            try makeTransport().unguardedWriteFile(path, data: data)
             return true
         } catch {
             return false

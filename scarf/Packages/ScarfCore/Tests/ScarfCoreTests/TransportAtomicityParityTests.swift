@@ -45,7 +45,7 @@ import Foundation
             return data
         }
 
-        func writeFile(_ path: String, data: Data) throws {
+        func unguardedWriteFile(_ path: String, data: Data) throws {
             if failWrites { throw TransportError.other(message: "connection reset") }
             lock.withLock {
                 files[path] = data

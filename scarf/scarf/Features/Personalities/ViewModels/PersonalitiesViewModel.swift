@@ -136,11 +136,12 @@ final class PersonalitiesViewModel {
         let ctx = context
         // Named `soulPath`, not `path`: the config-writer parity gate
         // (`AllConfigWritersParityTests.nonLiteralKeySiteCountsMatchTheManifest`)
-        // treats `writeText(path, …)` as a direct-YAML config splice, and this
+        // treats `unguardedWriteText(path, …)` as a direct-YAML config splice, and this
         // write is SOUL.md — not config.yaml, not a config key at all.
         let soulPath = self.soulPath
         Task { [weak self] in
-            let ok = await Task.detached { ctx.writeText(soulPath, content: content) }.value
+            // UNGUARDED-WRITE(O): whole-file SOUL.md replace from the editor buffer; the destination is not read into it.
+            let ok = await Task.detached { ctx.unguardedWriteText(soulPath, content: content) }.value
             guard let self else { return }
             self.isSaving = false
             if ok {

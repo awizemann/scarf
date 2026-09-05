@@ -156,7 +156,8 @@ struct CatalogService: Sendable {
             if !parent.isEmpty {
                 try? transport.createDirectory(parent)
             }
-            try transport.writeFile(cachePath, data: data)
+            // UNGUARDED-WRITE(O): catalog cache published from a fresh network fetch; nothing read from this file feeds the bytes.
+            try transport.unguardedWriteFile(cachePath, data: data)
         } catch {
             Self.logger.warning("couldn't write catalog cache: \(error.localizedDescription, privacy: .public)")
         }

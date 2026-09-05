@@ -116,7 +116,8 @@ struct SlashCommandBootstrapService: Sendable {
             return
         }
 
-        try transport.writeFile(destPath, data: bundledData)
+        // UNGUARDED-WRITE(R): same version-gate-by-inference shape as SkillBootstrapService — E2 converts.
+        try transport.unguardedWriteFile(destPath, data: bundledData)
 
         Self.logger.info(
             "bootstrapped slash command \(commandName, privacy: .public) at v\(bundledVersion, privacy: .public) (was: \(installedVersion ?? "missing", privacy: .public))"

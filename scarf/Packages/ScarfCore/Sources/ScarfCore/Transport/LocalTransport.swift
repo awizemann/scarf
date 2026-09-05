@@ -92,7 +92,7 @@ public struct LocalTransport: ServerTransport {
         }
     }
 
-    public func writeFile(_ path: String, data: Data) throws {
+    public func unguardedWriteFile(_ path: String, data: Data) throws {
         do {
             // Ensure the parent dir exists — callers sometimes pass a
             // path whose parent hasn't been mkdir'd yet (e.g.,

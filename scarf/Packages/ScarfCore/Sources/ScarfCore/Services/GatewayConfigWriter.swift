@@ -229,7 +229,8 @@ public enum GatewayConfigWriter {
         let existing = context.readText(path) ?? ""
         let updated = setList(in: existing, platform: platform, key: key, items: items)
         if updated == existing { return true }   // no-op: already correct
-        return context.writeText(path, content: updated)
+        // UNGUARDED-WRITE(R): saveList splices config.yaml from a readText(path) ?? "" base — E2 converts.
+        return context.unguardedWriteText(path, content: updated)
     }
 
     // MARK: - Internals

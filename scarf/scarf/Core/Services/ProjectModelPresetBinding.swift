@@ -116,7 +116,8 @@ struct ProjectModelPresetBinding: Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(updated)
-        try transport.writeFile(path, data: data)
+        // UNGUARDED-WRITE(R): manifest.json sentinel fallback on a failed read, and unknown keys dropped — E2 converts with KanbanTenantResolver.
+        try transport.unguardedWriteFile(path, data: data)
     }
 
     nonisolated private func manifestPath(for project: ProjectEntry) -> String {

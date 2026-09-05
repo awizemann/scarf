@@ -541,7 +541,7 @@ extension ProjectStore {
         try transport.createDirectory(scarfDir)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try transport.writeFile(
+        try transport.unguardedWriteFile(
             ProjectStore.recordPath(forProjectPath: project.rootPath),
             data: encoder.encode(project)
         )

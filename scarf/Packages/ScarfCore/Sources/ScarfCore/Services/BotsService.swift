@@ -276,7 +276,8 @@ public struct BotsService: Sendable {
             throw BotsError.unsafeToWrite(path: path)
         }
         guard let data = updated.data(using: .utf8) else { throw BotsError.unsafeToWrite(path: path) }
-        try transport.writeFile(path, data: data)
+        // UNGUARDED-WRITE(R): profile.yaml read-merge-write whose merge base is fileExists-inferred — E2 converts.
+        try transport.unguardedWriteFile(path, data: data)
     }
 
     // MARK: - Lifecycle (hermes profile …)

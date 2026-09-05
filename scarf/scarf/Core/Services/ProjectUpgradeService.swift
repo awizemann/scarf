@@ -135,7 +135,8 @@ struct ProjectUpgradeService: Sendable {
         if !transport.fileExists(dashboardPath) {
             do {
                 let data = try ProjectScaffolder.makePlaceholderDashboard(name: project.name, description: nil)
-                try transport.writeFile(dashboardPath, data: data)
+                // UNGUARDED-WRITE(R): placeholder gated only on !fileExists — a dropped round-trip answers false and overwrites a real dashboard. E2 converts the gate.
+                try transport.unguardedWriteFile(dashboardPath, data: data)
                 dashboardSeeded = true
             } catch {
                 Self.logger.warning("upgrade: placeholder dashboard write failed for \(project.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -197,7 +198,8 @@ struct ProjectUpgradeService: Sendable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(provenance) else { return }
         do {
-            try context.makeTransport().writeFile(provenancePath(projectPath: projectPath), data: data)
+            // UNGUARDED-WRITE(O): provenance stamp composed entirely in memory; the file is re-derivable.
+            try context.makeTransport().unguardedWriteFile(provenancePath(projectPath: projectPath), data: data)
         } catch {
             Self.logger.warning("upgrade: couldn't write provenance for \(projectPath, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }

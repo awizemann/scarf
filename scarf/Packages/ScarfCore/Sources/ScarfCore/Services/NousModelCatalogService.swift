@@ -174,7 +174,8 @@ public struct NousModelCatalogService: Sendable {
             if !parent.isEmpty {
                 try? transport.createDirectory(parent)
             }
-            try transport.writeFile(cachePath, data: data)
+            // UNGUARDED-WRITE(O): models cache published from a fresh network fetch; nothing read from this file feeds the bytes.
+            try transport.unguardedWriteFile(cachePath, data: data)
         } catch {
             Self.logger.warning("couldn't write nous models cache: \(error.localizedDescription, privacy: .public)")
         }

@@ -119,7 +119,8 @@ public struct ProjectSlashCommandService: Sendable {
         guard let data = serialised.data(using: .utf8) else {
             throw ServiceError.encodingFailed
         }
-        try transport.writeFile(path, data: data)
+        // UNGUARDED-WRITE(O): command file serialized whole from the in-memory model; destination is not read into it.
+        try transport.unguardedWriteFile(path, data: data)
     }
 
     /// Remove the command with the given name. No-op if it doesn't exist.

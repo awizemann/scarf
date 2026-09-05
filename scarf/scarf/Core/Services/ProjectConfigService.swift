@@ -89,7 +89,8 @@ struct ProjectConfigService: Sendable {
         let data = try encoder.encode(file)
         let parent = (Self.configPath(for: project) as NSString).deletingLastPathComponent
         try transport.createDirectory(parent)
-        try transport.writeFile(Self.configPath(for: project), data: data)
+        // UNGUARDED-WRITE(R): config.json rebuilt from a fileExists-inferred load; the MCP writer of this same file is already guarded — E2 closes the parity gap.
+        try transport.unguardedWriteFile(Self.configPath(for: project), data: data)
     }
 
     // MARK: - Manifest cache (schema used by post-install editor)
@@ -102,7 +103,8 @@ struct ProjectConfigService: Sendable {
         let path = Self.manifestCachePath(for: project)
         let parent = (path as NSString).deletingLastPathComponent
         try transport.createDirectory(parent)
-        try transport.writeFile(path, data: manifestData)
+        // UNGUARDED-WRITE(C): installer-time manifest cache into a freshly created project dir.
+        try transport.unguardedWriteFile(path, data: manifestData)
     }
 
     /// Load the cached manifest into a `ProjectTemplateManifest` so the

@@ -156,7 +156,8 @@ struct ProjectTemplateInstaller: Sendable {
             if copy.sourceRelativePath.isEmpty {
                 if copy.destinationPath.hasSuffix("/.scarf/config.json") {
                     let data = try encodeConfigFile(plan: plan)
-                    try transport.writeFile(copy.destinationPath, data: data)
+                    // UNGUARDED-WRITE(C): install-time copy from the unpacked template bundle.
+                    try transport.unguardedWriteFile(copy.destinationPath, data: data)
                     continue
                 }
                 throw ProjectTemplateError.requiredFileMissing(
@@ -166,7 +167,8 @@ struct ProjectTemplateInstaller: Sendable {
 
             let source = plan.unpackedDir + "/" + copy.sourceRelativePath
             let data = try Data(contentsOf: URL(fileURLWithPath: source))
-            try transport.writeFile(copy.destinationPath, data: data)
+            // UNGUARDED-WRITE(C): install-time copy from the unpacked template bundle.
+            try transport.unguardedWriteFile(copy.destinationPath, data: data)
         }
     }
 
@@ -196,7 +198,8 @@ struct ProjectTemplateInstaller: Sendable {
             let data = try Data(contentsOf: URL(fileURLWithPath: source))
             let parent = (copy.destinationPath as NSString).deletingLastPathComponent
             try transport.createDirectory(parent)
-            try transport.writeFile(copy.destinationPath, data: data)
+            // UNGUARDED-WRITE(C): install-time copy of a template skill file from the unpacked bundle.
+            try transport.unguardedWriteFile(copy.destinationPath, data: data)
         }
     }
 
@@ -458,6 +461,7 @@ struct ProjectTemplateInstaller: Sendable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(lock)
         let path = plan.projectDir + "/.scarf/template.lock.json"
-        try context.makeTransport().writeFile(path, data: data)
+        // UNGUARDED-WRITE(C): install-time lock file, composed entirely from the install plan.
+        try context.makeTransport().unguardedWriteFile(path, data: data)
     }
 }

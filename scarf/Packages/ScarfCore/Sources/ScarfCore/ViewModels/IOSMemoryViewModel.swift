@@ -147,7 +147,8 @@ public final class IOSMemoryViewModel {
         let path = kind.path(on: context)
         let snapshot = text
         let ok: Bool = await Task.detached {
-            ctx.writeText(path, content: snapshot)
+            // UNGUARDED-WRITE(R): MEMORY.md/USER.md snapshot whose loader sets text = "" on a transport failure — E2 converts.
+            ctx.unguardedWriteText(path, content: snapshot)
         }.value
         isSaving = false
         if ok {

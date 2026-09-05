@@ -30,7 +30,7 @@ public protocol ServerTransport: Sendable {
     /// Atomic write: the file at `path` is either the previous contents or
     /// the new contents, never a partial write. Preserves `0600` mode for
     /// paths that match `.env` conventions so secrets stay owner-only.
-    nonisolated func writeFile(_ path: String, data: Data) throws
+    nonisolated func unguardedWriteFile(_ path: String, data: Data) throws
     nonisolated func fileExists(_ path: String) -> Bool
     nonisolated func stat(_ path: String) -> FileStat?
     /// Stat MANY paths, ideally in one transport round-trip.

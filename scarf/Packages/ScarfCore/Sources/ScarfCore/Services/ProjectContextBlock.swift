@@ -141,7 +141,8 @@ public enum ProjectContextBlock {
         guard let outData = rewritten.data(using: .utf8) else {
             throw WriteError.encodingFailed
         }
-        try transport.writeFile(agentsMdPath, data: outData)
+        // UNGUARDED-WRITE(R): removeBlock splices AGENTS.md with no stat+retry proof and no .bak; sibling writeBlock is guarded — E2 converts.
+        try transport.unguardedWriteFile(agentsMdPath, data: outData)
     }
 
     /// Read `<project>/AGENTS.md`, splice in the given block, write

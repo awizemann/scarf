@@ -854,7 +854,8 @@ final class SettingsViewModel {
             return
         }
         if updated != existing {
-            guard context.writeText(path, content: updated) else {
+            // UNGUARDED-WRITE(R): saveDirectYAML splices config.yaml from a readText(path) ?? "" base — E2 converts.
+            guard context.unguardedWriteText(path, content: updated) else {
                 // Direct-YAML write failure: no CLI output to quote, so the
                 // shared builder's bare form is exactly right.
                 saveMessage = Self.saveFailureMessage(key: label, output: "")

@@ -148,7 +148,8 @@ nonisolated struct HermesEnvService: Sendable {
     private func atomicWrite(_ content: String) -> Bool {
         guard let data = content.data(using: .utf8) else { return false }
         do {
-            try transport.writeFile(path, data: data)
+            // UNGUARDED-WRITE(R): setMany/unset rebuild ~/.hermes/.env from a prior read and fall back to a header-only file — E2 converts.
+            try transport.unguardedWriteFile(path, data: data)
             return true
         } catch {
             logger.error("Failed to write .env: \(error.localizedDescription)")

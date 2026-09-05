@@ -296,9 +296,9 @@ import Foundation
             let guarded = GuardedJSONStore(transport: transport, label: "thing.json")
 
             let good = Data(#"{"v":1}"#.utf8)
-            try transport.writeFile(path + ".bak", data: good)
+            try transport.unguardedWriteFile(path + ".bak", data: good)
             let corrupt = Data("nope".utf8)
-            try transport.writeFile(path, data: corrupt)
+            try transport.unguardedWriteFile(path, data: corrupt)
 
             let (inspection, value) = guarded.inspectDecoding(
                 [String: Int].self, at: path, maxBytes: 1024

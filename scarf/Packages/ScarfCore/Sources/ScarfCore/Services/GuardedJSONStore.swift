@@ -200,7 +200,8 @@ public struct GuardedJSONStore: Sendable {
             // Best effort: losing the backup is not a reason to fail the
             // write the user asked for.
             do {
-                try transport.writeFile(path + ".bak", data: existing)
+                // UNGUARDED-WRITE(G): GuardedJSONStore's own .bak publish.
+                try transport.unguardedWriteFile(path + ".bak", data: existing)
             } catch {
                 #if canImport(os)
                 Self.logger.warning(
@@ -209,7 +210,8 @@ public struct GuardedJSONStore: Sendable {
                 #endif
             }
         }
-        try transport.writeFile(path, data: data)
+        // UNGUARDED-WRITE(G): GuardedJSONStore's own guarded publish.
+        try transport.unguardedWriteFile(path, data: data)
     }
 
     // MARK: - Quarantine
@@ -268,7 +270,8 @@ public struct GuardedJSONStore: Sendable {
             destination += "-" + UUID().uuidString.prefix(8)
         }
         do {
-            try transport.writeFile(destination, data: data)
+            // UNGUARDED-WRITE(G): GuardedJSONStore's own quarantine copy.
+            try transport.unguardedWriteFile(destination, data: data)
             #if canImport(os)
             logger.error(
                 "Quarantined unusable \(label, privacy: .public) to \(destination, privacy: .public)"

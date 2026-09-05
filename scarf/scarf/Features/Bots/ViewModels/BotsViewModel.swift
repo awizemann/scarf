@@ -105,7 +105,8 @@ nonisolated struct LiveBotsBackend: BotsBackend {
         if !transport.fileExists(assets) {
             try transport.createDirectory(assets)
         }
-        try transport.writeFile(assets + "/avatar.png", data: data)
+        // UNGUARDED-WRITE(O): avatar bytes are the user's fresh selection; the destination is never read.
+        try transport.unguardedWriteFile(assets + "/avatar.png", data: data)
         for candidate in HermesBotAvatar.probeOrder where candidate.ext != "png" {
             let stale = assets + "/avatar." + candidate.ext
             if transport.fileExists(stale) { try? transport.removeFile(stale) }

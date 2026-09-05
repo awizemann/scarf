@@ -931,6 +931,7 @@ struct ProjectTemplateUninstaller: Sendable {
         }
         let updated = text.replacingCharacters(in: lower..<stripRange.upperBound, with: "")
         guard let outData = updated.data(using: .utf8) else { return }
-        try transport.writeFile(memoryPath, data: outData)
+        // UNGUARDED-WRITE(R): MEMORY.md splice of the user's prose with no proof probe and no .bak — E2 converts.
+        try transport.unguardedWriteFile(memoryPath, data: outData)
     }
 }

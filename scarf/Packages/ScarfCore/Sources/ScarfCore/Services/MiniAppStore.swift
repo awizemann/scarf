@@ -72,7 +72,8 @@ public struct MiniAppStore: Sendable {
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try transport.writeFile(
+        // UNGUARDED-WRITE(R): load() is try? readFile ?? [:], so one blip publishes {} — E2 converts.
+        try transport.unguardedWriteFile(
             Self.statePath(projectPath: projectPath, miniAppId: miniAppId),
             data: encoder.encode(state)
         )

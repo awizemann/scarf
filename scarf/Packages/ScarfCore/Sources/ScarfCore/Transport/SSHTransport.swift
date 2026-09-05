@@ -380,7 +380,7 @@ public struct SSHTransport: ServerTransport {
         return result.stdout
     }
 
-    public func writeFile(_ path: String, data: Data) throws {
+    public func unguardedWriteFile(_ path: String, data: Data) throws {
         // Atomic pattern:
         //   1. scp to `<path>.scarf-<nonce>.tmp` on the remote
         //   2. ssh `mv <tmp> <path>` — atomic on POSIX within the same FS

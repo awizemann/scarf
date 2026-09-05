@@ -334,7 +334,7 @@ import Foundation
 
         let transport = LocalTransport()
         let content = Data("hello scarf\n".utf8)
-        try transport.writeFile(tmp.path, data: content)
+        try transport.unguardedWriteFile(tmp.path, data: content)
         #expect(transport.fileExists(tmp.path))
 
         let read = try transport.readFile(tmp.path)

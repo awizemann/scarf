@@ -128,12 +128,14 @@ struct HermesFileService: Sendable {
 
     nonisolated func saveMemory(_ content: String, profile: String = "") {
         let path = memoryPath(profile: profile, file: "MEMORY.md")
-        writeFile(path, content: content)
+        // UNGUARDED-WRITE(R): saveMemory publishes over MEMORY.md whose loader returns "" on a failed read — E2 converts.
+        unguardedWriteFile(path, content: content)
     }
 
     nonisolated func saveUserProfile(_ content: String, profile: String = "") {
         let path = memoryPath(profile: profile, file: "USER.md")
-        writeFile(path, content: content)
+        // UNGUARDED-WRITE(R): saveUserProfile publishes over USER.md whose loader returns "" on a failed read — E2 converts.
+        unguardedWriteFile(path, content: content)
     }
 
     nonisolated private func memoryPath(profile: String, file: String) -> String {
@@ -1189,7 +1191,8 @@ struct HermesFileService: Sendable {
         guard newYAML != yaml else { return true }
 
         backUpConfigOnceForThisLaunch(originalText: yaml)
-        writeFile(context.paths.configYAML, content: newYAML)
+        // UNGUARDED-WRITE(R): config.yaml patch published from a prior read of the same file — E2 converts.
+        unguardedWriteFile(context.paths.configYAML, content: newYAML)
 
         // Read the file BACK OFF DISK — the write goes through a transport
         // that logs and swallows its failures, so "we built a good string" is
@@ -1198,7 +1201,8 @@ struct HermesFileService: Sendable {
             Self.logger.error(
                 "could not re-read \(self.context.paths.configYAML, privacy: .public) after patching \(name, privacy: .public); restoring"
             )
-            writeFile(context.paths.configYAML, content: yaml)
+            // UNGUARDED-WRITE(R): config.yaml restore of the pre-patch text read from the same file — E2 converts.
+            unguardedWriteFile(context.paths.configYAML, content: yaml)
             return false
         }
         if let reason = Self.verifyPatchedConfig(
@@ -1207,7 +1211,8 @@ struct HermesFileService: Sendable {
             Self.logger.error(
                 "patch of MCP server \(name, privacy: .public) failed verification (\(reason, privacy: .public)); restoring \(self.context.paths.configYAML, privacy: .public)"
             )
-            writeFile(context.paths.configYAML, content: yaml)
+            // UNGUARDED-WRITE(R): config.yaml restore of the pre-patch text read from the same file — E2 converts.
+            unguardedWriteFile(context.paths.configYAML, content: yaml)
             return false
         }
         return true
@@ -1419,7 +1424,8 @@ struct HermesFileService: Sendable {
         let destination = path + ".scarf-backup-" + stamp
         guard let data = originalText.data(using: .utf8) else { return }
         do {
-            try transport.writeFile(destination, data: data)
+            // UNGUARDED-WRITE(C): per-launch timestamped config backup at a fresh, unique name.
+            try transport.unguardedWriteFile(destination, data: data)
             Self.logger.info("backed up \(path, privacy: .public) to \(destination, privacy: .public)")
         } catch {
             Self.logger.warning(
@@ -2346,10 +2352,11 @@ struct HermesFileService: Sendable {
     /// old pre-transport behavior (print + swallow on error) because the
     /// callers don't have a UI path for surfacing I/O failures — that's
     /// planned for Phase 4.
-    nonisolated private func writeFile(_ path: String, content: String) {
+    nonisolated private func unguardedWriteFile(_ path: String, content: String) {
         guard let data = content.data(using: .utf8) else { return }
         do {
-            try transport.writeFile(path, data: data)
+            // UNGUARDED-WRITE(R): private writeFile seam; its callers include the destroy-shaped MEMORY.md/USER.md and config.yaml patch paths — E2 converts.
+            try transport.unguardedWriteFile(path, data: data)
         } catch {
             Self.logger.warning("Failed to write \(path, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }

@@ -29,7 +29,7 @@ private struct LocalSQLite3Transport: ServerTransport {
     func readFile(_ path: String) throws -> Data {
         try Data(contentsOf: URL(fileURLWithPath: path))
     }
-    func writeFile(_ path: String, data: Data) throws {
+    func unguardedWriteFile(_ path: String, data: Data) throws {
         try data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }
     func fileExists(_ path: String) -> Bool {

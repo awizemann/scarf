@@ -436,7 +436,7 @@ import Foundation
         init(lines: [String]) { self.lines = lines }
 
         func readFile(_ path: String) throws -> Data { throw TransportError.other(message: "N/A") }
-        func writeFile(_ path: String, data: Data) throws { throw TransportError.other(message: "N/A") }
+        func unguardedWriteFile(_ path: String, data: Data) throws { throw TransportError.other(message: "N/A") }
         func fileExists(_ path: String) -> Bool { true }
         func stat(_ path: String) -> FileStat? { FileStat(size: 0, mtime: Date(), isDirectory: false) }
         func listDirectory(_ path: String) throws -> [String] { [] }

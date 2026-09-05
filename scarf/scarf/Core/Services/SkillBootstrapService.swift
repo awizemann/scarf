@@ -351,7 +351,8 @@ struct SkillBootstrapService: Sendable {
 
         try transport.createDirectory(categorizedRoot)
         try transport.createDirectory(destDir)
-        try transport.writeFile(destSkillMd, data: bundledData)
+        // UNGUARDED-WRITE(R): version gate rests on fileExists + try? readFile, so a blip downgrades a hand-edited SKILL.md — E2 converts.
+        try transport.unguardedWriteFile(destSkillMd, data: bundledData)
 
         // Carry any companion files (assets, examples, etc.) the skill
         // ships alongside SKILL.md. Walks one level deep — skills don't
@@ -379,7 +380,8 @@ struct SkillBootstrapService: Sendable {
                     continue
                 }
                 do {
-                    try transport.writeFile(
+                    // UNGUARDED-WRITE(O): bundle-owned companion file, written on the same upgrade decision as SKILL.md.
+                    try transport.unguardedWriteFile(
                         destDir + "/" + url.lastPathComponent, data: try Data(contentsOf: url)
                     )
                 } catch {

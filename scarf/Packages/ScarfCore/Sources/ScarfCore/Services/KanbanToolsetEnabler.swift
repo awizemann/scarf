@@ -107,7 +107,8 @@ public actor KanbanToolsetEnabler {
             let writeResult: Result<Void, Error> = await Task.detached(priority: .utility) {
                 do {
                     let data = Data(newYaml.utf8)
-                    try context.makeTransport().writeFile(path, data: data)
+                    // UNGUARDED-WRITE(R): splices the whole Hermes config.yaml from a prior read of the same file — E2 converts.
+                    try context.makeTransport().unguardedWriteFile(path, data: data)
                     return .success(())
                 } catch {
                     return .failure(error)
@@ -155,7 +156,8 @@ public actor KanbanToolsetEnabler {
         case .rewrite(let newYaml):
             let writeResult: Result<Void, Error> = await Task.detached(priority: .utility) {
                 do {
-                    try context.makeTransport().writeFile(
+                    // UNGUARDED-WRITE(R): same config.yaml splice shape, disable path — E2 converts.
+                    try context.makeTransport().unguardedWriteFile(
                         path, data: Data(newYaml.utf8)
                     )
                     return .success(())
