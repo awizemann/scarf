@@ -41,6 +41,12 @@ public enum SkillsScanner: Sendable {
                         guard transport.stat(skillPath)?.isDirectory == true else { return nil }
                         let files = ((try? transport.listDirectory(skillPath)) ?? [])
                             .filter { !$0.hasPrefix(".") }
+                            // Guard artifacts, not skill content: the guarded
+                            // writers keep a one-deep `<name>.bak` beside what
+                            // they replace (GW-E2c gave the skill bootstrap
+                            // one). Listing it would put a second, stale copy
+                            // of every upgraded skill in the file picker.
+                            .filter { !$0.hasSuffix(".bak") }
                             .sorted()
                         let requiredConfig = readRequiredConfig(
                             yamlPath: skillPath + "/skill.yaml",

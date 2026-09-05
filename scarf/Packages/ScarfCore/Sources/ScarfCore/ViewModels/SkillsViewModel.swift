@@ -38,6 +38,19 @@ public final class SkillsViewModel {
     public var missingConfig: [String] = []
     public var isEditing = false
     public var editText = ""
+    /// The proof token behind `skillContent`. Nil means the current file was
+    /// never read successfully — the viewer shows an empty buffer and Save
+    /// is impossible, because saving that buffer is precisely how the old
+    /// `?? ""` loader destroyed skills (GW-E2c).
+    private var loadedContent: GuardedTextFile.Loaded?
+    /// Why the current file couldn't be read or saved. Nil when all is well.
+    /// The Skills editor reads this to explain a disabled Edit button.
+    public private(set) var contentError: String?
+    /// True when the selected file was read successfully and may be edited.
+    public var canEditSelectedFile: Bool { loadedContent != nil }
+    /// Skill files are hand-sized markdown. Past this a file is not an
+    /// editable buffer; the guard refuses rather than republishing it.
+    static let maxSkillFileBytes = 8 * 1024 * 1024
     /// True while the installed-skills scan is in flight. Renders a
     /// progress indicator on iOS; Mac historically didn't surface this
     /// from VM state but adding it doesn't break the existing UI.
@@ -226,10 +239,15 @@ public final class SkillsViewModel {
         let mainFile = skill.files.first(where: { $0.hasSuffix(".md") }) ?? skill.files.first
         if let file = mainFile {
             selectedFileName = file
-            skillContent = loadSkillContent(path: skill.path + "/" + file)
+            let path = skill.path + "/" + file
+            applyLoad(loadSkillContent(path: path), path: path)
         } else {
+            // No file to show is not a read failure — blank the viewer
+            // without an error.
             selectedFileName = nil
+            loadedContent = nil
             skillContent = ""
+            contentError = nil
         }
         missingConfig = computeMissingConfig(for: skill)
     }
@@ -247,7 +265,8 @@ public final class SkillsViewModel {
     public func selectFile(_ file: String) {
         guard let skill = selectedSkill else { return }
         selectedFileName = file
-        skillContent = loadSkillContent(path: skill.path + "/" + file)
+        let path = skill.path + "/" + file
+        applyLoad(loadSkillContent(path: path), path: path)
     }
 
     public var isMarkdownFile: Bool {
@@ -259,7 +278,11 @@ public final class SkillsViewModel {
         return skill.path + "/" + file
     }
 
+    /// Arms the editor. A file that was never read successfully cannot be
+    /// edited at all — the empty buffer on screen is not its contents, and
+    /// letting Save publish it is the bug GW-E2c closes.
     public func startEditing() {
+        guard canEditSelectedFile else { return }
         editText = skillContent
         isEditing = true
     }
@@ -267,12 +290,28 @@ public final class SkillsViewModel {
     public func saveEdit() {
         guard let path = currentFilePath else { return }
         saveSkillContent(path: path, content: editText)
+        // A refused or failed save leaves `contentError` set. Keep the
+        // editor open on the user's text rather than dismissing it and
+        // showing a `skillContent` that no longer matches the file.
+        guard contentError == nil else { return }
         skillContent = editText
         isEditing = false
     }
 
     public func cancelEditing() {
         isEditing = false
+    }
+
+    /// Deselect and blank the viewer. Goes through the view model rather
+    /// than having the list set `skillContent` directly, so the proof token
+    /// behind that text is dropped with it — a stale token plus a blanked
+    /// buffer is the exact pair that must never be savable.
+    public func clearSelection() {
+        selectedSkill = nil
+        selectedFileName = nil
+        loadedContent = nil
+        skillContent = ""
+        contentError = nil
     }
 
     // MARK: - Hub browse / search / install / update
@@ -732,22 +771,66 @@ public final class SkillsViewModel {
         }
     }
 
-    private func loadSkillContent(path: String) -> String {
-        guard isValidSkillPath(path) else { return "" }
-        guard let data = try? transport.readFile(path),
-              let s = String(data: data, encoding: .utf8)
-        else { return "" }
-        return s
+    /// The load that arms (or disarms) the editor.
+    ///
+    /// **Guarded (GW-E2c).** This used to return `""` for every failure —
+    /// an unreadable file, a dropped SSH round-trip, a non-UTF-8 byte — and
+    /// the editor happily armed Save over that empty buffer, publishing an
+    /// empty file over a skill whose text exists nowhere else. The fix is
+    /// not a check inside the writer: it is making the unsavable state
+    /// unrepresentable. A failed load now leaves `loadedContent` NIL, and
+    /// `saveSkillContent` has no path that can write without one.
+    private func loadSkillContent(path: String) -> GuardedTextFile.Loaded? {
+        guard isValidSkillPath(path) else { return nil }
+        do {
+            return try GuardedTextFile(transport: transport, label: "SKILL.md")
+                .load(path, maxBytes: Self.maxSkillFileBytes)
+        } catch {
+            logger.error("loadSkillContent(\(path, privacy: .public)) refused: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// Apply a load to the editor's state. A refused load blanks the
+    /// viewer, records the reason, and drops the proof token — which is
+    /// exactly what makes Save impossible until a successful load replaces
+    /// it.
+    private func applyLoad(_ loaded: GuardedTextFile.Loaded?, path: String) {
+        loadedContent = loaded
+        skillContent = loaded?.text ?? ""
+        if loaded == nil {
+            contentError = "\(path) couldn't be read. Editing is disabled so an empty file can't be saved over it."
+        } else {
+            contentError = nil
+        }
     }
 
     private func saveSkillContent(path: String, content: String) {
         guard isValidSkillPath(path) else { return }
-        guard let data = content.data(using: .utf8) else { return }
+        // No proof token ⇒ the buffer on screen was never the file's real
+        // contents ⇒ there is nothing legitimate to save.
+        guard let loaded = loadedContent else {
+            logger.error("saveSkillContent(\(path, privacy: .public)) refused: no successful load backs this buffer")
+            contentError = "Not saved — \(path) was never read successfully."
+            return
+        }
         do {
-            // UNGUARDED-WRITE(R): loadSkillContent returns "" on a failed read, so the editor can save an empty buffer over the skill — E2 converts.
-            try transport.unguardedWriteFile(path, data: data)
+            try GuardedTextFile(transport: transport, label: "SKILL.md")
+                .write(content, to: path, after: loaded)
+            // The token now describes what is actually on disk, so a second
+            // save in the same sitting backs up the version it replaces
+            // rather than the one two saves ago.
+            loadedContent = GuardedTextFile.Loaded(
+                text: content,
+                exists: true,
+                inspection: GuardedJSONStore.Inspection(
+                    state: .present, bytes: Data(content.utf8)
+                )
+            )
+            contentError = nil
         } catch {
             logger.error("saveSkillContent(\(path, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
+            contentError = "Couldn't save \(path): \(error.localizedDescription)"
         }
     }
 

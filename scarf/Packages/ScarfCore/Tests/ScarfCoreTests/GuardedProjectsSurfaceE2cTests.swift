@@ -1,0 +1,355 @@
+import Testing
+import Foundation
+@testable import ScarfCore
+
+/// GW-E2c — the ScarfCore half of the projects/skills/bots write surface
+/// converted off destroy-shaped read-modify-write: `AGENTS.md`'s
+/// `removeBlock`, mini-app `state.json`, the Skills editor's `SKILL.md`, and
+/// a bot's `profile.yaml`.
+///
+/// W1 shape throughout: real files, real `LocalTransport`. The bug being
+/// tested is always what the WRITER BELIEVES about a file it could not read,
+/// and a fake transport that answers honestly proves nothing about that. The
+/// unreadable cases use mode 0000, which only produces an unreadable file for
+/// a non-root user, so they self-skip under root.
+@Suite struct GuardedProjectsSurfaceE2cTests {
+
+    private static var runningAsRoot: Bool { getuid() == 0 }
+
+    private static func withScratch(_ body: sending (URL) async throws -> Void) async throws {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-e2c-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: base.path
+            )
+            try? FileManager.default.removeItem(at: base)
+        }
+        try await body(base)
+    }
+
+    private static func chmod(_ path: String, _ mode: Int) throws {
+        try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: path)
+    }
+
+    private static func text(_ path: String) -> String? {
+        (try? Data(contentsOf: URL(fileURLWithPath: path))).flatMap {
+            String(data: $0, encoding: .utf8)
+        }
+    }
+
+    private static func write(_ contents: String, to path: String) throws {
+        try FileManager.default.createDirectory(
+            atPath: (path as NSString).deletingLastPathComponent,
+            withIntermediateDirectories: true
+        )
+        try Data(contents.utf8).write(to: URL(fileURLWithPath: path))
+    }
+
+    // MARK: - ProjectContextBlock.removeBlock (AGENTS.md)
+
+    private static func agentsMd(withBlock block: String) -> String {
+        "# My project\n\nMy own notes.\n\n"
+            + ProjectContextBlock.beginMarker + "\n" + block + "\n"
+            + ProjectContextBlock.endMarker + "\n\nMore of my notes.\n"
+    }
+
+    @Test func removeBlockStripsTheBlockAndBacksUpWhatItReplaced() async throws {
+        try await Self.withScratch { base in
+            let project = base.appendingPathComponent("proj").path
+            let path = project + "/AGENTS.md"
+            let original = Self.agentsMd(withBlock: "scarf stuff")
+            try Self.write(original, to: path)
+
+            try ProjectContextBlock.removeBlock(forProjectAt: project, context: .local)
+
+            let after = try #require(Self.text(path))
+            #expect(!after.contains(ProjectContextBlock.beginMarker))
+            #expect(after.contains("My own notes."))
+            #expect(after.contains("More of my notes."))
+            #expect(
+                Self.text(path + ".bak") == original,
+                "the sibling writeBlock keeps a .bak; this half must produce the same one"
+            )
+        }
+    }
+
+    @Test func removeBlockRefusesOnAnUnreadableAgentsMdAndLeavesItIntact() async throws {
+        try #require(!Self.runningAsRoot)
+        try await Self.withScratch { base in
+            let project = base.appendingPathComponent("proj").path
+            let path = project + "/AGENTS.md"
+            let original = Self.agentsMd(withBlock: "scarf stuff")
+            try Self.write(original, to: path)
+            try Self.chmod(path, 0o000)
+
+            #expect(throws: ProjectContextBlock.WriteError.self) {
+                try ProjectContextBlock.removeBlock(forProjectAt: project, context: .local)
+            }
+
+            try Self.chmod(path, 0o644)
+            #expect(Self.text(path) == original, "a blipped read must never republish a splice")
+        }
+    }
+
+    @Test func removeBlockOnAnAbsentAgentsMdIsASilentNoOp() async throws {
+        try await Self.withScratch { base in
+            let project = base.appendingPathComponent("proj").path
+            try FileManager.default.createDirectory(
+                atPath: project, withIntermediateDirectories: true
+            )
+            try ProjectContextBlock.removeBlock(forProjectAt: project, context: .local)
+            #expect(!FileManager.default.fileExists(atPath: project + "/AGENTS.md"))
+        }
+    }
+
+    // MARK: - MiniAppStore (state.json)
+
+    @Test func miniAppStoreWritesFreshStateWhenTheFileIsAbsent() async throws {
+        try await Self.withScratch { base in
+            let project = base.appendingPathComponent("proj").path
+            let store = MiniAppStore(context: .local)
+            try store.set(projectPath: project, miniAppId: "app", key: "k", value: "\"v\"")
+            #expect(store.get(projectPath: project, miniAppId: "app", key: "k") == "\"v\"")
+        }
+    }
+
+    @Test func miniAppStoreRefusesToRepublishOverAnUnreadableStateFile() async throws {
+        try #require(!Self.runningAsRoot)
+        try await Self.withScratch { base in
+            let project = base.appendingPathComponent("proj").path
+            let store = MiniAppStore(context: .local)
+            try store.set(projectPath: project, miniAppId: "app", key: "keep", value: "\"me\"")
+            let path = MiniAppStore.statePath(projectPath: project, miniAppId: "app")
+            let original = try #require(Self.text(path))
+            try Self.chmod(path, 0o000)
+
+            #expect(throws: GuardedStoreError.self) {
+                try store.set(projectPath: project, miniAppId: "app", key: "new", value: "\"x\"")
+            }
+
+            try Self.chmod(path, 0o644)
+            #expect(
+                Self.text(path) == original,
+                "one blip used to publish {} over the mini-app's whole state"
+            )
+        }
+    }
+
+    /// Mini-app state is app-owned and re-creatable, so it follows the
+    /// SIDECAR half of the store's doctrine: undecodable bytes are copied
+    /// aside and the file is rebuilt, rather than frozen forever.
+    @Test func miniAppStoreQuarantinesUndecodableStateAndRebuilds() async throws {
+        try await Self.withScratch { base in
+            let project = base.appendingPathComponent("proj").path
+            let path = MiniAppStore.statePath(projectPath: project, miniAppId: "app")
+            try Self.write("{ this is not json", to: path)
+            QuarantineMemo.shared.reset()
+
+            let store = MiniAppStore(context: .local)
+            try store.set(projectPath: project, miniAppId: "app", key: "k", value: "\"v\"")
+
+            #expect(store.get(projectPath: project, miniAppId: "app", key: "k") == "\"v\"")
+            let dir = (path as NSString).deletingLastPathComponent
+            let copies = (try? FileManager.default.contentsOfDirectory(atPath: dir))?
+                .filter { $0.hasPrefix("state.json.corrupt-") } ?? []
+            #expect(copies.count == 1, "the unusable bytes must survive somewhere")
+            // A quarantined predecessor is NOT a backup (P8 DI-M2).
+            #expect(!FileManager.default.fileExists(atPath: path + ".bak"))
+        }
+    }
+
+    @Test func miniAppStoreKeepsABakOfTheStateItReplaces() async throws {
+        try await Self.withScratch { base in
+            let project = base.appendingPathComponent("proj").path
+            let store = MiniAppStore(context: .local)
+            try store.set(projectPath: project, miniAppId: "app", key: "a", value: "1")
+            let path = MiniAppStore.statePath(projectPath: project, miniAppId: "app")
+            let first = try #require(Self.text(path))
+            try store.set(projectPath: project, miniAppId: "app", key: "b", value: "2")
+            #expect(Self.text(path + ".bak") == first)
+            #expect(store.get(projectPath: project, miniAppId: "app", key: "a") == "1")
+        }
+    }
+
+    // MARK: - SkillsViewModel (SKILL.md)
+
+    /// The whole point of the conversion: the `""`-loader case must have no
+    /// path to a save. The editor cannot even be armed.
+    @MainActor
+    @Test func unreadableSkillCannotBeEditedOrSavedBack() async throws {
+        try #require(!Self.runningAsRoot)
+        try await Self.withScratch { base in
+            let home = base.appendingPathComponent("hermes")
+            let ctx = ServerContext.local(home: home)
+            let skillDir = ctx.paths.skillsDir + "/writing/haiku"
+            let path = skillDir + "/SKILL.md"
+            let original = "---\nname: haiku\n---\n\nfive seven five\n"
+            try Self.write(original, to: path)
+            try Self.chmod(path, 0o000)
+
+            let vm = SkillsViewModel(context: ctx)
+            vm.selectSkill(
+                HermesSkill(
+                    id: "writing/haiku", name: "haiku", category: "writing",
+                    path: skillDir, files: ["SKILL.md"], requiredConfig: []
+                )
+            )
+            #expect(vm.skillContent.isEmpty)
+            #expect(vm.canEditSelectedFile == false)
+            #expect(vm.contentError != nil, "the user has to be told why Edit is dead")
+
+            // Even driving the editor by hand can't publish the empty buffer.
+            vm.startEditing()
+            #expect(vm.isEditing == false)
+            vm.editText = ""
+            vm.saveEdit()
+
+            try Self.chmod(path, 0o644)
+            #expect(
+                Self.text(path) == original,
+                "the loader's empty buffer must never reach the file"
+            )
+        }
+    }
+
+    @MainActor
+    @Test func readableSkillEditsSaveAndKeepABak() async throws {
+        try await Self.withScratch { base in
+            let home = base.appendingPathComponent("hermes")
+            let ctx = ServerContext.local(home: home)
+            let skillDir = ctx.paths.skillsDir + "/writing/haiku"
+            let path = skillDir + "/SKILL.md"
+            let original = "---\nname: haiku\n---\n\nfive seven five\n"
+            try Self.write(original, to: path)
+
+            let vm = SkillsViewModel(context: ctx)
+            vm.selectSkill(
+                HermesSkill(
+                    id: "writing/haiku", name: "haiku", category: "writing",
+                    path: skillDir, files: ["SKILL.md"], requiredConfig: []
+                )
+            )
+            #expect(vm.skillContent == original)
+            #expect(vm.canEditSelectedFile)
+            vm.startEditing()
+            #expect(vm.isEditing)
+            vm.editText = original + "\nedited\n"
+            vm.saveEdit()
+
+            #expect(vm.isEditing == false)
+            #expect(vm.contentError == nil)
+            #expect(Self.text(path) == original + "\nedited\n")
+            #expect(Self.text(path + ".bak") == original)
+        }
+    }
+
+    // MARK: - BotsService (profile.yaml)
+
+    private static func makeBots(root: String) -> BotsService {
+        BotsService(
+            transport: LocalTransport(),
+            paths: HermesPathSet(home: root, isRemote: false, binaryHint: nil),
+            capabilities: HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)")
+        )
+    }
+
+    @Test func saveIdentityRefusesOnAnUnreadableProfileYAMLAndLeavesItIntact() async throws {
+        try #require(!Self.runningAsRoot)
+        try await Self.withScratch { base in
+            let root = base.appendingPathComponent(".hermes").path
+            let path = root + "/profiles/zeta/profile.yaml"
+            let original = "name: Zeta\nrole: helper\nsomething_hermes_owns: keep-me\n"
+            try Self.write(original, to: path)
+            try Self.chmod(path, 0o000)
+
+            let service = Self.makeBots(root: root)
+            #expect(throws: BotsError.self) {
+                try service.saveIdentity(
+                    HermesBotIdentity(
+                        profileName: "zeta",
+                        profileDirectory: root + "/profiles/zeta",
+                        displayName: "Zeta",
+                        profileDescription: "changed"
+                    )
+                )
+            }
+
+            try Self.chmod(path, 0o644)
+            #expect(
+                Self.text(path) == original,
+                "a fileExists blip used to make the merge base \"\" and publish a stub"
+            )
+        }
+    }
+
+    @Test func saveIdentityMergesAHealthyProfileAndBacksItUp() async throws {
+        try await Self.withScratch { base in
+            let root = base.appendingPathComponent(".hermes").path
+            let path = root + "/profiles/zeta/profile.yaml"
+            let original = "name: Zeta\nrole: helper\nsomething_hermes_owns: keep-me\n"
+            try Self.write(original, to: path)
+
+            let service = Self.makeBots(root: root)
+            try service.saveIdentity(
+                HermesBotIdentity(
+                        profileName: "zeta",
+                        profileDirectory: root + "/profiles/zeta",
+                        displayName: "Zeta",
+                        profileDescription: "changed"
+                    )
+            )
+
+            let after = try #require(Self.text(path))
+            #expect(after.contains("keep-me"), "the YAML preservation contract still holds")
+            #expect(after.contains("changed"))
+            #expect(Self.text(path + ".bak") == original)
+        }
+    }
+
+    // MARK: - The shrinking allowlist
+
+    /// A converted site's `UNGUARDED-WRITE(R)` annotation is a lie, and the
+    /// E1 scanner enforces the allowlist only as it shrinks. Pin the
+    /// E2c manifest the same way E2a pinned its own.
+    @Test func everyE2cWriterRoutesThroughAGuardAndDroppedItsAnnotation() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()  // → ScarfCoreTests
+            .deletingLastPathComponent()  // → Tests
+            .deletingLastPathComponent()  // → ScarfCore
+            .deletingLastPathComponent()  // → Packages
+            .deletingLastPathComponent()  // → scarf
+            .deletingLastPathComponent()  // → repo root
+        let writers = [
+            "scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectContextBlock.swift",
+            "scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppStore.swift",
+            "scarf/Packages/ScarfCore/Sources/ScarfCore/Services/BotsService.swift",
+            "scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/SkillsViewModel.swift",
+            "scarf/scarf/Core/Services/ProjectConfigService.swift",
+            "scarf/scarf/Core/Services/ProjectManifestStore.swift",
+            "scarf/scarf/Core/Services/KanbanTenantResolver.swift",
+            "scarf/scarf/Core/Services/ProjectModelPresetBinding.swift",
+            "scarf/scarf/Core/Services/ProjectTemplateUninstaller.swift",
+            "scarf/scarf/Core/Services/SkillBootstrapService.swift",
+            "scarf/scarf/Core/Services/SlashCommandBootstrapService.swift",
+            "scarf/scarf/Core/Services/ProjectUpgradeService.swift",
+        ]
+        for relative in writers {
+            let url = root.appendingPathComponent(relative)
+            let source = try #require(
+                try? String(contentsOf: url, encoding: .utf8),
+                "missing \(relative) — the manifest is stale"
+            )
+            #expect(
+                source.contains("GuardedTextFile(") || source.contains("GuardedJSONStore")
+                    || source.contains("ProjectManifestStore("),
+                "\(relative) is an E2c-converted writer and must reach its file through a guard"
+            )
+            #expect(
+                !source.contains("UNGUARDED-WRITE(R)"),
+                "\(relative) still carries an R annotation — a converted site's annotation is a lie"
+            )
+        }
+    }
+}

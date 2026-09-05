@@ -56,35 +56,26 @@ struct ProjectModelPresetBinding: Sendable {
     // MARK: - Private
 
     nonisolated private func readManifest(for project: ProjectEntry) -> ProjectTemplateManifest? {
-        let path = manifestPath(for: project)
-        let transport = context.makeTransport()
-        guard transport.fileExists(path),
-              let data = try? transport.readFile(path)
-        else {
-            return nil
-        }
-        return try? JSONDecoder().decode(ProjectTemplateManifest.self, from: data)
+        ProjectManifestStore(context: context).read(for: project)
     }
 
+    /// Persist the binding through the file's ONE guarded writer
+    /// (`ProjectManifestStore`, GW-E2c). The old body read the manifest,
+    /// re-encoded it through `ProjectTemplateManifest`, and on a failed read
+    /// wrote a `0.0.0` sentinel over whatever was there — so a dropped
+    /// round-trip while binding a model preset erased a template project's
+    /// real manifest, and even the success path dropped every key Scarf
+    /// doesn't model.
     nonisolated private func persist(presetID: String?, for project: ProjectEntry) throws {
-        let path = manifestPath(for: project)
-        let transport = context.makeTransport()
-
-        // Ensure .scarf/ exists.
-        let scarfDir = project.scarfDir
-        if !transport.fileExists(scarfDir) {
-            try transport.createDirectory(scarfDir)
-        }
-
-        let updated: ProjectTemplateManifest
-        if let existing = readManifest(for: project) {
-            var copy = existing
-            copy.modelPresetID = presetID
-            updated = copy
-        } else {
+        try ProjectManifestStore(context: context).setField(
+            "modelPresetID",
+            to: presetID.map { JSONValue.string($0) },
+            for: project
+        ) {
             // Bare-project sentinel manifest — same shape
-            // `KanbanTenantResolver.persist` writes for first-mint.
-            updated = ProjectTemplateManifest(
+            // `KanbanTenantResolver.persist` writes for first-mint. Reached
+            // only when the file is PROVABLY absent.
+            ProjectTemplateManifest(
                 schemaVersion: 3,
                 id: "scarf/\(project.id)",
                 name: project.name,
@@ -112,15 +103,5 @@ struct ProjectModelPresetBinding: Sendable {
                 modelPresetID: presetID
             )
         }
-
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(updated)
-        // UNGUARDED-WRITE(R): manifest.json sentinel fallback on a failed read, and unknown keys dropped — E2 converts with KanbanTenantResolver.
-        try transport.unguardedWriteFile(path, data: data)
-    }
-
-    nonisolated private func manifestPath(for project: ProjectEntry) -> String {
-        project.scarfDir + "/manifest.json"
     }
 }

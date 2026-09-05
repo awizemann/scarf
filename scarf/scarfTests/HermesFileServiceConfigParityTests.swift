@@ -692,10 +692,18 @@ struct AllConfigWritersParityTests {
         // memory snapshot) out of the discovered set.
         // (GW-E2a) The direct-YAML writers now publish through the shared
         // `GuardedTextFile` instead of `context.unguardedWriteText`, so the
-        // marker follows the guard. Both orderings are still listed because
-        // the path constant and the write can appear either way round.
-        #"paths\.configYAML[\s\S]*?GuardedTextFile\("#,
-        #"GuardedTextFile\([\s\S]*?paths\.configYAML"#,
+        // marker follows the guard.
+        //
+        // (GW-E2c) It matches the guard's LABEL rather than spanning from a
+        // `GuardedTextFile(` to a `paths.configYAML` anywhere later in the
+        // file. That span was a false positive by construction the moment a
+        // second file guarded some OTHER text file and also happened to
+        // mention `paths.configYAML` — which `SkillsViewModel` does, guarding
+        // `SKILL.md` while reading config.yaml to compute missing config. All
+        // five config.yaml writers name the label on the construction line,
+        // and the label is the thing that actually says "this writes
+        // config.yaml".
+        #"GuardedTextFile\([^\n]*label:\s*"config\.yaml""#,
     ]
 
     private static func swiftFiles() -> [String] {

@@ -35,36 +35,63 @@ public struct MiniAppStore: Sendable {
 
     /// The stored JSON string for `key`, or `nil` if unset / unreadable.
     public nonisolated func get(projectPath: String, miniAppId: String, key: String) -> String? {
-        load(projectPath: projectPath, miniAppId: miniAppId)[key]
+        load(projectPath: projectPath, miniAppId: miniAppId).state[key]
     }
 
     /// Set (or, with an empty key guard, reject) a key to a JSON string.
     /// Read-modify-write of the whole state file. Throws on I/O failure.
+    ///
+    /// **Guarded (GW-E2c).** `load` used to be the textbook destroy shape —
+    /// `try? readFile … ?? [:]` — and `set` published whatever came back.
+    /// One dropped SSH round-trip on a healthy remote therefore replaced the
+    /// mini-app's entire state with `{}`. The inspection that answered the
+    /// read is now carried into the write (`GuardedJSONStore`): a
+    /// stat-confirmed file that fails two reads REFUSES the write, and bytes
+    /// that won't decode are quarantined to `state.json.corrupt-<stamp>` and
+    /// rebuilt from empty — the sidecar half of the store's doctrine, which
+    /// is right here because mini-app state is app-owned and re-creatable,
+    /// unlike `projects.json`'s rows.
     public nonisolated func set(projectPath: String, miniAppId: String, key: String, value: String) throws {
         guard !key.isEmpty else { throw StoreError.invalidKey }
-        var state = load(projectPath: projectPath, miniAppId: miniAppId)
+        let loaded = load(projectPath: projectPath, miniAppId: miniAppId)
+        var state = loaded.state
         state[key] = value
-        try write(state, projectPath: projectPath, miniAppId: miniAppId)
+        try write(
+            state,
+            projectPath: projectPath,
+            miniAppId: miniAppId,
+            after: loaded.inspection
+        )
     }
 
     // MARK: - Private
 
-    private nonisolated func load(projectPath: String, miniAppId: String) -> [String: String] {
+    private nonisolated func load(
+        projectPath: String, miniAppId: String
+    ) -> (state: [String: String], inspection: GuardedJSONStore.Inspection) {
         let path = Self.statePath(projectPath: projectPath, miniAppId: miniAppId)
         let transport = context.makeTransport()
-        // One probe: both absent and unreadable already mean "empty
-        // state" to this caller.
-        guard let data = try? transport.readFile(path) else { return [:] }
-        if data.count > Self.maxBytes {
-            #if canImport(os)
-            Self.logger.warning("mini-app state for \(miniAppId, privacy: .public) is \(data.count) bytes (cap \(Self.maxBytes)); treating as empty")
-            #endif
-            return [:]
+        // One read on the healthy path; the stat + retry probe below it runs
+        // only after a read has already failed. Oversized and undecodable
+        // both land in `.quarantined`, which still reads as empty state to
+        // `get` — the same answer the old size/decode fallbacks gave — but
+        // the bytes now survive in the quarantine copy.
+        let (inspection, decoded) = GuardedJSONStore(transport: transport, label: "state.json")
+            .inspectDecoding([String: String].self, at: path, maxBytes: Self.maxBytes)
+        #if canImport(os)
+        if case .quarantined(let copy) = inspection.state {
+            Self.logger.warning("mini-app state for \(miniAppId, privacy: .public) was unusable; quarantined to \(copy, privacy: .public) and rebuilding")
         }
-        return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
+        #endif
+        return (decoded ?? [:], inspection)
     }
 
-    private nonisolated func write(_ state: [String: String], projectPath: String, miniAppId: String) throws {
+    private nonisolated func write(
+        _ state: [String: String],
+        projectPath: String,
+        miniAppId: String,
+        after inspection: GuardedJSONStore.Inspection
+    ) throws {
         let dir = MiniAppService.miniAppDir(forProjectPath: projectPath, id: miniAppId)
         let transport = context.makeTransport()
         if !transport.fileExists(dir) {
@@ -72,10 +99,10 @@ public struct MiniAppStore: Sendable {
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        // UNGUARDED-WRITE(R): load() is try? readFile ?? [:], so one blip publishes {} — E2 converts.
-        try transport.unguardedWriteFile(
-            Self.statePath(projectPath: projectPath, miniAppId: miniAppId),
-            data: encoder.encode(state)
+        try GuardedJSONStore(transport: transport, label: "state.json").write(
+            try encoder.encode(state),
+            to: Self.statePath(projectPath: projectPath, miniAppId: miniAppId),
+            after: inspection
         )
     }
 

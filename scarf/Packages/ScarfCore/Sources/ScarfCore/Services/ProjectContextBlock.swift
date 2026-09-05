@@ -125,24 +125,48 @@ public enum ProjectContextBlock {
     /// No-op — and never an error — when the file or the block is absent:
     /// this runs on the project-removal path, where refusing to finish
     /// because a markdown file was missing would be absurd.
+    ///
+    /// **Guarded (GW-E2c).** The sibling `writeBlock` below has had the
+    /// proof discipline since W1; this half was left behind, and "the guard
+    /// belongs to the FILE, applied by whichever writer someone audited" is
+    /// exactly the disease this phase exists to end. It used to open with a
+    /// bare `fileExists` (inference — a dropped SSH round-trip answers
+    /// `false` and the removal silently does nothing) and then splice a read
+    /// that had no stat+retry proof and no `.bak`: a truncated-but-successful
+    /// read that still carried both markers republished the truncation over
+    /// the user's project instructions.
+    ///
+    /// Now it goes through `GuardedTextFile`, the same guard `writeBlock`'s
+    /// policy was factored into — proof of damage, a refusal on unreadable
+    /// or non-UTF-8 bytes, and a one-deep `AGENTS.md.bak` of whatever gets
+    /// replaced (the same `.bak` naming `writeBlock` produces, because it is
+    /// literally the same publisher).
     public static func removeBlock(
         forProjectAt projectPath: String,
         context: ServerContext
     ) throws {
         let transport = context.makeTransport()
         let agentsMdPath = projectPath + "/AGENTS.md"
-        guard transport.fileExists(agentsMdPath) else { return }
-        let existingData = try transport.readFile(agentsMdPath)
-        // Bytes we can't decode as text are left ALONE — the block can't be
-        // in them, and `?? ""` would offer the splice an empty document.
-        guard let existing = String(data: existingData, encoding: .utf8) else { return }
-        let rewritten = removeBlock(from: existing)
-        guard rewritten != existing else { return }
-        guard let outData = rewritten.data(using: .utf8) else {
-            throw WriteError.encodingFailed
+        let guarded = GuardedTextFile(transport: transport, label: "AGENTS.md")
+        let loaded: GuardedTextFile.Loaded
+        do {
+            loaded = try guarded.load(agentsMdPath, maxBytes: maxAgentsBytes)
+        } catch let refusal as GuardedTextFile.Refusal {
+            switch refusal {
+            case .unreadable(let damaged, _):
+                throw WriteError.refusedUnreadable(path: damaged)
+            case .notUTF8:
+                // Bytes we hold but can't decode are left ALONE, exactly as
+                // before: the managed block cannot be inside them, so there
+                // is nothing to remove and nothing to report.
+                return
+            }
         }
-        // UNGUARDED-WRITE(R): removeBlock splices AGENTS.md with no stat+retry proof and no .bak; sibling writeBlock is guarded — E2 converts.
-        try transport.unguardedWriteFile(agentsMdPath, data: outData)
+        // Absent is a no-op, not an error — see the doc comment.
+        guard loaded.exists else { return }
+        let rewritten = removeBlock(from: loaded.text)
+        guard rewritten != loaded.text else { return }
+        try guarded.write(rewritten, to: agentsMdPath, after: loaded)
     }
 
     /// Read `<project>/AGENTS.md`, splice in the given block, write

@@ -130,12 +130,20 @@ struct ProjectUpgradeService: Sendable {
         // 4. Ensure a `dashboard.json` so the Dashboard panel lights up —
         //    placeholder ONLY if none exists. Never clobber a real dashboard;
         //    the agent replaces the placeholder during enrichment.
+        //    **The gate is the guard here (GW-E2c).** This is not an RMW —
+        //    the placeholder is composed in memory — but it was destroy-shaped
+        //    by INFERENCE: `!transport.fileExists(path)`, one round trip, and
+        //    a dropped one answers `false`. The placeholder then landed on top
+        //    of a real, agent-enriched dashboard. Absence now takes proof
+        //    (`probeExistence`: two independent probes must agree), and
+        //    anything short of proven-absent skips, exactly as a `true`
+        //    `fileExists` always did.
         var dashboardSeeded = false
         let dashboardPath = scarfDir + "/dashboard.json"
-        if !transport.fileExists(dashboardPath) {
+        if GuardedJSONStore.probeExistence(dashboardPath, transport: transport) == .provenAbsent {
             do {
                 let data = try ProjectScaffolder.makePlaceholderDashboard(name: project.name, description: nil)
-                // UNGUARDED-WRITE(R): placeholder gated only on !fileExists — a dropped round-trip answers false and overwrites a real dashboard. E2 converts the gate.
+                // UNGUARDED-WRITE(C): placeholder into a path two independent probes proved empty.
                 try transport.unguardedWriteFile(dashboardPath, data: data)
                 dashboardSeeded = true
             } catch {

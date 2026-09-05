@@ -89,7 +89,10 @@ struct SlashCommandBootstrapService: Sendable {
 
     // MARK: - Per-command install
 
-    private nonisolated func installCommand(
+    /// `internal` (not `private`) for the same reason
+    /// `SkillBootstrapService.installSkill` is: GW-E2c's skip-on-unreadable
+    /// case needs to be reachable without a populated app bundle.
+    nonisolated func installCommand(
         from sourceFile: URL,
         named commandName: String,
         transport: any ServerTransport
@@ -99,11 +102,30 @@ struct SlashCommandBootstrapService: Sendable {
         let bundledData = try Data(contentsOf: sourceFile)
         let bundledVersion = Self.parseVersion(bundledData) ?? "0.0.0"
 
-        let installedVersion: String? = {
-            guard transport.fileExists(destPath) else { return nil }
-            guard let data = try? transport.readFile(destPath) else { return nil }
-            return Self.parseVersion(data)
-        }()
+        // **Proof, not inference (GW-E2c)** — the same conversion, for the
+        // same reason, as `SkillBootstrapService`'s version gate: a failed
+        // read used to read as "missing" and downgrade the user's
+        // hand-edited command to the bundled copy, permanently (the version
+        // check then said "current" on every later launch).
+        let guarded = GuardedJSONStore(transport: transport, label: "slash command")
+        let inspection = guarded.inspect(destPath, maxBytes: SkillBootstrapService.maxBootstrapBytes)
+        let installedVersion: String?
+        switch inspection.state {
+        case .absent:
+            installedVersion = nil
+        case .unreadable(let damaged):
+            Self.logger.warning(
+                "slash command \(commandName, privacy: .public) at \(damaged, privacy: .public) exists but couldn't be read; skipping the bootstrap rather than replacing a file we can't see"
+            )
+            return
+        case .quarantined:
+            Self.logger.warning(
+                "slash command \(commandName, privacy: .public) at \(destPath, privacy: .public) is past the bootstrap size cap; skipping"
+            )
+            return
+        case .present:
+            installedVersion = Self.parseVersion(inspection.bytes ?? Data())
+        }
 
         // Only copy when the destination is missing OR older than the
         // bundled copy. A user with a newer hand-edited command keeps
@@ -116,8 +138,9 @@ struct SlashCommandBootstrapService: Sendable {
             return
         }
 
-        // UNGUARDED-WRITE(R): same version-gate-by-inference shape as SkillBootstrapService — E2 converts.
-        try transport.unguardedWriteFile(destPath, data: bundledData)
+        // Guarded publish — one-deep `<name>.md.bak` of the version being
+        // upgraded away from.
+        try guarded.write(bundledData, to: destPath, after: inspection)
 
         Self.logger.info(
             "bootstrapped slash command \(commandName, privacy: .public) at v\(bundledVersion, privacy: .public) (was: \(installedVersion ?? "missing", privacy: .public))"

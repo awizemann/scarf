@@ -25,6 +25,10 @@ import ScarfCore
 struct SkillBootstrapService: Sendable {
     private nonisolated static let logger = Logger(subsystem: "com.scarf", category: "SkillBootstrapService")
 
+    /// Ceiling for the installed-copy probe. A SKILL.md is hand-sized
+    /// markdown; past this we neither parse it nor replace it.
+    nonisolated static let maxBootstrapBytes = 8 * 1024 * 1024
+
     let context: ServerContext
 
     nonisolated init(context: ServerContext = .local) {
@@ -282,7 +286,11 @@ struct SkillBootstrapService: Sendable {
     ///   outdated destination), `false` when the installed copy was already
     ///   current and nothing was touched. The caller sums these into the one
     ///   `skills_bootstrapped` event.
-    private nonisolated func installSkill(
+    /// `internal` (not `private`) so GW-E2c's "a blipped read must not
+    /// downgrade a hand-edited SKILL.md" case is directly testable — reaching
+    /// it through `ensureBundledSkillsInstalled` would need a populated app
+    /// bundle inside the test host.
+    nonisolated func installSkill(
         from sourceDir: URL,
         named skillName: String,
         transport: any ServerTransport
@@ -332,11 +340,36 @@ struct SkillBootstrapService: Sendable {
         let bundledData = try Data(contentsOf: bundledSkillMd)
         let bundledVersion = Self.parseVersion(bundledData) ?? "0.0.0"
 
-        let installedVersion: String? = {
-            guard transport.fileExists(destSkillMd) else { return nil }
-            guard let data = try? transport.readFile(destSkillMd) else { return nil }
-            return Self.parseVersion(data)
-        }()
+        // **Proof, not inference (GW-E2c).** The "keep the user's newer
+        // edit" decision used to rest on `fileExists` + `try? readFile`,
+        // both collapsing to "missing" — so one dropped SSH round trip
+        // downgraded a hand-edited SKILL.md to the bundled copy with no
+        // backup, and the version check then reported "current" forever
+        // after. `inspect` gives absence a stat-confirm + retried read, and
+        // a file that is provably there but unreadable now SKIPS the
+        // install rather than overwriting text nobody has seen.
+        let guarded = GuardedJSONStore(transport: transport, label: "SKILL.md")
+        let inspection = guarded.inspect(destSkillMd, maxBytes: Self.maxBootstrapBytes)
+        let installedVersion: String?
+        switch inspection.state {
+        case .absent:
+            installedVersion = nil
+        case .unreadable(let damaged):
+            Self.logger.warning(
+                "skill \(skillName, privacy: .public) at \(damaged, privacy: .public) exists but couldn't be read; skipping the bootstrap rather than replacing a file we can't see"
+            )
+            return false
+        case .quarantined:
+            Self.logger.warning(
+                "skill \(skillName, privacy: .public) at \(destSkillMd, privacy: .public) is past the bootstrap size cap; skipping"
+            )
+            return false
+        case .present:
+            // An unparseable frontmatter version still reads as "older", as
+            // it always has — the bytes are in hand, so this is a content
+            // judgement, not a failed read.
+            installedVersion = Self.parseVersion(inspection.bytes ?? Data())
+        }
 
         // Only copy when the destination is missing OR older than the
         // bundled copy. A user with a newer hand-edited skill keeps
@@ -351,8 +384,9 @@ struct SkillBootstrapService: Sendable {
 
         try transport.createDirectory(categorizedRoot)
         try transport.createDirectory(destDir)
-        // UNGUARDED-WRITE(R): version gate rests on fileExists + try? readFile, so a blip downgrades a hand-edited SKILL.md — E2 converts.
-        try transport.unguardedWriteFile(destSkillMd, data: bundledData)
+        // Guarded publish: cheap insurance in the form of a one-deep
+        // `SKILL.md.bak` of the version being upgraded away from.
+        try guarded.write(bundledData, to: destSkillMd, after: inspection)
 
         // Carry any companion files (assets, examples, etc.) the skill
         // ships alongside SKILL.md. Walks one level deep — skills don't

@@ -92,6 +92,39 @@ public struct GuardedJSONStore: Sendable {
         self.label = label
     }
 
+    // MARK: - Existence
+
+    /// What an existence probe could PROVE about a path.
+    public enum Existence: Sendable, Equatable {
+        /// Two independent probes agreed there is nothing there.
+        case provenAbsent
+        /// Something is there, or we could not prove otherwise.
+        case present
+    }
+
+    /// "Is it safe to create this file?" answered with proof rather than one
+    /// `fileExists` (GW-E2c).
+    ///
+    /// The create-if-missing gate — `if !transport.fileExists(p) { write }` —
+    /// looks innocent and is the same inference bug as `try? read ?? []`
+    /// wearing a different hat: over SSH `fileExists` is a round trip, one
+    /// dropped round trip answers `false`, and the scaffold placeholder then
+    /// lands on top of the real, agent-authored file. Two independent probes
+    /// have to agree before we will call a path empty — cheap, because the
+    /// present path still answers on the FIRST probe and pays nothing.
+    ///
+    /// Deliberately does not read the file: callers of this helper are
+    /// deciding whether to CREATE, and pulling an unknown number of bytes
+    /// across a transport to answer a yes/no question is the wrong trade.
+    /// Callers that need the contents use `inspect` instead.
+    public nonisolated static func probeExistence(
+        _ path: String, transport: any ServerTransport
+    ) -> Existence {
+        if transport.fileExists(path) { return .present }
+        if transport.stat(path) != nil { return .present }
+        return .provenAbsent
+    }
+
     // MARK: - Read
 
     /// One read answering every question a guarded write has to ask: is

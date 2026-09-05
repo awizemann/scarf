@@ -127,14 +127,7 @@ struct KanbanTenantResolver: Sendable {
     }
 
     nonisolated private func readManifest(for project: ProjectEntry) -> ProjectTemplateManifest? {
-        let path = manifestPath(for: project)
-        let transport = context.makeTransport()
-        guard transport.fileExists(path),
-              let data = try? transport.readFile(path)
-        else {
-            return nil
-        }
-        return try? JSONDecoder().decode(ProjectTemplateManifest.self, from: data)
+        ProjectManifestStore(context: context).read(for: project)
     }
 
     /// Write the tenant back to `<project>/.scarf/manifest.json`. If
@@ -145,25 +138,22 @@ struct KanbanTenantResolver: Sendable {
     /// project's slug-form, version stays "0.0.0", and contents claims
     /// nothing — none of which the reader requires for the Kanban
     /// tenant line.
+    ///
+    /// **Guarded (GW-E2c).** Goes through `ProjectManifestStore`, the file's
+    /// one guarded writer, shared with `ProjectModelPresetBinding`. The old
+    /// body wrote the sentinel below whenever `readManifest` returned nil —
+    /// including when the read merely FAILED — so one dropped round-trip
+    /// while minting a Kanban tenant replaced a template project's real
+    /// manifest with a `0.0.0` stub. It also re-encoded through the model,
+    /// dropping every key Scarf doesn't declare; the store mutates the JSON
+    /// object graph instead, so those survive.
     nonisolated private func persist(tenant: String, for project: ProjectEntry) throws {
-        let path = manifestPath(for: project)
-        let transport = context.makeTransport()
-
-        // Ensure .scarf/ exists.
-        let scarfDir = project.scarfDir
-        if !transport.fileExists(scarfDir) {
-            try transport.createDirectory(scarfDir)
-        }
-
-        let updated: ProjectTemplateManifest
-        if let existing = readManifest(for: project) {
-            // Mutate the existing manifest in place. var fields permit
-            // this; let fields are preserved.
-            var copy = existing
-            copy.kanbanTenant = tenant
-            updated = copy
-        } else {
-            updated = ProjectTemplateManifest(
+        try ProjectManifestStore(context: context).setField(
+            "kanbanTenant",
+            to: .string(tenant),
+            for: project
+        ) {
+            ProjectTemplateManifest(
                 schemaVersion: 3,
                 id: ProjectManifestProjection.sentinelIDPrefix + project.id,
                 name: project.name,
@@ -190,15 +180,5 @@ struct KanbanTenantResolver: Sendable {
                 kanbanTenant: tenant
             )
         }
-
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(updated)
-        // UNGUARDED-WRITE(R): readManifest nil publishes a SENTINEL manifest over the real one — E2 converts.
-        try transport.unguardedWriteFile(path, data: data)
-    }
-
-    nonisolated private func manifestPath(for project: ProjectEntry) -> String {
-        project.scarfDir + "/manifest.json"
     }
 }

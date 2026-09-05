@@ -267,17 +267,34 @@ public struct BotsService: Sendable {
         // it as `""` and merging into that would REPLACE somebody's file with
         // a three-line stub. Refuse instead; the read path's "degrade to
         // empty" contract is for display only, never for a merge base.
-        let exists = transport.fileExists(path)
-        let current = readBoundedText(path, limit: Self.maxProfileYAMLBytes)
-        guard let current = exists ? current : (current ?? "") else {
+        //
+        // **Guarded (GW-E2c).** That distinction used to rest on
+        // `transport.fileExists` — INFERENCE. One dropped SSH round-trip
+        // answered `false`, the merge base became `""`, and a real
+        // profile.yaml (identity keys plus every key Scarf doesn't own, which
+        // Hermes and Hermes Desktop both write) collapsed to a stub. It now
+        // goes through `GuardedTextFile`: absent only when a stat could not
+        // confirm the file after a failed read, a refusal when it is provably
+        // there and unreadable or not UTF-8, and a one-deep `profile.yaml.bak`
+        // of whatever gets replaced.
+        //
+        // The size check stays AHEAD of the guarded load for the reason
+        // `loadAvatar` stats before reading: refusing an oversized file must
+        // not first pull it across the transport.
+        if let stat = transport.stat(path), stat.size > Int64(Self.maxProfileYAMLBytes) {
             throw BotsError.unsafeToWrite(path: path)
         }
-        guard let updated = HermesBotProfileYAML.write(identity: identity, into: current) else {
+        let guarded = GuardedTextFile(transport: transport, label: "profile.yaml")
+        let loaded: GuardedTextFile.Loaded
+        do {
+            loaded = try guarded.load(path, maxBytes: Self.maxProfileYAMLBytes)
+        } catch {
             throw BotsError.unsafeToWrite(path: path)
         }
-        guard let data = updated.data(using: .utf8) else { throw BotsError.unsafeToWrite(path: path) }
-        // UNGUARDED-WRITE(R): profile.yaml read-merge-write whose merge base is fileExists-inferred — E2 converts.
-        try transport.unguardedWriteFile(path, data: data)
+        guard let updated = HermesBotProfileYAML.write(identity: identity, into: loaded.text) else {
+            throw BotsError.unsafeToWrite(path: path)
+        }
+        try guarded.write(updated, to: path, after: loaded)
     }
 
     // MARK: - Lifecycle (hermes profile …)

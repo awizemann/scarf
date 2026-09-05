@@ -56,11 +56,30 @@ struct ProjectConfigService: Sendable {
     /// a schema-less template, or a hand-added project). Throws on
     /// malformed JSON so the caller can surface a concrete error
     /// rather than silently treating a corrupt file as missing.
+    ///
+    /// **Absent takes PROOF (GW-E2c).** This used to gate on
+    /// `transport.fileExists`, so a dropped round-trip reported "no config"
+    /// — and the Configuration form then opened on schema defaults and
+    /// SAVED them, wiping the real values. Guarding only `save` would not
+    /// have closed that: the destruction enters through the load.
     nonisolated func load(project: ProjectEntry) throws -> ProjectConfigFile? {
         let transport = context.makeTransport()
         let path = Self.configPath(for: project)
-        guard transport.fileExists(path) else { return nil }
-        let data = try transport.readFile(path)
+        let inspection = GuardedJSONStore(transport: transport, label: "config.json")
+            .inspect(path, maxBytes: Self.configMaxBytes)
+        switch inspection.state {
+        case .absent:
+            return nil
+        case .unreadable(let damaged):
+            throw GuardedStoreError.refusedUnreadableOverwrite(path: damaged, label: "config.json")
+        case .quarantined:
+            // Past the cap. Not a decodable config, and not ours to replace
+            // on the strength of a file we never parsed.
+            throw GuardedStoreError.refusedUnreadableOverwrite(path: path, label: "config.json")
+        case .present:
+            break
+        }
+        let data = inspection.bytes ?? Data()
         do {
             return try JSONDecoder().decode(ProjectConfigFile.self, from: data)
         } catch {
@@ -72,25 +91,67 @@ struct ProjectConfigService: Sendable {
     /// Write `<project>/.scarf/config.json`. Secrets should already be
     /// represented as `TemplateConfigValue.keychainRef` references here
     /// — this service never inspects their plaintext.
+    /// Cap shared verbatim with `ProjectMCPTools.configMaxBytes` — the same
+    /// file, so the same ceiling.
+    nonisolated static let configMaxBytes = 1 * 1024 * 1024
+
     nonisolated func save(
         project: ProjectEntry,
         templateId: String,
         values: [String: TemplateConfigValue]
     ) throws {
         let transport = context.makeTransport()
-        let file = ProjectConfigFile(
-            schemaVersion: 2,
-            templateId: templateId,
-            values: values,
-            updatedAt: ISO8601DateFormatter().string(from: Date())
+        let path = Self.configPath(for: project)
+
+        // GUARDED read-modify-write (GW-E2c) — the SAME policy the
+        // `scarf-projects` MCP `project_set_config` tool applies to this
+        // exact file, not a second one. That writer was guarded in W1 and
+        // this Mac-side one was not: the guard belonged to the FILE via
+        // whichever writer got audited, which is the whole disease this
+        // phase exists to end.
+        //
+        // The policy, matching `ProjectMCPTools.setConfig`:
+        //  * one proof-based inspection (stat-confirm + retried read) that
+        //    REFUSES the write when the file is provably there and
+        //    unreadable — rebuilding it would orphan every `keychain://`
+        //    reference in it, with no pointer left to the secrets;
+        //  * bytes that won't decode are quarantined, then rebuilt;
+        //  * the object graph is MUTATED, so every top-level key Scarf
+        //    doesn't own survives the round trip;
+        //  * a one-deep `config.json.bak` of whatever gets replaced.
+        let guarded = GuardedJSONStore(transport: transport, label: "config.json")
+        let (inspection, existingRoot) = guarded.inspectDecoding(
+            JSONValue.self, at: path, maxBytes: Self.configMaxBytes
         )
+        if case .unreadable = inspection.state {
+            throw GuardedStoreError.refusedUnreadableOverwrite(path: path, label: "config.json")
+        }
+        var root: [String: JSONValue] = [:]
+        if let existingRoot, case .object(let object) = existingRoot { root = object }
+
+        // Scarf's four keys, written from the caller's values; everything
+        // else in `root` is left exactly as it was found.
+        root["schemaVersion"] = .int(2)
+        root["templateId"] = .string(templateId)
+        root["values"] = try Self.jsonValues(from: values)
+        root["updatedAt"] = .string(ISO8601DateFormatter().string(from: Date()))
+
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(file)
-        let parent = (Self.configPath(for: project) as NSString).deletingLastPathComponent
-        try transport.createDirectory(parent)
-        // UNGUARDED-WRITE(R): config.json rebuilt from a fileExists-inferred load; the MCP writer of this same file is already guarded — E2 closes the parity gap.
-        try transport.unguardedWriteFile(Self.configPath(for: project), data: data)
+        let data = try encoder.encode(JSONValue.object(root))
+        try guarded.write(data, to: path, after: inspection)
+    }
+
+    /// Re-express the typed values as a `JSONValue` object so they can be
+    /// spliced into the graph read from disk. Routed through
+    /// `TemplateConfigValue`'s own `Codable` so the on-the-wire shape stays
+    /// byte-identical to what `JSONEncoder().encode(ProjectConfigFile)`
+    /// produced before this became a splice.
+    nonisolated private static func jsonValues(
+        from values: [String: TemplateConfigValue]
+    ) throws -> JSONValue {
+        let data = try JSONEncoder().encode(values)
+        return try JSONDecoder().decode(JSONValue.self, from: data)
     }
 
     // MARK: - Manifest cache (schema used by post-install editor)

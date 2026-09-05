@@ -899,8 +899,31 @@ struct ProjectTemplateUninstaller: Sendable {
         let beginMarker = ProjectTemplateService.memoryBlockBeginMarker(templateId: blockId)
         let endMarker = ProjectTemplateService.memoryBlockEndMarker(templateId: blockId)
 
-        let data = try transport.readFile(memoryPath)
-        guard let text = String(data: data, encoding: .utf8) else { return }
+        // **Guarded (GW-E2c).** The INSTALLER's appendix writer of this same
+        // file was guarded in G2; this half was left behind — the "guard
+        // belongs to the file, applied by whichever writer got audited"
+        // pattern. It read with no stat+retry proof and republished with no
+        // `.bak`, so a truncated-but-successful read that still carried both
+        // markers spliced the truncation back over the user's prose, with no
+        // copy of what was lost. `GuardedTextFile` is the installer's policy
+        // factored out, so both writers now hold the same line.
+        let guarded = GuardedTextFile(transport: transport, label: "MEMORY.md")
+        let loaded: GuardedTextFile.Loaded
+        do {
+            // Uncapped for the same reason `ProjectTemplateInstaller.inspectMemory`
+            // is: MEMORY.md is the user's prose, not an index we decode.
+            loaded = try guarded.load(memoryPath, maxBytes: Int.max)
+        } catch let refusal as GuardedTextFile.Refusal {
+            switch refusal {
+            case .unreadable(let damaged, _):
+                throw ProjectTemplateError.memoryFileUnreadable(damaged)
+            case .notUTF8:
+                // Unchanged: bytes we can't decode can't contain the block,
+                // so there is nothing to strip and nothing to report.
+                return
+            }
+        }
+        let text = loaded.text
         guard let beginRange = text.range(of: beginMarker) else { return }
 
         guard let endRange = text.range(
@@ -930,8 +953,6 @@ struct ProjectTemplateUninstaller: Sendable {
             }
         }
         let updated = text.replacingCharacters(in: lower..<stripRange.upperBound, with: "")
-        guard let outData = updated.data(using: .utf8) else { return }
-        // UNGUARDED-WRITE(R): MEMORY.md splice of the user's prose with no proof probe and no .bak — E2 converts.
-        try transport.unguardedWriteFile(memoryPath, data: outData)
+        try guarded.write(updated, to: memoryPath, after: loaded)
     }
 }

@@ -248,8 +248,7 @@ struct SkillsView: View {
                         }
                     }
                 }
-                viewModel.selectedSkill = nil
-                viewModel.skillContent = ""
+                viewModel.clearSelection()
             }
         )) {
             ForEach(viewModel.filteredCategories) { category in
@@ -398,11 +397,19 @@ struct SkillsView: View {
                             }
                         }
                     }
+                    if let contentError = viewModel.contentError {
+                        Divider()
+                        Label(contentError, systemImage: "exclamationmark.triangle")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("Skill file problem: \(contentError)")
+                    }
                     if !viewModel.skillContent.isEmpty {
                         Divider()
                         HStack {
                             Spacer()
                             Button("Edit") { viewModel.startEditing() }
+                                .disabled(!viewModel.canEditSelectedFile)
                                 .controlSize(.small)
                             Button("Uninstall", role: .destructive) {
                                 viewModel.uninstallHubSkill(skill.id)

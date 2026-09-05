@@ -155,6 +155,13 @@ import Foundation
         let files = try Self.swiftFiles()
         #expect(files.count > 200, "only \(files.count) sources found — source roots did not resolve")
         let annotated = files.filter { $0.text.contains("UNGUARDED-WRITE(") }.count
-        #expect(annotated > 20, "only \(annotated) annotated files — the census listed far more")
+        // A "did the scan resolve" floor, NOT a budget: the allowlist is
+        // meant to shrink, and E2's conversions do shrink it (E2c alone took
+        // it from 21 annotated files to 19). Keep this well under the current
+        // count so a real conversion never has to argue with it — but above
+        // zero, because a root that resolved to nothing would make every rule
+        // in this suite vacuously true. The G sites inside the guards
+        // themselves are permanent and are most of what remains.
+        #expect(annotated >= 8, "only \(annotated) annotated files — source roots did not resolve")
     }
 }
