@@ -88,14 +88,18 @@ public actor KanbanToolsetEnabler {
         }
 
         // Read + mutate off the main actor; the YAML scan is line-bounded
-        // and cheap (~6 KB file in practice) but `readText` may hit SSH
+        // and cheap (~6 KB file in practice) but the load may hit SSH
         // on remote contexts.
-        let yaml: String? = await Task.detached(priority: .utility) {
-            context.readText(path)
-        }.value
-        guard let yaml else {
-            return .failed(message: "Couldn't read \(path)")
+        let loadResult = await Self.loadConfig(context: context, path: path)
+        let loaded: GuardedTextFile.Loaded
+        switch loadResult {
+        case .failure(let error):
+            return .failed(message: error.localizedDescription)
+        case .success(let value):
+            guard value.exists else { return .failed(message: "Couldn't read \(path)") }
+            loaded = value
         }
+        let yaml = loaded.text
 
         let plan = Self.planEnable(yaml: yaml, platform: platform)
         switch plan {
@@ -104,16 +108,9 @@ public actor KanbanToolsetEnabler {
         case .refuse(let reason):
             return .failed(message: reason)
         case .rewrite(let newYaml):
-            let writeResult: Result<Void, Error> = await Task.detached(priority: .utility) {
-                do {
-                    let data = Data(newYaml.utf8)
-                    // UNGUARDED-WRITE(R): splices the whole Hermes config.yaml from a prior read of the same file — E2 converts.
-                    try context.makeTransport().unguardedWriteFile(path, data: data)
-                    return .success(())
-                } catch {
-                    return .failure(error)
-                }
-            }.value
+            let writeResult = await Self.writeConfig(
+                newYaml, context: context, path: path, after: loaded
+            )
             if case .failure(let err) = writeResult {
                 return .failed(message: err.localizedDescription)
             }
@@ -139,13 +136,16 @@ public actor KanbanToolsetEnabler {
     public func disable(platform: String = "cli") async -> EnableResult {
         let context = self.context
         let path = context.paths.configYAML
-        let yaml: String? = await Task.detached(priority: .utility) {
-            context.readText(path)
-        }.value
-        guard let yaml else {
-            return .failed(message: "Couldn't read \(path)")
+        let loadResult = await Self.loadConfig(context: context, path: path)
+        let loaded: GuardedTextFile.Loaded
+        switch loadResult {
+        case .failure(let error):
+            return .failed(message: error.localizedDescription)
+        case .success(let value):
+            guard value.exists else { return .failed(message: "Couldn't read \(path)") }
+            loaded = value
         }
-        let plan = Self.planDisable(yaml: yaml, platform: platform)
+        let plan = Self.planDisable(yaml: loaded.text, platform: platform)
         switch plan {
         case .alreadyPresent:
             // For disable, `alreadyPresent` means "wasn't there in the
@@ -154,22 +154,49 @@ public actor KanbanToolsetEnabler {
         case .refuse(let reason):
             return .failed(message: reason)
         case .rewrite(let newYaml):
-            let writeResult: Result<Void, Error> = await Task.detached(priority: .utility) {
-                do {
-                    // UNGUARDED-WRITE(R): same config.yaml splice shape, disable path — E2 converts.
-                    try context.makeTransport().unguardedWriteFile(
-                        path, data: Data(newYaml.utf8)
-                    )
-                    return .success(())
-                } catch {
-                    return .failure(error)
-                }
-            }.value
+            let writeResult = await Self.writeConfig(
+                newYaml, context: context, path: path, after: loaded
+            )
             if case .failure(let err) = writeResult {
                 return .failed(message: err.localizedDescription)
             }
             return .enabled
         }
+    }
+
+    // MARK: - Guarded config.yaml I/O
+
+    /// `~/.hermes/config.yaml` is hand-authored and irreplaceable, and this
+    /// actor is one of FIVE writers of it. All of them go through
+    /// `GuardedTextFile` so the "is this file damaged or just absent" answer
+    /// is computed once, in one place — before, each writer had its own
+    /// `readText(path) ?? ""`, and one dropped SSH round-trip published a
+    /// config containing nothing but the section being edited.
+    private static func loadConfig(
+        context: ServerContext, path: String
+    ) async -> Result<GuardedTextFile.Loaded, Error> {
+        await Task.detached(priority: .utility) {
+            do {
+                let file = GuardedTextFile(transport: context.makeTransport(), label: "config.yaml")
+                return .success(try file.load(path))
+            } catch {
+                return .failure(error)
+            }
+        }.value
+    }
+
+    private static func writeConfig(
+        _ yaml: String, context: ServerContext, path: String, after loaded: GuardedTextFile.Loaded
+    ) async -> Result<Void, Error> {
+        await Task.detached(priority: .utility) {
+            do {
+                let file = GuardedTextFile(transport: context.makeTransport(), label: "config.yaml")
+                try file.write(yaml, to: path, after: loaded)
+                return .success(())
+            } catch {
+                return .failure(error)
+            }
+        }.value
     }
 
     // MARK: - Pure mutation planning (unit-testable)

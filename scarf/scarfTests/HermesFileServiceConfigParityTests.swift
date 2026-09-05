@@ -571,9 +571,9 @@ struct AllConfigWritersParityTests {
             // `setSetting("auxiliary.\(task)…")` writers, which
             // `SettingsWriteReadParityTests` already pins by template and
             // expands into concrete keys.
-            // …plus 1 direct-YAML site (`saveDirectYAML`'s shared
-            // `context.unguardedWriteText(path, …)`), whose three callers name the
-            // key they splice in their `label:`.
+            // …plus 1 direct-YAML site (`saveDirectYAML`'s shared guarded
+            // `file.write(updated, to: path, …)`), whose three callers name
+            // the key they splice in their `label:`.
             Writer(path: "scarf/Features/Settings/ViewModels/SettingsViewModel.swift",
                    nonLiteralKeySites: 9,
                    computedKeys: SettingsWriteReadParityTests.expandedAuxKeys()
@@ -625,10 +625,19 @@ struct AllConfigWritersParityTests {
             // plus `model.context_length`, cleared through the managed-key
             // list rather than a `.clear(key: "…")` literal.
             // Shared direct-YAML executor for the gateway allowlists: one
-            // `writeText` site whose `platform` / `key` both arrive as
+            // guarded write site whose `platform` / `key` both arrive as
             // parameters from `GatewayBehaviorViewModel`.
             Writer(path: "Packages/ScarfCore/Sources/ScarfCore/Services/GatewayConfigWriter.swift",
                    nonLiteralKeySites: 1, computedKeys: []),
+            // (GW-E2a) Newly VISIBLE rather than newly written: this actor has
+            // always spliced `platform_toolsets.<platform>` directly, but it
+            // did so through a raw transport write that no marker could see.
+            // Routing it through the shared `GuardedTextFile` put it in the
+            // discovered set, where it belongs. It writes no `key: value`
+            // setting — it inserts/removes a `- kanban` list item — so it has
+            // no non-literal KEY sites and nothing for the readability gate.
+            Writer(path: "Packages/ScarfCore/Sources/ScarfCore/Services/KanbanToolsetEnabler.swift",
+                   nonLiteralKeySites: 0, computedKeys: []),
             Writer(path: "Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelConfigPlan.swift",
                    nonLiteralKeySites: 2,
                    computedKeys: ["model.context_length"]),
@@ -681,8 +690,12 @@ struct AllConfigWritersParityTests {
         // the write can appear either way round in a file; requiring BOTH
         // tokens keeps non-config `writeText` callers (SOUL.md, the iOS
         // memory snapshot) out of the discovered set.
-        #"paths\.configYAML[\s\S]*?\.unguardedWriteText\("#,
-        #"\.unguardedWriteText\([\s\S]*?paths\.configYAML"#,
+        // (GW-E2a) The direct-YAML writers now publish through the shared
+        // `GuardedTextFile` instead of `context.unguardedWriteText`, so the
+        // marker follows the guard. Both orderings are still listed because
+        // the path constant and the write can appear either way round.
+        #"paths\.configYAML[\s\S]*?GuardedTextFile\("#,
+        #"GuardedTextFile\([\s\S]*?paths\.configYAML"#,
     ]
 
     private static func swiftFiles() -> [String] {
@@ -905,7 +918,7 @@ struct AllConfigWritersParityTests {
             // write itself (it lives in the transform / the caller's
             // arguments), so each one is by definition a non-literal site
             // and must be declared.
-            let directYAMLSites = Self.count(#"\.unguardedWriteText\(\s*path\s*,"#, in: source)
+            let directYAMLSites = Self.count(#"file\.write\(\s*updated\s*,\s*to:\s*path\s*,"#, in: source)
             let sites = argvSites + setSettingSites + configKVSites + directYAMLSites
             // …minus those whose key the scan captured as a FULLY STATIC
             // literal. An interpolated literal (`"quick_commands.\(name).type"`)

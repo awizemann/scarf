@@ -81,10 +81,15 @@ nonisolated struct HermesEnvService: Sendable {
         var remaining = pairs
         var lines: [String]
 
-        // Start from existing file contents, or a minimal header if creating new.
-        if let data = try? transport.readFile(path),
-           let content = String(data: data, encoding: .utf8) {
-            lines = content.components(separatedBy: "\n")
+        // GUARDED. This used to be `try? readFile … else header`, which
+        // published a ONE-LINE `.env` — every API key Hermes owns, gone —
+        // the first time a read blipped. `.env` is the highest-value
+        // irreplaceable file Scarf writes: it refuses, it never rebuilds.
+        // An EMPTY .env is a legal user state, so `exists` (not emptiness)
+        // is what picks the header branch.
+        guard let loaded = guardedLoad() else { return false }
+        if loaded.exists {
+            lines = loaded.text.components(separatedBy: "\n")
             // Trim a single trailing empty line from splitting the final newline;
             // we'll re-add it on write.
             if lines.last == "" { lines.removeLast() }
@@ -112,18 +117,18 @@ nonisolated struct HermesEnvService: Sendable {
             }
         }
 
-        return atomicWrite(lines.joined(separator: "\n") + "\n")
+        return atomicWrite(lines.joined(separator: "\n") + "\n", after: loaded)
     }
 
     /// Comment out a key. The value is preserved so the user can restore by
     /// uncommenting. If the key doesn't exist, this is a no-op.
     @discardableResult
     func unset(_ key: String) -> Bool {
-        guard let data = try? transport.readFile(path),
-              let content = String(data: data, encoding: .utf8) else {
-            return true
-        }
-        var lines = content.components(separatedBy: "\n")
+        // A refused load returns `false` here where the old `try?` returned
+        // `true`: "we could not read it" is not "there was nothing to do".
+        guard let loaded = guardedLoad() else { return false }
+        guard loaded.exists else { return true }
+        var lines = loaded.text.components(separatedBy: "\n")
         if lines.last == "" { lines.removeLast() }
 
         var changed = false
@@ -135,21 +140,36 @@ nonisolated struct HermesEnvService: Sendable {
             changed = true
         }
         guard changed else { return true }
-        return atomicWrite(lines.joined(separator: "\n") + "\n")
+        return atomicWrite(lines.joined(separator: "\n") + "\n", after: loaded)
     }
 
     // MARK: - Internals
 
-    /// Writes the entire file in one shot through the transport. For local
-    /// contexts this ends up doing the same atomic-rename dance as before
-    /// (via `LocalTransport.writeFile`). For remote contexts this goes
-    /// through `scp` + remote `mv`, still atomic from Hermes's point of
-    /// view.
-    private func atomicWrite(_ content: String) -> Bool {
-        guard let data = content.data(using: .utf8) else { return false }
+    private var guardedFile: GuardedTextFile {
+        GuardedTextFile(transport: transport, label: ".env")
+    }
+
+    /// Proof-based read of `.env`. `nil` means REFUSED — the file is
+    /// stat-confirmed but unreadable, or holds non-UTF-8 bytes. Callers turn
+    /// that into the same `false` they already return for a write failure,
+    /// which every caller of `set`/`setMany`/`unset` already handles.
+    private func guardedLoad() -> GuardedTextFile.Loaded? {
         do {
-            // UNGUARDED-WRITE(R): setMany/unset rebuild ~/.hermes/.env from a prior read and fall back to a header-only file — E2 converts.
-            try transport.unguardedWriteFile(path, data: data)
+            return try guardedFile.load(path)
+        } catch {
+            logger.error("Refusing to rewrite .env: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Writes the entire file in one shot through the transport, keeping a
+    /// one-deep `.bak` of the bytes it replaces. For local contexts this ends
+    /// up doing the same atomic-rename dance as before (via
+    /// `LocalTransport.unguardedWriteFile`). For remote contexts this goes
+    /// through `scp` + remote `mv`, still atomic from Hermes's point of view.
+    private func atomicWrite(_ content: String, after loaded: GuardedTextFile.Loaded) -> Bool {
+        do {
+            try guardedFile.write(content, to: path, after: loaded)
             return true
         } catch {
             logger.error("Failed to write .env: \(error.localizedDescription)")

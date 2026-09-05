@@ -4,8 +4,9 @@ import Foundation
 /// GW-E1 — the guarded-write enforcement seam.
 ///
 /// The transport's raw write primitive is named `unguardedWriteFile`, and
-/// `ServerContext.unguardedWriteText` / `HermesFileService.unguardedWriteFile`
-/// are the two helper seams that wrap it. The rename makes an unguarded write
+/// `ServerContext.unguardedWriteText` is the one helper seam left that wraps
+/// it (GW-E2a deleted `HermesFileService`'s private twin by converting all
+/// five of its callers). The rename makes an unguarded write
 /// impossible to perform *by accident* — you have to type the word — and this
 /// scanner makes it impossible to perform *silently*.
 ///

@@ -146,16 +146,30 @@ public final class IOSMemoryViewModel {
         let ctx = context
         let path = kind.path(on: context)
         let snapshot = text
-        let ok: Bool = await Task.detached {
-            // UNGUARDED-WRITE(R): MEMORY.md/USER.md snapshot whose loader sets text = "" on a transport failure — E2 converts.
-            ctx.unguardedWriteText(path, content: snapshot)
+        let label = kind.displayName
+        // GUARDED. `load()` sets `text = ""` on a transport failure and Save
+        // stays armed, so an unguarded write here published that empty
+        // buffer over the file. An EMPTY memory file is a legal state, so
+        // only a stat-confirmed unreadable (or non-UTF-8) file is refused.
+        let result: Result<Void, Error> = await Task.detached {
+            do {
+                let file = GuardedTextFile(
+                    transport: ctx.makeTransport(), label: label
+                )
+                let loaded = try file.load(path)
+                try file.write(snapshot, to: path, after: loaded)
+                return .success(())
+            } catch {
+                return .failure(error)
+            }
         }.value
         isSaving = false
-        if ok {
+        switch result {
+        case .success:
             originalText = snapshot
             return true
-        } else {
-            lastError = "Couldn't save \(kind.displayName) — check the connection and try again."
+        case .failure(let error):
+            lastError = "Couldn't save \(kind.displayName) — \(error.localizedDescription)"
             return false
         }
     }

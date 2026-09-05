@@ -31,6 +31,10 @@ final class MemoryViewModel {
     enum SaveOutcome: Equatable {
         case saved
         case conflict(onDisk: String)
+        /// The guarded writer REFUSED, or the transport failed. The file on
+        /// disk is untouched and the draft is still the user's — the old
+        /// code swallowed both cases and reported `.saved`.
+        case failed(message: String)
     }
 
     var memoryCharCount: Int { memoryContent.count }
@@ -124,9 +128,13 @@ final class MemoryViewModel {
                 }
                 guard current == baseline else { return .conflict(onDisk: current) }
             }
-            switch target {
-            case .memory: svc.saveMemory(text, profile: profile)
-            case .user:   svc.saveUserProfile(text, profile: profile)
+            do {
+                switch target {
+                case .memory: try svc.saveMemory(text, profile: profile)
+                case .user:   try svc.saveUserProfile(text, profile: profile)
+                }
+            } catch {
+                return .failed(message: error.localizedDescription)
             }
             return .saved
         }.value

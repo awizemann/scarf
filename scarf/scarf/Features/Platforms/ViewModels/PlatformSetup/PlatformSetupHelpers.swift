@@ -52,7 +52,11 @@ enum PlatformSetupHelpers {
             envOK = envService.setMany(toSet)
         }
         for key in toUnset {
-            _ = envService.unset(key)
+            // The result is no longer decorative: `unset` returns `false` when
+            // the guarded reader REFUSED (the .env is there and unreadable),
+            // which means the key is still live in the file. Dropping that on
+            // the floor would report "Saved" over a save that did not happen.
+            if !envService.unset(key) { envOK = false }
         }
 
         var configFailures: [String] = []

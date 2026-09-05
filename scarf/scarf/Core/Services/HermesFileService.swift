@@ -126,16 +126,30 @@ struct HermesFileService: Sendable {
         return readFile(path) ?? ""
     }
 
-    nonisolated func saveMemory(_ content: String, profile: String = "") {
-        let path = memoryPath(profile: profile, file: "MEMORY.md")
-        // UNGUARDED-WRITE(R): saveMemory publishes over MEMORY.md whose loader returns "" on a failed read — E2 converts.
-        unguardedWriteFile(path, content: content)
+    /// GUARDED, and therefore THROWING. `loadMemory` returns `""` on a
+    /// failed read, so the editor could hand that empty buffer straight back
+    /// here and publish it over the user's prose. An empty `MEMORY.md` is a
+    /// legal state (the guard's zero-byte reclassification), so only a
+    /// PROVEN-unreadable file is refused — and a refusal has to reach the
+    /// user, which is why these no longer swallow.
+    nonisolated func saveMemory(_ content: String, profile: String = "") throws {
+        try guardedWriteText(content, to: memoryPath(profile: profile, file: "MEMORY.md"),
+                             label: "MEMORY.md")
     }
 
-    nonisolated func saveUserProfile(_ content: String, profile: String = "") {
-        let path = memoryPath(profile: profile, file: "USER.md")
-        // UNGUARDED-WRITE(R): saveUserProfile publishes over USER.md whose loader returns "" on a failed read — E2 converts.
-        unguardedWriteFile(path, content: content)
+    nonisolated func saveUserProfile(_ content: String, profile: String = "") throws {
+        try guardedWriteText(content, to: memoryPath(profile: profile, file: "USER.md"),
+                             label: "USER.md")
+    }
+
+    /// Read-with-proof, then publish with a one-deep `.bak`, for the
+    /// irreplaceable hand-authored text files this service owns.
+    nonisolated private func guardedWriteText(
+        _ content: String, to path: String, label: String
+    ) throws {
+        let file = GuardedTextFile(transport: transport, label: label)
+        let loaded = try file.load(path)
+        try file.write(content, to: path, after: loaded)
     }
 
     nonisolated private func memoryPath(profile: String, file: String) -> String {
@@ -1109,7 +1123,24 @@ struct HermesFileService: Sendable {
         expecting: [String] = [],
         mutate: (inout [String]) -> Void
     ) -> Bool {
-        guard let yaml = readFile(context.paths.configYAML) else { return false }
+        // GUARDED. One of five writers of `~/.hermes/config.yaml`; all of
+        // them share `GuardedTextFile` so "absent" and "unreadable" are
+        // decided once, with proof, rather than five times by inference. An
+        // absent file still returns `false` here exactly as the old
+        // `readFile(…) ?? nil` did; a stat-confirmed unreadable one now
+        // refuses instead of being patched from a read that failed.
+        let configFile = GuardedTextFile(transport: transport, label: "config.yaml")
+        let loadedConfig: GuardedTextFile.Loaded
+        do {
+            loadedConfig = try configFile.load(context.paths.configYAML)
+        } catch {
+            Self.logger.error(
+                "refusing to patch MCP server \(name, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            return false
+        }
+        guard loadedConfig.exists else { return false }
+        let yaml = loadedConfig.text
         let location = extractMCPBlock(yaml: yaml)
         guard !location.block.isEmpty else { return false }
 
@@ -1191,8 +1222,15 @@ struct HermesFileService: Sendable {
         guard newYAML != yaml else { return true }
 
         backUpConfigOnceForThisLaunch(originalText: yaml)
-        // UNGUARDED-WRITE(R): config.yaml patch published from a prior read of the same file — E2 converts.
-        unguardedWriteFile(context.paths.configYAML, content: newYAML)
+        // Failures are logged and swallowed here on purpose: the read-back
+        // below is the real proof, and it restores when nothing landed.
+        do {
+            try configFile.write(newYAML, to: context.paths.configYAML, after: loadedConfig)
+        } catch {
+            Self.logger.warning(
+                "Failed to write \(self.context.paths.configYAML, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
 
         // Read the file BACK OFF DISK — the write goes through a transport
         // that logs and swallows its failures, so "we built a good string" is
@@ -1201,8 +1239,10 @@ struct HermesFileService: Sendable {
             Self.logger.error(
                 "could not re-read \(self.context.paths.configYAML, privacy: .public) after patching \(name, privacy: .public); restoring"
             )
-            // UNGUARDED-WRITE(R): config.yaml restore of the pre-patch text read from the same file — E2 converts.
-            unguardedWriteFile(context.paths.configYAML, content: yaml)
+            // Restore the bytes we read and still hold. `loadedConfig`
+            // proved them good, so the guard cannot refuse here; the `.bak`
+            // it refreshes still holds that same pre-patch text.
+            try? configFile.write(yaml, to: context.paths.configYAML, after: loadedConfig)
             return false
         }
         if let reason = Self.verifyPatchedConfig(
@@ -1211,8 +1251,10 @@ struct HermesFileService: Sendable {
             Self.logger.error(
                 "patch of MCP server \(name, privacy: .public) failed verification (\(reason, privacy: .public)); restoring \(self.context.paths.configYAML, privacy: .public)"
             )
-            // UNGUARDED-WRITE(R): config.yaml restore of the pre-patch text read from the same file — E2 converts.
-            unguardedWriteFile(context.paths.configYAML, content: yaml)
+            // Restore the bytes we read and still hold. `loadedConfig`
+            // proved them good, so the guard cannot refuse here; the `.bak`
+            // it refreshes still holds that same pre-patch text.
+            try? configFile.write(yaml, to: context.paths.configYAML, after: loadedConfig)
             return false
         }
         return true
@@ -2348,17 +2390,4 @@ struct HermesFileService: Sendable {
         return false
     }
 
-    /// Write a UTF-8 text file atomically through the transport. Matches the
-    /// old pre-transport behavior (print + swallow on error) because the
-    /// callers don't have a UI path for surfacing I/O failures — that's
-    /// planned for Phase 4.
-    nonisolated private func unguardedWriteFile(_ path: String, content: String) {
-        guard let data = content.data(using: .utf8) else { return }
-        do {
-            // UNGUARDED-WRITE(R): private writeFile seam; its callers include the destroy-shaped MEMORY.md/USER.md and config.yaml patch paths — E2 converts.
-            try transport.unguardedWriteFile(path, data: data)
-        } catch {
-            Self.logger.warning("Failed to write \(path, privacy: .public): \(error.localizedDescription, privacy: .public)")
-        }
-    }
 }

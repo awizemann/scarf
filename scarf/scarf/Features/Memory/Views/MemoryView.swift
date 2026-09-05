@@ -466,6 +466,11 @@ struct MemoryView: View {
                 case .user:   viewModel.userContent = onDisk
                 }
                 saveError = "\(fileMeta(target).filename) changed on disk since you started editing. Reload to take the new version (your edits are discarded), or overwrite it with yours."
+            case .failed(let message):
+                // The write was REFUSED or failed. Nothing on disk moved and
+                // the draft is intact — say so instead of pretending it saved.
+                hasConflict = false
+                saveError = message
             }
         }
     }

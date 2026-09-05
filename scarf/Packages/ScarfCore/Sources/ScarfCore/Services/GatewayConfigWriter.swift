@@ -226,11 +226,22 @@ public enum GatewayConfigWriter {
         items: [String]
     ) -> Bool {
         let path = context.paths.configYAML
-        let existing = context.readText(path) ?? ""
+        // GUARDED. `readText(path) ?? ""` used to collapse "unreadable" into
+        // "empty", so a blipped read published a config.yaml holding nothing
+        // but this one allowlist. `GuardedTextFile` is the single shared
+        // guard for every config.yaml writer; a refusal reports as the same
+        // `false` this function already returns for a write failure.
+        let file = GuardedTextFile(transport: context.makeTransport(), label: "config.yaml")
+        guard let loaded = try? file.load(path) else { return false }
+        let existing = loaded.text
         let updated = setList(in: existing, platform: platform, key: key, items: items)
         if updated == existing { return true }   // no-op: already correct
-        // UNGUARDED-WRITE(R): saveList splices config.yaml from a readText(path) ?? "" base — E2 converts.
-        return context.unguardedWriteText(path, content: updated)
+        do {
+            try file.write(updated, to: path, after: loaded)
+            return true
+        } catch {
+            return false
+        }
     }
 
     // MARK: - Internals

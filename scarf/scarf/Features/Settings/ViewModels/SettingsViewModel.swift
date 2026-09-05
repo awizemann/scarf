@@ -842,7 +842,23 @@ final class SettingsViewModel {
     /// behavior and `setSetting`'s save toast.
     private func saveDirectYAML(label: String, transform: (String) -> String?) {
         let path = context.paths.configYAML
-        let existing = context.readText(path) ?? ""
+        // GUARDED. `readText(path) ?? ""` collapsed "unreadable" into
+        // "empty" and then published the splice over it — the whole Hermes
+        // config, replaced by the one section this form edits. All five
+        // config.yaml writers now share `GuardedTextFile`; a refusal
+        // surfaces through the same `saveMessage` a write failure does.
+        let file = GuardedTextFile(transport: context.makeTransport(), label: "config.yaml")
+        let loaded: GuardedTextFile.Loaded
+        do {
+            loaded = try file.load(path)
+        } catch {
+            saveMessage = "Could not save \(label): \(error.localizedDescription)"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                self?.saveMessage = nil
+            }
+            return
+        }
+        let existing = loaded.text
         guard let updated = transform(existing) else {
             // Writer refused (invalid value or capability-gated) — surface
             // it instead of silently dropping the save, mirroring the
@@ -854,8 +870,7 @@ final class SettingsViewModel {
             return
         }
         if updated != existing {
-            // UNGUARDED-WRITE(R): saveDirectYAML splices config.yaml from a readText(path) ?? "" base — E2 converts.
-            guard context.unguardedWriteText(path, content: updated) else {
+            guard (try? file.write(updated, to: path, after: loaded)) != nil else {
                 // Direct-YAML write failure: no CLI output to quote, so the
                 // shared builder's bare form is exactly right.
                 saveMessage = Self.saveFailureMessage(key: label, output: "")
