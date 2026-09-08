@@ -709,4 +709,376 @@ private struct LocalSQLite3Transport: ServerTransport {
     }
 }
 
+
+// MARK: - RecordingTransport
+
+/// Test-only transport that RECORDS every script it is handed and replays
+/// canned `ProcessResult`s. Lets the WAL-fallback tests assert the exact
+/// argv / SQL shape `RemoteSQLiteBackend` sends without a shell at all.
+private final class ScriptRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _scripts: [String] = []
+    private var _responses: [ProcessResult]
+    init(responses: [ProcessResult]) { self._responses = responses }
+    var scripts: [String] { lock.lock(); defer { lock.unlock() }; return _scripts }
+    func next(_ script: String) -> ProcessResult {
+        lock.lock(); defer { lock.unlock() }
+        _scripts.append(script)
+        if _responses.isEmpty {
+            return ProcessResult(exitCode: 0, stdout: Data(), stderr: Data())
+        }
+        return _responses.removeFirst()
+    }
+}
+
+private struct RecordingTransport: ServerTransport {
+    let contextID: ServerID
+    let isRemote: Bool = true
+    let recorder: ScriptRecorder
+
+    func readFile(_ path: String) throws -> Data { Data() }
+    func unguardedWriteFile(_ path: String, data: Data) throws {}
+    func fileExists(_ path: String) -> Bool { true }
+    func stat(_ path: String) -> FileStat? { nil }
+    func listDirectory(_ path: String) throws -> [String] { [] }
+    func createDirectory(_ path: String) throws {}
+    func removeFile(_ path: String) throws {}
+    func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval?) throws -> ProcessResult {
+        throw TransportError.other(message: "unused")
+    }
+    #if !os(iOS)
+    func makeProcess(executable: String, args: [String]) -> Process { Process() }
+    #endif
+    func streamLines(executable: String, args: [String]) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { $0.finish() }
+    }
+    func streamScript(_ script: String, timeout: TimeInterval) async throws -> ProcessResult {
+        recorder.next(script)
+    }
+    func watchPaths(_ paths: [String]) -> AsyncStream<WatchEvent> { AsyncStream { $0.finish() } }
+}
+
+// MARK: - WAL / query_only fallback suite
+
+/// t-fb136a08. `RemoteSQLiteBackend` shells `sqlite3 -readonly -json` over
+/// SSH; on a host whose Hermes gateway is stopped, `state.db` is in WAL mode
+/// with no `-shm` sidecar and SQLite cannot open it read-only at all. These
+/// tests pin the fallback: retry with `PRAGMA query_only=1` (no `-readonly`),
+/// which can create the sidecar but cannot write a row.
+///
+/// CLI behaviour verified on sqlite 3.54.0 before the fix:
+///   sqlite3 -readonly -json wal.db "SELECT..."  → exit 1, "unable to open database file (14)"
+///   sqlite3 -json wal.db "PRAGMA query_only=1; SELECT..." → exit 0, sidecars created
+///   sqlite3 -json wal.db "PRAGMA query_only=1; INSERT..." → exit 1, "attempt to write a readonly database"
+///   sqlite3 -readonly -json missing.db "SELECT 1;" → exit 1, file NOT created
+///   sqlite3 -json missing.db "PRAGMA query_only=1; SELECT 1;" → exit 0, file CREATED  ← why the guard exists
+@Suite struct RemoteSQLiteBackendWALFallbackTests {
+
+    // MARK: - Fixtures
+
+    private func requireSqlite3() throws {
+        try #require(FileManager.default.isExecutableFile(atPath: "/usr/bin/sqlite3"), "Test requires /usr/bin/sqlite3")
+    }
+
+    /// Build a WAL-mode state.db carrying the sessions/messages schema the
+    /// preflight probes, then DELETE the -shm/-wal sidecars — the exact
+    /// on-disk shape of a host whose gateway has been stopped.
+    @discardableResult
+    private func makeWALFixture(inDir dir: URL, journalMode: String = "WAL") throws -> URL {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let db = dir.appendingPathComponent("state.db")
+        let sql = """
+        PRAGMA journal_mode=\(journalMode);
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY, source TEXT, user_id TEXT, model TEXT, title TEXT,
+            parent_session_id TEXT, started_at REAL, ended_at REAL, end_reason TEXT,
+            message_count INTEGER, tool_call_count INTEGER, input_tokens INTEGER,
+            output_tokens INTEGER, cache_read_tokens INTEGER, cache_write_tokens INTEGER,
+            estimated_cost_usd REAL
+        );
+        INSERT INTO sessions (id, source, model, title, started_at, message_count)
+            VALUES ('s1', 'acp', 'gpt-5', 'Test', 1700000000.0, 5);
+        CREATE TABLE messages (
+            id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT,
+            tool_call_id TEXT, tool_calls TEXT, tool_name TEXT, timestamp REAL,
+            token_count INTEGER, finish_reason TEXT
+        );
+        INSERT INTO messages (id, session_id, role, content, timestamp)
+            VALUES (1, 's1', 'user', 'hi', 1700000001.0);
+        """
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        p.arguments = [db.path, sql]
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        try p.run()
+        p.waitUntilExit()
+        try #require(p.terminationStatus == 0, "fixture sqlite3 failed")
+        // Strip the sidecars — this is the condition under test.
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent("state.db-shm"))
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent("state.db-wal"))
+        return db
+    }
+
+    private func tempDir() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("scarf-wal-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    private func context(home: URL) -> ServerContext {
+        ServerContext(
+            id: UUID(),
+            displayName: "wal-fixture",
+            kind: .ssh(SSHConfig(host: "fake.invalid", remoteHome: home.path))
+        )
+    }
+
+    // MARK: - Script shape (recording transport, no shell)
+
+    /// The FIRST attempt must be the strict `-readonly` form with no
+    /// `query_only` prefix and no existence guard — hosts where read-only
+    /// works keep the OS-level guarantee.
+    @Test func firstAttemptIsStrictReadonly() async throws {
+        let dir = tempDir()
+        let recorder = ScriptRecorder(responses: [
+            // preflight succeeds strictly → no retry, no fallback.
+            ProcessResult(
+                exitCode: 0,
+                stdout: Data("3.45.0 2024\n[{\"name\":\"id\"}]\n[{\"name\":\"id\"}]\n[{\"n\":0}]\n".utf8),
+                stderr: Data()
+            )
+        ])
+        let ctx = context(home: dir)
+        await ServerContext.primeResolvedHome(dir.path, forServerID: ctx.id)
+        let backend = RemoteSQLiteBackend(
+            context: ctx,
+            transport: RecordingTransport(contextID: ctx.id, recorder: recorder)
+        )
+        _ = await backend.open()
+
+        let scripts = recorder.scripts
+        #expect(scripts.count == 1)
+        let first = try #require(scripts.first)
+        #expect(first.contains("sqlite3 -readonly -json"))
+        #expect(!first.contains("query_only"))
+        #expect(!first.contains("[ ! -f"))
+        let latched = await backend.isQueryOnlyFallback
+        #expect(latched == false)
+    }
+
+    /// On CANTOPEN the backend retries EXACTLY ONCE with the relaxed form:
+    /// `-readonly` dropped, `PRAGMA query_only=1;` prefixed, and the shell
+    /// existence guard present so an absent DB is never created.
+    @Test func cantOpenRetriesWithQueryOnlyAndGuard() async throws {
+        let dir = tempDir()
+        let recorder = ScriptRecorder(responses: [
+            ProcessResult(exitCode: 1, stdout: Data(), stderr: Data("Parse error near line 1: unable to open database file (14)\n".utf8)),
+            ProcessResult(
+                exitCode: 0,
+                stdout: Data("3.45.0 2024\n[{\"name\":\"id\"}]\n[{\"name\":\"id\"}]\n[{\"n\":0}]\n".utf8),
+                stderr: Data()
+            )
+        ])
+        let ctx = context(home: dir)
+        await ServerContext.primeResolvedHome(dir.path, forServerID: ctx.id)
+        let backend = RemoteSQLiteBackend(
+            context: ctx,
+            transport: RecordingTransport(contextID: ctx.id, recorder: recorder)
+        )
+        let opened = await backend.open()
+        #expect(opened)
+
+        let scripts = recorder.scripts
+        #expect(scripts.count == 2)
+        let retry = try #require(scripts.last)
+        #expect(retry.contains("sqlite3 -json"))
+        #expect(!retry.contains("-readonly"))
+        #expect(retry.contains("PRAGMA query_only=1;"))
+        #expect(retry.contains("if [ ! -f"))
+        #expect(retry.contains("unable to open database file"))
+        let latched = await backend.isQueryOnlyFallback
+        #expect(latched)
+    }
+
+    /// Once latched, later queries go STRAIGHT to the relaxed form — a host
+    /// with a stopped gateway pays the doomed strict round-trip exactly once.
+    @Test func fallbackLatchesForSubsequentQueries() async throws {
+        let dir = tempDir()
+        let rows = Data("[{\"id\":\"s1\"}]\n".utf8)
+        let recorder = ScriptRecorder(responses: [
+            ProcessResult(exitCode: 1, stdout: Data(), stderr: Data("unable to open database file\n".utf8)),
+            ProcessResult(exitCode: 0, stdout: Data("3.45.0\n[{\"name\":\"id\"}]\n[{\"name\":\"id\"}]\n[{\"n\":0}]\n".utf8), stderr: Data()),
+            ProcessResult(exitCode: 0, stdout: rows, stderr: Data()),
+        ])
+        let ctx = context(home: dir)
+        await ServerContext.primeResolvedHome(dir.path, forServerID: ctx.id)
+        let backend = RemoteSQLiteBackend(
+            context: ctx,
+            transport: RecordingTransport(contextID: ctx.id, recorder: recorder)
+        )
+        #expect(await backend.open())
+        _ = try await backend.query("SELECT id FROM sessions", params: [])
+
+        let scripts = recorder.scripts
+        // preflight strict, preflight relaxed, query relaxed — NOT 4.
+        #expect(scripts.count == 3)
+        let queryScript = try #require(scripts.last)
+        #expect(queryScript.contains("PRAGMA query_only=1;"))
+        #expect(!queryScript.contains("-readonly"))
+    }
+
+    /// A retry that ALSO fails must surface the ORIGINAL strict error, not
+    /// the fallback's — same rule as `LocalSQLiteBackend`. Keeps the
+    /// absent-vs-unreadable discriminator honest.
+    @Test func failedRetryReportsOriginalError() async throws {
+        let dir = tempDir()
+        let recorder = ScriptRecorder(responses: [
+            ProcessResult(exitCode: 1, stdout: Data(), stderr: Data("ORIGINAL: unable to open database file\n".utf8)),
+            ProcessResult(exitCode: 1, stdout: Data(), stderr: Data("RETRY-NOISE\n".utf8)),
+        ])
+        let ctx = context(home: dir)
+        await ServerContext.primeResolvedHome(dir.path, forServerID: ctx.id)
+        let backend = RemoteSQLiteBackend(
+            context: ctx,
+            transport: RecordingTransport(contextID: ctx.id, recorder: recorder)
+        )
+        #expect(await backend.open() == false)
+        let err = await backend.lastOpenError ?? ""
+        #expect(err.contains("ORIGINAL"))
+        #expect(!err.contains("RETRY-NOISE"))
+        let latched = await backend.isQueryOnlyFallback
+        #expect(latched == false)
+    }
+
+    /// A genuine SQL error is NOT a CANTOPEN — no retry, no fallback.
+    @Test func nonCantOpenFailureDoesNotRetry() async throws {
+        let dir = tempDir()
+        let recorder = ScriptRecorder(responses: [
+            ProcessResult(exitCode: 1, stdout: Data(), stderr: Data("Error: no such table: sessions\n".utf8)),
+        ])
+        let ctx = context(home: dir)
+        await ServerContext.primeResolvedHome(dir.path, forServerID: ctx.id)
+        let backend = RemoteSQLiteBackend(
+            context: ctx,
+            transport: RecordingTransport(contextID: ctx.id, recorder: recorder)
+        )
+        #expect(await backend.open() == false)
+        #expect(recorder.scripts.count == 1)
+    }
+
+    // MARK: - End-to-end against the real sqlite3 CLI
+
+    /// The regression itself: a WAL state.db with no sidecars, driven
+    /// through the production codepath and a real `/usr/bin/sqlite3`.
+    /// Before the fix this failed with "unable to open database file".
+    @Test func walWithoutSidecarsOpensAndQueries() async throws {
+        try requireSqlite3()
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let db = try makeWALFixture(inDir: dir)
+        #expect(!FileManager.default.fileExists(atPath: db.path + "-shm"))
+
+        let ctx = context(home: dir)
+        await ServerContext.primeResolvedHome(dir.path, forServerID: ctx.id)
+        let backend = RemoteSQLiteBackend(context: ctx, transport: LocalSQLite3Transport())
+
+        let opened = await backend.open()
+        #expect(opened)
+        #expect(await backend.lastOpenError == nil)
+        let latched = await backend.isQueryOnlyFallback
+        #expect(latched, "WAL db without -shm must have taken the query_only fallback")
+
+        // Schema probe (charter C4) still derives capabilities.
+        #expect(await backend.hasV07Schema == false)
+
+        // Single query and batch both work through the relaxed form.
+        let rows = try await backend.query("SELECT id FROM sessions", params: [])
+        #expect(rows.count == 1)
+        let batch = try await backend.queryBatch([
+            (sql: "SELECT id FROM sessions", params: []),
+            (sql: "SELECT id FROM messages", params: []),
+        ])
+        #expect(batch.count == 2)
+        #expect(batch[0].count == 1)
+        #expect(batch[1].count == 1)
+
+        // The fallback created the sidecar — that is what makes the read work.
+        #expect(FileManager.default.fileExists(atPath: db.path + "-shm"))
+    }
+
+    /// Charter C3: the fallback connection can create a sidecar but CANNOT
+    /// write a row. A write through it fails "attempt to write a readonly
+    /// database", so `state.db` stays Hermes's alone.
+    @Test func queryOnlyFallbackRefusesWrites() async throws {
+        try requireSqlite3()
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        _ = try makeWALFixture(inDir: dir)
+
+        let ctx = context(home: dir)
+        await ServerContext.primeResolvedHome(dir.path, forServerID: ctx.id)
+        let backend = RemoteSQLiteBackend(context: ctx, transport: LocalSQLite3Transport())
+        #expect(await backend.open())
+        #expect(await backend.isQueryOnlyFallback)
+
+        var thrown: Error?
+        do {
+            _ = try await backend.query("INSERT INTO sessions (id) VALUES ('evil')", params: [])
+        } catch {
+            thrown = error
+        }
+        let err = try #require(thrown)
+        guard case BackendError.sqlite(let exitCode, let stderr) = err else {
+            Issue.record("expected BackendError.sqlite, got \(err)")
+            return
+        }
+        #expect(exitCode != 0)
+        #expect(stderr.lowercased().contains("attempt to write a readonly database"))
+
+        // And the row was NOT written.
+        let rows = try await backend.query("SELECT id FROM sessions", params: [])
+        #expect(rows.count == 1)
+    }
+
+    /// A DELETE-journal db opens read-only fine, so the strict path must be
+    /// kept — no fallback, no relaxed form.
+    @Test func deleteModeDBStaysOnStrictReadonly() async throws {
+        try requireSqlite3()
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        _ = try makeWALFixture(inDir: dir, journalMode: "DELETE")
+
+        let ctx = context(home: dir)
+        await ServerContext.primeResolvedHome(dir.path, forServerID: ctx.id)
+        let backend = RemoteSQLiteBackend(context: ctx, transport: LocalSQLite3Transport())
+        #expect(await backend.open())
+        let latched = await backend.isQueryOnlyFallback
+        #expect(latched == false)
+        let rows = try await backend.query("SELECT id FROM sessions", params: [])
+        #expect(rows.count == 1)
+    }
+
+    /// The regression the guard exists for: `sqlite3` WITHOUT `-readonly`
+    /// creates a missing database. An absent state.db must still report
+    /// "unable to open database file" (which `HermesDataService.humanize`
+    /// turns into "Hermes state not found") and must NOT be created.
+    @Test func absentStateDBIsNotCreatedAndStaysDistinguishable() async throws {
+        try requireSqlite3()
+        let dir = tempDir()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let dbPath = dir.appendingPathComponent("state.db").path
+        #expect(!FileManager.default.fileExists(atPath: dbPath))
+
+        let ctx = context(home: dir)
+        await ServerContext.primeResolvedHome(dir.path, forServerID: ctx.id)
+        let backend = RemoteSQLiteBackend(context: ctx, transport: LocalSQLite3Transport())
+
+        #expect(await backend.open() == false)
+        let err = (await backend.lastOpenError ?? "").lowercased()
+        #expect(err.contains("unable to open database file"))
+        #expect(!FileManager.default.fileExists(atPath: dbPath), "absent state.db must never be created")
+    }
+}
+
 #endif // canImport(SQLite3)

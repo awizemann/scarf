@@ -47,6 +47,29 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
     private(set) public var hasListableChildSupport = false
     private(set) public var lastOpenError: String?
     private var isOpen = false
+    /// Latched `true` once a strict `sqlite3 -readonly` invocation has been
+    /// proven impossible on this host and the `PRAGMA query_only=1` form
+    /// worked instead. Mirrors `LocalSQLiteBackend.isQueryOnlyFallback`.
+    ///
+    /// **Why the fallback exists.** Hermes keeps `state.db` in WAL mode. With
+    /// no `-shm`/`-wal` sidecars on disk (gateway stopped, CLI-only user,
+    /// fresh home) SQLite cannot open the DB read-only at all — it must
+    /// create the shared-memory sidecar first — so every statement fails
+    /// `SQLITE_CANTOPEN(14)` / "unable to open database file". Charter C3
+    /// reading: creating a WAL sidecar is not a state mutation, and
+    /// `PRAGMA query_only=1` is what makes the connection incapable of
+    /// writing a row (a write through it fails "attempt to write a readonly
+    /// database").
+    ///
+    /// **Why it is a FALLBACK and not the unconditional form.** `sqlite3`
+    /// without `-readonly` CREATES a missing database file. Dropping the flag
+    /// everywhere would plant an empty `state.db` in Hermes's data dir on
+    /// hosts that have none, and turn "Hermes not installed" into "Hermes
+    /// installed but empty" — destroying the absent-vs-unreadable
+    /// discriminator. The strict path stays primary; the relaxed form is
+    /// entered only after `-readonly` actually fails, and it carries a shell
+    /// existence guard so an absent DB still fails with the same message.
+    private(set) public var isQueryOnlyFallback = false
     /// Captured `sqlite3 --version` line from the most recent preflight.
     /// Stashed for diagnostic logs and a future "remote sqlite3 too old"
     /// error path.
@@ -129,14 +152,17 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         //   3. PRAGMA table_info(messages) | messages schema
         // sqlite3 -json emits two arrays back-to-back for the two PRAGMA
         // statements; we parse them as separate result sets.
-        let preflight = """
-        set -e
-        sqlite3 --version
-        sqlite3 -readonly -json \(quoteForRemoteShell(dbPath)) "PRAGMA table_info(sessions); PRAGMA table_info(messages); SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'session_model_usage';"
-        """
+        let quotedPath = quoteForRemoteShell(dbPath)
+        let preflightSQL = "PRAGMA table_info(sessions); PRAGMA table_info(messages); SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'session_model_usage';"
 
         do {
-            let result = try await transport.streamScript(preflight, timeout: preflightTimeout)
+            let result = try await runSQLite(timeout: preflightTimeout) { queryOnly in
+                """
+                set -e
+                \(Self.missingDBGuard(quotedPath, queryOnly: queryOnly))sqlite3 --version
+                sqlite3 \(Self.sqlite3Flags(queryOnly: queryOnly)) \(quotedPath) "\(Self.sqlPrefix(queryOnly: queryOnly))\(preflightSQL)"
+                """
+            }
             if result.exitCode != 0 {
                 lastOpenError = errorMessage(stderr: result.stderrString, stdout: result.stdoutString, exitCode: result.exitCode)
                 #if canImport(os)
@@ -199,14 +225,16 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         let task = Task<[Row], Error> { [self] in
             try await ScarfMon.measureAsync(.sqlite, "query") {
                 let dbPath = context.paths.stateDB
-                let script = """
-                sqlite3 -readonly -json \(quoteForRemoteShell(dbPath)) <<'__SCARF_SQL__'
-                \(inlined)
-                __SCARF_SQL__
-                """
+                let quotedPath = quoteForRemoteShell(dbPath)
                 let result: ProcessResult
                 do {
-                    result = try await transport.streamScript(script, timeout: queryTimeout)
+                    result = try await runSQLite(timeout: queryTimeout) { queryOnly in
+                        """
+                        \(Self.missingDBGuard(quotedPath, queryOnly: queryOnly))sqlite3 \(Self.sqlite3Flags(queryOnly: queryOnly)) \(quotedPath) <<'__SCARF_SQL__'
+                        \(Self.sqlPrefix(queryOnly: queryOnly))\(inlined)
+                        __SCARF_SQL__
+                        """
+                    }
                 } catch {
                     throw BackendError.transport(error.localizedDescription)
                 }
@@ -260,17 +288,19 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         }
         let combined = sqlBlocks.joined(separator: "\n")
         let dbPath = context.paths.stateDB
-        let script = """
-        sqlite3 -readonly -json \(quoteForRemoteShell(dbPath)) <<'__SCARF_SQL__'
-        \(combined)
-        __SCARF_SQL__
-        """
+        let quotedPath = quoteForRemoteShell(dbPath)
         let result: ProcessResult
         do {
             // Batched timeout: scale with statement count, capped at
             // a comfortable 30 s. Most batches are 4–5 statements.
             let timeout = min(30, queryTimeout + Double(statements.count) * 2)
-            result = try await transport.streamScript(script, timeout: timeout)
+            result = try await runSQLite(timeout: timeout) { queryOnly in
+                """
+                \(Self.missingDBGuard(quotedPath, queryOnly: queryOnly))sqlite3 \(Self.sqlite3Flags(queryOnly: queryOnly)) \(quotedPath) <<'__SCARF_SQL__'
+                \(Self.sqlPrefix(queryOnly: queryOnly))\(combined)
+                __SCARF_SQL__
+                """
+            }
         } catch {
             throw BackendError.transport(error.localizedDescription)
         }
@@ -637,6 +667,78 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         let trimmed = sql.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasSuffix(";") { return trimmed }
         return trimmed + ";"
+    }
+
+    // MARK: - sqlite3 invocation + WAL query_only fallback
+
+    /// The sqlite3 CLI's stderr text for `SQLITE_CANTOPEN`. Also the exact
+    /// substring `HermesDataService.humanize` keys off for "Hermes state not
+    /// found", which is why the fallback's existence guard reproduces it.
+    private static let cantOpenNeedle = "unable to open database file"
+
+    /// Flags for the sqlite3 invocation. The strict form keeps `-readonly`
+    /// (SQLite refuses to create the file OR the WAL sidecar); the relaxed
+    /// form drops it so the sidecar can be created, and pairs with
+    /// `sqlPrefix`'s `PRAGMA query_only=1`.
+    static func sqlite3Flags(queryOnly: Bool) -> String {
+        queryOnly ? "-json" : "-readonly -json"
+    }
+
+    /// SQL prepended to every relaxed-form script. `PRAGMA query_only=1`
+    /// makes the connection incapable of writing a row for the rest of the
+    /// session; it returns no result set, so batch marker parsing is
+    /// unaffected.
+    static func sqlPrefix(queryOnly: Bool) -> String {
+        queryOnly ? "PRAGMA query_only=1;\n" : ""
+    }
+
+    /// Shell guard emitted ONLY in the relaxed form. Without `-readonly`,
+    /// sqlite3 CREATES a missing database file — which would write into
+    /// Hermes's data dir and make "not installed" indistinguishable from
+    /// "installed but empty". The guard fails an absent DB with the same
+    /// message `-readonly` produces, so the absent-vs-unreadable
+    /// discriminator survives the fallback unchanged.
+    static func missingDBGuard(_ quotedPath: String, queryOnly: Bool) -> String {
+        guard queryOnly else { return "" }
+        return "if [ ! -f \(quotedPath) ]; then echo 'Error: \(cantOpenNeedle)' >&2; exit 1; fi\n"
+    }
+
+    /// True when a non-zero sqlite3 exit is the WAL/sidecar CANTOPEN we can
+    /// retry, rather than a genuine SQL or permission error.
+    static func isCantOpen(_ result: ProcessResult) -> Bool {
+        let combined = (result.stderrString + "\n" + result.stdoutString).lowercased()
+        return combined.contains(cantOpenNeedle)
+    }
+
+    /// Run a sqlite3 script, retrying once in `query_only` mode when the
+    /// strict `-readonly` attempt fails with CANTOPEN.
+    ///
+    /// Once the relaxed form succeeds the decision LATCHES for the lifetime
+    /// of the backend, so a host with a stopped gateway pays the doomed
+    /// strict round-trip exactly once rather than on every query. The
+    /// build closure is called with `queryOnly` and must produce the whole
+    /// remote script.
+    ///
+    /// When the retry ALSO fails, the ORIGINAL strict result is returned —
+    /// same rule as `LocalSQLiteBackend`: the fallback must never mask the
+    /// real error (a missing file, a permission problem, bad SQL).
+    private func runSQLite(
+        timeout: TimeInterval,
+        build: (_ queryOnly: Bool) -> String
+    ) async throws -> ProcessResult {
+        if isQueryOnlyFallback {
+            return try await transport.streamScript(build(true), timeout: timeout)
+        }
+        let strict = try await transport.streamScript(build(false), timeout: timeout)
+        guard strict.exitCode != 0, Self.isCantOpen(strict) else { return strict }
+        let relaxed = try await transport.streamScript(build(true), timeout: timeout)
+        guard relaxed.exitCode == 0 else { return strict }
+        isQueryOnlyFallback = true
+        #if canImport(os)
+        Self.logger.info("Remote state.db could not be opened -readonly (WAL without -shm); using PRAGMA query_only=1 for this host")
+        #endif
+        ScarfMon.event(.sqlite, "query_only.fallback", count: 1)
+        return relaxed
     }
 
     // MARK: - Quoting + error mapping
