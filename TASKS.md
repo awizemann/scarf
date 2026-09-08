@@ -52,9 +52,7 @@
 - [ ] Performance and reliability issues on large state.db (lag, crashes, missing sessions) (id: t-b8a6c3) (source: gh#61) (added: 2026-06-13)
 - [ ] **[followup/t-aud01]** Lazy-load `reasoning_content` (v0.11 rich chain-of-thought) on REASONING disclosure open. `fetchReasoningContent(for:)` exists but has zero callers; the bulk fetch excludes reasoning_content (perf, issue #74) so it's never shown on ANY historical load. Wire a per-message lazy fetch from `RichMessageBubble` (macOS) + `Scarf iOS/Chat/ChatView.swift:2464`. Gotchas to resolve: (1) `RichMessageBubble` `==` short-circuit (issue #46) doesn't compare reasoning for settled bubbles, so a spliced result won't redraw — use a view-local `@State` cache instead; (2) need a cheap "reasoning_content available" probe so the disclosure shows even when content isn't loaded; (3) confirm whether v0.11 models populate `reasoning` too or only `reasoning_content`. (id: t-aud21) (added: 2026-06-13, source: t-aud01)
 - [ ] Flaky ACPClientStartIdempotenceTests under full parallel swift test (id: t-f3820038) (added: 2026-09-07) (priority: low)
-- [ ] UI gate phase 1: fixture Hermes home builder + section sweep + root-id lint + test plans (id: t-90831994) (added: 2026-09-08) (priority: high)
-- [ ] UI gate phase 2: journeys for top flows, de-network the template journey (id: t-3db5405e) (added: 2026-09-08)
-- [ ] UI gate phase 3: run Smoke+Full+Live from release.sh before archive (id: t-b7d43521) (added: 2026-09-08)
+- [ ] Stabilize the UI gate: journeys flake on a loaded Mac (id: t-e3926f86) (added: 2026-09-08)
 
 ## Doing
 
@@ -64,6 +62,21 @@
 
 ## Done
 
+- [x] Cron detail pane is unreachable: no click/context menu, absent from a11y tree (id: t-0fb3b91f) (added: 2026-09-08) (priority: high)
+- [x] Follow-up: RemoteSQLiteBackend has the same WAL -readonly trap over SSH (id: t-fb136a08) (added: 2026-09-08)
+- [x] Make SkillsView's tab strip UI-test drivable (buttons, not segmented Picker) (id: t-42c56c2f) (added: 2026-09-08) (priority: low)
+- [x] Give the chat composer's send button an accessibility label (id: t-353099de) (added: 2026-09-08) (priority: low)
+- [x] UI gate P1b: section root ids, sweep test, base-class hygiene, test plans (id: t-e732e091) (added: 2026-09-08) (priority: high)
+- [x] UI gate P2d journey: Chat over ACP (Live plan, real key) (id: t-d714835d) (added: 2026-09-08)
+- [x] UI gate writes the developer's window-frame preference (id: t-e0c3bd4d) (added: 2026-09-08) (priority: low)
+- [x] Fix Skills → Uninstall: wrong identifier, and exit 0 on failure (id: t-ec6d2e6d) (added: 2026-09-08) (priority: high)
+- [x] Fix: read-only open of WAL state.db fails without -shm sidecar (Dashboard "Can't read Hermes state") (id: t-281048bc) (added: 2026-09-08) (priority: high)
+- [x] Hermes capability probe: one shot, no retry, cached per home path (id: t-a9ad5e67) (added: 2026-09-08)
+- [x] UI gate P2b journey: Cron + Kanban (id: t-cd7d1c11) (added: 2026-09-08)
+- [x] UI gate P2c journey: Skills + Models + Settings persistence (id: t-877c6e6f) (added: 2026-09-08)
+- [x] UI gate P2a journey: Projects (new project + template install from local file) (id: t-3db5405e) (added: 2026-09-08)
+- [x] UI gate P3: release.sh runs unit + Smoke + Full + Live before archive (id: t-b7d43521) (added: 2026-09-08)
+- [x] UI gate P1a: fixture Hermes home builder script (hermes CLI seeded) (id: t-90831994) (added: 2026-09-08) (priority: high)
 - [x] GW follow-ups: skill-load spinner, iOS SkillEditorSheet dismiss-on-failure, manifest-repair notice (id: t-09bd3af5) (added: 2026-09-07) (priority: low)
 - [x] HUMAN: Xcode interactive build to extract + translate GW-F4's new string-catalog keys (id: t-e90334b6) (added: 2026-09-07) (priority: high)
 - [x] GW-F6: ServerRegistry/config.json robustness + remaining E5 lows (id: t-26bf60b8) (added: 2026-09-04)
@@ -350,6 +363,7 @@
 - [x] “Chat connection failed” when app switcher used (id: t-e9257e) (source: gh#108) — **CLOSED on GitHub 2026-06-13** (fixed `8023097`, shipped v2.10.1, reporter confirmed).
 - [x] **[release · HIGH]** Cut **v2.10.3** — ships three fixes that are on `main` but missed the v2.10.2 cut (tagged 2026-06-05, before they landed): gh#102 100% CPU `720c805`, gh#112 Failure-1 stderr-surfacing `3401cc7`, gh#105 10s menu-bar flash `c7f42a6`. **Publicly promised on gh#102/#112/#105 (2026-06-13)** — users were told "fixed/next build" but no release contains these yet (this was gh#102 reporter aseelye's exact complaint). Until v2.10.3 ships, gh#102/#112(F1)/#105(flash) can't be closed. (id: t-rel-2103) (added: 2026-06-13, source: gh issue triage)
 - [x] **[release · HIGH]** Cut **v2.10.3** — ships three fixes that are on `main` but missed the v2.10.2 cut (tagged 2026-06-05, before they landed): gh#102 100% CPU `720c805`, gh#112 Failure-1 stderr-surfacing `3401cc7`, gh#105 10s menu-bar flash `c7f42a6`. **Publicly promised on gh#102/#112/#105 (2026-06-13)** — users were told "fixed/next build" but no release contains these yet (this was gh#102 reporter aseelye's exact complaint). Until v2.10.3 ships, gh#102/#112(F1)/#105(flash) can't be closed. (id: t-rel-2103) (added: 2026-06-13, source: gh issue triage)
+- [x] Kanban: Block sheet said the reason was optional while the plan required it (id: t-f06cee84) (added: 2026-09-08)
 
 ## Archived
 
