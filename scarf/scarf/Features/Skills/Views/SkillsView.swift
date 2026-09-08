@@ -28,7 +28,7 @@ struct SkillsView: View {
     }
 
 
-    enum Tab: String, CaseIterable, Identifiable {
+    enum Tab: String, CaseIterable, Identifiable, ScarfTabStripTab {
         case installed = "Installed"
         case bundles = "Bundles"
         case hub = "Browse Hub"
@@ -203,16 +203,17 @@ struct SkillsView: View {
 
     private var modePicker: some View {
         HStack {
-            Picker("", selection: $currentTab) {
-                ForEach(visibleTabs) { tab in
-                    Text(tab.displayName).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 360)
-            // Segment titles are localized; journeys address the segments
-            // positionally under this identifier instead.
-            .accessibilityIdentifier("skills.tabPicker")
+            // A `.pickerStyle(.segmented)` Picker's selection is not
+            // drivable by XCUITest on macOS (segments surface as
+            // RadioButtons whose click never moves the binding — see the
+            // XCUITest input/click reliability memory note), so this uses
+            // the same button-strip pattern as SettingsView.tabStrip.
+            ScarfTabStrip(
+                tabs: visibleTabs,
+                selection: $currentTab,
+                identifierPrefix: "skills.tab"
+            )
+            .fixedSize(horizontal: true, vertical: false)
             Spacer()
             if let msg = viewModel.hubMessage {
                 Label(msg, systemImage: "info.circle")

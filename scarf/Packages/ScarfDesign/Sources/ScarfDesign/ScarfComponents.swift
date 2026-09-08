@@ -299,3 +299,102 @@ public struct ScarfPageHeader<Trailing: View>: View {
         )
     }
 }
+
+// MARK: - Tab strip
+
+/// A tab a `ScarfTabStrip` can render. Backed by a `String` `RawRepresentable`
+/// so each strip's `.accessibilityIdentifier` composes as `"<prefix>.<rawValue>"`
+/// and stays independent of the (localized) display text.
+public protocol ScarfTabStripTab: Identifiable, Hashable {
+    var rawValue: String { get }
+    var displayName: LocalizedStringResource { get }
+}
+
+/// Row-of-buttons tab strip, extracted from `SettingsView.tabStrip` (t-42c56c2f)
+/// so every feature that needs a driveable tab switcher shares one
+/// implementation. A SwiftUI `.pickerStyle(.segmented)` Picker is NOT an
+/// option here: on macOS its segments surface as accessibility RadioButtons
+/// whose selection XCUITest cannot move (click reports success, the binding
+/// never changes — see the XCUITest input/click reliability memory note).
+/// A real `Button` per tab is fully drivable and keyboard/VoiceOver
+/// navigable, at the cost of losing segmented-control chrome.
+public struct ScarfTabStrip<Tab: ScarfTabStripTab>: View {
+    let tabs: [Tab]
+    @Binding var selection: Tab
+    let identifierPrefix: String
+    let icon: (Tab) -> String?
+
+    /// - Parameters:
+    ///   - tabs: Tabs to render, in order.
+    ///   - selection: The active tab.
+    ///   - identifierPrefix: Prefix for each button's `.accessibilityIdentifier`
+    ///     (e.g. `"settings.tab"` → `"settings.tab.General"`).
+    ///   - icon: Optional SF Symbol name per tab. Omit for a text-only strip.
+    public init(
+        tabs: [Tab],
+        selection: Binding<Tab>,
+        identifierPrefix: String,
+        icon: @escaping (Tab) -> String? = { _ in nil }
+    ) {
+        self.tabs = tabs
+        self._selection = selection
+        self.identifierPrefix = identifierPrefix
+        self.icon = icon
+    }
+
+    public var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: ScarfSpace.s1) {
+                ForEach(tabs) { tab in
+                    tabButton(tab)
+                }
+            }
+            .padding(.horizontal, ScarfSpace.s6)
+        }
+        .background(
+            ScarfColor.backgroundSecondary
+                .overlay(
+                    Rectangle()
+                        .fill(ScarfColor.border)
+                        .frame(height: 1),
+                    alignment: .bottom
+                )
+        )
+    }
+
+    private func tabButton(_ tab: Tab) -> some View {
+        let isActive = selection == tab
+        return Button {
+            selection = tab
+        } label: {
+            HStack(spacing: 6) {
+                if let iconName = icon(tab) {
+                    Image(systemName: iconName)
+                        .font(.system(size: 12))
+                }
+                Text(tab.displayName)
+                    .scarfStyle(isActive ? .bodyEmph : .body)
+            }
+            .foregroundStyle(isActive ? ScarfColor.accent : ScarfColor.foregroundMuted)
+            .padding(.horizontal, ScarfSpace.s3)
+            .padding(.vertical, 10)
+            .overlay(
+                Rectangle()
+                    .fill(isActive ? ScarfColor.accent : Color.clear)
+                    .frame(height: 2),
+                alignment: .bottom
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // Stable handle for UI journeys: the visible tab label is
+        // localized, so a test that clicked by title would only pass in
+        // English.
+        .accessibilityIdentifier("\(identifierPrefix).\(tab.rawValue)")
+        .accessibilityLabel(Text(tab.displayName))
+        // Selection is colour-only visually; give VoiceOver/Voice Control
+        // the state as a trait since the control is selectable (tabs),
+        // per the macOS accessibility label conventions note.
+        .accessibilityAddTraits(isActive ? .isSelected : [])
+    }
+}

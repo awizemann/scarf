@@ -34,7 +34,7 @@ struct SettingsView: View {
     }
 
 
-    enum SettingsTab: String, CaseIterable, Identifiable {
+    enum SettingsTab: String, CaseIterable, Identifiable, ScarfTabStripTab {
         case general = "General"
         case display = "Display"
         case agent = "Agent"
@@ -145,52 +145,12 @@ struct SettingsView: View {
     }
 
     private var tabStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: ScarfSpace.s1) {
-                ForEach(visibleTabs) { tab in
-                    tabButton(tab)
-                }
-            }
-            .padding(.horizontal, ScarfSpace.s6)
-        }
-        .background(
-            ScarfColor.backgroundSecondary
-                .overlay(
-                    Rectangle()
-                        .fill(ScarfColor.border)
-                        .frame(height: 1),
-                    alignment: .bottom
-                )
+        ScarfTabStrip(
+            tabs: visibleTabs,
+            selection: $selectedTab,
+            identifierPrefix: "settings.tab",
+            icon: { $0.icon }
         )
-    }
-
-    private func tabButton(_ tab: SettingsTab) -> some View {
-        let isActive = selectedTab == tab
-        return Button {
-            selectedTab = tab
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: tab.icon)
-                    .font(.system(size: 12))
-                Text(tab.displayName)
-                    .scarfStyle(isActive ? .bodyEmph : .body)
-            }
-            .foregroundStyle(isActive ? ScarfColor.accent : ScarfColor.foregroundMuted)
-            .padding(.horizontal, ScarfSpace.s3)
-            .padding(.vertical, 10)
-            .overlay(
-                Rectangle()
-                    .fill(isActive ? ScarfColor.accent : Color.clear)
-                    .frame(height: 2),
-                alignment: .bottom
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        // Stable handle for UI journeys: the visible tab label is
-        // localized, so a test that clicked by title would only pass in
-        // English.
-        .accessibilityIdentifier("settings.tab.\(tab.rawValue)")
     }
 
     @ViewBuilder
