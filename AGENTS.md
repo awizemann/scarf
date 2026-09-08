@@ -34,7 +34,7 @@ filing a task tagged `charter`, never by editing the file.
 - `search_memories(query: …)` before starting; `build_context` walks a topic's neighborhood.
 - Record facts with `write_memory` as FIRST-CLASS ARGUMENTS: `observations:
   ["- [category] fact #tag", …]` (1–5 atomic facts; canonical categories:
-  decision, fact, gotcha, constraint, convention, todo, idea, done) plus `relations: [{"relation":
+  decision, fact, gotcha, constraint, convention, todo, idea, done, invariant) plus `relations: [{"relation":
   "relates_to", "target": "Other Note"}]`. `content` is optional short context — never the
   facts. Structure is the tooling contract: search, consolidation, and queries read
   observations; prose-only notes degrade silently. `[[links]]` belong in `relations`.
