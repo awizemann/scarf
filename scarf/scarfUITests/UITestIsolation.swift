@@ -206,7 +206,12 @@ class ScarfUITestCase: XCTestCase {
     ///    ("Timed out while synthesizing event").
     static var standardLaunchArguments: [String] {
         sidebarSectionTitles.flatMap { ["-sidebar.section.collapsed.\($0)", "0"] }
-            + ["-\(windowFramePersistenceKey)", "\"{{0, 0}, {1800, 1300}}\""]
+            // Origin lifted off the screen's bottom-left corner: AppKit
+            // coordinates put y=0 UNDER the Dock, and a window pinned there
+            // has its bottom strip occluded — the Kanban inspector's Block
+            // button sat at y 2835–2868 on a 2880 pt screen whose visible
+            // frame ends at 2850, so every click on it hit the Dock.
+            + ["-\(windowFramePersistenceKey)", "\"{{40, 140}, {1800, 1300}}\""]
             + ["-NSAutomaticWindowAnimationsEnabled", "0", "-NSWindowResizeTime", "0.001"]
     }
 

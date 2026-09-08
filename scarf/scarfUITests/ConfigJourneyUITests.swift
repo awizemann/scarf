@@ -457,7 +457,10 @@ final class ConfigJourneyUITests: ScarfUITestCase {
 
         // Delete it again, through the confirmation dialog.
         element(app, "models.row.\(presetName).delete").click()
-        let confirm = app.buttons["Delete"].firstMatch
+        // The confirmation is an NSAlert sheet. Scope to it: an app-wide
+        // `buttons["Delete"]` can resolve to the alert's Touch Bar proxy,
+        // which XCUITest refuses to click.
+        let confirm = app.sheets.buttons["Delete"].firstMatch
         XCTAssertTrue(confirm.waitForExistence(timeout: 15), "Delete confirmation dialog never appeared.")
         confirm.click()
 
