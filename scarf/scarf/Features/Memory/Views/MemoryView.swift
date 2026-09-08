@@ -298,6 +298,21 @@ struct MemoryView: View {
                 .padding(.horizontal, ScarfSpace.s5)
                 .padding(.vertical, ScarfSpace.s4)
                 .background(ScarfColor.backgroundPrimary)
+            // A READ that failed (GW-F2). Distinct from `saveError`: nothing
+            // was attempted, and the buffer on screen is the last copy we
+            // could actually read, not an empty one inferred from the
+            // failure. Clears itself on the next successful load — which
+            // `onAppear` and every watcher tick issue.
+            if let loadError = viewModel.loadError, saveError == nil {
+                Text(loadError)
+                    .scarfStyle(.footnote)
+                    .foregroundStyle(ScarfColor.danger)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, ScarfSpace.s5)
+                    .padding(.vertical, ScarfSpace.s2)
+                    .background(ScarfColor.backgroundSecondary)
+                    .accessibilityLabel(loadError)
+            }
             if let saveError {
                 Text(saveError)
                     .scarfStyle(.footnote)
@@ -426,7 +441,15 @@ struct MemoryView: View {
     private func reloadFromDisk() {
         let target = selectedFile
         Task {
-            let disk = await viewModel.reload(target)
+            guard let disk = await viewModel.reload(target) else {
+                // The read FAILED (GW-F2). There is no "new version" to take
+                // — presenting `""` here is exactly how a blip became a
+                // published empty file. Keep the draft and the conflict
+                // banner; say why the reload could not happen.
+                guard target == selectedFile else { return }
+                saveError = viewModel.loadError
+                return
+            }
             switch target {
             case .memory: viewModel.memoryContent = disk
             case .user:   viewModel.userContent = disk

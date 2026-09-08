@@ -196,12 +196,47 @@ struct ProjectConfigService: Sendable {
     /// Load the cached manifest into a `ProjectTemplateManifest` so the
     /// editor can look up field types + labels. Returns `nil` when the
     /// project wasn't installed from a schemaful template.
+    ///
+    /// **Absent takes PROOF here too (GW-F2, audit DI L7.)** The old
+    /// `fileExists` gate turned one dropped round-trip into `nil`, which the
+    /// Configuration sheet renders as "This project isn't configurable" —
+    /// a confident, false statement about the project, told to the user
+    /// because a read failed. `nil` now means the cache is provably absent;
+    /// a file that is there but unreadable throws, and the sheet says it
+    /// couldn't read the manifest.
     nonisolated func loadCachedManifest(project: ProjectEntry) throws -> ProjectTemplateManifest? {
         let transport = context.makeTransport()
         let path = Self.manifestCachePath(for: project)
-        guard transport.fileExists(path) else { return nil }
-        let data = try transport.readFile(path)
-        return try JSONDecoder().decode(ProjectTemplateManifest.self, from: data)
+        let inspection = GuardedJSONStore(transport: transport, label: "manifest.json")
+            .inspect(path, maxBytes: Self.configMaxBytes)
+        switch inspection.state {
+        case .absent:
+            return nil
+        case .unreadable(let damaged):
+            throw ManifestCacheError.unreadable(path: damaged)
+        case .quarantined:
+            throw ManifestCacheError.unreadable(path: path)
+        case .present:
+            break
+        }
+        return try JSONDecoder().decode(
+            ProjectTemplateManifest.self, from: inspection.bytes ?? Data()
+        )
+    }
+
+    /// Why the cached template manifest could not be read. Deliberately NOT
+    /// `GuardedStoreError`: nothing is being written here, and telling the
+    /// user we are "refusing to overwrite" a file they only tried to open
+    /// is the wrong sentence (GW-F2).
+    enum ManifestCacheError: LocalizedError, Equatable {
+        case unreadable(path: String)
+
+        var errorDescription: String? {
+            switch self {
+            case let .unreadable(path):
+                return "Couldn't read this project's template manifest at \(path). It's there, but two reads of it failed — check the connection, then try again."
+            }
+        }
     }
 
     // MARK: - Secrets

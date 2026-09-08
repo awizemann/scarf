@@ -36,8 +36,17 @@ struct KanbanTenantResolver: Sendable {
 
     /// Returns the existing tenant for a project, or `nil` if none has
     /// been minted yet. Read-only — never writes.
-    nonisolated func tenant(for project: ProjectEntry) -> String? {
-        readManifest(for: project)?.kanbanTenant
+    ///
+    /// **Throws rather than answering `nil` when the manifest is
+    /// stat-confirmed but unreadable** (GW-F2, audit DI H1/H2). Every caller
+    /// of this method is one branch away from a WRITE: `resolveOrMint` mints
+    /// a fresh slug on `nil`, `setTenant` treats `nil` as "not a no-op" and
+    /// publishes. A dropped SSH round-trip answered `nil` therefore minted a
+    /// second tenant for a board that already had one and orphaned every
+    /// task on it — the guarded write downstream could not tell, because by
+    /// then the value it was handed looked like a legitimate first mint.
+    nonisolated func tenant(for project: ProjectEntry) throws -> String? {
+        try readManifest(for: project)?.kanbanTenant
     }
 
     /// Set the project's Kanban tenant to an **explicit** slug, rather
@@ -54,7 +63,7 @@ struct KanbanTenantResolver: Sendable {
     nonisolated func setTenant(_ tenant: String, for project: ProjectEntry) throws {
         let trimmed = tenant.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
-        if self.tenant(for: project) == trimmed { return }  // no-op; avoid churn
+        if try self.tenant(for: project) == trimmed { return }  // no-op; avoid churn
         try persist(tenant: trimmed, for: project)
         Self.logger.info("set kanban tenant '\(trimmed, privacy: .public)' for project '\(project.name, privacy: .public)' (fleet apply)")
     }
@@ -63,11 +72,11 @@ struct KanbanTenantResolver: Sendable {
     /// the new tenant back to the project's manifest.json. Idempotent —
     /// calling twice on a fresh project returns the same value.
     nonisolated func resolveOrMint(for project: ProjectEntry) throws -> String {
-        if let existing = tenant(for: project), !existing.isEmpty {
+        if let existing = try tenant(for: project), !existing.isEmpty {
             return existing
         }
         let candidate = Self.makeSlug(for: project.name)
-        let unique = uniquify(candidate, against: project)
+        let unique = try uniquify(candidate, against: project)
         try persist(tenant: unique, for: project)
         Self.logger.info("minted kanban tenant '\(unique, privacy: .public)' for project '\(project.name, privacy: .public)'")
         return unique
@@ -98,8 +107,8 @@ struct KanbanTenantResolver: Sendable {
     /// this host. Reads every project's manifest; `O(projects)` — fine
     /// for typical project counts (handful to dozens). Suffixes `-2`,
     /// `-3`, … until unique.
-    nonisolated private func uniquify(_ candidate: String, against project: ProjectEntry) -> String {
-        let used = Set(allMintedTenants(excluding: project))
+    nonisolated private func uniquify(_ candidate: String, against project: ProjectEntry) throws -> String {
+        let used = Set(try allMintedTenants(excluding: project))
         if !used.contains(candidate) { return candidate }
         var n = 2
         while n < 1000 {
@@ -113,21 +122,41 @@ struct KanbanTenantResolver: Sendable {
 
     /// Collect every Scarf-minted tenant currently on disk, excluding
     /// the given project. Used to dedup new mints.
-    nonisolated private func allMintedTenants(excluding project: ProjectEntry) -> [String] {
+    ///
+    /// **Every failure here aborts the mint** (GW-F2). This set is the
+    /// uniqueness proof for a slug we are about to publish: answering it
+    /// from a registry we could not read, or skipping a sibling whose
+    /// manifest would not load, produces a candidate that "isn't used" only
+    /// because we failed to look — and the guarded write then happily
+    /// publishes the collision. A registry that is provably ABSENT is a
+    /// different thing (no projects yet) and legitimately yields no tenants.
+    nonisolated private func allMintedTenants(excluding project: ProjectEntry) throws -> [String] {
         let registryPath = context.paths.projectsRegistry
+        let transport = context.makeTransport()
+        if GuardedJSONStore.probeExistence(registryPath, transport: transport) == .provenAbsent {
+            return []
+        }
         guard let data = context.readData(registryPath),
               let registry = try? JSONDecoder().decode(ProjectRegistry.self, from: data)
         else {
-            return []
+            Self.logger.error(
+                "kanban tenant mint aborted: projects.json at \(registryPath, privacy: .public) is present but couldn't be read — a slug minted without it could collide"
+            )
+            throw GuardedStoreError.refusedUnreadableOverwrite(
+                path: registryPath, label: "projects.json"
+            )
         }
-        return registry.projects.compactMap { other in
+        return try registry.projects.compactMap { other in
             guard other.id != project.id else { return nil }
-            return readManifest(for: other)?.kanbanTenant
+            return try readManifest(for: other)?.kanbanTenant
         }
     }
 
-    nonisolated private func readManifest(for project: ProjectEntry) -> ProjectTemplateManifest? {
-        ProjectManifestStore(context: context).read(for: project)
+    /// Proof-carrying: see `ProjectManifestStore.readProven`. Every read on
+    /// this type feeds a mint decision, so none of them may infer "absent"
+    /// from a failed read.
+    nonisolated private func readManifest(for project: ProjectEntry) throws -> ProjectTemplateManifest? {
+        try ProjectManifestStore(context: context).readProven(for: project)
     }
 
     /// Write the tenant back to `<project>/.scarf/manifest.json`. If

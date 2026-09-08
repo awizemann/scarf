@@ -30,8 +30,15 @@ struct ProjectModelPresetBinding: Sendable {
 
     /// Returns the project's bound preset UUID string, or nil when no
     /// binding is set. Read-only — never writes.
+    ///
+    /// **Deliberately tolerant** (GW-F2): this answer only ever renders a
+    /// picker selection, so a dropped round-trip costs one paint showing
+    /// "no preset bound" and self-corrects on the next read — no bytes are
+    /// decided by it. The sibling decision path (`bind`, which uses the
+    /// answer to declare a write a no-op) uses the proof-carrying read
+    /// instead.
     nonisolated func boundPresetID(for project: ProjectEntry) -> String? {
-        readManifest(for: project)?.modelPresetID
+        ProjectManifestStore(context: context).read(for: project)?.modelPresetID
     }
 
     /// Set or clear a project's preset binding. Passing `nil`
@@ -41,7 +48,10 @@ struct ProjectModelPresetBinding: Sendable {
         let trimmed = presetID?.trimmingCharacters(in: .whitespaces)
         let nextValue = (trimmed?.isEmpty ?? true) ? nil : trimmed
 
-        let existing = readManifest(for: project)
+        // Proof-carrying: an unreadable manifest answered as "no binding"
+        // would turn a real no-op into a publish (or vice versa). Aborts
+        // through the caller's existing `throws`.
+        let existing = try readManifest(for: project)
         if existing?.modelPresetID == nextValue {
             // No-op write. Avoids file-watcher churn and noisy diffs.
             return
@@ -55,8 +65,8 @@ struct ProjectModelPresetBinding: Sendable {
 
     // MARK: - Private
 
-    nonisolated private func readManifest(for project: ProjectEntry) -> ProjectTemplateManifest? {
-        ProjectManifestStore(context: context).read(for: project)
+    nonisolated private func readManifest(for project: ProjectEntry) throws -> ProjectTemplateManifest? {
+        try ProjectManifestStore(context: context).readProven(for: project)
     }
 
     /// Persist the binding through the file's ONE guarded writer

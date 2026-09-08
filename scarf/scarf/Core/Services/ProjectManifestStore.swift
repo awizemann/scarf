@@ -61,8 +61,19 @@ nonisolated struct ProjectManifestStore: GuardedSidecarStore, Sendable {
         project.scarfDir + "/manifest.json"
     }
 
-    /// Typed read for callers that just want to look. Unchanged in
-    /// behavior: `nil` for anything that isn't a decodable manifest.
+    /// Typed read for callers that just want to LOOK — display, not
+    /// decision. `nil` for anything that isn't a decodable manifest,
+    /// including a read that merely failed.
+    ///
+    /// **Deliberately tolerant, and only safe where nothing is written as a
+    /// result** (GW-F2). The one remaining caller is
+    /// `ProjectModelPresetBinding.boundPresetID`, which renders a picker
+    /// selection: a dropped round-trip there shows "no preset bound" for one
+    /// paint and self-corrects on the next read. Every caller whose answer
+    /// feeds a WRITE — minting a Kanban tenant, deciding a binding is a
+    /// no-op — must use ``readProven(for:)`` instead, because for those an
+    /// unreadable manifest answered as `nil` is how a sentinel (or a
+    /// duplicate slug) lands on top of a real file.
     nonisolated func read(for project: ProjectEntry) -> ProjectTemplateManifest? {
         let transport = context.makeTransport()
         let path = Self.path(for: project)
@@ -72,6 +83,35 @@ nonisolated struct ProjectManifestStore: GuardedSidecarStore, Sendable {
             return nil
         }
         return try? JSONDecoder().decode(ProjectTemplateManifest.self, from: data)
+    }
+
+    /// The same read with PROOF behind its `nil` — for the callers whose
+    /// answer decides whether to write (GW-F2, audit DI H1/H2).
+    ///
+    /// `nil` here means the manifest is provably absent, or held bytes that
+    /// are not a manifest — both states in which minting a stub is correct.
+    /// A stat-confirmed-but-unreadable file THROWS instead, so the decision
+    /// aborts rather than inferring "no manifest" from a dropped SSH
+    /// round-trip.
+    ///
+    /// Undecodable bytes stay `nil` rather than being quarantined: this is a
+    /// read, and `setField` — which runs `inspectDecoding` immediately
+    /// afterwards on the write path — owns the quarantine.
+    ///
+    /// - Throws: `GuardedStoreError.refusedUnreadableOverwrite`.
+    nonisolated func readProven(for project: ProjectEntry) throws -> ProjectTemplateManifest? {
+        let path = Self.path(for: project)
+        let inspection = inspect(path)
+        if case .unreadable(let damaged) = inspection.state {
+            Self.logger.error(
+                "manifest.json at \(damaged, privacy: .public) exists but couldn't be read — aborting rather than treating it as absent"
+            )
+            throw GuardedStoreError.refusedUnreadableOverwrite(
+                path: damaged, label: Self.label
+            )
+        }
+        guard let bytes = inspection.bytes else { return nil }
+        return try? JSONDecoder().decode(ProjectTemplateManifest.self, from: bytes)
     }
 
     /// Set (or, with `nil`, remove) ONE top-level key, preserving every

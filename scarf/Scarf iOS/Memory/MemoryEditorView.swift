@@ -48,7 +48,10 @@ struct MemoryEditorView: View {
                 Button("Save") {
                     Task { await performSave() }
                 }
-                .disabled(!vm.hasUnsavedChanges || vm.isSaving)
+                // `canSave` folds in the load proof (GW-F2): after a failed
+                // read the editor stays disarmed rather than re-arming on
+                // the next keystroke over a buffer nobody read.
+                .disabled(!vm.canSave)
             }
             ToolbarItem(placement: .topBarLeading) {
                 if vm.hasUnsavedChanges {

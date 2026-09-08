@@ -141,10 +141,17 @@ public enum ProjectContextBlock {
     /// or non-UTF-8 bytes, and a one-deep `AGENTS.md.bak` of whatever gets
     /// replaced (the same `.bak` naming `writeBlock` produces, because it is
     /// literally the same publisher).
+    ///
+    /// - Returns: whether bytes were actually REWRITTEN. Callers used to
+    ///   answer this for themselves by comparing a `try?` read taken before
+    ///   against one taken after (GW-F2, audit DI M4) — two unguarded reads
+    ///   whose failures both read as "nothing changed". The publisher knows;
+    ///   it now says so.
+    @discardableResult
     public static func removeBlock(
         forProjectAt projectPath: String,
         context: ServerContext
-    ) throws {
+    ) throws -> Bool {
         let transport = context.makeTransport()
         let agentsMdPath = projectPath + "/AGENTS.md"
         let guarded = GuardedTextFile(transport: transport, label: "AGENTS.md")
@@ -159,14 +166,15 @@ public enum ProjectContextBlock {
                 // Bytes we hold but can't decode are left ALONE, exactly as
                 // before: the managed block cannot be inside them, so there
                 // is nothing to remove and nothing to report.
-                return
+                return false
             }
         }
         // Absent is a no-op, not an error — see the doc comment.
-        guard loaded.exists else { return }
+        guard loaded.exists else { return false }
         let rewritten = removeBlock(from: loaded.text)
-        guard rewritten != loaded.text else { return }
+        guard rewritten != loaded.text else { return false }
         try guarded.write(rewritten, to: agentsMdPath, after: loaded)
+        return true
     }
 
     /// Read `<project>/AGENTS.md`, splice in the given block, write

@@ -243,8 +243,14 @@ import Foundation
 
             let vm = IOSMemoryViewModel(kind: .memory, context: ctx)
             await vm.load()
-            // The loader's own failure mode: an empty buffer with Save armed.
-            #expect(vm.text.isEmpty)
+            // GW-F2 (DI M12): the loader no longer answers a failed read with
+            // an empty buffer and an armed Save. No proof, no save — and a
+            // keystroke cannot re-arm it.
+            #expect(!vm.isLoaded)
+            #expect(!vm.canSave)
+            vm.text = "typed over a buffer nobody read\n"
+            #expect(!vm.canSave, "a keystroke must not re-arm Save after a failed load")
+            #expect(!vm.hasUnsavedChanges)
             let saved = await vm.save()
             #expect(!saved)
             #expect(vm.lastError != nil)
@@ -278,6 +284,36 @@ import Foundation
             #expect(await vm.save())
             #expect(Self.text(path) == "second\n")
         }
+    }
+
+    /// The disarmed state must not WEDGE: a successful load re-arms the
+    /// editor, and the view re-issues `load()` on every appearance.
+    @MainActor
+    @Test func iosMemoryEditorRearmsAfterASuccessfulReload() async throws {
+        try #require(!Self.runningAsRoot)
+        let base = try Self.makeScratch()
+        defer { Self.cleanUp(base) }
+        let ctx = ServerContext.local(home: base.appendingPathComponent("hermes"))
+        let path = IOSMemoryViewModel.Kind.memory.path(on: ctx)
+        try FileManager.default.createDirectory(
+            atPath: (path as NSString).deletingLastPathComponent,
+            withIntermediateDirectories: true
+        )
+        try Data("prose\n".utf8).write(to: URL(fileURLWithPath: path))
+        try Self.chmod(path, 0o000)
+
+        let vm = IOSMemoryViewModel(kind: .memory, context: ctx)
+        await vm.load()
+        #expect(!vm.canSave)
+
+        try Self.chmod(path, 0o644)
+        await vm.load()
+        #expect(vm.isLoaded)
+        #expect(vm.text == "prose\n", "the real bytes, not the blip's emptiness")
+        vm.text = "edited\n"
+        #expect(vm.canSave)
+        #expect(await vm.save())
+        #expect(Self.text(path) == "edited\n")
     }
 
     // MARK: - One guard, not five copies

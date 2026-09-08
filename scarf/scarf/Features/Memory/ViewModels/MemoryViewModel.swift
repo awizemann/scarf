@@ -19,6 +19,13 @@ final class MemoryViewModel {
     var activeProfile = ""
     var isLoading = false
     var isSaving = false
+    /// The last READ failure, or `nil`. Set when a memory file is provably
+    /// there but could not be read (GW-F2, audit DI H3): the previously
+    /// published content stays on screen untouched rather than being
+    /// replaced by the `""` a failed read used to produce. Cleared by the
+    /// next successful load — `load()` runs on appear and on every watcher
+    /// tick, so this can never wedge the editor.
+    var loadError: String?
 
     enum EditTarget: Hashable {
         case memory, user
@@ -62,46 +69,81 @@ final class MemoryViewModel {
                 let config = svc.loadConfig()
                 let profiles = svc.loadMemoryProfiles()
                 let profile = currentProfile.isEmpty ? config.memoryProfile : currentProfile
-                let memory = svc.loadMemory(profile: profile)
-                let user = svc.loadUserProfile(profile: profile)
-                ScarfMon.event(.diskIO, "memory.load.bytes", count: 0, bytes: memory.utf8.count + user.utf8.count)
+                // Each file independently: one unreadable file must not blank
+                // the other, and NEITHER may be published as `""` from a
+                // failure — the editor's conflict check reads these.
+                let loaded = Self.readBoth(svc, profile: profile)
+                let (memory, user, failure) = (loaded.memory, loaded.user, loaded.failure)
+                let loadedBytes = (memory?.utf8.count ?? 0) + (user?.utf8.count ?? 0)
+                ScarfMon.event(.diskIO, "memory.load.bytes", count: 0, bytes: loadedBytes)
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     self.memoryProvider = config.memoryProvider
                     self.profiles = profiles
                     self.activeProfile = profile
-                    self.memoryContent = memory
-                    self.userContent = user
+                    if let memory { self.memoryContent = memory }
+                    if let user { self.userContent = user }
+                    self.loadError = failure
                     self.isLoading = false
                 }
             }
         }
     }
 
+    /// Read both memory files, each independently: one unreadable file must
+    /// not blank the other, and NEITHER may be published as `""` from a
+    /// failure — the editor's conflict check reads these (GW-F2).
+    /// `nil` text means "not read", never "empty".
+    private nonisolated static func readBoth(
+        _ svc: HermesFileService, profile: String
+    ) -> (memory: String?, user: String?, failure: String?) {
+        var failure: String?
+        var memory: String?
+        var user: String?
+        do { memory = try svc.loadMemory(profile: profile) }
+        catch { failure = error.localizedDescription }
+        do { user = try svc.loadUserProfile(profile: profile) }
+        catch { failure = failure ?? error.localizedDescription }
+        return (memory, user, failure)
+    }
+
     func switchProfile(_ profile: String) {
         activeProfile = profile
         let svc = fileService
         Task.detached { [weak self] in
-            let memory = svc.loadMemory(profile: profile)
-            let user = svc.loadUserProfile(profile: profile)
+            let loaded = Self.readBoth(svc, profile: profile)
+            let (memory, user, failure) = (loaded.memory, loaded.user, loaded.failure)
             await MainActor.run { [weak self] in
-                self?.memoryContent = memory
-                self?.userContent = user
+                if let memory { self?.memoryContent = memory }
+                if let user { self?.userContent = user }
+                self?.loadError = failure
             }
         }
     }
 
     /// Reads the on-disk copy of `target` for the active profile, off the main
     /// actor. Used by the editor to refresh a clean buffer on demand.
-    func reload(_ target: EditTarget) async -> String {
+    ///
+    /// `nil` means the read FAILED (GW-F2). The caller must not treat that as
+    /// disk content: offering `""` as "the new version" to replace a draft is
+    /// how a blip turned into a published empty file.
+    func reload(_ target: EditTarget) async -> String? {
         let svc = fileService
         let profile = activeProfile
-        return await Task.detached {
-            switch target {
-            case .memory: return svc.loadMemory(profile: profile)
-            case .user:   return svc.loadUserProfile(profile: profile)
+        // `(text, error)` rather than `Result`: the error is carried as a
+        // Sendable message string, and `String` is not an `Error`.
+        let outcome: (text: String?, message: String?) = await Task.detached {
+            do {
+                switch target {
+                case .memory: return (try svc.loadMemory(profile: profile), nil)
+                case .user:   return (try svc.loadUserProfile(profile: profile), nil)
+                }
+            } catch {
+                return (nil, error.localizedDescription)
             }
         }.value
+        loadError = outcome.message
+        return outcome.text
     }
 
     /// Conflict-aware write. Re-reads the file immediately before writing and
@@ -120,18 +162,33 @@ final class MemoryViewModel {
         defer { isSaving = false }
 
         let outcome: SaveOutcome = await Task.detached {
+            // The conflict check MUST NOT run against a failed read (GW-F2,
+            // audit DI H3). It used to compare the baseline against
+            // `readFile ?? ""`, so one dropped round-trip presented as
+            // `.conflict(onDisk: "")` — "the file changed to empty, reload to
+            // take the new version" — and the reload-then-save published that
+            // emptiness through the guard. A read that fails is now a
+            // `.failed`, which moves nothing and keeps the draft.
+            var proof: GuardedTextFile.Loaded?
             if !force {
-                let current: String
-                switch target {
-                case .memory: current = svc.loadMemory(profile: profile)
-                case .user:   current = svc.loadUserProfile(profile: profile)
+                let loaded: GuardedTextFile.Loaded
+                do {
+                    switch target {
+                    case .memory: loaded = try svc.loadMemoryFile(profile: profile)
+                    case .user:   loaded = try svc.loadUserProfileFile(profile: profile)
+                    }
+                } catch {
+                    return .failed(message: error.localizedDescription)
                 }
-                guard current == baseline else { return .conflict(onDisk: current) }
+                guard loaded.text == baseline else { return .conflict(onDisk: loaded.text) }
+                // Same inspection the comparison was made against carries into
+                // the write: one read, and no window between them (PERF M3).
+                proof = loaded
             }
             do {
                 switch target {
-                case .memory: try svc.saveMemory(text, profile: profile)
-                case .user:   try svc.saveUserProfile(text, profile: profile)
+                case .memory: try svc.saveMemory(text, profile: profile, after: proof)
+                case .user:   try svc.saveUserProfile(text, profile: profile, after: proof)
                 }
             } catch {
                 return .failed(message: error.localizedDescription)

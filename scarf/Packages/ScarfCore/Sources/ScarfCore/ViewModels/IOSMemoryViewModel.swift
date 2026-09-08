@@ -83,7 +83,23 @@ public final class IOSMemoryViewModel {
     public private(set) var isSaving: Bool = false
     public private(set) var lastError: String?
 
-    public var hasUnsavedChanges: Bool { text != originalText }
+    /// The PROOF that this editor's buffer came from a real read
+    /// (GW-F2, audit DI M12). `false` until a load succeeds, and back to
+    /// `false` after any load failure — a Save is unreachable without it.
+    ///
+    /// This mirrors `SkillsViewModel`'s proof-token discipline: no token, no
+    /// save. Without it, a transport blip blanked `text`/`originalText` to
+    /// `""`, and the very next keystroke made `hasUnsavedChanges` true again
+    /// — re-arming Save over a buffer that was never read. The guarded write
+    /// would refuse a stat-confirmed unreadable file, but a blip that healed
+    /// in the meantime reads fine, and then the empty buffer publishes.
+    public private(set) var isLoaded: Bool = false
+
+    /// Save is reachable only for a buffer with a load behind it AND an
+    /// actual edit.
+    public var canSave: Bool { isLoaded && hasUnsavedChanges && !isSaving }
+
+    public var hasUnsavedChanges: Bool { isLoaded && text != originalText }
 
     public init(kind: Kind, context: ServerContext) {
         self.kind = kind
@@ -119,6 +135,7 @@ public final class IOSMemoryViewModel {
         case .success(.some(let loaded)):
             text = loaded
             originalText = loaded
+            isLoaded = true
             lastError = nil
         case .success(.none):
             // Genuinely absent file — treat as empty (first-time
@@ -126,14 +143,17 @@ public final class IOSMemoryViewModel {
             // fileExists check inside readTextThrowing (pass-1 M7 #7/#8).
             text = ""
             originalText = ""
+            isLoaded = true
             lastError = nil
         case .failure(let error):
-            // Transport error (SSH timeout, auth failure, SFTP
-            // protocol issue). Surface to the UI so the user
-            // understands this isn't just "empty file" — something's
-            // genuinely broken with the connection.
-            text = ""
-            originalText = ""
+            // Transport error (SSH timeout, auth failure, SFTP protocol
+            // issue). The buffer is NOT blanked and the editor is NOT armed
+            // (GW-F2): `text = ""` here plus a re-arming keystroke is how a
+            // blip published an empty MEMORY.md through a guard that had
+            // nothing left to refuse. Whatever was last successfully read
+            // stays on screen; `load()` is re-issued by the view's `.task`,
+            // so a retry is one navigation away.
+            isLoaded = false
             lastError = "Couldn't load \(kind.displayName) — \(error.localizedDescription)"
         }
         isLoading = false
@@ -141,16 +161,25 @@ public final class IOSMemoryViewModel {
 
     public func save() async -> Bool {
         guard !isSaving else { return false }
+        // No proof, no save. The UI disables the button on `canSave`; this is
+        // the model-level enforcement so a programmatic caller cannot get
+        // past it either (GW-F2).
+        guard isLoaded else {
+            lastError = "Couldn't save \(kind.displayName) — it hasn't been read yet. Reopen this file to try loading it again."
+            return false
+        }
         isSaving = true
         lastError = nil
         let ctx = context
         let path = kind.path(on: context)
         let snapshot = text
         let label = kind.displayName
-        // GUARDED. `load()` sets `text = ""` on a transport failure and Save
-        // stays armed, so an unguarded write here published that empty
-        // buffer over the file. An EMPTY memory file is a legal state, so
-        // only a stat-confirmed unreadable (or non-UTF-8) file is refused.
+        // GUARDED — the second of two defences, the first being `isLoaded`
+        // above. An EMPTY memory file is a legal state, so only a
+        // stat-confirmed unreadable (or non-UTF-8) file is refused here.
+        // Deliberately re-reads rather than reusing the load's proof: the
+        // editor may have sat open for minutes, and a `.bak` written from a
+        // stale inspection would archive bytes the file no longer holds.
         let result: Result<Void, Error> = await Task.detached {
             do {
                 let file = GuardedTextFile(

@@ -173,6 +173,69 @@ import Foundation
         }
     }
 
+    // MARK: - ProjectLifecycleService.cleanUpAfterRemoval (GW-F2, DI M4)
+
+    /// The old body gated on `fileExists` and then diffed a `try?` read taken
+    /// before against one taken after. An unreadable AGENTS.md therefore
+    /// reported a clean removal with the block still in it. Now the refusal
+    /// becomes a warning the removal reports.
+    @Test func removalCleanupWarnsInsteadOfSilentlySkippingAnUnreadableAgentsMd() async throws {
+        try #require(!Self.runningAsRoot)
+        try await Self.withScratch { base in
+            let project = base.appendingPathComponent("proj").path
+            let agents = project + "/AGENTS.md"
+            let original = Self.agentsMd(withBlock: "scarf block")
+            try Self.write(original, to: agents)
+            try Self.chmod(agents, 0o000)
+
+            let ctx = ServerContext.local(home: base.appendingPathComponent("hermes"))
+            let result = ProjectLifecycleService(context: ctx)
+                .cleanUpAfterRemoval(of: ProjectEntry(name: "proj", path: project))
+
+            #expect(result.contextBlockStripped == false)
+            #expect(
+                result.warnings.contains { $0.contains("AGENTS.md") },
+                "the refusal has to be reported, not swallowed by a fileExists gate"
+            )
+
+            try Self.chmod(agents, 0o644)
+            #expect(Self.text(agents) == original)
+        }
+    }
+
+    /// Healthy paths unchanged: the block is stripped and REPORTED stripped,
+    /// and a project whose folder is gone is a quiet no-op — not a warning.
+    @Test func removalCleanupReportsTheStripItActuallyPerformed() async throws {
+        try await Self.withScratch { base in
+            let project = base.appendingPathComponent("proj").path
+            let agents = project + "/AGENTS.md"
+            try Self.write(Self.agentsMd(withBlock: "scarf block"), to: agents)
+            let ctx = ServerContext.local(home: base.appendingPathComponent("hermes"))
+            let service = ProjectLifecycleService(context: ctx)
+
+            let stripped = service.cleanUpAfterRemoval(
+                of: ProjectEntry(name: "proj", path: project)
+            )
+            #expect(stripped.contextBlockStripped)
+            #expect(stripped.warnings.isEmpty)
+            #expect(Self.text(agents)?.contains(ProjectContextBlock.beginMarker) == false)
+
+            // Second pass: nothing left to strip.
+            let again = service.cleanUpAfterRemoval(
+                of: ProjectEntry(name: "proj", path: project)
+            )
+            #expect(again.contextBlockStripped == false)
+            #expect(again.warnings.isEmpty)
+
+            // A project whose folder is gone entirely.
+            let vanished = service.cleanUpAfterRemoval(
+                of: ProjectEntry(name: "gone", path: base.appendingPathComponent("gone").path)
+            )
+            #expect(vanished.contextBlockStripped == false)
+            #expect(vanished.warnings.isEmpty)
+        }
+    }
+
     // MARK: - SkillsViewModel (SKILL.md)
 
     /// The whole point of the conversion: the `""`-loader case must have no
@@ -211,6 +274,36 @@ import Foundation
                 Self.text(path) == original,
                 "the loader's empty buffer must never reach the file"
             )
+        }
+    }
+
+    /// GW-F2 (DI M11): the containment guard used to `return` bare, and
+    /// `saveEdit` reads "no contentError" as "it saved" — so a rejected path
+    /// closed the editor on a confirmation and dropped the user's edits.
+    @MainActor
+    @Test func skillPathOutsideTheSkillsDirRefusesLoudlyInsteadOfSilently() async throws {
+        try await Self.withScratch { base in
+            let home = base.appendingPathComponent("hermes")
+            let ctx = ServerContext.local(home: home)
+            // A real, readable file that is simply NOT under ~/.hermes/skills.
+            let outsideDir = base.appendingPathComponent("elsewhere").path
+            let path = outsideDir + "/SKILL.md"
+            let original = "somebody else's file\n"
+            try Self.write(original, to: path)
+
+            let vm = SkillsViewModel(context: ctx)
+            vm.selectSkill(
+                HermesSkill(
+                    id: "x/outside", name: "outside", category: "x",
+                    path: outsideDir, files: ["SKILL.md"], requiredConfig: []
+                )
+            )
+            vm.editText = "overwritten\n"
+            vm.saveEdit()
+
+            #expect(vm.contentError != nil, "a rejected path is not a successful save")
+            #expect(vm.isEditing == false)
+            #expect(Self.text(path) == original, "and nothing was written outside the root")
         }
     }
 

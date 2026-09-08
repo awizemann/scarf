@@ -148,7 +148,7 @@ import ScarfCore
         let resolver = KanbanTenantResolver(context: .local)
 
         try resolver.setTenant("scarf:exact", for: project)
-        #expect(resolver.tenant(for: project) == "scarf:exact")
+        #expect(try resolver.tenant(for: project) == "scarf:exact")
         // Sentinel manifest written.
         #expect(FileManager.default.fileExists(atPath: dir + "/.scarf/manifest.json"))
     }

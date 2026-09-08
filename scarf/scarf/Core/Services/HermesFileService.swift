@@ -116,40 +116,71 @@ struct HermesFileService: Sendable {
         }.sorted()
     }
 
-    nonisolated func loadMemory(profile: String = "") -> String {
-        let path = memoryPath(profile: profile, file: "MEMORY.md")
-        return readFile(path) ?? ""
+    /// Load `MEMORY.md` WITH PROOF (GW-F2, audit DI H3).
+    ///
+    /// The old body was `readFile(path) ?? ""`, which is the absent-vs-
+    /// unreadable inference one hop upstream of the guard: the editor's
+    /// conflict check compared the user's baseline against that `""`,
+    /// concluded the file "changed to empty", and offered "Reload to take
+    /// the new version" — after which the next save published emptiness
+    /// THROUGH the guard, because by then the file read fine. The guard was
+    /// being bypassed by the UI it protects.
+    ///
+    /// An empty file is still `""` with `exists == true`; only a
+    /// stat-confirmed unreadable file (or non-UTF-8 bytes) throws. The
+    /// returned `Loaded` is the write's proof token — hand it back to
+    /// ``saveMemory(_:profile:after:)`` and the save costs no second read.
+    nonisolated func loadMemoryFile(profile: String = "") throws -> GuardedTextFile.Loaded {
+        try GuardedTextFile(transport: transport, label: "MEMORY.md")
+            .load(memoryPath(profile: profile, file: "MEMORY.md"))
     }
 
-    nonisolated func loadUserProfile(profile: String = "") -> String {
-        let path = memoryPath(profile: profile, file: "USER.md")
-        return readFile(path) ?? ""
+    /// `USER.md`'s counterpart to ``loadMemoryFile(profile:)``.
+    nonisolated func loadUserProfileFile(profile: String = "") throws -> GuardedTextFile.Loaded {
+        try GuardedTextFile(transport: transport, label: "USER.md")
+            .load(memoryPath(profile: profile, file: "USER.md"))
     }
 
-    /// GUARDED, and therefore THROWING. `loadMemory` returns `""` on a
-    /// failed read, so the editor could hand that empty buffer straight back
-    /// here and publish it over the user's prose. An empty `MEMORY.md` is a
-    /// legal state (the guard's zero-byte reclassification), so only a
-    /// PROVEN-unreadable file is refused — and a refusal has to reach the
-    /// user, which is why these no longer swallow.
-    nonisolated func saveMemory(_ content: String, profile: String = "") throws {
+    nonisolated func loadMemory(profile: String = "") throws -> String {
+        try loadMemoryFile(profile: profile).text
+    }
+
+    nonisolated func loadUserProfile(profile: String = "") throws -> String {
+        try loadUserProfileFile(profile: profile).text
+    }
+
+    /// GUARDED, and therefore THROWING. Only a PROVEN-unreadable file is
+    /// refused — an empty `MEMORY.md` is a legal state (the guard's
+    /// zero-byte reclassification) — and a refusal has to reach the user,
+    /// which is why these no longer swallow.
+    ///
+    /// - Parameter loaded: the proof from a read the caller ALREADY did (the
+    ///   editor's conflict check does exactly one, immediately before this).
+    ///   Passing it makes the save a single round-trip instead of two and
+    ///   closes the window between the two reads. `nil` reads here.
+    nonisolated func saveMemory(
+        _ content: String, profile: String = "", after loaded: GuardedTextFile.Loaded? = nil
+    ) throws {
         try guardedWriteText(content, to: memoryPath(profile: profile, file: "MEMORY.md"),
-                             label: "MEMORY.md")
+                             label: "MEMORY.md", after: loaded)
     }
 
-    nonisolated func saveUserProfile(_ content: String, profile: String = "") throws {
+    nonisolated func saveUserProfile(
+        _ content: String, profile: String = "", after loaded: GuardedTextFile.Loaded? = nil
+    ) throws {
         try guardedWriteText(content, to: memoryPath(profile: profile, file: "USER.md"),
-                             label: "USER.md")
+                             label: "USER.md", after: loaded)
     }
 
     /// Read-with-proof, then publish with a one-deep `.bak`, for the
     /// irreplaceable hand-authored text files this service owns.
     nonisolated private func guardedWriteText(
-        _ content: String, to path: String, label: String
+        _ content: String, to path: String, label: String,
+        after loaded: GuardedTextFile.Loaded? = nil
     ) throws {
         let file = GuardedTextFile(transport: transport, label: label)
-        let loaded = try file.load(path)
-        try file.write(content, to: path, after: loaded)
+        let proof = try loaded ?? file.load(path)
+        try file.write(content, to: path, after: proof)
     }
 
     nonisolated private func memoryPath(profile: String, file: String) -> String {

@@ -806,7 +806,15 @@ public final class SkillsViewModel {
     }
 
     private func saveSkillContent(path: String, content: String) {
-        guard isValidSkillPath(path) else { return }
+        // A bare `return` here was a SILENT SUCCESS (GW-F2, audit DI M11):
+        // `saveEdit` reads `contentError == nil` as "it saved", so a path
+        // rejected by containment closed the editor and dropped the user's
+        // edits with a confirmation. The rejection now surfaces through the
+        // same channel every other refusal uses.
+        guard isValidSkillPath(path) else {
+            contentError = "Not saved — \(path) is outside the skills directory."
+            return
+        }
         // No proof token ⇒ the buffer on screen was never the file's real
         // contents ⇒ there is nothing legitimate to save.
         guard let loaded = loadedContent else {

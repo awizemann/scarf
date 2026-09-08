@@ -143,9 +143,11 @@ import ScarfCore
         try Data("years of the user's notes\n".utf8).write(to: URL(fileURLWithPath: path))
         try Self.chmod(path, 0o000)
 
-        // `loadMemory` hands the editor an empty buffer — the exact input the
-        // old unguarded `saveMemory` would have published.
-        #expect(service.loadMemory().isEmpty)
+        // GW-F2: the READ refuses too. It used to hand the editor an empty
+        // buffer — the exact input the old unguarded `saveMemory` would have
+        // published, and the input the Mac conflict check called "the file
+        // changed to empty".
+        #expect(throws: (any Error).self) { try service.loadMemory() }
         #expect(throws: (any Error).self) { try service.saveMemory("") }
 
         try Self.chmod(path, 0o644)

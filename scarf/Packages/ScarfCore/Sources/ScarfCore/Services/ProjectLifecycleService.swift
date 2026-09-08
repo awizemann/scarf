@@ -89,20 +89,28 @@ public struct ProjectLifecycleService: Sendable {
             )
         }
 
-        // Only when the folder is still there. A project removed BECAUSE its
-        // folder is gone must not have the removal report a failure to edit
-        // a file inside it.
-        if transport.fileExists(entry.path + "/AGENTS.md") {
-            do {
-                let before = try? transport.readFile(entry.path + "/AGENTS.md")
-                try ProjectContextBlock.removeBlock(forProjectAt: entry.path, context: context)
-                let after = try? transport.readFile(entry.path + "/AGENTS.md")
-                result.contextBlockStripped = before != after
-            } catch {
-                result.warnings.append(
-                    "Couldn't remove Scarf's section from \(entry.path)/AGENTS.md: \(error.localizedDescription)"
-                )
-            }
+        // A project removed BECAUSE its folder is gone must not have the
+        // removal report a failure to edit a file inside it — which is why
+        // this used to open with `fileExists`. That gate was INFERENCE
+        // (GW-F2, audit DI M4): one dropped SSH round-trip answered `false`
+        // and the block was silently left in the user's AGENTS.md, reported
+        // as a clean removal. It also bracketed the call with two `try?`
+        // reads to guess whether anything changed, so a failed read on
+        // either side became "nothing was stripped".
+        //
+        // `removeBlock` already carries the guard: absence is its no-op,
+        // non-UTF-8 bytes are left alone, and only a stat-confirmed
+        // unreadable file throws. It now also REPORTS whether it rewrote
+        // anything, so the outcome comes from the publisher instead of a
+        // before/after diff nobody could trust.
+        do {
+            result.contextBlockStripped = try ProjectContextBlock.removeBlock(
+                forProjectAt: entry.path, context: context
+            )
+        } catch {
+            result.warnings.append(
+                "Couldn't remove Scarf's section from \(entry.path)/AGENTS.md: \(error.localizedDescription)"
+            )
         }
 
         #if canImport(os)

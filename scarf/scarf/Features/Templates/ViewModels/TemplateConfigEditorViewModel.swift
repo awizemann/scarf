@@ -54,6 +54,10 @@ final class TemplateConfigEditorViewModel {
         let project = project
         Task.detached { [weak self] in
             do {
+                // `loadCachedManifest` answers `nil` only for a PROVABLY
+                // absent cache (GW-F2): an unreadable one throws and lands
+                // in `.failed` below, so a dropped round-trip no longer
+                // reports the project as "not configurable".
                 guard let cachedManifest = try service.loadCachedManifest(project: project),
                       let schema = cachedManifest.config,
                       !schema.isEmpty else {
