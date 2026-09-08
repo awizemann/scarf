@@ -2,6 +2,14 @@
 #
 # ui-gate.sh — Scarf's full UI release gate.
 #
+# Plans: Full = scarfTests + every scarfUITests suite (the Live-gated ones skip
+# themselves); Live = ONLY the Live-gated suites (ChatJourneyUITests,
+# LiveGateUITests) with SCARF_UITEST_LIVE=1. Live deliberately does not re-run
+# Full: a second 12-minute pass doubled the exposure to runner-side failures
+# ("Lost connection to the application" → "Not authorized for performing UI
+# testing actions" cascading through every later test) for no extra coverage.
+# A new Live-only suite must be added to Live.xctestplan's selectedTests.
+#
 # Builds a throwaway seeded Hermes fixture home (scripts/ui-fixture/make-ui-fixture.sh),
 # then runs the Full and Live xctestplans (unless overridden) against ONE DerivedData
 # directory so the app only builds once, and writes a pass/fail summary.

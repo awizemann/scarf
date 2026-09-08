@@ -1,41 +1,36 @@
 {
-  "configurations" : [
+  "configurations": [
     {
-      "id" : "1F2A3B4C-0003-4A00-9000-5CA2F00D0003",
-      "name" : "Live",
-      "options" : {
-
-      }
+      "id": "1F2A3B4C-0003-4A00-9000-5CA2F00D0003",
+      "name": "Live",
+      "options": {}
     }
   ],
-  "defaultOptions" : {
-    "environmentVariableEntries" : [
+  "defaultOptions": {
+    "environmentVariableEntries": [
       {
-        "key" : "SCARF_UITEST_LIVE",
-        "value" : "1"
+        "key": "SCARF_UITEST_LIVE",
+        "value": "1"
       }
     ],
-    "targetForVariableExpansion" : {
-      "containerPath" : "container:scarf.xcodeproj",
-      "identifier" : "5349593F2F7B83B600BD31AD",
-      "name" : "scarf"
+    "targetForVariableExpansion": {
+      "containerPath": "container:scarf.xcodeproj",
+      "identifier": "5349593F2F7B83B600BD31AD",
+      "name": "scarf"
     }
   },
-  "testTargets" : [
+  "testTargets": [
     {
-      "target" : {
-        "containerPath" : "container:scarf.xcodeproj",
-        "identifier" : "5349594E2F7B83B700BD31AD",
-        "name" : "scarfTests"
-      }
-    },
-    {
-      "target" : {
-        "containerPath" : "container:scarf.xcodeproj",
-        "identifier" : "534959582F7B83B700BD31AD",
-        "name" : "scarfUITests"
+      "selectedTests": [
+        "ChatJourneyUITests",
+        "LiveGateUITests"
+      ],
+      "target": {
+        "containerPath": "container:scarf.xcodeproj",
+        "identifier": "534959582F7B83B700BD31AD",
+        "name": "scarfUITests"
       }
     }
   ],
-  "version" : 1
+  "version": 1
 }
