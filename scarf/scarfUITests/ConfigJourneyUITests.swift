@@ -559,10 +559,13 @@ final class ConfigJourneyUITests: ScarfUITestCase {
     // MARK: - Navigation helpers
 
     private func element(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
-        // Always `.firstMatch`: a container identifier PROPAGATES to
-        // descendants that have none of their own, so several elements can
+        // Scoped to the app's WINDOWS (sheets and alerts included), never the
+        // whole app: AppKit mirrors some buttons into a Touch Bar proxy that
+        // an app-wide `.firstMatch` can resolve to first, and clicking that
+        // fails with "cannot be called with Touch Bar elements" (seen on the
+        // Models row's Delete). Always `.firstMatch`: several elements can
         // legitimately answer to one identifier.
-        app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+        app.windows.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
     /// Launch, surface, and open every collapsed sidebar nav section.

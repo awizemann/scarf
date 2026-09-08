@@ -49,6 +49,15 @@ public final class HermesVersionCache: @unchecked Sendable {
     private let defaults: UserDefaults
     private let probe: Probe
     private let ttl: TimeInterval
+    /// Back-off between attempts of one ASYNC probe when the previous
+    /// attempt came back undetected. `hermes --version` on a cold home
+    /// (first run, or a machine under load) can outrun the 10 s subprocess
+    /// timeout, and a single miss used to hide every capability-gated
+    /// section — Kanban, Models, Peers, Proxy — for the life of the window
+    /// with no second chance. Two short retries recover the common case
+    /// without turning an absent binary into a 30 s stall. Tests inject
+    /// `[]` or tiny values.
+    private let retryDelays: [TimeInterval]
     private let lock = NSLock()
 
     /// Successful probes completed in this process, keyed by `key(for:)`,
@@ -67,10 +76,12 @@ public final class HermesVersionCache: @unchecked Sendable {
     public init(
         defaults: UserDefaults = .standard,
         ttl: TimeInterval = 600,
-        probe: @escaping Probe = HermesVersionCache.subprocessProbe
+        probe: @escaping Probe = HermesVersionCache.subprocessProbe,
+        retryDelays: [TimeInterval] = [1.5, 4.0]
     ) {
         self.defaults = defaults
         self.ttl = ttl
+        self.retryDelays = retryDelays
         self.probe = probe
     }
 
@@ -164,7 +175,22 @@ public final class HermesVersionCache: @unchecked Sendable {
         if let hit = unexpiredLocked(key) { return .hit(hit) }
         if let existing = inFlight[key] { return .inFlight(existing) }
         let task = Task.detached(priority: .utility) { [self] () -> HermesCapabilities in
-            let result = probe(context)
+            var result = probe(context)
+            var attempt = 1
+            for delay in retryDelays where !result.detected {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                attempt += 1
+                result = probe(context)
+            }
+            #if canImport(os)
+            if !result.detected {
+                // `.error` so it persists in the unified log; the `.info`
+                // lines around a probe are gone by the time anyone looks.
+                logger.error("hermes --version probe failed after \(attempt) attempt(s) on \(context.displayName, privacy: .public); capability-gated sections stay hidden")
+            } else if attempt > 1 {
+                logger.notice("hermes --version probe succeeded on attempt \(attempt) for \(context.displayName, privacy: .public)")
+            }
+            #endif
             record(result, key: key, context: context)
             return result
         }

@@ -23,12 +23,18 @@ import Foundation
         private let lock = NSLock()
         private var _calls = 0
         var line: String?
-        init(line: String?) { self.line = line }
+        /// Calls that fail before `line` starts being returned — models a
+        /// cold home whose first `hermes --version` outruns the timeout.
+        var failuresBeforeSuccess = 0
+        init(line: String?, failuresBeforeSuccess: Int = 0) {
+            self.line = line
+            self.failuresBeforeSuccess = failuresBeforeSuccess
+        }
         var calls: Int { lock.lock(); defer { lock.unlock() }; return _calls }
         func probe(_: ServerContext) -> HermesCapabilities {
             lock.lock()
             _calls += 1
-            let current = line
+            let current = _calls <= failuresBeforeSuccess ? nil : line
             lock.unlock()
             guard let current else { return .empty }
             return HermesCapabilities.parse(current)
@@ -45,6 +51,47 @@ import Foundation
             displayName: host,
             kind: .ssh(SSHConfig(host: host, user: user, remoteHome: home))
         )
+    }
+
+    // MARK: - Retry on a cold miss
+
+    @Test func aColdMissIsRetriedAndTheRetryIsMemoized() async {
+        let (defaults, name) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let spy = ProbeSpy(line: "Hermes Agent v0.21.0 (2026.8.31)", failuresBeforeSuccess: 1)
+        let cache = HermesVersionCache(defaults: defaults, probe: spy.probe, retryDelays: [0.01, 0.01])
+        let ctx = localContext(home: "/tmp/scarf-cache-retry")
+
+        let caps = await cache.capabilities(for: ctx)
+
+        #expect(caps.detected)
+        #expect(caps.semver == HermesCapabilities.SemVer(major: 0, minor: 21, patch: 0))
+        #expect(spy.calls == 2)
+        // The recovered answer is the memoized one: no third probe.
+        _ = await cache.capabilities(for: ctx)
+        #expect(spy.calls == 2)
+    }
+
+    @Test func retriesAreBoundedAndAPersistentMissStaysEmpty() async {
+        let (defaults, name) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let spy = ProbeSpy(line: nil)
+        let cache = HermesVersionCache(defaults: defaults, probe: spy.probe, retryDelays: [0.01, 0.01])
+        let ctx = localContext(home: "/tmp/scarf-cache-retry-miss")
+
+        let caps = await cache.capabilities(for: ctx)
+
+        #expect(!caps.detected)
+        #expect(spy.calls == 3)   // one attempt plus two retries, then stop
+    }
+
+    @Test func noRetryDelaysMeansOneAttempt() async {
+        let (defaults, name) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let spy = ProbeSpy(line: nil)
+        let cache = HermesVersionCache(defaults: defaults, probe: spy.probe, retryDelays: [])
+        _ = await cache.capabilities(for: localContext(home: "/tmp/scarf-cache-retry-none"))
+        #expect(spy.calls == 1)
     }
 
     // MARK: - Single cached probe
@@ -157,7 +204,9 @@ import Foundation
         let (defaults, name) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: name) }
         let spy = ProbeSpy(line: nil)
-        let cache = HermesVersionCache(defaults: defaults, probe: spy.probe)
+        // No retries here: this test pins the caching semantics of ONE
+        // failed probe; the retry behaviour has its own tests above.
+        let cache = HermesVersionCache(defaults: defaults, probe: spy.probe, retryDelays: [])
         let ctx = localContext(home: "/tmp/scarf-cache-e")
 
         let failed = await cache.capabilities(for: ctx)
