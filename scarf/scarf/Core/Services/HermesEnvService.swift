@@ -48,10 +48,45 @@ nonisolated struct HermesEnvService: Sendable {
     /// on a `Sendable` struct) — callers like `PlatformsViewModel.load()` read
     /// `.env` on a detached task to keep the main thread free (gh#102).
     nonisolated func load() -> [String: String] {
-        guard let data = try? transport.readFile(path),
-              let content = String(data: data, encoding: .utf8) else {
-            return [:]
+        (try? loadProven()) ?? [:]
+    }
+
+    /// Why a `.env` could not be read, when the caller needs to know the
+    /// difference (GW-F6 / audit DI L10).
+    enum LoadRefusal: LocalizedError, Equatable {
+        case unreadable(path: String)
+
+        var errorDescription: String? {
+            switch self {
+            case let .unreadable(path):
+                return "Couldn't read \(path). It's there, but two reads of it failed — the fields below may be blank even though values are set. Fix the connection or the file's permissions before saving, or a save will comment those keys out."
+            }
         }
+    }
+
+    /// ``load()`` with the two failures kept apart: an ABSENT `.env` is an
+    /// empty dictionary (nothing is set yet, and an empty form is the
+    /// truth), while a file that is provably there and unreadable THROWS.
+    ///
+    /// **Why the distinction is load-bearing.** `load() ?? [:]` is what feeds
+    /// every platform setup form. A blip made it return `[:]`, the form
+    /// rendered blank fields over live values, and `PlatformSetupHelpers`
+    /// turns a blank field into an `unset` — so pressing Save on a form the
+    /// user never edited commented out working API keys. The write itself
+    /// was already safe (the guarded `unset` refuses while the file is
+    /// unreadable); the hazard is the transient case where the read blips
+    /// and the write a moment later succeeds. Surfacing at LOAD is what
+    /// closes it, which is why the forms show the refusal instead of an
+    /// empty form.
+    nonisolated func loadProven() throws -> [String: String] {
+        let loaded: GuardedTextFile.Loaded
+        do {
+            loaded = try GuardedTextFile(transport: transport, label: ".env").load(path)
+        } catch {
+            throw LoadRefusal.unreadable(path: path)
+        }
+        guard loaded.exists else { return [:] }
+        let content = loaded.text
         var result: [String: String] = [:]
         for line in content.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)

@@ -23,6 +23,25 @@ enum PlatformSetupHelpers {
     /// read unchanged.
     typealias SaveOutcome = OutcomeMessage
 
+    /// Read `.env` for a setup form, distinguishing "nothing is set yet"
+    /// from "we couldn't read it" (GW-F6 / audit DI L10).
+    ///
+    /// Every platform form used to open on `HermesEnvService.load()`, whose
+    /// `?? [:]` collapsed those two into an empty form. The fields then
+    /// rendered blank over live values, and ``saveForm(context:envPairs:configKV:)``
+    /// treats a blank field as an `unset` — so a Save on a form the user
+    /// never touched commented out working credentials. The dictionary is
+    /// unchanged on both healthy paths; the second element is the sentence
+    /// the form puts in its (already outcome-typed, GW-F4) message bar when
+    /// the fields it is about to show are not the file's contents.
+    nonisolated static func loadEnv(context: ServerContext) -> (env: [String: String], failure: String?) {
+        do {
+            return (try HermesEnvService(context: context).loadProven(), nil)
+        } catch {
+            return ([:], error.localizedDescription)
+        }
+    }
+
     /// Apply a form save in one atomic batch against a specific server.
     ///
     /// - `context`: the server whose `.env` and `config.yaml` we're writing.

@@ -25,7 +25,15 @@ final class MattermostSetupViewModel: OutcomeMessageHosting {
     let replyModeOptions = ["off", "thread"]
 
     func load() {
-        let env = HermesEnvService(context: context).load()
+        // GW-F6 / audit DI L10: an unreadable `.env` used to arrive as an
+        // EMPTY one, so this form rendered blank fields over live values and
+        // a Save then commented those keys out. Absent is still an empty
+        // form (correct — nothing is set yet); unreadable says so.
+        let (env, envReadFailure) = PlatformSetupHelpers.loadEnv(context: context)
+        if let envReadFailure {
+            message = envReadFailure
+            messageIsFailure = true
+        }
         serverURL = env["MATTERMOST_URL"] ?? ""
         token = env["MATTERMOST_TOKEN"] ?? ""
         allowedUsers = env["MATTERMOST_ALLOWED_USERS"] ?? ""

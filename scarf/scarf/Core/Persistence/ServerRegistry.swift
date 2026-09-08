@@ -79,6 +79,20 @@ final class ServerRegistry: GuardedSidecarStore {
 
     private(set) var storeDamage: StoreDamage?
 
+    /// A save that was NOT refused and still did not land — a full disk, a
+    /// read-only volume, a permissions change under us (GW-F6 / audit DI
+    /// M5). This used to be a bare `logger.error` in the `catch` below: the
+    /// user's edit stayed on screen, the banner stayed hidden, and Scarf had
+    /// silently become an in-memory registry. It is deliberately NOT
+    /// `storeDamage` — nothing is damaged, nothing is being refused, and the
+    /// remedy (free some space, fix the permissions, retry) is a different
+    /// sentence — but it renders in the same banner slot.
+    private(set) var saveFailure: String?
+
+    /// True when anything is wrong enough that `ManageServersView` should
+    /// show a banner: the file is damaged, or a write failed outright.
+    var hasStoreProblem: Bool { storeDamage != nil || saveFailure != nil }
+
     private let storePath: String
 
     /// The inspection the in-memory `entries` were built from — the same
@@ -252,6 +266,15 @@ final class ServerRegistry: GuardedSidecarStore {
     struct ImportSummary: Equatable {
         var imported: Int
         var skippedDuplicates: Int
+        /// Whether the imported entries actually reached `servers.json`
+        /// (GW-F6 / audit DI M7). `false` when the save was refused (the
+        /// file is damaged) or failed outright — in which case the import
+        /// lives in this session only, and telling the user "Imported 3
+        /// servers" full stop would be the same green-checkmark-for-failure
+        /// GW-F4 removed everywhere else.
+        var persisted: Bool = true
+        /// Why it did not persist, ready to append to the summary line.
+        var persistFailure: String?
     }
 
     /// Errors raised by `importEntries(from:)` for the user-facing alert.
@@ -339,9 +362,14 @@ final class ServerRegistry: GuardedSidecarStore {
             }
         }
 
-        save()
+        let outcome = save()
         if imported > 0 { onEntriesChanged?() }
-        return ImportSummary(imported: imported, skippedDuplicates: skipped)
+        return ImportSummary(
+            imported: imported,
+            skippedDuplicates: skipped,
+            persisted: outcome.didPersist,
+            persistFailure: outcome.failureMessage
+        )
     }
 
     /// Disk envelope distinct from `RegistryFile`. Adds the export
@@ -377,27 +405,73 @@ final class ServerRegistry: GuardedSidecarStore {
     /// Cost on the launch path (Charter C10): one local `read` on the happy
     /// path, exactly as before. The stat + retry probe runs only when that
     /// read already failed. No sleeps, no retry loops.
-    private func load() {
+    /// Re-read `servers.json` from disk and act on what is there NOW.
+    ///
+    /// **Re-inspect; never trust the cached verdict (GW-F2).** The whole
+    /// point of a retry is that the world may have changed — the file was
+    /// restored from the quarantine copy, the volume came back, the
+    /// permissions were fixed — so this runs the full proof-based inspection
+    /// again rather than re-testing `storeDamage`.
+    ///
+    /// Two outcomes, and which one applies depends on whether the user has
+    /// edits that never reached disk:
+    ///
+    /// - **The file is healthy again and the session has UNPUBLISHED edits**
+    ///   (`storeDamage?.refusedSave == true`): the in-memory list is what the
+    ///   user believes their registry is, so it is published on top of the
+    ///   recovered file — with the guard's one-deep `.bak` capturing whatever
+    ///   was just recovered, so the hand-repair is not lost either.
+    /// - **The file is healthy again and nothing is pending**: the disk wins
+    ///   and the list is reloaded from it, exactly as at launch.
+    ///
+    /// Still damaged ⇒ still refusing, with the banner updated to whatever
+    /// the fresh inspection found (the quarantine path can appear, or
+    /// disappear — a size-refused file has no `.corrupt-` copy at all).
+    func retryLoad() {
+        let hadPendingEdits = storeDamage?.refusedSave == true
+        saveFailure = nil
+        load(adoptingDiskEntries: !hadPendingEdits)
+        if hadPendingEdits, storeDamage == nil {
+            // The file reads again and `lastInspection` is fresh proof, so
+            // the publish this session has been refusing can finally happen.
+            save()
+        }
+    }
+
+    /// Publish the in-memory list again after a non-refusal write failure
+    /// (DI M5). Nothing to re-inspect here: `lastInspection` is still the
+    /// proof from a healthy read — the write, not the read, is what failed.
+    func retrySave() {
+        save()
+    }
+
+    private func load(adoptingDiskEntries: Bool = true) {
+        // A retry that finds the file STILL damaged must not forget that
+        // this session is holding edits nothing has published: forgetting it
+        // would make the next retry adopt the disk and silently discard
+        // them. `refusedSave` is a fact about the session, not about the
+        // inspection, so it survives a re-read.
+        let hadPendingEdits = storeDamage?.refusedSave ?? false
         let inspection = inspect(storePath)
         switch inspection.state {
         case .absent:
             // Proven-absent (or nothing we can prove is there): a fresh
             // install has no servers, and an empty list IS the truth.
             lastInspection = inspection
-            entries = []
+            if adoptingDiskEntries { entries = [] }
             storeDamage = nil
 
         case .present:
             guard let data = inspection.bytes else {
                 lastInspection = inspection
-                entries = []
+                if adoptingDiskEntries { entries = [] }
                 storeDamage = nil
                 return
             }
             do {
                 let file = try JSONDecoder().decode(RegistryFile.self, from: data)
                 lastInspection = inspection
-                entries = file.entries
+                if adoptingDiskEntries { entries = file.entries }
                 storeDamage = nil
             } catch {
                 // We HELD the bytes but they are not a server list. Copy
@@ -413,7 +487,9 @@ final class ServerRegistry: GuardedSidecarStore {
                 lastInspection = GuardedJSONStore.Inspection(
                     state: .unreadable(path: storePath), bytes: data, quarantineCopy: copy
                 )
-                storeDamage = StoreDamage(path: storePath, quarantinePath: copy)
+                storeDamage = StoreDamage(
+                    path: storePath, quarantinePath: copy, refusedSave: hadPendingEdits
+                )
             }
 
         case .unreadable(let path):
@@ -425,7 +501,9 @@ final class ServerRegistry: GuardedSidecarStore {
                 "servers.json at \(path, privacy: .public) is unreadable; keeping the in-memory list and refusing writes"
             )
             lastInspection = inspection
-            storeDamage = StoreDamage(path: path, quarantinePath: inspection.quarantineCopy)
+            storeDamage = StoreDamage(
+                path: path, quarantinePath: inspection.quarantineCopy, refusedSave: hadPendingEdits
+            )
 
         case .quarantined:
             // Unreachable: `damagePolicy == .refuseForever` reclassifies the
@@ -437,7 +515,9 @@ final class ServerRegistry: GuardedSidecarStore {
             lastInspection = GuardedJSONStore.Inspection(
                 state: .unreadable(path: storePath), bytes: inspection.bytes
             )
-            storeDamage = StoreDamage(path: storePath, quarantinePath: inspection.quarantineCopy)
+            storeDamage = StoreDamage(
+                path: storePath, quarantinePath: inspection.quarantineCopy, refusedSave: hadPendingEdits
+            )
         }
     }
 
@@ -448,7 +528,30 @@ final class ServerRegistry: GuardedSidecarStore {
     /// atomic replace — `LocalTransport.unguardedWriteFile` is
     /// `Data.write(options: .atomic)` with the same `mkdir -p` the old code
     /// did by hand.
-    private func save() {
+    /// What a `save()` actually did. Returned so the surfaces that report an
+    /// outcome to the user (import, above) can report the REAL one instead
+    /// of a fabricated success (GW-F6 / audit DI M7).
+    enum SaveOutcome: Equatable {
+        case saved
+        /// The guard refused: the predecessor is damage. The edit lives in
+        /// `entries` and the banner says so.
+        case refused(String)
+        /// The write was allowed and failed anyway — disk full, read-only
+        /// volume, permissions (DI M5).
+        case failed(String)
+
+        var didPersist: Bool { self == .saved }
+
+        var failureMessage: String? {
+            switch self {
+            case .saved: return nil
+            case .refused(let m), .failed(let m): return m
+            }
+        }
+    }
+
+    @discardableResult
+    private func save() -> SaveOutcome {
         do {
             let file = RegistryFile(schemaVersion: Self.currentSchemaVersion, entries: entries)
             let encoder = JSONEncoder()
@@ -459,6 +562,8 @@ final class ServerRegistry: GuardedSidecarStore {
             // save backs THEM up rather than re-reading.
             lastInspection = GuardedJSONStore.Inspection(state: .present, bytes: data)
             storeDamage = nil
+            saveFailure = nil
+            return .saved
         } catch let refusal as GuardedStoreError {
             // Not "failed to save" — REFUSED to save. The user's edit lives
             // in `entries` and the banner says so; retrying would only
@@ -469,8 +574,17 @@ final class ServerRegistry: GuardedSidecarStore {
                 quarantinePath: storeDamage?.quarantinePath,
                 refusedSave: true
             )
+            return .refused(refusal.localizedDescription)
         } catch {
+            // NOT a refusal — the guard said yes and the WRITE failed
+            // (GW-F6 / audit DI M5). This was a bare log line, which made
+            // "your servers are only in memory now" a silent state: no
+            // banner, no alert, the edit still on screen. Unlike a refusal
+            // there is nothing damaged to reload, so `storeDamage` stays
+            // nil and this gets its own message and its own remedy.
             Self.logger.error("Failed to save servers.json: \(error.localizedDescription)")
+            saveFailure = error.localizedDescription
+            return .failed(error.localizedDescription)
         }
     }
 }

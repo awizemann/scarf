@@ -93,6 +93,14 @@ public struct LocalTransport: ServerTransport {
         do {
             return try Data(contentsOf: URL(fileURLWithPath: path))
         } catch {
+            // Normalize "it isn't there" to the same phrase `SSHTransport`
+            // produces, so `TransportError.isNoSuchFile` means one thing on
+            // both transports (GW-F6 / audit DI L1). Everything else keeps
+            // its own message.
+            if (error as NSError).code == NSFileReadNoSuchFileError,
+               (error as NSError).domain == NSCocoaErrorDomain {
+                throw TransportError.fileIO(path: path, underlying: "No such file or directory")
+            }
             throw TransportError.fileIO(path: path, underlying: error.localizedDescription)
         }
     }

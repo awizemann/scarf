@@ -210,18 +210,22 @@ public struct RegistryWriteLock: Sendable {
 
     /// The same lock with a different wait bound (GW-F3).
     ///
-    /// One call site needs this: `SettingsViewModel.saveDirectYAML` runs its
-    /// whole read-modify-write SYNCHRONOUSLY ON THE MAIN ACTOR (PERF H2,
-    /// scheduled off-main in t-26bf60b8). The default remote bound is 60s,
-    /// chosen because a remote registry writer was already going to block
-    /// for about that long on its own scps — an argument that does not
-    /// transfer to a main-actor frame, where 60s of waiting is 60s of frozen
-    /// UI that charter C10 forbids. That site takes the lock with a bound
-    /// small enough to be invisible when uncontended (the normal case: the
-    /// create is one `open(2)`) and reports `registryBusy` through its
-    /// existing failure toast when it is not. Serialization is preserved for
-    /// every honest concurrent writer; what is given up is queueing behind a
-    /// slow remote holder, which that frame must not do anyway.
+    /// **No production caller today, deliberately.** It existed for
+    /// `SettingsViewModel.saveDirectYAML`, which ran its whole
+    /// read-modify-write synchronously on the main actor and therefore could
+    /// not afford the default 60s remote acquire — 60s of waiting there is
+    /// 60s of frozen UI that charter C10 forbids. GW-F6 moved that frame
+    /// onto a detached task (audit PERF H2), so it inherits the context
+    /// bound like every other adopter and the override went away with the
+    /// hazard that motivated it.
+    ///
+    /// The seam stays for two reasons: the F3 lock-contention tests drive it
+    /// through ``GuardedTextFile/withLock(_:acquireTimeout:_:)`` to make
+    /// contention observable in bounded time, and the next writer that
+    /// genuinely cannot wait should shorten its bound here rather than
+    /// skipping the lock. If you are reaching for it from a main-actor
+    /// frame, move the frame off-main instead — that is the fix this
+    /// override was standing in for.
     public nonisolated func withAcquireTimeout(_ seconds: TimeInterval) -> RegistryWriteLock {
         RegistryWriteLock(lockURL: lockURL, staleAfter: staleAfter, acquireTimeout: seconds)
     }

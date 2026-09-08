@@ -25,8 +25,32 @@ import os
 ///   for the ride. Keychain access stays local (it's a macOS-side thing
 ///   by definition — agents on remote Hermes installs would fetch
 ///   values via Scarf's channel, same as today).
-struct ProjectConfigService: Sendable {
+///
+/// **The `config.json` policy is DECLARED, not hand-rolled (GW-F6 / audit
+/// DI M8).** This type conforms to `GuardedSidecarStore` with
+/// `damagePolicy == .refuseForever`, which is what makes the three
+/// `if case .unreadable` branches below sufficient. Before that it ran
+/// `GuardedJSONStore` directly, so bytes that would not DECODE arrived as
+/// `.quarantined`, `existingRoot` came back `nil`, and `save` rebuilt the
+/// file from `root = [:]` — silently dropping every `keychain://` reference
+/// in it and orphaning the secrets they pointed at, which is exactly the
+/// destruction the refusal on the unreadable branch exists to prevent. The
+/// rows in `config.json` (the user's configured values, and the only
+/// pointers to their Keychain items) exist nowhere else, so it takes
+/// `projects.json`'s policy, and the protocol reclassifies the quarantine to
+/// `.unreadable` centrally — the bytes are still copied aside for the human,
+/// and `Inspection.quarantineCopy` still carries where.
+struct ProjectConfigService: GuardedSidecarStore, Sendable {
     private nonisolated static let logger = Logger(subsystem: "com.scarf", category: "ProjectConfigService")
+
+    nonisolated static let label = "config.json"
+    /// Cap shared verbatim with `ProjectMCPTools.configMaxBytes` — the same
+    /// file, so the same ceiling.
+    nonisolated static let maxBytes = 1 * 1024 * 1024
+    /// REFUSE FOREVER — see the type's header.
+    nonisolated static let damagePolicy = GuardedDamagePolicy.refuseForever
+
+    nonisolated var transport: any ServerTransport { context.makeTransport() }
 
     let context: ServerContext
     let keychain: ProjectConfigKeychain
@@ -63,19 +87,18 @@ struct ProjectConfigService: Sendable {
     /// SAVED them, wiping the real values. Guarding only `save` would not
     /// have closed that: the destruction enters through the load.
     nonisolated func load(project: ProjectEntry) throws -> ProjectConfigFile? {
-        let transport = context.makeTransport()
         let path = Self.configPath(for: project)
-        let inspection = GuardedJSONStore(transport: transport, label: "config.json")
-            .inspect(path, maxBytes: Self.configMaxBytes)
+        let inspection = inspect(path)
         switch inspection.state {
         case .absent:
             return nil
         case .unreadable(let damaged):
-            throw GuardedStoreError.refusedUnreadableOverwrite(path: damaged, label: "config.json")
+            throw GuardedStoreError.refusedUnreadableOverwrite(path: damaged, label: Self.label)
         case .quarantined:
-            // Past the cap. Not a decodable config, and not ours to replace
-            // on the strength of a file we never parsed.
-            throw GuardedStoreError.refusedUnreadableOverwrite(path: path, label: "config.json")
+            // Unreachable: `.refuseForever` reclassifies it to `.unreadable`
+            // above. Kept exhaustive rather than defaulted so a policy
+            // change surfaces here as a compile-time decision.
+            throw GuardedStoreError.refusedUnreadableOverwrite(path: path, label: Self.label)
         case .present:
             break
         }
@@ -91,9 +114,10 @@ struct ProjectConfigService: Sendable {
     /// Write `<project>/.scarf/config.json`. Secrets should already be
     /// represented as `TemplateConfigValue.keychainRef` references here
     /// — this service never inspects their plaintext.
-    /// Cap shared verbatim with `ProjectMCPTools.configMaxBytes` — the same
-    /// file, so the same ceiling.
-    nonisolated static let configMaxBytes = 1 * 1024 * 1024
+    /// Spelling kept for the call sites (and for `manifest.json`, which
+    /// borrows the same ceiling); the value is now the protocol's
+    /// ``maxBytes``.
+    nonisolated static var configMaxBytes: Int { maxBytes }
 
     /// Prove `save` would be ALLOWED to publish, without writing anything.
     ///
@@ -111,12 +135,9 @@ struct ProjectConfigService: Sendable {
     /// Costs one inspection (the same one `save` runs again at time of use —
     /// this is a pre-check, never a substitute for the guard).
     nonisolated func preflightSave(project: ProjectEntry) throws {
-        let transport = context.makeTransport()
         let path = Self.configPath(for: project)
-        let inspection = GuardedJSONStore(transport: transport, label: "config.json")
-            .inspect(path, maxBytes: Self.configMaxBytes)
-        if case .unreadable = inspection.state {
-            throw GuardedStoreError.refusedUnreadableOverwrite(path: path, label: "config.json")
+        if case .unreadable = inspect(path).state {
+            throw GuardedStoreError.refusedUnreadableOverwrite(path: path, label: Self.label)
         }
     }
 
@@ -125,7 +146,6 @@ struct ProjectConfigService: Sendable {
         templateId: String,
         values: [String: TemplateConfigValue]
     ) throws {
-        let transport = context.makeTransport()
         let path = Self.configPath(for: project)
 
         // GUARDED read-modify-write (GW-E2c) — the SAME policy the
@@ -140,16 +160,15 @@ struct ProjectConfigService: Sendable {
         //    REFUSES the write when the file is provably there and
         //    unreadable — rebuilding it would orphan every `keychain://`
         //    reference in it, with no pointer left to the secrets;
-        //  * bytes that won't decode are quarantined, then rebuilt;
+        //  * bytes that won't decode are copied aside AND refused, not
+        //    rebuilt (GW-F6 / DI M8): a rebuild from `[:]` here would drop
+        //    every `keychain://` reference and orphan the secrets;
         //  * the object graph is MUTATED, so every top-level key Scarf
         //    doesn't own survives the round trip;
         //  * a one-deep `config.json.bak` of whatever gets replaced.
-        let guarded = GuardedJSONStore(transport: transport, label: "config.json")
-        let (inspection, existingRoot) = guarded.inspectDecoding(
-            JSONValue.self, at: path, maxBytes: Self.configMaxBytes
-        )
+        let (inspection, existingRoot) = inspectDecoding(JSONValue.self, at: path)
         if case .unreadable = inspection.state {
-            throw GuardedStoreError.refusedUnreadableOverwrite(path: path, label: "config.json")
+            throw GuardedStoreError.refusedUnreadableOverwrite(path: path, label: Self.label)
         }
         var root: [String: JSONValue] = [:]
         if let existingRoot, case .object(let object) = existingRoot { root = object }
@@ -164,7 +183,7 @@ struct ProjectConfigService: Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(JSONValue.object(root))
-        try guarded.write(data, to: path, after: inspection)
+        try publish(data, to: path, after: inspection)
     }
 
     /// Re-express the typed values as a `JSONValue` object so they can be
@@ -180,18 +199,6 @@ struct ProjectConfigService: Sendable {
     }
 
     // MARK: - Manifest cache (schema used by post-install editor)
-
-    /// Copy a template's `template.json` into `<project>/.scarf/manifest.json`
-    /// so the post-install "Configuration" button can render the form
-    /// offline. Called once by the installer after unpack + validate.
-    nonisolated func cacheManifest(project: ProjectEntry, manifestData: Data) throws {
-        let transport = context.makeTransport()
-        let path = Self.manifestCachePath(for: project)
-        let parent = (path as NSString).deletingLastPathComponent
-        try transport.createDirectory(parent)
-        // UNGUARDED-WRITE(C): installer-time manifest cache into a freshly created project dir.
-        try transport.unguardedWriteFile(path, data: manifestData)
-    }
 
     /// Load the cached manifest into a `ProjectTemplateManifest` so the
     /// editor can look up field types + labels. Returns `nil` when the

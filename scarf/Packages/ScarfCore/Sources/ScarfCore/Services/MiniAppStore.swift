@@ -13,6 +13,16 @@ import os
 /// based, so Mac + ScarfGo share it. Last-write-wins at the file level;
 /// the WebKit message pump serializes a single mini-app's calls on the
 /// main thread, so a mini-app never races itself.
+///
+/// **Unknown keys: preserved; unknown SHAPES: not** (declared per
+/// `GuardedSidecarStore` section 4 — GW-F6 / audit DI L8). The model is
+/// `[String: String]`, so every key the file holds survives a round trip
+/// whoever wrote it — there is no typed struct to drop them. What does NOT
+/// survive is a value that is not a JSON string: the decode fails, the bytes
+/// are quarantined to `state.json.corrupt-<stamp>`, and the store rebuilds
+/// from empty. That is the right trade for this file (mini-app state is
+/// app-owned and re-creatable) and it is why the shim stringifies on the way
+/// in — nothing Scarf writes can produce that shape.
 public struct MiniAppStore: Sendable {
     #if canImport(os)
     private static let logger = Logger(subsystem: "com.scarf", category: "MiniAppStore")
@@ -94,9 +104,12 @@ public struct MiniAppStore: Sendable {
     ) throws {
         let dir = MiniAppService.miniAppDir(forProjectPath: projectPath, id: miniAppId)
         let transport = context.makeTransport()
-        if !transport.fileExists(dir) {
-            try transport.createDirectory(dir)
-        }
+        // `createDirectory` is `mkdir -p` on every transport, so the
+        // `fileExists` gate in front of it bought nothing and cost a full
+        // SSH round-trip on the JS-callable `scarf.store.set` path (GW-F6 /
+        // audit PERF M2). It was also the create-if-missing INFERENCE shape
+        // in miniature: one dropped probe and the mkdir ran anyway.
+        try transport.createDirectory(dir)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try GuardedJSONStore(transport: transport, label: "state.json").write(

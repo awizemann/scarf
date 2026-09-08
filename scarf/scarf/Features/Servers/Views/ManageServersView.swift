@@ -34,6 +34,9 @@ struct ManageServersView: View {
             if let damage = registry.storeDamage {
                 damageBanner(damage)
                 Divider()
+            } else if let failure = registry.saveFailure {
+                saveFailureBanner(failure)
+                Divider()
             }
             if registry.entries.isEmpty {
                 empty
@@ -101,36 +104,58 @@ struct ManageServersView: View {
     @ViewBuilder
     private func damageBanner(_ damage: ServerRegistry.StoreDamage) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Label("Your server list couldn't be read", systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                .scarfStyle(.headline)
-            Text(damage.refusedSave
-                 ? "Changes you make here are kept in this session only — Scarf won't overwrite \(damage.path) until it can read it again."
-                 : "Scarf won't overwrite \(damage.path) until it can read it again, so changes you make here stay in this session only.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let quarantine = damage.quarantinePath {
-                // AX M2: the path is the actionable half of this sentence —
-                // the user has to go find that file. Monospaced so a path
-                // reads as a path, and selectable so it can be copied
-                // (there is no "Show in Finder" here: the file may live on a
-                // remote host). Split from the prose for the same reason
-                // `RegistryDamageBanner` splits it.
-                Text("A copy of the unreadable file is at:")
+            // The PROSE is one combined VoiceOver element (AX H1's house
+            // pattern); the retry button below has to stay its own
+            // focusable control, so the grouping moved in here rather than
+            // sitting on the whole banner and swallowing it.
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Your server list couldn't be read", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .scarfStyle(.headline)
+                // GW-F6 / audit DI M6: "until it can read it again" promised
+                // a retry that did not exist — nothing re-read the file for
+                // the life of the window. The sentence is now true because
+                // the button below it is what makes it true.
+                Text(damage.refusedSave
+                     ? "Changes you make here are kept in this session only — Scarf won't overwrite \(damage.path) until it can read it again."
+                     : "Scarf won't overwrite \(damage.path) until it can read it again, so changes you make here stay in this session only.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(quarantine)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                if let quarantine = damage.quarantinePath {
+                    // AX M2: the path is the actionable half of this
+                    // sentence — the user has to go find that file.
+                    // Monospaced so a path reads as a path, and selectable
+                    // so it can be copied (there is no "Show in Finder"
+                    // here: the file may live on a remote host). Split from
+                    // the prose for the same reason `RegistryDamageBanner`
+                    // splits it.
+                    //
+                    // Absent for a file refused on SIZE: that one is never
+                    // read, so there are no bytes to copy aside (GW-F5) and
+                    // promising a copy would send the user hunting for a
+                    // file that does not exist.
+                    Text("A copy of the unreadable file is at:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(quarantine)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
+            .accessibilityElement(children: .combine)
+            Button("Try Reading It Again") { registry.retryLoad() }
+                .buttonStyle(.link)
+                .font(.caption)
+                .accessibilityHint(damage.refusedSave
+                    ? "Re-reads the server list file. If it can be read now, the changes you made in this session are saved to it."
+                    : "Re-reads the server list file.")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .accessibilityElement(children: .combine)
         // AX H1: the banner has no chrome of its own to draw a VoiceOver
         // user's attention, so its appearance was exactly as silent as the
         // refusal it exists to announce. Guarded on the last announced
@@ -139,6 +164,44 @@ struct ManageServersView: View {
         // (`RegistryDamageBanner` is the house pattern).
         .onAppear { announceDamage(damage) }
         .onChange(of: damage.path) { _, _ in announceDamage(damage) }
+    }
+
+    /// A save that was ALLOWED and failed anyway (GW-F6 / audit DI M5) — a
+    /// full disk, a read-only volume, permissions. Nothing is damaged, so
+    /// this is not the refusal banner: there is no quarantine copy to point
+    /// at and no read to retry, only a write to try again once the user has
+    /// fixed the cause.
+    @ViewBuilder
+    private func saveFailureBanner(_ failure: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Your server list couldn't be saved", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .scarfStyle(.headline)
+                Text("Changes you make here are kept in this session only: \(failure)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            Button("Try Saving Again") { registry.retrySave() }
+                .buttonStyle(.link)
+                .font(.caption)
+                .accessibilityHint("Writes the server list to disk again.")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .onAppear { announce(failure: failure) }
+        .onChange(of: failure) { _, new in announce(failure: new) }
+    }
+
+    private func announce(failure: String) {
+        let spoken = String(
+            localized: "Your server list couldn’t be saved. Changes you make here are kept in this session only. \(failure)"
+        )
+        guard lastAnnouncedDamagePath != spoken else { return }
+        lastAnnouncedDamagePath = spoken
+        AccessibilityNotification.Announcement(AttributedString(spoken)).post()
     }
 
     private func announceDamage(_ damage: ServerRegistry.StoreDamage) {
@@ -217,10 +280,22 @@ struct ManageServersView: View {
             let summary = try registry.importEntries(from: data)
             let count = summary.imported
             let skipped = summary.skippedDuplicates
-            let title = count == 0 && skipped > 0
-                ? "Nothing to import"
-                : (count == 1 ? "Imported 1 server" : "Imported \(count) servers")
+            // GW-F6 / audit DI M7: the title used to claim the import
+            // regardless of whether it reached `servers.json`. A refused or
+            // failed save means the entries are in this session only, and
+            // that is what the alert now says.
+            let title: String
+            if count > 0 && !summary.persisted {
+                title = "Imported into this session only"
+            } else {
+                title = count == 0 && skipped > 0
+                    ? "Nothing to import"
+                    : (count == 1 ? "Imported 1 server" : "Imported \(count) servers")
+            }
             var lines: [String] = []
+            if count > 0, !summary.persisted {
+                lines.append("Scarf couldn't write \(count == 1 ? "it" : "them") to your server list: \(summary.persistFailure ?? "the save didn't complete"). The imported \(count == 1 ? "server is" : "servers are") usable now but won't survive a restart.")
+            }
             if count == 0 && skipped > 0 {
                 lines.append("Every entry was already in your registry. Nothing changed.")
             } else if skipped > 0 {

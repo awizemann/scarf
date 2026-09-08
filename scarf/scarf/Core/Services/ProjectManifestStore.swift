@@ -154,6 +154,32 @@ nonisolated struct ProjectManifestStore: GuardedSidecarStore, Sendable {
         var root: [String: JSONValue]
         if let existing, case .object(let object) = existing {
             root = object
+            // **A JSON object that is not a MANIFEST is repaired, not
+            // extended (GW-F6 / audit DI L4).** Splicing one key into
+            // `{"hello": 1}` used to produce a file that still would not
+            // decode as a manifest — so the preset binding "succeeded", the
+            // Configuration editor kept reporting the project as
+            // unconfigurable, and nothing ever said why. The pre-arc
+            // behavior for this state was to replace the file wholesale;
+            // this is that decision, minus the destruction: the caller's
+            // sentinel keys are overlaid so the document becomes a valid
+            // manifest again, while every key we do not own — including the
+            // foreign ones that made it undecodable — is preserved for the
+            // human to find, per `GuardedSidecarStore` section 4. (Refusing
+            // instead was the alternative; it was rejected because neither
+            // caller can offer the user a repair, so it would freeze preset
+            // bindings and Kanban tenants on a file only a text editor can
+            // fix.)
+            let bytes = (try? JSONEncoder().encode(JSONValue.object(object))) ?? Data()
+            if (try? JSONDecoder().decode(ProjectTemplateManifest.self, from: bytes)) == nil {
+                Self.logger.warning(
+                    "manifest.json at \(path, privacy: .public) is a JSON object but not a manifest; overlaying a fresh stub and keeping its other keys"
+                )
+                let stub = try JSONEncoder().encode(sentinel())
+                if case .object(let stubObject) = try JSONDecoder().decode(JSONValue.self, from: stub) {
+                    for (k, v) in stubObject { root[k] = v }
+                }
+            }
         } else {
             // Proven-absent (or quarantined, or a JSON document that isn't
             // an object): mint the caller's stub. Encoded through the model

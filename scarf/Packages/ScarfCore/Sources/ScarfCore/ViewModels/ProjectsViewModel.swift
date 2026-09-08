@@ -506,7 +506,10 @@ public final class ProjectsViewModel {
         let lifecycle = ProjectLifecycleService(context: context)
         let removed = project
         await Task.detached(priority: .userInitiated) {
-            lifecycle.cleanUpAfterRemoval(of: removed)
+            // Discarded explicitly: `cleanUpAfterRemoval` reports which
+            // stages ran for the UNINSTALL surface's stage list, and a
+            // removal has no such surface — the project row is already gone.
+            _ = lifecycle.cleanUpAfterRemoval(of: removed)
         }.value
         if selectedProject?.name == project.name {
             selectedProject = nil

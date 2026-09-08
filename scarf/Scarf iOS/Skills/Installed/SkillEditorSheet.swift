@@ -27,10 +27,13 @@ struct SkillEditorSheet: View {
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Save") {
-                            vm.saveEdit()
-                            dismiss()
+                            Task {
+                                await vm.saveEdit()
+                                dismiss()
+                            }
                         }
                         .fontWeight(.semibold)
+                        .disabled(vm.isSavingContent)
                     }
                 }
         }

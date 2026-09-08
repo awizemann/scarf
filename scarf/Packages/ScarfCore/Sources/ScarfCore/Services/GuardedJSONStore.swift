@@ -193,9 +193,27 @@ public struct GuardedJSONStore: Sendable {
             #endif
             return Inspection(state: .unreadable(path: path), bytes: nil)
         }
-        var read = try? transport.readFile(path)
+        var read: Data?
+        do {
+            read = try transport.readFile(path)
+        } catch let error as TransportError where error.isNoSuchFile {
+            // POSITIVE proof of absence from the far end (GW-F6 / audit DI
+            // L1) — and one round-trip cheaper than proving it by double
+            // negative. Everything else still falls through to the probe.
+            return Inspection(state: .absent, bytes: nil)
+        } catch {
+            read = nil
+        }
         if read == nil {
             guard let info = transport.stat(path) else {
+                // Absence by DOUBLE NEGATIVE: a read that failed for a
+                // reason other than ENOENT, and a stat that could not
+                // confirm the file either. Over ONE SSH channel those two
+                // failures are correlated, so this is the residual the
+                // ENOENT branch above shrinks but cannot remove — a
+                // transport that reports neither ENOENT nor a stat leaves
+                // nothing better to infer from. Callers deciding whether to
+                // CREATE take `probeExistence` on top of this.
                 return Inspection(state: .absent, bytes: nil)
             }
             read = try? transport.readFile(path)

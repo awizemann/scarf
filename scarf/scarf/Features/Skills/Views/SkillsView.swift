@@ -243,7 +243,10 @@ struct SkillsView: View {
                 if let id {
                     for category in viewModel.filteredCategories {
                         if let skill = category.skills.first(where: { $0.id == id }) {
-                            viewModel.selectSkill(skill)
+                            // PERF H1: the guarded read now runs on a
+                            // detached task, so the selection action
+                            // returns immediately.
+                            Task { await viewModel.selectSkill(skill) }
                             return
                         }
                     }
@@ -383,7 +386,7 @@ struct SkillsView: View {
                                 .foregroundStyle(.secondary)
                             ForEach(skill.files, id: \.self) { file in
                                 Button {
-                                    viewModel.selectFile(file)
+                                    Task { await viewModel.selectFile(file) }
                                 } label: {
                                     HStack(spacing: 4) {
                                         Image(systemName: viewModel.selectedFileName == file ? "doc.fill" : "doc")
@@ -575,8 +578,9 @@ struct SkillsView: View {
                     .font(.headline)
                 Spacer()
                 Button("Cancel") { viewModel.cancelEditing() }
-                Button("Save") { viewModel.saveEdit() }
+                Button("Save") { Task { await viewModel.saveEdit() } }
                     .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.isSavingContent)
             }
             .padding()
             Divider()

@@ -324,3 +324,157 @@ struct ProjectsE2cGuardedWriterTests {
         }
     }
 }
+
+/// GW-F6 — the E5 audit's remaining data-robustness findings on this same
+/// surface: `config.json`'s undecodable-bytes policy (DI M8), the
+/// wrong-shaped `manifest.json` (L4), and the zero-byte bootstrap files that
+/// could never be repaired (L2).
+@Suite("Projects F6 robustness")
+struct ProjectsF6RobustnessTests {
+
+    private static var runningAsRoot: Bool { getuid() == 0 }
+
+    private static func withTempDir(_ body: (String) throws -> Void) throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("scarf-f6-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: dir.path
+            )
+            try? FileManager.default.removeItem(at: dir)
+        }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try body(dir.path)
+    }
+
+    private static func write(_ text: String, to path: String) throws {
+        let parent = (path as NSString).deletingLastPathComponent
+        try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: URL(fileURLWithPath: path))
+    }
+
+    private static func text(_ path: String) -> String? {
+        (try? Data(contentsOf: URL(fileURLWithPath: path))).flatMap {
+            String(data: $0, encoding: .utf8)
+        }
+    }
+
+    private static func json(_ path: String) -> [String: Any]? {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    private static func sentinelManifest() -> ProjectTemplateManifest {
+        ProjectTemplateManifest(
+            schemaVersion: 3,
+            id: "scarf/sentinel",
+            name: "M",
+            version: "0.0.0",
+            minScarfVersion: nil,
+            minHermesVersion: nil,
+            author: nil,
+            description: "",
+            category: nil,
+            tags: nil,
+            icon: nil,
+            screenshots: nil,
+            contents: TemplateContents(
+                dashboard: false, agentsMd: false, instructions: nil, skills: nil,
+                cron: nil, memory: nil, config: nil, slashCommands: nil
+            ),
+            config: nil
+        )
+    }
+
+    // MARK: - DI M8: config.json refuses, it does not rebuild
+
+    /// The hole: `inspectDecoding` classified undecodable bytes as
+    /// `.quarantined` (writable), `existingRoot` came back nil, and `save`
+    /// rebuilt from `root = [:]` — every `keychain://` reference in the file
+    /// gone, and the Keychain items they pointed at orphaned. Declaring
+    /// `.refuseForever` on the store is what makes the existing
+    /// `if case .unreadable` branch cover this too.
+    @Test func configSaveRefusesUndecodableBytesInsteadOfRebuildingFromEmpty() throws {
+        try Self.withTempDir { dir in
+            let project = ProjectEntry(name: "P", path: dir)
+            let path = dir + "/.scarf/config.json"
+            // Held bytes that are not JSON — the quarantine shape, not the
+            // unreadable one.
+            let original = "{ this was a config until an editor mangled it"
+            try Self.write(original, to: path)
+
+            #expect(throws: GuardedStoreError.self) {
+                try ProjectConfigService(context: .local).save(
+                    project: project, templateId: "t", values: ["a": .string("b")]
+                )
+            }
+            #expect(
+                Self.text(path) == original,
+                "a rebuild here drops every keychain:// ref with no pointer left to the secrets"
+            )
+            // The bytes are still copied aside for the human — refusing is
+            // not the same as discarding.
+            let siblings = try FileManager.default.contentsOfDirectory(atPath: dir + "/.scarf")
+            #expect(siblings.contains { $0.hasPrefix("config.json.corrupt-") })
+            #expect(!siblings.contains("config.json.bak"), "a quarantine never eats the .bak")
+        }
+    }
+
+    @Test func configPolicyIsDeclaredRefuseForever() {
+        #expect(ProjectConfigService.damagePolicy == .refuseForever)
+        #expect(ProjectConfigService.label == "config.json")
+        #expect(ProjectConfigService.maxBytes == ProjectConfigService.configMaxBytes)
+    }
+
+    // MARK: - DI L4: a JSON object that is not a manifest
+
+    @Test func wrongShapedManifestIsRepairedNotSilentlyExtended() throws {
+        try Self.withTempDir { dir in
+            let project = ProjectEntry(name: "M", path: dir)
+            try Self.write(
+                #"{"hello": "world", "notAManifest": true}"#,
+                to: dir + "/.scarf/manifest.json"
+            )
+
+            try ProjectManifestStore(context: .local).setField(
+                "kanbanTenant", to: .string("m-1"), for: project,
+                sentinel: { Self.sentinelManifest() }
+            )
+
+            let root = try #require(Self.json(dir + "/.scarf/manifest.json"))
+            #expect(root["kanbanTenant"] as? String == "m-1")
+            #expect(root["hello"] as? String == "world", "foreign keys survive the repair")
+            #expect(root["id"] as? String == "scarf/sentinel", "and the document is a decodable manifest again")
+            // The repaired file must actually decode — the whole point of
+            // repairing rather than extending.
+            let reread = try ProjectManifestStore(context: .local).readProven(for: project)
+            #expect(reread != nil)
+        }
+    }
+
+    @Test func wellShapedManifestIsLeftAloneApartFromTheField() throws {
+        try Self.withTempDir { dir in
+            let project = ProjectEntry(name: "M", path: dir)
+            try Self.write(
+                #"""
+                {"schemaVersion":3,"id":"alice/real","name":"Real","version":"2.0.0",
+                 "description":"d",
+                 "contents":{"dashboard":false,"agentsMd":false},
+                 "extraKey":42}
+                """#,
+                to: dir + "/.scarf/manifest.json"
+            )
+
+            try ProjectManifestStore(context: .local).setField(
+                "kanbanTenant", to: .string("m-2"), for: project,
+                sentinel: { Self.sentinelManifest() }
+            )
+
+            let root = try #require(Self.json(dir + "/.scarf/manifest.json"))
+            #expect(root["id"] as? String == "alice/real", "a real manifest is NOT overlaid")
+            #expect(root["version"] as? String == "2.0.0")
+            #expect(root["extraKey"] as? Int == 42)
+            #expect(root["kanbanTenant"] as? String == "m-2")
+        }
+    }
+}

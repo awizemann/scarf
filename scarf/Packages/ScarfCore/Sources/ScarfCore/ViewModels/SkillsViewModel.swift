@@ -48,6 +48,18 @@ public final class SkillsViewModel {
     public private(set) var contentError: String?
     /// True when the selected file was read successfully and may be edited.
     public var canEditSelectedFile: Bool { loadedContent != nil }
+    /// True while the selected file's contents are being read on a detached
+    /// task (GW-F6 / PERF H1). Views render a spinner and keep Edit
+    /// disabled — `canEditSelectedFile` is already false during the load
+    /// because the proof token is dropped first, so this only distinguishes
+    /// "still reading" from "read and refused".
+    public private(set) var isLoadingContent = false
+    /// True while a save is in flight. Disables the Save button so a
+    /// double-tap can't start a second detached write.
+    public private(set) var isSavingContent = false
+    /// Stamps each content load so a slow one that lands after the user has
+    /// moved to another file is discarded instead of painting stale text.
+    private var contentToken: UInt64 = 0
     /// Skill files are hand-sized markdown. Past this a file is not an
     /// editable buffer; the guard refuses rather than republishing it.
     static let maxSkillFileBytes = 8 * 1024 * 1024
@@ -234,13 +246,13 @@ public final class SkillsViewModel {
         return Set(collected)
     }
 
-    public func selectSkill(_ skill: HermesSkill) {
+    public func selectSkill(_ skill: HermesSkill) async {
         selectedSkill = skill
         let mainFile = skill.files.first(where: { $0.hasSuffix(".md") }) ?? skill.files.first
         if let file = mainFile {
             selectedFileName = file
             let path = skill.path + "/" + file
-            applyLoad(loadSkillContent(path: path), path: path)
+            await loadSelectedFile(path: path)
         } else {
             // No file to show is not a read failure — blank the viewer
             // without an error.
@@ -248,6 +260,7 @@ public final class SkillsViewModel {
             loadedContent = nil
             skillContent = ""
             contentError = nil
+            isLoadingContent = false
         }
         missingConfig = computeMissingConfig(for: skill)
     }
@@ -262,11 +275,11 @@ public final class SkillsViewModel {
         }
     }
 
-    public func selectFile(_ file: String) {
+    public func selectFile(_ file: String) async {
         guard let skill = selectedSkill else { return }
         selectedFileName = file
         let path = skill.path + "/" + file
-        applyLoad(loadSkillContent(path: path), path: path)
+        await loadSelectedFile(path: path)
     }
 
     public var isMarkdownFile: Bool {
@@ -287,9 +300,15 @@ public final class SkillsViewModel {
         isEditing = true
     }
 
-    public func saveEdit() {
+    public func saveEdit() async {
         guard let path = currentFilePath else { return }
-        saveSkillContent(path: path, content: editText)
+        // Reentrancy guard: Save is a button, and a detached write over SSH
+        // is long enough to double-tap through. A second run would race the
+        // first one's proof-token refresh and could publish twice.
+        guard !isSavingContent else { return }
+        isSavingContent = true
+        defer { isSavingContent = false }
+        await saveSkillContent(path: path, content: editText)
         // A refused or failed save leaves `contentError` set. Keep the
         // editor open on the user's text rather than dismissing it and
         // showing a `skillContent` that no longer matches the file.
@@ -780,8 +799,11 @@ public final class SkillsViewModel {
     /// not a check inside the writer: it is making the unsavable state
     /// unrepresentable. A failed load now leaves `loadedContent` NIL, and
     /// `saveSkillContent` has no path that can write without one.
-    private func loadSkillContent(path: String) -> GuardedTextFile.Loaded? {
-        guard isValidSkillPath(path) else { return nil }
+    /// `nonisolated static` so the detached hop below can call it without
+    /// capturing `self` (the view model is `@Observable`, not `Sendable`).
+    nonisolated private static func loadSkillContent(
+        path: String, transport: any ServerTransport, logger: Logger
+    ) -> GuardedTextFile.Loaded? {
         do {
             return try GuardedTextFile(transport: transport, label: "SKILL.md")
                 .load(path, maxBytes: Self.maxSkillFileBytes)
@@ -789,6 +811,49 @@ public final class SkillsViewModel {
             logger.error("loadSkillContent(\(path, privacy: .public)) refused: \(error.localizedDescription, privacy: .public)")
             return nil
         }
+    }
+
+    /// Load the selected file's contents OFF the main actor (GW-F6 / audit
+    /// PERF H1) and apply the result back on it.
+    ///
+    /// This was a synchronous `applyLoad(loadSkillContent(...))` in a
+    /// SwiftUI row-selection action — over SSH, up to four
+    /// timeout-bounded spawns (`cat`, then the proof probe's `stat` +
+    /// retry) on the main thread, i.e. minutes of beachball against a dead
+    /// remote (charter C10). `KanbanToolsetEnabler.applyPlan` is the in-repo
+    /// shape being copied: ONE `Task.detached` around the whole guarded
+    /// read, `await`ed, with every piece of `@Observable` state written
+    /// back here on the main actor.
+    ///
+    /// **Last-selection-wins.** A user clicking down a skill list starts one
+    /// of these per row, and they can finish out of order. `contentToken`
+    /// stamps each attempt; a result whose stamp is no longer current is
+    /// dropped rather than painting a stale file's text under the current
+    /// file's name.
+    private func loadSelectedFile(path: String) async {
+        contentToken &+= 1
+        let token = contentToken
+        isLoadingContent = true
+        // Blank the previous file's text immediately: the row selection has
+        // already changed, and leaving the last skill's contents on screen
+        // under the new skill's name is a worse lie than an empty viewer.
+        // The proof token goes with it, so Save is impossible until this
+        // load lands (the GW-E2c invariant, unchanged).
+        loadedContent = nil
+        skillContent = ""
+        contentError = nil
+        let transport = self.transport
+        let logger = self.logger
+        // Containment is a pure string check on already-held state; keeping
+        // it on this side means the detached hop is exactly the I/O.
+        let contained = isValidSkillPath(path)
+        let loaded = await Task.detached(priority: .userInitiated) { () -> GuardedTextFile.Loaded? in
+            guard contained else { return nil }
+            return Self.loadSkillContent(path: path, transport: transport, logger: logger)
+        }.value
+        guard token == contentToken else { return }
+        isLoadingContent = false
+        applyLoad(loaded, path: path)
     }
 
     /// Apply a load to the editor's state. A refused load blanks the
@@ -805,7 +870,18 @@ public final class SkillsViewModel {
         }
     }
 
-    private func saveSkillContent(path: String, content: String) {
+    /// Publish the editor buffer OFF the main actor (GW-F6 / audit PERF H1),
+    /// same shape and same reasoning as ``loadSelectedFile(path:)`` — the
+    /// guarded write is up to two transport writes (`.bak`, then the file),
+    /// which over SSH is two spawns this used to take on the main thread.
+    ///
+    /// The proof token, the refusal messages and the byte content are all
+    /// unchanged; only where the I/O runs moved. Nothing between the check
+    /// and the write can be reordered by the hop: `loaded` is captured
+    /// before it, and `SKILL.md` is a per-skill file with a single
+    /// user-driven writer, which is why `GuardedTextFile` gives it no lock
+    /// (see that type's `lockContext`).
+    private func saveSkillContent(path: String, content: String) async {
         // A bare `return` here was a SILENT SUCCESS (GW-F2, audit DI M11):
         // `saveEdit` reads `contentError == nil` as "it saved", so a path
         // rejected by containment closed the editor and dropped the user's
@@ -822,24 +898,32 @@ public final class SkillsViewModel {
             contentError = "Not saved — \(path) was never read successfully."
             return
         }
-        do {
-            try GuardedTextFile(transport: transport, label: "SKILL.md")
-                .write(content, to: path, after: loaded)
-            // The token now describes what is actually on disk, so a second
-            // save in the same sitting backs up the version it replaces
-            // rather than the one two saves ago.
-            loadedContent = GuardedTextFile.Loaded(
-                text: content,
-                exists: true,
-                inspection: GuardedJSONStore.Inspection(
-                    state: .present, bytes: Data(content.utf8)
-                )
-            )
-            contentError = nil
-        } catch {
-            logger.error("saveSkillContent(\(path, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
-            contentError = "Couldn't save \(path): \(error.localizedDescription)"
+        let transport = self.transport
+        let failure = await Task.detached(priority: .userInitiated) { () -> String? in
+            do {
+                try GuardedTextFile(transport: transport, label: "SKILL.md")
+                    .write(content, to: path, after: loaded)
+                return nil
+            } catch {
+                return error.localizedDescription
+            }
+        }.value
+        if let failure {
+            logger.error("saveSkillContent(\(path, privacy: .public)) failed: \(failure, privacy: .public)")
+            contentError = "Couldn't save \(path): \(failure)"
+            return
         }
+        // The token now describes what is actually on disk, so a second
+        // save in the same sitting backs up the version it replaces
+        // rather than the one two saves ago.
+        loadedContent = GuardedTextFile.Loaded(
+            text: content,
+            exists: true,
+            inspection: GuardedJSONStore.Inspection(
+                state: .present, bytes: Data(content.utf8)
+            )
+        )
+        contentError = nil
     }
 
     private func isValidSkillPath(_ path: String) -> Bool {

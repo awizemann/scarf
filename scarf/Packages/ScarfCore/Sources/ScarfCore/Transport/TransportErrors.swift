@@ -30,6 +30,27 @@ public enum TransportError: LocalizedError {
     /// for a bug report.
     case other(message: String)
 
+    /// True when this error is the OS saying the path is not there, as
+    /// opposed to the channel saying it could not ask (GW-F6 / audit DI L1).
+    ///
+    /// The distinction matters because `GuardedJSONStore.inspect` otherwise
+    /// proves absence by DOUBLE NEGATIVE — a failed read plus a failed
+    /// `stat` — and over one SSH channel those two failures are correlated:
+    /// the blip that killed the read kills the stat a moment later, and the
+    /// caller is told "provably absent" about a file that is provably
+    /// nothing of the sort. An ENOENT is a positive answer from the far end,
+    /// so it needs no second opinion.
+    ///
+    /// Matched on the message because that is what survives both transports:
+    /// `SSHTransport` normalizes the remote stderr to this exact phrase, and
+    /// `LocalTransport` maps `CocoaError.fileReadNoSuchFile` onto it. Any
+    /// other failure — permissions, a dropped channel, a timeout — is
+    /// deliberately NOT this, and falls through to the stat probe unchanged.
+    public var isNoSuchFile: Bool {
+        guard case .fileIO(_, let underlying) = self else { return false }
+        return underlying.contains("No such file")
+    }
+
     public var errorDescription: String? {
         switch self {
         case .hostUnreachable(let host, _):

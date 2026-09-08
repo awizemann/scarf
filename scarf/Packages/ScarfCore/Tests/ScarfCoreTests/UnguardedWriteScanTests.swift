@@ -89,7 +89,26 @@ import Foundation
         "Packages/ScarfIOS/Sources",
     ]
 
+    /// Memoized (GW-F6 / audit PERF M5). Four `@Test`s each walked ~555
+    /// files and re-read every one into a `String` — about 28 MB of
+    /// allocation per run, three quarters of it identical. The corpus is
+    /// immutable for the lifetime of the process, so it is read once.
+    ///
+    /// `nonisolated(unsafe)` + a lock rather than a plain `static let`
+    /// because the read can throw and the tests run in parallel.
+    private nonisolated(unsafe) static var cachedFiles: [(rel: String, text: String)]?
+    private static let cacheLock = NSLock()
+
     private static func swiftFiles() throws -> [(rel: String, text: String)] {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        if let cachedFiles { return cachedFiles }
+        let scanned = try scanSwiftFiles()
+        cachedFiles = scanned
+        return scanned
+    }
+
+    private static func scanSwiftFiles() throws -> [(rel: String, text: String)] {
         var out: [(String, String)] = []
         for root in sourceRoots {
             let base = scarfDir.appendingPathComponent(root)

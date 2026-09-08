@@ -349,7 +349,18 @@ struct SkillBootstrapService: Sendable {
         // a file that is provably there but unreadable now SKIPS the
         // install rather than overwriting text nobody has seen.
         let guarded = GuardedJSONStore(transport: transport, label: "SKILL.md")
-        let inspection = guarded.inspect(destSkillMd, maxBytes: Self.maxBootstrapBytes)
+        var inspection = guarded.inspect(destSkillMd, maxBytes: Self.maxBootstrapBytes)
+        // GW-F6 / audit DI L2. `GuardedJSONStore`'s "zero bytes is damage"
+        // rule is right for a JSON sidecar Scarf never writes empty — but
+        // this destination is MARKDOWN, and `GuardedTextFile`'s rule 1 is
+        // the one that applies: an empty markdown file is a legal thing a
+        // person (or a truncating editor) made, and it has nothing to lose.
+        // Left as damage it was permanently un-bootstrappable: the file
+        // read as unreadable, the install skipped, and no later launch ever
+        // repaired a BUNDLED file the user had zeroed.
+        if case .unreadable = inspection.state, inspection.bytes?.isEmpty == true {
+            inspection = GuardedJSONStore.Inspection(state: .absent, bytes: nil)
+        }
         let installedVersion: String?
         switch inspection.state {
         case .absent:

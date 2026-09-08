@@ -59,7 +59,19 @@ public struct GuardedTextFile: Sendable {
         /// open a fresh read-then-write window.
         public let inspection: GuardedJSONStore.Inspection
 
-        public init(text: String, exists: Bool, inspection: GuardedJSONStore.Inspection) {
+        /// **`internal`, not `public` (GW-F6 / audit DI L5).** A `Loaded` is
+        /// the PROOF TOKEN that ``GuardedTextFile/write(_:to:after:)``
+        /// consumes: holding one is supposed to mean "a guarded load of this
+        /// path succeeded". A public initializer made it forgeable from any
+        /// module — `Loaded(text: "", exists: true, inspection: .init(state:
+        /// .present, bytes: nil))` and the guard waves through exactly the
+        /// blank-buffer publish the token exists to prevent. Keeping the
+        /// memberwise init in-module leaves the two legitimate constructors
+        /// (`load`, and `SkillsViewModel` re-stamping the token after its own
+        /// successful write) working, and gives everything outside ScarfCore
+        /// only the honest route: call `load`. Tests reach it with
+        /// `@testable import`, which is the intended door.
+        init(text: String, exists: Bool, inspection: GuardedJSONStore.Inspection) {
             self.text = text
             self.exists = exists
             self.inspection = inspection

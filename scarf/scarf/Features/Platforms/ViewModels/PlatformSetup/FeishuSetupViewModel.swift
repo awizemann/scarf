@@ -26,7 +26,15 @@ final class FeishuSetupViewModel: OutcomeMessageHosting {
     let connectionOptions = ["websocket", "webhook"]
 
     func load() {
-        let env = HermesEnvService(context: context).load()
+        // GW-F6 / audit DI L10: an unreadable `.env` used to arrive as an
+        // EMPTY one, so this form rendered blank fields over live values and
+        // a Save then commented those keys out. Absent is still an empty
+        // form (correct — nothing is set yet); unreadable says so.
+        let (env, envReadFailure) = PlatformSetupHelpers.loadEnv(context: context)
+        if let envReadFailure {
+            message = envReadFailure
+            messageIsFailure = true
+        }
         appID = env["FEISHU_APP_ID"] ?? ""
         appSecret = env["FEISHU_APP_SECRET"] ?? ""
         domain = env["FEISHU_DOMAIN"] ?? "lark"

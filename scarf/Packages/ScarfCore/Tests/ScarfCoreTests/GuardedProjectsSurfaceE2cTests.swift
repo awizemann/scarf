@@ -253,7 +253,7 @@ import Foundation
             try Self.chmod(path, 0o000)
 
             let vm = SkillsViewModel(context: ctx)
-            vm.selectSkill(
+            await vm.selectSkill(
                 HermesSkill(
                     id: "writing/haiku", name: "haiku", category: "writing",
                     path: skillDir, files: ["SKILL.md"], requiredConfig: []
@@ -267,7 +267,7 @@ import Foundation
             vm.startEditing()
             #expect(vm.isEditing == false)
             vm.editText = ""
-            vm.saveEdit()
+            await vm.saveEdit()
 
             try Self.chmod(path, 0o644)
             #expect(
@@ -292,14 +292,14 @@ import Foundation
             try Self.write(original, to: path)
 
             let vm = SkillsViewModel(context: ctx)
-            vm.selectSkill(
+            await vm.selectSkill(
                 HermesSkill(
                     id: "x/outside", name: "outside", category: "x",
                     path: outsideDir, files: ["SKILL.md"], requiredConfig: []
                 )
             )
             vm.editText = "overwritten\n"
-            vm.saveEdit()
+            await vm.saveEdit()
 
             #expect(vm.contentError != nil, "a rejected path is not a successful save")
             #expect(vm.isEditing == false)
@@ -318,7 +318,7 @@ import Foundation
             try Self.write(original, to: path)
 
             let vm = SkillsViewModel(context: ctx)
-            vm.selectSkill(
+            await vm.selectSkill(
                 HermesSkill(
                     id: "writing/haiku", name: "haiku", category: "writing",
                     path: skillDir, files: ["SKILL.md"], requiredConfig: []
@@ -329,7 +329,7 @@ import Foundation
             vm.startEditing()
             #expect(vm.isEditing)
             vm.editText = original + "\nedited\n"
-            vm.saveEdit()
+            await vm.saveEdit()
 
             #expect(vm.isEditing == false)
             #expect(vm.contentError == nil)

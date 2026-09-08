@@ -189,6 +189,6 @@ private struct ExcludedProvidersSection: View {
     }
 
     private func save(_ providers: [String]) {
-        viewModel.saveExcludedProviders(providers, capabilities: capabilities)
+        Task { await viewModel.saveExcludedProviders(providers, capabilities: capabilities) }
     }
 }

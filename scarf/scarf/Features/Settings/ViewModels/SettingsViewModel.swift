@@ -780,16 +780,16 @@ final class SettingsViewModel {
 
     /// Write `agent.reasoning_overrides` (dict — `hermes config set` can't).
     /// Refused silently on pre-v0.20 hosts (the UI is hidden there too).
-    func saveReasoningOverrides(_ pairs: [(key: String, value: String)], capabilities: HermesCapabilities) {
-        saveDirectYAML(label: "agent.reasoning_overrides") { yaml in
+    func saveReasoningOverrides(_ pairs: [(key: String, value: String)], capabilities: HermesCapabilities) async {
+        await saveDirectYAML(label: "agent.reasoning_overrides") { yaml in
             PowerSettingsWriter.setReasoningOverrides(in: yaml, pairs: pairs, capabilities: capabilities)
         }
     }
 
     /// Write `model_catalog.excluded_providers` (list — `hermes config set`
     /// stringifies arrays). Refused silently on pre-v0.20 hosts.
-    func saveExcludedProviders(_ providers: [String], capabilities: HermesCapabilities) {
-        saveDirectYAML(label: "model_catalog.excluded_providers") { yaml in
+    func saveExcludedProviders(_ providers: [String], capabilities: HermesCapabilities) async {
+        await saveDirectYAML(label: "model_catalog.excluded_providers") { yaml in
             PowerSettingsWriter.setExcludedProviders(in: yaml, providers: providers, capabilities: capabilities)
         }
     }
@@ -805,8 +805,8 @@ final class SettingsViewModel {
         _ routes: [HermesProfileRoute],
         location: HermesProfileRoutes.Location,
         capabilities: HermesCapabilities
-    ) {
-        saveDirectYAML(label: "profile_routes") { yaml in
+    ) async {
+        await saveDirectYAML(label: "profile_routes") { yaml in
             // Re-derive the live location from the YAML we are about to
             // edit rather than trusting the snapshot the view was rendered
             // from: Hermes (or a hand edit) may have moved the block since
@@ -832,7 +832,9 @@ final class SettingsViewModel {
     /// Shared read → transform → write → reload path for the direct-YAML
     /// writers, mirroring `GatewayConfigWriter.saveList`'s no-op-on-equal
     /// behavior and `setSetting`'s save toast.
-    private func saveDirectYAML(label: String, transform: (String) -> String?) {
+    private func saveDirectYAML(
+        label: String, transform: @escaping @Sendable (String) -> String?
+    ) async {
         let path = context.paths.configYAML
         // GUARDED. `readText(path) ?? ""` collapsed "unreadable" into
         // "empty" and then published the splice over it — the whole Hermes
@@ -840,74 +842,88 @@ final class SettingsViewModel {
         // config.yaml writers now share `GuardedTextFile`; a refusal
         // surfaces through the same `saveMessage` a write failure does.
         //
-        // SERIALIZED (GW-F3 / DI H4), but on a SHORT wait bound. This whole
-        // frame is synchronous on the main actor (PERF H2 — moving it
-        // off-main is t-26bf60b8), so it cannot afford the default 60s
-        // remote acquire: that would turn a contended save into a minute of
-        // frozen UI, which is charter C10's exact prohibition and strictly
-        // worse than the interleaving it prevents. `2` is the local bound —
-        // invisible when uncontended (one `open(2)`), and a `registryBusy`
-        // through the existing failure toast when a genuine second writer
-        // holds it. Once this moves off-main, drop the override and inherit
-        // the context bound like every other adopter.
+        // SERIALIZED (GW-F3 / DI H4) on the CONTEXT's own acquire bound.
+        // This frame used to be synchronous on the main actor, which is why
+        // it carried a 2s override: the default 60s remote acquire would
+        // have been a minute of frozen UI, charter C10's exact prohibition.
+        // Now that the whole read-modify-write runs on a detached task
+        // (GW-F6 / audit PERF H2), a contended save waits without freezing
+        // anything, so the override is gone and this adopter inherits the
+        // same bound as every other one.
         //
-        // The lock spans the load AND the write below: a lock around only
-        // the publish would serialize the write while leaving the
+        // ONE detached hop for the whole hold, never two: `RegistryWriteLock`
+        // reentrancy bookkeeping is THREAD-LOCAL, so a hold taken on the
+        // load's thread could not cover a write running on another
+        // (`KanbanToolsetEnabler.applyPlan` documents the same rule).
+        //
+        // The lock spans the load AND the write: a lock around only the
+        // publish would serialize the write while leaving the
         // read-modify-write window exactly where the audit found it.
-        let file = GuardedTextFile(context: context, label: "config.yaml")
-        do {
-            try file.withLock(path, acquireTimeout: Self.mainActorLockWait) {
-                try saveDirectYAMLLocked(label: label, path: path, file: file, transform: transform)
+        let context = self.context
+        let fileService = self.fileService
+        let outcome = await Task.detached(priority: .userInitiated) { () -> DirectYAMLOutcome in
+            let file = GuardedTextFile(context: context, label: "config.yaml")
+            do {
+                return try file.withLock(path) { () -> DirectYAMLOutcome in
+                    let loaded: GuardedTextFile.Loaded
+                    do {
+                        loaded = try file.load(path)
+                    } catch {
+                        return .failure(error.localizedDescription)
+                    }
+                    let existing = loaded.text
+                    guard let updated = transform(existing) else {
+                        // Writer refused (invalid value or capability-gated)
+                        // — surface it instead of silently dropping the
+                        // save, mirroring the write-failure toast below.
+                        return .rejectedValue
+                    }
+                    if updated != existing {
+                        guard (try? file.write(updated, to: path, after: loaded)) != nil else {
+                            return .writeFailed
+                        }
+                    }
+                    // These two reads sit inside the hold. Deliberate: they
+                    // are the post-write reload, and holding the lock across
+                    // them means the UI re-renders the bytes THIS save
+                    // published rather than a successor's.
+                    return .saved(
+                        config: fileService.loadConfig(),
+                        rawYAML: context.readText(path)
+                    )
+                }
+            } catch {
+                // Includes the GW-F3 `registryBusy` contention failure, whose
+                // prose names THIS file rather than the projects registry.
+                return .failure(error.localizedDescription)
             }
-        } catch {
-            // Includes the GW-F3 `registryBusy` contention failure, whose
-            // prose now names THIS file rather than the projects registry.
-            showSaveFailure(String(localized: "Could not save \(label): \(error.localizedDescription)"))
+        }.value
+
+        // Back on the main actor: every `@Observable` mutation happens here,
+        // exactly as it did when the whole frame was synchronous (C10).
+        switch outcome {
+        case let .failure(message):
+            showSaveFailure(String(localized: "Could not save \(label): \(message)"))
+        case .rejectedValue:
+            showSaveFailure(String(localized: "Could not save \(label): a value was rejected as invalid"))
+        case .writeFailed:
+            // Direct-YAML write failure: no CLI output to quote, so the
+            // shared builder's bare form is exactly right.
+            showSaveFailure(Self.saveFailureMessage(key: label, output: ""))
+        case let .saved(newConfig, rawYAML):
+            showSuccess(String(localized: "Saved \(label)"))
+            config = newConfig
+            rawConfigYAML = rawYAML ?? rawConfigYAML
         }
     }
 
-    /// See ``saveDirectYAML(label:transform:)``'s comment on the bound.
-    private static let mainActorLockWait: TimeInterval = 2
-
-    /// The body of ``saveDirectYAML(label:transform:)``, run under
-    /// config.yaml's write lock.
-    private func saveDirectYAMLLocked(
-        label: String,
-        path: String,
-        file: GuardedTextFile,
-        transform: (String) -> String?
-    ) throws {
-        let loaded: GuardedTextFile.Loaded
-        do {
-            loaded = try file.load(path)
-        } catch {
-            showSaveFailure(String(localized: "Could not save \(label): \(error.localizedDescription)"))
-            return
-        }
-        let existing = loaded.text
-        guard let updated = transform(existing) else {
-            // Writer refused (invalid value or capability-gated) — surface
-            // it instead of silently dropping the save, mirroring the
-            // write-failure toast below.
-            showSaveFailure(String(localized: "Could not save \(label): a value was rejected as invalid"))
-            return
-        }
-        if updated != existing {
-            guard (try? file.write(updated, to: path, after: loaded)) != nil else {
-                // Direct-YAML write failure: no CLI output to quote, so the
-                // shared builder's bare form is exactly right.
-                showSaveFailure(Self.saveFailureMessage(key: label, output: ""))
-                return
-            }
-        }
-        showSuccess(String(localized: "Saved \(label)"))
-        // These two reads sit inside the hold. Deliberate and cheap: they
-        // are the post-write reload, and holding the lock across them means
-        // the UI re-renders the bytes THIS save published rather than a
-        // successor's. It costs the next contender at most one extra read's
-        // worth of wait against a 2s bound.
-        config = fileService.loadConfig()
-        rawConfigYAML = context.readText(path) ?? rawConfigYAML
+    /// What one ``saveDirectYAML(label:transform:)`` hop decided, carried
+    /// back to the main actor so no `@Observable` state is touched off it.
+    private enum DirectYAMLOutcome: Sendable {
+        case saved(config: HermesConfig, rawYAML: String?)
+        case rejectedValue
+        case writeFailed
+        case failure(String)
     }
     func setCheckpointsEnabled(_ value: Bool) { setSetting("checkpoints.enabled", value: value ? "true" : "false") }
     func setCheckpointsMaxSnapshots(_ value: Int) { setSetting("checkpoints.max_snapshots", value: String(value)) }

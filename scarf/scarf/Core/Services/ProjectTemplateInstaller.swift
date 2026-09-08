@@ -244,11 +244,15 @@ struct ProjectTemplateInstaller: Sendable {
     nonisolated static func inspectMemory(
         at path: String, transport: any ServerTransport
     ) -> GuardedJSONStore.Inspection {
-        // Uncapped for the same reason `ProjectContextBlock.maxAgentsBytes`
-        // is: MEMORY.md is the user's prose, not an index we decode, and
-        // quarantining it is not ours to do.
+        // The house cap (32 MB), matching `ProjectTemplateUninstaller`'s
+        // read of the SAME file and `ProjectContextBlock.maxAgentsBytes`.
+        // It was `Int.max` on the grounds that MEMORY.md is the user's prose
+        // rather than an index we decode — but that argues for a GENEROUS
+        // bound, not for none, and `Int.max` additionally SKIPS the
+        // stat-first probe, so an agent-writable file of any size was held
+        // whole before anyone could object (GW-F5 / SEC F3).
         var inspection = GuardedJSONStore(transport: transport, label: "MEMORY.md")
-            .inspect(path, maxBytes: Int.max)
+            .inspect(path, maxBytes: GuardedTextFile.defaultMaxBytes)
         // An empty MEMORY.md is a normal file with nothing to lose.
         if case .unreadable = inspection.state, inspection.bytes?.isEmpty == true {
             inspection = GuardedJSONStore.Inspection(state: .absent, bytes: nil)

@@ -167,7 +167,7 @@ private struct ReasoningOverridesSection: View {
     }
 
     private func save(_ pairs: [(key: String, value: String)]) {
-        viewModel.saveReasoningOverrides(pairs, capabilities: capabilities)
+        Task { await viewModel.saveReasoningOverrides(pairs, capabilities: capabilities) }
     }
 }
 

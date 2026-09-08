@@ -159,7 +159,7 @@ struct SkillDetailView: View {
                 Section("Files") {
                     ForEach(skill.files, id: \.self) { file in
                         Button {
-                            vm.selectFile(file)
+                            Task { await vm.selectFile(file) }
                         } label: {
                             HStack {
                                 Text(file)
@@ -227,7 +227,7 @@ struct SkillDetailView: View {
         .task {
             // Selecting the skill (re)loads its main file content +
             // missingConfig diagnostics. Idempotent on re-appears.
-            vm.selectSkill(skill)
+            await vm.selectSkill(skill)
         }
         .task(id: skill.id) {
             // v2.5: probe `npx` only when this is the design-md skill —

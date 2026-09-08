@@ -197,7 +197,7 @@ struct ProfileRoutesSection: View {
     }
 
     private func save(_ routes: [HermesProfileRoute]) {
-        viewModel.saveProfileRoutes(routes, location: block.location, capabilities: capabilities)
+        Task { await viewModel.saveProfileRoutes(routes, location: block.location, capabilities: capabilities) }
     }
 }
 

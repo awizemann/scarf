@@ -47,13 +47,20 @@ public enum ProjectContextBlock {
         }
     }
 
-    /// Deliberately effectively uncapped. `GuardedJSONStore`'s size cap
-    /// exists so a phone doesn't try to DECODE a huge JSON index, and it
-    /// reacts by copying the file aside as `.corrupt-<stamp>`. AGENTS.md is
-    /// the user's own prose: quarantining it (and re-uploading megabytes on
-    /// every chat start) is not ours to do, and the read that would blow
-    /// the budget is the same read the old code already did.
-    static let maxAgentsBytes = Int.max
+    /// The house cap (32 MB), matching every other hand-authored file
+    /// `GuardedTextFile` guards.
+    ///
+    /// This was `Int.max` on the grounds that AGENTS.md is the user's own
+    /// prose rather than an index we decode, and that quarantining it is not
+    /// ours to do. The second half still holds — and it is now free, because
+    /// since GW-F5 an over-cap file is refused on the `stat`, UNREAD, with
+    /// no `.corrupt-` copy made. What the first half never justified is an
+    /// UNBOUNDED allocation from an agent-writable file on a phone (GW-F5 /
+    /// SEC F3): `Int.max` also skips the stat probe entirely, so the only
+    /// way to learn the file was multi-gigabyte was to hold it. No real
+    /// AGENTS.md is anywhere near 32 MB; one that is gets a refusal instead
+    /// of a jetsam.
+    static let maxAgentsBytes = GuardedTextFile.defaultMaxBytes
 
     /// Splice `block` into `existing`, preserving everything outside
     /// the markers. Three cases:
@@ -221,8 +228,10 @@ public enum ProjectContextBlock {
         case .unreadable(let damaged):
             throw WriteError.refusedUnreadable(path: damaged)
         case .quarantined:
-            // Unreachable with an uncapped `maxAgentsBytes`; refuse rather
-            // than replace bytes we already decided were unusable.
+            // Since GW-F5 an over-cap file arrives as `.unreadable` above
+            // (refused on the stat, never read), so this is reached only
+            // through a decode-shaped quarantine. Same verdict: refuse
+            // rather than replace bytes we already decided were unusable.
             throw WriteError.refusedUnreadable(path: agentsMdPath)
         case .absent:
             // `GuardedJSONStore.write` mkdir -p's the parent, so the old

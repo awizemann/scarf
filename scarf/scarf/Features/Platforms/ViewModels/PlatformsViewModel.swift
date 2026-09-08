@@ -107,6 +107,11 @@ final class PlatformsViewModel: OutcomeMessageHosting {
                     return String(trimmed.dropLast())
                 }
         )
+        // Tolerant `load()` on purpose (GW-F6 / audit DI L10): this decides
+        // which platform rows LOOK configured, and nothing is written as a
+        // result. A blip shows one platform as unconfigured for one paint
+        // and self-corrects on the next read. The setup FORMS, whose blank
+        // fields turn into `unset` writes, take `loadProven` instead.
         let env = HermesEnvService(context: context).load()
         var configured: Set<String> = []
         for platform in KnownPlatforms.all where platform.name != "cli" {

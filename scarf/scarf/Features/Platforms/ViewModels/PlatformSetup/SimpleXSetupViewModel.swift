@@ -30,7 +30,15 @@ final class SimpleXSetupViewModel: OutcomeMessageHosting {
     var messageIsFailure = false
 
     func load() {
-        let env = HermesEnvService(context: context).load()
+        // GW-F6 / audit DI L10: an unreadable `.env` used to arrive as an
+        // EMPTY one, so this form rendered blank fields over live values and
+        // a Save then commented those keys out. Absent is still an empty
+        // form (correct — nothing is set yet); unreadable says so.
+        let (env, envReadFailure) = PlatformSetupHelpers.loadEnv(context: context)
+        if let envReadFailure {
+            message = envReadFailure
+            messageIsFailure = true
+        }
         wsURL = env["SIMPLEX_WS_URL"] ?? ""
         allowedUsers = env["SIMPLEX_ALLOWED_USERS"] ?? ""
         allowAllUsers = PlatformSetupHelpers.parseEnvBool(env["SIMPLEX_ALLOW_ALL_USERS"])

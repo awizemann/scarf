@@ -534,10 +534,42 @@ struct AllConfigWritersParityTests {
     /// `label:` argument, which by construction IS the dotted key each
     /// caller writes. Scanned rather than hard-coded so a fourth
     /// direct-YAML surface is covered the moment it lands.
+    /// **The gate keys on a LABEL string, which is fragile (GW-F6 / audit DI
+    /// L9).** `label:` is a display/log argument that happens to be the
+    /// dotted config key at all three call sites; nothing in the type system
+    /// says it must be, and a future caller passing `"Reasoning overrides"`
+    /// would silently shrink the covered set rather than fail. Two cheap
+    /// defences below: `directYAMLSiteCount` pins how many call sites the
+    /// scan is supposed to find (so a renamed method or an added site trips
+    /// the count, not the coverage), and `directYAMLKeysAreDottedConfigKeys`
+    /// asserts each scraped label is shaped like a config path. Together
+    /// they turn "the gate quietly stopped checking" into a red test.
     static var directYAMLKeys: [String] {
         guard let source = try? read("scarf/Features/Settings/ViewModels/SettingsViewModel.swift")
         else { return [] }
         return matches(#"saveDirectYAML\(label:\s*"([^"]+)""#, in: stripComments(source))
+    }
+
+    /// The number of `saveDirectYAML(label:` call sites this gate expects.
+    /// Bump it deliberately when a fourth direct-YAML surface lands.
+    static let directYAMLSiteCount = 3
+
+    @Test func directYAMLKeysAreDottedConfigKeysAndComplete() throws {
+        let keys = Self.directYAMLKeys
+        #expect(keys.count == Self.directYAMLSiteCount, """
+            Expected \(Self.directYAMLSiteCount) `saveDirectYAML(label:` sites, found \(keys.count): \(keys).
+            Either a direct-YAML surface was added (extend `directYAMLSiteCount`) or the \
+            scan's regex no longer matches the call shape — in which case this gate has \
+            silently stopped covering those keys.
+            """)
+        for key in keys {
+            // A config key is dotted-lowercase-with-underscores. A prose
+            // label ("Reasoning overrides") fails on the space and the caps.
+            #expect(
+                key.range(of: #"\A[a-z0-9_]+(\.[a-z0-9_]+)*\z"#, options: .regularExpression) != nil,
+                "`saveDirectYAML(label: \"\(key)\")` is not shaped like a config key. The parity gate treats the label AS the key it writes; a prose label makes that key invisible to it."
+            )
+        }
     }
 
     /// Platforms whose gateway-behavior toggles Scarf actually writes —
