@@ -124,6 +124,7 @@ struct RichChatInputBar: View {
                     .buttonStyle(.plain)
                     .disabled(!isEnabled)
                     .help("Compress conversation (/compress)")
+                    .accessibilityLabel(Text("Compress Conversation"))
                 }
 
                 if supportsImagePrompts {
@@ -258,6 +259,7 @@ struct RichChatInputBar: View {
                 .buttonStyle(.plain)
                 .disabled(!canSend)
                 .help("Send message (Enter)")
+                .accessibilityLabel(Text("Send message"))
             }
             .padding(.horizontal, ScarfSpace.s3)
             .padding(.vertical, ScarfSpace.s2)
@@ -440,6 +442,7 @@ struct RichChatInputBar: View {
             }
             .buttonStyle(.plain)
             .help(attachment.filename ?? "Image attachment")
+            .accessibilityLabel(Text("Remove attached image"))
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
@@ -480,6 +483,7 @@ struct RichChatInputBar: View {
         .buttonStyle(.plain)
         .disabled(!isEnabled || attachments.count >= Self.maxAttachments)
         .help("Attach image (\(attachments.count)/\(Self.maxAttachments))")
+        .accessibilityLabel(Text("Attach image"))
     }
 
     private var compressSheet: some View {
