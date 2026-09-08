@@ -51,14 +51,27 @@
 - [ ] iOS - Chat connection Failed - Couldn’t save model+provider to config.yaml (id: t-2c5982) (source: gh#112) (added: 2026-06-13) — **gh#112 commented 2026-06-13** (F1 fix unreleased → v2.10.3); kept open as the tracker for F2 ([[t-ios-cfg-get]]).
 - [ ] Performance and reliability issues on large state.db (lag, crashes, missing sessions) (id: t-b8a6c3) (source: gh#61) (added: 2026-06-13)
 - [ ] **[followup/t-aud01]** Lazy-load `reasoning_content` (v0.11 rich chain-of-thought) on REASONING disclosure open. `fetchReasoningContent(for:)` exists but has zero callers; the bulk fetch excludes reasoning_content (perf, issue #74) so it's never shown on ANY historical load. Wire a per-message lazy fetch from `RichMessageBubble` (macOS) + `Scarf iOS/Chat/ChatView.swift:2464`. Gotchas to resolve: (1) `RichMessageBubble` `==` short-circuit (issue #46) doesn't compare reasoning for settled bubbles, so a spliced result won't redraw — use a view-local `@State` cache instead; (2) need a cheap "reasoning_content available" probe so the disclosure shows even when content isn't loaded; (3) confirm whether v0.11 models populate `reasoning` too or only `reasoning_content`. (id: t-aud21) (added: 2026-06-13, source: t-aud01)
+- [ ] GW-F1: uninstall refusal-ordering — cleanup must survive a MEMORY.md refusal (id: t-ba501bbf) (added: 2026-09-04) (priority: urgent)
+- [ ] GW-F2: read-side absent-vs-unreadable inference feeding guarded writes (id: t-01dd696e) (added: 2026-09-04) (priority: high)
+- [ ] GW-F3: cross-writer serialization for config.yaml and .env (id: t-521a02f7) (added: 2026-09-04) (priority: high)
+- [ ] GW-F4: outcome-typed message channels + refusal announcements + iOS Skills parity (id: t-667fd332) (added: 2026-09-04) (priority: high)
+- [ ] GW-F5: guard hardening — chmod ordering, size-cap reads, scanner tightening (id: t-35e7593b) (added: 2026-09-04)
+- [ ] GW-F6: ServerRegistry/config.json robustness + remaining E5 lows (id: t-26bf60b8) (added: 2026-09-04)
 
 ## Doing
 
+- [ ] GW-E3: GuardedSidecarStore conformance protocol + adoption docs (id: t-ecaccef5) (added: 2026-09-04)
 - [ ] Chat activity-bubble UX (P1–P4) (id: t-43c8f3de) (added: 2026-09-02)
 - [ ] Refresh marketing site + README FAQ for v2.15 Projects (supersede PR #109) (id: t-83c4c692) (added: 2026-06-28)
 
 ## Done
 
+- [x] GW-E5: full-surface audit of touched surfaces (sec/perf/data/a11y) (id: t-a81644dd) (added: 2026-09-04)
+- [x] GW-E4: orchestrator plan-conformance audit + memory validation (id: t-550b3ce3) (added: 2026-09-04)
+- [x] GW-E2b: ServerRegistry servers.json guarded local write (transport-bypassing) (id: t-59b679c5) (added: 2026-09-04) (priority: high)
+- [x] GW-E2: convert destroy-shaped RMW writers found by E0 to guarded writes (id: t-b889e8e7) (added: 2026-09-04) (priority: high)
+- [x] GW-E1: rename writeFile→unguardedWriteFile + annotations + CI scan test (id: t-b301305a) (added: 2026-09-04) (priority: high)
+- [x] GW-E0: census + classify all 42 raw writeFile sites (read-only) (id: t-8ffcb4d0) (added: 2026-09-04) (priority: high)
 - [x] Release notes: mini-app grants re-prompt once after HMAC signing ships (id: t-a30b421f) (added: 2026-09-04) (priority: high)
 - [x] Sidebar restructure: projects list in a well, collapsible sections, no secondary project sidebar (id: t-e5bc2ad4) (added: 2026-09-04) (priority: high)
 - [x] Per-project auto-accept edits + "Allow edits this session" prompt button (id: t-05f33e75) (added: 2026-09-04) (priority: high)
