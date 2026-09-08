@@ -425,6 +425,7 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
             let confirm = control(app, "kanban.block.confirm")
             var sheetUp = false
             for attempt in 1...5 where !sheetUp {
+                if app.state != .runningForeground { app.activate() }
                 if block.exists { block.click() }
                 sheetUp = confirm.waitForExistence(timeout: 6)
                 if !sheetUp {

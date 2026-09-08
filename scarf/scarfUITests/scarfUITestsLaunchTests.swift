@@ -12,8 +12,13 @@ import XCTest
 /// target must go through `makeApp()`.
 final class scarfUITestsLaunchTests: ScarfUITestCase {
 
+    // One configuration, not the Xcode-template default of every locale ×
+    // appearance: that multiplied this into 14 launches per gate run and
+    // failed on an unrelated helper process ("Unable to update application
+    // state promptly for com.grammarly…"). The section sweep already
+    // proves launch; this test exists for the screenshot.
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
-        true
+        false
     }
 
     @MainActor

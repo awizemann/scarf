@@ -155,6 +155,11 @@ struct ModelPresetsView: View {
                 VStack(alignment: .leading, spacing: ScarfSpace.s1) {
                     HStack(spacing: ScarfSpace.s2) {
                         Text(preset.name)
+                            // Row handle for the UI gate. Deliberately on the
+                            // title, NOT the row container: a container
+                            // identifier rewrites every descendant's, which
+                            // erased the Edit/Delete handles below.
+                            .accessibilityIdentifier("models.row.\(preset.name)")
                             .scarfStyle(.title3)
                         let count = viewModel.usageCounts[preset.id] ?? 0
                         if count > 0 {
@@ -183,9 +188,5 @@ struct ModelPresetsView: View {
                     .accessibilityIdentifier("models.row.\(preset.name).delete")
             }
         }
-        // Container identifier: propagates to the descendants that have
-        // none of their own, so the row is findable while Edit/Delete keep
-        // their own handles. Always match with `.firstMatch`.
-        .accessibilityIdentifier("models.row.\(preset.name)")
     }
 }

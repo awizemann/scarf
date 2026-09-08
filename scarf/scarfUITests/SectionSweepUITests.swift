@@ -159,14 +159,15 @@ final class SectionSweepUITests: ScarfUITestCase {
                     return
                 }
 
-                row.click()
-
                 let root = app.descendants(matching: .any)
                     .matching(identifier: "\(section.rawValue).root")
                     .firstMatch
-                // Generous: a section's `.task` may do a transport read on
-                // first entry, and Chat/Gateway/Proxy spawn processes.
-                let rendered = root.waitForExistence(timeout: 20)
+                // Generous final wait: a section's `.task` may do a transport
+                // read on first entry, and Chat/Gateway/Proxy spawn
+                // processes. Retried because a dropped row click leaves the
+                // PREVIOUS section on screen (seen as "Webhooks.root never
+                // appeared" with Plugins still showing).
+                let rendered = clickUntil(row, appears: root, in: app)
 
                 attachScreenshot(app, named: section.rawValue, keepAlways: !rendered)
 

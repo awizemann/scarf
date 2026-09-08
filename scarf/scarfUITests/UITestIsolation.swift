@@ -304,6 +304,36 @@ class ScarfUITestCase: XCTestCase {
         )
     }
 
+    // MARK: - Clicks with an observable outcome
+
+    /// Click `element` and wait for `outcome` to appear, re-activating the
+    /// app and clicking again if it doesn't.
+    ///
+    /// Synthesized clicks on macOS are dropped now and then — a sidebar row
+    /// click that leaves the previous section on screen, a button whose
+    /// sheet never presents — most often when the app has lost frontmost
+    /// between two steps. Re-clicking a sidebar row or a sheet trigger is a
+    /// harmless no-op once the first click landed, so retry is safe wherever
+    /// the outcome is observable. Returns whether `outcome` appeared.
+    @discardableResult
+    func clickUntil(
+        _ element: XCUIElement,
+        appears outcome: XCUIElement,
+        attempts: Int = 3,
+        firstWait: TimeInterval = 8,
+        finalWait: TimeInterval = 20,
+        in app: XCUIApplication
+    ) -> Bool {
+        for attempt in 1...attempts {
+            if app.state != .runningForeground { app.activate() }
+            if element.exists { element.click() }
+            let wait = attempt == attempts ? finalWait : firstWait
+            if outcome.waitForExistence(timeout: wait) { return true }
+            print("[ScarfUITestCase] click on \(element.identifier) attempt \(attempt)/\(attempts) produced no \(outcome.identifier); retrying.")
+        }
+        return false
+    }
+
     // MARK: - Plan gating
 
     /// Skip unless the Live test plan is running.
