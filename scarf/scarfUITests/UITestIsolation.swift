@@ -166,10 +166,70 @@ class ScarfUITestCase: XCTestCase {
     /// The ONLY sanctioned way to construct one in this target.
     func makeApp(extraLaunchArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--scarf-test-mode"] + extraLaunchArguments
+        // Standard arguments first so a test's own can still override them.
+        app.launchArguments = ["--scarf-test-mode"] + Self.standardLaunchArguments + extraLaunchArguments
         app.launchEnvironment["SCARF_HERMES_HOME"] = isolatedHome
         app.launchEnvironment["HERMES_HOME"] = isolatedHome
         return app
+    }
+
+    // MARK: - Standard launch arguments
+
+    /// The sidebar nav groups, in on-screen order. Add a title here when the
+    /// sidebar gains a group, or its rows stay collapsed for every test.
+    static let sidebarSectionTitles = ["Monitor", "Bots", "Interact", "Configure", "Manage"]
+
+    /// `WindowFrameAutosave`'s UserDefaults key for the LOCAL server window
+    /// (`ScarfWindowFrame.Scarf.Window.<ServerContext.local.id>`; the local
+    /// id is the fixed UUID ending in `…0001`).
+    static let windowFramePersistenceKey =
+        "ScarfWindowFrame.Scarf.Window.00000000-0000-0000-0000-000000000001"
+
+    /// Every UserDefaults surface the app under test would otherwise read
+    /// from — and write back into — the DEVELOPER's own `com.scarf.app`
+    /// domain, which `SCARF_HERMES_HOME` does not isolate. All three ride in
+    /// `NSArgumentDomain`: they out-rank the persisted value and are never
+    /// written back.
+    ///
+    /// 1. Sidebar groups open (`SidebarSectionCollapseStore` collapses
+    ///    Configure and Manage by default; a row under a closed group has no
+    ///    element at all).
+    /// 2. Window geometry pinned tall enough that all 28 nav rows fit
+    ///    (`WindowFrameAutosave` otherwise restores whatever size the
+    ///    developer last left — at 795 pt the Configure/Manage rows sat below
+    ///    the fold, XCUITest clicked their off-screen coordinates, and the
+    ///    previous section stayed on screen: "Webhooks.root never appeared").
+    ///    The value MUST be quoted: an `NSArgumentDomain` value is parsed as
+    ///    an old-style plist, where a bare `{…}` is a dictionary.
+    /// 3. Window/sheet animations off, because `typeText` waits for
+    ///    quiescence and a sheet animation in flight is not quiescent
+    ///    ("Timed out while synthesizing event").
+    static var standardLaunchArguments: [String] {
+        sidebarSectionTitles.flatMap { ["-sidebar.section.collapsed.\($0)", "0"] }
+            + ["-\(windowFramePersistenceKey)", "\"{{0, 0}, {1800, 1300}}\""]
+            + ["-NSAutomaticWindowAnimationsEnabled", "0", "-NSWindowResizeTime", "0.001"]
+    }
+
+    /// Scroll the sidebar until the row carrying `identifier` is hittable,
+    /// and return it. A row below the fold EXISTS in the accessibility tree
+    /// but a click lands on its off-screen coordinates and does nothing; a
+    /// row under a lazily-built group may not even exist until scrolled to.
+    @discardableResult
+    func revealSidebarRow(_ app: XCUIApplication, identifier: String, steps: Int = 8) -> XCUIElement {
+        let row = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+        if row.exists && row.isHittable { return row }
+        // The sidebar is the narrow scrollable column; anything wide is the
+        // detail pane, and scrolling THAT would move the wrong content.
+        let candidates = (app.scrollViews.allElementsBoundByIndex
+            + app.outlines.allElementsBoundByIndex
+            + app.tables.allElementsBoundByIndex)
+            .filter { $0.exists && $0.frame.width > 0 && $0.frame.width < 420 }
+        guard let sidebar = candidates.first else { return row }
+        for _ in 1...max(1, steps) {
+            sidebar.scroll(byDeltaX: 0, deltaY: -120)
+            if row.exists && row.isHittable { return row }
+        }
+        return row
     }
 
     // MARK: - Launch / surface / quit

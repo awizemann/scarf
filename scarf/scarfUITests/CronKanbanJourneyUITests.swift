@@ -473,12 +473,6 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
     /// clicking the picker — is never written back to their preferences.
     static let boardModeLaunchArguments = ["-kanban.viewMode", "board"]
 
-    /// `WindowFrameAutosave`'s UserDefaults key for the LOCAL server
-    /// window (`ScarfWindowFrame.Scarf.Window.<ServerContext.local.id>`;
-    /// the local id is the fixed UUID ending in `…0001`).
-    static let windowFramePersistenceKey =
-        "ScarfWindowFrame.Scarf.Window.00000000-0000-0000-0000-000000000001"
-
     /// Pin the window's geometry for the app under test.
     ///
     /// The third UserDefaults surface this journey has to neutralize, and
@@ -505,20 +499,10 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
     /// synthesizing event", an unrecoverable failure. Sheet presentation is
     /// exactly such an animation, and both journeys type into a sheet.
     /// `NSArgumentDomain` again: nothing is persisted.
-    static let animationLaunchArguments = [
-        "-NSAutomaticWindowAnimationsEnabled", "0",
-        "-NSWindowResizeTime", "0.001"
-    ]
+    static let animationLaunchArguments: [String] = []
 
-    static let windowFrameLaunchArguments = [
-        // The literal double quotes are REQUIRED. An `NSArgumentDomain`
-        // value is parsed as an old-style property list, in which
-        // `{ … }` is a DICTIONARY — passed bare, `{{0, 0}, {1800, 1150}}`
-        // arrives as a dict and `string(forKey:)` returns nil, so the
-        // window silently came up at SwiftUI's 1100×700 `.defaultSize`
-        // (measured). Quoting makes the plist parser hand back a string.
-        "-\(windowFramePersistenceKey)", "\"{{0, 0}, {1800, 1600}}\""
-    ]
+    /// Provided by `makeApp()` now; kept so the launch sites read unchanged.
+    static let windowFrameLaunchArguments: [String] = []
 
     // MARK: - Warm-up
 

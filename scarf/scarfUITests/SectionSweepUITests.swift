@@ -108,11 +108,9 @@ final class SectionSweepUITests: ScarfUITestCase {
     /// via `SidebarSectionCollapseStore.storedBool` — they arrive as the
     /// STRING "0"/"1", which the store coerces (a plain `as? Bool` cast
     /// silently rejected them, and this override did nothing until it did).
-    static let sidebarSectionTitles = ["Monitor", "Bots", "Interact", "Configure", "Manage"]
-
-    static var expandedSidebarLaunchArguments: [String] {
-        sidebarSectionTitles.flatMap { ["-sidebar.section.collapsed.\($0)", "0"] }
-    }
+    /// Kept for the journeys that reference it; `makeApp()` now applies the
+    /// same arguments (and the window pin) to every launch.
+    static var expandedSidebarLaunchArguments: [String] { ScarfUITestCase.standardLaunchArguments }
 
     // MARK: - The sweep
 
@@ -145,7 +143,7 @@ final class SectionSweepUITests: ScarfUITestCase {
 
         for section in sections {
             XCTContext.runActivity(named: "Section: \(section.rawValue)") { _ in
-                let row = app.descendants(matching: .any)
+                var row = app.descendants(matching: .any)
                     .matching(identifier: "sidebar.section.\(section.rawValue)")
                     .firstMatch
 
@@ -167,6 +165,7 @@ final class SectionSweepUITests: ScarfUITestCase {
                 // processes. Retried because a dropped row click leaves the
                 // PREVIOUS section on screen (seen as "Webhooks.root never
                 // appeared" with Plugins still showing).
+                row = revealSidebarRow(app, identifier: "sidebar.section.\(section.rawValue)")
                 let rendered = clickUntil(row, appears: root, named: "\(section.rawValue).root", in: app)
 
                 attachScreenshot(app, named: section.rawValue, keepAlways: !rendered)
