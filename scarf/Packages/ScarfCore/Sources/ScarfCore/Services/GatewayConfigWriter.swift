@@ -231,13 +231,19 @@ public enum GatewayConfigWriter {
         // but this one allowlist. `GuardedTextFile` is the single shared
         // guard for every config.yaml writer; a refusal reports as the same
         // `false` this function already returns for a write failure.
-        let file = GuardedTextFile(transport: context.makeTransport(), label: "config.yaml")
-        guard let loaded = try? file.load(path) else { return false }
-        let existing = loaded.text
-        let updated = setList(in: existing, platform: platform, key: key, items: items)
-        if updated == existing { return true }   // no-op: already correct
+        //
+        // SERIALIZED (GW-F3 / DI H4): `mutate` holds config.yaml's write
+        // lock from the read to the publish, so a Settings direct-YAML save
+        // (or the Kanban enabler) can no longer splice its section into
+        // bytes this rewrite is about to replace. Contention past the wait
+        // bound reports as the same `false` — never a hang.
+        let file = GuardedTextFile(context: context, label: "config.yaml")
         do {
-            try file.write(updated, to: path, after: loaded)
+            try file.mutate(path) { loaded in
+                let existing = loaded.text
+                let updated = setList(in: existing, platform: platform, key: key, items: items)
+                return updated == existing ? nil : updated   // nil: already correct
+            }
             return true
         } catch {
             return false

@@ -24,16 +24,22 @@ nonisolated struct HermesEnvService: Sendable {
     /// Path to `~/.hermes/.env`. Kept configurable for tests.
     let path: String
     let transport: any ServerTransport
+    /// Carried so the guarded rewrite can take `.env`'s write lock (GW-F3).
+    /// `nil` for the fixture-path initializer below, whose whole point is a
+    /// throwaway file no second writer knows about.
+    private let lockContext: ServerContext?
 
     nonisolated init(context: ServerContext = .local) {
         self.path = context.paths.envFile
         self.transport = context.makeTransport()
+        self.lockContext = context
     }
 
     /// Escape hatch for tests that want to point at a fixture path directly.
     init(path: String) {
         self.path = path
         self.transport = LocalTransport()
+        self.lockContext = nil
     }
 
     /// Read the .env file into a `[key: value]` dict. Comments and commented-out
@@ -78,46 +84,50 @@ nonisolated struct HermesEnvService: Sendable {
     /// Returns `true` on success, `false` if the atomic rewrite failed.
     @discardableResult
     func setMany(_ pairs: [String: String]) -> Bool {
-        var remaining = pairs
-        var lines: [String]
-
-        // GUARDED. This used to be `try? readFile … else header`, which
+        // GUARDED AND SERIALIZED. This used to be `try? readFile … else header`, which
         // published a ONE-LINE `.env` — every API key Hermes owns, gone —
         // the first time a read blipped. `.env` is the highest-value
         // irreplaceable file Scarf writes: it refuses, it never rebuilds.
         // An EMPTY .env is a legal user state, so `exists` (not emptiness)
         // is what picks the header branch.
-        guard let loaded = guardedLoad() else { return false }
-        if loaded.exists {
-            lines = loaded.text.components(separatedBy: "\n")
-            // Trim a single trailing empty line from splitting the final newline;
-            // we'll re-add it on write.
-            if lines.last == "" { lines.removeLast() }
-        } else {
-            lines = ["# Hermes Agent Environment Configuration"]
-        }
-
-        // First pass: update in-place (handles both live and commented-out lines).
-        for (idx, line) in lines.enumerated() {
-            guard let match = Self.extractKey(fromLine: line) else { continue }
-            if let newValue = remaining.removeValue(forKey: match.key) {
-                // A commented-out `# KEY=...` becomes a live `KEY=...` with the new value.
-                lines[idx] = Self.formatLine(key: match.key, value: newValue)
+        //
+        // The read is now taken INSIDE `.env`'s write lock and the publish
+        // happens before it is released (GW-F3), so a concurrent
+        // `KeychainEnvMirror` splice can no longer land between them and be
+        // published away by this whole-file rewrite.
+        return guardedMutate { loaded in
+            var remaining = pairs
+            var lines: [String]
+            if loaded.exists {
+                lines = loaded.text.components(separatedBy: "\n")
+                // Trim a single trailing empty line from splitting the final newline;
+                // we'll re-add it on write.
+                if lines.last == "" { lines.removeLast() }
+            } else {
+                lines = ["# Hermes Agent Environment Configuration"]
             }
-        }
 
-        // Second pass: append any keys that didn't match an existing line.
-        if !remaining.isEmpty {
-            // Leave a blank line before appending new keys for visual separation.
-            if let last = lines.last, !last.isEmpty {
-                lines.append("")
+            // First pass: update in-place (handles both live and commented-out lines).
+            for (idx, line) in lines.enumerated() {
+                guard let match = Self.extractKey(fromLine: line) else { continue }
+                if let newValue = remaining.removeValue(forKey: match.key) {
+                    // A commented-out `# KEY=...` becomes a live `KEY=...` with the new value.
+                    lines[idx] = Self.formatLine(key: match.key, value: newValue)
+                }
             }
-            for key in remaining.keys.sorted() {
-                lines.append(Self.formatLine(key: key, value: remaining[key]!))
-            }
-        }
 
-        return atomicWrite(lines.joined(separator: "\n") + "\n", after: loaded)
+            // Second pass: append any keys that didn't match an existing line.
+            if !remaining.isEmpty {
+                // Leave a blank line before appending new keys for visual separation.
+                if let last = lines.last, !last.isEmpty {
+                    lines.append("")
+                }
+                for key in remaining.keys.sorted() {
+                    lines.append(Self.formatLine(key: key, value: remaining[key]!))
+                }
+            }
+            return lines.joined(separator: "\n") + "\n"
+        }
     }
 
     /// Comment out a key. The value is preserved so the user can restore by
@@ -126,53 +136,65 @@ nonisolated struct HermesEnvService: Sendable {
     func unset(_ key: String) -> Bool {
         // A refused load returns `false` here where the old `try?` returned
         // `true`: "we could not read it" is not "there was nothing to do".
-        guard let loaded = guardedLoad() else { return false }
-        guard loaded.exists else { return true }
-        var lines = loaded.text.components(separatedBy: "\n")
-        if lines.last == "" { lines.removeLast() }
+        // Nothing-to-do (absent file, or no live assignment of `key`) returns
+        // `nil` from the body, which publishes nothing and is still `true`.
+        return guardedMutate { loaded in
+            guard loaded.exists else { return nil }
+            var lines = loaded.text.components(separatedBy: "\n")
+            if lines.last == "" { lines.removeLast() }
 
-        var changed = false
-        for (idx, line) in lines.enumerated() {
-            guard let match = Self.extractKey(fromLine: line), match.key == key else { continue }
-            // Skip lines that are already commented — nothing to do.
-            if Self.isCommentedOutAssignment(line) { continue }
-            lines[idx] = "# " + line
-            changed = true
+            var changed = false
+            for (idx, line) in lines.enumerated() {
+                guard let match = Self.extractKey(fromLine: line), match.key == key else { continue }
+                // Skip lines that are already commented — nothing to do.
+                if Self.isCommentedOutAssignment(line) { continue }
+                lines[idx] = "# " + line
+                changed = true
+            }
+            guard changed else { return nil }
+            return lines.joined(separator: "\n") + "\n"
         }
-        guard changed else { return true }
-        return atomicWrite(lines.joined(separator: "\n") + "\n", after: loaded)
     }
 
     // MARK: - Internals
 
+    /// SERIALIZED (GW-F3 / DI H4). `.env` has two in-app writers — this
+    /// service and `KeychainEnvMirror` — plus the reconcile pass at launch,
+    /// and every one of them is a whole-file read-modify-write. Interleaved,
+    /// the loser's edit vanished AND the `.bak` was overwritten with the
+    /// winner's pre-image, so the previous good copy was gone too. Both
+    /// writers now go through `GuardedTextFile.mutate`, which is one lock
+    /// hold from the read to the second of the two publishes.
     private var guardedFile: GuardedTextFile {
-        GuardedTextFile(transport: transport, label: ".env")
-    }
-
-    /// Proof-based read of `.env`. `nil` means REFUSED — the file is
-    /// stat-confirmed but unreadable, or holds non-UTF-8 bytes. Callers turn
-    /// that into the same `false` they already return for a write failure,
-    /// which every caller of `set`/`setMany`/`unset` already handles.
-    private func guardedLoad() -> GuardedTextFile.Loaded? {
-        do {
-            return try guardedFile.load(path)
-        } catch {
-            logger.error("Refusing to rewrite .env: \(error.localizedDescription)")
-            return nil
+        if let lockContext {
+            return GuardedTextFile(context: lockContext, label: ".env")
         }
+        return GuardedTextFile(transport: transport, label: ".env")
     }
 
-    /// Writes the entire file in one shot through the transport, keeping a
-    /// one-deep `.bak` of the bytes it replaces. For local contexts this ends
-    /// up doing the same atomic-rename dance as before (via
-    /// `LocalTransport.unguardedWriteFile`). For remote contexts this goes
-    /// through `scp` + remote `mv`, still atomic from Hermes's point of view.
-    private func atomicWrite(_ content: String, after loaded: GuardedTextFile.Loaded) -> Bool {
+    /// One lock hold covering the proof-based read of `.env`, the caller's
+    /// rewrite of it, and the publish (`.bak` + file).
+    ///
+    /// `false` means REFUSED or FAILED — the file is stat-confirmed but
+    /// unreadable, holds non-UTF-8 bytes, another writer held the lock past
+    /// its bound (`registryBusy`), or the publish itself failed. Every
+    /// caller of `set`/`setMany`/`unset` already handles that `false`, which
+    /// is why contention surfaces there rather than as a hang.
+    ///
+    /// Returning `nil` from `body` means "nothing to do": no publish, and
+    /// still `true`.
+    ///
+    /// The publish keeps a one-deep `.bak` of the bytes it replaces. For
+    /// local contexts this ends up doing the same atomic-rename dance as
+    /// before (via `LocalTransport.unguardedWriteFile`); for remote contexts
+    /// it goes through `scp` + remote `mv`, still atomic from Hermes's point
+    /// of view.
+    private func guardedMutate(_ body: (GuardedTextFile.Loaded) -> String?) -> Bool {
         do {
-            try guardedFile.write(content, to: path, after: loaded)
+            try guardedFile.mutate(path) { body($0) }
             return true
         } catch {
-            logger.error("Failed to write .env: \(error.localizedDescription)")
+            logger.error("Refusing to rewrite .env: \(error.localizedDescription)")
             return false
         }
     }

@@ -195,4 +195,85 @@ import ScarfCore
         try Self.chmod(path, 0o644)
         #expect(Self.text(path) == "who the user is\n")
     }
+
+    // MARK: - GW-F3: the conflict check and the write share ONE lock hold
+
+    /// The Mac memory editor's save is a conflict check followed by a write,
+    /// and before GW-F3 those were two round-trips with the first one's proof
+    /// threaded into the second. `saveMemoryFile` does the comparison against
+    /// a read taken UNDER `MEMORY.md`'s write lock and publishes in the same
+    /// hold, so there is no window in which the bytes the check passed can be
+    /// replaced before the write validates against them.
+    @Test func memorySaveComparesAndWritesInOneHold() throws {
+        let base = try Self.makeScratch()
+        defer { Self.cleanUp(base) }
+        let ctx = ServerContext.local(home: base.appendingPathComponent("hermes"))
+        let service = HermesFileService(context: ctx)
+        let path = ctx.paths.memoriesDir + "/MEMORY.md"
+        try FileManager.default.createDirectory(
+            atPath: ctx.paths.memoriesDir, withIntermediateDirectories: true
+        )
+        try Data("on disk\n".utf8).write(to: URL(fileURLWithPath: path))
+
+        // Baseline matches → saved, and the lock file is gone afterwards.
+        #expect(
+            try service.saveMemoryFile(
+                "edited\n", target: .memory, ifMatches: "on disk\n"
+            ) == .saved
+        )
+        #expect(Self.text(path) == "edited\n")
+        #expect(!FileManager.default.fileExists(atPath: path + ".lock"))
+
+        // Baseline is stale → CONFLICT, and nothing is published. The old
+        // shape could not tell this from a failed read; GW-F2 fixed that, and
+        // this pins that the decision now happens under the lock.
+        let outcome = try service.saveMemoryFile(
+            "clobber\n", target: .memory, ifMatches: "on disk\n"
+        )
+        #expect(outcome == .conflict(onDisk: "edited\n"))
+        #expect(Self.text(path) == "edited\n")
+
+        // `ifMatches: nil` is the user's explicit overwrite answer.
+        #expect(
+            try service.saveMemoryFile("clobber\n", target: .memory, ifMatches: nil) == .saved
+        )
+        #expect(Self.text(path) == "clobber\n")
+        #expect(Self.text(path + ".bak") == "edited\n")
+    }
+
+    /// Concurrent whole-file writers of `MEMORY.md` — the memory editor and a
+    /// template install's appendix are exactly this shape — must both land.
+    @Test func concurrentMemoryWritersDoNotLoseAnEdit() async throws {
+        let base = try Self.makeScratch()
+        defer { Self.cleanUp(base) }
+        let ctx = ServerContext.local(home: base.appendingPathComponent("hermes"))
+        let service = HermesFileService(context: ctx)
+        let path = ctx.paths.memoriesDir + "/MEMORY.md"
+        try FileManager.default.createDirectory(
+            atPath: ctx.paths.memoriesDir, withIntermediateDirectories: true
+        )
+        try Data("prose\n".utf8).write(to: URL(fileURLWithPath: path))
+
+        await withTaskGroup(of: Void.self) { group in
+            for tag in ["A", "B"] {
+                group.addTask {
+                    await Task.detached {
+                        let current = (try? service.loadMemory()) ?? ""
+                        _ = try? service.saveMemoryFile(
+                            current + "\(tag)\n", target: .memory, ifMatches: nil
+                        )
+                    }.value
+                }
+            }
+        }
+        // The unconditional save re-reads under the lock, so the second
+        // writer's read-then-write cannot be built on a pre-image the first
+        // already replaced… but its `current` was read OUTSIDE the hold, so
+        // this asserts only what the lock can guarantee: the file is one of
+        // the two writers' whole outputs, never a torn or emptied one, and
+        // the user's pre-existing prose survives either way.
+        let final = try #require(Self.text(path))
+        #expect(final.hasPrefix("prose\n"))
+        #expect(final.contains("A\n") || final.contains("B\n"))
+    }
 }

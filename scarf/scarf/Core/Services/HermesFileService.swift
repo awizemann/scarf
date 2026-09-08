@@ -129,7 +129,13 @@ struct HermesFileService: Sendable {
     /// An empty file is still `""` with `exists == true`; only a
     /// stat-confirmed unreadable file (or non-UTF-8 bytes) throws. The
     /// returned `Loaded` is the write's proof token — hand it back to
-    /// ``saveMemory(_:profile:after:)`` and the save costs no second read.
+    /// ``saveMemoryFile(_:target:profile:ifMatches:)``, which re-reads under
+    /// the lock and does the conflict comparison there.
+    ///
+    /// Transport-only, i.e. UNSERIALIZED, on purpose (GW-F3): this is a READ.
+    /// Reads need no lock against each other, and a read that loses a race
+    /// against a writer returns bytes that were true a moment ago. The lock
+    /// belongs to the write, and every write of these files takes it.
     nonisolated func loadMemoryFile(profile: String = "") throws -> GuardedTextFile.Loaded {
         try GuardedTextFile(transport: transport, label: "MEMORY.md")
             .load(memoryPath(profile: profile, file: "MEMORY.md"))
@@ -154,33 +160,77 @@ struct HermesFileService: Sendable {
     /// zero-byte reclassification) — and a refusal has to reach the user,
     /// which is why these no longer swallow.
     ///
-    /// - Parameter loaded: the proof from a read the caller ALREADY did (the
-    ///   editor's conflict check does exactly one, immediately before this).
-    ///   Passing it makes the save a single round-trip instead of two and
-    ///   closes the window between the two reads. `nil` reads here.
-    nonisolated func saveMemory(
-        _ content: String, profile: String = "", after loaded: GuardedTextFile.Loaded? = nil
-    ) throws {
-        try guardedWriteText(content, to: memoryPath(profile: profile, file: "MEMORY.md"),
-                             label: "MEMORY.md", after: loaded)
+    /// Unconditional save. The read the write is validated against is taken
+    /// HERE, under the file's write lock (GW-F3) — a proof threaded in from
+    /// an earlier read would be a `.bak` cut from bytes the file may no
+    /// longer hold. Callers that also need a conflict check against an
+    /// editor baseline use ``saveMemoryFile(_:target:profile:ifMatches:)``,
+    /// which does the comparison inside the same hold.
+    nonisolated func saveMemory(_ content: String, profile: String = "") throws {
+        _ = try saveMemoryFile(content, target: .memory, profile: profile, ifMatches: nil)
     }
 
-    nonisolated func saveUserProfile(
-        _ content: String, profile: String = "", after loaded: GuardedTextFile.Loaded? = nil
-    ) throws {
-        try guardedWriteText(content, to: memoryPath(profile: profile, file: "USER.md"),
-                             label: "USER.md", after: loaded)
+    nonisolated func saveUserProfile(_ content: String, profile: String = "") throws {
+        _ = try saveMemoryFile(content, target: .userProfile, profile: profile, ifMatches: nil)
     }
 
-    /// Read-with-proof, then publish with a one-deep `.bak`, for the
-    /// irreplaceable hand-authored text files this service owns.
-    nonisolated private func guardedWriteText(
-        _ content: String, to path: String, label: String,
-        after loaded: GuardedTextFile.Loaded? = nil
-    ) throws {
-        let file = GuardedTextFile(transport: transport, label: label)
-        let proof = try loaded ?? file.load(path)
-        try file.write(content, to: path, after: proof)
+    /// Conflict-checked, SERIALIZED save of `MEMORY.md` / `USER.md`.
+    ///
+    /// The Mac memory editor's save is a read-modify-write with a
+    /// conflict check in the middle, and before GW-F3 the two halves
+    /// straddled the lock that did not exist: the editor read the file,
+    /// compared it against its baseline, and passed that `Loaded` down as
+    /// the write's proof. Serializing only the write would have been
+    /// theatre — the read it was validated against would still have been
+    /// taken outside the hold, so a concurrent template install could land
+    /// its memory appendix in the window and have it published away.
+    ///
+    /// So the comparison moves in here, where it runs against a read taken
+    /// UNDER the lock. `baseline == nil` is the user's explicit "overwrite"
+    /// answer to a conflict and skips the comparison; a mismatch publishes
+    /// nothing and hands back the on-disk text the editor should offer.
+    ///
+    /// Synchronous and `nonisolated` by construction — the caller runs it
+    /// inside one `Task.detached`, because the lock's reentrancy is
+    /// thread-local and a hold must not span an `await`.
+    nonisolated func saveMemoryFile(
+        _ content: String,
+        target: MemoryFileTarget,
+        profile: String = "",
+        ifMatches baseline: String?
+    ) throws -> MemorySaveResult {
+        let path = memoryPath(profile: profile, file: target.fileName)
+        let file = GuardedTextFile(context: context, label: target.fileName)
+        var conflict: String?
+        try file.mutate(path) { loaded in
+            if let baseline, loaded.text != baseline {
+                conflict = loaded.text
+                return nil
+            }
+            return content
+        }
+        if let conflict { return .conflict(onDisk: conflict) }
+        return .saved
+    }
+
+    /// Which of the two hand-authored memory files a save targets.
+    enum MemoryFileTarget: Sendable {
+        case memory
+        case userProfile
+
+        var fileName: String {
+            switch self {
+            case .memory: return "MEMORY.md"
+            case .userProfile: return "USER.md"
+            }
+        }
+    }
+
+    /// Outcome of ``saveMemoryFile(_:target:profile:ifMatches:)``. A refusal
+    /// or a lost lock race is a `throw`, not a case here.
+    enum MemorySaveResult: Sendable, Equatable {
+        case saved
+        case conflict(onDisk: String)
     }
 
     nonisolated private func memoryPath(profile: String, file: String) -> String {
@@ -1160,7 +1210,30 @@ struct HermesFileService: Sendable {
         // absent file still returns `false` here exactly as the old
         // `readFile(…) ?? nil` did; a stat-confirmed unreadable one now
         // refuses instead of being patched from a read that failed.
-        let configFile = GuardedTextFile(transport: transport, label: "config.yaml")
+        //
+        // SERIALIZED (GW-F3 / DI H4). This one keeps `load`/`write` split
+        // rather than using `mutate`, because it is not a plain rewrite: it
+        // publishes, RE-READS off disk, and RESTORES the pre-patch bytes
+        // when the verification fails. All four of those touches have to be
+        // inside one hold or the restore can publish over a concurrent
+        // writer's config — which is why the lock is taken here, around the
+        // whole method, instead of inside each write.
+        let configFile = GuardedTextFile(context: context, label: "config.yaml")
+        return (try? configFile.withLock(context.paths.configYAML) {
+            patchMCPServerFieldLocked(
+                name: name, expecting: expecting, configFile: configFile, mutate: mutate
+            )
+        }) ?? false
+    }
+
+    /// The body of ``patchMCPServerField(name:expecting:mutate:)``, run
+    /// under config.yaml's write lock.
+    nonisolated private func patchMCPServerFieldLocked(
+        name: String,
+        expecting: [String],
+        configFile: GuardedTextFile,
+        mutate: (inout [String]) -> Void
+    ) -> Bool {
         let loadedConfig: GuardedTextFile.Loaded
         do {
             loadedConfig = try configFile.load(context.paths.configYAML)

@@ -216,17 +216,28 @@ struct ProjectTemplateInstaller: Sendable {
     /// own appendix. Same treatment W1 gave `ProjectContextBlock.writeBlock`:
     /// stat-confirmed proof of damage, a refusal on undecodable bytes, and
     /// a one-deep `MEMORY.md.bak` of whatever is replaced.
+    ///
+    /// SERIALIZED (GW-F3 / DI H4). `MEMORY.md` has three writers — this
+    /// appendix, the uninstaller's strip, and the memory editor's save — and
+    /// an append computed against bytes the editor is replacing publishes
+    /// the user's previous draft back over their save. The read and the
+    /// publish are one hold of `MEMORY.md`'s write lock, taken through
+    /// `GuardedTextFile` so it is the same lock file the other two use.
+    /// (The read itself stays on `inspectMemory`, which preflight shares.)
     nonisolated private func appendMemoryIfNeeded(plan: TemplateInstallPlan) throws {
         guard let appendix = plan.memoryAppendix else { return }
         let transport = context.makeTransport()
-        let inspection = Self.inspectMemory(at: plan.memoryPath, transport: transport)
-        let existing = try Self.memoryText(of: inspection, at: plan.memoryPath)
-        let combined = existing + appendix
-        guard let data = combined.data(using: .utf8) else {
-            throw ProjectTemplateError.requiredFileMissing("memory/append.md (non-UTF8)")
-        }
-        try GuardedJSONStore(transport: transport, label: "MEMORY.md")
-            .write(data, to: plan.memoryPath, after: inspection)
+        try GuardedTextFile(context: context, label: "MEMORY.md")
+            .withLock(plan.memoryPath) {
+                let inspection = Self.inspectMemory(at: plan.memoryPath, transport: transport)
+                let existing = try Self.memoryText(of: inspection, at: plan.memoryPath)
+                let combined = existing + appendix
+                guard let data = combined.data(using: .utf8) else {
+                    throw ProjectTemplateError.requiredFileMissing("memory/append.md (non-UTF8)")
+                }
+                try GuardedJSONStore(transport: transport, label: "MEMORY.md")
+                    .write(data, to: plan.memoryPath, after: inspection)
+            }
     }
 
     /// One guarded read of MEMORY.md, shared by preflight and the append.

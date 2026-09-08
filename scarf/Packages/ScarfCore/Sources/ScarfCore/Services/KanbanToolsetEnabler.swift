@@ -90,30 +90,21 @@ public actor KanbanToolsetEnabler {
         // Read + mutate off the main actor; the YAML scan is line-bounded
         // and cheap (~6 KB file in practice) but the load may hit SSH
         // on remote contexts.
-        let loadResult = await Self.loadConfig(context: context, path: path)
-        let loaded: GuardedTextFile.Loaded
-        switch loadResult {
-        case .failure(let error):
-            return .failed(message: error.localizedDescription)
-        case .success(let value):
-            guard value.exists else { return .failed(message: "Couldn't read \(path)") }
-            loaded = value
+        //
+        // Read, plan and write are ONE detached hop because they are one
+        // lock hold (GW-F3). They used to be two `Task.detached`s, which is
+        // not merely a window: `RegistryWriteLock`'s reentrancy is
+        // THREAD-LOCAL, so a hold taken on the load's thread could not have
+        // covered a write running on another.
+        let outcome = await Self.applyPlan(context: context, path: path) {
+            Self.planEnable(yaml: $0, platform: platform)
         }
-        let yaml = loaded.text
-
-        let plan = Self.planEnable(yaml: yaml, platform: platform)
-        switch plan {
-        case .alreadyPresent:
+        switch outcome {
+        case .failed(let message):
+            return .failed(message: message)
+        case .noChange:
             return .enabled
-        case .refuse(let reason):
-            return .failed(message: reason)
-        case .rewrite(let newYaml):
-            let writeResult = await Self.writeConfig(
-                newYaml, context: context, path: path, after: loaded
-            )
-            if case .failure(let err) = writeResult {
-                return .failed(message: err.localizedDescription)
-            }
+        case .wrote:
             // Trust-but-verify. The kanban gating in Hermes is exact
             // string membership; if our write went in correctly the
             // detector must see `.enabled` on the next read. Anything
@@ -136,65 +127,69 @@ public actor KanbanToolsetEnabler {
     public func disable(platform: String = "cli") async -> EnableResult {
         let context = self.context
         let path = context.paths.configYAML
-        let loadResult = await Self.loadConfig(context: context, path: path)
-        let loaded: GuardedTextFile.Loaded
-        switch loadResult {
-        case .failure(let error):
-            return .failed(message: error.localizedDescription)
-        case .success(let value):
-            guard value.exists else { return .failed(message: "Couldn't read \(path)") }
-            loaded = value
-        }
-        let plan = Self.planDisable(yaml: loaded.text, platform: platform)
-        switch plan {
-        case .alreadyPresent:
-            // For disable, `alreadyPresent` means "wasn't there in the
-            // first place" — treated as a no-op success.
-            return .enabled
-        case .refuse(let reason):
-            return .failed(message: reason)
-        case .rewrite(let newYaml):
-            let writeResult = await Self.writeConfig(
-                newYaml, context: context, path: path, after: loaded
-            )
-            if case .failure(let err) = writeResult {
-                return .failed(message: err.localizedDescription)
-            }
-            return .enabled
+        // One lock hold over read + plan + write, as `enable` does.
+        // `alreadyPresent` here means "wasn't there in the first place" —
+        // a no-op success.
+        switch await Self.applyPlan(context: context, path: path, plan: {
+            Self.planDisable(yaml: $0, platform: platform)
+        }) {
+        case .failed(let message): return .failed(message: message)
+        case .noChange, .wrote: return .enabled
         }
     }
 
-    // MARK: - Guarded config.yaml I/O
+    // MARK: - Guarded, serialized config.yaml I/O
 
+    private enum PlanOutcome {
+        case wrote
+        case noChange
+        case failed(message: String)
+    }
+
+    /// Read `config.yaml` with proof, run `plan` over its text, and publish
+    /// the rewrite — the whole thing inside ONE hold of config.yaml's write
+    /// lock, on ONE detached thread (GW-F3 / DI H4).
+    ///
     /// `~/.hermes/config.yaml` is hand-authored and irreplaceable, and this
-    /// actor is one of FIVE writers of it. All of them go through
+    /// actor is one of five writers of it. All of them go through
     /// `GuardedTextFile` so the "is this file damaged or just absent" answer
     /// is computed once, in one place — before, each writer had its own
     /// `readText(path) ?? ""`, and one dropped SSH round-trip published a
-    /// config containing nothing but the section being edited.
-    private static func loadConfig(
-        context: ServerContext, path: String
-    ) async -> Result<GuardedTextFile.Loaded, Error> {
+    /// config containing nothing but the section being edited. Since GW-F3
+    /// they also share its LOCK, so two of those writers can no longer each
+    /// build a whole file from a read the other is about to invalidate.
+    ///
+    /// A refusal, an absent file, a rejected plan and a lost lock race all
+    /// come back as `.failed` with the message the UI already shows.
+    private static func applyPlan(
+        context: ServerContext,
+        path: String,
+        plan: @escaping @Sendable (String) -> MutationPlan
+    ) async -> PlanOutcome {
         await Task.detached(priority: .utility) {
+            let file = GuardedTextFile(context: context, label: "config.yaml")
             do {
-                let file = GuardedTextFile(transport: context.makeTransport(), label: "config.yaml")
-                return .success(try file.load(path))
+                var outcome = PlanOutcome.noChange
+                try file.mutate(path) { loaded in
+                    guard loaded.exists else {
+                        outcome = .failed(message: "Couldn't read \(path)")
+                        return nil
+                    }
+                    switch plan(loaded.text) {
+                    case .alreadyPresent:
+                        outcome = .noChange
+                        return nil
+                    case .refuse(let reason):
+                        outcome = .failed(message: reason)
+                        return nil
+                    case .rewrite(let newYaml):
+                        outcome = .wrote
+                        return newYaml
+                    }
+                }
+                return outcome
             } catch {
-                return .failure(error)
-            }
-        }.value
-    }
-
-    private static func writeConfig(
-        _ yaml: String, context: ServerContext, path: String, after loaded: GuardedTextFile.Loaded
-    ) async -> Result<Void, Error> {
-        await Task.detached(priority: .utility) {
-            do {
-                let file = GuardedTextFile(transport: context.makeTransport(), label: "config.yaml")
-                try file.write(yaml, to: path, after: loaded)
-                return .success(())
-            } catch {
-                return .failure(error)
+                return .failed(message: error.localizedDescription)
             }
         }.value
     }

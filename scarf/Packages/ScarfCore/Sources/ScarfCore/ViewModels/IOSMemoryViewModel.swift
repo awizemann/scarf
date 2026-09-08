@@ -180,13 +180,15 @@ public final class IOSMemoryViewModel {
         // Deliberately re-reads rather than reusing the load's proof: the
         // editor may have sat open for minutes, and a `.bak` written from a
         // stale inspection would archive bytes the file no longer holds.
+        // SERIALIZED (GW-F3): the re-read and the publish are one hold of
+        // this file's write lock, on one detached thread. The re-read was
+        // already deliberate; the lock is what makes it MEAN something —
+        // without it, "read the current bytes, then write" is the same
+        // read-modify-write window the Mac side had, just narrower.
         let result: Result<Void, Error> = await Task.detached {
             do {
-                let file = GuardedTextFile(
-                    transport: ctx.makeTransport(), label: label
-                )
-                let loaded = try file.load(path)
-                try file.write(snapshot, to: path, after: loaded)
+                let file = GuardedTextFile(context: ctx, label: label)
+                try file.mutate(path) { _ in snapshot }
                 return .success(())
             } catch {
                 return .failure(error)

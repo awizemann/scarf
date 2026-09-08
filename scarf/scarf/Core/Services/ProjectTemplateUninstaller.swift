@@ -181,6 +181,9 @@ struct ProjectTemplateUninstaller: Sendable {
         var memoryBlockPresent = false
         var memoryUnreadable: String? = nil
         if let blockId = lock.memoryBlockId {
+            // Transport-only, i.e. unserialized, on purpose (GW-F3): this
+            // is the PLAN phase's read. The strip that acts on it takes
+            // MEMORY.md's lock around its own re-read and write.
             let guarded = GuardedTextFile(transport: transport, label: "MEMORY.md")
             do {
                 // Uncapped, matching `stripMemoryBlock`: MEMORY.md is the
@@ -976,9 +979,6 @@ struct ProjectTemplateUninstaller: Sendable {
         memoryPath: String,
         transport: any ServerTransport
     ) throws {
-        let beginMarker = ProjectTemplateService.memoryBlockBeginMarker(templateId: blockId)
-        let endMarker = ProjectTemplateService.memoryBlockEndMarker(templateId: blockId)
-
         // **Guarded (GW-E2c).** The INSTALLER's appendix writer of this same
         // file was guarded in G2; this half was left behind — the "guard
         // belongs to the file, applied by whichever writer got audited"
@@ -987,7 +987,27 @@ struct ProjectTemplateUninstaller: Sendable {
         // markers spliced the truncation back over the user's prose, with no
         // copy of what was lost. `GuardedTextFile` is the installer's policy
         // factored out, so both writers now hold the same line.
-        let guarded = GuardedTextFile(transport: transport, label: "MEMORY.md")
+        // SERIALIZED (GW-F3): `MEMORY.md` is the memory editor's file too,
+        // and a strip computed against bytes the editor replaces mid-flight
+        // republishes the user's previous draft over their save. The lock is
+        // taken around the whole read-splice-write below.
+        let guarded = GuardedTextFile(context: context, label: "MEMORY.md")
+        return try guarded.withLock(memoryPath) {
+            try stripMemoryBlockLocked(
+                blockId: blockId, memoryPath: memoryPath, guarded: guarded
+            )
+        }
+    }
+
+    /// The body of ``stripMemoryBlock(blockId:memoryPath:transport:)``, run
+    /// under `MEMORY.md`'s write lock.
+    nonisolated private func stripMemoryBlockLocked(
+        blockId: String,
+        memoryPath: String,
+        guarded: GuardedTextFile
+    ) throws {
+        let beginMarker = ProjectTemplateService.memoryBlockBeginMarker(templateId: blockId)
+        let endMarker = ProjectTemplateService.memoryBlockEndMarker(templateId: blockId)
         let loaded: GuardedTextFile.Loaded
         do {
             // Uncapped for the same reason `ProjectTemplateInstaller.inspectMemory`

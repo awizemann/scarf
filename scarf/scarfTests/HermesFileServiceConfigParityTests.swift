@@ -926,7 +926,15 @@ struct AllConfigWritersParityTests {
             // write itself (it lives in the transform / the caller's
             // arguments), so each one is by definition a non-literal site
             // and must be declared.
-            let directYAMLSites = Self.count(#"file\.write\(\s*updated\s*,\s*to:\s*path\s*,"#, in: source)
+            // GW-F3 moved the config.yaml writers onto `GuardedTextFile`'s
+            // locked `mutate`, which publishes the transform's return value
+            // instead of calling `write` with it — so the splice site is now
+            // `file.mutate(path)` at those adopters. Both shapes count: the
+            // gate is about the KEY never being a literal at the write, and
+            // that is equally true either way.
+            let directYAMLSites =
+                Self.count(#"file\.write\(\s*updated\s*,\s*to:\s*path\s*,"#, in: source)
+                + Self.count(#"file\.mutate\(\s*path\s*\)\s*\{[^}]*\bupdated\b"#, in: source)
             let sites = argvSites + setSettingSites + configKVSites + directYAMLSites
             // …minus those whose key the scan captured as a FULLY STATIC
             // literal. An interpolated literal (`"quick_commands.\(name).type"`)

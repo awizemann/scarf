@@ -208,6 +208,24 @@ public struct RegistryWriteLock: Sendable {
         return String(hash, radix: 36)
     }
 
+    /// The same lock with a different wait bound (GW-F3).
+    ///
+    /// One call site needs this: `SettingsViewModel.saveDirectYAML` runs its
+    /// whole read-modify-write SYNCHRONOUSLY ON THE MAIN ACTOR (PERF H2,
+    /// scheduled off-main in t-26bf60b8). The default remote bound is 60s,
+    /// chosen because a remote registry writer was already going to block
+    /// for about that long on its own scps — an argument that does not
+    /// transfer to a main-actor frame, where 60s of waiting is 60s of frozen
+    /// UI that charter C10 forbids. That site takes the lock with a bound
+    /// small enough to be invisible when uncontended (the normal case: the
+    /// create is one `open(2)`) and reports `registryBusy` through its
+    /// existing failure toast when it is not. Serialization is preserved for
+    /// every honest concurrent writer; what is given up is queueing behind a
+    /// slow remote holder, which that frame must not do anyway.
+    public nonisolated func withAcquireTimeout(_ seconds: TimeInterval) -> RegistryWriteLock {
+        RegistryWriteLock(lockURL: lockURL, staleAfter: staleAfter, acquireTimeout: seconds)
+    }
+
     // MARK: - Acquire / release
 
     /// Run `body` holding the lock. Releases on every path, including a

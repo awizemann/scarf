@@ -158,6 +158,11 @@ final class MemoryViewModel {
     func save(_ text: String, target: EditTarget, baseline: String, force: Bool = false) async -> SaveOutcome {
         let svc = fileService
         let profile = activeProfile
+        // Mapped HERE, on the main actor: `EditTarget`'s `Equatable`
+        // conformance is main-actor-isolated, so comparing it inside the
+        // detached body is a Swift 6 isolation error.
+        let fileTarget: HermesFileService.MemoryFileTarget =
+            target == .memory ? .memory : .userProfile
         isSaving = true
         defer { isSaving = false }
 
@@ -169,31 +174,33 @@ final class MemoryViewModel {
             // take the new version" — and the reload-then-save published that
             // emptiness through the guard. A read that fails is now a
             // `.failed`, which moves nothing and keeps the draft.
-            var proof: GuardedTextFile.Loaded?
-            if !force {
-                let loaded: GuardedTextFile.Loaded
-                do {
-                    switch target {
-                    case .memory: loaded = try svc.loadMemoryFile(profile: profile)
-                    case .user:   loaded = try svc.loadUserProfileFile(profile: profile)
-                    }
-                } catch {
-                    return .failed(message: error.localizedDescription)
-                }
-                guard loaded.text == baseline else { return .conflict(onDisk: loaded.text) }
-                // Same inspection the comparison was made against carries into
-                // the write: one read, and no window between them (PERF M3).
-                proof = loaded
-            }
+            //
+            // The check and the write are ONE lock hold now (GW-F3). They
+            // used to be a read here and a write below, with the read's
+            // proof threaded down — so even once config.yaml and .env got
+            // serialized, a lock around the write alone would have left this
+            // window open: the bytes the comparison passed were read before
+            // the hold began, and a template install landing its memory
+            // appendix in between would have been published away with a
+            // `.bak` cut from the wrong pre-image. `saveMemoryFile` does the
+            // comparison against a read taken UNDER the lock, and publishes
+            // in the same hold. Still exactly one read on the healthy path.
             do {
-                switch target {
-                case .memory: try svc.saveMemory(text, profile: profile, after: proof)
-                case .user:   try svc.saveUserProfile(text, profile: profile, after: proof)
+                let result = try svc.saveMemoryFile(
+                    text,
+                    target: fileTarget,
+                    profile: profile,
+                    // `force` is the user's explicit "overwrite" answer to a
+                    // conflict the UI already showed them.
+                    ifMatches: force ? nil : baseline
+                )
+                switch result {
+                case .saved: return .saved
+                case .conflict(let onDisk): return .conflict(onDisk: onDisk)
                 }
             } catch {
                 return .failed(message: error.localizedDescription)
             }
-            return .saved
         }.value
 
         // Deliberately does NOT commit `text` into memoryContent/userContent.

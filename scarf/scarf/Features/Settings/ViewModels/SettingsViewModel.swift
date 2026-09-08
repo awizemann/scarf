@@ -847,7 +847,45 @@ final class SettingsViewModel {
         // config, replaced by the one section this form edits. All five
         // config.yaml writers now share `GuardedTextFile`; a refusal
         // surfaces through the same `saveMessage` a write failure does.
-        let file = GuardedTextFile(transport: context.makeTransport(), label: "config.yaml")
+        //
+        // SERIALIZED (GW-F3 / DI H4), but on a SHORT wait bound. This whole
+        // frame is synchronous on the main actor (PERF H2 — moving it
+        // off-main is t-26bf60b8), so it cannot afford the default 60s
+        // remote acquire: that would turn a contended save into a minute of
+        // frozen UI, which is charter C10's exact prohibition and strictly
+        // worse than the interleaving it prevents. `2` is the local bound —
+        // invisible when uncontended (one `open(2)`), and a `registryBusy`
+        // through the existing failure toast when a genuine second writer
+        // holds it. Once this moves off-main, drop the override and inherit
+        // the context bound like every other adopter.
+        //
+        // The lock spans the load AND the write below: a lock around only
+        // the publish would serialize the write while leaving the
+        // read-modify-write window exactly where the audit found it.
+        let file = GuardedTextFile(context: context, label: "config.yaml")
+        do {
+            try file.withLock(path, acquireTimeout: Self.mainActorLockWait) {
+                try saveDirectYAMLLocked(label: label, path: path, file: file, transform: transform)
+            }
+        } catch {
+            saveMessage = "Could not save \(label): \(error.localizedDescription)"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                self?.saveMessage = nil
+            }
+        }
+    }
+
+    /// See ``saveDirectYAML(label:transform:)``'s comment on the bound.
+    private static let mainActorLockWait: TimeInterval = 2
+
+    /// The body of ``saveDirectYAML(label:transform:)``, run under
+    /// config.yaml's write lock.
+    private func saveDirectYAMLLocked(
+        label: String,
+        path: String,
+        file: GuardedTextFile,
+        transform: (String) -> String?
+    ) throws {
         let loaded: GuardedTextFile.Loaded
         do {
             loaded = try file.load(path)
@@ -881,6 +919,11 @@ final class SettingsViewModel {
             }
         }
         saveMessage = String(localized: "Saved \(label)")
+        // These two reads sit inside the hold. Deliberate and cheap: they
+        // are the post-write reload, and holding the lock across them means
+        // the UI re-renders the bytes THIS save published rather than a
+        // successor's. It costs the next contender at most one extra read's
+        // worth of wait against a 2s bound.
         config = fileService.loadConfig()
         rawConfigYAML = context.readText(path) ?? rawConfigYAML
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
