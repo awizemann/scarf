@@ -1,7 +1,13 @@
 import Foundation
 
-/// What a store does with bytes it HELD but could not use — undecodable
-/// JSON, or bytes past the size cap.
+/// What a store does with bytes it HELD but could not use — i.e. with
+/// undecodable JSON.
+///
+/// **Not the size cap.** Bytes past ``GuardedSidecarStore/maxBytes`` are
+/// refused by a `stat` BEFORE they are read (GW-F5 / SEC F3), so there are
+/// no bytes to hold, no `.corrupt-` copy to make, and nothing for a policy
+/// to choose between: both policies refuse an oversized file. This enum is
+/// about the decode failure only.
 ///
 /// **This is a property of the FILE, not of the store type.** Two stores
 /// built on the same `GuardedJSONStore` want opposite answers, and picking
@@ -28,8 +34,9 @@ public enum GuardedDamagePolicy: Sendable, Equatable {
 /// three things, and the read-then-write discipline
 /// `GuardedJSONStore` implements arrives already wired: proof-based
 /// absent-vs-unreadable, zero-bytes-is-damage, quarantine with dedup, a
-/// one-deep `.bak`, an atomic publish — and the damage policy applied
-/// consistently to BOTH the decode failure and the size cap.
+/// one-deep `.bak`, an atomic publish — and the damage policy applied to the
+/// decode failure. (The size cap is not a policy question: it is refused
+/// stat-first, unread, for every adopter.)
 ///
 /// ```swift
 /// struct WidgetPinStore: GuardedSidecarStore {
@@ -53,11 +60,11 @@ public enum GuardedDamagePolicy: Sendable, Equatable {
 ///
 /// `.refuseForever` is honoured HERE, in the defaults below, rather than by
 /// each adopter: `ServerRegistry` hand-rolled the reclassification (GW-E2b)
-/// and had to remember it twice — once for the decode failure and once for
-/// the size cap, which is exactly the branch a new store forgets. The
-/// original bytes are still quarantined either way and the copy's path
-/// survives on `Inspection.quarantineCopy`, so a refusing store can still
-/// tell the user where its file went.
+/// and had to remember it on every branch that produced a quarantine, which
+/// is exactly what a new store forgets. The original bytes are still
+/// quarantined either way and the copy's path survives on
+/// `Inspection.quarantineCopy`, so a refusing store can still tell the user
+/// where its file went.
 ///
 /// ## 2. Which shape?
 ///
@@ -117,8 +124,9 @@ public enum GuardedDamagePolicy: Sendable, Equatable {
 public protocol GuardedSidecarStore {
     /// Short name for logs and refusal messages (`"miniapp_grants.json"`).
     static var label: String { get }
-    /// Anything larger is not this file; it is quarantined rather than
-    /// decoded — a memory-pressured phone must not try.
+    /// Anything larger is not this file: it is refused on a `stat`, without
+    /// ever being read — a memory-pressured phone must not hold it, let
+    /// alone decode it. Both damage policies refuse on size.
     static var maxBytes: Int { get }
     /// See ``GuardedDamagePolicy``. Deliberately un-defaulted.
     static var damagePolicy: GuardedDamagePolicy { get }
@@ -141,7 +149,8 @@ extension GuardedSidecarStore {
     }
 
     /// ``inspect(_:)`` plus a decode, with the policy applied to the decode
-    /// failure as well as to the size cap.
+    /// failure. (An oversized file never reaches the decoder: it is refused
+    /// on the `stat`.)
     public nonisolated func inspectDecoding<T: Decodable>(
         _ type: T.Type,
         at path: String,

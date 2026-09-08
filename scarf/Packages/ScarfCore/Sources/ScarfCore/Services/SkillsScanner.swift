@@ -44,9 +44,15 @@ public enum SkillsScanner: Sendable {
                             // Guard artifacts, not skill content: the guarded
                             // writers keep a one-deep `<name>.bak` beside what
                             // they replace (GW-E2c gave the skill bootstrap
-                            // one). Listing it would put a second, stale copy
-                            // of every upgraded skill in the file picker.
-                            .filter { !$0.hasSuffix(".bak") }
+                            // one) and copy unusable bytes aside as
+                            // `<name>.corrupt-<stamp>`. Listing either would
+                            // put a second, stale copy of every upgraded or
+                            // damaged skill in the file picker — and the
+                            // `.corrupt-` one is worse than the `.bak`: it is
+                            // the file the user is being told is broken,
+                            // offered back to them as editable content
+                            // (GW-F5 / SEC F5, DI L3).
+                            .filter { !isGuardArtifact($0) }
                             .sorted()
                         let requiredConfig = readRequiredConfig(
                             yamlPath: skillPath + "/skill.yaml",
@@ -79,6 +85,18 @@ public enum SkillsScanner: Sendable {
                 guard !skills.isEmpty else { return nil }
                 return HermesSkillCategory(id: categoryName, name: categoryName, skills: skills)
             }
+    }
+
+    /// Is this filename something one of Scarf's guarded writers left
+    /// beside a real file, rather than skill content?
+    ///
+    /// Two shapes, matching what the guards actually produce: the one-deep
+    /// `<name>.bak`, and the quarantine copy `<name>.corrupt-<stamp>` —
+    /// which is an INFIX, not a suffix, because the stamp (and an optional
+    /// `-<uuid8>` collision tiebreaker) follows it. `internal` so the scan
+    /// tests can pin both shapes without going through a filesystem.
+    static func isGuardArtifact(_ name: String) -> Bool {
+        name.hasSuffix(".bak") || name.contains(".corrupt-")
     }
 
     private static func readRequiredConfig(yamlPath: String, transport: any ServerTransport) -> [String] {

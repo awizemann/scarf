@@ -6,8 +6,9 @@ import Foundation
 ///
 /// Only the parts the protocol ADDS are tested here: the per-file damage
 /// policy, the `.quarantined → .unreadable` reclassification the default
-/// implementation now owns (both for the size cap and for the decode
-/// failure), the preserved quarantine-copy path, and the refusal of a
+/// implementation now owns for the decode failure (the size cap is refused
+/// stat-first for every adopter since GW-F5), the preserved quarantine-copy
+/// path, and the refusal of a
 /// publish with no inspection behind it. Every migrated adopter's own
 /// behavior is pinned by its existing, unedited suite.
 ///
@@ -88,7 +89,15 @@ import Foundation
 
     // MARK: - Size cap (the branch a hand-rolled adopter forgets)
 
-    @Test func refuseForeverAlsoReclassifiesTheSizeCapQuarantine() throws {
+    /// SINCE GW-F5 THE SIZE CAP IS NOT A POLICY QUESTION. An oversized file
+    /// is refused on a `stat`, before a single byte is read (SEC F3), so
+    /// there are no bytes to copy aside and nothing to rebuild from — both
+    /// policies refuse, and neither leaves a `.corrupt-` copy. The
+    /// availability cost (a `.quarantineAndRebuild` store freezes instead of
+    /// replacing a file it never saw) is the accepted side of that trade:
+    /// the alternative is pulling a runaway file into memory on a phone to
+    /// find out how big it is.
+    @Test func refuseForeverRefusesTheSizeCapWithoutQuarantining() throws {
         let base = try Self.scratch()
         defer { try? FileManager.default.removeItem(at: base) }
         let path = base.appendingPathComponent("irreplaceable.json").path
@@ -98,14 +107,17 @@ import Foundation
         let store = Irreplaceable(transport: LocalTransport())
         let inspection = store.inspect(path)
         #expect(inspection.state == .unreadable(path: path))
-        #expect(inspection.quarantineCopy != nil)
+        #expect(inspection.bytes == nil)
+        #expect(inspection.quarantineCopy == nil)
         #expect(throws: GuardedStoreError.self) {
             try store.publish(Data("{}".utf8), to: path, after: inspection)
         }
         #expect(try Data(contentsOf: URL(fileURLWithPath: path)) == huge)
+        let listed = try FileManager.default.contentsOfDirectory(atPath: base.path)
+        #expect(!listed.contains { $0.contains(".corrupt-") })
     }
 
-    @Test func rebuildableKeepsTheSizeCapQuarantineWritable() throws {
+    @Test func rebuildableAlsoRefusesTheSizeCap() throws {
         let base = try Self.scratch()
         defer { try? FileManager.default.removeItem(at: base) }
         let path = base.appendingPathComponent("rebuildable.json").path
@@ -114,12 +126,13 @@ import Foundation
 
         let store = Rebuildable(transport: LocalTransport())
         let inspection = store.inspect(path)
-        guard case .quarantined = inspection.state else {
-            Issue.record("expected .quarantined, got \(inspection.state)")
-            return
+        #expect(inspection.state == .unreadable(path: path))
+        #expect(throws: GuardedStoreError.self) {
+            try store.publish(Data("{}".utf8), to: path, after: inspection)
         }
-        try store.publish(Data("{}".utf8), to: path, after: inspection)
-        #expect(try Data(contentsOf: URL(fileURLWithPath: path)) == Data("{}".utf8))
+        // The oversized bytes are untouched where they are — a human raising
+        // the cap or trimming the file is the way out.
+        #expect(try Data(contentsOf: URL(fileURLWithPath: path)) == huge)
     }
 
     // MARK: - Policy-neutral states

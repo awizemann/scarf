@@ -6,11 +6,33 @@ import Foundation
 /// The transport's raw write primitive is named `unguardedWriteFile`, and
 /// `ServerContext.unguardedWriteText` is the one helper seam left that wraps
 /// it (GW-E2a deleted `HermesFileService`'s private twin by converting all
-/// five of its callers). The rename makes an unguarded write
-/// impossible to perform *by accident* — you have to type the word — and this
-/// scanner makes it impossible to perform *silently*.
+/// five of its callers). The rename makes an unguarded write impossible to
+/// perform *by accident* — you have to type the word.
 ///
-/// Two rules, both line-based and deliberately dumb (a full parse would be
+/// ## What this scanner does and does NOT cover (GW-F5 / SEC F4)
+///
+/// It used to claim it made an unguarded write "impossible to perform
+/// silently". It does not, and saying so invited exactly the trust it can't
+/// carry. Honestly:
+///
+/// - **Covered:** every direct CALL of the transport primitive in non-test
+///   sources must name itself with an annotation (rule 2), and the old,
+///   innocent-looking names cannot come back (rule 1).
+/// - **NOT covered — wrapper laundering.** One annotated helper with N
+///   callers is one annotation, and the N call sites are invisible to a
+///   line-based scan. Nothing here can see them; a REVIEWER has to, which
+///   is why the annotation asks for a reason and not just a class letter.
+/// - **NOT covered — Foundation writes in general.** `Data.write(to:)`,
+///   `FileManager.createFile`, `FileHandle`, `String.write(to:)` all reach
+///   the disk without touching a transport. Twelve such sites exist and
+///   most are legitimate (export sheets, save panels, temp staging), so a
+///   blanket ban would be false-positive noise. Rule 3 below therefore
+///   bans only the narrow case that is never legitimate: a Foundation write
+///   aimed at one of Scarf's OWN live-state files.
+/// - **Not an evasion:** `#if` branches. The scan is textual, so it sees
+///   both sides of a conditional — more than the compiler does, not less.
+///
+/// Three rules, all line-based and deliberately dumb (a full parse would be
 /// slower and no more correct for a naming convention):
 ///
 /// 1. **No `.writeFile(` / `.writeText(` on a transport or context anywhere in
@@ -20,9 +42,16 @@ import Foundation
 ///
 /// 2. **Every `unguardedWriteFile(` / `unguardedWriteText(` CALL SITE carries an
 ///    `// UNGUARDED-WRITE(<G|C|O|R>): <reason>` annotation** on the same line or
-///    the line above. Classes: `G` guard-internal, `C` create-only scaffold,
-///    `O` authoritative overwrite, `R` destroy-shaped read-modify-write (the
-///    E2 conversion backlog).
+///    on a preceding line that IS A COMMENT. Classes: `G` guard-internal, `C`
+///    create-only scaffold, `O` authoritative overwrite, `R` destroy-shaped
+///    read-modify-write (the E2 conversion backlog).
+///
+/// 3. **No Foundation write may target a Scarf-owned live-state file.**
+///    A `Data.write` / `createFile` on a line that also spells
+///    `servers.json`, `projects.json`, `config.yaml`, `.env`, `MEMORY.md`
+///    … in a string literal is a write around the whole discipline. Only
+///    the transports and the guards themselves may name those files that
+///    way. See `liveStateBasenames`.
 ///
 /// ## The escape hatch
 ///
@@ -116,8 +145,14 @@ import Foundation
                 if Self.isComment(line) { continue }
                 // Declarations spell the primitive by necessity.
                 if line.contains("func unguardedWrite") { continue }
+                // The previous line only counts as THE ANNOTATION LINE when
+                // it is a comment (GW-F5 / SEC F4). Without that test, an
+                // inline-annotated call laundered its annotation to the call
+                // on the next line — two unguarded writes, one reason, and
+                // the second one never named itself.
                 let previous = i > 0 ? lines[i - 1] : ""
-                let annotated = line.contains("UNGUARDED-WRITE(") || previous.contains("UNGUARDED-WRITE(")
+                let annotated = line.contains("UNGUARDED-WRITE(")
+                    || (Self.isComment(previous) && previous.contains("UNGUARDED-WRITE("))
                 if !annotated {
                     offenders.append("\(rel):\(i + 1): \(line.trimmingCharacters(in: .whitespaces))")
                 }
@@ -145,6 +180,74 @@ import Foundation
         }
         #expect(offenders.isEmpty, """
             Malformed annotation(s). Shape: `// UNGUARDED-WRITE(G|C|O|R): <reason>`:
+            \(offenders.joined(separator: "\n"))
+            """)
+    }
+
+    // MARK: - Rule 3: no Foundation write at a Scarf-owned live-state file
+
+    /// The files whose read-modify-write discipline this whole arc exists to
+    /// protect. Naming one of these in a string literal ON a write line means
+    /// the writer went around the transports, the guards, the `.bak`, the
+    /// damage refusal and the private-mode chmod all at once.
+    ///
+    /// Deliberately a SHORT list of live state, not "every file Scarf
+    /// writes": exports, save panels, temp staging and caches are legitimate
+    /// Foundation writes and must stay quiet, which is what keeps this rule
+    /// worth having.
+    private static let liveStateBasenames = [
+        "servers.json", "projects.json", "project.json", "manifest.json",
+        "miniapp_grants.json", "session_project_map.json", "model_presets.json",
+        "config.yaml", "auth.json", ".env", "MEMORY.md", "USER.md",
+    ]
+
+    /// The only files allowed to spell those names next to a raw write: the
+    /// transports (which ARE the write primitive) and the guards (which
+    /// implement the discipline). Everything else goes through them.
+    private static let liveStateWriteExempt = [
+        "Transport/LocalTransport.swift",
+        "Transport/SSHTransport.swift",
+        "Transport/CitadelServerTransport.swift",
+        "Services/GuardedJSONStore.swift",
+        "Services/GuardedTextFile.swift",
+        "Services/GuardedSidecarStore.swift",
+    ]
+
+    /// Double-quoted literals on a line, cheaply (no escape handling — a
+    /// filename with an escaped quote in it is not a thing).
+    private static func quotedLiterals(in line: String) -> [String] {
+        let parts = line.components(separatedBy: "\"")
+        guard parts.count > 2 else { return [] }
+        return stride(from: 1, to: parts.count, by: 2).map { parts[$0] }
+    }
+
+    @Test func noFoundationWriteTargetsScarfLiveState() throws {
+        var offenders: [String] = []
+        for (rel, text) in try Self.swiftFiles() {
+            if Self.liveStateWriteExempt.contains(where: { rel.hasSuffix($0) }) { continue }
+            for (i, raw) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+                let line = String(raw)
+                guard line.contains(".write(") || line.contains("createFile(") else { continue }
+                if Self.isComment(line) { continue }
+                let named = Self.quotedLiterals(in: line).contains { literal in
+                    let base = (literal as NSString).lastPathComponent
+                    // `<name>.bak` / `<name>.corrupt-<stamp>` are the same
+                    // file's bytes under another name — see
+                    // `TransportPrivateMode.originalBasename`.
+                    let stem = base.hasSuffix(".bak") ? String(base.dropLast(4)) : base
+                    let root = stem.components(separatedBy: ".corrupt-").first ?? stem
+                    return Self.liveStateBasenames.contains(root)
+                }
+                if named {
+                    offenders.append("\(rel):\(i + 1): \(line.trimmingCharacters(in: .whitespaces))")
+                }
+            }
+        }
+        #expect(offenders.isEmpty, """
+            A Foundation write is naming one of Scarf's live-state files. Those \
+            files are written through a guard (`GuardedTextFile`, \
+            `GuardedSidecarStore`) and nothing else — a raw write skips the \
+            damage refusal, the one-deep `.bak` and the 0600 mode at once. Sites:
             \(offenders.joined(separator: "\n"))
             """)
     }

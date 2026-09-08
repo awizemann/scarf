@@ -61,12 +61,15 @@ public struct GuardedJSONStore: Sendable {
         case absent
         /// Bytes we read and can hand to a decoder.
         case present
-        /// The file is stat-confirmed but two reads failed, or it is zero
-        /// bytes. Writing would replace content we never saw.
+        /// The file is stat-confirmed but two reads failed, it is zero
+        /// bytes, or it is past the size cap (in which case it was never
+        /// read at all — see ``inspect(_:maxBytes:)``). Writing would
+        /// replace content we never saw.
         case unreadable(path: String)
-        /// We held the bytes but they were unusable (undecodable, or past
-        /// the size cap); they were copied to `copy`. Treated as writable —
-        /// see rule 3 above.
+        /// We held the bytes and they would not DECODE; they were copied to
+        /// `copy`. Treated as writable — see rule 3 above. (Bytes past the
+        /// size cap are `.unreadable`, not this: they are refused before
+        /// they are read, so there is nothing to copy aside.)
         case quarantined(copy: String)
     }
 
@@ -148,9 +151,48 @@ public struct GuardedJSONStore: Sendable {
     /// decoder see. Reading per question would be one SSH/SFTP round-trip
     /// per question.
     ///
-    /// - Parameter maxBytes: anything larger is unusable and is quarantined
-    ///   rather than decoded — a memory-pressured phone must not try.
+    /// - Parameter maxBytes: anything larger is REFUSED — and refused
+    ///   without being read.
+    ///
+    /// **The cap is enforced by a `stat`, BEFORE the read** (GW-F5 / SEC F3).
+    /// It used to be enforced after: the whole file was pulled into memory
+    /// and then measured, which made the cap a statement about what we would
+    /// DECODE rather than about what we would HOLD — a multi-gigabyte
+    /// `MEMORY.md` still landed in RAM on an iPhone before being declared too
+    /// big, and quarantining it then doubled the residency.
+    ///
+    /// **The cost, and why it is paid.** A capped inspection is now
+    /// `stat` + `read` instead of `read`, i.e. one extra SSH/SFTP round-trip
+    /// on every healthy remote load. That is deliberate: the stat is free
+    /// locally, it is one round-trip on remote paths that already pay one to
+    /// three, and it is the only ordering in which the phone — which is
+    /// remote-ONLY, so a local-only rule would protect nobody — can refuse a
+    /// runaway file instead of being jetsammed by it. Callers that genuinely
+    /// want no bound pass `Int.max` and pay nothing: the probe is skipped
+    /// entirely for them, which keeps the uncapped loads at exactly ONE read.
+    ///
+    /// **An over-cap file is `.unreadable`, not `.quarantined`,** and there is
+    /// no `.corrupt-` copy of it: we never held its bytes, so there is
+    /// nothing to copy aside and nothing to rebuild from. Both damage
+    /// policies therefore refuse on size — a `.quarantineAndRebuild` store
+    /// freezes rather than replacing a file it never saw (the audit's
+    /// accepted availability-for-integrity trade). The bytes are untouched
+    /// where they are; a human raising the cap or trimming the file is the
+    /// way out.
+    ///
+    /// Verdicts are otherwise unchanged: the probe only fires when a `stat`
+    /// SUCCEEDS and reports a size past the cap, so a transport that cannot
+    /// stat falls through to the exact read-then-probe correlation below and
+    /// its `.absent` / `.unreadable` answers are the same as before.
     public nonisolated func inspect(_ path: String, maxBytes: Int) -> Inspection {
+        if maxBytes != Int.max, let info = transport.stat(path), info.size > Int64(maxBytes) {
+            #if canImport(os)
+            Self.logger.error(
+                "\(self.label, privacy: .public) at \(path, privacy: .public) is \(info.size) bytes (cap \(maxBytes)); refusing without reading it"
+            )
+            #endif
+            return Inspection(state: .unreadable(path: path), bytes: nil)
+        }
         var read = try? transport.readFile(path)
         if read == nil {
             guard let info = transport.stat(path) else {
@@ -176,12 +218,18 @@ public struct GuardedJSONStore: Sendable {
             return Inspection(state: .unreadable(path: path), bytes: data)
         }
         if data.count > maxBytes {
+            // Fallback for a transport that could not `stat` (the probe
+            // above is what normally catches this). Same verdict, so the
+            // cap means one thing whichever branch enforces it: refuse,
+            // and do NOT write a `.corrupt-` copy — quarantining an
+            // oversized file is precisely the residency-doubling the cap
+            // exists to prevent.
             #if canImport(os)
-            Self.logger.warning(
-                "\(self.label, privacy: .public) at \(path, privacy: .public) is \(data.count) bytes (cap \(maxBytes)); quarantining"
+            Self.logger.error(
+                "\(self.label, privacy: .public) at \(path, privacy: .public) is \(data.count) bytes (cap \(maxBytes)); refusing"
             )
             #endif
-            return quarantining(data: data, path: path)
+            return Inspection(state: .unreadable(path: path), bytes: nil)
         }
         return Inspection(state: .present, bytes: data)
     }

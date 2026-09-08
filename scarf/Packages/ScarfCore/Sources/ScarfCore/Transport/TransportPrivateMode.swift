@@ -22,9 +22,19 @@ public enum TransportPrivateMode {
     /// Heuristic: files that conventionally hold secrets should be created
     /// with restrictive permissions so a future `scp` or editor doesn't end
     /// up exposing them.
+    ///
+    /// `servers.json` is on the list (GW-F5 / SEC F6) even though it holds
+    /// no passwords: it is the user's complete inventory of hosts,
+    /// usernames, ports and key paths — a target list for anyone with a
+    /// login on the machine — and its `.bak` and `.corrupt-` copies carry
+    /// the same inventory. Adding the base name covers all three artifacts
+    /// at once via ``originalBasename(_:)``.
     public static func shouldEnforce(for path: String) -> Bool {
         let name = originalBasename((path as NSString).lastPathComponent)
-        return name == ".env" || name == "auth.json" || name.hasSuffix("-tokens.json")
+        return name == ".env"
+            || name == "auth.json"
+            || name == "servers.json"
+            || name.hasSuffix("-tokens.json")
     }
 
     /// Strip the suffixes Scarf's own guarded writers append when they copy

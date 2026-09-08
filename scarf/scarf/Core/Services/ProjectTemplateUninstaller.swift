@@ -186,9 +186,15 @@ struct ProjectTemplateUninstaller: Sendable {
             // MEMORY.md's lock around its own re-read and write.
             let guarded = GuardedTextFile(transport: transport, label: "MEMORY.md")
             do {
-                // Uncapped, matching `stripMemoryBlock`: MEMORY.md is the
-                // user's prose, not an index we decode.
-                let loaded = try guarded.load(memoryPath, maxBytes: Int.max)
+                // The house cap (32 MB), matching `stripMemoryBlock`. It
+                // used to be `Int.max` on the grounds that MEMORY.md is
+                // the user's prose rather than an index we decode — but
+                // that reasoning argues for a GENEROUS bound, not for
+                // none, and an uncapped load of an agent-writable file is
+                // an unbounded allocation (GW-F5 / SEC F3). No real
+                // MEMORY.md is anywhere near 32 MB; one that is gets a
+                // refusal instead of a hang.
+                let loaded = try guarded.load(memoryPath)
                 let text = loaded.text
                 let beginMarker = ProjectTemplateService.memoryBlockBeginMarker(
                     templateId: blockId
@@ -1010,9 +1016,10 @@ struct ProjectTemplateUninstaller: Sendable {
         let endMarker = ProjectTemplateService.memoryBlockEndMarker(templateId: blockId)
         let loaded: GuardedTextFile.Loaded
         do {
-            // Uncapped for the same reason `ProjectTemplateInstaller.inspectMemory`
-            // is: MEMORY.md is the user's prose, not an index we decode.
-            loaded = try guarded.load(memoryPath, maxBytes: Int.max)
+            // The house cap (32 MB) — see the plan phase's read. An
+            // uncapped load of an agent-writable file is an unbounded
+            // allocation; a MEMORY.md past 32 MB is refused, not held.
+            loaded = try guarded.load(memoryPath)
         } catch let refusal as GuardedTextFile.Refusal {
             switch refusal {
             case .unreadable(let damaged, _):

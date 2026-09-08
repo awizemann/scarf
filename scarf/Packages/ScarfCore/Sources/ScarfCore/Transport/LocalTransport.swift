@@ -2,6 +2,11 @@ import Foundation
 #if canImport(os)
 import os
 #endif
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// `ServerTransport` over the local filesystem. Thin wrapper around
 /// `FileManager`, `Process`, and `DispatchSourceFileSystemObject` — the APIs
@@ -102,22 +107,60 @@ public struct LocalTransport: ServerTransport {
             if !parent.isEmpty, !FileManager.default.fileExists(atPath: parent) {
                 try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
             }
-            // Atomic write: Data.write(options: .atomic) drops a temp
-            // file alongside the destination and rename(2)s it into
-            // place. Cross-platform (macOS + iOS + Linux CI for tests).
+            // Atomic write: stage the bytes in a temp file IN THE SAME
+            // DIRECTORY, put the final mode on the temp, and only then
+            // `rename(2)` it into place. Cross-platform (macOS + iOS +
+            // Linux CI for tests) — `rename` is POSIX, and it replaces
+            // the destination entry rather than following a symlink
+            // planted there, which is the property the guarded writers'
+            // `.bak`/`.corrupt-` copies rely on.
+            //
+            // WHY NOT `Data.write(options: .atomic)` ANY MORE (GW-F5 /
+            // SEC F2). That call also renames a temp into place, but it
+            // creates the temp with the process umask (0644 typically),
+            // so the chmod could only happen AFTER the file was already
+            // published: a brand-new `.env`, `.env.bak` or `auth.json`
+            // was observable at its real path in a loose mode for the
+            // length of that window, and the `try?` around the chmod
+            // meant a failure left it there forever. `SSHTransport`
+            // (chmod-then-mv in one remote command) and
+            // `CitadelServerTransport` both fixed this the other way
+            // round; this is the local side of the same rule, so all
+            // three transports now decide the mode BEFORE the bytes are
+            // reachable at their real name.
             //
             // Earlier this method used `FileManager.replaceItemAt`,
             // which is Apple-only — Linux swift-corelibs would fail.
-            // Data.write-atomic works everywhere with identical
-            // semantics.
-            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
-            // Preserve 0600 for files that conventionally hold secrets.
-            // The existing files use 0600 via HermesEnvService; apply
-            // the same to brand-new files so we never demote
-            // permissions on a rewrite.
+            let dir = parent.isEmpty ? "." : parent
+            let staging = dir + "/.scarf-write-" + UUID().uuidString + ".tmp"
+            defer { try? FileManager.default.removeItem(atPath: staging) }
+            try data.write(to: URL(fileURLWithPath: staging))
             if TransportPrivateMode.shouldEnforce(for: path) {
-                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+                // Files that conventionally hold secrets are owner-only
+                // from the instant they exist under their real name.
+                // NOT `try?`: a mode we could not set is a failed write,
+                // not a quiet downgrade.
+                try FileManager.default.setAttributes(
+                    [.posixPermissions: 0o600], ofItemAtPath: staging
+                )
+            } else if let existing = try? FileManager.default.attributesOfItem(atPath: path),
+                      let mode = existing[.posixPermissions] as? NSNumber {
+                // Existing-file mode semantics, preserved (audit I2): a
+                // rewrite must not re-permission a file the user or
+                // Hermes deliberately tightened or loosened. Best effort
+                // — an unreadable mode is not a reason to fail the write.
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: mode], ofItemAtPath: staging
+                )
             }
+            guard rename(staging, path) == 0 else {
+                throw TransportError.fileIO(
+                    path: path,
+                    underlying: "publish failed: \(String(cString: strerror(errno)))"
+                )
+            }
+        } catch let error as TransportError {
+            throw error
         } catch {
             throw TransportError.fileIO(path: path, underlying: error.localizedDescription)
         }

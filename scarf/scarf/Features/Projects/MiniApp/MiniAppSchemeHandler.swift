@@ -74,6 +74,14 @@ final class MiniAppSchemeHandler: NSObject, WKURLSchemeHandler {
     /// silently truncated — a half-served asset is worse than a failed one.
     static let maxAssetBytes = 64 * 1024 * 1024
 
+    /// A basename one of Scarf's guarded writers produced: the one-deep
+    /// `<name>.bak`, or the quarantine copy `<name>.corrupt-<stamp>` (an
+    /// INFIX — the stamp and an optional collision tiebreaker follow it).
+    /// `static` + `internal` so the test target can pin the rule directly.
+    static func isGuardArtifact(_ basename: String) -> Bool {
+        basename.hasSuffix(".bak") || basename.contains(".corrupt-")
+    }
+
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
         guard let url = urlSchemeTask.request.url else {
             urlSchemeTask.didFailWithError(URLError(.badURL))
@@ -97,6 +105,30 @@ final class MiniAppSchemeHandler: NSObject, WKURLSchemeHandler {
                 urlSchemeTask, url: url, status: 403,
                 mime: "text/plain; charset=utf-8",
                 body: Data(refusal.message.utf8)
+            )
+            return
+        }
+
+        // Guard artifacts are never assets (GW-F5 / SEC F7). The guarded
+        // writers drop `<name>.bak` and `<name>.corrupt-<stamp>` copies
+        // beside the files they replace, and the mini-app root is a
+        // directory those writers touch — so a page could ask for
+        // `state.json.bak` (or the quarantine copy of a file whose current
+        // version the grant sheet has since narrowed) and be served the
+        // OLD contents through a channel that only ever intended to serve
+        // the current ones. Nothing legitimate is named this way: a
+        // mini-app author who wants a file served gives it a name of its
+        // own. Denied here rather than in the resolver because it is a
+        // statement about what this SCHEME serves, not about path
+        // containment. 404, the same answer as any other asset that isn't
+        // there, so the page's error handling needs no new case.
+        if Self.isGuardArtifact((url.path as NSString).lastPathComponent) {
+            Self.logger.warning(
+                "refusing guard artifact as a mini-app asset: \(url.path, privacy: .public)"
+            )
+            respond(
+                urlSchemeTask, url: url, status: 404,
+                mime: "text/plain; charset=utf-8", body: Data("Not found".utf8)
             )
             return
         }

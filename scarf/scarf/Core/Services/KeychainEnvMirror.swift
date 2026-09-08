@@ -279,9 +279,13 @@ struct KeychainEnvMirror: Sendable {
         // owner-only.
         let guarded = GuardedTextFile(context: context, label: ".env")
         do {
-            // Uncapped, as this service's own inspect was: `.env` is the
-            // user's credentials, not an index we decode.
-            let wrote = try guarded.mutate(path, maxBytes: Int.max) { loaded in
+            // ONE cap for `.env`, the house 32 MB default (GW-F5 / SEC F3
+            // "F3-gotcha"). This path was uncapped while `HermesEnvService`
+            // — writing the SAME FILE through the same type — used the
+            // default, so the two writers disagreed about when a runaway
+            // `.env` should be refused: whichever one you happened to save
+            // through decided. Same file, same bound.
+            let wrote = try guarded.mutate(path) { loaded in
                 let existing = loaded.text
                 let rewritten = rewrite(existing)
                 return rewritten == existing ? nil : rewritten

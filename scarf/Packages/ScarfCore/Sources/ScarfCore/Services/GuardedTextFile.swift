@@ -266,9 +266,11 @@ public struct GuardedTextFile: Sendable {
             }
             throw Refusal.unreadable(path: damagedPath, label: label)
         case .quarantined:
-            // Over the size cap. The bytes are safe in the quarantine copy,
-            // but we still will not publish a rewrite of a file we never
-            // parsed (rule 2's reasoning, by size instead of encoding).
+            // Bytes we held but could not use. Since GW-F5 the size cap is
+            // refused stat-first and arrives as `.unreadable` above, so this
+            // branch is reached only through a decode-shaped quarantine; the
+            // verdict is the same either way — we will not publish a rewrite
+            // of a file we never parsed (rule 2's reasoning).
             throw Refusal.unreadable(path: path, label: label)
         case .present:
             guard let bytes = inspection.bytes else {
