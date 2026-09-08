@@ -172,11 +172,43 @@ nonisolated struct ProjectManifestStore: GuardedSidecarStore, Sendable {
             // fix.)
             let bytes = (try? JSONEncoder().encode(JSONValue.object(object))) ?? Data()
             if (try? JSONDecoder().decode(ProjectTemplateManifest.self, from: bytes)) == nil {
-                Self.logger.warning(
-                    "manifest.json at \(path, privacy: .public) is a JSON object but not a manifest; overlaying a fresh stub and keeping its other keys"
-                )
                 let stub = try JSONEncoder().encode(sentinel())
                 if case .object(let stubObject) = try JSONDecoder().decode(JSONValue.self, from: stub) {
+                    // **Log-only, deliberately (GW follow-up, item 3).** No UI
+                    // is added for this repair, and that is the honest call
+                    // rather than an omission:
+                    //
+                    // 1. Nothing is lost. Every key we do not own survives the
+                    //    overlay — the log line below names them — so there is
+                    //    no user decision waiting on the other side of a
+                    //    notice.
+                    // 2. The BROKEN state is already surfaced. A wrong-shaped
+                    //    `manifest.json` is a `malformedSidecar` finding in
+                    //    Project Doctor (`ProjectDoctorService`, sidecar scan)
+                    //    from the moment it lands, before any preset binding
+                    //    touches it. That is where a user learns their manifest
+                    //    is not a manifest.
+                    // 3. After the repair the file decodes, so the doctor would
+                    //    correctly find nothing. Reporting "this was repaired"
+                    //    there would need a persisted repair marker — new
+                    //    state, new lifecycle, new staleness — for a
+                    //    self-healing fix to an agent-owned file. That is not
+                    //    a cheap fit for an existing channel; it is machinery.
+                    //
+                    // So the log carries the whole story, and it names the keys
+                    // it kept and the keys it wrote so a support read of the
+                    // console can reconstruct the file's before-state.
+                    let overlaid = stubObject.keys.sorted()
+                    let preserved = object.keys.filter { stubObject[$0] == nil }.sorted()
+                    let clobbered = object.keys.filter { stubObject[$0] != nil }.sorted()
+                    Self.logger.warning(
+                        """
+                        manifest.json at \(path, privacy: .public) is a JSON object but not a manifest; \
+                        overlaying a fresh stub. wrote=[\(overlaid.joined(separator: ","), privacy: .public)] \
+                        preserved=[\(preserved.joined(separator: ","), privacy: .public)] \
+                        replaced=[\(clobbered.joined(separator: ","), privacy: .public)]
+                        """
+                    )
                     for (k, v) in stubObject { root[k] = v }
                 }
             }

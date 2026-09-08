@@ -338,6 +338,104 @@ import Foundation
         }
     }
 
+    // MARK: - Skill load/save affordances (GW follow-ups)
+
+    /// `isLoadingContent` is what the Mac and iOS skill viewers now render a
+    /// "Reading file…" row from. It must be a transient that always settles —
+    /// a stuck `true` is a permanent spinner over a file that is already on
+    /// screen, and a `true` left behind by a refusal hides the refusal notice
+    /// the F4 wave added.
+    @MainActor
+    @Test func isLoadingContentSettlesForEverySelectionOutcome() async throws {
+        try #require(!Self.runningAsRoot)
+        try await Self.withScratch { base in
+            let home = base.appendingPathComponent("hermes")
+            let ctx = ServerContext.local(home: home)
+            let vm = SkillsViewModel(context: ctx)
+            #expect(vm.isLoadingContent == false, "nothing selected, nothing loading")
+
+            // 1. A readable file.
+            let goodDir = ctx.paths.skillsDir + "/writing/haiku"
+            try Self.write("five seven five\n", to: goodDir + "/SKILL.md")
+            await vm.selectSkill(
+                HermesSkill(
+                    id: "writing/haiku", name: "haiku", category: "writing",
+                    path: goodDir, files: ["SKILL.md"], requiredConfig: []
+                )
+            )
+            #expect(vm.isLoadingContent == false)
+            #expect(vm.canEditSelectedFile)
+
+            // 2. A file the guarded reader refuses. The spinner must give way
+            //    to the refusal notice, not sit on top of it.
+            let badDir = ctx.paths.skillsDir + "/writing/locked"
+            try Self.write("secret\n", to: badDir + "/SKILL.md")
+            try Self.chmod(badDir + "/SKILL.md", 0o000)
+            await vm.selectSkill(
+                HermesSkill(
+                    id: "writing/locked", name: "locked", category: "writing",
+                    path: badDir, files: ["SKILL.md"], requiredConfig: []
+                )
+            )
+            #expect(vm.isLoadingContent == false)
+            #expect(vm.contentError != nil)
+            try Self.chmod(badDir + "/SKILL.md", 0o644)
+
+            // 3. A skill with no files at all — the branch that never starts a
+            //    load has to clear the flag too.
+            await vm.selectSkill(
+                HermesSkill(
+                    id: "writing/empty", name: "empty", category: "writing",
+                    path: ctx.paths.skillsDir + "/writing/empty",
+                    files: [], requiredConfig: []
+                )
+            )
+            #expect(vm.isLoadingContent == false)
+        }
+    }
+
+    /// The contract the iOS `SkillEditorSheet` now reads to decide whether to
+    /// dismiss: a FAILED save leaves `isEditing` true (and `contentError` set)
+    /// so the sheet stays open on the user's buffer instead of closing on it
+    /// like a success. The Mac editor has always behaved this way.
+    @MainActor
+    @Test func aFailedSaveKeepsTheEditorArmedOnTheUsersBuffer() async throws {
+        try #require(!Self.runningAsRoot)
+        try await Self.withScratch { base in
+            let home = base.appendingPathComponent("hermes")
+            let ctx = ServerContext.local(home: home)
+            let skillDir = ctx.paths.skillsDir + "/writing/haiku"
+            let path = skillDir + "/SKILL.md"
+            let original = "---\nname: haiku\n---\n\nfive seven five\n"
+            try Self.write(original, to: path)
+
+            let vm = SkillsViewModel(context: ctx)
+            await vm.selectSkill(
+                HermesSkill(
+                    id: "writing/haiku", name: "haiku", category: "writing",
+                    path: skillDir, files: ["SKILL.md"], requiredConfig: []
+                )
+            )
+            vm.startEditing()
+            #expect(vm.isEditing)
+
+            // Read-only directory: the guarded write's `.bak` and its atomic
+            // replace both need to create files here, so the save fails after
+            // the editor was legitimately armed.
+            try Self.chmod(skillDir, 0o500)
+            defer { try? Self.chmod(skillDir, 0o755) }
+            vm.editText = original + "\nedited\n"
+            await vm.saveEdit()
+
+            #expect(vm.contentError != nil, "the user has to be told the save failed")
+            #expect(
+                vm.isEditing,
+                "the sheet reads this to stay open — dismissing here drops the buffer"
+            )
+            #expect(vm.editText == original + "\nedited\n", "and the buffer survives")
+        }
+    }
+
     // MARK: - BotsService (profile.yaml)
 
     private static func makeBots(root: String) -> BotsService {

@@ -189,7 +189,21 @@ struct SkillDetailView: View {
                     // read, over which Save would then have been offered.
                     // `contentError` distinguishes the two, so check it
                     // FIRST and say what actually happened.
-                    if let contentError = vm.contentError {
+                    //
+                    // The read itself is a detached task (GW-F6): over SSH
+                    // that is several timeout-bounded spawns, during which
+                    // `skillContent` is deliberately blank and `contentError`
+                    // is nil. Without this row that in-flight state rendered
+                    // as "(empty file)" — the same confident lie the refusal
+                    // branch below exists to avoid. Same idiom as
+                    // `InstalledSkillsListView`'s scan spinner.
+                    if vm.isLoadingContent {
+                        ProgressView(String(localized: "Reading file…"))
+                            .font(.caption)
+                            .accessibilityLabel(
+                                String(localized: "Reading the selected skill file")
+                            )
+                    } else if let contentError = vm.contentError {
                         HStack(alignment: .top, spacing: 8) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundStyle(.orange)

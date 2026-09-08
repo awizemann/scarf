@@ -400,6 +400,24 @@ struct SkillsView: View {
                             }
                         }
                     }
+                    // The guarded read runs on a detached task (GW-F6), which
+                    // over SSH is several timeout-bounded spawns. Without this
+                    // the viewer was a blank pane with a greyed-out Edit and
+                    // nothing saying why — indistinguishable from "read and
+                    // refused", which is the state the row below describes.
+                    if viewModel.isLoadingContent {
+                        Divider()
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text(String(localized: "Reading file…"))
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(
+                            Text(String(localized: "Reading the selected skill file"))
+                        )
+                    }
                     if let contentError = viewModel.contentError {
                         Divider()
                         // `Label(someStringVariable, systemImage:)` binds the
