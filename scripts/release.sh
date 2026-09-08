@@ -170,6 +170,32 @@ See .memory/ops/sparkle-key-recovery.md for the import procedure."
 fi
 log "Sparkle keypair OK ($EMBEDDED_PUBKEY)"
 
+# ---------- UI release gate ----------
+# Runs BEFORE the version bump so a failed gate leaves no stray bump commit, and
+# so the bump commit below can carry UI-GATE.md as the release's own evidence.
+# On a resume run (version already bumped) pass --skip-ui-tests if the gate has
+# already passed for this tree; the skip is recorded in UI-GATE.md either way.
+mkdir -p "$RELEASE_DIR"
+UI_GATE_SUMMARY="$RELEASE_DIR/UI-GATE.md"
+if [[ $SKIP_UI_TESTS -eq 1 ]]; then
+  warn "=================================================================="
+  warn " --skip-ui-tests: UI RELEASE GATE SKIPPED"
+  warn " Unit tests, Smoke, Full and Live test plans were NOT run."
+  warn " This release has NOT been verified against the XCUITest gate."
+  warn "=================================================================="
+  {
+    printf '# UI Gate Summary\n\n'
+    printf -- '- Date: %s\n' "$(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+    printf -- '- Git commit: %s\n\n' "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    printf 'SKIPPED by --skip-ui-tests\n'
+  } > "$UI_GATE_SUMMARY"
+else
+  log "Running UI release gate (scripts/ui-gate.sh)"
+  "$REPO_ROOT/scripts/ui-gate.sh" --summary "$UI_GATE_SUMMARY" \
+    || die "UI release gate failed — see $UI_GATE_SUMMARY. Re-run with --skip-ui-tests to bypass (not recommended)."
+  log "UI release gate passed — summary: $UI_GATE_SUMMARY"
+fi
+
 # ---------- bump version ----------
 # NOTES_FILE is referenced later (appcast + GitHub release), so resolve it
 # unconditionally — even when the bump is skipped on a resume run.
@@ -192,29 +218,9 @@ else
   if [[ -f "$NOTES_FILE" ]]; then
     git add "$NOTES_FILE"
   fi
+  # The gate summary (PASS or SKIPPED) ships with the bump commit.
+  [[ -f "$UI_GATE_SUMMARY" ]] && git add "$UI_GATE_SUMMARY"
   git commit -m "chore: Bump version to ${VERSION}"
-fi
-
-# ---------- UI release gate ----------
-mkdir -p "$RELEASE_DIR"
-UI_GATE_SUMMARY="$RELEASE_DIR/UI-GATE.md"
-if [[ $SKIP_UI_TESTS -eq 1 ]]; then
-  warn "=================================================================="
-  warn " --skip-ui-tests: UI RELEASE GATE SKIPPED"
-  warn " Unit tests, Smoke, Full and Live test plans were NOT run."
-  warn " This release has NOT been verified against the XCUITest gate."
-  warn "=================================================================="
-  {
-    printf '# UI Gate Summary\n\n'
-    printf -- '- Date: %s\n' "$(date -u +"%Y-%m-%d %H:%M:%S UTC")"
-    printf -- '- Git commit: %s\n\n' "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
-    printf 'SKIPPED by --skip-ui-tests\n'
-  } > "$UI_GATE_SUMMARY"
-else
-  log "Running UI release gate (scripts/ui-gate.sh)"
-  "$REPO_ROOT/scripts/ui-gate.sh" --summary "$UI_GATE_SUMMARY" \
-    || die "UI release gate failed — see $UI_GATE_SUMMARY. Re-run with --skip-ui-tests to bypass (not recommended)."
-  log "UI release gate passed — summary: $UI_GATE_SUMMARY"
 fi
 
 # ---------- build variants ----------
