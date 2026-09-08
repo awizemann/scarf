@@ -51,12 +51,10 @@
 - [ ] iOS - Chat connection Failed - Couldn’t save model+provider to config.yaml (id: t-2c5982) (source: gh#112) (added: 2026-06-13) — **gh#112 commented 2026-06-13** (F1 fix unreleased → v2.10.3); kept open as the tracker for F2 ([[t-ios-cfg-get]]).
 - [ ] Performance and reliability issues on large state.db (lag, crashes, missing sessions) (id: t-b8a6c3) (source: gh#61) (added: 2026-06-13)
 - [ ] **[followup/t-aud01]** Lazy-load `reasoning_content` (v0.11 rich chain-of-thought) on REASONING disclosure open. `fetchReasoningContent(for:)` exists but has zero callers; the bulk fetch excludes reasoning_content (perf, issue #74) so it's never shown on ANY historical load. Wire a per-message lazy fetch from `RichMessageBubble` (macOS) + `Scarf iOS/Chat/ChatView.swift:2464`. Gotchas to resolve: (1) `RichMessageBubble` `==` short-circuit (issue #46) doesn't compare reasoning for settled bubbles, so a spliced result won't redraw — use a view-local `@State` cache instead; (2) need a cheap "reasoning_content available" probe so the disclosure shows even when content isn't loaded; (3) confirm whether v0.11 models populate `reasoning` too or only `reasoning_content`. (id: t-aud21) (added: 2026-06-13, source: t-aud01)
-- [ ] GW-F1: uninstall refusal-ordering — cleanup must survive a MEMORY.md refusal (id: t-ba501bbf) (added: 2026-09-04) (priority: urgent)
-- [ ] GW-F2: read-side absent-vs-unreadable inference feeding guarded writes (id: t-01dd696e) (added: 2026-09-04) (priority: high)
-- [ ] GW-F3: cross-writer serialization for config.yaml and .env (id: t-521a02f7) (added: 2026-09-04) (priority: high)
-- [ ] GW-F4: outcome-typed message channels + refusal announcements + iOS Skills parity (id: t-667fd332) (added: 2026-09-04) (priority: high)
-- [ ] GW-F5: guard hardening — chmod ordering, size-cap reads, scanner tightening (id: t-35e7593b) (added: 2026-09-04)
-- [ ] GW-F6: ServerRegistry/config.json robustness + remaining E5 lows (id: t-26bf60b8) (added: 2026-09-04)
+- [ ] Flaky ACPClientStartIdempotenceTests under full parallel swift test (id: t-f3820038) (added: 2026-09-07) (priority: low)
+- [ ] UI gate phase 1: fixture Hermes home builder + section sweep + root-id lint + test plans (id: t-90831994) (added: 2026-09-08) (priority: high)
+- [ ] UI gate phase 2: journeys for top flows, de-network the template journey (id: t-3db5405e) (added: 2026-09-08)
+- [ ] UI gate phase 3: run Smoke+Full+Live from release.sh before archive (id: t-b7d43521) (added: 2026-09-08)
 
 ## Doing
 
@@ -66,6 +64,14 @@
 
 ## Done
 
+- [x] GW follow-ups: skill-load spinner, iOS SkillEditorSheet dismiss-on-failure, manifest-repair notice (id: t-09bd3af5) (added: 2026-09-07) (priority: low)
+- [x] HUMAN: Xcode interactive build to extract + translate GW-F4's new string-catalog keys (id: t-e90334b6) (added: 2026-09-07) (priority: high)
+- [x] GW-F6: ServerRegistry/config.json robustness + remaining E5 lows (id: t-26bf60b8) (added: 2026-09-04)
+- [x] GW-F5: guard hardening — chmod ordering, size-cap reads, scanner tightening (id: t-35e7593b) (added: 2026-09-04)
+- [x] GW-F4: outcome-typed message channels + refusal announcements + iOS Skills parity (id: t-667fd332) (added: 2026-09-04) (priority: high)
+- [x] GW-F3: cross-writer serialization for config.yaml and .env (id: t-521a02f7) (added: 2026-09-04) (priority: high)
+- [x] GW-F2: read-side absent-vs-unreadable inference feeding guarded writes (id: t-01dd696e) (added: 2026-09-04) (priority: high)
+- [x] GW-F1: uninstall refusal-ordering — cleanup must survive a MEMORY.md refusal (id: t-ba501bbf) (added: 2026-09-04) (priority: urgent)
 - [x] GW-E5: full-surface audit of touched surfaces (sec/perf/data/a11y) (id: t-a81644dd) (added: 2026-09-04)
 - [x] GW-E4: orchestrator plan-conformance audit + memory validation (id: t-550b3ce3) (added: 2026-09-04)
 - [x] GW-E2b: ServerRegistry servers.json guarded local write (transport-bypassing) (id: t-59b679c5) (added: 2026-09-04) (priority: high)
@@ -347,3 +353,4 @@
 
 ## Archived
 
+- [x] UI gate phase 4: Harness exploratory chain against the fixture home (id: t-e94d1612) (added: 2026-09-08) (priority: low)
