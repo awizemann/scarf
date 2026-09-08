@@ -107,12 +107,51 @@ final class TemplateInstallUITests: ScarfUITestCase {
 
     // MARK: - Full install-flow journey
 
-    /// HTTPS URL for the HN Digest `.scarftemplate` bundle. The
-    /// install pipeline accepts any HTTPS URL pointing at a valid
-    /// `.scarftemplate`; this is the canonical published location
-    /// that the live catalog also references via `installUrl`.
-    private static let hnDigestInstallURL =
-        "https://raw.githubusercontent.com/awizemann/scarf/main/templates/awizemann/hackernews-digest/hackernews-digest.scarftemplate"
+    /// The HN Digest `.scarftemplate` bundle AS IT SITS IN THIS REPO.
+    ///
+    /// This journey used to install from
+    /// `raw.githubusercontent.com/.../hackernews-digest.scarftemplate`,
+    /// which made the release gate fail on a flaky hotel wifi and pass or
+    /// fail on whatever happened to be on `main` rather than on the
+    /// working tree being released. The bundle is checked in, so the
+    /// obvious fix is to install the local copy: same installer, same
+    /// sheet, same assertions, no network.
+    ///
+    /// Resolved from `#filePath` (compile-time source location, so it
+    /// follows a git worktree) rather than a bundle resource — the file
+    /// is a repo asset that `validate-template-pr.yml` also checks, and
+    /// copying it into the test bundle would fork it.
+    static let repoTemplatePath: String = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()   // scarfUITests
+        .deletingLastPathComponent()   // scarf
+        .deletingLastPathComponent()   // <repo root>
+        .appendingPathComponent("templates/awizemann/hackernews-digest/hackernews-digest.scarftemplate")
+        .path
+
+    /// Copy the repo's `.scarftemplate` into the runner's own container
+    /// tmp and return a `file://` URL string for it.
+    ///
+    /// Copied, never handed over in place: the app under test is
+    /// unsandboxed and the installer opens the bundle for reading, but
+    /// pointing it at a tracked working-tree file makes a test one bad
+    /// installer bug away from mutating the repo. The copy is disposable
+    /// and the caller deletes it.
+    func stageLocalTemplateCopy() throws -> String {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: Self.repoTemplatePath) else {
+            throw XCTSkip("Template bundle missing at \(Self.repoTemplatePath) — is this a full checkout?")
+        }
+        let dir = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("scarf-uitest-template-\(UUID().uuidString)")
+        try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let dest = (dir as NSString).appendingPathComponent("hackernews-digest.scarftemplate")
+        try fm.copyItem(atPath: Self.repoTemplatePath, toPath: dest)
+        addTeardownBlock { try? fm.removeItem(atPath: dir) }
+        // `URL(fileURLWithPath:)` rather than string concatenation so a
+        // space or a `#` anywhere in the runner tmp path is percent-encoded
+        // instead of truncating the URL.
+        return URL(fileURLWithPath: dest).absoluteString
+    }
 
     /// The cron job tag prefix the installer attaches to every cron
     /// job shipped with this template. Used for cleanup if the
@@ -132,7 +171,7 @@ final class TemplateInstallUITests: ScarfUITestCase {
     ///   templateInstall.parentDir.continue
     ///   templateConfig.commitButton
     ///   templateInstall.confirmInstall
-    ///   projects.row.<name>
+    ///   sidebar.projects.row.<name>
     ///   projects.contextMenu.uninstallTemplate
     ///   templateUninstall.confirmRemove
     ///
@@ -182,18 +221,25 @@ final class TemplateInstallUITests: ScarfUITestCase {
             try? FileManager.default.removeItem(atPath: parentDir)
         }
 
+        // The template bundle, copied out of the repo into the runner's
+        // tmp. Doing this BEFORE the launch means a missing checkout
+        // skips the test rather than failing it halfway through the
+        // install sheet.
+        let localTemplateURL = try stageLocalTemplateCopy()
+
         let app = makeApp(extraLaunchArguments: [
             // Hand the install URL to ScarfApp.init() via launch
             // args — see scarfApp.swift's `--scarf-test-install-url`
-            // block. Equivalent to a `scarf://install?url=…` deep
-            // link arriving on cold launch, except XCUITest
-            // doesn't have a clean way to issue those (NSWorkspace
-            // is sandbox-restricted from the runner). The router
-            // stages the URL on the singleton; ProjectsView's
-            // onAppear hook picks it up and presents the install
-            // sheet automatically once the window surfaces.
+            // block. Equivalent to a Finder double-click on the
+            // `.scarftemplate` arriving on cold launch, except
+            // XCUITest doesn't have a clean way to issue those
+            // (NSWorkspace is sandbox-restricted from the runner).
+            // The router stages the file URL on the singleton;
+            // ProjectsView's onAppear hook picks it up and presents
+            // the install sheet automatically once the window
+            // surfaces.
             "--scarf-test-install-url",
-            Self.hnDigestInstallURL
+            localTemplateURL
         ])
         // Surface the window, same dance as the smoke test.
         launchAndSurface(app)
@@ -210,11 +256,12 @@ final class TemplateInstallUITests: ScarfUITestCase {
         // 4. Install sheet → parent dir field. The launch-arg URL
         // handoff stages the URL via TemplateURLRouter; the install
         // sheet picks it up via ProjectsView's onChange observer.
-        // First visible state is `fetching/inspecting` (network
-        // download of the .scarftemplate, ~few seconds), then
-        // `awaitingParentDirectory` which is when the field appears.
-        // Generous timeout because cold network on a CI Mac can be
-        // slow.
+        // First visible state is `inspecting` (unzip + manifest read of
+        // the local bundle, fast), then `awaitingParentDirectory` which
+        // is when the field appears. The timeout stays generous even
+        // though there is no download any more: the first launch of a
+        // freshly-built app pays for Gatekeeper and the sheet is behind
+        // a window that has to surface first.
         let parentField = app.descendants(matching: .any)
             .matching(identifier: "templateInstall.parentDir.field").firstMatch
         if !parentField.waitForExistence(timeout: 30) {
@@ -225,9 +272,7 @@ final class TemplateInstallUITests: ScarfUITestCase {
             XCTFail("parent-dir field missing — install sheet didn't open or got stuck in fetching/inspecting? See screenshot.")
             return
         }
-        parentField.click()
-        parentField.typeKey("a", modifierFlags: .command)
-        parentField.typeText(parentDir)
+        setText(parentDir, in: parentField, of: app)
 
         let parentContinue = app.descendants(matching: .any)
             .matching(identifier: "templateInstall.parentDir.continue").firstMatch
@@ -279,15 +324,15 @@ final class TemplateInstallUITests: ScarfUITestCase {
         // `.tag(project)` accessibility-id propagation has been flaky
         // in our hands; falls back to a tree dump for diagnostics.
         let projectRow = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH 'projects.row.HackerNews Daily Digest'"))
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'sidebar.projects.row.HackerNews Daily Digest'"))
             .firstMatch
         if !projectRow.waitForExistence(timeout: 30) {
             let allProjectRows = app.descendants(matching: .any)
-                .matching(NSPredicate(format: "identifier BEGINSWITH 'projects.row.'"))
+                .matching(NSPredicate(format: "identifier BEGINSWITH 'sidebar.projects.row.'"))
                 .allElementsBoundByIndex
                 .map { $0.identifier }
-            print("[Layer B] all projects.row.* identifiers seen:", allProjectRows)
-            XCTFail("Installed project didn't appear in sidebar with a numbered suffix.")
+            print("[Layer B] all sidebar.projects.row.* identifiers seen:", allProjectRows)
+            XCTFail("Installed project didn't appear in the sidebar's projects well.")
             return
         }
 
@@ -336,7 +381,7 @@ final class TemplateInstallUITests: ScarfUITestCase {
         // earlier handle because XCUITest sometimes caches a stale
         // snapshot of `.exists`.
         let removedRow = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH 'projects.row.HackerNews Daily Digest'"))
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'sidebar.projects.row.HackerNews Daily Digest'"))
             .firstMatch
         // `waitForExistence` only waits for APPEARANCE; disappearance needs
         // a predicate expectation, which also re-snapshots the tree on each
@@ -348,10 +393,10 @@ final class TemplateInstallUITests: ScarfUITestCase {
         let stillThere = XCTWaiter().wait(for: [gone], timeout: 15) != .completed
         if stillThere {
             let remaining = app.descendants(matching: .any)
-                .matching(NSPredicate(format: "identifier BEGINSWITH 'projects.row.'"))
+                .matching(NSPredicate(format: "identifier BEGINSWITH 'sidebar.projects.row.'"))
                 .allElementsBoundByIndex
                 .map { $0.identifier }
-            print("[Layer B] projects.row.* still present after uninstall:", remaining)
+            print("[Layer B] sidebar.projects.row.* still present after uninstall:", remaining)
             let registry = (isolatedHome ?? "") + "/scarf/projects.json"
             let contents = (try? String(contentsOfFile: registry, encoding: .utf8)) ?? "<unreadable>"
             print("[Layer B] isolated registry after uninstall:", contents)

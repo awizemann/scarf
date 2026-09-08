@@ -157,7 +157,7 @@ struct ScarfApp: App {
         }
 
         // Test-mode launch-URL handoff. When XCUITest passes
-        // `--scarf-test-install-url <https-url>`, route the URL
+        // `--scarf-test-install-url <url>`, route the URL
         // through `TemplateURLRouter` so `ProjectsView`'s onAppear
         // hook dispatches it as if the user had clicked a
         // `scarf://install` deep link. Bypasses the SwiftUI/AppKit
@@ -165,10 +165,22 @@ struct ScarfApp: App {
         // XCUITest from driving the toolbar menu's "Browse Catalog…"
         // / "Install from URL…" items reliably. Production launches
         // (no flag) untouched.
+        //
+        // Two argument shapes, dispatched by scheme — both land in the
+        // same router the real entry points use:
+        //
+        // - `https://…` is wrapped as `scarf://install?url=…`, the exact
+        //   URL a web link would deliver (the router still enforces
+        //   https on that path).
+        // - `file:///…/foo.scarftemplate` is handed over AS IS, which is
+        //   the Finder-double-click path (`handleFileURL`). This is what
+        //   lets the template journey install from the repo's own
+        //   `.scarftemplate` with no network — a networked gate is a
+        //   gate that fails on a plane.
         if TestModeFlags.shared.isTestMode,
            let idx = CommandLine.arguments.firstIndex(of: "--scarf-test-install-url"),
            idx + 1 < CommandLine.arguments.count,
-           let url = URL(string: "scarf://install?url=" + CommandLine.arguments[idx + 1]) {
+           let url = Self.testInstallURL(from: CommandLine.arguments[idx + 1]) {
             TemplateURLRouter.shared.handle(url)
             // XCUITest's bypass for the deep-link install flow, not a real
             // `scarf://` open — never the same `kind` the real onOpenURL
@@ -306,6 +318,23 @@ struct ScarfApp: App {
         ) {
             MenuBarMenu(liveRegistry: liveRegistry, updater: updater)
         }
+    }
+
+    /// Turn the raw `--scarf-test-install-url` argument into the URL the
+    /// router should see. A `file://` argument passes through untouched
+    /// (the Finder-double-click path, used by the offline template
+    /// journey); anything else is wrapped as `scarf://install?url=…`, the
+    /// exact shape a web link delivers — so the router's own https guard
+    /// still applies to remote URLs and this bypass can never be a looser
+    /// door than the real one.
+    ///
+    /// Test-mode only: the single caller is gated on
+    /// `TestModeFlags.shared.isTestMode`.
+    static func testInstallURL(from argument: String) -> URL? {
+        if let direct = URL(string: argument), direct.isFileURL {
+            return direct
+        }
+        return URL(string: "scarf://install?url=" + argument)
     }
 }
 

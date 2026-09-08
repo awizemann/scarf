@@ -269,13 +269,6 @@ class ScarfUITestCase: XCTestCase {
         return window.exists ? window.screenshot() : app.screenshot()
     }
 
-    /// Attach a front-window screenshot to the running test.
-    func attachWindowScreenshot(_ app: XCUIApplication, named name: String, keepAlways: Bool) {
-        let shot = XCTAttachment(screenshot: windowScreenshot(app))
-        shot.name = name
-        shot.lifetime = keepAlways ? .keepAlways : .deleteOnSuccess
-        add(shot)
-    }
 
     // MARK: - Plan gating
 
@@ -298,5 +291,129 @@ class ScarfUITestCase: XCTestCase {
         guard FileManager.default.isExecutableFile(atPath: Self.hermesBinary) else {
             throw XCTSkip("Live-only test — no hermes binary at \(Self.hermesBinary).")
         }
+    }
+    // MARK: - Diagnostics
+
+    /// Attach a screenshot of the app to the current test.
+    ///
+    /// `keepAlways` is the whole decision: a green run otherwise writes a
+    /// full-screen PNG per step into every result bundle. Pass `false` for
+    /// the "here is what it looked like" shots (deleted on success) and
+    /// `true` only from a failure branch, where the image is the evidence.
+    func attachScreenshot(_ app: XCUIApplication, named name: String, keepAlways: Bool) {
+        let shot = XCTAttachment(screenshot: windowScreenshot(app))
+        shot.name = name
+        shot.lifetime = keepAlways ? .keepAlways : .deleteOnSuccess
+        add(shot)
+    }
+
+    // MARK: - Text entry
+
+    /// Replace a text field's contents with `text`, then CHECK it landed —
+    /// retrying the whole click/select-all/type sequence if it didn't.
+    ///
+    /// Why this exists rather than three inline calls: `typeText` on macOS
+    /// synthesizes CGEvents into whatever is key at that instant, and when
+    /// the app isn't frontmost (a sheet still animating in, the runner
+    /// having just torn down a previous app) the call either fails outright
+    /// with "Failed to synthesize event: Timed out while synthesizing
+    /// event" or silently types into nothing. Observed on the template
+    /// journey's parent-dir field, which is the first thing typed after a
+    /// sheet presents. Both failure modes are transient, and both are
+    /// invisible until an assertion far downstream fails for an unrelated-
+    /// looking reason.
+    ///
+    /// So: activate the app first, type, then read the field's value back.
+    /// A field that holds the right text has demonstrably received the
+    /// events; one that doesn't gets another attempt before the test is
+    /// allowed to fail. Fails the test at the CALL SITE (file/line of the
+    /// caller) when every attempt is exhausted, naming what it saw.
+    ///
+    /// Not a sleep in disguise: there is no unconditional wait anywhere in
+    /// here — a first attempt that works costs one extra value read.
+    func setText(
+        _ text: String,
+        in element: XCUIElement,
+        of app: XCUIApplication,
+        attempts: Int = 3,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        var lastSeen: String?
+        for attempt in 1...max(1, attempts) {
+            // `typeText` synthesizes CGEvents into whatever is key RIGHT
+            // NOW: if Scarf is not `.runningForeground` the call raises
+            // "Failed to synthesize event: Timed out while synthesizing
+            // event", which XCTest records as a failure immediately — the
+            // retry below never gets a turn. So the foreground check comes
+            // BEFORE the typing, not around it.
+            //
+            // CONDITIONAL activate, deliberately. Calling `activate()`
+            // unconditionally measurably made things WORSE: it is not free
+            // when the app is already front, and when a SECOND UI-test run
+            // is going on the same Mac (two agents, two DerivedData) the
+            // two apps ping-pong for the frontmost slot and every step
+            // slows to a crawl. Nothing here can fix a concurrent run
+            // stealing focus — that is a "don't run two UI-test runs on
+            // one Mac" problem, not a code one — but this at least does
+            // not join in.
+            if !app.isHittable {
+                app.activate()
+                waitForForeground(app, timeout: 10)
+            }
+            // And the field itself has to be on screen and hittable — a
+            // sheet still animating in accepts a click that lands nowhere.
+            let hittable = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "isHittable == true"),
+                object: element
+            )
+            _ = XCTWaiter().wait(for: [hittable], timeout: 10)
+
+            let type = {
+                element.click()
+                element.typeKey("a", modifierFlags: .command)
+                element.typeText(text)
+            }
+            // A dropped keystroke is one failure mode; the other is
+            // `click`/`typeText` raising "Failed to synthesize event:
+            // Timed out while synthesizing event", which XCTest records as
+            // a test FAILURE the moment it happens — so a plain retry loop
+            // never reaches its second attempt, it just reports the first
+            // one's failure. Non-strict `XCTExpectFailure` around every
+            // attempt BUT THE LAST makes the retry real, while the last
+            // attempt runs unwrapped so a genuinely unusable field still
+            // fails the test. Non-strict, so a clean attempt is not itself
+            // an error.
+            if attempt < attempts {
+                let options = XCTExpectedFailure.Options()
+                options.isStrict = false
+                XCTExpectFailure(
+                    "Transient event-synthesis failure typing into \(element.identifier) — retrying.",
+                    options: options,
+                    failingBlock: type
+                )
+            } else {
+                type()
+            }
+
+            // A SwiftUI TextField reports its contents as the AX value;
+            // an empty one can report the placeholder or nothing at all,
+            // so compare against what we wanted rather than for emptiness.
+            let seen = element.value as? String
+            lastSeen = seen
+            if seen == text { return }
+            if attempt < attempts {
+                // Re-clicking IS the retry; nothing to wait for. Logged so
+                // flake that only shows up in CI is visible in the log
+                // rather than inferred from a timing difference.
+                print("[ScarfUITestCase] setText attempt \(attempt) did not land in \(element.identifier): saw \(seen ?? "<nil>")")
+            }
+        }
+        XCTFail(
+            "Could not type into \(element.identifier) after \(attempts) attempts — last value seen: \(lastSeen ?? "<nil>"). "
+            + "Usually means the app was not frontmost when the events were synthesized.",
+            file: file,
+            line: line
+        )
     }
 }

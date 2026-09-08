@@ -541,6 +541,7 @@ struct SidebarProjectsWell: View {
         Button("Remove from List (keep files)…", systemImage: "minus.circle") {
             pendingRemoveFromList = project
         }
+        .accessibilityIdentifier("projects.contextMenu.removeFromList")
     }
 
     private var removeFromListDialogTitle: LocalizedStringKey {
@@ -572,7 +573,9 @@ struct SidebarProjectsWell: View {
                 }
             }
         }
+        .accessibilityIdentifier("projects.removeFromList.confirm")
         Button("Cancel", role: .cancel) { pendingRemoveFromList = nil }
+            .accessibilityIdentifier("projects.removeFromList.cancel")
     }
 
     // MARK: - Sheets

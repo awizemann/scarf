@@ -231,13 +231,4 @@ final class SectionSweepUITests: ScarfUITestCase {
             "Sidebar sections still collapsed despite the launch-arg override: \(collapsed). Either SidebarSectionCollapseStore stopped honouring NSArgumentDomain strings, or a new title is missing from sidebarSectionTitles."
         )
     }
-
-    private func attachScreenshot(_ app: XCUIApplication, named name: String, keepAlways: Bool) {
-        let shot = XCTAttachment(screenshot: windowScreenshot(app))
-        shot.name = name
-        // Keep only what someone would want to look at: a green sweep
-        // otherwise writes ~28 full-screen PNGs into every result bundle.
-        shot.lifetime = keepAlways ? .keepAlways : .deleteOnSuccess
-        add(shot)
-    }
 }
