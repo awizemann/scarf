@@ -29,6 +29,7 @@ struct ModelPresetsView: View {
                 trailing: {
                     Button("New Preset") { isCreating = true }
                         .buttonStyle(ScarfPrimaryButton())
+                        .accessibilityIdentifier("models.newPreset")
                 }
             )
 
@@ -131,6 +132,7 @@ struct ModelPresetsView: View {
             Button("Create First Preset") { isCreating = true }
                 .buttonStyle(ScarfPrimaryButton())
                 .padding(.top, ScarfSpace.s2)
+                .accessibilityIdentifier("models.createFirstPreset")
             Spacer()
         }
         .padding(ScarfSpace.s4)
@@ -175,9 +177,15 @@ struct ModelPresetsView: View {
                 Spacer()
                 Button("Edit") { editingPreset = preset }
                     .buttonStyle(ScarfSecondaryButton())
+                    .accessibilityIdentifier("models.row.\(preset.name).edit")
                 Button("Delete") { pendingDelete = preset }
                     .buttonStyle(ScarfGhostButton())
+                    .accessibilityIdentifier("models.row.\(preset.name).delete")
             }
         }
+        // Container identifier: propagates to the descendants that have
+        // none of their own, so the row is findable while Edit/Delete keep
+        // their own handles. Always match with `.firstMatch`.
+        .accessibilityIdentifier("models.row.\(preset.name)")
     }
 }
