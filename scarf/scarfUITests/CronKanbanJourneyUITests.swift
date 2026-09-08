@@ -433,6 +433,15 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
                 }
             }
             XCTAssertTrue(sheetUp, "Block-reason sheet never presented. On screen: \(visibleIdentifiers(app))")
+            // A reason is REQUIRED (KanbanService.plan rejects an empty one
+            // for Ready→Blocked); the sheet keeps Block disabled until typed.
+            let reasonField = control(app, "kanban.block.reason")
+            XCTAssertTrue(reasonField.waitForExistence(timeout: 5), "Block sheet has no kanban.block.reason field.")
+            type(into: reasonField, "UI gate")
+            XCTAssertTrue(
+                waitUntil("Block button enabled after typing a reason", timeout: 5) { confirm.isEnabled },
+                "kanban.block.confirm stayed disabled after typing a reason."
+            )
             confirm.click()
         }
 
@@ -440,7 +449,7 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
             waitUntil("kanban block reaches the CLI", timeout: 30) {
                 self.kanbanTasks().first { $0.id == task.id }?.status == "blocked"
             },
-            "Blocking through the inspector did not move \(task.id) to blocked; `hermes kanban list` says '\(kanbanTasks().first { $0.id == task.id }?.status ?? "<gone>")'."
+            "Blocking through the inspector did not move \(task.id) to blocked; `hermes kanban list` says '\(kanbanTasks().first { $0.id == task.id }?.status ?? "<gone>")'. Board error banner: \(kanbanError(app))."
         )
         XCTAssertTrue(
             cardIsIn(app, taskID: task.id, column: "blocked", timeout: 30),
@@ -614,6 +623,12 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
             sidebar.scroll(byDeltaX: 0, deltaY: -120)
             print("[journey] scrolled the sidebar (\(step)/\(steps)) looking for \(identifier).")
         }
+    }
+
+    /// The Kanban board's error banner text, or "<none>".
+    private func kanbanError(_ app: XCUIApplication) -> String {
+        let banner = app.descendants(matching: .any).matching(identifier: "kanban.error").firstMatch
+        return banner.exists ? banner.label : "<none>"
     }
 
     /// The Cron page header's status/error line, or "<none>".

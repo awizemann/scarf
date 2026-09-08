@@ -26,8 +26,14 @@ struct KanbanBlockReasonSheet: View {
                     .lineLimit(2)
             }
 
-            ScarfTextField("Reason (optional)", text: $reason)
+            // Required, and the sheet says so: `KanbanService.plan` rejects an
+            // empty reason for Ready→Blocked and Running→Blocked ("A reason is
+            // required to mark a task blocked"), so a sheet that called it
+            // optional and let Block through with nothing typed sent every
+            // such move into the error banner instead of the Blocked column.
+            ScarfTextField("Reason (required)", text: $reason)
                 .focused($fieldFocused)
+                .accessibilityIdentifier("kanban.block.reason")
 
             Text("Reasons appear as a comment on the task and feed into the worker's context if it's later unblocked.")
                 .scarfStyle(.footnote)
@@ -46,6 +52,7 @@ struct KanbanBlockReasonSheet: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(ScarfPrimaryButton())
+                .disabled(reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityIdentifier("kanban.block.confirm")
             }
         }

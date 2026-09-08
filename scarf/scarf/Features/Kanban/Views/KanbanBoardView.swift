@@ -507,6 +507,8 @@ struct KanbanBoardView: View {
             Text(message)
                 .scarfStyle(.caption)
                 .foregroundStyle(ScarfColor.foregroundPrimary)
+                // UI gate: a journey reads this to say WHY a move failed.
+                .accessibilityIdentifier("kanban.error")
             Spacer()
             Button {
                 viewModel.lastError = nil
