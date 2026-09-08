@@ -18,7 +18,9 @@ import ScarfCore
 /// The server config itself is not sensitive (SSH private keys live in
 /// the Keychain separately), so `UserDefaults` is the right low-
 /// ceremony store.
-public struct UserDefaultsIOSServerConfigStore: IOSServerConfigStore {
+/// `@unchecked Sendable`: `UserDefaults` is documented thread-safe, but the
+/// compiler cannot see that, and the protocol requires Sendable.
+public struct UserDefaultsIOSServerConfigStore: IOSServerConfigStore, @unchecked Sendable {
     public static let legacyV1Key = "com.scarf.ios.primary-server-config.v1"
     public static let defaultDefaultsKey = "com.scarf.ios.servers.v2"
 

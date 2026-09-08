@@ -75,7 +75,7 @@ public actor SSHExecACPChannel: ACPChannel {
         self.stderr = errStream
         self.stderrCont = errCont
 
-        await startExecTask(client: client, command: command)
+        startExecTask(client: client, command: command)
         // Wait for the exec session to hand us its stdin writer. If
         // anything fails before that, the exec task will surface the
         // error via the waiters queue.

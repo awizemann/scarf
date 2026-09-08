@@ -198,7 +198,7 @@ struct ProjectsListView: View {
     /// is the app-wide wording for the blocking kinds (dropped rows,
     /// quarantine, unreadable); field-level salvage isn't blocking but is
     /// still worth saying, so it gets its own line rather than silence.
-    private static func damageMessage(
+    nonisolated private static func damageMessage(
         _ result: ProjectDashboardService.RegistryLoadResult
     ) -> String? {
         if let loss = result.loss { return loss.message }
