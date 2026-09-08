@@ -30,14 +30,36 @@ struct ContentView: View {
                 // (`SectionCatalogTests`) keeps the shared section list
                 // honest.
                 //
-                // GOTCHA: `.accessibilityIdentifier` on a plain container
-                // propagates DOWN to descendant elements that have no
-                // identifier of their own — it does not create an element.
-                // That is fine (and is what makes the id findable at all
-                // here), but it means `<section>.root` may match several
-                // elements; always use `.firstMatch` / `waitForExistence`
-                // rather than asserting on a unique count.
-                .accessibilityIdentifier("\(coordinator.selectedSection.rawValue).root")
+                .overlay(alignment: .topLeading) {
+                    // A 1×1 transparent MARKER carries the identifier —
+                    // the identifier is NOT put on the detail view itself.
+                    //
+                    // Two things were learned the hard way here. First, a
+                    // bare `.accessibilityIdentifier` on the container does
+                    // not create an element; it REWRITES the identifier of
+                    // every element beneath it, including elements that
+                    // have one — measured, the Cron header button appeared
+                    // as `[Cron.root] New cron job` and `cron.newJob`
+                    // existed nowhere, so no journey test could address any
+                    // control in any section and the sweep's
+                    // `error.banner` check could never have fired. Second,
+                    // the obvious fix — `.accessibilityElement(children:
+                    // .contain)` — restores the descendants' identifiers
+                    // but makes the whole section an accessibility
+                    // container, and synthesized clicks then stop
+                    // ACTIVATING controls inside it.
+                    //
+                    // A marker sidesteps both: `<section>.root` resolves to
+                    // exactly one element (better than the original, which
+                    // matched many), and the section's own subtree is
+                    // untouched — same identifiers, same hit testing.
+                    Color.clear
+                        .frame(width: 1, height: 1)
+                        .allowsHitTesting(false)
+                        .accessibilityElement()
+                        .accessibilityIdentifier("\(coordinator.selectedSection.rawValue).root")
+                        .accessibilityLabel(Text(verbatim: coordinator.selectedSection.rawValue))
+                }
                 .toolbar {
                     ToolbarItem(placement: .navigation) {
                         ServerSwitcherToolbar()

@@ -46,6 +46,7 @@ struct KanbanBlockReasonSheet: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(ScarfPrimaryButton())
+                .accessibilityIdentifier("kanban.block.confirm")
             }
         }
         .padding(ScarfSpace.s5)

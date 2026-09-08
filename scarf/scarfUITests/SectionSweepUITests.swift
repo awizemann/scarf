@@ -204,26 +204,6 @@ final class SectionSweepUITests: ScarfUITestCase {
 
     // MARK: - Helpers
 
-    /// Click open every collapsed sidebar nav section.
-    ///
-    /// The headers carry `sidebar.sectionHeader.<Title>` and speak their
-    /// state as the accessibility VALUE ("collapsed"/"expanded"), which is
-    /// what we read here — cheaper and less brittle than inferring it from
-    /// whether the rows beneath happen to be hittable.
-    private func expandAllSidebarSections(_ app: XCUIApplication) {
-        let headers = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH 'sidebar.sectionHeader.'"))
-        guard headers.firstMatch.waitForExistence(timeout: 10) else {
-            XCTFail("No sidebar section headers found — did the sidebar render at all?")
-            return
-        }
-        for header in headers.allElementsBoundByIndex where header.exists {
-            if (header.value as? String) == "collapsed" {
-                header.click()
-            }
-        }
-    }
-
     private func attachScreenshot(_ app: XCUIApplication, named name: String, keepAlways: Bool) {
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = name

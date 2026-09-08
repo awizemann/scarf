@@ -254,6 +254,39 @@ class ScarfUITestCase: XCTestCase {
         _ = XCTWaiter().wait(for: [exited], timeout: timeout)
     }
 
+    // MARK: - Sidebar
+
+    /// Click open every collapsed sidebar nav section.
+    ///
+    /// Belt to the `-sidebar.section.collapsed.<Title> 0` launch
+    /// arguments' braces (see `SectionSweepUITests`): those cover the
+    /// titles a test names, this covers whatever the sidebar actually
+    /// renders — including a title added since.
+    ///
+    /// Load-bearing for any test that clicks a row under Configure or
+    /// Manage, both of which `SidebarSectionCollapseStore` collapses BY
+    /// DEFAULT — a section like Cron or Kanban has no row at all until
+    /// its group is open, and the failure reads as "the section is
+    /// missing" rather than "the group is shut".
+    ///
+    /// The headers carry `sidebar.sectionHeader.<Title>` and speak their
+    /// state as the accessibility VALUE ("collapsed"/"expanded"), which is
+    /// what we read here — cheaper and less brittle than inferring it from
+    /// whether the rows beneath happen to be hittable.
+    func expandAllSidebarSections(_ app: XCUIApplication) {
+        let headers = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'sidebar.sectionHeader.'"))
+        guard headers.firstMatch.waitForExistence(timeout: 10) else {
+            XCTFail("No sidebar section headers found — did the sidebar render at all?")
+            return
+        }
+        for header in headers.allElementsBoundByIndex where header.exists {
+            if (header.value as? String) == "collapsed" {
+                header.click()
+            }
+        }
+    }
+
     // MARK: - Plan gating
 
     /// Skip unless the Live test plan is running.

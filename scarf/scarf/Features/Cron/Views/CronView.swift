@@ -196,6 +196,10 @@ struct CronView: View {
                     Text(msg)
                         .scarfStyle(.caption)
                         .foregroundStyle(failed ? ScarfColor.danger : ScarfColor.foregroundMuted)
+                        // UI gate: the ONLY place a failed `hermes cron …`
+                        // is reported to the user, so a journey that sees a
+                        // mutation not happen can say WHY.
+                        .accessibilityIdentifier("cron.message")
                     if failed {
                         Button {
                             viewModel.dismissMessage()
@@ -223,6 +227,9 @@ struct CronView: View {
                     Label("New cron job", systemImage: "plus")
                 }
                 .buttonStyle(ScarfPrimaryButton())
+                // UI gate (CronKanbanJourneyUITests): the only entry to
+                // the create sheet.
+                .accessibilityIdentifier("cron.newJob")
             }
             .fixedSize(horizontal: true, vertical: false)
         }
@@ -334,6 +341,10 @@ struct CronView: View {
             )
         }
         .buttonStyle(.plain)
+        // UI gate: one row per job, keyed by the SAME id the CLI and
+        // `cron/jobs.json` use, so a test can create a job, read its id
+        // back from the file, and address exactly that row.
+        .accessibilityIdentifier("cron.row.\(job.id)")
         .contextMenu {
             Button(job.enabled ? "Pause" : "Resume") {
                 if job.enabled { viewModel.pauseJob(job) } else { viewModel.resumeJob(job) }
@@ -434,6 +445,10 @@ struct CronView: View {
                         .foregroundStyle(ScarfColor.foregroundPrimary)
                     ScarfBadge(job.enabled ? "active" : "paused",
                                kind: job.enabled ? .success : .neutral)
+                        // UI gate: the detail pane's rendering of
+                        // enabled/paused — the thing a pause journey has
+                        // to see change.
+                        .accessibilityIdentifier("cron.detail.state")
                     if job.effectiveState == "running" {
                         ScarfBadge("running…", kind: .info)
                     }
@@ -462,6 +477,7 @@ struct CronView: View {
             }
             .buttonStyle(ScarfSecondaryButton())
             .help(job.enabled ? "Pause" : "Resume")
+            .accessibilityIdentifier("cron.detail.pauseToggle")
 
             // v0.20.6 `cron resume --run-now`. Offered next to Resume
             // whenever plain Resume isn't the whole story: a paused job
@@ -497,6 +513,7 @@ struct CronView: View {
             }
             .buttonStyle(ScarfDestructiveButton())
             .help("Delete")
+            .accessibilityIdentifier("cron.detail.delete")
         }
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -1101,13 +1118,16 @@ struct CronJobEditor: View {
                 .scarfStyle(.headline)
                 .foregroundStyle(ScarfColor.foregroundPrimary)
             formField("Name", text: $form.name, placeholder: "Friendly label")
+                .accessibilityIdentifier("cron.editor.name")
             formField("Schedule", text: $form.schedule, placeholder: "0 9 * * *  or  30m  or  every 2h", mono: true)
+                .accessibilityIdentifier("cron.editor.schedule")
             VStack(alignment: .leading, spacing: 4) {
                 Text("Prompt")
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)
                 TextEditor(text: $form.prompt)
                     .accessibilityLabel("Prompt")
+                    .accessibilityIdentifier("cron.editor.prompt")
                     .font(ScarfFont.mono)
                     .frame(minHeight: 100)
                     .padding(4)
@@ -1201,6 +1221,7 @@ struct CronJobEditor: View {
                     .buttonStyle(ScarfGhostButton())
                 Button("Save") { onSave(form) }
                     .buttonStyle(ScarfPrimaryButton())
+                    .accessibilityIdentifier("cron.editor.save")
                     .disabled(form.schedule.isEmpty)
             }
         }

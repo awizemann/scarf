@@ -854,6 +854,9 @@ struct KanbanInspectorPane: View {
             case .ready, .todo, .running:
                 Button("Block", action: onBlock)
                     .buttonStyle(ScarfSecondaryButton())
+                    // UI gate: the reliable, non-drag way to move a card
+                    // into the Blocked column.
+                    .accessibilityIdentifier("kanban.inspector.block")
                     .help("Mark this task blocked with a reason. The reason is appended as a comment.")
             default:
                 EmptyView()

@@ -223,6 +223,9 @@ struct KanbanBoardView: View {
                     Label("New Task", systemImage: "plus")
                 }
                 .buttonStyle(ScarfPrimaryButton())
+                // UI gate (CronKanbanJourneyUITests): the only entry to
+                // the create sheet from the board header.
+                .accessibilityIdentifier("kanban.newTask")
             }
         }
     }
