@@ -80,11 +80,27 @@ struct CronView: View {
     var body: some View {
         VStack(spacing: 0) {
             pageHeader
-            HSplitView {
+            // Shared resizable-column mechanism (Bots, Chat) instead of
+            // HSplitView. HSplitView's two minWidths ADD UP (320 + 400):
+            // in a detail column narrower than their sum it does not
+            // shrink, it overflows — and the overflowing detail pane is
+            // clipped, which takes its whole subtree out of the
+            // accessibility tree (no `cron.detail.*`, not even the
+            // "Select a cron job" placeholder), for VoiceOver exactly as
+            // much as for XCUITest. A fixed-width list + a flexible
+            // detail can never overflow, and the divider position now
+            // persists across relaunches. 360 is the mockup's list width
+            // (HSplitView had drifted to an even 50/50 split).
+            HStack(spacing: 0) {
                 jobsList
-                    .frame(minWidth: 320, idealWidth: 360)
+                    .resizableColumn(
+                        key: "scarf.cron.listWidth",
+                        defaultWidth: 360,
+                        minWidth: 320,
+                        maxWidth: 480
+                    )
                 jobDetail
-                    .frame(minWidth: 400)
+                    .frame(minWidth: 320, maxWidth: .infinity)
             }
         }
         .background(ScarfColor.backgroundPrimary)
@@ -314,9 +330,10 @@ struct CronView: View {
                                 : .default,
                             value: job.effectiveState
                         )
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(Text("Status"))
-                        .accessibilityValue(Text(statusDotLabel(job)))
+                        // The dot's meaning now rides in the ROW's own
+                        // label (name + state), so a second stop that
+                        // says only "Status: Paused" would be a repeat.
+                        .accessibilityHidden(true)
                 }
                 HStack(spacing: 10) {
                     Text(job.schedule.expression ?? job.schedule.display ?? "—")
@@ -339,12 +356,28 @@ struct CronView: View {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(isActive ? ScarfColor.accentTint : Color.clear)
             )
+            // THE row-selection bug: a `.plain` Button's hit area is its
+            // label's OPAQUE content, and an unselected row's background
+            // is `Color.clear` — so only the glyphs took clicks. A click
+            // (or right-click) anywhere in the row's empty middle — which
+            // is exactly where a synthesized click lands, and where a
+            // mouse user aims — fell through to the ScrollView: no
+            // selection, no context menu, and therefore a detail pane
+            // that never had a job to show.
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         // UI gate: one row per job, keyed by the SAME id the CLI and
         // `cron/jobs.json` use, so a test can create a job, read its id
         // back from the file, and address exactly that row.
         .accessibilityIdentifier("cron.row.\(job.id)")
+        // Name first, state after (list-row convention). The schedule and
+        // next-run line stay reachable as the row's VALUE rather than
+        // being swallowed by the explicit label.
+        .accessibilityLabel(Text(rowAccessibilityLabel(job)))
+        .accessibilityValue(Text(rowAccessibilityValue(job)))
+        // Selection is conveyed visually by the tint alone.
+        .accessibilityAddTraits(isActive ? [.isSelected] : [])
         .contextMenu {
             Button(job.enabled ? "Pause" : "Resume") {
                 if job.enabled { viewModel.pauseJob(job) } else { viewModel.resumeJob(job) }
@@ -378,13 +411,42 @@ struct CronView: View {
         .padding(ScarfSpace.s8)
     }
 
-    /// The dot's meaning in words. Same precedence as `statusDotColor`,
-    /// so the two can never disagree.
-    private func statusDotLabel(_ job: HermesCronJob) -> LocalizedStringKey {
-        if !job.enabled { return "Paused" }
-        if job.effectiveState == "running" { return "Running" }
-        if job.lastError != nil { return "Last run failed" }
-        return "OK"
+    /// The state the row's coloured dot conveys, in words. Same
+    /// precedence as `statusDotColor`, so the two can never disagree.
+    /// Fragments are localized HERE (a `String` passed to
+    /// `.accessibilityLabel` is never extracted).
+    private func rowStateWord(_ job: HermesCronJob) -> String {
+        if !job.enabled { return String(localized: "paused") }
+        if job.effectiveState == "running" { return String(localized: "running") }
+        if job.lastError != nil { return String(localized: "last run failed") }
+        return String(localized: "scheduled")
+    }
+
+    /// Name first, state after — the list-row convention.
+    private func rowAccessibilityLabel(_ job: HermesCronJob) -> String {
+        "\(job.name), \(rowStateWord(job))"
+    }
+
+    /// What the explicit label would otherwise swallow: the schedule and
+    /// the next-run line the row shows underneath the name.
+    private func rowAccessibilityValue(_ job: HermesCronJob) -> String {
+        var parts: [String] = []
+        if let schedule = job.schedule.expression ?? job.schedule.display, !schedule.isEmpty {
+            parts.append(schedule)
+        }
+        if let next = job.nextRunAt {
+            parts.append(String(localized: "next \(CronScheduleFormatter.formatNextRun(iso: next))"))
+        }
+        // The badge and the warning icon are the row's only rendering of
+        // these; an explicit row label would otherwise bury both.
+        if hasCronDoctor, let finding = viewModel.doctorFindings[job.id] {
+            parts.append(String(localized: "^[\(finding.issues.count) health issue](inflect: true)"))
+        }
+        if hasCronIncidents {
+            let open = viewModel.openIncidentCount(jobID: job.id)
+            if open > 0 { parts.append(String(localized: "^[\(open) open incident](inflect: true)")) }
+        }
+        return parts.joined(separator: ", ")
     }
 
     private func statusDotColor(_ job: HermesCronJob) -> Color {
