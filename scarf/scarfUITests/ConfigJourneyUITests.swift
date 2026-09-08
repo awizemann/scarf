@@ -156,50 +156,30 @@ final class ConfigJourneyUITests: ScarfUITestCase {
         )
         uninstall.click()
 
-        // KNOWN PRODUCT BUG — t-ec6d2e6d. Scarf's Uninstall does not
-        // uninstall anything, and says it succeeded.
-        //
-        // `SkillsView` passes `skill.id` to `uninstallHubSkill`, and
-        // `SkillsScanner` builds that id as `"<category>/<name>"`. So
-        // Scarf runs `hermes skills uninstall smart-home/openhue`, which
-        // (verified against the installed v0.21 CLI, charter C5):
-        //
-        //     $ hermes skills uninstall smart-home/openhue   # exit 0
-        //     Error: 'smart-home/openhue' is not a hub-installed skill
-        //     $ hermes skills uninstall openhue               # exit 0
-        //     Uninstalled 'openhue' from smart-home/openhue
-        //
-        // The bare name works, the prefixed id does not — and the failure
-        // EXITS ZERO, so `finishUninstall(exitCode:)` reports success and
-        // the row stays. This is exactly the class C5 exists for.
-        //
-        // Wrapped rather than deleted or softened to a warning: the
-        // assertion is correct, and `XCTExpectedFailure` keeps the gate
-        // green while the bug is open AND fails the moment it is fixed,
-        // so nobody has to remember to come back and re-arm it.
-        XCTExpectFailure("t-ec6d2e6d: Skills → Uninstall passes <category>/<name> to a CLI that wants <name>, and the CLI's failure exits 0.") {
-            // `hermes skills uninstall` is a spawned CLI call with a 60 s
-            // timeout, so the disk is the thing to wait on.
-            // 30s, not 90: `hermes skills uninstall` answers in about two
-            // seconds, and while t-ec6d2e6d is open this wait ALWAYS runs
-            // to exhaustion. A minute and a half of idle polling per run is
-            // not free — it is long enough to lose the app's window and to
-            // take later tests in the same invocation down with it.
-            let removed = waitUntil(timeout: 30, describing: "\(skillDir) to disappear") {
-                !FileManager.default.fileExists(atPath: skillDir)
-            }
-            attach(app, named: "skills — after uninstall", keepAlways: !removed)
-            XCTAssertTrue(
-                removed,
-                "Clicked Uninstall for '\(skillName)' but \(skillDir) is still on disk — the UI reported an action the CLI did not perform."
-            )
-
-            // And the list agrees with the disk.
-            XCTAssertTrue(
-                waitForDisappearance(of: row, timeout: 15),
-                "'\(skillName)' is gone from disk but skills.row.\(skillName) is still in the list."
-            )
+        // t-ec6d2e6d (fixed 2026-09-08): Uninstall now passes the BARE skill
+        // name and judges the CLI by its output, not its always-zero exit.
+        // The assertions below run for real.
+        // `hermes skills uninstall` is a spawned CLI call with a 60 s
+        // timeout, so the disk is the thing to wait on.
+        // 30s, not 90: `hermes skills uninstall` answers in about two
+        // seconds; while the bug was open this wait always ran
+        // to exhaustion. A minute and a half of idle polling per run is
+        // not free — it is long enough to lose the app's window and to
+        // take later tests in the same invocation down with it.
+        let removed = waitUntil(timeout: 30, describing: "\(skillDir) to disappear") {
+            !FileManager.default.fileExists(atPath: skillDir)
         }
+        attach(app, named: "skills — after uninstall", keepAlways: !removed)
+        XCTAssertTrue(
+            removed,
+            "Clicked Uninstall for '\(skillName)' but \(skillDir) is still on disk — the UI reported an action the CLI did not perform."
+        )
+
+        // And the list agrees with the disk.
+        XCTAssertTrue(
+            waitForDisappearance(of: row, timeout: 15),
+            "'\(skillName)' is gone from disk but skills.row.\(skillName) is still in the list."
+        )
     }
 
     // MARK: - Journey 1b: installing a skill through the UI

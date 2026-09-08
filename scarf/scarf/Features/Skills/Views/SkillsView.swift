@@ -463,7 +463,11 @@ struct SkillsView: View {
                                         : Text("Editing is off because this file couldn’t be read.")
                                 )
                             Button("Uninstall", role: .destructive) {
-                                viewModel.uninstallHubSkill(skill.id)
+                                // The CLI's positional is the BARE skill
+                                // name; `skill.id` is `<category>/<name>`,
+                                // which `skills uninstall` rejects — and it
+                                // rejects with exit 0 (t-ec6d2e6d).
+                                viewModel.uninstallHubSkill(skill.name)
                             }
                             .controlSize(.small)
                             .accessibilityIdentifier("skills.detail.uninstall")

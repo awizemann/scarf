@@ -565,8 +565,25 @@ public final class SkillsViewModel {
                 timeout: 60,
                 stdin: Self.uninstallStdin
             )
-            await self?.finishUninstall(exitCode: result.exitCode)
+            await self?.finishUninstall(exitCode: result.exitCode, output: result.output)
         }
+    }
+
+    /// `skills uninstall` exits 0 whether or not it removed anything —
+    /// "Error: 'x' is not a hub-installed skill" comes back with exit 0
+    /// (verified at v0.21.0) — so the exit code alone cannot be the
+    /// verdict (charter C5). A rejection is an `Error:` line in the output.
+    nonisolated static func uninstallSucceeded(exitCode: Int32, output: String) -> Bool {
+        guard exitCode == 0 else { return false }
+        return !output.contains("Error:")
+    }
+
+    /// The CLI's own one-line reason for a refused uninstall, for the banner.
+    nonisolated static func uninstallFailureReason(output: String) -> String? {
+        output
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { $0.hasPrefix("Error:") }
     }
 
     public func checkForUpdates() {
@@ -713,8 +730,13 @@ public final class SkillsViewModel {
     }
 
     @MainActor
-    private func finishUninstall(exitCode: Int32) async {
-        hubMessage = exitCode == 0 ? "Uninstalled" : "Uninstall failed"
+    private func finishUninstall(exitCode: Int32, output: String) async {
+        if Self.uninstallSucceeded(exitCode: exitCode, output: output) {
+            hubMessage = "Uninstalled"
+        } else {
+            hubMessage = Self.uninstallFailureReason(output: output).map { "Uninstall failed — \($0)" }
+                ?? "Uninstall failed (exit \(exitCode))"
+        }
         await load()
         try? await Task.sleep(nanoseconds: 2_000_000_000)
         hubMessage = nil

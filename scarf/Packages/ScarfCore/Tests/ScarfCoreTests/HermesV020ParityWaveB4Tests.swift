@@ -166,6 +166,20 @@ struct HermesV020ParityWaveB4Tests {
         #expect(SkillsViewModel.uninstallStdin == "y\n")
     }
 
+    /// t-ec6d2e6d: the positional is the BARE name (`skill.name`), never the
+    /// `<category>/<name>` id, and the verdict is the output, not the exit.
+    @Test func skillsUninstallVerdictComesFromOutputNotExitCode() {
+        #expect(SkillsViewModel.uninstallArgs("openhue") == ["skills", "uninstall", "openhue"])
+        // v0.21.0, verbatim: rejection exits 0.
+        let rejected = "Error: 'smart-home/openhue' is not a hub-installed skill (may be a builtin)\n"
+        #expect(!SkillsViewModel.uninstallSucceeded(exitCode: 0, output: rejected))
+        #expect(SkillsViewModel.uninstallFailureReason(output: rejected)?.hasPrefix("Error:") == true)
+        let removed = "Uninstalled 'openhue' from smart-home/openhue\n"
+        #expect(SkillsViewModel.uninstallSucceeded(exitCode: 0, output: removed))
+        #expect(SkillsViewModel.uninstallFailureReason(output: removed) == nil)
+        #expect(!SkillsViewModel.uninstallSucceeded(exitCode: 1, output: removed))
+    }
+
     @Test func skillsUpdateArgvHasNoYesFlagAndNoName() {
         // Omitting the optional name positional updates all outdated skills.
         #expect(SkillsViewModel.updateAllArgs == ["skills", "update"])
