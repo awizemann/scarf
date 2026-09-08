@@ -83,6 +83,28 @@ struct TemplateConfigSheet: View {
 
     @ViewBuilder
     private var footer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Whole-form failure (the destination pre-check). Field-level
+            // problems still render inline next to their own control.
+            if let commitError = viewModel.commitError {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                    Text(commitError)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+            }
+            footerButtons
+        }
+        .padding(16)
+    }
+
+    @ViewBuilder
+    private var footerButtons: some View {
         HStack {
             Button("Cancel") {
                 // Caller owns dismissal — this view is used both as a
@@ -111,7 +133,6 @@ struct TemplateConfigSheet: View {
             .buttonStyle(ScarfPrimaryButton())
             .accessibilityIdentifier("templateConfig.commitButton")
         }
-        .padding(16)
     }
 
     // MARK: - Field rows

@@ -243,6 +243,30 @@ struct TemplateUninstallSheet: View {
                         .font(.caption)
                 }
             }
+        } else if let reason = plan.memoryUnreadable {
+            // Present but unreadable at plan time. Stated here rather than
+            // hidden behind a prompt: the block is inert markdown, and the
+            // rest of the uninstall (secrets included) still runs.
+            section(title: "Memory block", subtitle: plan.memoryPath) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.shield")
+                            .foregroundStyle(.orange)
+                            .font(.caption)
+                        Text("MEMORY.md couldn't be read, so its template section can't be removed.")
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text(reason)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Everything else listed here is still removed, including this template's Keychain secrets.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         } else if plan.lock.memoryBlockId != nil {
             section(title: "Memory block", subtitle: nil) {
                 Text("A memory block was recorded in the lock but is no longer present in MEMORY.md — skipping.")

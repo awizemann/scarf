@@ -95,6 +95,31 @@ struct ProjectConfigService: Sendable {
     /// file, so the same ceiling.
     nonisolated static let configMaxBytes = 1 * 1024 * 1024
 
+    /// Prove `save` would be ALLOWED to publish, without writing anything.
+    ///
+    /// **Ordering, not compensation (GW-F1 / DI M3).** The Configuration
+    /// sheet used to mint the Keychain items first and call `save` after, so
+    /// a refused config write (an unreadable `config.json`) left a secret in
+    /// the login Keychain that nothing on disk pointed at. Deleting it
+    /// afterwards is not a fix: `storeSecret` writes to a DETERMINISTIC
+    /// account (slug, field key, project path), so rotating an existing
+    /// secret OVERWRITES the old one in place — a compensating delete would
+    /// destroy the value the surviving `config.json` still references. The
+    /// only clean order is to learn the write would be refused BEFORE the
+    /// Keychain is touched at all, which is what this is.
+    ///
+    /// Costs one inspection (the same one `save` runs again at time of use —
+    /// this is a pre-check, never a substitute for the guard).
+    nonisolated func preflightSave(project: ProjectEntry) throws {
+        let transport = context.makeTransport()
+        let path = Self.configPath(for: project)
+        let inspection = GuardedJSONStore(transport: transport, label: "config.json")
+            .inspect(path, maxBytes: Self.configMaxBytes)
+        if case .unreadable = inspection.state {
+            throw GuardedStoreError.refusedUnreadableOverwrite(path: path, label: "config.json")
+        }
+    }
+
     nonisolated func save(
         project: ProjectEntry,
         templateId: String,

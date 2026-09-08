@@ -19,9 +19,17 @@ struct ProjectTemplateUninstaller: Sendable {
     private nonisolated static let logger = Logger(subsystem: "com.scarf", category: "ProjectTemplateUninstaller")
 
     let context: ServerContext
+    /// The Keychain the uninstall's step 4a deletes through. Injectable so
+    /// tests can prove the cleanup ran without minting items in the user's
+    /// real login Keychain; production always gets the default.
+    let keychain: ProjectConfigKeychain
 
-    nonisolated init(context: ServerContext = .local) {
+    nonisolated init(
+        context: ServerContext = .local,
+        keychain: ProjectConfigKeychain = ProjectConfigKeychain()
+    ) {
         self.context = context
+        self.keychain = keychain
     }
 
     // MARK: - Detection
@@ -159,21 +167,35 @@ struct ProjectTemplateUninstaller: Sendable {
         // for the begin marker in the current MEMORY.md. If it's missing
         // (never installed, or removed by hand) we simply skip the memory
         // strip step.
+        //
+        // **The decision is proof-based (GW-F1 / DI M1).** It used to be
+        // `fileExists` + `try? readFile`: a MEMORY.md that is present but
+        // UNREADABLE (mode 0000, a dropped SSH round-trip) read as "no block
+        // installed", and the sheet said so. The same file then refused the
+        // strip at execute time — after the destructive steps had run — which
+        // is the SEC F1 hole this batch closes. `GuardedTextFile.load` is the
+        // same proof `stripMemoryBlock` applies, moved to where the answer is
+        // still cheap: unreadable is now its OWN state, distinct from absent,
+        // decided BEFORE step 1 deletes anything.
         let memoryPath = context.paths.memoryMD
         var memoryBlockPresent = false
-        if lock.memoryBlockId != nil {
-            if transport.fileExists(memoryPath),
-               let data = try? transport.readFile(memoryPath),
-               let text = String(data: data, encoding: .utf8) {
+        var memoryUnreadable: String? = nil
+        if let blockId = lock.memoryBlockId {
+            let guarded = GuardedTextFile(transport: transport, label: "MEMORY.md")
+            do {
+                // Uncapped, matching `stripMemoryBlock`: MEMORY.md is the
+                // user's prose, not an index we decode.
+                let loaded = try guarded.load(memoryPath, maxBytes: Int.max)
+                let text = loaded.text
                 let beginMarker = ProjectTemplateService.memoryBlockBeginMarker(
-                    templateId: lock.memoryBlockId!
+                    templateId: blockId
                 )
                 // BOTH markers, not just the begin one — since SEC-L5 an
                 // unbounded region is refused by `stripMemoryBlock`, so
                 // promising to remove it in the preview would be a lie the
                 // uninstall then quietly failed to keep.
                 let endMarker = ProjectTemplateService.memoryBlockEndMarker(
-                    templateId: lock.memoryBlockId!
+                    templateId: blockId
                 )
                 if let begin = text.range(of: beginMarker) {
                     memoryBlockPresent = text.range(
@@ -181,10 +203,34 @@ struct ProjectTemplateUninstaller: Sendable {
                     ) != nil
                     if !memoryBlockPresent {
                         Self.logger.error(
-                            "MEMORY.md at \(memoryPath, privacy: .public) has a begin marker for \(lock.memoryBlockId!, privacy: .public) with no end marker; the block will be left in place (unbounded regions are never stripped)"
+                            "MEMORY.md at \(memoryPath, privacy: .public) has a begin marker for \(blockId, privacy: .public) with no end marker; the block will be left in place (unbounded regions are never stripped)"
                         )
                     }
                 }
+            } catch let refusal as GuardedTextFile.Refusal {
+                switch refusal {
+                case .unreadable:
+                    // Present, and we could not read it. Say so in the plan;
+                    // the uninstall itself proceeds (see `memoryUnreadable`'s
+                    // doc comment on why this is not a blocking prompt).
+                    memoryUnreadable = refusal.errorDescription
+                    Self.logger.error(
+                        "MEMORY.md at \(memoryPath, privacy: .public) couldn't be read while planning the uninstall; its template block will be left in place"
+                    )
+                case .notUTF8:
+                    // Bytes we can't decode can't contain the markers, so
+                    // there is nothing to strip — exactly what
+                    // `stripMemoryBlock` concludes for the same file.
+                    break
+                }
+            } catch {
+                // No other error is reachable through `load` today; treat an
+                // unexpected one the same way — as a fact the plan reports,
+                // never as a reason to abandon the uninstall.
+                memoryUnreadable = error.localizedDescription
+                Self.logger.error(
+                    "MEMORY.md at \(memoryPath, privacy: .public) couldn't be inspected: \(error.localizedDescription, privacy: .public)"
+                )
             }
         }
 
@@ -241,7 +287,8 @@ struct ProjectTemplateUninstaller: Sendable {
             cronJobsToRemove: cronToRemove,
             cronJobsAlreadyGone: cronGone,
             memoryBlockPresent: memoryBlockPresent,
-            memoryPath: memoryPath
+            memoryPath: memoryPath,
+            memoryUnreadable: memoryUnreadable
         )
     }
 
@@ -392,12 +439,23 @@ struct ProjectTemplateUninstaller: Sendable {
         if let skillsDir = plan.skillsNamespaceDir,
            guardian.admits(skillsDir, under: Self.skillsTemplatesRoot(context: context)),
            transport.fileExists(skillsDir) {
-            try removeRecursively(
-                skillsDir,
-                root: Self.skillsTemplatesRoot(context: context),
-                guardian: guardian,
-                transport: transport
-            )
+            // Non-fatal, for the same reason step 4 is (GW-F1): a failed
+            // `removeFile` in here used to throw out of `uninstall`, skipping
+            // the cron, memory, KEYCHAIN, registry and grant steps below. A
+            // skills file the uninstall couldn't delete must not be a way to
+            // keep the template's secrets in the login Keychain.
+            do {
+                try removeRecursively(
+                    skillsDir,
+                    root: Self.skillsTemplatesRoot(context: context),
+                    guardian: guardian,
+                    transport: transport
+                )
+            } catch {
+                Self.logger.warning(
+                    "couldn't fully remove skills namespace dir \(skillsDir, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+            }
         }
 
         // 3. Cron jobs via CLI — `hermes cron remove <id>`. A non-zero
@@ -415,8 +473,30 @@ struct ProjectTemplateUninstaller: Sendable {
         // when the block is absent; we already decided presence in the
         // plan and only come here when `memoryBlockPresent` was true
         // AND the plan recorded a memoryBlockId.
+        //
+        // **A refusal here is a WARNING, never an abort (GW-F1 / SEC F1).**
+        // `stripMemoryBlock` throws `memoryFileUnreadable` when MEMORY.md is
+        // present but unreadable, and that throw used to leave `uninstall`
+        // BETWEEN the destructive steps and the cleanup ones: files, skills
+        // and cron jobs already gone, the template's Keychain secrets (4a),
+        // the registry row (5) and the mini-app grants (6) all skipped. Since
+        // MEMORY.md lives in the Hermes home that any agent can write, `chmod
+        // 000 MEMORY.md` was a one-command way to make an uninstall PRESERVE
+        // the secrets it promised to remove. The plan already decided this
+        // file's readability with the same proof (`memoryUnreadable`), so
+        // there is nothing new to learn here — only steps to protect. Same
+        // shape as `ProjectLifecycleService.cleanUpAfterRemoval`: the failing
+        // step reports, the removal continues.
         if plan.memoryBlockPresent, let blockId = plan.lock.memoryBlockId {
-            try stripMemoryBlock(blockId: blockId, memoryPath: plan.memoryPath, transport: transport)
+            do {
+                try stripMemoryBlock(
+                    blockId: blockId, memoryPath: plan.memoryPath, transport: transport
+                )
+            } catch {
+                Self.logger.warning(
+                    "uninstall couldn't strip the template's block from \(plan.memoryPath, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+            }
         }
 
         // 4a. Config Keychain items — remove every secret the template's
@@ -430,7 +510,7 @@ struct ProjectTemplateUninstaller: Sendable {
         // binding here so a plan built elsewhere can't widen the blast
         // radius of `SecItemDelete` (which is reachable for ANY item this
         // app can see).
-        let keychain = ProjectConfigKeychain()
+        let keychain = self.keychain
         for ref in plan.keychainItemsToDelete {
             guard ref.belongs(toProjectPath: plan.project.path) else {
                 Self.logger.error("refusing to delete keychain item \(ref.uri, privacy: .public) — not this project's")

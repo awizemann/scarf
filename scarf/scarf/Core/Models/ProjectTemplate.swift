@@ -323,6 +323,22 @@ nonisolated struct TemplateUninstallPlan: Sendable {
     /// `memoryBlockPresent` is true.
     let memoryPath: String
 
+    /// Non-nil when MEMORY.md is stat-confirmed present but could not be
+    /// read while planning — so whether it holds the template's block is
+    /// UNKNOWN, not "no" (`memoryBlockPresent` is false either way, and the
+    /// uninstall never strips what it could not read).
+    ///
+    /// **Why this is a warning and not a confirmation gate.** The block is
+    /// inert markdown in the user's own file; the rest of the uninstall —
+    /// files, skills, cron jobs, the template's Keychain secrets, the
+    /// registry row — is the part with security meaning, and blocking on an
+    /// unreadable MEMORY.md is exactly how mode-0000 became a way to KEEP
+    /// those secrets installed. So the plan reports it the way it reports
+    /// every other "we won't touch this" fact (the refused/already-gone
+    /// rows), and the uninstall runs. Defaulted so the ordinary construction
+    /// site doesn't have to mention it.
+    var memoryUnreadable: String? = nil
+
     /// `true` when the project's own ROOT failed `ProjectRootPolicy` at plan
     /// time, so this plan performs nothing at all — not even the registry
     /// removal. `refusedEntries` leads with the reason. Defaulted so the

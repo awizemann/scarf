@@ -58,6 +58,10 @@ final class TemplateConfigViewModel {
     /// the offending control.
     var errors: [String: String] = [:]
 
+    /// A whole-form failure that belongs to no single field — today only the
+    /// destination pre-check below. Cleared at the start of every commit.
+    var commitError: String?
+
     init(
         schema: TemplateConfigSchema,
         templateId: String,
@@ -129,6 +133,7 @@ final class TemplateConfigViewModel {
         // write them in a moment); for secrets already stored as
         // keychainRef, we treat them as present too. Only a completely
         // empty secret field is "missing."
+        commitError = nil
         var candidate = values
         for key in pendingSecrets.keys {
             // The field is about to have a fresh keychainRef — for
@@ -158,6 +163,30 @@ final class TemplateConfigViewModel {
             targetProject = project
         case .edit(let proj):
             targetProject = proj
+        }
+
+        // DESTINATION PRE-CHECK, before the first secret is minted (GW-F1 /
+        // DI M3). `storeSecret` writes to a deterministic Keychain account,
+        // so a secret written here and then refused by
+        // `ProjectConfigService.save` cannot be cleanly undone: in edit mode
+        // the write OVERWROTE the value the surviving `config.json` still
+        // points at, and deleting it would take the user's working secret
+        // with it. Asking first — does the config file allow a write at all?
+        // — leaves the Keychain exactly as it was on refusal, which is the
+        // outcome a compensating delete can only approximate.
+        //
+        // Only when there is something to write, so an ordinary commit with
+        // no new secrets costs no extra round-trip.
+        if !pendingSecrets.isEmpty {
+            do {
+                try configService.preflightSave(project: targetProject)
+            } catch {
+                Self.logger.error(
+                    "refusing to write secrets for a config that can't be saved: \(error.localizedDescription, privacy: .public)"
+                )
+                commitError = error.localizedDescription
+                return nil
+            }
         }
 
         for (key, secret) in pendingSecrets {
