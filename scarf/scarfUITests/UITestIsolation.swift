@@ -254,6 +254,29 @@ class ScarfUITestCase: XCTestCase {
         _ = XCTWaiter().wait(for: [exited], timeout: timeout)
     }
 
+    // MARK: - Screenshots
+
+    /// A screenshot of Scarf's front window — never the whole desktop.
+    ///
+    /// On macOS `XCUIApplication.screenshot()` captures EVERY display,
+    /// so a failure attachment in a result bundle would carry whatever
+    /// else was on the developer's screen (mail, chats, other repos).
+    /// Result bundles get shared; the window is all a triage needs.
+    /// Falls back to the app capture only when no window exists yet,
+    /// which is itself the thing worth seeing.
+    func windowScreenshot(_ app: XCUIApplication) -> XCUIScreenshot {
+        let window = app.windows.firstMatch
+        return window.exists ? window.screenshot() : app.screenshot()
+    }
+
+    /// Attach a front-window screenshot to the running test.
+    func attachWindowScreenshot(_ app: XCUIApplication, named name: String, keepAlways: Bool) {
+        let shot = XCTAttachment(screenshot: windowScreenshot(app))
+        shot.name = name
+        shot.lifetime = keepAlways ? .keepAlways : .deleteOnSuccess
+        add(shot)
+    }
+
     // MARK: - Plan gating
 
     /// Skip unless the Live test plan is running.

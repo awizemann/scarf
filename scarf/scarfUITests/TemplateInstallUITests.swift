@@ -99,7 +99,7 @@ final class TemplateInstallUITests: ScarfUITestCase {
         // no window ever appears.
         launchAndSurface(app)
 
-        let attachment = XCTAttachment(screenshot: app.screenshot())
+        let attachment = XCTAttachment(screenshot: windowScreenshot(app))
         attachment.name = "App Launch"
         attachment.lifetime = .deleteOnSuccess
         add(attachment)
@@ -218,7 +218,7 @@ final class TemplateInstallUITests: ScarfUITestCase {
         let parentField = app.descendants(matching: .any)
             .matching(identifier: "templateInstall.parentDir.field").firstMatch
         if !parentField.waitForExistence(timeout: 30) {
-            let snap = XCTAttachment(screenshot: app.screenshot())
+            let snap = XCTAttachment(screenshot: windowScreenshot(app))
             snap.name = "no-parent-dir-field"
             snap.lifetime = .keepAlways
             add(snap)
@@ -296,7 +296,7 @@ final class TemplateInstallUITests: ScarfUITestCase {
 
         // Capture the post-install screenshot for triage / before
         // tearing down.
-        let installedShot = XCTAttachment(screenshot: app.screenshot())
+        let installedShot = XCTAttachment(screenshot: windowScreenshot(app))
         installedShot.name = "Post-Install Sidebar"
         installedShot.lifetime = .deleteOnSuccess
         add(installedShot)
@@ -355,7 +355,7 @@ final class TemplateInstallUITests: ScarfUITestCase {
             let registry = (isolatedHome ?? "") + "/scarf/projects.json"
             let contents = (try? String(contentsOfFile: registry, encoding: .utf8)) ?? "<unreadable>"
             print("[Layer B] isolated registry after uninstall:", contents)
-            let snap = XCTAttachment(screenshot: app.screenshot())
+            let snap = XCTAttachment(screenshot: windowScreenshot(app))
             snap.name = "row-still-present-after-uninstall"
             snap.lifetime = .keepAlways
             add(snap)

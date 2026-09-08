@@ -225,7 +225,7 @@ final class SectionSweepUITests: ScarfUITestCase {
     }
 
     private func attachScreenshot(_ app: XCUIApplication, named name: String, keepAlways: Bool) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
+        let shot = XCTAttachment(screenshot: windowScreenshot(app))
         shot.name = name
         // Keep only what someone would want to look at: a green sweep
         // otherwise writes ~28 full-screen PNGs into every result bundle.
