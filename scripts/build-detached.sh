@@ -176,10 +176,11 @@ quit_running_copies() {
     cmd="$(ps -p "$pid" -o command= 2>/dev/null)"
     case "$cmd" in *"/Contents/MacOS/$APP_PRODUCT"*) ;; *) continue ;; esac          # this app's executable
     case "$cmd" in *"/tmp/"*|*"/var/folders/"*) has_tmp=1; continue ;; esac          # spare agent /tmp builds
+    case "$cmd" in *"--scarf-test-mode"*) has_tmp=1; continue ;; esac                  # spare XCUITest apps-under-test (DerivedData, not /tmp)
     victims+=("$pid")
   done < <(pgrep -x "$APP_PRODUCT" 2>/dev/null)
   [ ${#victims[@]} -gt 0 ] || return 0
-  say "==> quitting ${#victims[@]} running copy(ies) of $APP_PRODUCT before launch (agent /tmp test builds left alone)…"
+  say "==> quitting ${#victims[@]} running copy(ies) of $APP_PRODUCT before launch (agent /tmp builds and --scarf-test-mode test apps left alone)…"
   # Graceful FIRST: an Apple Event "quit" runs the app's normal termination so it FLUSHES
   # UserDefaults and leaves cfprefsd's domain view coherent. A force-kill (below) skips that —
   # the write reaches the plist but the daemon serves an empty domain, so the next launch reads
