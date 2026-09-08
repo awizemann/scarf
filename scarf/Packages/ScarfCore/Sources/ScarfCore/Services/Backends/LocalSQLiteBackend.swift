@@ -44,6 +44,12 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
     private(set) public var hasListableChildSupport = false
     private(set) public var lastOpenError: String?
 
+    /// True when `open()` had to fall back to a READWRITE handle guarded by
+    /// `PRAGMA query_only=1` because the plain READONLY open could not create
+    /// the WAL sidecars. Diagnostics only — the connection is still incapable
+    /// of writing a row (charter C3).
+    private(set) public var isQueryOnlyFallback = false
+
     private let context: ServerContext
 
     public init(context: ServerContext) {
@@ -60,7 +66,16 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
             return false
         }
         let flags: Int32 = SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX
-        let rc = sqlite3_open_v2(path, &db, flags, nil)
+        var rc = sqlite3_open_v2(path, &db, flags, nil)
+
+        // `sqlite3_open_v2` is lazy: it allocates the handle without touching
+        // the file, so a database Scarf cannot actually read still returns
+        // SQLITE_OK here and only fails on the first statement. Probe the
+        // schema so `open()` reports the truth its callers assume.
+        if rc == SQLITE_OK, let handle = db {
+            rc = Self.probeReadable(handle)
+        }
+
         guard rc == SQLITE_OK else {
             let msg: String
             if let db {
@@ -68,16 +83,86 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
             } else {
                 msg = "sqlite3_open_v2 returned \(rc)"
             }
+            // Discard the failed handle before any retry: it must be closed
+            // exactly once, and the probe may have left one behind.
+            if let db { sqlite3_close(db) }
+            db = nil
+
+            // WAL trap: a database left in WAL mode with no -shm/-wal sidecars
+            // (CLI-only users, gateway stopped, a fresh home) cannot be READ
+            // read-only at all — SQLite must create the shared-memory sidecar
+            // before it can read a WAL database, and a READONLY connection
+            // can't, so every statement fails SQLITE_CANTOPEN.
+            //
+            // Creating a sidecar is not a state mutation (charter C3): reopen
+            // READWRITE (never CREATE) and immediately clamp the connection
+            // with `PRAGMA query_only=1`, which is what makes it incapable of
+            // writing a row.
+            if rc == SQLITE_CANTOPEN, openQueryOnlyFallback(path: path) {
+                #if canImport(os)
+                Self.logger.info(
+                    "state.db read-only open hit SQLITE_CANTOPEN (WAL without sidecars); reopened query_only at \(path, privacy: .public)"
+                )
+                #endif
+                isQueryOnlyFallback = true
+                openedAtPath = path
+                lastOpenError = nil
+                detectSchema()
+                return true
+            }
+
             lastOpenError = "Couldn't open state.db: \(msg)"
             #if canImport(os)
             Self.logger.warning("sqlite3_open_v2 failed (\(rc)) at \(path, privacy: .public): \(msg, privacy: .public)")
             #endif
-            db = nil
             return false
         }
         openedAtPath = path
         lastOpenError = nil
+        isQueryOnlyFallback = false
         detectSchema()
+        return true
+    }
+
+    /// Force SQLite to actually touch the database file (and, for a WAL
+    /// database, its `-shm` sidecar) by reading the schema. Returns
+    /// `SQLITE_OK` when the connection is genuinely usable, otherwise the
+    /// result code that the first real statement would have produced.
+    private static func probeReadable(_ handle: OpaquePointer) -> Int32 {
+        var stmt: OpaquePointer?
+        let prepRC = sqlite3_prepare_v2(handle, "SELECT count(*) FROM sqlite_master", -1, &stmt, nil)
+        guard prepRC == SQLITE_OK, let stmt else {
+            sqlite3_finalize(stmt)
+            return prepRC == SQLITE_OK ? SQLITE_ERROR : prepRC
+        }
+        defer { sqlite3_finalize(stmt) }
+        let stepRC = sqlite3_step(stmt)
+        return (stepRC == SQLITE_ROW || stepRC == SQLITE_DONE) ? SQLITE_OK : stepRC
+    }
+
+    /// Reopen `path` READWRITE (never CREATE) and clamp it with
+    /// `PRAGMA query_only=1`. Returns true only when the open, the pragma,
+    /// AND the readability probe all succeed; on any failure `db` is left nil
+    /// so the caller reports the ORIGINAL error unchanged.
+    private func openQueryOnlyFallback(path: String) -> Bool {
+        var handle: OpaquePointer?
+        let flags: Int32 = SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX
+        guard sqlite3_open_v2(path, &handle, flags, nil) == SQLITE_OK, let handle else {
+            if let handle { sqlite3_close(handle) }
+            return false
+        }
+        guard sqlite3_exec(handle, "PRAGMA query_only=1", nil, nil, nil) == SQLITE_OK else {
+            #if canImport(os)
+            Self.logger.warning("PRAGMA query_only=1 failed at \(path, privacy: .public); refusing the writable handle")
+            #endif
+            sqlite3_close(handle)
+            return false
+        }
+        guard Self.probeReadable(handle) == SQLITE_OK else {
+            sqlite3_close(handle)
+            return false
+        }
+        db = handle
         return true
     }
 
@@ -105,6 +190,7 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
         }
         db = nil
         openedAtPath = nil
+        isQueryOnlyFallback = false
     }
 
     deinit {
