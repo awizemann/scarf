@@ -131,6 +131,14 @@ struct RichChatInputBar: View {
                 }
 
                 TextEditor(text: $text)
+                    // UI-gate handle for the Live chat journey
+                    // (ChatJourneyUITests). Applied HERE, directly on
+                    // the TextEditor and before the background/overlay
+                    // modifiers, so the identifier lands on the text
+                    // element itself — XCUITest reads the typed value
+                    // back off it, and an identifier further down the
+                    // chain would name the composed group instead.
+                    .accessibilityIdentifier("chat.composer.input")
                     .font(ScarfFont.body)
                     .scrollContentBackground(.hidden)
                     .focused($isFocused)
@@ -258,6 +266,10 @@ struct RichChatInputBar: View {
                 .buttonStyle(.plain)
                 .disabled(!canSend)
                 .help("Send message (Enter)")
+                // UI-gate handle for the Live chat journey. The label is
+                // an SF Symbol with no text, so there is nothing else to
+                // address this button by.
+                .accessibilityIdentifier("chat.composer.send")
             }
             .padding(.horizontal, ScarfSpace.s3)
             .padding(.vertical, ScarfSpace.s2)
