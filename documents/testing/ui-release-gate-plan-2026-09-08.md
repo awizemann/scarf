@@ -52,3 +52,32 @@
 - The gate runs inside `release.sh`; 10–15 minutes or more is acceptable for a pre-release pattern.
 - Real credentials, real Hermes: the fixture home is rebuilt per run by the `hermes` CLI, with credentials and model config copied from the developer's own `~/.hermes` (the existing `ScarfUITestCase` copy step). Contributors who want to run the gate bring their own Hermes install and keys. The Live plan (Chat, Gateway, Proxy, Bots, Curator) skips cleanly when hermes or credentials are absent. No ACP stub.
 - Harness is dropped from the plan (adds a second framework and LLM cost, no gate value). Tier 2 and phase 4 below are void; tasks filed as UI gate phases 1–3.
+
+## Outcome (2026-09-08, branch `ui-gate`, not pushed)
+
+Final gate run at commit 76e73d5b on a quiet Mac: **PASS**.
+
+| Plan | Result | Wall |
+| --- | --- | --- |
+| Fixture build (hermes CLI seeded) | ok | 25 s |
+| Full — 16 UI journeys + 811 unit tests | PASS | 656 s |
+| Live — chat over ACP with the real key | PASS | 62 s |
+
+What landed: fixture builder (`scripts/ui-fixture/`), section sweep over all 28 sections, journeys for Projects, template install (offline), Cron, Kanban, Skills, Models, Settings persistence, Chat over ACP; three test plans; `scripts/ui-gate.sh` wired into `release.sh` before the version bump, with the summary committed alongside it.
+
+Product bugs found by the gate and fixed on the branch: WAL state.db unreadable without its -shm sidecar (Dashboard "Can't read Hermes state" for CLI-only users); sidebar collapse launch-arg override never worked; capability probe one-shot with no retry; Skills → Uninstall passed the wrong identifier and trusted exit 0; Kanban Block sheet called a required reason optional; Projects section unreachable on an empty registry; `build-detached.sh` killed UI-test apps.
+
+Still open (tasks on the board): RemoteSQLiteBackend has the same WAL trap over SSH (t-fb136a08); Cron detail pane unreachable to XCUITest and VoiceOver (t-0fb3b91f, high); Skills tab strip is a segmented Picker XCUITest cannot drive (t-42c56c2f); chat send button lacks an accessibility label (t-353099de); gate stabilization watch (t-e3926f86) — one runner-side cascade seen on a quiet Mac, mitigated by not running the journey set twice.
+
+Operational rules learned: only one XCUITest run per Mac at a time; the app under test shares `com.scarf.app` defaults with the installed copy, so every preference a test needs rides in NSArgumentDomain via `makeApp()`; a container accessibility identifier rewrites every descendant's.
+
+### Fix round (same day)
+
+All four follow-up tasks ran through the cycle with agents forbidden from running XCUITest; the gate then ran alone. Final: commit 446c880b, Full PASS (16 UI journeys, 811 unit tests, 744 s), Live PASS (2, 73 s).
+
+- Cron rows: a `.plain` Button with a clear background only took clicks on its glyphs; whole-row hit shape, HStack + resizableColumn instead of the overflowing HSplitView, full row labels. Pause and delete now run unwrapped. Context-menu items are addressed by identifier (the Edit menu also has a Delete).
+- RemoteSQLiteBackend: query-only fallback over SSH, guarded by an existence check because plain `sqlite3` creates a missing database file.
+- Skills tabs: shared `ScarfTabStrip` replaces the segmented Picker (also used by Settings).
+- Chat composer: all four icon-only buttons labelled, reusing already-translated strings.
+
+Only t-e3926f86 (stability watch) remains open.
