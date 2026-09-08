@@ -1,0 +1,33 @@
+{
+  "_comment": "The rawValue of every SidebarSection case (scarf/scarf/Navigation/AppCoordinator.swift), in declaration order. This file is the ONLY channel by which the UI-test bundle — which links neither the app nor ScarfCore — learns the section list. SectionCatalogTests (scarfTests) asserts it equals SidebarSection.allCases exactly, in order, so adding a section without updating this file fails the unit run. `live` marks sections that need a live Hermes process or a provider key — the sweep asserts only that their root renders. `gated` marks capability-gated rows that may legitimately be absent on an older Hermes host; the sweep records those as skipped rather than failing.",
+  "sections": [
+    { "rawValue": "Dashboard",        "live": false, "gated": false },
+    { "rawValue": "Insights",         "live": false, "gated": false },
+    { "rawValue": "Sessions",         "live": false, "gated": false },
+    { "rawValue": "Activity",         "live": false, "gated": false },
+    { "rawValue": "Projects",         "live": false, "gated": false },
+    { "rawValue": "Bots",             "live": true,  "gated": true  },
+    { "rawValue": "Chat",             "live": true,  "gated": false },
+    { "rawValue": "Memory",           "live": false, "gated": false },
+    { "rawValue": "Curator",          "live": true,  "gated": true  },
+    { "rawValue": "Skills",           "live": false, "gated": false },
+    { "rawValue": "Platforms",        "live": false, "gated": false },
+    { "rawValue": "Personalities",    "live": false, "gated": false },
+    { "rawValue": "Quick Commands",   "live": false, "gated": false },
+    { "rawValue": "Credential Pools", "live": false, "gated": false },
+    { "rawValue": "Plugins",          "live": false, "gated": false },
+    { "rawValue": "Webhooks",         "live": false, "gated": false },
+    { "rawValue": "Profiles",         "live": false, "gated": false },
+    { "rawValue": "Models",           "live": false, "gated": true  },
+    { "rawValue": "Proxy",            "live": true,  "gated": true  },
+    { "rawValue": "Tools",            "live": false, "gated": false },
+    { "rawValue": "MCP Servers",      "live": false, "gated": false },
+    { "rawValue": "Gateway",          "live": true,  "gated": false },
+    { "rawValue": "Cron",             "live": false, "gated": false },
+    { "rawValue": "Peers",            "live": false, "gated": true  },
+    { "rawValue": "Kanban",           "live": false, "gated": true  },
+    { "rawValue": "Health",           "live": false, "gated": false },
+    { "rawValue": "Logs",             "live": false, "gated": false },
+    { "rawValue": "Settings",         "live": false, "gated": false }
+  ]
+}

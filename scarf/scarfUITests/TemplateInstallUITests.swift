@@ -91,23 +91,13 @@ final class TemplateInstallUITests: ScarfUITestCase {
     @MainActor
     func testAppLaunchesAndSurfacesAWindow() throws {
         let app = makeApp()
-        app.launch()
         defer { app.terminate() }
 
-        // Activate first — without this, ⌘1 is delivered to whatever
-        // app currently owns the keyboard focus (often Xcode), and the
-        // menu shortcut is silently dropped by Scarf.
-        app.activate()
-        // Brief pause for activation to settle. We sleep up to 1s; if
-        // the app is already responsive sooner, the ⌘1 send is harmless.
-        Thread.sleep(forTimeInterval: 1.0)
-        app.typeKey("1", modifierFlags: .command)
-
-        let windowAppeared = app.windows.firstMatch.waitForExistence(timeout: 15)
-        XCTAssertTrue(
-            windowAppeared,
-            "Scarf did not surface a window within 15s of ⌘1 nudge. Crash logs land under derivedData/Logs/Test/."
-        )
+        // Launch → activate → ⌘1 → wait for a window. The whole dance
+        // (and why each step is load-bearing) lives in
+        // `ScarfUITestCase.launchAndSurface`; it fails the test itself if
+        // no window ever appears.
+        launchAndSurface(app)
 
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "App Launch"
@@ -205,14 +195,8 @@ final class TemplateInstallUITests: ScarfUITestCase {
             "--scarf-test-install-url",
             Self.hnDigestInstallURL
         ])
-        app.launch()
-
         // Surface the window, same dance as the smoke test.
-        app.activate()
-        Thread.sleep(forTimeInterval: 1.0)
-        app.typeKey("1", modifierFlags: .command)
-        let windowAppeared = app.windows.firstMatch.waitForExistence(timeout: 15)
-        XCTAssertTrue(windowAppeared, "Scarf window did not surface within 15s")
+        launchAndSurface(app)
 
         // Click into Projects in the sidebar — the install-sheet
         // observer lives on `ProjectsView.onChange(pendingInstallURL)`,
@@ -351,14 +335,17 @@ final class TemplateInstallUITests: ScarfUITestCase {
         // assertion is unconditional. Re-query rather than reusing the
         // earlier handle because XCUITest sometimes caches a stale
         // snapshot of `.exists`.
-        let removedDeadline = Date().addingTimeInterval(15)
-        var stillThere = true
-        while stillThere && Date() < removedDeadline {
-            Thread.sleep(forTimeInterval: 0.5)
-            stillThere = app.descendants(matching: .any)
-                .matching(NSPredicate(format: "identifier BEGINSWITH 'projects.row.HackerNews Daily Digest'"))
-                .firstMatch.exists
-        }
+        let removedRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'projects.row.HackerNews Daily Digest'"))
+            .firstMatch
+        // `waitForExistence` only waits for APPEARANCE; disappearance needs
+        // a predicate expectation, which also re-snapshots the tree on each
+        // poll (a plain `.exists` re-read can serve a stale snapshot).
+        let gone = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: removedRow
+        )
+        let stillThere = XCTWaiter().wait(for: [gone], timeout: 15) != .completed
         if stillThere {
             let remaining = app.descendants(matching: .any)
                 .matching(NSPredicate(format: "identifier BEGINSWITH 'projects.row.'"))
@@ -378,21 +365,8 @@ final class TemplateInstallUITests: ScarfUITestCase {
             "Project still in sidebar after uninstall — registry write didn't complete?"
         )
 
-        // 10. Graceful quit. XCTest's implicit teardown auto-terminate
-        // has been observed to fail with "Failed to terminate
-        // com.scarf.app:0" after long journeys involving multiple
-        // sheet open/close cycles. Sending ⌘Q here lets Scarf go
-        // through its normal NSApp.terminate flow (which respects
-        // any save-window-state work the WindowGroup wants to do)
-        // BEFORE the runner tries to force-terminate. Result: clean
-        // green test instead of a phantom-failure-after-success.
-        app.typeKey("q", modifierFlags: .command)
-        // Wait briefly for the app to actually exit. If it doesn't,
-        // the auto-terminate will still try and may still fail —
-        // but at least we gave it the polite-quit chance first.
-        let exitDeadline = Date().addingTimeInterval(5)
-        while app.state != .notRunning && Date() < exitDeadline {
-            Thread.sleep(forTimeInterval: 0.2)
-        }
+        // 10. Graceful quit before XCTest's implicit teardown reaches for
+        // force-terminate — see `ScarfUITestCase.gracefulQuit` for why.
+        gracefulQuit(app)
     }
 }

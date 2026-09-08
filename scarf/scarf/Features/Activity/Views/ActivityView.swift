@@ -93,6 +93,8 @@ struct ActivityView: View {
             Rectangle().fill(Color.orange.opacity(0.25)).frame(height: 1),
             alignment: .bottom
         )
+        // Sweep contract: see DashboardView.readErrorBanner.
+        .accessibilityIdentifier("error.banner")
     }
 
     // MARK: - Page header

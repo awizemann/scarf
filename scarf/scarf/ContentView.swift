@@ -18,6 +18,26 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 180, ideal: 224, max: 360)
         } detail: {
             detailView
+                // Every routed section is addressable from XCUITest as
+                // `<rawValue>.root` (e.g. "Dashboard.root", "MCP
+                // Servers.root") — the same vocabulary the sidebar rows
+                // use (`sidebar.section.<rawValue>`), so the sweep test
+                // can pair a row with its destination without a second
+                // mapping. Applied ONCE here rather than per-view: the
+                // switch below is the only place that knows which
+                // section is on screen, so a new `SidebarSection` case
+                // is sweepable the moment it is routed. A scan test
+                // (`SectionCatalogTests`) keeps the shared section list
+                // honest.
+                //
+                // GOTCHA: `.accessibilityIdentifier` on a plain container
+                // propagates DOWN to descendant elements that have no
+                // identifier of their own — it does not create an element.
+                // That is fine (and is what makes the id findable at all
+                // here), but it means `<section>.root` may match several
+                // elements; always use `.firstMatch` / `waitForExistence`
+                // rather than asserting on a unique count.
+                .accessibilityIdentifier("\(coordinator.selectedSection.rawValue).root")
                 .toolbar {
                     ToolbarItem(placement: .navigation) {
                         ServerSwitcherToolbar()
