@@ -218,7 +218,7 @@ struct HermesFileService: Sendable {
         case memory
         case userProfile
 
-        var fileName: String {
+        nonisolated var fileName: String {
             switch self {
             case .memory: return "MEMORY.md"
             case .userProfile: return "USER.md"
@@ -1580,7 +1580,9 @@ struct HermesFileService: Sendable {
         }
     }
 
-    private static let backupTimestampFormatter: DateFormatter = {
+    /// `nonisolated`: DateFormatter is documented thread-safe for formatting
+    /// once configured, and this one is never reconfigured after init.
+    nonisolated private static let backupTimestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
@@ -1591,7 +1593,7 @@ struct HermesFileService: Sendable {
     /// Config paths this process has already backed up. A tiny lock-guarded
     /// set rather than a `@MainActor` flag, because every caller here is
     /// `nonisolated` and runs off-main by charter C10.
-    private final class PathSet: @unchecked Sendable {
+    nonisolated private final class PathSet: @unchecked Sendable {
         private let lock = NSLock()
         private var paths: Set<String> = []
         /// - Returns: `true` when the path was NOT already present.
@@ -1601,7 +1603,7 @@ struct HermesFileService: Sendable {
             return paths.insert(path).inserted
         }
     }
-    private static let backedUpConfigPaths = PathSet()
+    nonisolated private static let backedUpConfigPaths = PathSet()
 
     // MARK: - MCP YAML: mutators
 

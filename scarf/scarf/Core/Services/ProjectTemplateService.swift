@@ -309,9 +309,9 @@ struct ProjectTemplateService: Sendable {
     /// markdown files, a dashboard and a cron spec — kilobytes. These are
     /// two orders of magnitude above anything legitimate, so they can only
     /// ever stop something that is not a template.
-    static let maxTemplateArchiveBytes: Int64 = 64 * 1024 * 1024
-    static let maxTemplateUnpackedBytes: Int64 = 256 * 1024 * 1024
-    static let maxTemplateEntries = 5_000
+    nonisolated static let maxTemplateArchiveBytes: Int64 = 64 * 1024 * 1024
+    nonisolated static let maxTemplateUnpackedBytes: Int64 = 256 * 1024 * 1024
+    nonisolated static let maxTemplateEntries = 5_000
 
     /// Refuse a bundle before extracting it.
     ///

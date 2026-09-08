@@ -86,11 +86,11 @@ enum WidgetFileRead {
     /// Text parity with `ProjectDashboardService.maxJSONBytes`: the file is
     /// rendered as markdown into a panel a few hundred points tall, so this
     /// is already far past generous.
-    static let maxTextBytes: Int64 = 4 * 1024 * 1024
+    nonisolated static let maxTextBytes: Int64 = 4 * 1024 * 1024
     /// Images decode to roughly `width × height × 4` bytes regardless of
     /// how well the file compresses, so the file cap is the wrong lever on
     /// its own — see `downsample`. This bounds the read.
-    static let maxImageBytes: Int64 = 32 * 1024 * 1024
+    nonisolated static let maxImageBytes: Int64 = 32 * 1024 * 1024
 
     /// `"<mtime-seconds>:<size>"`, or `nil` when the file isn't there.
     ///
