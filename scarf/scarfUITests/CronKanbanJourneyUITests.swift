@@ -167,108 +167,86 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
 
         // --- Pause and delete ------------------------------------------
         //
-        // KNOWN FAILING, and deliberately landed as such rather than
-        // dropped: nothing in `CronView`'s job list responds to XCUITest.
-        // A left click on `cron.row.<id>` never opens the detail pane
-        // (tried six times per run, across window sizes up to full screen);
-        // a right click never presents the row's context menu; and the
-        // detail pane is absent from the accessibility tree entirely — not
-        // its buttons, not even its "Select a cron job" placeholder — so
-        // there is no third way in. Everything ELSE in this journey works:
-        // the create round-trips through `hermes cron create` into
-        // `cron/jobs.json` and back onto the screen.
+        // Driven through the row's CONTEXT MENU, with the paused state
+        // read back off the ROW and off `cron/jobs.json` — the detail
+        // pane's own Pause/Delete buttons are a second path to the same
+        // view-model calls, and the row path also proves the row itself
+        // takes a click.
         //
-        // `XCTExpectFailure(strict: false)` keeps the release gate honest
-        // in both directions: the suite stays green while the bug is open,
-        // the failure is still recorded in the result bundle, and the day
-        // the rows become reachable this passes with no edit. It must NOT
-        // be turned into a skip — a skip would stop exercising pause and
-        // delete at all.
-        XCTExpectFailure(
-            "Cron list rows do not respond to synthesized clicks and the detail pane is not in the accessibility tree — the same reason a VoiceOver user cannot reach it.",
-            strict: false
-        ) {
-            // --- Pause ----------------------------------------------------
-            //
-            // Through the row's CONTEXT MENU, not the detail pane's Pause
-            // button, and the paused state is read off the ROW.
-            //
-            // Why: `CronView`'s detail pane (the second child of its
-            // `HSplitView`) never appears in the accessibility tree at all —
-            // not its buttons, not even its "Select a cron job" placeholder —
-            // at any window width tried, including full screen. Clicking the
-            // row six times in a row left the pane absent. The list pane and
-            // its rows are fully addressable, and the row already speaks its
-            // own state ("…, paused, Status, every 120m, …"), so the journey
-            // drives and verifies the surface that is actually reachable.
-            // `cron.detail.*` identifiers are left in place for when that is
-            // fixed — it is filed as its own bug, and it means a VoiceOver user
-            // cannot reach the cron detail pane either.
-            XCTAssertFalse(
-                jobRow.label.lowercased().contains("paused"),
-                "A freshly created job should not read as paused, but the row says '\(jobRow.label)'."
-            )
+        // These steps were wrapped in `XCTExpectFailure(strict: false)`
+        // while cron rows were unclickable (t-0fb3b91f: an unselected
+        // row's background was `Color.clear`, so a `.plain` Button's hit
+        // area was its glyphs only, and the detail pane consequently had
+        // nothing selected to show). The wrapper is gone — these assert
+        // for real.
+        // --- Pause ----------------------------------------------------
+        //
+        // The row speaks its own state ("<name>, paused"), so the pause is
+        // asserted on the row, on `cron/jobs.json` and on the CLI.
+        XCTAssertFalse(
+            jobRow.label.lowercased().contains("paused"),
+            "A freshly created job should not read as paused, but the row says '\(jobRow.label)'."
+        )
 
-            jobRow.rightClick()
-            let pauseItem = app.menuItems["Pause"]
-            XCTAssertTrue(pauseItem.waitForExistence(timeout: 15),
-                          "The cron row's context menu offered no Pause item. On screen: \(visibleIdentifiers(app))")
-            pauseItem.click()
+        jobRow.rightClick()
+        let pauseItem = app.menuItems["Pause"]
+        XCTAssertTrue(pauseItem.waitForExistence(timeout: 15),
+                      "The cron row's context menu offered no Pause item. On screen: \(visibleIdentifiers(app))")
+        pauseItem.click()
 
-            XCTAssertTrue(
-                waitUntil("cron pause reaches jobs.json", timeout: 30) {
-                    self.cronJobsOnDisk().first { $0.id == job.id }?.enabled == false
-                },
-                "Pausing did not flip enabled=false for \(job.id) in cron/jobs.json. cron.message says: '\(cronMessage(app))'."
-            )
-            // The same fact through the CLI. `cron list` HIDES paused jobs, so
-            // `--all` is the read that proves it is both present and paused —
-            // and the bare form proves the hiding, which is the behaviour a
-            // reader of this test would otherwise get wrong.
-            let listedAll = runHermes(["cron", "list", "--all"]).stdout
-            XCTAssertTrue(listedAll.contains(job.id) && listedAll.contains("[paused]"),
-                          "`hermes cron list --all` does not show \(job.id) as paused:\n\(listedAll)")
-            XCTAssertFalse(runHermes(["cron", "list"]).stdout.contains(job.id),
-                           "A paused job should be absent from a bare `hermes cron list`, but \(job.id) is listed.")
+        XCTAssertTrue(
+            waitUntil("cron pause reaches jobs.json", timeout: 30) {
+                self.cronJobsOnDisk().first { $0.id == job.id }?.enabled == false
+            },
+            "Pausing did not flip enabled=false for \(job.id) in cron/jobs.json. cron.message says: '\(cronMessage(app))'."
+        )
+        // The same fact through the CLI. `cron list` HIDES paused jobs, so
+        // `--all` is the read that proves it is both present and paused —
+        // and the bare form proves the hiding, which is the behaviour a
+        // reader of this test would otherwise get wrong.
+        let listedAll = runHermes(["cron", "list", "--all"]).stdout
+        XCTAssertTrue(listedAll.contains(job.id) && listedAll.contains("[paused]"),
+                      "`hermes cron list --all` does not show \(job.id) as paused:\n\(listedAll)")
+        XCTAssertFalse(runHermes(["cron", "list"]).stdout.contains(job.id),
+                       "A paused job should be absent from a bare `hermes cron list`, but \(job.id) is listed.")
 
-            XCTAssertTrue(
-                waitUntil("paused state reaches the row", timeout: 25) {
-                    jobRow.exists && jobRow.label.lowercased().contains("paused")
-                },
-                "jobs.json says \(job.id) is paused but its row still reads '\(jobRow.label)' — the UI is showing stale state."
-            )
-            attachScreenshot(app, named: "cron — paused", keepAlways: false)
+        XCTAssertTrue(
+            waitUntil("paused state reaches the row", timeout: 25) {
+                jobRow.exists && jobRow.label.lowercased().contains("paused")
+            },
+            "jobs.json says \(job.id) is paused but its row still reads '\(jobRow.label)' — the UI is showing stale state."
+        )
+        attachScreenshot(app, named: "cron — paused", keepAlways: false)
 
-            // --- Delete ---------------------------------------------------
-            jobRow.rightClick()
-            let deleteItem = app.menuItems["Delete"]
-            XCTAssertTrue(deleteItem.waitForExistence(timeout: 15),
-                          "The cron row's context menu offered no Delete item.")
-            deleteItem.click()
+        // --- Delete ---------------------------------------------------
+        jobRow.rightClick()
+        let deleteItem = app.menuItems["Delete"]
+        XCTAssertTrue(deleteItem.waitForExistence(timeout: 15),
+                      "The cron row's context menu offered no Delete item.")
+        deleteItem.click()
 
-            // The confirmation is a SwiftUI `confirmationDialog`, which macOS
-            // renders as an alert whose buttons are addressed by label — an
-            // identifier applied in the dialog builder does not survive the
-            // AppKit bridge.
-            let confirmDelete = app.buttons.matching(NSPredicate(format: "label == %@", "Delete")).firstMatch
-            XCTAssertTrue(confirmDelete.waitForExistence(timeout: 15),
-                          "Delete confirmation dialog never appeared.")
-            confirmDelete.click()
+        // The confirmation is a SwiftUI `confirmationDialog`, which macOS
+        // renders as an alert whose buttons are addressed by label — an
+        // identifier applied in the dialog builder does not survive the
+        // AppKit bridge.
+        let confirmDelete = app.buttons.matching(NSPredicate(format: "label == %@", "Delete")).firstMatch
+        XCTAssertTrue(confirmDelete.waitForExistence(timeout: 15),
+                      "Delete confirmation dialog never appeared.")
+        confirmDelete.click()
 
-            XCTAssertTrue(
-                waitUntil("cron remove reaches jobs.json", timeout: 30) {
-                    !self.cronJobsOnDisk().contains { $0.id == job.id }
-                },
-                "Confirming Delete did not remove \(job.id) from cron/jobs.json. cron.message says: '\(cronMessage(app))'."
-            )
-            XCTAssertFalse(runHermes(["cron", "list", "--all"]).stdout.contains(job.id),
-                           "`hermes cron list --all` still lists the deleted job \(job.id).")
-            XCTAssertTrue(
-                waitUntil("deleted row disappears", timeout: 25) { !jobRow.exists },
-                "\(job.id) is gone from jobs.json but cron.row.\(job.id) is still on screen."
-            )
+        XCTAssertTrue(
+            waitUntil("cron remove reaches jobs.json", timeout: 30) {
+                !self.cronJobsOnDisk().contains { $0.id == job.id }
+            },
+            "Confirming Delete did not remove \(job.id) from cron/jobs.json. cron.message says: '\(cronMessage(app))'."
+        )
+        XCTAssertFalse(runHermes(["cron", "list", "--all"]).stdout.contains(job.id),
+                       "`hermes cron list --all` still lists the deleted job \(job.id).")
+        XCTAssertTrue(
+            waitUntil("deleted row disappears", timeout: 25) { !jobRow.exists },
+            "\(job.id) is gone from jobs.json but cron.row.\(job.id) is still on screen."
+        )
 
-        }
 
         // The fixture's own jobs must survive a journey that only ever
         // touched its own job.
