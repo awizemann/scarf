@@ -42,3 +42,8 @@ Landed as commits 8d1c5dc, 7887687, 453465a, 9bc58c4, abdd0e7, e5d393a plus audi
 - [fact] App-target tests capture emitted events by installing CapturingUsageTracker via Analytics.install; every suite that installs into the process-wide seam must share one .serialized parent #testing
 - [fact] The write key is never in source; it reaches the binary via gitignored scarf/Configs/SwiftStatsLocal.xcconfig → committed SwiftStats.xcconfig → Info.plist SwiftStatsWriteKey → Analytics.writeKey; canonical copy lives in Keychain vendor swift-stats-write-key #security
 - [fact] UsageEvent (scarf/scarf/Core/Services/UsageEvent.swift) is a closed 32-case enum that IS the taxonomy, enforced by the type checker via UsageTracking seam #architecture
+
+## Relations
+- relates_to [[ScarfGo iOS Companion App]]
+- relates_to [[Uninstall + keychain trust boundaries: re-derive at time-of-use (S1)]]
+- relates_to [[ScarfCore tests inject a temp Hermes home via ServerContext.local(home:)]]

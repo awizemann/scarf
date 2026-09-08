@@ -5,10 +5,10 @@ permalink: scarf/architecture/project-lifecycle-transitions-have-side-effects-ou
 tags: [projects, lifecycle, doctor, uninstall, archive]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectLifecycleService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/ProjectsViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDoctorService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectContextBlock.swift, scarf/scarf/Core/Services/ProjectTemplateUninstaller.swift]
 source_paths_inferred: false
-source_sha: 73fefe98e639a3d2692dd3bd38afd2a74a5049cb
+source_sha: 91ae15fa9560c87a913c3b5ef14b8915b7ab5028
 created: 2026-09-04
 updated: 2026-09-04
-reviewed: 2026-09-04
+reviewed: 2026-09-07
 reviewed_by: audit:claude-code (background)
 ---
 

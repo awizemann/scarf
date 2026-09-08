@@ -18,7 +18,7 @@ reviewed_by: audit:claude-code (background)
 - [gotcha] ACPClient is a reentrant actor — pre-await guards are not mutual exclusion; use in-flight task + generation counter, and stop() must never await an in-flight request #acp
 - [fact] .stringsdata build intermediates are the authoritative string-extraction oracle under headless xcodebuild; diff them against Localizable.xcstrings #i18n
 - [gotcha] Plural-hack key detection requires %lld AND letter-before-%@ conjoined; bare pattern falsely flags the v%@ version family #i18n
-- [decision] Config-parity gate widened to all 21 config-writer files (AllConfigWritersParityTests); new writer files must register in knownWriters — it caught the google_chat read-loop gap immediately #config-parity
+- [decision] Config-parity gate widened to all 22 config-writer files (AllConfigWritersParityTests); detection via GuardedTextFile label markers (label: "config.yaml") instead of prior writeText/paths.configYAML span patterns; new writer files must register in knownWriters — catches undiscovered writers immediately #config-parity
 
 ## Relations
 - relates_to [[Hermes v0.21 Compatibility Decisions]]

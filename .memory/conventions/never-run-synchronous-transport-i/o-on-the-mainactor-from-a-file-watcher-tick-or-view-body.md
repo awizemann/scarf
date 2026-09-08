@@ -3,7 +3,7 @@ title: Never run synchronous transport I/O on the MainActor from a file-watcher 
 type: note
 permalink: scarf/conventions/never-run-synchronous-transport-i/o-on-the-mainactor-from-a-file-watcher-tick-or-view-body
 created: 2026-06-21
-updated: 2026-09-04
+updated: 2026-09-07
 ---
 
 ## Observations
@@ -66,3 +66,14 @@ model, which is why two sweeps of the view models missed them.
   only the view models. A consent surface is the worst place to block: it
   is modal-feeling, user-initiated, and the one interaction the user cannot
   skip.
+
+
+
+## GW-F6 (t-26bf60b8): the two remaining main-actor guarded writers (audit PERF H1/H2)
+
+Commit 10c3475f. The E5 perf audit found the guarded-write arc had WIDENED two pre-existing main-actor sites rather than introduced them (the proof probe and the `.bak` each add spawns), which is what made them worth moving.
+
+- [decision] `SkillsViewModel.selectSkill/selectFile/saveEdit` and `SettingsViewModel.saveDirectYAML` (plus its three `save*` callers) are `async` and run their guarded I/O in `Task.detached`, `KanbanToolsetEnabler.applyPlan` style. Worst case before: 1→4 spawns × 60s each on a dead remote, synchronously on the main actor — charter C10's exact prohibition. Call sites are `Task { await … }` in the SwiftUI action, which is why the signature change stayed cheap. #performance
+- [constraint] ONE `Task.detached` FOR THE WHOLE READ-MODIFY-WRITE, never one per step: `RegistryWriteLock`'s reentrancy bookkeeping is THREAD-LOCAL, so a hold taken on the load's thread cannot cover a write running on another. Same rule `KanbanToolsetEnabler` documents; `saveDirectYAML` returns a `DirectYAMLOutcome` from inside the hold so every `@Observable` mutation happens back on the main actor.
+- [decision] `SettingsViewModel.mainActorLockWait` (the 2s acquire override) is GONE — the lock inherits the context bound like every other adopter now that the frame is off-main. `RegistryWriteLock.withAcquireTimeout` survives with no production caller, documented as a test seam and as the wrong reach: if you want it from a main-actor frame, move the frame instead.
+- [gotcha] AN ASYNC LOAD NEEDS LAST-SELECTION-WINS AND THE SAVE NEEDS A REENTRANCY GUARD. Clicking down a skill list starts one detached load per row and they finish out of order, so `contentToken` stamps each attempt and a stale result is dropped rather than painted under the current file's name; `isSavingContent` disables Save so a double-tap can't start a second write racing the first one's proof-token refresh. `isLoadingContent` is the spinner. Neither hazard existed while the work was synchronous — they are the cost of the move, and they are the first thing to check on the next one.

@@ -3,12 +3,12 @@ title: Registry writes take a reentrant cross-process file lock; remote is best-
 type: note
 permalink: scarf/decisions/registry-writes-take-a-reentrant-cross-process-file-lock
 tags: [projects, registry, concurrency, mcp, dataloss, locking]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RegistryWriteLock.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDashboardService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SessionAttributionService.swift, scarf/scarf/Core/Services/HermesFileWatcher.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RegistryWriteLock.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDashboardService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SessionAttributionService.swift, scarf/scarf/Core/Services/HermesFileWatcher.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedTextFile.swift, scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift]
 source_paths_inferred: false
-source_sha: 5dd8e409667ca8bfde68d3138339bf2c85b7d139
+source_sha: a5fb2eb0d5ab79996602b16419b9b44249680e53
 created: 2026-09-04
-updated: 2026-09-04
-reviewed: 2026-09-04
+updated: 2026-09-07
+reviewed: 2026-09-07
 reviewed_by: audit:claude-code (background)
 ---
 
@@ -48,3 +48,15 @@ t-07e909e0, from the P8 audit (DI H4/H5/M4/M5, SEC M5). The lock was correct abo
 - [decision] SIDECARS (M4): `MiniAppGrantStore.mutate` and `SessionAttributionService.mutate` take the same lock, keyed on their OWN file path (`<path>.lock`), so a permission write never queues behind a projects.json save. Cross-DEVICE stays last-write-wins BY CONSTRUCTION and is now documented as such: a Mac and an iPhone on one remote `~/.hermes` hold local stand-in locks that cannot see each other. Tolerable where it is not for the registry — a dropped grant re-prompts, a dropped attribution is re-derived, a dropped project row exists nowhere else #remote
 - [gotcha] The lock file is AGENT-WRITABLE (SEC-M5) and now says so in its own header: anything with write access to `~/.hermes/scarf/` can hold it (DoS until the staleness bound) or delete a live one (re-opening the race for one write). It is a protocol between COOPERATING Scarf processes, never an integrity guarantee. The integrity layer is `saveRegistry`'s guarded inspect — refuse over damage, over an unexpected `expecting:` fingerprint, over a non-empty file with an empty list — which holds whether or not the lock was honoured #security
 - [constraint] Every new hold is one SYNCHRONOUS `nonisolated` frame, verified case by case: reentrancy is a `Thread.threadDictionary` depth, so a hold spanning an `await` would set the depth on one thread and clear it on another and leak the file lock. `RemoteRestoreService.reanchorProjectsRegistry` is `async` but its locked closure is not, which is the shape to copy. No cross-lock cycle exists either — the uninstaller's grant cleanup runs AFTER the registry lock is released, and registry→sidecar is the only ordering anywhere #gotcha
+
+
+## GW-F3 — the lock is no longer registry-only
+
+- [decision] (GW-F3, DI H4) The same lock now serializes the hand-authored TEXT files too, not just the JSON registry and sidecars. `GuardedTextFile(context:label:)` derives a `RegistryWriteLock` per protected path and takes it around the WHOLE read-modify-write; the type name is now historical — read it as "Scarf's one advisory write lock". Locked paths: `config.yaml`, `.env`, `MEMORY.md`, `USER.md`. Deliberately NOT locked: per-project `AGENTS.md`, per-skill `SKILL.md`, a bot's `profile.yaml` #guarded-write
+- [fact] (GW-F3) New API: `RegistryWriteLock.withAcquireTimeout(_:)` returns the same lock with a different wait bound. Exactly one caller — `SettingsViewModel.saveDirectYAML`, which is still synchronous on the main actor — passes 2s so a contended save reports `registryBusy` instead of freezing the UI for the 60s remote default (charter C10). Remove the override when PERF H2 / t-26bf60b8 moves that frame off-main #concurrency
+- [gotcha] (GW-F3) No path in the app nests a text lock inside a registry lock or vice versa, and that is load-bearing: the template installer takes MEMORY.md's lock in `appendMemoryIfNeeded` and the registry's in `registerProject` SEQUENTIALLY, and the uninstaller strips the memory block before it takes the registry lock. Keep them sequential — two different lock files acquired in inconsistent order across paths is a classic deadlock, and the reentrancy that saves same-lock nesting does nothing for it #concurrency
+- [gotcha] (GW-F3) The reentrancy is THREAD-LOCAL, which is why an async adopter must run the entire read-modify-write inside ONE `Task.detached`. `KanbanToolsetEnabler`'s two-detached-tasks shape (load in one, write in the other) could not hold a lock at all and was collapsed into a single `applyPlan` #concurrency
+
+
+
+- [done] GW-F6 (10c3475f) removed that 2s override: `SettingsViewModel.saveDirectYAML` now runs its whole read-modify-write in one `Task.detached`, so it inherits the context acquire bound like every other adopter. `withAcquireTimeout` has NO production caller today — it stays as the F3 contention tests' seam, and as the documented wrong answer for a main-actor frame (move the frame off-main instead).

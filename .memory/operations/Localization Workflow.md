@@ -7,7 +7,7 @@ source_paths: [tools/validate-catalog.py]
 source_paths_inferred: true
 source_sha: 7ccb6d6d5feb78ddf9809429181d313a1db31775
 created: 2026-05-29
-updated: 2026-09-02
+updated: 2026-09-08
 ---
 
 ## Observations
@@ -39,3 +39,13 @@ updated: 2026-09-02
 - [rule] Plural hacks are retired via **automatic grammar agreement** (`^[\(n) incident](inflect: true)`), not String Catalog plural variations: the catalog has zero `variations` entries, tools/translations is flat key→string, and validate-catalog.py assumes `stringUnit`. Keep the markup for de/es/fr/pt-BR; DROP it for ja/zh-Hans (no plural agreement). Delete the old hack key from the catalog — an unused stale key reads as translated while the live site renders the new one. 18 → 11 hack keys after F7; the two deliberate exceptions are unchanged #rule
 - [gotcha] `.stringsdata` lives under the DerivedData directory for THIS project path — find it with `xcodebuild -showBuildSettings | grep OBJROOT`. A sibling worktree's DerivedData holds identically-named files whose `source` points elsewhere; diffing those reports "0 missing" and looks like success #tooling
 - [gotcha] `tools/merge-translations.py` only writes keys that ALREADY exist in Localizable.xcstrings. Insert new keys into the catalog FIRST, then merge — otherwise everything lands in `unknown-keys-skipped` and the script exits 1 #tooling
+
+
+- [gotcha] An interactive Xcode extraction run from the **macOS scheme alone DELETES keys whose only call sites are in the iOS target** — the 2026-09-08 pass (+425 keys) silently dropped `%lld prompt%@ queued — manage on the Mac app`, `ScarfGo`, `%@ (%lld)`, `%@. %@`, `%lld file%@`. Two were plural hacks, so `pluralHackSetIsNonEmpty` (>= 10) went red, and `ScarfGo` leaving the catalog broke `fallbackListIsCurrent` ("not in catalog") — two gate failures that look unrelated to the missing translations. Fix: diff `git show HEAD:scarf/scarf/Localizable.xcstrings` against the working copy and restore the removed entries verbatim (their translations come back with them); the alternative is extracting both schemes before translating #gotcha
+- [tooling] **The catalog's on-disk format after an Xcode save is NOT what `merge-translations.py` writes.** Xcode emits `"key" : value` (space before the colon), empty objects as `{\n\n}`, and a file with **no trailing newline**; `json.dump(indent=2)` emits `"key": value` + newline, which rewrites all ~95k lines. When the working copy is Xcode-formatted, patch it with a small serializer that reproduces that style and preserves the existing key order (Xcode's sort is not codepoint order — `"—"` sorts near the top — so never re-sort), then mirror the same strings into `tools/translations/<locale>.json` for the merge tool. Verified byte-for-byte round-trip before writing #tooling
+- [rule] Translating a fresh extraction: derive the authoritative missing list from the THREE legitimate hole categories in `scarfTests/LocalizationCatalogTests.swift` (read `englishFallbackKeys` straight out of the Swift source), not from raw locale coverage. Then self-audit mechanically — specifier multiset (positional prefixes stripped) equal between source and every translation, inflect markup present for de/es/fr/pt-BR and spelled out for ja/zh-Hans, and a base-vs-new diff proving no pre-existing translation changed value #rule
+
+
+## iOS-only key pruning is now gated (2026-09-08)
+
+- [rule] The six iOS-only catalog keys are pinned by `LocalizationCatalogTests.iosOnlyKeysAreStillInTheCatalog` (scarf/scarfTests/LocalizationCatalogTests.swift, list: `iosOnlyKeys`). A macOS-scheme extraction that prunes them now fails the scarf scheme's tests with the restore procedure in the failure message (restore verbatim from git). Building the iOS scheme does NOT protect them — confirmed twice (2026-09-08): the iOS scheme never writes back to the shared catalog, so iOS-only keys are hand-maintained. A key added for an iOS-only call site must be hand-added to the catalog AND appended to `iosOnlyKeys`.

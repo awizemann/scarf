@@ -11,8 +11,6 @@ reviewed: 2026-09-01
 reviewed_by: audit:claude-code (background)
 ---
 
-How Milestone 1 (the first-class `ScarfProject`) was actually built, and the non-obvious calls a future agent must know before touching the model, the registry, or the fleet/portfolio work. Built on `feat/projects` per the impl spec.
-
 ## Observations
 - [model] `ScarfProject` (ScarfCore/Models) is the canonical record: `id: UUID`, name, rootPath, created/updatedAt, modelPresetId, scopedToolsets/Skills (empty — deferred), board, cronJobIds, memoryNamespace, secretsScope, templateLockRef, hostBindings, miniApps, extra. Codable is hand-written, lenient + additive (decodeIfPresent + defaults; minimal `{id,name,rootPath}` decodes; unknown keys preserved in `extra: [String: JSONValue]` field to protect against agent writes and future schema extensions) with ISO-8601 string dates — self-contained, no decoder-strategy dependency. #scarfproject
 - [id-decision] `ProjectEntry.id` STAYS the display name (`var id: String { name }`). The stable UUID was added as a SEPARATE `uuid: UUID?` metadata field, NOT by retyping `id` to UUID. Why: `id`/name is load-bearing for SwiftUI selection (`selectedProjectName`), `.sheet(item:)`, and ForEach across the whole app; retyping would ripple through selection/equality everywhere — risky and out of M1 scope. `ProjectEntry` Equatable/Hashable are hand-written to EXCLUDE `uuid` (logical identity = name+path+folder+archived) so back-filling the UUID never disturbs selection highlight or sheet identity. Canonical stable id lives on `ScarfProject.id`; `ProjectEntry.uuid` mirrors it. **Fleet/portfolio (Phase-1 #4) keys on the UUID, not the name.** #decision #gotcha
@@ -24,7 +22,7 @@ How Milestone 1 (the first-class `ScarfProject`) was actually built, and the non
 - [cockpit] `ProjectCockpitView` is a `DashboardTab.cockpit` tab inside the Projects feature (not a new sidebar section). Header (name/path/model badge/host badges) + panel bar reusing `ProjectSessionsView` + `ProjectKanbanTab` (gated on `hasKanban`) + 5 new lightweight read-only panels (Context/Cron/Memory/Secrets/Templates). Backed by `ProjectCockpitViewModel` (one off-main load). #cockpit
 - [deferred] Tool/skill scoping NOT built — `scopedToolsets`/`scopedSkills` always empty; ACP adapter hardcodes `enabled_toolsets`, no per-session seam. Unblocks on NousResearch/hermes-agent#45958. Mini-apps = Milestone 2 (will add `ScarfProject.miniApps` + the `scarf-miniapp://` bridge). #deferred
 - [done] Installer parity gap CLOSED (in commit 9be1e2f): `ProjectTemplateInstaller.registerProject` mints the uuid and `install()` writes `.scarf/project.json` after the lock file lands, symmetric with the scaffolder. Phase 3 (9be1e2f) then removed the underlying hazard — `derive(from:)` no longer mints a fresh random uuid per call; see [[Project ids are derived from (host, path), never minted on a read]]. #done
-- [tests] ScarfCore: 637 pass incl. new `ScarfProjectTests` (4) + `ProjectStoreTests` (8). App: `ProjectAgentContextServiceTests` 13/13 (SECRET-SAFE + IDEMPOTENT held), `ProjectScaffolderTests` 3/3. See [[Fast test-iteration commands (swift test vs xcodebuild)]]. #testing
+- [tests] ScarfCore: 637+ pass incl. new `ScarfProjectTests` (4) + `ProjectStoreTests` (21). App: `ProjectAgentContextServiceTests` 13/13 (SECRET-SAFE + IDEMPOTENT held), `ProjectScaffolderTests` 3/3. See [[Fast test-iteration commands (swift test vs xcodebuild)]]. #testing
 
 ## Relations
 - relates_to [[ScarfCore tests inject a temp Hermes home via ServerContext.local(home:)]]

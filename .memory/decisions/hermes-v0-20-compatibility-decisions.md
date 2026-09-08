@@ -4,10 +4,10 @@ type: note
 permalink: scarf/decisions/hermes-v0-20-compatibility-decisions
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesMessage.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/CuratorService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesTool.swift]
 source_paths_inferred: false
-source_sha: 676f7d8dffc2c34a567124e08b36d30c650ca587
+source_sha: a5fb2eb0d5ab79996602b16419b9b44249680e53
 created: 2026-08-03
 updated: 2026-08-12
-reviewed: 2026-09-02
+reviewed: 2026-09-07
 reviewed_by: audit:claude-code (background)
 ---
 

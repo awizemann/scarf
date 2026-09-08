@@ -5,9 +5,11 @@ permalink: scarf/decisions/the-skill-is-tool-first-and-scarf-deletes-skills-that
 tags: [projects, skills, mcp, phase-6, agents]
 source_paths: [scarf/scarf/Resources/BuiltinSkills.bundle/scarf-template-author/SKILL.md, scarf/scarf/Core/Services/SkillBootstrapService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectContextBlock.swift, scarf/scarfTests/SkillBootstrapServiceTests.swift]
 source_paths_inferred: false
-source_sha: 2660f501f521ae0d86b2027f5c99d1db141b916a
+source_sha: 4aabf5c24fba7eca2879f877c64b28acfcd604b2
 created: 2026-09-03
 updated: 2026-09-03
+reviewed: 2026-09-07
+reviewed_by: audit:claude-code (background)
 ---
 
 Phase 6 (final) of projects-first-class, branch feat/projects-first-class, task t-2cea158a. Phase 5 gave agents the `scarf-projects` MCP tools; this phase changes what agents are TOLD, which is the half that actually produced the 2026-09-02 corruption. Three surfaces move together, because an agent reads whichever one it happens to hit: the bundled skill, the per-chat AGENTS.md managed block, and the set of installed skills competing for activation.

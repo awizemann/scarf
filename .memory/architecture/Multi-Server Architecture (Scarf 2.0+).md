@@ -5,10 +5,10 @@ permalink: scarf/architecture/multi-server-architecture-scarf-2.0
 tags: [architecture, transport, ssh]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHTransport.swift, scarf/scarf/Features/Servers/Views/RemoteDiagnostics.swift, scarf/scarf/Features/Servers/ViewModels/RemoteDiagnosticsViewModel.swift, scarf/scarf/Features/Servers/ViewModels/TestConnectionProbe.swift, README.md]
 source_paths_inferred: false
-source_sha: 73fefe98e639a3d2692dd3bd38afd2a74a5049cb
+source_sha: 9b1d97497a9dab2e58137d071729db6bf72d9035
 created: 2026-05-29
 updated: 2026-05-29
-reviewed: 2026-09-04
+reviewed: 2026-09-07
 reviewed_by: audit:claude-code (background)
 ---
 

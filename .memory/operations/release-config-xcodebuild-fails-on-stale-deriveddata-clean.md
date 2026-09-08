@@ -13,3 +13,6 @@ updated: 2026-09-04
 ## Observations
 - [gotcha] An incremental `xcodebuild -scheme scarf -configuration Release build` can fail with bogus `cannot find type 'ProjectDoctorService' in scope` / `'RegistryLoadResult' is not a member type` errors in ScarfProjectsMCPKit — a stale Release ScarfCore.swiftmodule in DerivedData, not a real regression #build
 - [convention] Reproduced on clean `main` with all local changes stashed before blaming a diff; `-configuration Release clean build` succeeds. Always add `clean` when verifying the Release config, and stash-test before treating a Release-only error as yours #build
+
+## Relations
+- documents_gotcha_in [[scarf/ops/build-and-release-workflow]]

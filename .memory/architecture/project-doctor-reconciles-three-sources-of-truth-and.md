@@ -5,9 +5,11 @@ permalink: scarf/architecture/project-doctor-reconciles-three-sources-of-truth-a
 tags: [projects, doctor, phase-4, registry, reconciliation]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDoctorService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectDoctorFinding.swift, scarf/scarf/Features/Projects/ViewModels/ProjectDoctorViewModel.swift, scarf/scarf/Features/Projects/ViewModels/ProjectHealthCache.swift, scarf/scarf/Features/Projects/Views/ProjectDoctorSheet.swift]
 source_paths_inferred: false
-source_sha: d21211a80383f52362a245594865a321c60dc058
+source_sha: a5fb2eb0d5ab79996602b16419b9b44249680e53
 created: 2026-09-03
 updated: 2026-09-03
+reviewed: 2026-09-07
+reviewed_by: audit:claude-code (background)
 ---
 
 Phase 4 of projects-first-class (branch feat/projects-first-class, t-eb8c7005, commit d21211a). `ProjectDoctorService` (ScarfCore) is one reconciliation pass over the registry index, each project's `<root>/.scarf/project.json`, the on-disk `.scarf/` scan and cron — 12 finding kinds, 4 repair kinds, surfaced in a doctor sheet + a cockpit health row + the P2 damage banner's new "Open Project Doctor" button. Deliberately does NOT read state.db: cron `workdir` is the only Hermes-side signal used, which keeps charter C3/C4 out of scope entirely and the pass fast. Checkpoints / `sessions.cwd` / kanban enumeration stay DEFERRED.

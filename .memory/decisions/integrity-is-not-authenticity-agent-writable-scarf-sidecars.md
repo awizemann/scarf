@@ -5,9 +5,11 @@ permalink: scarf/decisions/integrity-is-not-authenticity-agent-writable-scarf-si
 tags: [security, projects, miniapps, keychain]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantSigner.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedJSONStore.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppLaunchView.swift]
 source_paths_inferred: false
-source_sha: 78cccf7a762b94fa125f4d9d8753c58ec19df3cd
+source_sha: 9b1d97497a9dab2e58137d071729db6bf72d9035
 created: 2026-09-04
-updated: 2026-09-04
+updated: 2026-09-08
+reviewed: 2026-09-07
+reviewed_by: audit:claude-code (background)
 ---
 
 S2 (t-a2c169f0) closed the gap D1 left open. `GuardedJSONStore` made
@@ -51,3 +53,6 @@ the same machine key rather than minting another.
 - relates_to [[Absent-vs-unreadable is the discriminator every Scarf JSON store owes its writers]]
 - relates_to [[Phase-1 Milestone 2: Mini-apps — implementation decisions]]
 - relates_to [[Uninstall + keychain trust boundaries: re-derive at time-of-use (S1)]]
+
+
+- [decision] A SELF-HEALING repair of an agent-owned sidecar gets a LOG LINE, not UI, when all three hold: nothing is lost (every foreign key survives the overlay), the BROKEN state was already surfaced through an existing channel, and reporting the repair afterwards would need persisted state. `ProjectManifestStore`'s wrong-shaped-`manifest.json` overlay (GW-F6) is the worked case: Project Doctor already reports it as a `malformedSidecar` finding from the moment the bad file lands and BEFORE any preset binding touches it, and after the repair the file decodes so the doctor correctly finds nothing — saying "this was repaired" there would take a repair marker with its own lifecycle and staleness. The log names the keys it wrote, kept and replaced so a console read reconstructs the before-state. Test the FIRST condition before reaching for this: a repair that drops anything is not self-healing and does owe the user a notice. (2026-09-08, `scarf/scarf/Core/Services/ProjectManifestStore.swift`) #decision #gotcha

@@ -5,10 +5,10 @@ permalink: scarf/integration/hermes-version-compatibility-target
 tags: [hermes, compatibility, versioning]
 source_paths: [README.md, scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift]
 source_paths_inferred: false
-source_sha: 28d4f8477d145526ed5b38a04ffc199e53d15f52
+source_sha: 6479e44021208a95e59f7885507b0fafaacb6335
 created: 2026-05-29
 updated: 2026-09-01
-reviewed: 2026-09-01
+reviewed: 2026-09-07
 reviewed_by: audit:claude-code (background)
 ---
 

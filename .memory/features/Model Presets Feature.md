@@ -4,10 +4,10 @@ type: note
 permalink: scarf/features/model-presets-feature
 tags: [models, presets, acp]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ModelPreset.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPresetService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectModelPresetReader.swift, scarf/scarf/Core/Services/ProjectModelPresetBinding.swift, scarf/scarf/Features/Models/Views/ModelPresetsView.swift]
-source_sha: 73ff36e8d264366ed074a105fe88d39d73b27f7b
+source_sha: 91ae15fa9560c87a913c3b5ef14b8915b7ab5028
 created: 2026-05-29
 updated: 2026-09-04
-reviewed: 2026-09-02
+reviewed: 2026-09-07
 reviewed_by: audit:claude-code (background)
 ---
 

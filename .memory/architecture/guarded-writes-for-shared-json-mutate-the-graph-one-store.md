@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedSideca
 source_paths_inferred: false
 source_sha: 7e6326c20d55aff25b9d9bb5be70e80881404361
 created: 2026-09-04
-updated: 2026-09-04
+updated: 2026-09-07
 ---
 
 GW-E2c (t-b889e8e7). Converting the last destroy-shaped writers in the projects/skills/bots surface produced three patterns worth reusing, all of them about the shape of the fix rather than the guard itself.
@@ -35,3 +35,13 @@ Commit c274e429. New type: `scarf/Packages/ScarfCore/Sources/ScarfCore/Services/
 - [decision] `publish(_:to:after:)` takes an OPTIONAL inspection and throws `GuardedStoreError.refusedUninspectedWrite` on `nil`. That is what makes the held shape safe: `ServerRegistry` used to seed `lastInspection = .absent`, so "never inspected" was indistinguishable from "proven absent" — i.e. writable. Unreachable today (its `init` loads), which is exactly why it needed to be structural rather than remembered.
 - [constraint] The protocol requires `nonisolated var transport` and does NOT require `Sendable`, so a `@MainActor final class` (`ServerRegistry`) and an adopter with a computed `context.makeTransport()` (the two ScarfCore/Mac structs) both conform without changing when their transport is built. A `Sendable` requirement or a stored-property requirement would have excluded one of them.
 - [gotcha] Non-vacuity of the two source-text scanners was re-proven empirically, not assumed: an unannotated `unguardedWriteFile(` injected into the new file failed `UnguardedWriteScanTests.everyUnguardedWriteCallSiteIsAnnotated`, and a throwaway `GuardedTextFile(… label: "config.yaml")` writer failed `AllConfigWritersParityTests.everyConfigWriterFileIsRegistered`. Both canaries were then removed. A scanner that stops biting is worse than no scanner. #testing
+
+
+
+## GW-F6: `config.json` joins the conformers, and what conforming actually bought
+
+Commit 10c3475f. `ProjectConfigService` is now a `GuardedSidecarStore` with `.refuseForever` declared — the fourth conformer, alongside `ServerRegistry` (`.refuseForever`), `MiniAppGrantStore` and `ProjectManifestStore` (`.quarantineAndRebuild`).
+
+- [fact] The bug conformance fixed is the exact one the protocol's header warns about: running `GuardedJSONStore` directly, `config.json` treated undecodable bytes as `.quarantined`/writable and rebuilt from `root = [:]`, dropping every `keychain://` reference and orphaning the secrets. Declaring the policy made the three existing `if case .unreadable` branches cover the decode failure too, with no new branch — which is the whole argument for declaring rather than hand-rolling. #dataloss
+- [gotcha] Conforming a type that already had a `maxBytes`-shaped constant: keep the old spelling as a computed alias (`configMaxBytes` → `maxBytes`) rather than renaming call sites, because a sibling file (`manifest.json`) deliberately borrows the same ceiling and the shared-cap comment is load-bearing.
+- [convention] Section 4 (unknown keys) is a doc obligation, not just a code one: `MiniAppStore`'s `state.json` now DECLARES that its `[String: String]` model preserves every key but not a non-string value shape (that decodes-fails into quarantine), matching the way `servers.json` declares its deliberate skip.

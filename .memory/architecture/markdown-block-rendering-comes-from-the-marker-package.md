@@ -19,3 +19,5 @@ reviewed_by: audit:claude-code (background)
 - [fact] Marker 0.9.0's dark-mode/appearance-adaptive theming lives entirely in the MarkerEditor product, which Scarf does not link — Scarf's own SwiftUI markdown rendering is already appearance-adaptive, so no dark-mode work was needed #theming
 
 ## Relations
+- relates_to [[scarf/architecture/streaming-chat-ui-upserts-are-throttled-to-50ms-acp-chunk]]
+- relates_to [[scarf/architecture/chat-transcript-activitybubble-segmentation]]

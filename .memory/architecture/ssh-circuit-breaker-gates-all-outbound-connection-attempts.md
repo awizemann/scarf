@@ -4,10 +4,10 @@ type: note
 permalink: scarf/architecture/ssh-circuit-breaker-gates-all-outbound-connection-attempts
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHConnectionGate.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHTransport.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHScriptRunner.swift]
 source_paths_inferred: false
-source_sha: 73fefe98e639a3d2692dd3bd38afd2a74a5049cb
+source_sha: 4aabf5c24fba7eca2879f877c64b28acfcd604b2
 created: 2026-08-13
 updated: 2026-08-13
-reviewed: 2026-09-04
+reviewed: 2026-09-07
 reviewed_by: audit:claude-code (background)
 ---
 
