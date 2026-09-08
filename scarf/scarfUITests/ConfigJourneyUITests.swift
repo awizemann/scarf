@@ -210,56 +210,27 @@ final class ConfigJourneyUITests: ScarfUITestCase {
 
         try openSection(app, "Skills")
 
-        // Segment titles are localized, so the Browse Hub tab is selected
-        // POSITIONALLY rather than by label.
-        //
-        // Positionally and not by identifier: `.pickerStyle(.segmented)`
-        // lowers to an NSSegmentedControl whose segments AppKit
-        // synthesizes, and a SwiftUI `.accessibilityIdentifier` on the
-        // Picker does not reach them — `skills.tabPicker` matched nothing
-        // at all on the first real run. The identifier is still on the
-        // Picker as a scope handle; the segments are found as radio
-        // buttons.
-        //
-        // Index: `visibleTabs` is [Installed, (Bundles), Browse Hub,
-        // Updates] — Bundles is dropped on pre-v0.15 hosts — so Browse Hub
-        // is always the second from the end, at any host version. Preferred
-        // by label when the runner's locale makes that possible, because an
-        // index is only as good as that reasoning.
-        ensureFrontmost(app)
-        let group = app.radioGroups.firstMatch
-        guard group.waitForExistence(timeout: 20) else {
-            throw XCTSkip("Skills view never exposed its tab picker as a radio group.")
+        // SkillsView's tab strip is now the same button-per-tab pattern as
+        // SettingsView.tabStrip (t-42c56c2f) — each tab is a real `Button`
+        // carrying `skills.tab.<rawValue>`, drivable by identifier rather
+        // than the old `.pickerStyle(.segmented)` Picker, whose segments
+        // surfaced as RadioButtons that `.click()` could not actually move.
+        let hubTab = element(app, "skills.tab.Browse Hub")
+        guard hubTab.waitForExistence(timeout: 20) else {
+            throw XCTSkip("Skills view never exposed skills.tab.Browse Hub.")
         }
-        let segments = group.radioButtons.allElementsBoundByIndex
-        guard segments.count >= 2 else {
-            throw XCTSkip("Skills tab picker exposed \(segments.count) segments — cannot reach the Browse Hub tab.")
-        }
-        let hubSegment = segments.first { $0.label == "Browse Hub" } ?? segments[segments.count - 2]
 
         // Retried for the same dropped-click reason as `openSection`.
         let browse = element(app, "skills.hub.browse")
         var reachedHub = false
         for attempt in 1...3 {
             ensureFrontmost(app)
-            hubSegment.click()
+            hubTab.click()
             if browse.waitForExistence(timeout: 10) { reachedHub = true; break }
             print("[ConfigJourney] Browse Hub tab did not open on attempt \(attempt)/3; retrying.")
         }
         guard reachedHub else {
-            // NOT a Scarf bug and NOT a flake: XCUITest cannot change the
-            // selection of a SwiftUI `.pickerStyle(.segmented)` picker.
-            // The segments come back as RadioButtons with the right labels
-            // and values, `.click()` reports success, and the binding never
-            // moves — verified three times by label AND by index. The same
-            // journey drives Settings' tab strip fine, because that strip
-            // is built from real `Button`s.
-            //
-            // Filed as t-42c56c2f (give SkillsView's tab strip the
-            // SettingsView treatment). Skipping rather than failing: there
-            // is nothing to fix on the test side, and Skills has no offline
-            // install path to reach anyway.
-            throw XCTSkip("Cannot reach the Browse Hub tab: XCUITest cannot move a SwiftUI segmented Picker's selection (t-42c56c2f tracks replacing the strip with buttons, as SettingsView already does).")
+            throw XCTSkip("skills.tab.Browse Hub did not open the hub view after 3 clicks.")
         }
         browse.click()
 
