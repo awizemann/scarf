@@ -43,6 +43,23 @@ struct SidebarRestructureTests {
         #expect(store.isCollapsed("Bots") == false)
     }
 
+    @Test("an argument-domain string value (-key 0 on the command line) is honoured")
+    func argumentDomainStringsAreHonoured() throws {
+        // `-sidebar.section.collapsed.Manage 0` reaches UserDefaults as the
+        // string "0", not an NSNumber. The UI-test sweep relies on this
+        // to open every section without persisting anything.
+        let defaults = try isolatedDefaults()
+        defaults.set("0", forKey: SidebarSectionCollapseStore.key(for: "Manage"))
+        defaults.set("1", forKey: SidebarSectionCollapseStore.key(for: "Monitor"))
+        defaults.set("maybe", forKey: SidebarSectionCollapseStore.key(for: "Configure"))
+        let store = SidebarSectionCollapseStore(defaults: defaults)
+        #expect(store.isCollapsed("Manage") == false)
+        #expect(store.isCollapsed("Monitor") == true)
+        #expect(store.isCollapsed("Configure") == true)   // unparseable → default
+        #expect(SidebarSectionCollapseStore.storedBool(NSNumber(value: true)) == true)
+        #expect(SidebarSectionCollapseStore.storedBool(nil) == nil)
+    }
+
     // MARK: - Persistence round-trip
 
     @Test("a collapse choice round-trips through UserDefaults into a fresh store")

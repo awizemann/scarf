@@ -58,10 +58,31 @@ final class SidebarSectionCollapseStore {
         // maps "never written" to `false`, which would force every
         // section — Configure and Manage included — open on first
         // launch.
-        let stored = defaults.object(forKey: Self.key(for: title)) as? Bool
+        let stored = Self.storedBool(defaults.object(forKey: Self.key(for: title)))
         let value = stored ?? Self.defaultCollapsed(for: title)
         states[title] = value
         return value
+    }
+
+    /// Read a persisted or argument-domain value as a Bool.
+    ///
+    /// A value this store wrote itself comes back as an `NSNumber`. A
+    /// value supplied on the command line (`-sidebar.section.collapsed.Manage 0`,
+    /// how the UI-test sweep forces every section open without touching
+    /// the developer's saved preference) lands in `NSArgumentDomain` as
+    /// the STRING "0" — `as? Bool` rejects it, and the override silently
+    /// did nothing until this coercion existed. Anything else reads as
+    /// "never written" so the section keeps its default.
+    nonisolated static func storedBool(_ raw: Any?) -> Bool? {
+        if let number = raw as? NSNumber { return number.boolValue }
+        if let text = raw as? String {
+            switch text.lowercased() {
+            case "1", "true", "yes": return true
+            case "0", "false", "no": return false
+            default: return nil
+            }
+        }
+        return nil
     }
 
     func setCollapsed(_ collapsed: Bool, for title: String) {

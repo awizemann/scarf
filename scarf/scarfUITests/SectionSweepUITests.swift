@@ -105,7 +105,9 @@ final class SectionSweepUITests: ScarfUITestCase {
     /// app under test sees every section expanded, nothing is persisted,
     /// and the developer's sidebar is exactly as they left it. `1`/`0`
     /// parse to an `NSNumber` that bridges to the `Bool` the store reads
-    /// via `object(forKey:) as? Bool`.
+    /// via `SidebarSectionCollapseStore.storedBool` — they arrive as the
+    /// STRING "0"/"1", which the store coerces (a plain `as? Bool` cast
+    /// silently rejected them, and this override did nothing until it did).
     static let sidebarSectionTitles = ["Monitor", "Bots", "Interact", "Configure", "Manage"]
 
     static var expandedSidebarLaunchArguments: [String] {
@@ -129,9 +131,13 @@ final class SectionSweepUITests: ScarfUITestCase {
         launchAndSurface(app)
         defer { gracefulQuit(app) }
 
-        // Belt to the launch arguments' braces: if a title is ever added
-        // to the sidebar without being listed above, this still opens it.
-        expandAllSidebarSections(app)
+        // Every header must already be open from the launch arguments.
+        // This deliberately does NOT click a collapsed header open: the
+        // click path writes the developer's real UserDefaults (the app
+        // under test shares com.scarf.app with the installed copy). A
+        // collapsed header here means the launch-arg override broke or a
+        // new title is missing from `sidebarSectionTitles` — fail loudly.
+        assertAllSidebarSectionsExpanded(app)
 
         var missing: [String] = []
         var skippedGated: [String] = []
@@ -210,18 +216,20 @@ final class SectionSweepUITests: ScarfUITestCase {
     /// state as the accessibility VALUE ("collapsed"/"expanded"), which is
     /// what we read here — cheaper and less brittle than inferring it from
     /// whether the rows beneath happen to be hittable.
-    private func expandAllSidebarSections(_ app: XCUIApplication) {
+    private func assertAllSidebarSectionsExpanded(_ app: XCUIApplication) {
         let headers = app.descendants(matching: .any)
             .matching(NSPredicate(format: "identifier BEGINSWITH 'sidebar.sectionHeader.'"))
         guard headers.firstMatch.waitForExistence(timeout: 10) else {
             XCTFail("No sidebar section headers found — did the sidebar render at all?")
             return
         }
-        for header in headers.allElementsBoundByIndex where header.exists {
-            if (header.value as? String) == "collapsed" {
-                header.click()
-            }
-        }
+        let collapsed = headers.allElementsBoundByIndex
+            .filter { $0.exists && ($0.value as? String) == "collapsed" }
+            .map { $0.identifier }
+        XCTAssertTrue(
+            collapsed.isEmpty,
+            "Sidebar sections still collapsed despite the launch-arg override: \(collapsed). Either SidebarSectionCollapseStore stopped honouring NSArgumentDomain strings, or a new title is missing from sidebarSectionTitles."
+        )
     }
 
     private func attachScreenshot(_ app: XCUIApplication, named name: String, keepAlways: Bool) {
