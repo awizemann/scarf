@@ -148,11 +148,22 @@ run_plan() {
   t1=$(date +%s)
   wall=$((t1 - t0))
 
-  local executed failed
-  executed="$(grep -oE "Executed [0-9]+ test[s]?, with [0-9]+ failure" "$log_file" | tail -n1 | grep -oE "[0-9]+" | head -n1 || true)"
-  failed="$(grep -oE "with [0-9]+ failure" "$log_file" | tail -n1 | grep -oE "[0-9]+" || true)"
+  # XCTest prints one "Executed N tests…" line per class/bundle and a final
+  # total; the total is the LAST line and may read "with 1 test skipped and
+  # 5 failures", so the pattern must allow the skipped clause or it picks a
+  # per-class line and under-reports (seen: "14 executed / 2 failed" for a
+  # run that was really 28 / 5). Swift Testing (the ScarfCore + scarfTests
+  # unit suites) reports separately as "Test run with N tests in M suites
+  # passed|failed"; carry that too so the unit total is visible.
+  local executed failed unit_line
+  unit_line="$(grep -oE "Test run with [0-9]+ tests? in [0-9]+ suites? (passed|failed)" "$log_file" | tail -n1 || true)"
+  local xctest_total
+  xctest_total="$(grep -oE "Executed [0-9]+ tests?, with ([0-9]+ tests? skipped and )?[0-9]+ failures?" "$log_file" | tail -n1 || true)"
+  executed="$(printf '%s' "$xctest_total" | grep -oE "Executed [0-9]+" | grep -oE "[0-9]+" || true)"
+  failed="$(printf '%s' "$xctest_total" | grep -oE "[0-9]+ failures?$" | grep -oE "[0-9]+" || true)"
   [[ -n "$executed" ]] || executed="?"
   [[ -n "$failed" ]] || failed="?"
+  [[ -n "$unit_line" ]] || unit_line="unit: not reported"
 
   local verdict
   if [[ $status -eq 0 ]]; then
@@ -162,7 +173,7 @@ run_plan() {
     OVERALL_STATUS=1
   fi
 
-  RESULT_LINES+=("| $plan | $verdict | ${executed} executed / ${failed} failed | ${wall}s | \`$bundle\` |")
+  RESULT_LINES+=("| $plan | $verdict | UI: ${executed} executed / ${failed} failed; ${unit_line} | ${wall}s | \`$bundle\` |")
   log "$plan: $verdict (${wall}s) — log: $log_file, bundle: $bundle"
 }
 
