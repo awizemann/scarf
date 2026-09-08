@@ -178,9 +178,26 @@ struct SidebarProjectsWell: View {
 
     private var header: some View {
         HStack(spacing: ScarfSpace.s1) {
-            Text("Projects")
-                .scarfStyle(.captionUppercase)
-                .foregroundStyle(ScarfColor.foregroundMuted)
+            // The well's title doubles as the nav row Projects doesn't
+            // otherwise have. Before this, the Projects cockpit was
+            // reachable ONLY by clicking an existing project row (or the
+            // damage row) — so on a machine with an empty registry the
+            // section was unreachable, and `sidebar.section.Projects`
+            // (which TemplateInstallUITests already selects on) did not
+            // exist at all. Carrying the same identifier as every real
+            // nav row keeps one vocabulary for the section sweep.
+            Button {
+                coordinator.selectedSection = .projects
+            } label: {
+                Text("Projects")
+                    .scarfStyle(.captionUppercase)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Open the Projects cockpit")
+            .accessibilityLabel(Text("Projects"))
+            .accessibilityIdentifier("sidebar.section.Projects")
             Spacer(minLength: 0)
             if !viewModel.projects.isEmpty {
                 Text(verbatim: "\(viewModel.projects.count)")

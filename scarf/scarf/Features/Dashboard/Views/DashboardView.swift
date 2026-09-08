@@ -130,6 +130,9 @@ struct DashboardView: View {
                         .strokeBorder(ScarfColor.warning.opacity(0.30), lineWidth: 1)
                 )
         )
+        // Sweep contract: the section sweep (SectionSweepUITests) asserts
+        // no `error.banner` is on screen after switching to a section.
+        .accessibilityIdentifier("error.banner")
     }
 
     // MARK: - Hermes shadow banner

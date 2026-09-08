@@ -58,6 +58,36 @@ class ScarfUITestCase: XCTestCase {
     /// `~/.hermes`.
     private(set) var isolatedHome: String!
 
+    /// Optional env var naming a PREBUILT fixture Hermes home (seeded by
+    /// `scripts/ui-fixture/make-ui-fixture.sh` with sessions, memories,
+    /// paused cron jobs, kanban cards, a skill and a project — through the
+    /// real `hermes` CLI, so the state.db schema matches the Hermes the
+    /// app actually faces). When set, each test gets its OWN COPY of it;
+    /// the original is never launched against, so a run can never mutate
+    /// the cached fixture and no two tests share a home.
+    ///
+    /// Entirely optional: unset, or pointing at a directory that does not
+    /// carry the sentinel marker, falls back to minting an empty home.
+    /// The gate must never depend on the fixture existing.
+    ///
+    /// GOTCHA — how to actually set it from the command line: xcodebuild
+    /// does NOT forward its own environment to the XCUITest RUNNER
+    /// process, so `SCARF_UITEST_FIXTURE=… xcodebuild test` is silently
+    /// ignored (verified: the fallback branch below never even logs).
+    /// Prefix it — xcodebuild strips `TEST_RUNNER_` and passes the rest on:
+    ///
+    ///     TEST_RUNNER_SCARF_UITEST_FIXTURE=/path/to/fixture \
+    ///       xcodebuild test -project scarf/scarf.xcodeproj -scheme scarf \
+    ///       -destination 'platform=macOS' -testPlan Smoke
+    ///
+    /// The same is true of every other runner-side variable, which is why
+    /// `SCARF_UITEST_LIVE` is delivered by `Live.xctestplan` rather than
+    /// by the shell.
+    static let fixtureHomeEnvVar = "SCARF_UITEST_FIXTURE"
+
+    /// Env var the Live test plan sets. See `requireLive()`.
+    static let liveEnvVar = "SCARF_UITEST_LIVE"
+
     override func setUpWithError() throws {
         try super.setUpWithError()
         continueAfterFailure = false
@@ -85,6 +115,36 @@ class ScarfUITestCase: XCTestCase {
         let fm = FileManager.default
         let home = (NSTemporaryDirectory() as NSString)
             .appendingPathComponent("scarf-uitest-home-\(UUID().uuidString)")
+
+        // Fixture path, when one was handed to us AND it is genuinely a
+        // Scarf test home. The marker check is a safety interlock, not a
+        // nicety: `HermesProfileResolver` honors `SCARF_HERMES_HOME` only
+        // when the marker is present, so copying an unmarked directory
+        // would produce a home every launch silently ignores — dropping
+        // the run back onto the developer's real `~/.hermes`. The same
+        // check is what makes `SCARF_UITEST_FIXTURE=~/.hermes` (typo, or
+        // a well-meant "use my real data") refuse rather than obey.
+        if let fixture = ProcessInfo.processInfo.environment[fixtureHomeEnvVar],
+           !fixture.isEmpty {
+            let marker = (fixture as NSString).appendingPathComponent(testHomeMarkerFilename)
+            var isDir: ObjCBool = false
+            let looksLikeAFixture = fm.fileExists(atPath: fixture, isDirectory: &isDir)
+                && isDir.boolValue
+                && fm.fileExists(atPath: marker)
+            if looksLikeAFixture {
+                // Copy, never symlink, and never launch against the
+                // original: the app writes on launch (registry migration,
+                // AGENTS.md refresh), so a shared fixture would drift
+                // between tests and a symlinked write would escape.
+                try fm.copyItem(atPath: fixture, toPath: home)
+                return home
+            }
+            // Loud, because a typo'd fixture path degrading silently to
+            // "empty home" turns a data-backed sweep into an empty-state
+            // sweep that still passes.
+            print("[ScarfUITestCase] \(fixtureHomeEnvVar)=\(fixture) is not a marked Scarf test home (no \(testHomeMarkerFilename)) — falling back to an empty isolated home.")
+        }
+
         for sub in ["", "/scarf", "/cron", "/sessions", "/logs"] {
             try fm.createDirectory(atPath: home + sub, withIntermediateDirectories: true)
         }
@@ -110,5 +170,110 @@ class ScarfUITestCase: XCTestCase {
         app.launchEnvironment["SCARF_HERMES_HOME"] = isolatedHome
         app.launchEnvironment["HERMES_HOME"] = isolatedHome
         return app
+    }
+
+    // MARK: - Launch / surface / quit
+
+    /// Launch `app` and get a real window on screen — the only sequence
+    /// that actually works for Scarf, owned here so no test re-derives it.
+    ///
+    /// Scarf's main window is `WindowGroup(for: ServerID.self)`. On a plain
+    /// `XCUIApplication.launch()` SwiftUI does not auto-surface a window:
+    /// real users get one via a Dock click → AppKit
+    /// `applicationOpenUntitledFile`, a path XCUITest never takes. The
+    /// harness nudges the same code path by sending ⌘1 ("Open Server →
+    /// Local", from `scarfApp.swift`'s `OpenServerCommands`).
+    ///
+    /// Two ordering constraints make this fiddly enough to centralize:
+    ///
+    /// 1. `activate()` FIRST. Without it ⌘1 goes to whatever app owns the
+    ///    keyboard (usually Xcode) and Scarf silently drops it.
+    /// 2. Activation is not instant. We wait for `.runningForeground`
+    ///    rather than sleeping — the old `Thread.sleep(1.0)` was slower
+    ///    than needed on a warm Mac and too short on a cold one.
+    ///
+    /// The ⌘1 is re-sent (up to `attempts`) because a keystroke landing in
+    /// the gap between "process is foreground" and "menu bar is installed"
+    /// is dropped with no error — the most likely flake in this target.
+    /// Re-sending is harmless: ⌘1 with a local window already open just
+    /// focuses it.
+    @discardableResult
+    func launchAndSurface(_ app: XCUIApplication, attempts: Int = 3, timeout: TimeInterval = 24) -> Bool {
+        app.launch()
+        app.activate()
+        waitForForeground(app, timeout: 15)
+
+        let attempts = max(1, attempts)
+        for attempt in 1...attempts {
+            app.typeKey("1", modifierFlags: .command)
+            if app.windows.firstMatch.waitForExistence(timeout: timeout / TimeInterval(attempts)) {
+                return true
+            }
+            print("[ScarfUITestCase] no window after ⌘1 attempt \(attempt)/\(attempts); re-activating and retrying.")
+            app.activate()
+        }
+        XCTFail("Scarf did not surface a window within \(timeout)s of the ⌘1 nudge. Crash logs land under derivedData/Logs/Test/.")
+        return false
+    }
+
+    /// Poll until `app` reports `.runningForeground`.
+    ///
+    /// `XCTNSPredicateExpectation` POLLS (roughly once a second) instead of
+    /// relying on KVO, which is what makes it usable against
+    /// `XCUIApplication.state` — a property that posts no change
+    /// notifications. Returns rather than failing: callers that care assert
+    /// on the window, which is the outcome that matters.
+    func waitForForeground(_ app: XCUIApplication, timeout: TimeInterval) {
+        let foreground = XCTNSPredicateExpectation(
+            predicate: NSPredicate { object, _ in
+                (object as? XCUIApplication)?.state == .runningForeground
+            },
+            object: app
+        )
+        _ = XCTWaiter().wait(for: [foreground], timeout: timeout)
+    }
+
+    /// Quit `app` through its own ⌘Q instead of letting XCTest's implicit
+    /// teardown force-terminate it.
+    ///
+    /// After long journeys with several sheet open/close cycles, the
+    /// automatic terminate has been observed to fail with "Failed to
+    /// terminate com.scarf.app:0" — a phantom failure on an otherwise green
+    /// test. ⌘Q lets Scarf run its normal `NSApp.terminate` flow (including
+    /// whatever window-state saving the `WindowGroup` wants) before the
+    /// runner reaches for the hammer.
+    func gracefulQuit(_ app: XCUIApplication, timeout: TimeInterval = 10) {
+        guard app.state != .notRunning else { return }
+        app.typeKey("q", modifierFlags: .command)
+        let exited = XCTNSPredicateExpectation(
+            predicate: NSPredicate { object, _ in
+                (object as? XCUIApplication)?.state == .notRunning
+            },
+            object: app
+        )
+        _ = XCTWaiter().wait(for: [exited], timeout: timeout)
+    }
+
+    // MARK: - Plan gating
+
+    /// Skip unless the Live test plan is running.
+    ///
+    /// Live tests drive surfaces that need a running Hermes process or a
+    /// real provider key (Chat over ACP, Gateway, Proxy, Bots, Curator).
+    /// They are opt-in — `Live.xctestplan` sets `SCARF_UITEST_LIVE=1` — so
+    /// Smoke and Full stay deterministic on a machine without credentials.
+    /// Call this at the TOP of such a test, before any launch, so a skip
+    /// leaves nothing behind.
+    ///
+    /// Read from the RUNNER's environment (where the test plan sets it),
+    /// not from the app's launch environment.
+    func requireLive() throws {
+        let value = ProcessInfo.processInfo.environment[Self.liveEnvVar] ?? ""
+        guard !value.isEmpty, value != "0" else {
+            throw XCTSkip("Live-only test — run the Live test plan (which sets \(Self.liveEnvVar)=1) on a Mac with a real Hermes install and provider credentials.")
+        }
+        guard FileManager.default.isExecutableFile(atPath: Self.hermesBinary) else {
+            throw XCTSkip("Live-only test — no hermes binary at \(Self.hermesBinary).")
+        }
     }
 }
