@@ -167,7 +167,7 @@ final class SectionSweepUITests: ScarfUITestCase {
                 // processes. Retried because a dropped row click leaves the
                 // PREVIOUS section on screen (seen as "Webhooks.root never
                 // appeared" with Plugins still showing).
-                let rendered = clickUntil(row, appears: root, in: app)
+                let rendered = clickUntil(row, appears: root, named: "\(section.rawValue).root", in: app)
 
                 attachScreenshot(app, named: section.rawValue, keepAlways: !rendered)
 

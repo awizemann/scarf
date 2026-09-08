@@ -319,6 +319,7 @@ class ScarfUITestCase: XCTestCase {
     func clickUntil(
         _ element: XCUIElement,
         appears outcome: XCUIElement,
+        named outcomeName: String,
         attempts: Int = 3,
         firstWait: TimeInterval = 8,
         finalWait: TimeInterval = 20,
@@ -329,7 +330,10 @@ class ScarfUITestCase: XCTestCase {
             if element.exists { element.click() }
             let wait = attempt == attempts ? finalWait : firstWait
             if outcome.waitForExistence(timeout: wait) { return true }
-            print("[ScarfUITestCase] click on \(element.identifier) attempt \(attempt)/\(attempts) produced no \(outcome.identifier); retrying.")
+            // Never read `.identifier` off `outcome` here: it does not
+            // exist yet by definition, and resolving it records an XCTest
+            // failure ("Failed to get matching snapshot") of its own.
+            print("[ScarfUITestCase] click attempt \(attempt)/\(attempts) produced no \(outcomeName); retrying.")
         }
         return false
     }
