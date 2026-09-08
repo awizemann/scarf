@@ -187,6 +187,10 @@ struct SettingsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Stable handle for UI journeys: the visible tab label is
+        // localized, so a test that clicked by title would only pass in
+        // English.
+        .accessibilityIdentifier("settings.tab.\(tab.rawValue)")
     }
 
     @ViewBuilder

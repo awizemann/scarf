@@ -210,6 +210,9 @@ struct SkillsView: View {
             }
             .pickerStyle(.segmented)
             .frame(maxWidth: 360)
+            // Segment titles are localized; journeys address the segments
+            // positionally under this identifier instead.
+            .accessibilityIdentifier("skills.tabPicker")
             Spacer()
             if let msg = viewModel.hubMessage {
                 Label(msg, systemImage: "info.circle")
@@ -298,6 +301,10 @@ struct SkillsView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(skillRowLabel(skill))
+        // Keyed on the skill NAME, not the id: the id is a filesystem
+        // path on some hosts, and the name is what a journey knows
+        // ("openhue" from the fixture).
+        .accessibilityIdentifier("skills.row.\(skill.name)")
     }
 
     /// Spoken row label: skill name first, then the state the icons and
@@ -459,6 +466,7 @@ struct SkillsView: View {
                                 viewModel.uninstallHubSkill(skill.id)
                             }
                             .controlSize(.small)
+                            .accessibilityIdentifier("skills.detail.uninstall")
                         }
                         if viewModel.isMarkdownFile {
                             MarkdownContentView(content: viewModel.skillContent)
@@ -660,6 +668,7 @@ struct SkillsView: View {
                 .controlSize(.small)
             Button("Browse") { viewModel.browseHub() }
                 .controlSize(.small)
+                .accessibilityIdentifier("skills.hub.browse")
         }
         .padding()
     }
@@ -715,6 +724,7 @@ struct SkillsView: View {
             }
             .controlSize(.small)
             .accessibilityLabel("Install \(hub.name)")
+            .accessibilityIdentifier("skills.hub.install.\(hub.name)")
             .disabled(viewModel.isHubLoading)
         }
         .padding(.horizontal, 12)

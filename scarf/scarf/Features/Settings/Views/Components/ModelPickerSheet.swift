@@ -251,6 +251,10 @@ struct ModelPickerSheet: View {
                 }
             }
             .controlSize(.small)
+            // The custom-entry path is the only offline-deterministic way
+            // into this sheet — the catalog columns depend on a multi-MB
+            // models.dev file — so the UI journeys drive it by identifier.
+            .accessibilityIdentifier("models.picker.customToggle")
         }
         .padding()
     }
@@ -1109,6 +1113,7 @@ struct ModelPickerSheet: View {
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.caption, design: .monospaced))
                     .accessibilityLabel("Model ID")
+                    .accessibilityIdentifier("models.picker.customModelID")
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text("Provider").font(.caption).foregroundStyle(.secondary)
@@ -1116,6 +1121,7 @@ struct ModelPickerSheet: View {
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.caption, design: .monospaced))
                     .accessibilityLabel("Provider")
+                    .accessibilityIdentifier("models.picker.customProviderID")
                 Text("Leave blank to infer from the model ID's prefix (\"openai/...\" → openai).")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -1138,9 +1144,11 @@ struct ModelPickerSheet: View {
             }
             Spacer()
             Button("Cancel") { onCancel() }
+                .accessibilityIdentifier("models.picker.cancel")
             Button("Select") { submitSelection() }
                 .buttonStyle(ScarfPrimaryButton())
                 .disabled(!canSubmit)
+                .accessibilityIdentifier("models.picker.select")
         }
         .padding()
     }

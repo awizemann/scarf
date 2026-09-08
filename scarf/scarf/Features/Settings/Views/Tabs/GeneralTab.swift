@@ -34,7 +34,8 @@ struct GeneralTab: View {
                         provider: selection.providerID,
                         local: selection
                     )
-                }
+                },
+                identifier: "settings.model.picker"
             )
             // Provider is shown read-only for clarity; users change it via the
             // Model picker, which presents providers and models together.
@@ -57,7 +58,11 @@ struct GeneralTab: View {
         }
 
         SettingsSection(title: "Locale", icon: "globe.americas") {
-            EditableTextField(label: "Timezone (IANA)", value: viewModel.config.timezone) { viewModel.setTimezone($0) }
+            EditableTextField(
+                label: "Timezone (IANA)",
+                value: viewModel.config.timezone,
+                identifier: "settings.timezone"
+            ) { viewModel.setTimezone($0) }
             // v0.13: `display.language` picker. Hidden on pre-v0.13 hosts
             // because writing the key would no-op silently. Two "English"
             // entries by design — empty string preserves "no key" semantics

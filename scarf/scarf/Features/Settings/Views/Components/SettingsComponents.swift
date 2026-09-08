@@ -63,9 +63,37 @@ private struct SettingsRowLabel: View {
     }
 }
 
+/// Applies `.accessibilityIdentifier` only when an identifier was supplied.
+///
+/// Needed because `.accessibilityIdentifier("")` is not a no-op: an empty
+/// identifier still marks the view as HAVING one, which stops a container
+/// identifier from propagating into it. Opting out entirely keeps the
+/// un-identified case byte-identical to before.
+struct OptionalAccessibilityIdentifier: ViewModifier {
+    let identifier: String?
+
+    init(_ identifier: String?) { self.identifier = identifier }
+
+    func body(content: Content) -> some View {
+        if let identifier {
+            content.accessibilityIdentifier(identifier)
+        } else {
+            content
+        }
+    }
+}
+
 struct EditableTextField: View {
     let label: LocalizedStringKey
     let value: String
+    /// Optional UI-test handle. When set, the row's three interactive
+    /// parts become addressable as `<identifier>.value` (the displayed
+    /// text), `<identifier>.edit` (the Edit button) and
+    /// `<identifier>.field` (the text field, while editing). Left nil the
+    /// row renders exactly as before — identifiers are added per journey,
+    /// on the rows a test actually drives, rather than sprayed across all
+    /// ~70 settings fields.
+    var identifier: String? = nil
     let onCommit: (String) -> Void
     @State private var text: String = ""
     @State private var isEditing = false
@@ -80,18 +108,21 @@ struct EditableTextField: View {
                 })
                 .textFieldStyle(.roundedBorder)
                 .font(ScarfFont.monoSmall)
+                .modifier(OptionalAccessibilityIdentifier(identifier.map { "\($0).field" }))
                 Button("Cancel") { isEditing = false }
                     .controlSize(.mini)
             } else {
                 Text(value.isEmpty ? "—" : value)
                     .font(ScarfFont.monoSmall)
                     .foregroundStyle(value.isEmpty ? ScarfColor.foregroundFaint : ScarfColor.foregroundPrimary)
+                    .modifier(OptionalAccessibilityIdentifier(identifier.map { "\($0).value" }))
                 Spacer()
                 Button("Edit") {
                     text = value
                     isEditing = true
                 }
                 .controlSize(.mini)
+                .modifier(OptionalAccessibilityIdentifier(identifier.map { "\($0).edit" }))
             }
         }
         .settingsRowChrome()

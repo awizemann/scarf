@@ -23,6 +23,11 @@ struct ModelPickerRow: View {
     var currentAPIMode: String = ""
     let onChange: (_ modelID: String, _ providerID: String) -> Void
     var onLocalChange: ((LocalModelSelection) -> Void)? = nil
+    /// Optional UI-test handle for the button that opens the sheet.
+    /// Several rows of this type can be on screen at once (General,
+    /// Delegation, each aux model), so the identifier is supplied by the
+    /// host rather than derived from the localized label.
+    var identifier: String? = nil
 
     @State private var showSheet = false
 
@@ -50,6 +55,7 @@ struct ModelPickerRow: View {
                 .clipShape(RoundedRectangle(cornerRadius: 5))
             }
             .buttonStyle(.plain)
+            .modifier(OptionalAccessibilityIdentifier(identifier))
 
             Spacer()
         }

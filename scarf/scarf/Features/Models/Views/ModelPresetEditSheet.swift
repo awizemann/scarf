@@ -44,6 +44,7 @@ struct ModelPresetEditSheet: View {
                     fieldRow("Name", required: true) {
                         ScarfTextField("e.g. Sonnet (production)", text: $name)
                             .accessibilityLabel("Name")
+                            .accessibilityIdentifier("models.preset.name")
                     }
 
                     fieldRow("Model", required: true) {
@@ -54,7 +55,8 @@ struct ModelPresetEditSheet: View {
                             onChange: { newModel, newProvider in
                                 modelID = newModel
                                 providerID = newProvider
-                            }
+                            },
+                            identifier: "models.preset.modelPicker"
                         )
                     }
 
@@ -74,12 +76,14 @@ struct ModelPresetEditSheet: View {
                 Spacer()
                 Button("Cancel") { onCancel() }
                     .buttonStyle(ScarfSecondaryButton())
+                    .accessibilityIdentifier("models.preset.cancel")
                 Button("Save") {
                     onSave(buildPreset())
                 }
                 .buttonStyle(ScarfPrimaryButton())
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(!isValid)
+                .accessibilityIdentifier("models.preset.save")
             }
             .padding(ScarfSpace.s4)
             .background(ScarfColor.backgroundSecondary)
