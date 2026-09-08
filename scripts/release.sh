@@ -20,6 +20,15 @@ fi
 #                                           # GitHub release is created as draft, the
 #                                           # appcast is NOT updated, and main is NOT
 #                                           # tagged. Promote later with --promote.
+#   ./scripts/release.sh 1.7.0 --skip-ui-tests   # bypass the UI release gate (loud
+#                                           # warning, recorded in UI-GATE.md). Not
+#                                           # recommended — see BUILDING.md.
+#
+# UI release gate:
+#   Before the archive step, this script runs scripts/ui-gate.sh (unit tests + the
+#   Smoke/Full/Live XCUITest plans against a seeded throwaway Hermes home) and writes
+#   releases/v<VERSION>/UI-GATE.md. A failing gate aborts the release. --skip-ui-tests
+#   bypasses it with a loud warning and records "SKIPPED" into UI-GATE.md instead.
 #
 # Release notes:
 #   If `releases/v<VERSION>/RELEASE_NOTES.md` exists, it is committed alongside the
@@ -44,9 +53,11 @@ set -euo pipefail
 # ---------- arg parsing ----------
 VERSION=""
 DRAFT=0
+SKIP_UI_TESTS=0
 for arg in "$@"; do
   case "$arg" in
     --draft) DRAFT=1 ;;
+    --skip-ui-tests) SKIP_UI_TESTS=1 ;;
     -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
     -*) printf '[ERR] unknown flag: %s\n' "$arg" >&2; exit 1 ;;
     *) [[ -z "$VERSION" ]] && VERSION="$arg" || { printf '[ERR] unexpected arg: %s\n' "$arg" >&2; exit 1; } ;;
@@ -182,6 +193,28 @@ else
     git add "$NOTES_FILE"
   fi
   git commit -m "chore: Bump version to ${VERSION}"
+fi
+
+# ---------- UI release gate ----------
+mkdir -p "$RELEASE_DIR"
+UI_GATE_SUMMARY="$RELEASE_DIR/UI-GATE.md"
+if [[ $SKIP_UI_TESTS -eq 1 ]]; then
+  warn "=================================================================="
+  warn " --skip-ui-tests: UI RELEASE GATE SKIPPED"
+  warn " Unit tests, Smoke, Full and Live test plans were NOT run."
+  warn " This release has NOT been verified against the XCUITest gate."
+  warn "=================================================================="
+  {
+    printf '# UI Gate Summary\n\n'
+    printf -- '- Date: %s\n' "$(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+    printf -- '- Git commit: %s\n\n' "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    printf 'SKIPPED by --skip-ui-tests\n'
+  } > "$UI_GATE_SUMMARY"
+else
+  log "Running UI release gate (scripts/ui-gate.sh)"
+  "$REPO_ROOT/scripts/ui-gate.sh" --summary "$UI_GATE_SUMMARY" \
+    || die "UI release gate failed — see $UI_GATE_SUMMARY. Re-run with --skip-ui-tests to bypass (not recommended)."
+  log "UI release gate passed — summary: $UI_GATE_SUMMARY"
 fi
 
 # ---------- build variants ----------

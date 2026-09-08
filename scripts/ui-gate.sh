@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+#
+# ui-gate.sh — Scarf's full UI release gate.
+#
+# Builds a throwaway seeded Hermes fixture home (scripts/ui-fixture/make-ui-fixture.sh),
+# then runs the Full and Live xctestplans (unless overridden) against ONE DerivedData
+# directory so the app only builds once, and writes a pass/fail summary.
+#
+# Usage:
+#   scripts/ui-gate.sh [--smoke-only] [--skip-live] [--derived-data <path>]
+#                       [--keep-fixture] [--summary <file>]
+#
+#   --smoke-only        Run only the Smoke plan (fast sanity: section sweep). Skips Full/Live.
+#   --skip-live          Run Full but skip Live (no real credentials / provider keys needed).
+#   --derived-data DIR  Reuse this DerivedData dir instead of a fresh TMPDIR one.
+#   --keep-fixture       Don't delete the seeded fixture home on exit.
+#   --summary FILE       Write the markdown summary here (default: stdout).
+#
+# Exits non-zero if the fixture build fails or any run test plan fails.
+#
+set -euo pipefail
+
+if [ -z "${DEVELOPER_DIR:-}" ]; then
+  case "$(xcode-select -p 2>/dev/null)" in
+    */Xcode*.app/Contents/Developer) : ;;
+    *) for _xc in /Applications/Xcode.app /Applications/Xcode-*.app; do
+         [ -x "$_xc/Contents/Developer/usr/bin/xcodebuild" ] && { export DEVELOPER_DIR="$_xc"; break; }
+       done ;;
+  esac
+fi
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT="$REPO_ROOT/scarf/scarf.xcodeproj"
+SCHEME="scarf"
+
+log()  { printf '\033[1;34m==> %s\033[0m\n' "$*"; }
+warn() { printf '\033[1;33m[WARN] %s\033[0m\n' "$*" >&2; }
+die()  { printf '\033[1;31m[ERR] %s\033[0m\n' "$*" >&2; exit 1; }
+
+require_cmd() { command -v "$1" >/dev/null 2>&1 || die "missing required tool: $1"; }
+
+# ---------- arg parsing ----------
+SMOKE_ONLY=0
+SKIP_LIVE=0
+KEEP_FIXTURE=0
+DERIVED_DATA=""
+SUMMARY_FILE=""
+_prev=""
+for arg in "$@"; do
+  case "$_prev" in
+    --derived-data) DERIVED_DATA="$arg"; _prev=""; continue ;;
+    --summary) SUMMARY_FILE="$arg"; _prev=""; continue ;;
+  esac
+  case "$arg" in
+    --smoke-only) SMOKE_ONLY=1 ;;
+    --skip-live) SKIP_LIVE=1 ;;
+    --keep-fixture) KEEP_FIXTURE=1 ;;
+    --derived-data) _prev="$arg" ;;
+    --derived-data=*) DERIVED_DATA="${arg#--derived-data=}" ;;
+    --summary) _prev="$arg" ;;
+    --summary=*) SUMMARY_FILE="${arg#--summary=}" ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown argument: $arg" ;;
+  esac
+done
+
+require_cmd xcodebuild
+require_cmd python3
+[[ -f "$PROJECT/project.pbxproj" ]] || die "scarf.xcodeproj not found at $PROJECT"
+
+if [[ -n "$SUMMARY_FILE" ]]; then
+  SUMMARY_DIR="$(dirname "$SUMMARY_FILE")"
+  [[ -d "$SUMMARY_DIR" ]] || die "summary directory does not exist: $SUMMARY_DIR"
+fi
+
+for plan in Smoke Full Live; do
+  [[ -f "$REPO_ROOT/scarf/${plan}.xctestplan" ]] || die "missing test plan: scarf/${plan}.xctestplan"
+done
+
+RUN_TMP="$(mktemp -d "${TMPDIR:-/tmp}/scarf-ui-gate.XXXXXX")"
+LOG_DIR="$RUN_TMP/logs"
+mkdir -p "$LOG_DIR"
+if [[ -z "$DERIVED_DATA" ]]; then
+  DERIVED_DATA="$RUN_TMP/DerivedData"
+fi
+mkdir -p "$DERIVED_DATA"
+
+FIXTURE_DIR=""
+cleanup() {
+  local status=$?
+  if [[ $KEEP_FIXTURE -eq 0 && -n "$FIXTURE_DIR" && -d "$FIXTURE_DIR" ]]; then
+    rm -rf "$FIXTURE_DIR"
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+
+# ---------- fixture ----------
+log "Building seeded fixture Hermes home"
+FIXTURE_PARENT="$(mktemp -d "$RUN_TMP/fixture.XXXXXX")"
+FIXTURE_DEST="$FIXTURE_PARENT/fixture-home"
+FIXTURE_T0=$(date +%s)
+if ! FIXTURE_DIR="$("$REPO_ROOT/scripts/ui-fixture/make-ui-fixture.sh" --self-check "$FIXTURE_DEST" 2> >(tee "$LOG_DIR/fixture.log" >&2))"; then
+  die "fixture build failed — see $LOG_DIR/fixture.log"
+fi
+FIXTURE_T1=$(date +%s)
+FIXTURE_WALL=$((FIXTURE_T1 - FIXTURE_T0))
+log "Fixture ready at $FIXTURE_DIR (${FIXTURE_WALL}s)"
+
+# ---------- plans to run ----------
+PLANS=()
+if [[ $SMOKE_ONLY -eq 1 ]]; then
+  PLANS=(Smoke)
+else
+  PLANS=(Full)
+  if [[ $SKIP_LIVE -eq 0 ]]; then
+    PLANS+=(Live)
+  fi
+fi
+
+GIT_HASH="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+HERMES_BIN="${HERMES_BIN:-$HOME/.local/bin/hermes}"
+HERMES_VERSION="$("$HERMES_BIN" --version 2>/dev/null | head -n1 || echo unknown)"
+
+declare -a RESULT_LINES=()
+OVERALL_STATUS=0
+
+run_plan() {
+  local plan="$1"
+  local bundle="$RUN_TMP/${plan}.xcresult"
+  local log_file="$LOG_DIR/${plan}.log"
+  local t0 t1 wall status
+  log "Running $plan plan"
+  t0=$(date +%s)
+  set +e
+  TEST_RUNNER_SCARF_UITEST_FIXTURE="$FIXTURE_DIR" \
+  xcodebuild test \
+    -project "$PROJECT" \
+    -scheme "$SCHEME" \
+    -destination 'platform=macOS' \
+    -testPlan "$plan" \
+    -derivedDataPath "$DERIVED_DATA" \
+    -resultBundlePath "$bundle" \
+    -skipPackagePluginValidation -skipMacroValidation \
+    2>&1 | tee "$log_file" | grep --line-buffered -E "Test Suite|Test Case|error:|BUILD FAILED|BUILD SUCCEEDED|\*\* TEST (SUCCEEDED|FAILED) \*\*"
+  status=${PIPESTATUS[0]}
+  set -e
+  t1=$(date +%s)
+  wall=$((t1 - t0))
+
+  local executed failed
+  executed="$(grep -oE "Executed [0-9]+ test[s]?, with [0-9]+ failure" "$log_file" | tail -n1 | grep -oE "[0-9]+" | head -n1 || true)"
+  failed="$(grep -oE "with [0-9]+ failure" "$log_file" | tail -n1 | grep -oE "[0-9]+" || true)"
+  [[ -n "$executed" ]] || executed="?"
+  [[ -n "$failed" ]] || failed="?"
+
+  local verdict
+  if [[ $status -eq 0 ]]; then
+    verdict="PASS"
+  else
+    verdict="FAIL"
+    OVERALL_STATUS=1
+  fi
+
+  RESULT_LINES+=("| $plan | $verdict | ${executed} executed / ${failed} failed | ${wall}s | \`$bundle\` |")
+  log "$plan: $verdict (${wall}s) — log: $log_file, bundle: $bundle"
+}
+
+for plan in "${PLANS[@]}"; do
+  run_plan "$plan"
+done
+
+# ---------- summary ----------
+SUMMARY_CONTENT="$(cat <<EOF
+# UI Gate Summary
+
+- Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+- Git commit: $GIT_HASH
+- Hermes version: $HERMES_VERSION
+- Fixture build: ${FIXTURE_WALL}s (fixture removed unless --keep-fixture)
+- DerivedData: $DERIVED_DATA
+
+| Plan | Result | Tests | Wall time | Result bundle |
+| --- | --- | --- | --- | --- |
+$(printf '%s\n' "${RESULT_LINES[@]}")
+
+Overall: $([[ $OVERALL_STATUS -eq 0 ]] && echo "PASS" || echo "FAIL")
+EOF
+)"
+
+if [[ -n "$SUMMARY_FILE" ]]; then
+  printf '%s\n' "$SUMMARY_CONTENT" > "$SUMMARY_FILE"
+  log "Summary written to $SUMMARY_FILE"
+else
+  printf '%s\n' "$SUMMARY_CONTENT"
+fi
+
+exit $OVERALL_STATUS
