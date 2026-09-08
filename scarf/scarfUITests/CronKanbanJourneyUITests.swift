@@ -189,7 +189,7 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
         )
 
         jobRow.rightClick()
-        let pauseItem = app.menuItems["Pause"]
+        let pauseItem = app.menuItems.matching(identifier: "cron.contextMenu.pauseToggle").firstMatch
         XCTAssertTrue(pauseItem.waitForExistence(timeout: 15),
                       "The cron row's context menu offered no Pause item. On screen: \(visibleIdentifiers(app))")
         pauseItem.click()
@@ -220,7 +220,8 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
 
         // --- Delete ---------------------------------------------------
         jobRow.rightClick()
-        let deleteItem = app.menuItems["Delete"]
+        // By identifier: the Edit menu also carries a "Delete" item.
+        let deleteItem = app.menuItems.matching(identifier: "cron.contextMenu.delete").firstMatch
         XCTAssertTrue(deleteItem.waitForExistence(timeout: 15),
                       "The cron row's context menu offered no Delete item.")
         deleteItem.click()
@@ -229,7 +230,7 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
         // renders as an alert whose buttons are addressed by label — an
         // identifier applied in the dialog builder does not survive the
         // AppKit bridge.
-        let confirmDelete = app.buttons.matching(NSPredicate(format: "label == %@", "Delete")).firstMatch
+        let confirmDelete = app.sheets.buttons.matching(NSPredicate(format: "label == %@", "Delete")).firstMatch
         XCTAssertTrue(confirmDelete.waitForExistence(timeout: 15),
                       "Delete confirmation dialog never appeared.")
         confirmDelete.click()

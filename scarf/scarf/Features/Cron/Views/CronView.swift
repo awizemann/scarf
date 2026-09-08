@@ -382,10 +382,14 @@ struct CronView: View {
             Button(job.enabled ? "Pause" : "Resume") {
                 if job.enabled { viewModel.pauseJob(job) } else { viewModel.resumeJob(job) }
             }
+            // UI gate: addressed by identifier, not title — the Edit menu also has
+            // a "Delete" item, so a title lookup matches two elements.
+            .accessibilityIdentifier("cron.contextMenu.pauseToggle")
             Button("Run Now") { viewModel.runNow(job) }
             Button("Edit") { viewModel.editingJob = job }
             Divider()
             Button("Delete", role: .destructive) { pendingDelete = job }
+                .accessibilityIdentifier("cron.contextMenu.delete")
         }
     }
 
