@@ -5,9 +5,11 @@ permalink: scarf/architecture/hermes-mcp-config-is-a-yaml-mcp-servers-block-scar
 tags: [hermes, mcp, config, phase-5, registration]
 source_paths: [scarf/scarf/Core/Services/ProjectsMCPRegistrar.swift, scarf/scarf/Core/Services/HermesFileService.swift, scarf/scarf/scarfApp.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesMCPAdd.swift]
 source_paths_inferred: false
-source_sha: d21211a80383f52362a245594865a321c60dc058
+source_sha: 73fefe98e639a3d2692dd3bd38afd2a74a5049cb
 created: 2026-09-03
 updated: 2026-09-03
+reviewed: 2026-09-04
+reviewed_by: audit:claude-code (background)
 ---
 
 Format facts VERIFIED against Hermes v0.21.0 on this machine (charter C5), not from release notes: `hermes mcp add --help` prints `hermes mcp add [-h] [--url URL] [--command MCP_COMMAND] [--args ...] [--auth {oauth,header}] [--preset PRESET] [--connect-timeout N] [--env [ENV ...]] name`, exactly matching `HermesMCPAdd.stdioPlan`. A real emitted stdio entry (`~/.hermes/profiles/scarfbox-*/config.yaml`) is `mcp_servers:` → `  <name>:` → `    command:` scalar, `    args:` list, `    timeout:`, `    connect_timeout:`.

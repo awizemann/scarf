@@ -3,12 +3,12 @@ title: macOS Accessibility Label Conventions
 type: note
 permalink: scarf/conventions/macos-accessibility-label-conventions
 tags: [accessibility, voiceover, localization]
-source_paths: [scarf/scarf/Features/Servers/Views/AddServerSheet.swift, scarf/scarf/Features/Servers/Views/ManageServersView.swift, scarf/scarf/Features/Projects/Views/ProjectsSidebar.swift, scarf/scarf/Features/Skills/Views/SkillsView.swift, scarf/scarf/Features/Projects/Views/Widgets/WidgetErrorCard.swift, scarf/scarf/Features/Projects/Views/Widgets/ImageWidgetView.swift, scarf/scarf/Features/Projects/Views/Widgets/KanbanSummaryWidgetView.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppLaunchView.swift, scarf/Scarf iOS/Projects/ProjectsListView.swift, scarf/scarf/Features/Projects/Views/RegistryDamageBanner.swift, scarf/scarf/Features/Projects/Views/ProjectDoctorSheet.swift]
+source_paths: [scarf/scarf/Features/Servers/Views/AddServerSheet.swift, scarf/scarf/Features/Servers/Views/ManageServersView.swift, scarf/scarf/Navigation/SidebarProjectsWell.swift, scarf/scarf/Features/Skills/Views/SkillsView.swift, scarf/scarf/Features/Projects/Views/Widgets/WidgetErrorCard.swift, scarf/scarf/Features/Projects/Views/Widgets/ImageWidgetView.swift, scarf/scarf/Features/Projects/Views/Widgets/KanbanSummaryWidgetView.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppLaunchView.swift, scarf/Scarf iOS/Projects/ProjectsListView.swift, scarf/scarf/Features/Projects/Views/RegistryDamageBanner.swift, scarf/scarf/Features/Projects/Views/ProjectDoctorSheet.swift]
 source_paths_inferred: false
-source_sha: c09ee3811bd75bae2d7416178d880f5d5b8c64b6
+source_sha: c274e429308eb0a19bbfcae56761d89f056f9091
 created: 2026-08-28
 updated: 2026-09-04
-reviewed: 2026-09-01
+reviewed: 2026-09-04
 reviewed_by: audit:claude-code (background)
 ---
 

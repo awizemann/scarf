@@ -3,11 +3,13 @@ title: Registry writes take a reentrant cross-process file lock; remote is best-
 type: note
 permalink: scarf/decisions/registry-writes-take-a-reentrant-cross-process-file-lock
 tags: [projects, registry, concurrency, mcp, dataloss, locking]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RegistryWriteLock.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDashboardService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RegistryWriteLock.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDashboardService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SessionAttributionService.swift, scarf/scarf/Core/Services/HermesFileWatcher.swift]
 source_paths_inferred: false
-source_sha: 1d6a6ecb3075529e5d58bb2e2897546d061811f9
+source_sha: 5dd8e409667ca8bfde68d3138339bf2c85b7d139
 created: 2026-09-04
 updated: 2026-09-04
+reviewed: 2026-09-04
+reviewed_by: audit:claude-code (background)
 ---
 
 t-db8c745b. Since the `scarf-projects` MCP helper shipped, `projects.json` has had two writing PROCESSES plus ~6 in-app writers, and the chokepoint's inspect-then-publish was a TOCTOU between them: both sides publish atomically so nothing tears, but the loser's rows vanish and `.bak` holds the loser's state rather than the user's previous one. `RegistryWriteLock` closes it with a lock FILE and a staleness timeout — deliberately not a clever protocol.

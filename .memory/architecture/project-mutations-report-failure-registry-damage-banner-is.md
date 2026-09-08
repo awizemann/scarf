@@ -5,9 +5,11 @@ permalink: scarf/architecture/project-mutations-report-failure-registry-damage-b
 tags: [projects, registry, error-surfacing, phase-2, swiftui]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/ProjectsViewModel.swift, scarf/scarf/Features/Projects/Views/ProjectsView.swift, scarf/scarf/Features/Projects/Views/RegistryDamageBanner.swift]
 source_paths_inferred: false
-source_sha: 04223db9206630eb927ee0feef42c5525f10b025
+source_sha: c274e429308eb0a19bbfcae56761d89f056f9091
 created: 2026-09-03
 updated: 2026-09-03
+reviewed: 2026-09-04
+reviewed_by: audit:claude-code (background)
 ---
 
 Phase 2 of projects-first-class (branch feat/projects-first-class, t-5523ab86, commit 30be59d), the user-facing half of the Phase-1 registry hardening. Phase 1 made a corrupt `projects.json` survivable; Phase 2 makes both the survival and the failures visible, because a silently-failed save looked identical to a successful one.

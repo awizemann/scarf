@@ -5,9 +5,11 @@ permalink: scarf/conventions/sidebar-collapse-state-one-userdefaults-key-per-sec
 tags: [navigation, swiftui, macos, userdefaults]
 source_paths: [scarf/scarf/Navigation/SidebarSectionCollapseStore.swift, scarf/scarf/Navigation/SidebarView.swift, scarf/scarf/Navigation/SidebarProjectsWell.swift]
 source_paths_inferred: false
-source_sha: 4c36d6e0400bab67a52ba9f36de41c3b537a3d99
+source_sha: d0bc77bd0c89f2596dcfc69d532f257420f50029
 created: 2026-09-04
 updated: 2026-09-04
+reviewed: 2026-09-04
+reviewed_by: audit:claude-code (background)
 ---
 
 From t-e5bc2ad4 (2026-09-04), which made every main-sidebar nav section collapsible and moved the project list into a well. The persistence shape is the part that is easy to get wrong in a capability-gated sidebar.

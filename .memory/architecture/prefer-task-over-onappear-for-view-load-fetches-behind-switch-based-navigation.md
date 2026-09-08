@@ -13,10 +13,10 @@ reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations
-- [rule] 🚨 Navigation here uses `@ViewBuilder switch` on a selected-section/-tab enum that DESTROYS and recreates subtrees per selection, so `.onAppear { load() }` re-fires multi-call remote fetches on every re-entry. Use `.task` (fires once per view instance, auto-cancels on disappear). #rule
-- [pattern] `SessionsView`/`ChatView` use `.task` correctly. For true state persistence across switches, hoist the view or cache the loaded data in the coordinator — `.task` alone reduces redundant fetch frequency but does not preserve state across destruction.
-- [check] Quick audit: `grep -rn '.onAppear {' --include="*.swift" scarf/scarf/Features | grep -i load`
-- [history] 2026-06-13 Cycle 2: `ContentView.swift:50-84` + 9 feature views (e.g. `SettingsView.swift:108`, `HealthView.swift:124-127`), `ProjectsView.swift:454-481` (project tab switch). #history
+- [rule] 🚨 Navigation here uses `@ViewBuilder switch` on a selected-section enum that DESTROYS and recreates subtrees per selection, so `.onAppear { load() }` re-fires multi-call remote fetches on every re-entry. Use `.task` (fires once per view instance, auto-cancels on disappear) OR cache the view model via `cachedVM()` in the coordinator. #rule
+- [pattern] `ProjectsView` now uses `.task` correctly (line 70). Many views are cached via `cachedVM()` in `ContentView.cachedVM()` — when a VM is cached, even `.onAppear` fires only once per cache miss (e.g., `ProjectsView` at line 83-86, `SettingsView` at line 123). For true state persistence across switches without data loss, hoist the view or use caching. #pattern
+- [issue] `HealthView` (line 121 in ContentView) still uses `.onAppear { load() }` (HealthView:175) without VM caching — this causes redundant loads on every section re-entry. #issue
+- [history] 2026-09-04: ProjectsView migrated to `.task`; ContentView now caches view models for 7+ features via `cachedVM()` pattern. SettingsView (line 109) still uses `.onAppear` but is cached so it's mitigated. HealthView remains uncached. #history
 
 ## Relations
 - relates_to [[Scarf Architecture Rules]]

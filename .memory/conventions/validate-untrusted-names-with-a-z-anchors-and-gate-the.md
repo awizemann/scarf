@@ -5,9 +5,11 @@ permalink: scarf/conventions/validate-untrusted-names-with-a-z-anchors-and-gate-
 tags: [security, validation, regex, consent]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectSlashCommand.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/MiniAppPermission.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppLaunchView.swift]
 source_paths_inferred: false
-source_sha: 2c964c9894ab73b47b209b5a0395e07b7250a847
+source_sha: 73fefe98e639a3d2692dd3bd38afd2a74a5049cb
 created: 2026-09-04
 updated: 2026-09-04
+reviewed: 2026-09-04
+reviewed_by: audit:claude-code (background)
 ---
 
 Two P8 lows (SEC-L1, SEC-L4) with one shape between them: a string that arrives from an agent-written file, passes a validator that doesn't quite mean what it reads, and is then rendered somewhere a person makes a trust decision.

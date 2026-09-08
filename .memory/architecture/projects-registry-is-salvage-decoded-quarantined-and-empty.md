@@ -5,9 +5,11 @@ permalink: scarf/architecture/projects-registry-is-salvage-decoded-quarantined-a
 tags: [projects, registry, resilience, phase-1, codable]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectRegistrySalvage.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectDashboard.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDashboardService.swift]
 source_paths_inferred: false
-source_sha: 0d4741e1e9f141625fd194599a2286fa22a65916
+source_sha: c274e429308eb0a19bbfcae56761d89f056f9091
 created: 2026-09-03
 updated: 2026-09-04
+reviewed: 2026-09-04
+reviewed_by: audit:claude-code (background)
 ---
 
 Phase 1 of projects-first-class (branch feat/projects-first-class, t-22700ef6), after the 2026-09-02 corruption where an agent wrote a non-UUID string into `ProjectEntry.uuid` and the strict decode emptied every project surface. `~/.hermes/scarf/projects.json` is agent-writable forever, so the READER is where the defense belongs.

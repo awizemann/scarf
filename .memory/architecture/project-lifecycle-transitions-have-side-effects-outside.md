@@ -5,9 +5,11 @@ permalink: scarf/architecture/project-lifecycle-transitions-have-side-effects-ou
 tags: [projects, lifecycle, doctor, uninstall, archive]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectLifecycleService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/ProjectsViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDoctorService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectContextBlock.swift, scarf/scarf/Core/Services/ProjectTemplateUninstaller.swift]
 source_paths_inferred: false
-source_sha: 78cccf7a762b94fa125f4d9d8753c58ec19df3cd
+source_sha: 73fefe98e639a3d2692dd3bd38afd2a74a5049cb
 created: 2026-09-04
 updated: 2026-09-04
+reviewed: 2026-09-04
+reviewed_by: audit:claude-code (background)
 ---
 
 D2 (t-a2c169f0). Adding a project touched half a dozen stores; removing,

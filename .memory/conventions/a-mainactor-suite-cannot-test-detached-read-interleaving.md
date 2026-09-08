@@ -5,9 +5,11 @@ permalink: scarf/conventions/a-mainactor-suite-cannot-test-detached-read-interle
 tags: [testing, concurrency, swift-testing]
 source_paths: [scarf/Packages/ScarfCore/Tests/ScarfCoreTests/ProjectsViewModelErrorSurfacingTests.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/ProjectsViewModel.swift]
 source_paths_inferred: false
-source_sha: 04223db9206630eb927ee0feef42c5525f10b025
+source_sha: 7e6326c20d55aff25b9d9bb5be70e80881404361
 created: 2026-09-03
 updated: 2026-09-03
+reviewed: 2026-09-04
+reviewed_by: audit:claude-code (background)
 ---
 
 Found while adding a regression test for the `reloadGeneration` stale-clobber guard in `ProjectsViewModel` (Phase 2 of projects-first-class, commit 30be59d). The test looked correct, passed, and proved nothing.

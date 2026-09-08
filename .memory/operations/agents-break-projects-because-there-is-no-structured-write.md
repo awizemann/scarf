@@ -3,11 +3,13 @@ title: Agents break projects because there is no structured write path — 2026-
 type: note
 permalink: scarf/operations/agents-break-projects-because-there-is-no-structured-write
 tags: [projects, stability, skills, registry, investigation]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDashboardService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift, scarf/scarf/Resources/BuiltinSkills.bundle/scarf-template-author/SKILL.md]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDashboardService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift, scarf/scarf/Core/Services/ProjectsMCPRegistrar.swift, scarf/scarf/Resources/BuiltinSkills.bundle/scarf-template-author/SKILL.md]
 source_paths_inferred: false
-source_sha: 009fb67fd0ec860cb5f61ec1d8e6060477025c90
+source_sha: d0bc77bd0c89f2596dcfc69d532f257420f50029
 created: 2026-09-03
 updated: 2026-09-03
+reviewed: 2026-09-04
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

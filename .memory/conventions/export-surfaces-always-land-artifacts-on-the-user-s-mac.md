@@ -13,12 +13,11 @@ reviewed_by: audit:claude-code (background)
 
 - [convention] Any user-facing "Export…" in the Mac app produces a file on the **user's Mac**, whichever host Hermes runs on. Decided across gh#129/PR#130 (sessions) and gh#132 (profiles). Never hand an `NSSavePanel`/`NSOpenPanel` path to a CLI that may run on a remote host, and never ask the user for a remote destination path for an export. #export #remote
 - [mechanism] Two implementation shapes, chosen by CLI capability: (1) CLI has a stdout mode → pipe the payload (`hermes sessions export -`, raw `Data`, stderr kept separate — `runHermesCLIData`); (2) CLI only takes `--output <path>` → export to a generated `/tmp/scarf-*-<uuid>` scratch on the host, stream down via `transport.streamRawBytes` (RemoteBackupService shape, chunked, never in memory), atomic move into the panel destination, delete the scratch on every path. See `RemoteProfileExport` in the app target. #pattern
-- [anti-pattern] `transport.readFile` is a fully-buffered `cat` scoped to <1 MB files — never use it for payload downloads. Remote-path input sheets with a "Verify" for *writable* paths are retired (gh#131's false-green class); the surviving remote-path sheet is import-only (existing-file checks). #gotcha
+- [anti-pattern] `transport.readFile` is a fully-buffered `cat` scoped to <1 MB files — never use it for payload downloads. Writable remote-path sheets were retired in gh#132 when profile export adopted RemoteProfileExport pattern (the sheets were added in gh#131 to fix false-green directory checks, then rendered unnecessary by streaming). #gotcha
 - [ux] Failure banners reduce Python tracebacks to their **last** non-empty line (`ProfilesViewModel.failureMessage`, Sessions `errorSummary`); success banners name the byte count so an empty file can't masquerade as a good export. #errors
-
 
 ## Observations
 - [convention] Every Mac-app "Export…" writes the artifact to the user's Mac regardless of where Hermes runs (gh#129/#130 sessions, gh#132 profiles); never hand a panel path to a possibly-remote CLI #export
 - [pattern] CLI with stdout mode → pipe payload as raw Data; CLI with only `--output` → host `/tmp` scratch + `streamRawBytes` download + atomic move + scratch cleanup (`RemoteProfileExport`) #remote
-- [gotcha] `transport.readFile` is a buffered `cat` for <1 MB files only — never for payload downloads; writable remote-path "Verify" sheets are retired (gh#131 false-green class) #transport
+- [gotcha] `transport.readFile` is a buffered `cat` for <1 MB files only — never for payload downloads; writable remote-path sheets retired in gh#132 after gh#131 proved verification unreliable #transport
 - [ux] CLI failure banners show the traceback's last non-empty line; success banners name the byte count #errors

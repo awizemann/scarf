@@ -3,12 +3,12 @@ title: Hermes v0.18.0 Audit Findings
 type: note
 permalink: scarf/integration/hermes-v0-18-0-audit-findings
 tags: [hermes, v018, audit, verification, wire-format]
-source_paths: [scripts/check-hermes-tables.py]
-source_paths_inferred: true
-source_sha: cc5d3945a2d0813c6559f9a538a83425582641c2
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesCronJob.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift]
+source_paths_inferred: false
+source_sha: 73fefe98e639a3d2692dd3bd38afd2a74a5049cb
 created: 2026-07-04
 updated: 2026-07-04
-reviewed: 2026-09-02
+reviewed: 2026-09-04
 reviewed_by: audit:claude-code (background)
 ---
 

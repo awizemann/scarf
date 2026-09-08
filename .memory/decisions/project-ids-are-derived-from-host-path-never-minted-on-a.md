@@ -5,9 +5,11 @@ permalink: scarf/decisions/project-ids-are-derived-from-host-path-never-minted-o
 tags: [projects, identity, phase-3, uuid, fleet, decision]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectIdentity.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/FleetService.swift, scarf/scarf/Core/Services/ProjectAgentContextService.swift]
 source_paths_inferred: false
-source_sha: 9be1e2f491a09c9de53ffcd0ca035c32fda4e648
+source_sha: c274e429308eb0a19bbfcae56761d89f056f9091
 created: 2026-09-03
 updated: 2026-09-03
+reviewed: 2026-09-04
+reviewed_by: audit:claude-code (background)
 ---
 
 Phase 3 of projects-first-class (branch feat/projects-first-class, t-91050c08, commit 9be1e2f). `ProjectStore.derive(from:)` did `entry.uuid ?? UUID()`, so `list()`, the cockpit load and the render-only `ProjectAgentContextService.refresh` each observed a DIFFERENT id for the same unpersisted project. Persisting inside `derive` was rejected: it would write on the render-only chat-start path and push past `save`'s `projectRootMissing` guard. Deriving deterministically fixes the same bug with zero writes.

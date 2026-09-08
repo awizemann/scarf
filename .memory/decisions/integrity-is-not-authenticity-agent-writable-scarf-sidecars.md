@@ -47,7 +47,6 @@ the same machine key rather than minting another.
 - [gotcha] The tag binds the project PATH, not a project identity — the same residual `ImageHostConsentStore` carries. A blessed path that later holds a different repo inherits the blessing; the payload is composed so a stable uuid can replace the id without a format change #security
 - [constraint] Scarf only chooses the OPENING posture — enforcement stays entirely Hermes-side, so sensitive paths still prompt exactly as they do when the mode is flipped by hand from the chat header. Gated on `hasSessionEditAutoApproval` (v0.15+); a pre-0.15 host sends no RPC at all (C1) #hermes
 
-
 ## Relations
 - relates_to [[Absent-vs-unreadable is the discriminator every Scarf JSON store owes its writers]]
 - relates_to [[Phase-1 Milestone 2: Mini-apps — implementation decisions]]
