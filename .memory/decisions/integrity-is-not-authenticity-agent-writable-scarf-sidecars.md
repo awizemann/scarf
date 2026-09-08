@@ -5,10 +5,10 @@ permalink: scarf/decisions/integrity-is-not-authenticity-agent-writable-scarf-si
 tags: [security, projects, miniapps, keychain]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantSigner.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedJSONStore.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppLaunchView.swift]
 source_paths_inferred: false
-source_sha: 9b1d97497a9dab2e58137d071729db6bf72d9035
+source_sha: 92d062bdc2c76f94828de482292db860b4da4cbd
 created: 2026-09-04
 updated: 2026-09-08
-reviewed: 2026-09-07
+reviewed: 2026-09-08
 reviewed_by: audit:claude-code (background)
 ---
 

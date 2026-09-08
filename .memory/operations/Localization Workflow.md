@@ -49,3 +49,8 @@ updated: 2026-09-08
 ## iOS-only key pruning is now gated (2026-09-08)
 
 - [rule] The six iOS-only catalog keys are pinned by `LocalizationCatalogTests.iosOnlyKeysAreStillInTheCatalog` (scarf/scarfTests/LocalizationCatalogTests.swift, list: `iosOnlyKeys`). A macOS-scheme extraction that prunes them now fails the scarf scheme's tests with the restore procedure in the failure message (restore verbatim from git). Building the iOS scheme does NOT protect them — confirmed twice (2026-09-08): the iOS scheme never writes back to the shared catalog, so iOS-only keys are hand-maintained. A key added for an iOS-only call site must be hand-added to the catalog AND appended to `iosOnlyKeys`.
+
+## Relations
+- implements [[Section-audit remediation 2026-09]]
+- relates_to [[Scarf Design System (ScarfDesign)]]
+- relates_to [[ScarfGo iOS Companion App]]

@@ -3,12 +3,12 @@ title: Bot Mode Phase A Decisions
 type: note
 permalink: scarf/decisions/bot-mode-phase-a-decisions
 tags: [bot-mode, phase-a, hermes, profiles, decisions]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/BotRoutinePrefix.swift, scarf/scarf/Features/Bots/ViewModels/BotRoutinesViewModel.swift, scarf/scarf/Features/Bots/ViewModels/BotsViewModel.swift, scarf/scarf/Features/Bots/Views/BotRoutinesView.swift, scarf/scarf/Features/Bots/Views/RemoteBotDetailView.swift, scarf/scarf/Features/Bots/Views/BotsView.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/BotRoutinePrefix.swift, scarf/scarf/Features/Bots/ViewModels/BotRoutinesViewModel.swift, scarf/scarf/Features/Bots/ViewModels/BotsViewModel.swift, scarf/scarf/Features/Bots/Views/BotRoutinesView.swift, scarf/scarf/Features/Bots/Views/RemoteBotDetailView.swift, scarf/scarf/Features/Bots/Views/BotsView.swift, scarf/scarf/Features/Common/OutcomeMessage.swift, scarf/scarf/Features/Common/OutcomeMessageBar.swift]
 source_paths_inferred: false
-source_sha: c274e429308eb0a19bbfcae56761d89f056f9091
+source_sha: 92d062bdc2c76f94828de482292db860b4da4cbd
 created: 2026-09-01
 updated: 2026-09-01
-reviewed: 2026-09-04
+reviewed: 2026-09-08
 reviewed_by: audit:claude-code (background)
 ---
 B4 filled BotDetailView's `automation` slot (commit 5c26a90): per-bot Routines + a Remote peer roster group.

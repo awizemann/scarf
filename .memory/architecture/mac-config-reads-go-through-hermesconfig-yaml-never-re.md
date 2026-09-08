@@ -5,10 +5,10 @@ permalink: scarf/architecture/mac-config-reads-go-through-hermesconfig-yaml-neve
 tags: [settings, config-parsing, drift]
 source_paths: [scarf/scarf/Core/Services/HermesFileService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift]
 source_paths_inferred: false
-source_sha: 7e6326c20d55aff25b9d9bb5be70e80881404361
+source_sha: 92d062bdc2c76f94828de482292db860b4da4cbd
 created: 2026-07-14
 updated: 2026-07-14
-reviewed: 2026-09-04
+reviewed: 2026-09-08
 reviewed_by: audit:claude-code (background)
 ---
 
@@ -24,7 +24,7 @@ Alan's 2026-07-14 bug report ("settings drop downs are saving but not showing se
 
 ## Drift-audit systemic finding (2026-07-14)
 - [fact] A full app-target-vs-ScarfCore duplication sweep confirmed the config parser was mostly a ONE-OFF, not a pervasive pattern: ACP wire encoding, path/home resolution (HermesPathSet/HermesProfileScope), capability gating (HermesCapabilities), ModelPreflight, and the YAML helpers (post-3e0184d) all have single owners with app-side delegation. Architecture is sound. #audit
-- [gotcha] The DRIFT CLASS is: an app-target WRITE path (`SettingsViewModel.setSetting("x.y")`, 120 of them) paired with a ScarfCore READ path (`HermesConfig(yaml:)`) where key sets can silently diverge → saves-but-reloads-stale. The convention ("keys go in ScarfCore only") is DOCUMENTATION, not a gate; HermesFileServiceConfigParityTests is a fixed-fixture guard that does NOT enumerate the 120 writers. Enforcement fix = a DERIVED parity test (t-2d258871). #enforcement
+- [done] The DRIFT CLASS was: an app-target WRITE path (`SettingsViewModel.setSetting("x.y")`, 120 of them) paired with a ScarfCore READ path (`HermesConfig(yaml:)`) where key sets could silently diverge → saves-but-reloads-stale. Enforcement fix = a derived parity test (t-2d258871), implemented 2026-09-02 — now failing builds catch any new writes without matching readers. #enforcement
 - [gotcha] iOS `ChatView.confirmModelPreflight` is ALREADY divergent — writes model.provider/default raw, skipping LocalModelConfigPlan's clear-on-switch scrub → stale base_url routes iOS chat to wrong endpoint (GH#27132 class, the bug we fixed on Mac). Live on iOS, untracked until now → t-52f4564b. #ios-divergence
 
 ## Relations

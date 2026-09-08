@@ -3,13 +3,13 @@ title: macOS Accessibility Label Conventions
 type: note
 permalink: scarf/conventions/macos-accessibility-label-conventions
 tags: [accessibility, voiceover, localization]
-source_paths: [scarf/scarf/Features/Servers/Views/AddServerSheet.swift, scarf/scarf/Features/Servers/Views/ManageServersView.swift, scarf/scarf/Navigation/SidebarProjectsWell.swift, scarf/scarf/Features/Skills/Views/SkillsView.swift, scarf/scarf/Features/Projects/Views/Widgets/WidgetErrorCard.swift, scarf/scarf/Features/Projects/Views/Widgets/ImageWidgetView.swift, scarf/scarf/Features/Projects/Views/Widgets/KanbanSummaryWidgetView.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppLaunchView.swift, scarf/Scarf iOS/Projects/ProjectsListView.swift, scarf/scarf/Features/Projects/Views/RegistryDamageBanner.swift, scarf/scarf/Features/Projects/Views/ProjectDoctorSheet.swift]
+source_paths: [scarf/scarf/Features/Servers/Views/AddServerSheet.swift, scarf/scarf/Features/Servers/Views/ManageServersView.swift, scarf/scarf/Navigation/SidebarProjectsWell.swift, scarf/scarf/Features/Skills/Views/SkillsView.swift, scarf/scarf/Features/Projects/Views/Widgets/WidgetErrorCard.swift, scarf/scarf/Features/Projects/Views/Widgets/ImageWidgetView.swift, scarf/scarf/Features/Projects/Views/Widgets/KanbanSummaryWidgetView.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppLaunchView.swift, scarf/Scarf iOS/Projects/ProjectsListView.swift, scarf/scarf/Features/Projects/Views/RegistryDamageBanner.swift, scarf/scarf/Features/Projects/Views/ProjectDoctorSheet.swift, scarf/scarf/Features/Settings/Views/Components/SettingsComponents.swift, scarf/scarf/Features/Sessions/Views/SessionsView.swift, scarf/scarf/Features/Kanban/Views/KanbanCardView.swift, scarf/scarf/Features/Logs/Views/LogsView.swift, scarf/scarf/Features/Chat/Views/RichMessageBubble.swift, scarf/scarf/Features/Cron/Views/CronView.swift, scarf/scarf/Features/Projects/Views/ProjectSessionsView.swift, scarf/scarf/Features/Common/OutcomeMessage.swift, scarf/scarf/Features/Common/OutcomeMessageBar.swift]
 source_paths_inferred: false
-source_sha: c274e429308eb0a19bbfcae56761d89f056f9091
+source_sha: 168f30e914d476427d2de7a165d8f905edb4e923
 created: 2026-08-28
-updated: 2026-09-07
-reviewed: 2026-09-04
-reviewed_by: audit:claude-code (background)
+updated: 2026-09-08
+reviewed: 2026-09-08
+reviewed_by: claude-fable-5-1
 ---
 
 Established during the 2026-08-28 accessibility pass driven by the Walkabout macOS shakedown (W19/W22). Form fields and list rows in the macOS target now carry .accessibilityLabel; follow these rules when adding UI.
@@ -78,3 +78,9 @@ Extended 2026-09-07 by GW-F4 (t-667fd332, the GW-E5 audit's Accessibility sectio
 - [convention] A single view model channel can have MORE THAN ONE consumer, and a second view that ignores the outcome flag re-opens the bug the first one fixed (`PeersViewModel.message` read correctly by `PeersView`, painted green by `RemoteBotDetailView`). When outcome-typing a channel, grep for every reader, not just the one the audit named #accessibility
 - [decision] `ProjectRegistryError.registryBusy` now carries a per-file `label` threaded from `GuardedTextFile`'s existing label through `RegistryWriteLock.withLock(path:label:)`. GW-F3 pointed one lock at four more files than the registry it is named for, and the busy message had only a raw path to show for a `.env` or a MEMORY.md #i18n
 - [gotcha] ScarfCore has NO string catalog and will not get one (a headless `xcodebuild` never merges keys back, and a second catalog would fork the vocabulary). Its refusal sentences reach users VERBATIM via `localizedDescription` passthrough at app-side bars — documented at both `errorDescription` sites rather than papered over; app-side surfaces wrap what they compose themselves in `String(localized:)` #i18n
+
+
+Extended 2026-09-08 by t-0fb3b91f (the cron detail pane the P2b UI gate could not reach). The headline finding was a HIT-TESTING one, not a labelling one, and it made an entire pane unreachable for VoiceOver as well as for XCUITest.
+
+- [gotcha] A `.plain` Button's hit area is its label's OPAQUE content: a row whose background is `.fill(isSelected ? tint : Color.clear)` is clickable only on its glyphs, so a click in the row's empty middle — where XCUITest clicks, and where a mouse user aims — falls through. `.contentShape(Rectangle())` inside the label is the fix; the symptom reads as "the row does nothing and its `.contextMenu` never presents", and downstream as "the detail pane is missing" when nothing can be selected #accessibility
+- [convention] `HSplitView`'s children's `minWidth`s ADD UP and it overflows rather than shrinks below their sum — the overflowing pane is clipped, and a clipped SwiftUI subtree is absent from the accessibility tree entirely. Master-detail panes take the app's `resizableColumn` + `HStack` pattern (Bots, Chat, now Cron): a fixed, persisted list width beside a flexible detail can never overflow #accessibility

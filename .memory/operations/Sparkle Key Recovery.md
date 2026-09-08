@@ -5,10 +5,10 @@ permalink: scarf/ops/sparkle-key-recovery
 tags: [release, sparkle, signing, gotcha, setup]
 source_paths: [scripts/release.sh, scarf/scarf/Info.plist]
 source_paths_inferred: false
-source_sha: 20f286c14389245de47c0c93a461d7bcc3a002d6
+source_sha: 7c0b8a6367b4a0c476e0b1a38c63e597abac5af6
 created: 2026-06-06
 updated: 2026-06-06
-reviewed: 2026-09-01
+reviewed: 2026-09-08
 reviewed_by: audit:claude-code (background)
 ---
 

@@ -4,18 +4,19 @@ type: note
 permalink: scarf/architecture/scarf-go-i-os-companion-app
 tags: [ios, scarfgo, ssh]
 source_paths: [README.md, scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/ScarfDesign, scarf/Packages/ScarfIOS]
-source_sha: 4aabf5c24fba7eca2879f877c64b28acfcd604b2
+source_sha: 3cf372605b3a8a51ec7ed5ac1238e41fed825678
 created: 2026-05-29
 updated: 2026-06-25
-reviewed: 2026-09-07
+reviewed: 2026-09-08
 reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations
 - [structure] ScarfGo is a separate iOS target (`scarf mobile`) in the same Xcode project. Both `scarf` (Mac) and `scarf mobile` import the shared `ScarfDesign` and `ScarfCore` Swift packages under `scarf/Packages/`. #targets
-- [design] ScarfGo uses pure-Swift SSH via Citadel — no `ssh` binary on iOS. Generates Ed25519 keypair on device; private key stored in iOS Keychain with `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, excluded from iCloud sync. #security
+- [design] ScarfGo uses pure-Swift SSH via Citadel — no `ssh` binary on iOS. Generates Ed25519 keypair on device; private key stored in iOS Keychain. Key resolution per-server via `SSHKeyResolver` maps `SSHConfig` to its server entry's stored key, with fallback to legacy singleton for pre-M9 installs (gh#133). Both transport + chat ACP channel use per-server resolution to avoid loading the lexicographically-first key when multiple servers are registered. #security
 - [scope] Feature surface: multi-server, project-scoped chat, session resume, memory editor, cron list, skills tree, settings (read-only). All sessions are scoped to a project via the same Scarf-managed AGENTS.md block the Mac app writes. #features
 - [profiles] Profile switching (#120, Design B): ScarfGo switches WHICH Hermes profile it views per-server WITHOUT mutating the host's `active_profile` (Mac app/terminal undisturbed). File layer scopes via `IOSServerConfig.remoteHome` → `HermesPathSet`; process layer (chat ACP + every hermes CLI) prepends `HERMES_HOME=<root>/profiles/<name>` via `HermesProfileScope.hermesHomeShellAssignment` in `CitadelServerTransport.asyncRunProcess`/`ACPClient+iOS`. Selection lives in `ScarfGoCoordinator.selectedProfile` (persisted per-server via `IOSProfileSelectionStore`); `ScarfGoTabRoot` rebuilds the tab tree (`.id`) on switch and `ChatController.deinit` tears down the old ACP session. `ProfilesView` is now a switcher (was read-only). Create/rename/delete/import-export stay Mac-only. #profiles #ios
+- [resilience] SSH connect resilience via `SSHConnectPolicy` — retries up to 3x on channel connect timeout only (hard-coded 10s window in Citadel). Actionable error text replaces bridged "error N" strings in transport / chat / onboarding funnels. Cold cellular Tailscale paths (DERP-relayed) exceed the 10s login window; warm tunnel fits easily. (gh#133) #resilience
 - [distribution] Public TestFlight: https://testflight.apple.com/join/qCrRpcTz . Requires iOS 18.0+. #distribution
 - [constraint] iOS Dynamic Type clamped at scene root in `ScarfIOSApp.swift`: `.dynamicTypeSize(.xSmall ... .accessibility2)`. iOS adopts native `.navigationTitle` + `.large` instead of `ScarfPageHeader` on tab roots. #accessibility
 
@@ -23,3 +24,4 @@ reviewed_by: audit:claude-code (background)
 - relates_to [[iOS Platform Rules]]
 - relates_to [[Multi-Server Architecture (Scarf 2.0+)]]
 - shares_with [[Scarf Design System (ScarfDesign)]]
+- documents_fix gh#133

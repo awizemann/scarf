@@ -5,9 +5,11 @@ permalink: scarf/architecture/guarded-writes-for-shared-json-mutate-the-graph-on
 tags: [guarded-write, dataloss, projects, architecture]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedSidecarStore.swift, scarf/scarf/Core/Persistence/ServerRegistry.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/scarf/Core/Services/ProjectManifestStore.swift, scarf/scarf/Core/Services/ProjectConfigService.swift, scarf/scarf/Core/Services/KanbanTenantResolver.swift, scarf/scarf/Core/Services/ProjectModelPresetBinding.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedJSONStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppStore.swift, scarf/scarf/Core/Services/SkillBootstrapService.swift]
 source_paths_inferred: false
-source_sha: 7e6326c20d55aff25b9d9bb5be70e80881404361
+source_sha: 92d062bdc2c76f94828de482292db860b4da4cbd
 created: 2026-09-04
 updated: 2026-09-07
+reviewed: 2026-09-08
+reviewed_by: audit:claude-code (background)
 ---
 
 GW-E2c (t-b889e8e7). Converting the last destroy-shaped writers in the projects/skills/bots surface produced three patterns worth reusing, all of them about the shape of the fix rather than the guard itself.

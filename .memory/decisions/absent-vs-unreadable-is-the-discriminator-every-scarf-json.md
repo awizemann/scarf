@@ -5,10 +5,10 @@ permalink: scarf/decisions/absent-vs-unreadable-is-the-discriminator-every-scarf
 tags: [projects, transport, resilience, dataloss, restore]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDashboardService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RemoteRestoreService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedJSONStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedTextFile.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedSidecarStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SessionAttributionService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPresetService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectContextBlock.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/TransportPrivateMode.swift, scarf/scarf/Core/Services/ProjectTemplateInstaller.swift, scarf/scarf/Core/Services/HermesFileService.swift]
 source_paths_inferred: false
-source_sha: 6479e44021208a95e59f7885507b0fafaacb6335
+source_sha: 3cf372605b3a8a51ec7ed5ac1238e41fed825678
 created: 2026-09-04
 updated: 2026-09-07
-reviewed: 2026-09-07
+reviewed: 2026-09-08
 reviewed_by: audit:claude-code (background)
 ---
 
@@ -24,6 +24,7 @@ t-a6f22379. `projects.json` got this discriminator in commit 7460cf9; `project.j
 ## Relations
 - relates_to [[Transport atomic-write parity is a per-transport contract, not a property of writeFile]]
 - relates_to [[Projects registry is salvage-decoded, quarantined, and empty-save-guarded]]
+- relates_to [[Guarded writes for shared JSON: mutate the graph, one store per file, prove absence before creating]]
 
 
 ## D1 (t-3b855719): the discipline became one type, and the adjacent sidecars got it

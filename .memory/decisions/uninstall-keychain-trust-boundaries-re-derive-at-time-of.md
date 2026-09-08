@@ -5,9 +5,11 @@ permalink: scarf/decisions/uninstall-keychain-trust-boundaries-re-derive-at-time
 tags: [security, templates, keychain, uninstall, projects]
 source_paths: [scarf/scarf/Core/Services/ProjectTemplateUninstaller.swift, scarf/scarf/Core/Models/TemplateConfig.swift, scarf/scarf/Core/Services/ProjectConfigService.swift, scarf/scarf/Core/Services/KeychainEnvMirror.swift, scarf/scarf/Core/Models/ProjectTemplate.swift]
 source_paths_inferred: false
-source_sha: feebb3c6a0446ee737233fe1a61621a876c3bc38
+source_sha: 92d062bdc2c76f94828de482292db860b4da4cbd
 created: 2026-09-04
 updated: 2026-09-07
+reviewed: 2026-09-08
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

@@ -5,9 +5,11 @@ permalink: scarf/decisions/keychain-ref-binding-truncated-sha-256-over-template-
 tags: [security, keychain, templates, projects, migration]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectConfigKeychain.swift, scarf/scarf/Core/Services/ProjectConfigService.swift, scarf/scarf/Core/Services/ProjectTemplateUninstaller.swift, scarf/scarf/Core/Services/KeychainEnvMirror.swift, scarf/Packages/ScarfCore/Sources/ScarfProjectsMCPKit/ProjectMCPTools.swift]
 source_paths_inferred: false
-source_sha: 73b775ed43e1947b6632c2a4f134d350ea1c9f2c
+source_sha: 3cf372605b3a8a51ec7ed5ac1238e41fed825678
 created: 2026-09-04
 updated: 2026-09-04
+reviewed: 2026-09-08
+reviewed_by: audit:claude-code (background)
 ---
 
 P8 audit SEC-H2, fixed in T1 (t-09019d73). The cross-project Keychain

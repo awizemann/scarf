@@ -28,3 +28,8 @@ Rules when touching SSH paths:
 - [fact] scp exit codes cannot distinguish connection failure (exits 1, not 255) — scp is admit-only, never feeds the gate #ssh
 - [fact] ssh -O check / -O exit are local socket ops — exempt from the gate or they poison it with "no master" non-zero exits #ssh
 - [fact] Test Connection, chat Reconnect, and server removal reset the gate — explicit user intent overrides backoff #ux
+
+## Relations
+- builds_on [[scarf/architecture/macos-controlmaster-staleness-dead-masters-must-be-probed]]
+- relates_to [[scarf/architecture/chat-session-layer-mechanism-map-and-2026-07-13-diagnosis]]
+- implements [[scarf/architecture/multi-server-architecture-scarf-2.0]]

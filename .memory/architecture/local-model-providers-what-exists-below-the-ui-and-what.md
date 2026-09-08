@@ -11,7 +11,7 @@ reviewed: 2026-09-01
 reviewed_by: audit:claude-code (background)
 ---
 
-Investigation 2026-07-13 (pre-design for the local/remote model toggle). Source-verified against main @ v2.16.2.
+Investigation 2026-07-13 (pre-design for the local/remote model toggle). Source-verified against main @ v2.16.2. Updated 2026-09-01 to reflect subsequent provider table reconciliations.
 
 ## Observations
 - [fact] Hermes accepts local providers TODAY via aliases Scarf already mirrors (ModelCatalogService.swift:810-817): `ollama`→`custom`, `vllm`/`llamacpp`/`llama.cpp`→`local`, `lm-studio`→`lmstudio`. Writing `model.provider: ollama` is valid Hermes config; Scarf canonicalizes only for validation. #providers

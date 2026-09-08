@@ -5,10 +5,10 @@ permalink: scarf/conventions/unguarded-write-seam-the-primitive-is-named-and-a-s
 tags: [writes, guards, testing, gw-enforcement]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/ServerTransport.swift, scarf/Packages/ScarfCore/Tests/ScarfCoreTests/UnguardedWriteScanTests.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ServerContext.swift, scarf/scarf/Core/Services/HermesFileService.swift]
 source_paths_inferred: false
-source_sha: 91ae15fa9560c87a913c3b5ef14b8915b7ab5028
+source_sha: 535e3a636eb90b30a620e776ab7ed436fac2873c
 created: 2026-09-04
 updated: 2026-09-07
-reviewed: 2026-09-07
+reviewed: 2026-09-08
 reviewed_by: audit:claude-code (background)
 ---
 
@@ -23,3 +23,9 @@ reviewed_by: audit:claude-code (background)
 - [convention] Rule 3 (GW-F5): a Foundation write (`.write(`/`createFile(`) on a line that also names a Scarf live-state file in a string literal FAILS the scan — `servers.json`, `projects.json`, `project.json`, `manifest.json`, `miniapp_grants.json`, `session_project_map.json`, `model_presets.json`, `config.yaml`, `auth.json`, `.env`, `MEMORY.md`, `USER.md` (plus their `.bak`/`.corrupt-` spellings). Exempt: the three transports and the three guards. Deliberately narrow — Foundation writes in general are NOT scanned because export/save-panel/temp sites are legitimate and a blanket rule would be noise #writes
 - [gotcha] The suite's docstring used to claim it made an unguarded write "impossible to perform silently". It does not, and the claim now names its own holes: WRAPPER LAUNDERING (one annotated helper, N invisible callers — only a reviewer catches it) and Foundation writes outside rule 3's narrow list. `#if` branches are NOT an evasion: a textual scan sees both arms #testing
 - [convention] Prove a scan rule bites with a temporary canary file under `scarf/scarf/…` before trusting it — SwiftPM does not compile the Mac app sources, so a canary there fails the SCAN without breaking the build, and is deleted before commit #testing
+
+## Relations
+- builds_on [[scarf/architecture/guarded-writes-for-shared-json-mutate-the-graph-one-store]]
+- builds_on [[scarf/architecture/guardedtextfile-is-the-one-guard-for-scarf-s-non-json-hand]]
+- relates_to [[scarf/architecture/the-transport-writefile-grep-is-not-the-write-surface]]
+- precedes [[scarf/decisions/guards-were-applied-per-writer-so-four-shared-files-each]]

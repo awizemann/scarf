@@ -21,3 +21,8 @@ reviewed_by: audit:claude-code (background)
 - [pattern] CLI with stdout mode → pipe payload as raw Data; CLI with only `--output` → host `/tmp` scratch + `streamRawBytes` download + atomic move + scratch cleanup (`RemoteProfileExport`) #remote
 - [gotcha] `transport.readFile` is a buffered `cat` for <1 MB files only — never for payload downloads; writable remote-path sheets retired in gh#132 after gh#131 proved verification unreliable #transport
 - [ux] CLI failure banners show the traceback's last non-empty line; success banners name the byte count #errors
+
+## Relations
+- builds_on [[scarf/architecture/transport-atomic-write-parity-is-a-per-transport-contract]]
+- relates_to [[scarf/architecture/the-transport-writefile-grep-is-not-the-write-surface]]
+- relates_to [[scarf/architecture/multi-server-architecture-scarf-2.0]]

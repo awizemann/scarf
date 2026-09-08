@@ -17,7 +17,8 @@ GW-E2a. `~/.hermes/config.yaml` had FIVE independent read-modify-write writers, 
 ## Observations
 
 - [convention] (GW-E2c) An EDITOR over a guarded text file must hold the `Loaded` token, not re-check in the writer: SkillsViewModel keeps `loadedContent: GuardedTextFile.Loaded?`, and a refused load leaves it nil so Save has no path at all. The old `?? ""` loader's empty buffer became unsavable by construction rather than by a check someone could remove #guarded-write
-- [gotcha] (GW-E2c) After a successful guarded write, REFRESH the token with the bytes just published (`Loaded(text:exists:inspection:)` is public). A stale token makes the second save in one sitting back up the version from two saves ago #guarded-write
+- [gotcha] (GW-F6) `Loaded.init` is `internal` (not `public`) to prevent forging proof tokens from outside ScarfCore. Within the same module, only `load()` and successful-write re-stamping (like SkillsViewModel does at line 919) may construct it; a public init would let any code forge a blank-buffer token and bypass the guard entirely #guarded-write
+- [gotcha] (GW-E2c) After a successful guarded write, REFRESH the token with the bytes just published (`Loaded(text:exists:inspection:)` is available in-module only). A stale token makes the second save in one sitting back up the version from two saves ago #guarded-write
 
 - [architecture] GuardedTextFile wraps GuardedJSONStore.inspect for hand-authored text (config.yaml, .env, MEMORY.md, USER.md): stat+retry proof, one-deep .bak, and write() reachable only via a Loaded returned by load() #guarded-write
 - [decision] Zero bytes is a LEGAL state for these files, but Loaded.exists stays true for an empty file — .env's 'create fresh with header' branch must not fire on an existing empty file #dataloss

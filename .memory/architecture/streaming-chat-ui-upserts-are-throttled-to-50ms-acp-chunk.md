@@ -23,3 +23,6 @@ reviewed_by: audit:claude-code (background)
 ## Phase 2 — incremental streaming markdown (gh#140)
 
 Throttling bounded the flush RATE; phase 2 bounds the cost PER flush. The streaming bubble previously re-parsed and re-laid-out the whole accumulated reply each flush (O(reply length), quadratic per turn — a multi-page reply pegged the core even at 20 flushes/sec). `StreamingMarkdownText` (scarf/scarf/Core/Utilities/MarkdownContentView.swift) keeps a settled prefix — everything up to the last completed `\n\n` paragraph boundary, parsed once into one AttributedString whose `Text` input never changes between flushes so SwiftUI skips its diff/layout — and re-parses only the small live tail. Reset detector: `content.hasPrefix(settledSource)` memcmp; a mismatch rebuilds from scratch. On finalize the bubble id flips off 0 and the full block pipeline takes over, so the incremental view only needs to match the old streaming rendering. Commits 1b6baa5 (phase 1) + 6f3bd68 (phase 2).
+
+## Relations
+- relates_to [[scarf/architecture/chat-session-layer-mechanism-map-and-2026-07-13-diagnosis]]

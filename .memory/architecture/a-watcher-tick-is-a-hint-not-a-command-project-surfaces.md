@@ -5,10 +5,10 @@ permalink: scarf/architecture/a-watcher-tick-is-a-hint-not-a-command-project-sur
 tags: [projects, performance, watcher, transport, gotcha]
 source_paths: [scarf/scarf/Features/Projects/ViewModels/ProjectCockpitViewModel.swift, scarf/scarf/Features/Projects/Views/Widgets/WidgetSignatureBatch.swift, scarf/scarf/Features/Projects/Views/Widgets/MarkdownFileWidgetView.swift, scarf/scarf/Features/Projects/Views/Widgets/ImageWidgetView.swift, scarf/scarf/Features/Projects/Views/Widgets/LogTailWidgetView.swift, scarf/scarf/Features/Projects/Views/ProjectCockpitView.swift, scarf/scarf/Features/Projects/ViewModels/ProjectMenuProbeCache.swift, scarf/scarf/Core/Services/HermesFileWatcher.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/ServerTransport.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHTransport.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/ProjectsViewModel.swift]
 source_paths_inferred: false
-source_sha: c274e429308eb0a19bbfcae56761d89f056f9091
+source_sha: 92d062bdc2c76f94828de482292db860b4da4cbd
 created: 2026-09-04
 updated: 2026-09-04
-reviewed: 2026-09-04
+reviewed: 2026-09-08
 reviewed_by: audit:claude-code (background)
 ---
 

@@ -6,7 +6,7 @@ tags: [build, release, ci]
 source_paths: [scripts/release.sh, scripts/local-build.sh]
 source_sha: 32c1e2aea156bf7aadb04b1565e2fd2a029a9f9e
 created: 2026-05-29
-updated: 2026-06-06
+updated: 2026-09-08
 reviewed: 2026-09-01
 reviewed_by: audit:claude-code (background)
 ---
@@ -15,8 +15,10 @@ reviewed_by: audit:claude-code (background)
 - [build] Debug build: `xcodebuild -project scarf/scarf.xcodeproj -scheme scarf -configuration Debug build`. For unsigned CLI debug build without Apple Developer account: ./scripts/local-build.sh #build
 - [tooling] Requires Xcode 16.0+ to build from source #tooling
 - [release-rule] NEVER run manual `xcodebuild archive` / `notarytool` / `gh release create` steps. Always use ./scripts/release.sh — manual steps skip or misorder critical actions #release #rule
-- [release-cmd] Full release: `./scripts/release.sh <version>` — bumps version, archives Universal (arm64+x86_64) and ARM64-only variants, signs with Developer ID, notarizes via xcrun notarytool (keychain profile `scarf-notary`), staples, EdDSA-signs Sparkle appcast, pushes appcast to gh-pages, creates GitHub release with both zips #release
-- [release-cmd] Draft release: `./scripts/release.sh <version> --draft` — builds + notarizes + uploads, skips appcast/tag so current version stays 'latest' until promoted #release
+- [ui-gate] Every release runs a UI release gate before version bump: scripts/ui-gate.sh runs unit tests + Smoke/Full/Live XCUITest plans against a seeded Hermes home, creates releases/v<VERSION>/UI-GATE.md, and aborts the release if it fails. Gate output shipped with version bump commit #release #gate
+- [ui-gate-bypass] Bypass gate with --skip-ui-tests flag (loud warning recorded in UI-GATE.md, not recommended — see BUILDING.md) #release #gate
+- [release-cmd] Full release: `./scripts/release.sh <version>` — runs UI gate, bumps version, archives Universal (arm64+x86_64) and ARM64-only variants, signs with Developer ID, notarizes via xcrun notarytool (keychain profile `scarf-notary`), staples, EdDSA-signs Sparkle appcast, pushes appcast to gh-pages, creates GitHub release with both zips #release
+- [release-cmd] Draft release: `./scripts/release.sh <version> --draft` — runs UI gate, builds + notarizes + uploads, skips appcast/tag so current version stays 'latest' until promoted #release
 - [release-notes] Write release notes to releases/v<version>/RELEASE_NOTES.md BEFORE running the script — auto-included in version-bump commit and used as GitHub release body. Absent → placeholder used #release
 - [canonical-prompts] Triggering phrases: 'Release v1.6.2', 'Release v1.6.2 as draft', 'Prepare v1.6.2 release notes from recent commits, then release' #release
 - [prereqs] One-time setup on Alan's machine: Developer ID Application cert in login Keychain (team 3Q6X2L86C4), notarytool keychain profile `scarf-notary`, Sparkle EdDSA private key in Keychain item `https://sparkle-project.org`, gh-pages branch + GitHub Pages enabled #setup
@@ -28,3 +30,4 @@ reviewed_by: audit:claude-code (background)
 - documented_in [[Wiki Maintenance Workflow]]
 - constrained_by [[Releases under iCloud Drive]]
 - constrained_by [[Sparkle Key Recovery]]
+- documented_in [[ui-gate.sh contract and how release.sh calls it]]

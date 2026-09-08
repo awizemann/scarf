@@ -5,10 +5,10 @@ permalink: scarf/conventions/a-mainactor-suite-cannot-test-detached-read-interle
 tags: [testing, concurrency, swift-testing]
 source_paths: [scarf/Packages/ScarfCore/Tests/ScarfCoreTests/ProjectsViewModelErrorSurfacingTests.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/ProjectsViewModel.swift]
 source_paths_inferred: false
-source_sha: 7e6326c20d55aff25b9d9bb5be70e80881404361
+source_sha: 535e3a636eb90b30a620e776ab7ed436fac2873c
 created: 2026-09-03
 updated: 2026-09-03
-reviewed: 2026-09-04
+reviewed: 2026-09-08
 reviewed_by: audit:claude-code (background)
 ---
 
