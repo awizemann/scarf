@@ -577,24 +577,8 @@ final class ConfigJourneyUITests: ScarfUITestCase {
     private func launchExpanded() -> XCUIApplication {
         let app = makeApp(extraLaunchArguments: SectionSweepUITests.expandedSidebarLaunchArguments)
         launchAndSurface(app)
-        expandAllSidebarSections(app)
+        assertAllSidebarSectionsExpanded(app)
         return app
-    }
-
-    /// Click open every collapsed sidebar nav section. The headers speak
-    /// their state as the accessibility VALUE, which is what we read.
-    private func expandAllSidebarSections(_ app: XCUIApplication) {
-        let headers = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH 'sidebar.sectionHeader.'"))
-        guard headers.firstMatch.waitForExistence(timeout: 15) else {
-            XCTFail("No sidebar section headers found — did the sidebar render at all?")
-            return
-        }
-        for header in headers.allElementsBoundByIndex where header.exists {
-            if (header.value as? String) == "collapsed" {
-                header.click()
-            }
-        }
     }
 
     /// Bring `app` back to the front before synthesizing events into it.
@@ -632,7 +616,6 @@ final class ConfigJourneyUITests: ScarfUITestCase {
             // Second look with the app explicitly re-fronted: the sidebar
             // is there, the runner just could not see it yet.
             ensureFrontmost(app)
-            expandAllSidebarSections(app)
         }
         guard row.waitForExistence(timeout: 20) else {
             guard gated else {
@@ -891,7 +874,7 @@ final class ConfigJourneyUITests: ScarfUITestCase {
     }
 
     private func attach(_ app: XCUIApplication, named name: String, keepAlways: Bool = false) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
+        let shot = XCTAttachment(screenshot: windowScreenshot(app))
         shot.name = name
         shot.lifetime = keepAlways ? .keepAlways : .deleteOnSuccess
         add(shot)

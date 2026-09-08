@@ -133,6 +133,10 @@ struct KanbanCardView: View {
         // REPLACES the combined text, so nothing may be left out).
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text(verbatim: cardAccessibilityLabel))
+        // UI gate: keyed by the SAME `t_…` id `hermes kanban list`
+        // prints, so a test can create a card, learn its id from the CLI,
+        // and assert on exactly that card inside a given column.
+        .accessibilityIdentifier("kanban.card.\(task.id)")
     }
 
     /// Fragments compose through `String(localized:)` — a plain String on

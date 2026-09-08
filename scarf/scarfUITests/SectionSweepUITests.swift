@@ -208,27 +208,4 @@ final class SectionSweepUITests: ScarfUITestCase {
         """)
     }
 
-    // MARK: - Helpers
-
-    /// Click open every collapsed sidebar nav section.
-    ///
-    /// The headers carry `sidebar.sectionHeader.<Title>` and speak their
-    /// state as the accessibility VALUE ("collapsed"/"expanded"), which is
-    /// what we read here — cheaper and less brittle than inferring it from
-    /// whether the rows beneath happen to be hittable.
-    private func assertAllSidebarSectionsExpanded(_ app: XCUIApplication) {
-        let headers = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH 'sidebar.sectionHeader.'"))
-        guard headers.firstMatch.waitForExistence(timeout: 10) else {
-            XCTFail("No sidebar section headers found — did the sidebar render at all?")
-            return
-        }
-        let collapsed = headers.allElementsBoundByIndex
-            .filter { $0.exists && ($0.value as? String) == "collapsed" }
-            .map { $0.identifier }
-        XCTAssertTrue(
-            collapsed.isEmpty,
-            "Sidebar sections still collapsed despite the launch-arg override: \(collapsed). Either SidebarSectionCollapseStore stopped honouring NSArgumentDomain strings, or a new title is missing from sidebarSectionTitles."
-        )
-    }
 }

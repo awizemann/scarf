@@ -115,6 +115,20 @@ struct KanbanColumnView: View {
                 .stroke(borderColor, lineWidth: isTargeted ? 2 : 1)
         )
         .animation(.easeInOut(duration: 0.12), value: isTargeted)
+        // UI gate: which column a card sits in is the assertion a move
+        // journey makes, and containment is the only way to express it.
+        //
+        // `children: .contain` is load-bearing, for the same reason it is
+        // on ContentView's section root. A bare `.accessibilityIdentifier`
+        // REWRITES the identifier of everything beneath it, so the column
+        // id landed on the header, the badge and each empty-state text as
+        // well — and `firstMatch` then resolved to whichever of those the
+        // tree happened to order first, an element with no descendants, so
+        // "is this card inside this column" was always false. As a
+        // container this is ONE element carrying the id, with the cards
+        // beneath it still individually addressable.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("kanban.column.\(column.rawValue)")
         .dropDestination(for: KanbanTaskRef.self) { items, _ in
             if let ref = items.first {
                 onDrop(ref)

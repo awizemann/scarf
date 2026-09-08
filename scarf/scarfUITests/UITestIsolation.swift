@@ -270,6 +270,40 @@ class ScarfUITestCase: XCTestCase {
     }
 
 
+    // MARK: - Sidebar
+
+    /// Assert every sidebar nav group is open.
+    ///
+    /// Tests launch with `-sidebar.section.collapsed.<Title> 0` launch
+    /// arguments (`SectionSweepUITests.expandedSidebarLaunchArguments`),
+    /// which `SidebarSectionCollapseStore` honours from NSArgumentDomain
+    /// and never writes back. This deliberately does NOT click a
+    /// collapsed header open: the app under test shares com.scarf.app
+    /// with the installed copy, so a click persists into the developer's
+    /// real UserDefaults, which `SCARF_HERMES_HOME` does not isolate. A
+    /// collapsed header here means the override broke or a new title is
+    /// missing from `sidebarSectionTitles` — fail loudly instead.
+    ///
+    /// Load-bearing for any test that clicks a row under Configure or
+    /// Manage, both collapsed BY DEFAULT — Cron or Kanban has no row at
+    /// all until its group is open, and the failure otherwise reads as
+    /// "the section is missing" rather than "the group is shut".
+    func assertAllSidebarSectionsExpanded(_ app: XCUIApplication) {
+        let headers = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'sidebar.sectionHeader.'"))
+        guard headers.firstMatch.waitForExistence(timeout: 10) else {
+            XCTFail("No sidebar section headers found — did the sidebar render at all?")
+            return
+        }
+        let collapsed = headers.allElementsBoundByIndex
+            .filter { $0.exists && ($0.value as? String) == "collapsed" }
+            .map { $0.identifier }
+        XCTAssertTrue(
+            collapsed.isEmpty,
+            "Sidebar sections still collapsed despite the launch-arg override: \(collapsed). Either SidebarSectionCollapseStore stopped honouring NSArgumentDomain strings, or a new title is missing from sidebarSectionTitles."
+        )
+    }
+
     // MARK: - Plan gating
 
     /// Skip unless the Live test plan is running.

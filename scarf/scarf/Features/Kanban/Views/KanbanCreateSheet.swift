@@ -154,6 +154,7 @@ struct KanbanCreateSheet: View {
             )
             .focused($titleFocused)
             .accessibilityLabel("Title")
+            .accessibilityIdentifier("kanban.create.title")
         }
     }
 
@@ -349,6 +350,7 @@ struct KanbanCreateSheet: View {
             .keyboardShortcut(.defaultAction)
             .buttonStyle(ScarfPrimaryButton())
             .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || isSubmitting)
+            .accessibilityIdentifier("kanban.create.submit")
         }
     }
 
