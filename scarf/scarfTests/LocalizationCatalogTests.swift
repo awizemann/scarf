@@ -115,6 +115,31 @@ struct LocalizationCatalogTests {
 
     // MARK: - Tests
 
+    /// Keys whose only call sites live in the iOS target. Xcode's extractor
+    /// runs from the macOS scheme and PRUNES any key it cannot see in that
+    /// build, and the iOS scheme never writes back to the shared catalog —
+    /// so every macOS-side extraction silently deletes these (it has done so
+    /// twice: 2026-09-08, both builds). They are maintained by hand; after
+    /// an extraction, restore them verbatim from git.
+    static let iosOnlyKeys: [String] = [
+        "%@ (%lld)",
+        "%@. %@",
+        "%lld file%@",
+        "%lld prompt%@ queued — manage on the Mac app",
+        "ScarfGo",
+        "Not saved: %@",
+    ]
+
+    @Test("iOS-only keys survive a macOS-scheme extraction")
+    func iosOnlyKeysAreStillInTheCatalog() {
+        for key in Self.iosOnlyKeys {
+            #expect(
+                Self.catalog.strings[key] != nil,
+                "\(key) is gone — Xcode's macOS extraction pruned it again; restore it from git (see this list's doc comment)"
+            )
+        }
+    }
+
     @Test("catalog parses and is English-sourced")
     func catalogLoads() {
         #expect(Self.catalog.sourceLanguage == "en")
