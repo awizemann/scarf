@@ -5,7 +5,7 @@ import ScarfCore
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/slack
 @Observable
 @MainActor
-final class SlackSetupViewModel {
+final class SlackSetupViewModel: OutcomeMessageHosting {
     let context: ServerContext
     init(context: ServerContext = .local) { self.context = context }
 
@@ -21,6 +21,9 @@ final class SlackSetupViewModel {
     var replyBroadcast: Bool = false
 
     var message: String?
+    /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
+    /// VoiceOver announcement come from this, never from the prose.
+    var messageIsFailure = false
 
     let replyToModeOptions = ["off", "first", "all"]
 
@@ -54,9 +57,6 @@ final class SlackSetupViewModel {
             "platforms.slack.extra.reply_in_thread": PlatformSetupHelpers.envBool(replyInThread),
             "platforms.slack.extra.reply_broadcast": PlatformSetupHelpers.envBool(replyBroadcast)
         ]
-        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.message = nil
-        }
+        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV))
     }
 }

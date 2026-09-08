@@ -65,11 +65,11 @@ struct PeersView: View {
             subtitle: "Other Hermes gateways this machine can message bot-to-bot."
         ) {
             HStack(spacing: ScarfSpace.s2) {
-                if let msg = viewModel.message {
-                    Label(msg, systemImage: "checkmark.circle.fill")
-                        .scarfStyle(.caption)
-                        .foregroundStyle(ScarfColor.success)
-                }
+                OutcomeMessageBar(
+                    text: viewModel.message,
+                    isFailure: viewModel.messageIsFailure,
+                    onDismiss: { viewModel.dismissMessage() }
+                )
                 Button("Reload") { viewModel.load(force: true) }
                     .buttonStyle(ScarfGhostButton())
             }

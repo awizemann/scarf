@@ -78,6 +78,9 @@ struct KanbanBoardView: View {
     /// clear next step. `.unknown` and `.enabled` suppress the hint.
     @State private var toolsetState: KanbanToolsetState?
     @State private var isEnablingToolset = false
+    /// Last board failure announced to VoiceOver, so the five-second poll
+    /// republishing an unchanged error doesn't repeat it (AX M3).
+    @State private var lastAnnouncedBoardError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -103,6 +106,14 @@ struct KanbanBoardView: View {
             }
         }
         .background(ScarfColor.backgroundPrimary)
+        // The board's banners have no chrome of their own, and a refused
+        // card move leaves the card visually where it was — so without this
+        // the refusal is silent for a VoiceOver user.
+        .onChange(of: viewModel.lastError) { _, new in
+            guard let new, !new.isEmpty, lastAnnouncedBoardError != new else { return }
+            lastAnnouncedBoardError = new
+            AccessibilityNotification.Announcement(AttributedString(new)).post()
+        }
         .onAppear {
             viewModel.startPolling()
             Task { await viewModel.refreshAssignees() }
@@ -489,6 +500,7 @@ struct KanbanBoardView: View {
         HStack(spacing: 6) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(ScarfColor.warning)
+                .accessibilityHidden(true)
             Text(message)
                 .scarfStyle(.caption)
                 .foregroundStyle(ScarfColor.foregroundPrimary)
@@ -501,6 +513,7 @@ struct KanbanBoardView: View {
                     .scarfStyle(.caption)
             }
             .buttonStyle(ScarfGhostButton())
+            .accessibilityLabel("Dismiss this error and reload the board")
         }
         .padding(.horizontal, ScarfSpace.s3)
         .padding(.vertical, 8)
@@ -580,6 +593,7 @@ struct KanbanBoardView: View {
         HStack(spacing: 6) {
             Image(systemName: "info.circle")
                 .foregroundStyle(ScarfColor.info)
+                .accessibilityHidden(true)
             Text(message)
                 .scarfStyle(.caption)
                 .foregroundStyle(ScarfColor.foregroundPrimary)
@@ -591,6 +605,9 @@ struct KanbanBoardView: View {
                     .font(.system(size: 10))
             }
             .buttonStyle(ScarfGhostButton())
+            // A glyph-only button is nameless to VoiceOver and untargetable
+            // by Voice Control; `.help()` is a mouse tooltip, not a label.
+            .accessibilityLabel("Dismiss this notice")
         }
         .padding(.horizontal, ScarfSpace.s3)
         .padding(.vertical, 8)

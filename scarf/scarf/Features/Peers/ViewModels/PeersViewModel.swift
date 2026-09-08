@@ -42,7 +42,7 @@ struct PeerRunRow: Identifiable, Sendable, Equatable {
 /// the credential. Scarf reads the file instead and shows only
 /// `name`/`url`/`note`. **No peer key is ever read or displayed.**
 @Observable
-final class PeersViewModel {
+final class PeersViewModel: OutcomeMessageHosting {
     private let logger = Logger(subsystem: "com.scarf", category: "PeersViewModel")
     let context: ServerContext
     private let fileService: HermesFileService
@@ -110,6 +110,9 @@ final class PeersViewModel {
     var lastReply: String?
     /// Transient status/error line for the header.
     var message: String?
+    /// Outcome of `message` (GW-F4) — the bar's colour, glyph and VoiceOver
+    /// announcement come from this stored fact, never from the prose.
+    var messageIsFailure = false
     var errorMessage: String?
     /// Non-fatal stderr note from `peer run` (the peer doesn't advertise
     /// restart-durable replay). Shown as a caption, not an error.
@@ -260,10 +263,5 @@ final class PeersViewModel {
         runs.removeAll { $0.id == run.id }
     }
 
-    private func flash(_ text: String) {
-        message = text
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            if self?.message == text { self?.message = nil }
-        }
-    }
+    private func flash(_ text: String) { showSuccess(text) }
 }

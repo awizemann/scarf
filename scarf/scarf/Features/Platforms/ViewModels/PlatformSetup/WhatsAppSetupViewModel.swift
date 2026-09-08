@@ -8,7 +8,7 @@ import ScarfCore
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/whatsapp
 @Observable
 @MainActor
-final class WhatsAppSetupViewModel {
+final class WhatsAppSetupViewModel: OutcomeMessageHosting {
     let context: ServerContext
 
     init(context: ServerContext = .local) {
@@ -25,6 +25,9 @@ final class WhatsAppSetupViewModel {
     var replyPrefix: String = ""
 
     var message: String?
+    /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
+    /// VoiceOver announcement come from this, never from the prose.
+    var messageIsFailure = false
     let modeOptions = ["bot", "self-chat"]
     let unauthorizedOptions = ["pair", "ignore"]
 
@@ -64,8 +67,7 @@ final class WhatsAppSetupViewModel {
             "whatsapp.unauthorized_dm_behavior": unauthorizedDMBehavior,
             "whatsapp.reply_prefix": replyPrefix
         ]
-        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV)
-        clearMessageAfterDelay()
+        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV))
     }
 
     /// Launch `hermes whatsapp` in the embedded terminal. The user scans the QR
@@ -75,8 +77,7 @@ final class WhatsAppSetupViewModel {
         pairingInProgress = true
         terminalController.onExit = { [weak self] _ in
             self?.pairingInProgress = false
-            self?.message = "Pairing terminal exited — check output for status"
-            self?.clearMessageAfterDelay()
+            self?.applySaveOutcome(.success(String(localized: "Pairing terminal exited — check output for status")))
         }
         terminalController.start(
             executable: context.paths.hermesBinary,
@@ -87,11 +88,5 @@ final class WhatsAppSetupViewModel {
     func stopPairing() {
         terminalController.stop()
         pairingInProgress = false
-    }
-
-    private func clearMessageAfterDelay() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.message = nil
-        }
     }
 }

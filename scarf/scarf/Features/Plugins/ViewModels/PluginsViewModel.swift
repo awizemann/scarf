@@ -27,7 +27,7 @@ struct HermesPlugin: Identifiable, Sendable, Equatable {
 }
 
 @Observable
-final class PluginsViewModel {
+final class PluginsViewModel: OutcomeMessageHosting {
     private let logger = Logger(subsystem: "com.scarf", category: "PluginsViewModel")
     let context: ServerContext
     private let fileService: HermesFileService
@@ -40,6 +40,9 @@ final class PluginsViewModel {
     var plugins: [HermesPlugin] = []
     var isLoading = false
     var message: String?
+    /// Outcome of `message` (GW-F4). This channel carried "Install failed"
+    /// and "Installed and enabled" alike, and the header painted both green.
+    var messageIsFailure = false
 
     private var pluginsDir: String { context.paths.pluginsDir }
 
@@ -245,7 +248,9 @@ final class PluginsViewModel {
     /// reported "Installed" while leaving the plugin inert.
     func install(_ identifier: String, enable: Bool) {
         isLoading = true
-        message = "Installing \(identifier)…"
+        // In-progress, not an outcome — nothing has failed yet.
+        message = String(localized: "Installing \(identifier)…")
+        messageIsFailure = false
         Task.detached { [weak self, fileService] in
             let result = fileService.runHermesCLI(
                 args: ["plugins", "install", enable ? "--enable" : "--no-enable", "--", identifier],
@@ -260,12 +265,15 @@ final class PluginsViewModel {
                 // exit 0 only means "the process finished", and the enable
                 // outcome has to come out of stdout.
                 let failed = result.exitCode != 0
-                self.message = failed ? "Install failed" : (outcome.enabled ? "Installed and enabled" : "Installed (not enabled)")
+                self.applySaveOutcome(
+                    failed
+                        ? .failure(String(localized: "Install failed"))
+                        : .success(outcome.enabled
+                                   ? String(localized: "Installed and enabled")
+                                   : String(localized: "Installed (not enabled)"))
+                )
                 self.installReport = InstallReport(identifier: identifier, outcome: outcome, failed: failed)
                 self.load(force: true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                    self?.message = nil
-                }
             }
         }
     }
@@ -318,11 +326,12 @@ final class PluginsViewModel {
             let result = fileService.runHermesCLI(args: args, timeout: 60)
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                self.message = result.exitCode == 0 ? success : "Failed"
+                self.applySaveOutcome(
+                    result.exitCode == 0
+                        ? .success(success)
+                        : .failure(String(localized: "Failed"))
+                )
                 self.load(force: true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                    self?.message = nil
-                }
             }
         }
     }

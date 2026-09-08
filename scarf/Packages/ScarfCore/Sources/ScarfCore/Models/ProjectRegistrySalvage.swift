@@ -141,7 +141,13 @@ public enum ProjectRegistryError: LocalizedError, Sendable, Equatable {
     /// window) held the registry write lock past the wait budget. The write
     /// did NOT happen — see `RegistryWriteLock`. A failure the caller can
     /// report and the user can retry, rather than a clobber nobody sees.
-    case registryBusy(path: String)
+    /// `label` names the file in the user's own vocabulary ("config.yaml",
+    /// "your projects file"). GW-F3 pointed this lock at four more files
+    /// than the registry it was named for, and the message then had only a
+    /// raw path to show for a `.env` or a MEMORY.md; `GuardedTextFile`
+    /// already carries a per-file label for exactly this, so it is threaded
+    /// through. `nil` falls back to the path (GW-F4).
+    case registryBusy(path: String, label: String?)
     /// The file changed between the read this mutation was computed from
     /// and the write. Somebody else — a second Scarf window on another
     /// machine sharing the home, the MCP helper, an agent's editor — got
@@ -152,6 +158,13 @@ public enum ProjectRegistryError: LocalizedError, Sendable, Equatable {
     /// the write are seconds apart over SSH and the lock is local only.
     case refusedStaleOverwrite(path: String)
 
+    /// **Not localized, by construction.** ScarfCore is a Swift package with
+    /// no string catalog (a headless `xcodebuild` never merges keys back into
+    /// one, and adding a second catalog to the package would fork the
+    /// vocabulary). These sentences reach users VERBATIM through
+    /// `localizedDescription` passthrough at the app-side save bars and
+    /// banners, so they are written as user-facing English and stay English
+    /// in every locale until the package gets a catalog of its own (GW-F4).
     public var errorDescription: String? {
         switch self {
         case let .refusedEmptyOverwrite(path, existingCount):
@@ -159,8 +172,8 @@ public enum ProjectRegistryError: LocalizedError, Sendable, Equatable {
             return "Refused to overwrite \(path) (\(existing)) with an empty project list."
         case let .refusedLossyOverwrite(_, loss):
             return loss.message
-        case .registryBusy(let path):
-            return "Another Scarf process is updating \(path) right now. Nothing was changed — try again in a moment."
+        case let .registryBusy(path, label):
+            return "Another Scarf process is updating \(label ?? path) right now. Nothing was changed — try again in a moment."
         case .refusedStaleOverwrite(let path):
             return "\(path) was changed by something else while this was open. Nothing was changed — reopen the list and try again."
         }

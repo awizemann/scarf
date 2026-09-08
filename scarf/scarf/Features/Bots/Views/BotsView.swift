@@ -27,6 +27,9 @@ struct BotsView: View {
     @State private var pendingDelete: BotRow?
     @State private var renaming: BotRow?
     @State private var renameText = ""
+    /// Last banner sentence announced, so an unchanged `errorMessage`
+    /// republishing does not repeat itself (AX M4).
+    @State private var lastAnnouncedBanner: String?
     /// A selection change held back because the bot being left has unsaved
     /// `SOUL.md` edits. See ``PendingSelection``.
     @State private var pendingSelection: PendingSelection?
@@ -201,11 +204,11 @@ struct BotsView: View {
         ) {
             HStack(spacing: ScarfSpace.s2) {
                 if viewModel.isWorking { ProgressView().controlSize(.small) }
-                if let message = viewModel.message {
-                    Label(message, systemImage: "checkmark.circle.fill")
-                        .scarfStyle(.caption)
-                        .foregroundStyle(ScarfColor.success)
-                }
+                OutcomeMessageBar(
+                    text: viewModel.message,
+                    isFailure: viewModel.messageIsFailure,
+                    onDismiss: { viewModel.dismissMessage() }
+                )
                 // The only place that re-reads activity: an explicit reload.
                 // Every mutation's own `load(force: true)` leaves the per-bot
                 // database opens alone, so pinning a bot doesn't re-open
@@ -809,13 +812,21 @@ struct BotsView: View {
 
     private func banner(_ text: String) -> some View {
         HStack(alignment: .top, spacing: ScarfSpace.s2) {
+            // AX M4. `.accessibilityLabel` on a plain container does NOT
+            // name a group — it propagates down and overwrites every
+            // child's, so the glyph AND the prose each announced the whole
+            // "Error: …" sentence. `BotAgentView.failure` has the correct
+            // triad: hide the decorative glyph, `.combine` the rest into
+            // one element, THEN label it.
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(ScarfColor.danger)
+                .accessibilityHidden(true)
             // Verbatim: `hermes profile`'s refusals ("profile 'x' already
             // exists", "cannot delete the active profile") carry the remedy.
             Text(text)
                 .scarfStyle(.caption)
                 .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(ScarfSpace.s3)
@@ -823,7 +834,21 @@ struct BotsView: View {
             RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
                 .fill(ScarfColor.danger.opacity(0.12))
         )
+        .accessibilityElement(children: .combine)
         .accessibilityLabel("Error: \(text)")
+        // The banner appears above the roster, away from the control the
+        // user just activated — announce it, guarded so an unchanged
+        // republish stays quiet.
+        .onAppear { announceBannerIfNew(text) }
+        .onChange(of: text) { _, new in announceBannerIfNew(new) }
+    }
+
+    private func announceBannerIfNew(_ text: String) {
+        guard lastAnnouncedBanner != text else { return }
+        lastAnnouncedBanner = text
+        AccessibilityNotification.Announcement(
+            AttributedString(String(localized: "Error: \(text)"))
+        ).post()
     }
 }
 

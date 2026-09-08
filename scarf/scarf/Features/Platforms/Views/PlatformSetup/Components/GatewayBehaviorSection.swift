@@ -73,11 +73,11 @@ struct GatewayBehaviorSection: View {
             }
 
             HStack {
-                if let msg = viewModel.message {
-                    Label(msg, systemImage: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                }
+                OutcomeMessageBar(
+                    text: viewModel.message,
+                    isFailure: viewModel.messageIsFailure,
+                    onDismiss: { viewModel.dismissMessage() }
+                )
                 Spacer()
                 if viewModel.isSaving {
                     ProgressView().controlSize(.small)

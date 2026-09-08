@@ -14,6 +14,9 @@ struct ManageServersView: View {
     @State private var importAlert: ImportAlertState?
     @State private var backupContext: ServerContext?
     @State private var restoreContext: ServerContext?
+    /// Last damage sentence announced to VoiceOver, so a republished but
+    /// unchanged `storeDamage` doesn't repeat itself (AX H1).
+    @State private var lastAnnouncedDamagePath: String?
 
     /// Lightweight wrapper around the after-import message so we can
     /// present a single SwiftUI `.alert` for both success summaries
@@ -108,15 +111,43 @@ struct ManageServersView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let quarantine = damage.quarantinePath {
-                Text("A copy of the unreadable file is at \(quarantine).")
+                // AX M2: the path is the actionable half of this sentence —
+                // the user has to go find that file. Monospaced so a path
+                // reads as a path, and selectable so it can be copied
+                // (there is no "Show in Finder" here: the file may live on a
+                // remote host). Split from the prose for the same reason
+                // `RegistryDamageBanner` splits it.
+                Text("A copy of the unreadable file is at:")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(quarantine)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .accessibilityElement(children: .combine)
+        // AX H1: the banner has no chrome of its own to draw a VoiceOver
+        // user's attention, so its appearance was exactly as silent as the
+        // refusal it exists to announce. Guarded on the last announced
+        // value: `storeDamage` republishes on every registry read, and a
+        // stable warning re-announcing on each one is worse than silence
+        // (`RegistryDamageBanner` is the house pattern).
+        .onAppear { announceDamage(damage) }
+        .onChange(of: damage.path) { _, _ in announceDamage(damage) }
+    }
+
+    private func announceDamage(_ damage: ServerRegistry.StoreDamage) {
+        let spoken = String(
+            localized: "Your server list couldn’t be read. Scarf won’t overwrite \(damage.path) until it can read it again, so changes you make here stay in this session only."
+        )
+        guard lastAnnouncedDamagePath != spoken else { return }
+        lastAnnouncedDamagePath = spoken
+        AccessibilityNotification.Announcement(AttributedString(spoken)).post()
     }
 
     private var header: some View {

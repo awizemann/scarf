@@ -9,7 +9,7 @@ import ScarfCore
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/signal
 @Observable
 @MainActor
-final class SignalSetupViewModel {
+final class SignalSetupViewModel: OutcomeMessageHosting {
     let context: ServerContext
     init(context: ServerContext = .local) { self.context = context }
 
@@ -24,6 +24,9 @@ final class SignalSetupViewModel {
     var requireMention: Bool = false
 
     var message: String?
+    /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
+    /// VoiceOver announcement come from this, never from the prose.
+    var messageIsFailure = false
 
     let terminalController = EmbeddedSetupTerminalController()
     var signalCLIInstalled: Bool = false
@@ -71,22 +74,19 @@ final class SignalSetupViewModel {
         let configKV: [String: String] = [
             "platforms.signal.extra.require_mention": PlatformSetupHelpers.envBool(requireMention)
         ]
-        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV)
-        clearMessageAfterDelay()
+        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV))
     }
 
     /// Run `signal-cli link -n HermesAgent` to generate a QR code.
     func startLink() {
         guard signalCLIInstalled else {
-            message = "signal-cli not found on PATH — install it first"
-            clearMessageAfterDelay()
+            showSaveFailure(String(localized: "signal-cli not found on PATH — install it first"))
             return
         }
         activeTask = .link
         terminalController.onExit = { [weak self] _ in
             self?.activeTask = .none
-            self?.message = "Link step exited — save credentials and start the daemon next"
-            self?.clearMessageAfterDelay()
+            self?.applySaveOutcome(.success(String(localized: "Link step exited — save credentials and start the daemon next")))
         }
         terminalController.start(executable: "/usr/bin/env", arguments: ["signal-cli", "link", "-n", "HermesAgent"])
     }
@@ -94,13 +94,11 @@ final class SignalSetupViewModel {
     /// Run the signal-cli daemon. Users can stop it by closing the panel.
     func startDaemon() {
         guard !account.isEmpty else {
-            message = "Enter your Signal account (E.164 format) first"
-            clearMessageAfterDelay()
+            showSaveFailure(String(localized: "Enter your Signal account (E.164 format) first"))
             return
         }
         guard signalCLIInstalled else {
-            message = "signal-cli not found on PATH"
-            clearMessageAfterDelay()
+            showSaveFailure(String(localized: "signal-cli not found on PATH"))
             return
         }
         activeTask = .daemon
@@ -117,11 +115,5 @@ final class SignalSetupViewModel {
     func stopTerminal() {
         terminalController.stop()
         activeTask = .none
-    }
-
-    private func clearMessageAfterDelay() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.message = nil
-        }
     }
 }

@@ -67,17 +67,28 @@ struct MemoryEditorView: View {
             VStack(spacing: 0) {
                 if let err = vm.lastError {
                     HStack(spacing: 6) {
+                        // Decorative: the strip's own label says "Save
+                        // failed" in words, so the glyph would only add a
+                        // "warning triangle" stop ahead of the sentence.
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
+                            .accessibilityHidden(true)
                         Text(err)
                             .font(.caption)
                             .foregroundStyle(ScarfColor.foregroundMuted)
+                            .fixedSize(horizontal: false, vertical: true)
                         Spacer()
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(.orange.opacity(0.12))
+                    // One VoiceOver stop for glyph + prose (AX M6). The
+                    // strip already draws ABOVE the keyboard (it lives in
+                    // the bottom safe-area inset), so what was missing was
+                    // the announcement, not the placement.
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(String(localized: "Save failed: \(err)"))
                 }
                 if showSavedConfirmation {
                     Label("Saved", systemImage: "checkmark.circle.fill")
@@ -93,6 +104,17 @@ struct MemoryEditorView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: showSavedConfirmation)
         .animation(.easeInOut(duration: 0.2), value: vm.lastError)
+        // A refused save is otherwise perceptually identical to no save at
+        // all for a VoiceOver user: the Save button stays where it was and
+        // a strip appears somewhere they are not looking. Announce the
+        // nil→non-nil transition only, so a re-render of the same failure
+        // does not repeat itself.
+        .onChange(of: vm.lastError) { _, new in
+            guard let new, !new.isEmpty else { return }
+            AccessibilityNotification.Announcement(
+                AttributedString(String(localized: "Save failed: \(new)"))
+            ).post()
+        }
         .task { await vm.load() }
         .onDisappear { savedHideTask?.cancel() }
     }

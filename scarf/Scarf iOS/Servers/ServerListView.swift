@@ -24,6 +24,10 @@ struct ServerListView: View {
     /// `state` flips to `.connected`.
     @State private var connectingID: ServerID?
 
+    /// Last error announced to VoiceOver, so an unchanged `lastError`
+    /// surviving a list re-render does not repeat itself.
+    @State private var lastAnnouncedError: String?
+
     var body: some View {
         NavigationStack {
             List {
@@ -37,6 +41,12 @@ struct ServerListView: View {
                                 .font(.callout)
                                 .foregroundStyle(ScarfColor.foregroundMuted)
                                 .fixedSize(horizontal: false, vertical: true)
+                                // AX L2: this section appears in place, at
+                                // the top of a list the user is not looking
+                                // at, after a connect attempt that simply
+                                // stops — announce it or it is silent.
+                                .onAppear { announceServerError(err) }
+                                .onChange(of: err) { _, new in announceServerError(new) }
                             HStack(spacing: 12) {
                                 Button("Dismiss") { model.clearLastError() }
                                     .buttonStyle(.bordered)
@@ -126,6 +136,14 @@ struct ServerListView: View {
     /// Project the model's `servers` dict into a sortable list.
     /// Alphabetical by display name so the ordering is deterministic
     /// and matches what users see in the picker.
+    private func announceServerError(_ text: String) {
+        guard lastAnnouncedError != text else { return }
+        lastAnnouncedError = text
+        AccessibilityNotification.Announcement(
+            AttributedString(String(localized: "Something went wrong. \(text)"))
+        ).post()
+    }
+
     private var sortedServers: [ServerRow] {
         model.servers
             .map { id, config in

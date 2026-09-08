@@ -12,7 +12,7 @@ struct HermesQuickCommand: Identifiable, Sendable, Equatable {
 }
 
 @Observable
-final class QuickCommandsViewModel {
+final class QuickCommandsViewModel: OutcomeMessageHosting {
     private let logger = Logger(subsystem: "com.scarf", category: "QuickCommandsViewModel")
     let context: ServerContext
 
@@ -22,6 +22,9 @@ final class QuickCommandsViewModel {
 
     var commands: [HermesQuickCommand] = []
     var message: String?
+    /// Outcome of `message` (GW-F4) — the bar's colour, glyph and VoiceOver
+    /// announcement come from this stored fact, never from the prose.
+    var messageIsFailure = false
 
     /// `hasLoaded` lets a plain section re-entry skip the re-read (the VM is
     /// cached in `AppCoordinator` and persists across switches); Reload and
@@ -59,7 +62,7 @@ final class QuickCommandsViewModel {
 
     func addOrUpdate(name: String, command: String) {
         guard !name.isEmpty, !command.isEmpty else {
-            message = "Name and command are required"
+            showSaveFailure(String(localized: "Name and command are required"))
             return
         }
         // A literal "." in the name (e.g. "v1.2 deploy") would otherwise be
@@ -110,7 +113,8 @@ final class QuickCommandsViewModel {
             // back in agreement with the list on both host generations (on
             // pre-0.21 hosts the dot is stripped rather than escaped, and
             // the stripped form IS the saved name, so it stands).
-            message = "Saved /\(sanitizedName.replacingOccurrences(of: "\\.", with: "."))"
+            let saved = sanitizedName.replacingOccurrences(of: "\\.", with: ".")
+            showSuccess(String(localized: "Saved /\(saved)"))
             load(force: true)
         } else {
             logger.warning("Failed to save quick command: type=\(typeResult.output) cmd=\(cmdResult.output)")
@@ -121,17 +125,12 @@ final class QuickCommandsViewModel {
             let key = typeResult.exitCode != 0
                 ? "quick_commands.\(sanitizedName).type"
                 : "quick_commands.\(sanitizedName).command"
-            message = SettingsViewModel.saveFailureMessage(key: key, output: failing.output)
-        }
-        messageClearTask?.cancel()
-        messageClearTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled else { return }
-            self?.message = nil
+            // GW-F4: a refusal stays on the bar in the failure style until
+            // the user dismisses it. It used to render under a green
+            // checkmark and vanish after two seconds.
+            showSaveFailure(SettingsViewModel.saveFailureMessage(key: key, output: failing.output))
         }
     }
-
-    @ObservationIgnored private var messageClearTask: Task<Void, Never>?
 
     /// Removal requires editing config.yaml directly — `hermes config set` has no
     /// unset for nested keys. Open the file in the editor for manual removal.

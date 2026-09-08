@@ -5,7 +5,7 @@ import ScarfCore
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/email
 @Observable
 @MainActor
-final class EmailSetupViewModel {
+final class EmailSetupViewModel: OutcomeMessageHosting {
     let context: ServerContext
 
     init(context: ServerContext = .local) {
@@ -25,6 +25,9 @@ final class EmailSetupViewModel {
     var skipAttachments: Bool = false
 
     var message: String?
+    /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
+    /// VoiceOver announcement come from this, never from the prose.
+    var messageIsFailure = false
 
     /// Common provider presets so users don't have to look up IMAP/SMTP servers.
     struct Preset {
@@ -101,9 +104,6 @@ final class EmailSetupViewModel {
             // `extra.` — the only shape the email adapter reads. See load().
             "platforms.email.extra.skip_attachments": PlatformSetupHelpers.envBool(skipAttachments)
         ]
-        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.message = nil
-        }
+        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV))
     }
 }

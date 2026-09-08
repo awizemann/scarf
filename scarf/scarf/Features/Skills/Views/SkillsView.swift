@@ -399,18 +399,41 @@ struct SkillsView: View {
                     }
                     if let contentError = viewModel.contentError {
                         Divider()
-                        Label(contentError, systemImage: "exclamationmark.triangle")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .accessibilityLabel("Skill file problem: \(contentError)")
+                        // `Label(someStringVariable, systemImage:)` binds the
+                        // StringProtocol overload, which is never extracted
+                        // for translation. The reason text is already
+                        // localized where it is built; the explicit `Text`
+                        // keeps the door open for one that isn't.
+                        Label {
+                            Text(contentError)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle")
+                        }
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Skill file problem: \(contentError)")
                     }
-                    if !viewModel.skillContent.isEmpty {
+                    // AX M1: the action row used to be gated on non-empty
+                    // content, so in the ONE case the disabled Edit exists
+                    // for — a file the guarded reader refused, leaving
+                    // `skillContent` empty — the row was hidden and the
+                    // `.disabled` below was dead code for its own case.
+                    // Now the row renders whenever a file is selected and
+                    // something is known about it, and the notice above
+                    // explains the greyed-out Edit.
+                    if !viewModel.skillContent.isEmpty || viewModel.contentError != nil {
                         Divider()
                         HStack {
                             Spacer()
                             Button("Edit") { viewModel.startEditing() }
                                 .disabled(!viewModel.canEditSelectedFile)
                                 .controlSize(.small)
+                                .accessibilityHint(
+                                    viewModel.canEditSelectedFile
+                                        ? Text("")
+                                        : Text("Editing is off because this file couldn’t be read.")
+                                )
                             Button("Uninstall", role: .destructive) {
                                 viewModel.uninstallHubSkill(skill.id)
                             }

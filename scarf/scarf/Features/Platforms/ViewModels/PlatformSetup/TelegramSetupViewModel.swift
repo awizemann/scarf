@@ -8,7 +8,7 @@ import os
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/telegram
 @Observable
 @MainActor
-final class TelegramSetupViewModel {
+final class TelegramSetupViewModel: OutcomeMessageHosting {
     let context: ServerContext
     init(context: ServerContext = .local) { self.context = context }
 
@@ -33,6 +33,9 @@ final class TelegramSetupViewModel {
     var statusIndicator: Bool = false
 
     var message: String?
+    /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
+    /// VoiceOver announcement come from this, never from the prose.
+    var messageIsFailure = false
 
     func load() {
         let env = HermesEnvService(context: context).load()
@@ -69,13 +72,6 @@ final class TelegramSetupViewModel {
             "platforms.telegram.extra.rich_messages": PlatformSetupHelpers.envBool(richMessages),
             "platforms.telegram.extra.status_indicator": PlatformSetupHelpers.envBool(statusIndicator)
         ]
-        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV)
-        clearMessageAfterDelay()
-    }
-
-    private func clearMessageAfterDelay() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.message = nil
-        }
+        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV))
     }
 }

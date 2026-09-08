@@ -76,6 +76,13 @@ public struct GuardedTextFile: Sendable {
         /// destroy content nobody has seen.
         case notUTF8(path: String, label: String)
 
+        /// **Not localized, by construction.** ScarfCore is a Swift package with
+        /// no string catalog (a headless `xcodebuild` never merges keys back into
+        /// one, and adding a second catalog to the package would fork the
+        /// vocabulary). These sentences reach users VERBATIM through
+        /// `localizedDescription` passthrough at the app-side save bars and
+        /// banners, so they are written as user-facing English and stay English
+        /// in every locale until the package gets a catalog of its own (GW-F4).
         public var errorDescription: String? {
             switch self {
             case let .unreadable(path, label):
@@ -200,7 +207,9 @@ public struct GuardedTextFile: Sendable {
               let base = RegistryWriteLock(context: context, path: path)
         else { return try body() }
         let lock = acquireTimeout.map { base.withAcquireTimeout($0) } ?? base
-        return try lock.withLock(path: path, body)
+        // The per-file label the refusal messages already use, so a busy
+        // config.yaml says "config.yaml" and not a projects-registry path.
+        return try lock.withLock(path: path, label: label, body)
     }
 
     /// The load-mutate-write entry point: takes the lock, reads WITH PROOF

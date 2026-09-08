@@ -62,11 +62,11 @@ struct QuickCommandsView: View {
                 if viewModel.isSaving {
                     ProgressView().controlSize(.small)
                 }
-                if let msg = viewModel.message {
-                    Label(msg, systemImage: "checkmark.circle.fill")
-                        .scarfStyle(.caption)
-                        .foregroundStyle(ScarfColor.success)
-                }
+                OutcomeMessageBar(
+                    text: viewModel.message,
+                    isFailure: viewModel.messageIsFailure,
+                    onDismiss: { viewModel.dismissMessage() }
+                )
                 Button("Reload") { viewModel.load(force: true) }
                     .buttonStyle(ScarfGhostButton())
                 Button {

@@ -8,7 +8,7 @@ import os
 /// "Restart Gateway" action.
 @Observable
 @MainActor
-final class PlatformsViewModel {
+final class PlatformsViewModel: OutcomeMessageHosting {
     private let logger = Logger(subsystem: "com.scarf", category: "PlatformsViewModel")
     let context: ServerContext
     private let fileService: HermesFileService
@@ -22,6 +22,9 @@ final class PlatformsViewModel {
     var gatewayState: GatewayState?
     var selected: HermesToolPlatform = KnownPlatforms.cli
     var message: String?
+    /// Outcome of `message` (GW-F4) — the bar's colour, glyph and VoiceOver
+    /// announcement come from this stored fact, never from the prose.
+    var messageIsFailure = false
     var restartInProgress: Bool = false
 
     /// Per-platform "has config on disk" set, computed off-main in `load()`
@@ -143,17 +146,21 @@ final class PlatformsViewModel {
     /// `hermes gateway restart` takes.
     func restartGateway() {
         restartInProgress = true
-        message = "Restarting gateway…"
+        // In-progress, not an outcome: shown in the success style because
+        // nothing has failed yet, and replaced the moment the CLI returns.
+        message = String(localized: "Restarting gateway…")
+        messageIsFailure = false
         Task.detached { [weak self, fileService] in
             let result = fileService.runHermesCLI(args: ["gateway", "restart"], timeout: 30)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.restartInProgress = false
-                self.message = result.exitCode == 0 ? "Gateway restarted" : "Restart failed"
+                self.applySaveOutcome(
+                    result.exitCode == 0
+                        ? .success(String(localized: "Gateway restarted"))
+                        : .failure(String(localized: "Restart failed"))
+                )
                 self.load(force: true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                    self?.message = nil
-                }
             }
         }
     }

@@ -139,11 +139,11 @@ struct PlatformsView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if let msg = viewModel.message {
-                Label(msg, systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
-            }
+            OutcomeMessageBar(
+                text: viewModel.message,
+                isFailure: viewModel.messageIsFailure,
+                onDismiss: { viewModel.dismissMessage() }
+            )
             if viewModel.restartInProgress {
                 ProgressView().controlSize(.small)
             }

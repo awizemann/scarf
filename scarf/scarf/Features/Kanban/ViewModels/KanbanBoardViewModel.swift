@@ -251,10 +251,14 @@ final class KanbanBoardViewModel {
                 for: KanbanTransition(from: source, to: destination)
             )
         } catch let err as KanbanError {
-            transientNotice = err.errorDescription
+            // AX M3: a refused transition is a FAILURE, so it belongs in
+            // `lastError` — the dedicated warning-styled banner — not in
+            // `transientNotice`, whose blue info glyph reads as "here's a
+            // tip" over "your card did not move".
+            lastError = err.errorDescription
             return
         } catch {
-            transientNotice = error.localizedDescription
+            lastError = error.localizedDescription
             return
         }
 

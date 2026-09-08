@@ -140,11 +140,11 @@ struct PluginsView: View {
             subtitle: "Hermes plugins discovered from `~/.hermes/plugins/`."
         ) {
             HStack(spacing: ScarfSpace.s2) {
-                if let msg = viewModel.message {
-                    Label(msg, systemImage: "info.circle.fill")
-                        .scarfStyle(.caption)
-                        .foregroundStyle(ScarfColor.success)
-                }
+                OutcomeMessageBar(
+                    text: viewModel.message,
+                    isFailure: viewModel.messageIsFailure,
+                    onDismiss: { viewModel.dismissMessage() }
+                )
                 Button("Reload") { viewModel.load(force: true) }
                     .buttonStyle(ScarfGhostButton())
                 Button {

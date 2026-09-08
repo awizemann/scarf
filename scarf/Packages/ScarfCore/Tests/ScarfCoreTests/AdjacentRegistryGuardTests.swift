@@ -334,7 +334,7 @@ import Foundation
         // Stand in for the other process: the lock file simply exists, and
         // is fresh enough not to be considered stale.
         try Data("pid=1".utf8).write(to: url)
-        #expect(throws: ProjectRegistryError.registryBusy(path: "/r")) {
+        #expect(throws: ProjectRegistryError.registryBusy(path: "/r", label: nil)) {
             try RegistryWriteLock(lockURL: url).withLock(path: "/r") { }
         }
     }
@@ -545,7 +545,7 @@ import Foundation
             staleAfter: RegistryWriteLock.remoteStaleAfter,
             acquireTimeout: 0.2
         )
-        #expect(throws: ProjectRegistryError.registryBusy(path: "/r")) {
+        #expect(throws: ProjectRegistryError.registryBusy(path: "/r", label: nil)) {
             try remote.withLock(path: "/r") { }
         }
         #expect(RegistryWriteLock.ownerToken(atPath: url.path) == "THE-SLOW-SCP",

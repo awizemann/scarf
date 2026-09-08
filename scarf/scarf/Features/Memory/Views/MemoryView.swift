@@ -25,6 +25,12 @@ struct MemoryView: View {
     @State private var stashedDrafts: [MemoryViewModel.EditTarget: (draft: String, baseline: String)] = [:]
     @State private var hasConflict: Bool = false
     @State private var saveError: String?
+    /// Accessibility focus anchor for the failure strip (AX H2): a refused
+    /// save has to take the VoiceOver cursor, not just draw a line of text
+    /// below the fold.
+    @AccessibilityFocusState private var failureStripFocused: Bool
+    /// Last failure announced, so an unchanged republish stays silent.
+    @State private var lastAnnouncedFailure: String?
 
     private var isDirty: Bool { draftText != baseline }
 
@@ -304,6 +310,10 @@ struct MemoryView: View {
             // failure. Clears itself on the next successful load — which
             // `onAppear` and every watcher tick issue.
             if let loadError = viewModel.loadError, saveError == nil {
+                // No explicit `.accessibilityLabel(loadError)`: passing a
+                // bare `String` variable binds the `StringProtocol`
+                // overload, which is never extracted for translation — and
+                // it only restated the `Text` it was attached to.
                 Text(loadError)
                     .scarfStyle(.footnote)
                     .foregroundStyle(ScarfColor.danger)
@@ -311,7 +321,7 @@ struct MemoryView: View {
                     .padding(.horizontal, ScarfSpace.s5)
                     .padding(.vertical, ScarfSpace.s2)
                     .background(ScarfColor.backgroundSecondary)
-                    .accessibilityLabel(loadError)
+                    .accessibilityFocused($failureStripFocused)
             }
             if let saveError {
                 Text(saveError)
@@ -321,11 +331,36 @@ struct MemoryView: View {
                     .padding(.horizontal, ScarfSpace.s5)
                     .padding(.vertical, ScarfSpace.s2)
                     .background(ScarfColor.backgroundSecondary)
-                    .accessibilityLabel(saveError)
+                    .accessibilityFocused($failureStripFocused)
             }
             editorFooter
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // AX H2. A refused save changed nothing visible where the user's
+        // attention (or VoiceOver's cursor) already was — it added a strip
+        // at the bottom of a pane whose focus is inside the text editor.
+        // Perceptually that is identical to the silent failure the guard
+        // was added to end, so announce the transition AND move
+        // accessibility focus onto the strip. Guarded on the last announced
+        // value so a re-render of the same failure stays quiet.
+        .onChange(of: saveError) { _, new in announceFailure(new) }
+        .onChange(of: viewModel.loadError) { _, new in
+            if saveError == nil { announceFailure(new) }
+        }
+    }
+
+    /// Announce a newly-arrived save/load failure and park accessibility
+    /// focus on it. `nil` (the failure clearing) resets the guard so the
+    /// NEXT failure — even an identical one — announces again.
+    private func announceFailure(_ text: String?) {
+        guard let text, !text.isEmpty else {
+            lastAnnouncedFailure = nil
+            return
+        }
+        guard lastAnnouncedFailure != text else { return }
+        lastAnnouncedFailure = text
+        AccessibilityNotification.Announcement(AttributedString(text)).post()
+        failureStripFocused = true
     }
 
     private var editorHeader: some View {

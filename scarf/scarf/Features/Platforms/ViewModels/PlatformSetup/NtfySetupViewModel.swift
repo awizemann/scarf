@@ -15,7 +15,7 @@ import os
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/ntfy
 @Observable
 @MainActor
-final class NtfySetupViewModel {
+final class NtfySetupViewModel: OutcomeMessageHosting {
     let context: ServerContext
     init(context: ServerContext = .local) { self.context = context }
 
@@ -28,6 +28,9 @@ final class NtfySetupViewModel {
     var markdown: Bool = false
 
     var message: String?
+    /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
+    /// VoiceOver announcement come from this, never from the prose.
+    var messageIsFailure = false
 
     func load() {
         let env = HermesEnvService(context: context).load()
@@ -67,9 +70,6 @@ final class NtfySetupViewModel {
             "platforms.ntfy.extra.token": "",
             "platforms.ntfy.extra.markdown": PlatformSetupHelpers.envBool(markdown)
         ]
-        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.message = nil
-        }
+        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV))
     }
 }

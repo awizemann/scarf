@@ -17,6 +17,12 @@ import os
 enum PlatformSetupHelpers {
     nonisolated static let logger = Logger(subsystem: "com.scarf", category: "PlatformSetup")
 
+    /// A save's user-facing result. See ``OutcomeMessage`` — the app-wide
+    /// outcome-typed channel this and every other save bar now share
+    /// (GW-F4). Kept as a nested alias so existing `saveForm` call sites
+    /// read unchanged.
+    typealias SaveOutcome = OutcomeMessage
+
     /// Apply a form save in one atomic batch against a specific server.
     ///
     /// - `context`: the server whose `.env` and `config.yaml` we're writing.
@@ -27,13 +33,13 @@ enum PlatformSetupHelpers {
     ///   Empty strings still produce a `config set <key> ""` call because
     ///   some fields accept an explicit empty string (e.g., `display.skin: ""`).
     ///
-    /// Returns a user-facing summary message.
+    /// Returns a user-facing summary message and whether it is a failure.
     /// `nonisolated`: the body is pure transport I/O (env writes + one
     /// `hermes config set` process per key) and touches no MainActor state,
     /// so callers can — and now do — run it from a `Task.detached` instead of
     /// freezing the window for a round-trip per key.
     @discardableResult
-    nonisolated static func saveForm(context: ServerContext, envPairs: [String: String], configKV: [String: String]) -> String {
+    nonisolated static func saveForm(context: ServerContext, envPairs: [String: String], configKV: [String: String]) -> SaveOutcome {
         let envService = HermesEnvService(context: context)
 
         // Split env pairs into set vs. unset.
@@ -68,9 +74,14 @@ enum PlatformSetupHelpers {
             }
         }
 
-        if !envOK { return "Failed to write .env" }
-        if !configFailures.isEmpty { return "Saved, but failed to update: \(configFailures.joined(separator: ", "))" }
-        return "Saved — restart gateway to apply"
+        // A partial save is a FAILURE for outcome purposes: some of what the
+        // user typed is not in the file, and a green checkmark over that is
+        // the exact misreport GW-F4 exists to end.
+        if !envOK { return .failure(String(localized: "Failed to write .env")) }
+        if !configFailures.isEmpty {
+            return .failure(String(localized: "Saved, but failed to update: \(configFailures.joined(separator: ", "))"))
+        }
+        return .success(String(localized: "Saved — restart gateway to apply"))
     }
 
     /// Synchronous hermes CLI invocation against the given server. Use only

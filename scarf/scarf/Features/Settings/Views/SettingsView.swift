@@ -126,11 +126,11 @@ struct SettingsView: View {
                     .foregroundStyle(ScarfColor.foregroundMuted)
             }
             Spacer()
-            if let msg = viewModel.saveMessage {
-                Label(msg, systemImage: "checkmark.circle.fill")
-                    .scarfStyle(.caption)
-                    .foregroundStyle(ScarfColor.success)
-            }
+            OutcomeMessageBar(
+                text: viewModel.saveMessage,
+                isFailure: viewModel.saveMessageIsFailure,
+                onDismiss: { viewModel.dismissMessage() }
+            )
             HStack(spacing: ScarfSpace.s2) {
                 Button("Open in Editor") { viewModel.openConfigInEditor() }
                     .buttonStyle(ScarfGhostButton())

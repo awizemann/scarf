@@ -86,9 +86,14 @@ struct RemoteBotDetailView: View {
                     .accessibilityLabel("Message")
                 HStack {
                     if viewModel.isSending { ProgressView().controlSize(.small) }
-                    if let message = viewModel.message {
-                        Text(message).scarfStyle(.caption).foregroundStyle(ScarfColor.success)
-                    }
+                    // The SECOND consumer of `PeersViewModel.message`; it
+                    // ignored the sibling `messageIsFailure` that PeersView
+                    // reads, so a failure line here was painted green.
+                    OutcomeMessageBar(
+                        text: viewModel.message,
+                        isFailure: viewModel.messageIsFailure,
+                        onDismiss: { viewModel.dismissMessage() }
+                    )
                     Spacer()
                     Button("Message") { viewModel.sendDM() }
                         .buttonStyle(ScarfGhostButton())

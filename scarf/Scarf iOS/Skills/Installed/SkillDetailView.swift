@@ -181,7 +181,28 @@ struct SkillDetailView: View {
 
             if vm.selectedFileName != nil {
                 Section("Content") {
-                    if vm.skillContent.isEmpty {
+                    // AX H5 / iOS refusal parity with the Mac. The guarded
+                    // reader REFUSES to hand back text for a file it could
+                    // not read, and `skillContent` is then empty — which
+                    // this screen used to render as "(empty file)": a
+                    // confident statement about a file nobody managed to
+                    // read, over which Save would then have been offered.
+                    // `contentError` distinguishes the two, so check it
+                    // FIRST and say what actually happened.
+                    if let contentError = vm.contentError {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .accessibilityHidden(true)
+                            Text(contentError)
+                                .font(.caption)
+                                .foregroundStyle(ScarfColor.foregroundMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.vertical, 4)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(String(localized: "Couldn’t read this file: \(contentError)"))
+                    } else if vm.skillContent.isEmpty {
                         Text("(empty file)")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
@@ -230,6 +251,18 @@ struct SkillDetailView: View {
                     } label: {
                         Label("Edit", systemImage: "pencil")
                     }
+                    // Disabled rather than hidden, and the notice in the
+                    // Content section above explains why: `startEditing()`
+                    // guard-returns without the load proof, so tapping this
+                    // opened a blank editor over a file that exists, and
+                    // Save then silently no-opped (the write was correctly
+                    // refused; the UX was silence).
+                    .disabled(!vm.canEditSelectedFile)
+                    .accessibilityHint(
+                        vm.canEditSelectedFile
+                            ? Text("")
+                            : Text("Editing is off because this file couldn’t be read.")
+                    )
                 }
                 Menu {
                     Button(role: .destructive) {

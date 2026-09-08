@@ -97,6 +97,11 @@ final class SettingsViewModel {
     ]
     var memoryProviders = ["", "honcho", "openviking", "mem0", "hindsight", "holographic", "retaindb", "byterover", "supermemory"]
     var saveMessage: String?
+    /// Outcome of ``saveMessage`` (GW-F4). The toast used to render every
+    /// message — including "Could not save …" and the guarded-write
+    /// refusals — under a green checkmark, so a refused save looked exactly
+    /// like a successful one. `OutcomeMessageBar` reads this stored fact.
+    var saveMessageIsFailure = false
     var isLoading = false
 
     /// `hasLoaded` lets a plain section re-entry skip the config/env re-read
@@ -166,11 +171,8 @@ final class SettingsViewModel {
             outcome: .init(succeeded: result.exitCode == 0)
         ))
         if result.exitCode == 0 {
-            saveMessage = String(localized: "Saved \(key)")
+            showSuccess(String(localized: "Saved \(key)"))
             config = fileService.loadConfig()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.saveMessage = nil
-            }
         } else {
             // `arguments` is a `hermes config set <key> <value>` — the value
             // is whatever the user typed into a settings field, which
@@ -183,10 +185,7 @@ final class SettingsViewModel {
             logger.warning(
                 "hermes config command failed: key=\(key, privacy: .public) exit=\(result.exitCode, privacy: .public) args=\(arguments, privacy: .private) output=\(result.output, privacy: .private)"
             )
-            saveMessage = Self.saveFailureMessage(key: key, output: result.output)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-                self?.saveMessage = nil
-            }
+            showSaveFailure(Self.saveFailureMessage(key: key, output: result.output))
         }
     }
 
@@ -339,12 +338,11 @@ final class SettingsViewModel {
                 // CLI reason to surface — but route through the shared
                 // builder anyway so this banner keeps matching its siblings
                 // if the wording ever changes.
-                self.saveMessage = ok
-                    ? String(localized: "Saved model settings")
-                    : Self.saveFailureMessage(key: "model settings", output: "")
-                DispatchQueue.main.asyncAfter(deadline: .now() + (ok ? 2 : 5)) { [weak self] in
-                    self?.saveMessage = nil
-                }
+                self.applySaveOutcome(
+                    ok
+                        ? .success(String(localized: "Saved model settings"))
+                        : .failure(Self.saveFailureMessage(key: "model settings", output: ""))
+                )
             }
         }
     }
@@ -553,16 +551,10 @@ final class SettingsViewModel {
         ))
         config = fileService.loadConfig()
         if result.exitCode == 0 {
-            saveMessage = String(localized: "Saved \(key)")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.saveMessage = nil
-            }
+            showSuccess(String(localized: "Saved \(key)"))
         } else {
             logger.warning("hermes memory off failed (exit \(result.exitCode)): \(result.output)")
-            saveMessage = Self.saveFailureMessage(key: key, output: result.output)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-                self?.saveMessage = nil
-            }
+            showSaveFailure(Self.saveFailureMessage(key: key, output: result.output))
         }
     }
     // Hermes v0.9.0 PR #6995: the key is camelCase in config.yaml (not snake_case like the rest of Hermes).
@@ -868,10 +860,9 @@ final class SettingsViewModel {
                 try saveDirectYAMLLocked(label: label, path: path, file: file, transform: transform)
             }
         } catch {
-            saveMessage = "Could not save \(label): \(error.localizedDescription)"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-                self?.saveMessage = nil
-            }
+            // Includes the GW-F3 `registryBusy` contention failure, whose
+            // prose now names THIS file rather than the projects registry.
+            showSaveFailure(String(localized: "Could not save \(label): \(error.localizedDescription)"))
         }
     }
 
@@ -890,10 +881,7 @@ final class SettingsViewModel {
         do {
             loaded = try file.load(path)
         } catch {
-            saveMessage = "Could not save \(label): \(error.localizedDescription)"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-                self?.saveMessage = nil
-            }
+            showSaveFailure(String(localized: "Could not save \(label): \(error.localizedDescription)"))
             return
         }
         let existing = loaded.text
@@ -901,24 +889,18 @@ final class SettingsViewModel {
             // Writer refused (invalid value or capability-gated) — surface
             // it instead of silently dropping the save, mirroring the
             // write-failure toast below.
-            saveMessage = "Could not save \(label): a value was rejected as invalid"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-                self?.saveMessage = nil
-            }
+            showSaveFailure(String(localized: "Could not save \(label): a value was rejected as invalid"))
             return
         }
         if updated != existing {
             guard (try? file.write(updated, to: path, after: loaded)) != nil else {
                 // Direct-YAML write failure: no CLI output to quote, so the
                 // shared builder's bare form is exactly right.
-                saveMessage = Self.saveFailureMessage(key: label, output: "")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-                    self?.saveMessage = nil
-                }
+                showSaveFailure(Self.saveFailureMessage(key: label, output: ""))
                 return
             }
         }
-        saveMessage = String(localized: "Saved \(label)")
+        showSuccess(String(localized: "Saved \(label)"))
         // These two reads sit inside the hold. Deliberate and cheap: they
         // are the post-write reload, and holding the lock across them means
         // the UI re-renders the bytes THIS save published rather than a
@@ -926,9 +908,6 @@ final class SettingsViewModel {
         // worth of wait against a 2s bound.
         config = fileService.loadConfig()
         rawConfigYAML = context.readText(path) ?? rawConfigYAML
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.saveMessage = nil
-        }
     }
     func setCheckpointsEnabled(_ value: Bool) { setSetting("checkpoints.enabled", value: value ? "true" : "false") }
     func setCheckpointsMaxSnapshots(_ value: Int) { setSetting("checkpoints.max_snapshots", value: String(value)) }
@@ -981,19 +960,17 @@ final class SettingsViewModel {
                         // unrelated local file with the same path). Surface the
                         // remote location in the saveMessage instead.
                         if self.context.isRemote {
-                            self.saveMessage = "Backup saved on \(self.context.displayName): \(zipPath)"
+                            let host = self.context.displayName
+                            self.showSuccess(String(localized: "Backup saved on \(host): \(zipPath)"))
                         } else {
                             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: zipPath)])
-                            self.saveMessage = "Backup saved"
+                            self.showSuccess(String(localized: "Backup saved"))
                         }
                     } else {
-                        self.saveMessage = "Backup complete"
+                        self.showSuccess(String(localized: "Backup complete"))
                     }
                 } else {
-                    self.saveMessage = "Backup failed"
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                    self?.saveMessage = nil
+                    self.showSaveFailure(String(localized: "Backup failed"))
                 }
             }
         }
@@ -1011,12 +988,13 @@ final class SettingsViewModel {
             let result = fileService.runHermesCLI(args: ["import", path], timeout: 300)
             await MainActor.run {
                 self.backupInProgress = false
-                self.saveMessage = result.exitCode == 0 ? "Restore complete — restart Scarf" : "Restore failed"
+                self.applySaveOutcome(
+                    result.exitCode == 0
+                        ? .success(String(localized: "Restore complete — restart Scarf"))
+                        : .failure(String(localized: "Restore failed"))
+                )
                 if result.exitCode == 0 {
                     self.load(force: true)
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                    self?.saveMessage = nil
                 }
             }
         }
@@ -1145,5 +1123,19 @@ final class SettingsViewModel {
                 }
             }
         }
+    }
+}
+
+/// The app-wide outcome-typed message channel (GW-F4), bridged onto this
+/// view model's longer-established `saveMessage` name so the property does
+/// not have to be renamed across every Settings tab.
+extension SettingsViewModel: OutcomeMessageHosting {
+    var message: String? {
+        get { saveMessage }
+        set { saveMessage = newValue }
+    }
+    var messageIsFailure: Bool {
+        get { saveMessageIsFailure }
+        set { saveMessageIsFailure = newValue }
     }
 }

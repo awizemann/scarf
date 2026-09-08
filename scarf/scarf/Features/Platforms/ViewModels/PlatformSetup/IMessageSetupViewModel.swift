@@ -6,7 +6,7 @@ import ScarfCore
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/bluebubbles
 @Observable
 @MainActor
-final class IMessageSetupViewModel {
+final class IMessageSetupViewModel: OutcomeMessageHosting {
     let context: ServerContext
     init(context: ServerContext = .local) { self.context = context }
 
@@ -21,6 +21,9 @@ final class IMessageSetupViewModel {
     var sendReadReceipts: Bool = false
 
     var message: String?
+    /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
+    /// VoiceOver announcement come from this, never from the prose.
+    var messageIsFailure = false
 
     func load() {
         let env = HermesEnvService(context: context).load()
@@ -47,9 +50,6 @@ final class IMessageSetupViewModel {
             "BLUEBUBBLES_ALLOW_ALL_USERS": allowAllUsers ? "true" : "",
             "BLUEBUBBLES_SEND_READ_RECEIPTS": sendReadReceipts ? "true" : ""
         ]
-        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: [:])
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.message = nil
-        }
+        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: [:]))
     }
 }

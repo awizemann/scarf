@@ -232,7 +232,7 @@ nonisolated struct BotDraft: Equatable {
 /// server switch. There is no shared/static state here for that reason.
 @Observable
 @MainActor
-final class BotsViewModel {
+final class BotsViewModel: OutcomeMessageHosting {
     private let logger = Logger(subsystem: "com.scarf", category: "BotsViewModel")
 
     let context: ServerContext
@@ -274,6 +274,9 @@ final class BotsViewModel {
     var isWorking = false
     /// Transient success line in the header.
     var message: String?
+    /// Outcome of `message` (GW-F4) — the bar's colour, glyph and VoiceOver
+    /// announcement come from this stored fact, never from the prose.
+    var messageIsFailure = false
     /// Verbatim failure text — CLI stderr where there is any, since Hermes'
     /// own profile errors carry the remedy and a paraphrase would lose it.
     var errorMessage: String?
@@ -1225,12 +1228,5 @@ final class BotsViewModel {
         }
     }
 
-    private func flash(_ text: String) {
-        message = text
-        Task { [weak self] in
-            try? await Task.sleep(for: .seconds(3))
-            guard let self, self.message == text else { return }
-            self.message = nil
-        }
-    }
+    private func flash(_ text: String) { showSuccess(text) }
 }

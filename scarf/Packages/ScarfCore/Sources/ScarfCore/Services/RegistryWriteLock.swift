@@ -243,7 +243,11 @@ public struct RegistryWriteLock: Sendable {
     ///
     /// - Throws: `ProjectRegistryError.registryBusy` when the lock could
     ///   not be taken within ``acquireTimeout``; whatever `body` throws.
-    public nonisolated func withLock<T>(path: String, _ body: () throws -> T) throws -> T {
+    /// - Parameter label: how to name `path` to the user in a
+    ///   `registryBusy` message ("config.yaml", "your projects file").
+    ///   `nil` shows the raw path, which is right for the registry's own
+    ///   callers and wrong for the four text files GW-F3 added.
+    public nonisolated func withLock<T>(path: String, label: String? = nil, _ body: () throws -> T) throws -> T {
         let key = "com.scarf.registryWriteLock." + lockURL.path
         let dictionary = Thread.current.threadDictionary
         if let depth = dictionary[key] as? Int, depth > 0 {
@@ -251,7 +255,7 @@ public struct RegistryWriteLock: Sendable {
             defer { dictionary[key] = (dictionary[key] as? Int ?? 1) - 1 }
             return try body()
         }
-        guard let token = try acquire(describing: path) else {
+        guard let token = try acquire(describing: path, label: label) else {
             // The lock file cannot be CREATED here (unwritable or missing
             // parent — not contention, which is EEXIST). Proceeding
             // unlocked mirrors the nil-lockURL policy above: losing the
@@ -270,7 +274,7 @@ public struct RegistryWriteLock: Sendable {
     /// Acquire, returning the token — or `nil` when the lock file cannot
     /// exist here at all (create fails with something other than EEXIST),
     /// in which case the caller proceeds unlocked.
-    private nonisolated func acquire(describing path: String) throws -> String? {
+    private nonisolated func acquire(describing path: String, label: String?) throws -> String? {
         let token = UUID().uuidString
         let deadline = Date().addingTimeInterval(acquireTimeout)
         try? FileManager.default.createDirectory(
@@ -295,7 +299,7 @@ public struct RegistryWriteLock: Sendable {
                     "Could not take the registry write lock at \(self.lockURL.path, privacy: .public) within \(self.acquireTimeout)s"
                 )
                 #endif
-                throw ProjectRegistryError.registryBusy(path: path)
+                throw ProjectRegistryError.registryBusy(path: path, label: label)
             }
             Thread.sleep(forTimeInterval: Self.pollInterval)
         }

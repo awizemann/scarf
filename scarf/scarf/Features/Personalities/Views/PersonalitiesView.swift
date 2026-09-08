@@ -20,11 +20,11 @@ struct PersonalitiesView: View {
                 subtitle: "Hermes' built-in personalities plus any you define under `agent.personalities` in config.yaml."
             ) {
                 HStack(spacing: ScarfSpace.s2) {
-                    if let msg = viewModel.message {
-                        Label(msg, systemImage: "checkmark.circle.fill")
-                            .scarfStyle(.caption)
-                            .foregroundStyle(ScarfColor.success)
-                    }
+                    OutcomeMessageBar(
+                        text: viewModel.message,
+                        isFailure: viewModel.messageIsFailure,
+                        onDismiss: { viewModel.dismissMessage() }
+                    )
                     Button("Edit config.yaml") { viewModel.openConfigInEditor() }
                         .buttonStyle(ScarfGhostButton())
                     Button("Reload") {

@@ -56,11 +56,11 @@ struct DiscordSetupView: View {
 
     private var saveBar: some View {
         HStack {
-            if let msg = viewModel.message {
-                Label(msg, systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
-            }
+            OutcomeMessageBar(
+                text: viewModel.message,
+                isFailure: viewModel.messageIsFailure,
+                onDismiss: { viewModel.dismissMessage() }
+            )
             Spacer()
             Button("Reload") { viewModel.load() }.controlSize(.small)
             Button("Save") { viewModel.save() }.buttonStyle(ScarfPrimaryButton()).controlSize(.small)

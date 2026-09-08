@@ -13,7 +13,7 @@ import os
 /// honor it.
 @Observable
 @MainActor
-final class GatewayBehaviorViewModel {
+final class GatewayBehaviorViewModel: OutcomeMessageHosting {
     private static let logger = Logger(subsystem: "com.scarf", category: "GatewayBehavior")
 
     let platform: String
@@ -39,6 +39,9 @@ final class GatewayBehaviorViewModel {
     var gatewayRestartNotification: Bool = false
 
     var message: String?
+    /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
+    /// VoiceOver announcement come from this, never from the prose.
+    var messageIsFailure = false
     var isSaving: Bool = false
 
     init(
@@ -108,7 +111,7 @@ final class GatewayBehaviorViewModel {
     func save() {
         guard !isSaving else { return }
         isSaving = true
-        message = nil
+        dismissMessage()
 
         // Step 2's key set is computed on MainActor (it reads the form), the
         // I/O below is not.
@@ -152,7 +155,7 @@ final class GatewayBehaviorViewModel {
         // "detached so the SCP round-trip doesn't block MainActor" described
         // code that did not exist; it does now.
         Task { [weak self] in
-            let outcome = await Task.detached { () -> String in
+            let outcome = await Task.detached { () -> PlatformSetupHelpers.SaveOutcome in
                 // Step 1: list write via direct YAML edit — `hermes config
                 // set` can't write list values.
                 if let listKey {
@@ -163,12 +166,12 @@ final class GatewayBehaviorViewModel {
                         items: trimmedItems
                     )
                     if !ok {
-                        return "Failed to write allowlist to config.yaml"
+                        return .failure(String(localized: "Failed to write allowlist to config.yaml"))
                     }
                 }
                 // Step 2: scalar saves via `hermes config set`.
                 if kv.isEmpty {
-                    return "Allowlist saved — restart gateway to apply"
+                    return .success(String(localized: "Allowlist saved — restart gateway to apply"))
                 }
                 return PlatformSetupHelpers.saveForm(
                     context: ctx, envPairs: [:], configKV: kv
@@ -177,17 +180,15 @@ final class GatewayBehaviorViewModel {
 
             guard let self else { return }
             self.isSaving = false
-            self.message = outcome
-            if outcome == "Failed to write allowlist to config.yaml" {
-                Self.logger.warning("GatewayConfigWriter.saveList failed for \(platform, privacy: .public)")
-                // A failure message is never auto-cleared — the user
-                // dismisses it by saving again.
-                return
+            // GW-F4: the outcome is now a stored fact rather than a string
+            // comparison against one particular failure sentence, so a
+            // `saveForm` refusal (".env"/`config set`) is treated as a
+            // failure here too instead of auto-clearing like a success.
+            // `applySaveOutcome` owns the "failures never auto-clear" rule.
+            if outcome.isFailure {
+                Self.logger.warning("Gateway behaviour save failed for \(platform, privacy: .public): \(outcome.text, privacy: .public)")
             }
-            Task { [weak self] in
-                try? await Task.sleep(for: .seconds(3))
-                self?.message = nil
-            }
+            self.applySaveOutcome(outcome)
         }
     }
 

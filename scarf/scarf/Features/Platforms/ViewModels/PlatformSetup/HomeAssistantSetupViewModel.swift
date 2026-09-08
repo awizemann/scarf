@@ -15,7 +15,7 @@ import AppKit
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/homeassistant
 @Observable
 @MainActor
-final class HomeAssistantSetupViewModel {
+final class HomeAssistantSetupViewModel: OutcomeMessageHosting {
     let context: ServerContext
 
     init(context: ServerContext = .local) {
@@ -35,6 +35,9 @@ final class HomeAssistantSetupViewModel {
     var ignoreEntities: [String] = []
 
     var message: String?
+    /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
+    /// VoiceOver announcement come from this, never from the prose.
+    var messageIsFailure = false
 
     func load() {
         let env = HermesEnvService(context: context).load()
@@ -60,10 +63,7 @@ final class HomeAssistantSetupViewModel {
             "platforms.homeassistant.extra.watch_all": PlatformSetupHelpers.envBool(watchAll),
             "platforms.homeassistant.extra.cooldown_seconds": String(cooldownSeconds)
         ]
-        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.message = nil
-        }
+        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV))
     }
 
     /// Open config.yaml in the user's default editor so they can manually edit

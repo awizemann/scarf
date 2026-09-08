@@ -5,7 +5,7 @@ import ScarfCore
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/feishu
 @Observable
 @MainActor
-final class FeishuSetupViewModel {
+final class FeishuSetupViewModel: OutcomeMessageHosting {
     let context: ServerContext
     init(context: ServerContext = .local) { self.context = context }
 
@@ -18,6 +18,9 @@ final class FeishuSetupViewModel {
     var connectionMode: String = "websocket"  // "websocket" | "webhook"
 
     var message: String?
+    /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
+    /// VoiceOver announcement come from this, never from the prose.
+    var messageIsFailure = false
 
     let domainOptions = ["feishu", "lark"]
     let connectionOptions = ["websocket", "webhook"]
@@ -43,9 +46,6 @@ final class FeishuSetupViewModel {
             "FEISHU_ALLOWED_USERS": allowedUsers,
             "FEISHU_CONNECTION_MODE": connectionMode == "websocket" ? "" : connectionMode
         ]
-        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: [:])
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.message = nil
-        }
+        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: [:]))
     }
 }

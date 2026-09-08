@@ -5,7 +5,7 @@ import ScarfCore
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/mattermost
 @Observable
 @MainActor
-final class MattermostSetupViewModel {
+final class MattermostSetupViewModel: OutcomeMessageHosting {
     let context: ServerContext
     init(context: ServerContext = .local) { self.context = context }
 
@@ -19,6 +19,9 @@ final class MattermostSetupViewModel {
     var requireMention: Bool = true
 
     var message: String?
+    /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
+    /// VoiceOver announcement come from this, never from the prose.
+    var messageIsFailure = false
     let replyModeOptions = ["off", "thread"]
 
     func load() {
@@ -44,9 +47,6 @@ final class MattermostSetupViewModel {
             "MATTERMOST_REPLY_MODE": replyMode == "off" ? "" : replyMode,
             "MATTERMOST_REQUIRE_MENTION": PlatformSetupHelpers.envBool(requireMention)
         ]
-        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: [:])
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.message = nil
-        }
+        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: [:]))
     }
 }

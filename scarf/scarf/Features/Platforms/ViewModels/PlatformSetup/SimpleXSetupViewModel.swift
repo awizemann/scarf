@@ -8,7 +8,7 @@ import ScarfCore
 /// `~/.hermes/.env`.
 @Observable
 @MainActor
-final class SimpleXSetupViewModel {
+final class SimpleXSetupViewModel: OutcomeMessageHosting {
     let context: ServerContext
     init(context: ServerContext = .local) { self.context = context }
 
@@ -25,6 +25,9 @@ final class SimpleXSetupViewModel {
     var textBatchDelay: String = "0.8"
 
     var message: String?
+    /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
+    /// VoiceOver announcement come from this, never from the prose.
+    var messageIsFailure = false
 
     func load() {
         let env = HermesEnvService(context: context).load()
@@ -56,13 +59,6 @@ final class SimpleXSetupViewModel {
             "SIMPLEX_HOME_CHANNEL_NAME": homeChannelName,
             "HERMES_SIMPLEX_TEXT_BATCH_DELAY": textBatchDelay
         ]
-        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: [:])
-        clearMessageAfterDelay()
-    }
-
-    private func clearMessageAfterDelay() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.message = nil
-        }
+        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: [:]))
     }
 }

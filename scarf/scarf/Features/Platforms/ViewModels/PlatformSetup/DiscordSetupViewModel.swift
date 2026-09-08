@@ -6,7 +6,7 @@ import os
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/discord
 @Observable
 @MainActor
-final class DiscordSetupViewModel {
+final class DiscordSetupViewModel: OutcomeMessageHosting {
     let context: ServerContext
     init(context: ServerContext = .local) { self.context = context }
 
@@ -33,6 +33,9 @@ final class DiscordSetupViewModel {
     var allowAnyAttachment: Bool = false
 
     var message: String?
+    /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
+    /// VoiceOver announcement come from this, never from the prose.
+    var messageIsFailure = false
 
     let allowBotsOptions = ["none", "mentions", "all"]
     let replyToModeOptions = ["off", "first", "all"]
@@ -72,9 +75,6 @@ final class DiscordSetupViewModel {
             "discord.history_backfill": PlatformSetupHelpers.envBool(historyBackfill),
             "platforms.discord.extra.allow_any_attachment": PlatformSetupHelpers.envBool(allowAnyAttachment)
         ]
-        message = PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.message = nil
-        }
+        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV))
     }
 }

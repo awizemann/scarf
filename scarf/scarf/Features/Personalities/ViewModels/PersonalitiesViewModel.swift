@@ -23,7 +23,7 @@ struct HermesPersonality: Identifiable, Sendable, Equatable {
 }
 
 @Observable
-final class PersonalitiesViewModel {
+final class PersonalitiesViewModel: OutcomeMessageHosting {
     private let logger = Logger(subsystem: "com.scarf", category: "PersonalitiesViewModel")
     let context: ServerContext
     private let fileService: HermesFileService
@@ -45,6 +45,9 @@ final class PersonalitiesViewModel {
     var soulMarkdown: String = ""
     var soulPath: String { context.paths.soulMD }
     var message: String?
+    /// Outcome of `message` (GW-F4) — the bar's colour, glyph and VoiceOver
+    /// announcement come from this stored fact, never from the prose.
+    var messageIsFailure = false
 
     /// Picker rows for the active selection: neutral `default`, the resolved
     /// names, plus the current selection if it matches none of them.
@@ -116,17 +119,19 @@ final class PersonalitiesViewModel {
             self.isSaving = false
             if result.exitCode == 0 {
                 self.activeName = name
-                self.message = "Active personality set to \(name)"
+                self.showSuccess(String(localized: "Active personality set to \(name)"))
             } else {
                 self.logger.warning("Failed to set personality: \(result.output)")
                 // Same `hermes config set` failure surface as Settings, so use
                 // the shared builder: it quotes the CLI's own reason (e.g. the
                 // managed-scope refusal) instead of a generic string.
-                self.message = SettingsViewModel.saveFailureMessage(
+                // GW-F4: a refusal renders in the failure style and stays
+                // put — it used to fade after two seconds under a green
+                // checkmark.
+                self.showSaveFailure(SettingsViewModel.saveFailureMessage(
                     key: "display.personality", output: result.output
-                )
+                ))
             }
-            self.clearMessageAfterDelay()
         }
     }
 
@@ -146,27 +151,14 @@ final class PersonalitiesViewModel {
             self.isSaving = false
             if ok {
                 self.soulMarkdown = content
-                self.message = "SOUL.md saved"
+                self.showSuccess(String(localized: "SOUL.md saved"))
             } else {
                 self.logger.error("Failed to write SOUL.md to \(self.context.displayName)")
-                self.message = "Save failed"
+                self.showSaveFailure(String(localized: "SOUL.md wasn’t saved — Scarf couldn’t write the file."))
             }
-            self.clearMessageAfterDelay()
         }
     }
 
-    private func clearMessageAfterDelay() {
-        messageClearTask?.cancel()
-        messageClearTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled else { return }
-            self?.message = nil
-        }
-    }
-
-    /// Held so a second action's message isn't wiped by the first action's
-    /// still-pending timer.
-    @ObservationIgnored private var messageClearTask: Task<Void, Never>?
 
     func openConfigInEditor() {
         context.openInLocalEditor(context.paths.configYAML)

@@ -8,6 +8,9 @@ import SwiftUI
 struct TemplateUninstallSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State var viewModel: TemplateUninstallerViewModel
+    /// Last failure announced, so a re-render of the same failed stage does
+    /// not repeat itself (AX M5).
+    @State private var announcedFailure: String?
     /// Called on success with the project that was removed. Parent uses
     /// this to refresh its projects list and clear any selection.
     let onCompleted: (ProjectEntry) -> Void
@@ -250,9 +253,12 @@ struct TemplateUninstallSheet: View {
             section(title: "Memory block", subtitle: plan.memoryPath) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
+                        // Redundant with the sentence beside it (GW-F1's
+                        // branch, held to the same rule as the two above).
                         Image(systemName: "exclamationmark.shield")
                             .foregroundStyle(.orange)
                             .font(.caption)
+                            .accessibilityHidden(true)
                         Text("MEMORY.md couldn't be read, so its template section can't be removed.")
                             .font(.caption)
                             .fixedSize(horizontal: false, vertical: true)
@@ -266,6 +272,9 @@ struct TemplateUninstallSheet: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                // Three sentences about ONE decision — one VoiceOver stop,
+                // per the shared error-card rule.
+                .accessibilityElement(children: .combine)
             }
         } else if plan.lock.memoryBlockId != nil {
             section(title: "Memory block", subtitle: nil) {
@@ -402,14 +411,35 @@ struct TemplateUninstallSheet: View {
 
     private func failureView(message: String) -> some View {
         VStack(spacing: 16) {
+            // AX M5: decorative — "Uninstall Failed" says it in words, and
+            // the glyph would otherwise announce as a warning symbol ahead
+            // of the heading.
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 48))
                 .foregroundStyle(.orange)
-            Text("Uninstall Failed").font(.title2.bold())
-            Text(message)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+                .accessibilityHidden(true)
+            VStack(spacing: 16) {
+                Text("Uninstall Failed").font(.title2.bold())
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // Heading + reason are one thought; the Close button stays
+            // outside so it remains its own reachable control.
+            .accessibilityElement(children: .combine)
+            // The sheet swapped its whole body from a progress spinner to
+            // this — a change with no sound and no focus move, so a
+            // VoiceOver user was left on a "Removing…" screen that was no
+            // longer there.
+            .onAppear {
+                guard announcedFailure != message else { return }
+                announcedFailure = message
+                AccessibilityNotification.Announcement(
+                    AttributedString(String(localized: "Uninstall failed. \(message)"))
+                ).post()
+            }
             Button("Close") {
                 viewModel.cancel()
                 dismiss()
