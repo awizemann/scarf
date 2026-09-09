@@ -798,14 +798,7 @@ public actor HermesDataService {
         // stays one phrase rather than becoming `gateway run py`), so
         // Scarf can return hits on punctuated terms that Hermes
         // broadens. Kept on purpose — do not "fix" it into parity.
-        let activeClause: String
-        if hasMessagesActiveColumn {
-            activeClause = hasCompactedColumn
-                ? " AND (m.active = 1 OR m.compacted = 1)"
-                : " AND m.active = 1"
-        } else {
-            activeClause = ""
-        }
+        let activeClause = searchActiveClause(alias: "m.")
         let sql = """
             SELECT \(msgCols)
             FROM messages_fts fts
@@ -835,7 +828,6 @@ public actor HermesDataService {
             query: query,
             highWater: highWater,
             msgCols: msgCols,
-            activeClause: activeClause,
             limit: limit - matches.count
         )
         guard !extra.isEmpty else { return matches }
@@ -880,11 +872,22 @@ public actor HermesDataService {
     /// `substr(content, 8193)`: a term straddling the prefix boundary
     /// would fall between the two windows, and rows the FTS pass already
     /// returned are removed by id afterwards anyway.
+    /// The "rows a search may return" predicate, optionally alias-qualified
+    /// (`"m."` for the FTS join, `""` for a query over bare `messages`).
+    /// One definition, so the two search passes cannot drift apart: a
+    /// rewound row excluded by one and admitted by the other would make a
+    /// hit appear or vanish depending on which pass found it.
+    private func searchActiveClause(alias: String) -> String {
+        guard hasMessagesActiveColumn else { return "" }
+        return hasCompactedColumn
+            ? " AND (\(alias)active = 1 OR \(alias)compacted = 1)"
+            : " AND \(alias)active = 1"
+    }
+
     private func deepToolContentMatches(
         query: String,
         highWater: Int,
         msgCols: String,
-        activeClause: String,
         limit: Int
     ) async -> [HermesMessage] {
         let terms = query
@@ -893,9 +896,11 @@ public actor HermesDataService {
             .map(String.init)
         guard !terms.isEmpty else { return [] }
 
-        // The inner query is over bare `messages`, so the alias-qualified
-        // active clause the FTS join uses has to lose its `m.` prefix.
-        let innerActive = activeClause.replacingOccurrences(of: "m.", with: "")
+        // The inner query is over bare `messages`, so it needs the SAME
+        // clause without the alias — built from the shared helper, not by
+        // string surgery on the outer one (which would also rewrite an `m.`
+        // that turned up anywhere else in the text).
+        let innerActive = searchActiveClause(alias: "")
         let likeClause = terms.map { _ in "m.content LIKE ? ESCAPE '\\'" }.joined(separator: " AND ")
         let sql = """
             SELECT \(msgCols)

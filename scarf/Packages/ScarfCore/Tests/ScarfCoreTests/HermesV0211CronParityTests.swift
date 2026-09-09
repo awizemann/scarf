@@ -15,9 +15,7 @@ import Foundation
 /// emit with color disabled — always, for Scarf's piped runs.
 @Suite struct HermesV0211CronParityTests {
 
-    private func caps(_ line: String) -> HermesCapabilities {
-        HermesCapabilities.parseLine(line)
-    }
+    private func caps(_ line: String) -> HermesCapabilities { HermesHost.caps(line) }
     private var v021: HermesCapabilities { caps("Hermes Agent v0.21.0 (2026.8.31)") }
     private var v0211: HermesCapabilities { caps("Hermes Agent v0.21.1 (2026.9.7)") }
 

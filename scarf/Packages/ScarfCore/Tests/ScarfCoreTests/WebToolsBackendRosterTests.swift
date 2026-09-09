@@ -15,9 +15,7 @@ import Testing
 /// not at all.
 @Suite struct WebToolsBackendRosterTests {
 
-    private func caps(_ line: String) -> HermesCapabilities {
-        HermesCapabilities.parseLine(line)
-    }
+    private func caps(_ line: String) -> HermesCapabilities { HermesHost.caps(line) }
 
     /// `git ls-tree v2026.8.31 plugins/web/` → brave_free, ddgs, exa,
     /// firecrawl, keenable, parallel, searxng, xai. No tavily (deleted at

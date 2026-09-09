@@ -1230,6 +1230,17 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `isV020OrLater`.
     public var isV0205OrLater: Bool { atLeastSemver(0, 20, 5) }
 
+    /// `hermes skills uninstall --yes` — the non-interactive confirmation.
+    ///
+    /// Floor walked across every tag over both parser locations
+    /// (`hermes_cli/main.py`, then `hermes_cli/subcommands/skills.py`): the
+    /// flag first appears at **v2026.8.19 = 0.20.5** and is consumed as
+    /// `do_uninstall(a.name, skip_confirm=getattr(a, "yes", False))`
+    /// (`hermes_cli/skills_hub.py:1324` at v2026.9.7). Below the floor the
+    /// verb prompts through `input()` and argparse exits 2 on the flag, so
+    /// those hosts still need the piped `"y\n"`.
+    public var hasSkillsUninstallYes: Bool { isV0205OrLater }
+
     /// Whether the connected host is on v0.20.6 or newer. Patch-level floor,
     /// same rationale as `isV0204OrLater`/`isV0205OrLater`. v0.20.6
     /// (v2026.8.27) is the tag that sits between v0.20.5 and v0.21.0 and

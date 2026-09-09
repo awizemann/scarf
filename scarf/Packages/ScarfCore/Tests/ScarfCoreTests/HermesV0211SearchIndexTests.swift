@@ -174,10 +174,16 @@ import SQLite3
         let service = await service(home)
         let ids = Set(await service.searchMessages(query: Self.needle).map(\.id))
         await service.close()
-        // With no marker Hermes never truncates, so the fixture indexes
-        // every row whole and MATCH finds id 20 on its own — the point
-        // being that no LIKE pass ran, which
-        // `preV0211HostEmitsOneSearchQueryAndNoLIKE` pins on the SQL.
+        // Read this as the FIXTURE's property, not Hermes's: with no marker
+        // the fixture indexes every row whole (that is what `makeFixtureHome`
+        // does when `highWater` is nil), so the FTS pass alone returns id 20
+        // and the result set happens to be complete. The assertion is only
+        // that this host's answer is unchanged from the release before the
+        // fallback existed; that no LIKE pass ran at all is pinned on the
+        // SQL by `preV0211HostEmitsOneSearchQueryAndNoLIKE`. A real
+        // pre-v0.21.1 host is likewise untruncated because the bounded-tool
+        // migration never ran there — but that is upstream's doing, and
+        // this test cannot observe it.
         #expect(ids == Set([5, 20, 21, 22]))
     }
 
@@ -307,6 +313,30 @@ import SQLite3
         #expect(HermesSearchIndexStatus(isRebuilding: true, rebuildProgress: 9, rebuildHighWater: 5).rebuildFraction == nil)
         #expect(HermesSearchIndexStatus(isRebuilding: false, rebuildProgress: 1, rebuildHighWater: 5).rebuildFraction == nil)
     }
-}
 
-#endif // canImport(SQLite3)
+    /// L2 — both passes derive the active/compacted predicate from ONE
+    /// helper instead of the inner pass rewriting the outer one's text with
+    /// `replacingOccurrences(of: "m.", …)`, which would also rewrite an
+    /// `m.` occurring anywhere else in the clause. The behavioural half is
+    /// `deepMatchesAreRecoveredPastThePrefix`'s rewound row (id 24), which
+    /// only stays hidden if the INNER query carries the clause too; this
+    /// pins the SQL shape.
+    @Test func neitherSearchPassEmitsAHalfRewrittenPredicate() async throws {
+        let home = try makeFixtureHome(highWater: 10)
+        defer { cleanup(home) }
+        let service = await service(home)
+        _ = await service.searchMessages(query: Self.needle)
+        await service.close()
+
+        let mock = MockHermesQueryBackend()
+        let probe = HermesDataService(context: .local, backend: mock)
+        #expect(await probe.open())
+        _ = await probe.searchMessages(query: "needle")
+        for entry in await mock.queryLog {
+            #expect(!entry.sql.contains("m.m."))
+            #expect(!entry.sql.contains("AND .active"))
+            #expect(!entry.sql.contains("AND (.active"))
+        }
+    }
+}
+#endif

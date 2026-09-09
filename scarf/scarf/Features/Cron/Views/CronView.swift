@@ -95,6 +95,15 @@ struct CronView: View {
         capabilitiesStore?.capabilities.hasCronCreatePaused ?? false
     }
 
+    /// The past-one-shot pre-check is gated on the RELEASE, not on any one
+    /// flag: only a v0.21.1 host rejects a one-shot whose timestamp is
+    /// already past, and refusing locally on an older host would deny a
+    /// write that host accepts. Reading `hasCronCreatePaused` for it worked
+    /// only by having the same floor today.
+    private var isV0211OrLater: Bool {
+        capabilitiesStore?.capabilities.isV0211OrLater ?? false
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             pageHeader
@@ -127,7 +136,7 @@ struct CronView: View {
         .onAppear {
             viewModel.load(changeToken: fileWatcher.lastChangeDate)
             viewModel.isV0206OrLater = hasCronResumeRunNow
-            viewModel.isV0211OrLater = hasCronCreatePaused
+            viewModel.isV0211OrLater = isV0211OrLater
             // Both probes are one cheap read-only CLI call each, and both
             // feed always-visible affordances (row badge / warning icon),
             // so they can't be deferred behind a disclosure the way RUN
@@ -147,7 +156,7 @@ struct CronView: View {
         // work when it does — otherwise a cold launch shows no incidents,
         // no doctor findings, and the wrong terminal-refusal wording.
         .onChange(of: hasCronResumeRunNow) { _, newValue in viewModel.isV0206OrLater = newValue }
-        .onChange(of: hasCronCreatePaused) { _, newValue in viewModel.isV0211OrLater = newValue }
+        .onChange(of: isV0211OrLater) { _, newValue in viewModel.isV0211OrLater = newValue }
         .onChange(of: hasCronIncidents) { _, newValue in if newValue { viewModel.loadIncidents() } }
         .onChange(of: hasCronDoctor) { _, newValue in if newValue { viewModel.loadDoctor() } }
         .sheet(isPresented: $viewModel.showCreateSheet) {

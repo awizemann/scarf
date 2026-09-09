@@ -384,9 +384,7 @@ import Foundation
 
     // MARK: - supportsCronDeliver (item 6)
 
-    private func caps(_ line: String) -> HermesCapabilities {
-        HermesCapabilities.parseLine(line)
-    }
+    private func caps(_ line: String) -> HermesCapabilities { HermesHost.caps(line) }
 
     @Test func botChatDeliveryIsVersionGated() {
         let v0205 = caps("Hermes Agent v0.20.5 (2026.8.19)")

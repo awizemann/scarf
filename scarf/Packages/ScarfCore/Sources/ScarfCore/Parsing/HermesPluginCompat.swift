@@ -13,7 +13,11 @@ import Foundation
 ///     old: str    # "facade.name"
 ///     new: str    # "target_module.name" (or the target module)
 /// ```
-public struct HermesPluginCompatHit: Sendable, Equatable, Identifiable, Decodable {
+/// Not `Decodable`: the payload is read with `JSONSerialization` in
+/// `HermesPluginCompatReport.parse`, which tolerates a `line` that arrives
+/// as a JSON string. A hand-written `init(from:)` used to shadow that and
+/// was never called by anything.
+public struct HermesPluginCompatHit: Sendable, Equatable, Identifiable {
     public var id: String { "\(file):\(line):\(old)" }
     public let file: String
     public let line: Int
@@ -29,16 +33,6 @@ public struct HermesPluginCompatHit: Sendable, Equatable, Identifiable, Decodabl
         self.line = line
         self.old = old
         self.new = new
-    }
-
-    private enum CodingKeys: String, CodingKey { case file, line, old, new }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        file = (try? c.decode(String.self, forKey: .file)) ?? ""
-        line = (try? c.decode(Int.self, forKey: .line)) ?? 0
-        old = (try? c.decode(String.self, forKey: .old)) ?? ""
-        new = (try? c.decode(String.self, forKey: .new)) ?? ""
     }
 }
 

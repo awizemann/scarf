@@ -146,9 +146,20 @@ def parse_plugin_providers(hermes_src):
                         assigned[target.id] = node.value
         registered_vars = []
         for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call)
-                    and getattr(node.func, "id", "") == "register_provider"
-                    and node.args):
+            if not isinstance(node, ast.Call) or not node.args:
+                continue
+            # Both call shapes: the bare `register_provider(p)` every bundled
+            # plugin uses today, and the attribute form `ctx.register_provider(p)`
+            # the image_gen plugins already use for their own registry. Missing
+            # the second would report a live provider as unreachable.
+            func = node.func
+            if isinstance(func, ast.Name):
+                if func.id != "register_provider":
+                    continue
+            elif isinstance(func, ast.Attribute):
+                if func.attr != "register_provider":
+                    continue
+            else:
                 continue
             if isinstance(node.args[0], ast.Name):
                 registered_vars.append(node.args[0].id)

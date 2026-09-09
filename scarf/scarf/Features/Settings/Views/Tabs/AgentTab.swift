@@ -138,17 +138,17 @@ struct AgentTab: View {
         }
     }
 
-    /// User-facing name for a `HermesServiceTier` raw value. A raw value
-    /// outside the enum can only come from a hand-edited config Hermes
-    /// itself would warn about; show it verbatim rather than inventing a
-    /// label for it.
+    /// User-facing name for a `HermesServiceTier` raw value. Every option
+    /// the picker offers comes from `HermesServiceTier.options`, which
+    /// only ever yields enum cases — `normalize` maps every spelling
+    /// Hermes accepts, and everything else, onto one of them — so there is
+    /// no non-enum raw value to fall back to.
     private static func fastModeLabel(for raw: String) -> String {
-        switch HermesServiceTier(rawValue: raw) {
+        switch HermesServiceTier(rawValue: raw) ?? .off {
         case .off:    String(localized: "Off")
         case .always: String(localized: "Always")
         case .auto:   String(localized: "Auto (bounded window)")
         case .cold:   String(localized: "Cold (first turn only)")
-        case nil:     raw
         }
     }
 }
