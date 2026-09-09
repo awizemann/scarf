@@ -78,8 +78,15 @@ public enum HermesYAML {
             return parts.joined(separator: ".")
         }
 
+        // CRLF: split on "\n" leaves a trailing "\r" on every line, and
+        // `.whitespaces` does NOT contain it — so `slack:\r` failed the
+        // `key: value` separator scan (the char after the colon was "\r",
+        // not a space or end-of-line) and EVERY section header in a CRLF
+        // config.yaml was silently dropped, taking its whole subtree with
+        // it. Strip it per line; the parser has no other use for it.
         let rawLines = yaml.components(separatedBy: "\n")
-        for line in rawLines {
+        for rawLine in rawLines {
+            let line = rawLine.hasSuffix("\r") ? String(rawLine.dropLast()) : rawLine
             // Skip comment-only and blank lines but preserve indent semantics.
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
@@ -170,11 +177,20 @@ public enum HermesYAML {
             lastScalarPath = nil
             lastScalarParent = nil
 
-            if afterColon.isEmpty || afterColon == "|" || afterColon == ">"
+            if afterColon.isEmpty || isBlockScalarHeader(afterColon)
                 || afterColon.hasPrefix("#") {
+                // Section header or empty-valued key — push onto stack so
+                // children nest.
+                //
                 // `#` — a section header carrying only a trailing comment
                 // (`agent:  # note`) still opens a block.
-                // Section header or empty-valued key — push onto stack so children nest.
+                //
+                // `|`/`>` plus any chomping or explicit-indent indicator
+                // (`|-`, `|+`, `>-`, `>+`, `|2`, `|2-`) opens a block
+                // SCALAR. Only bare `|` / `>` were recognised before, so a
+                // `system_prompt: |-` header was read as the VALUE and every
+                // deeper body line was then folded onto it — the key came
+                // back as the literal string "|- role: assistant tone: dry".
                 // Children legitimately sit deeper, so the continuation
                 // guard is disarmed until the next scalar.
                 stack.append((indent: indent, name: key))
@@ -235,6 +251,33 @@ public enum HermesYAML {
             }
         }
         return ParsedYAML(values: values, lists: lists, maps: maps)
+    }
+
+    /// True when `afterColon` is a YAML block-scalar header: `|` or `>`
+    /// optionally followed by an explicit indentation indicator (a single
+    /// digit 1-9) and/or a chomping indicator (`-` or `+`), in either
+    /// order, and then nothing but an optional `# comment`.
+    private static func isBlockScalarHeader(_ afterColon: String) -> Bool {
+        guard let first = afterColon.first, first == "|" || first == ">" else { return false }
+        var rest = Substring(afterColon.dropFirst())
+        if let hash = rest.firstIndex(of: "#") { rest = rest[rest.startIndex..<hash] }
+        let body = rest.trimmingCharacters(in: .whitespaces)
+        if body.isEmpty { return true }
+        guard body.count <= 2 else { return false }
+        var sawDigit = false
+        var sawChomp = false
+        for ch in body {
+            if ch.isNumber && ch != "0" {
+                if sawDigit { return false }
+                sawDigit = true
+            } else if ch == "-" || ch == "+" {
+                if sawChomp { return false }
+                sawChomp = true
+            } else {
+                return false
+            }
+        }
+        return true
     }
 
     /// Index of the `key: value` separator colon in a trimmed plain-key

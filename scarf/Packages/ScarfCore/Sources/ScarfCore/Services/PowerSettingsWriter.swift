@@ -53,12 +53,15 @@ public enum PowerSettingsWriter {
         guard capabilities.isV020OrLater else { return nil }
         let cleaned = pairs.filter { !$0.key.trimmingCharacters(in: .whitespaces).isEmpty }
         guard cleaned.allSatisfy({ HermesReasoningEffort.isValid($0.value) }) else { return nil }
-        return GatewayConfigWriter.setMap(
+        // A refusal (a config.yaml shape the line editor can't rewrite
+        // without clobbering it) reports as the same nil the pre-v0.20 and
+        // invalid-effort guards use — the caller writes nothing.
+        return GatewayConfigWriter.setMapChecked(
             in: yaml,
             section: "agent",
             key: "reasoning_overrides",
             pairs: cleaned
-        )
+        ).appliedText(orUnchanged: yaml)
     }
 
     /// Replace the `model_catalog.excluded_providers:` list. Returns nil on
@@ -74,11 +77,12 @@ public enum PowerSettingsWriter {
         let cleaned = providers
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        return GatewayConfigWriter.setList(
+        // Refusal → nil, same as the capability guard above.
+        return GatewayConfigWriter.setListChecked(
             in: yaml,
             platform: "model_catalog",
             key: "excluded_providers",
             items: cleaned
-        )
+        ).appliedText(orUnchanged: yaml)
     }
 }

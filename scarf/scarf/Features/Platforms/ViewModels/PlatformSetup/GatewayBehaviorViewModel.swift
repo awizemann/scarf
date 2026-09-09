@@ -147,8 +147,13 @@ final class GatewayBehaviorViewModel: OutcomeMessageHosting {
         let ctx = context
         let platform = platform
         let listKey = (capabilities.hasGatewayAllowlists ? kind?.yamlKey : nil)
+        // `.whitespacesAndNewlines`, not `.whitespaces`: a channel id
+        // pasted with a trailing newline (or a whole multi-line paste)
+        // reached `GatewayConfigWriter` with the break intact, which cannot
+        // be written as one YAML row. Interior breaks still make the writer
+        // refuse the whole save rather than emit a document PyYAML rejects.
         let trimmedItems = items
-            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         let kv = configKV
 

@@ -98,13 +98,28 @@ final class PlatformsViewModel: OutcomeMessageHosting {
     /// Detection mirrors the previous `hasConfigBlock` exactly.
     nonisolated static func computeConfiguredPlatforms(context: ServerContext) -> Set<String> {
         let yaml = context.readText(context.paths.configYAML) ?? ""
+        // A top-level section is `<name>:` followed by ANYTHING — Hermes
+        // emits preserved-but-empty sections flow-style (`slack: {}`,
+        // `_strip_default_values` preserve_keys) and hand-written configs
+        // carry trailing comments (`slack:  # work`). The old
+        // `hasSuffix(":")` test saw neither, so a configured platform
+        // rendered as unconfigured. Split at the first `key: value`
+        // separator colon instead. (`.whitespacesAndNewlines` so a CRLF
+        // config.yaml doesn't leave a `\r` glued to every section name.)
         let topLevel = Set(
             yaml.components(separatedBy: "\n")
                 .filter { !$0.hasPrefix(" ") && !$0.hasPrefix("\t") }
                 .compactMap { line -> String? in
-                    let trimmed = line.trimmingCharacters(in: .whitespaces)
-                    guard trimmed.hasSuffix(":") else { return nil }
-                    return String(trimmed.dropLast())
+                    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { return nil }
+                    guard let colon = trimmed.firstIndex(of: ":") else { return nil }
+                    let name = String(trimmed[trimmed.startIndex..<colon])
+                        .trimmingCharacters(in: .whitespaces)
+                    guard !name.isEmpty else { return nil }
+                    // Only a bare/quoted plain key is a section name; a
+                    // `- item` row or a document marker is not.
+                    guard !name.hasPrefix("-"), !name.hasPrefix("#") else { return nil }
+                    return name
                 }
         )
         // Tolerant `load()` on purpose (GW-F6 / audit DI L10): this decides

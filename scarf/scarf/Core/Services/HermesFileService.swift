@@ -554,11 +554,29 @@ struct HermesFileService: Sendable {
         guard addResult.exitCode == 0 else { return addResult }
         // Stamp the SSE transport discriminator (+ optional read timeout)
         // into the freshly-written entry's YAML block.
-        _ = patchMCPServerField(name: name) { entryLines in
+        //
+        // The stamp is not cosmetic: `transport: sse` is the ONLY thing that
+        // discriminates this entry from the plain HTTP entry `hermes mcp add
+        // --url` just wrote. Discarding the patcher's Bool reported a
+        // successful SSE add for a server that is, on disk, an HTTP server —
+        // and the reader then contradicted the UI on the next load. Report
+        // the partial failure instead, with the entry named so the user can
+        // fix or remove it.
+        let stamped = patchMCPServerField(name: name) { entryLines in
             Self.replaceOrInsertScalar(key: "transport", value: "sse", in: &entryLines)
             if let timeout = sseReadTimeout {
                 Self.replaceOrInsertScalar(key: "sse_read_timeout", value: String(timeout), in: &entryLines)
             }
+        }
+        guard stamped else {
+            return (
+                exitCode: 1,
+                output: addResult.output
+                    + (addResult.output.hasSuffix("\n") ? "" : "\n")
+                    + "Server '\(name)' was created, but writing 'transport: sse' to "
+                    + "~/.hermes/config.yaml failed — it is configured as a plain HTTP "
+                    + "server. Remove it and try again, or add 'transport: sse' by hand."
+            )
         }
         return addResult
     }
@@ -606,9 +624,14 @@ struct HermesFileService: Sendable {
     nonisolated func setMCPServerClientCert(name: String, path: String?) -> Bool {
         patchMCPServerField(name: name) { entryLines in
             if let path, !path.trimmingCharacters(in: .whitespaces).isEmpty {
+                // Quoted through `yamlScalar` like every other scalar
+                // writer (`setMCPServerCommand`): a path with a space,
+                // a colon, a `#`, or a leading `~`-adjacent indicator
+                // emitted bare makes PyYAML raise, and one PyYAML error
+                // makes Hermes discard the WHOLE config.yaml layer.
                 Self.replaceOrInsertScalar(
                     key: "client_cert",
-                    value: path.trimmingCharacters(in: .whitespaces),
+                    value: Self.yamlScalar(path.trimmingCharacters(in: .whitespaces)),
                     in: &entryLines
                 )
             } else {
@@ -623,9 +646,14 @@ struct HermesFileService: Sendable {
     nonisolated func setMCPServerClientKey(name: String, path: String?) -> Bool {
         patchMCPServerField(name: name) { entryLines in
             if let path, !path.trimmingCharacters(in: .whitespaces).isEmpty {
+                // Quoted through `yamlScalar` like every other scalar
+                // writer (`setMCPServerCommand`): a path with a space,
+                // a colon, a `#`, or a leading `~`-adjacent indicator
+                // emitted bare makes PyYAML raise, and one PyYAML error
+                // makes Hermes discard the WHOLE config.yaml layer.
                 Self.replaceOrInsertScalar(
                     key: "client_key",
-                    value: path.trimmingCharacters(in: .whitespaces),
+                    value: Self.yamlScalar(path.trimmingCharacters(in: .whitespaces)),
                     in: &entryLines
                 )
             } else {
@@ -641,9 +669,21 @@ struct HermesFileService: Sendable {
     nonisolated func setMCPServerSSLVerify(name: String, value: String?) -> Bool {
         patchMCPServerField(name: name) { entryLines in
             if let value, !value.trimmingCharacters(in: .whitespaces).isEmpty {
+                // `ssl_verify` is EITHER a bool or a CA-bundle path
+                // (mcp_client.py reads both). The bool form must stay a
+                // bare `true` / `false` — `yamlScalar` quotes those on
+                // purpose, and a quoted "true" is a PATH named "true" to
+                // Hermes, which is a silent downgrade of certificate
+                // verification. Only the path form is quoted, and it must
+                // be: a bundle path with a `#` or a `:` in it, emitted
+                // bare, makes PyYAML raise, and one PyYAML error makes
+                // Hermes discard the WHOLE config.yaml layer
+                // (gateway/config.py:776-791 at v2026.9.7).
+                let raw = value.trimmingCharacters(in: .whitespaces)
+                let isBool = ["true", "false"].contains(raw.lowercased())
                 Self.replaceOrInsertScalar(
                     key: "ssl_verify",
-                    value: value.trimmingCharacters(in: .whitespaces),
+                    value: isBool ? raw.lowercased() : Self.yamlScalar(raw),
                     in: &entryLines
                 )
             } else {
@@ -731,9 +771,14 @@ struct HermesFileService: Sendable {
     nonisolated func setMCPServerCwd(name: String, path: String?) -> Bool {
         patchMCPServerField(name: name) { entryLines in
             if let path, !path.trimmingCharacters(in: .whitespaces).isEmpty {
+                // Quoted through `yamlScalar` like every other scalar
+                // writer (`setMCPServerCommand`): a path with a space,
+                // a colon, a `#`, or a leading `~`-adjacent indicator
+                // emitted bare makes PyYAML raise, and one PyYAML error
+                // makes Hermes discard the WHOLE config.yaml layer.
                 Self.replaceOrInsertScalar(
                     key: "cwd",
-                    value: path.trimmingCharacters(in: .whitespaces),
+                    value: Self.yamlScalar(path.trimmingCharacters(in: .whitespaces)),
                     in: &entryLines
                 )
             } else {
