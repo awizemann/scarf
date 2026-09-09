@@ -37,7 +37,9 @@ final class MCPLoginController {
     /// Parsed device prompt, once both of its lines have arrived.
     private(set) var devicePrompt: HermesMCPDevicePrompt?
     private(set) var isRunning: Bool = false
-    /// Nil until the process exits. `true` only on a zero exit.
+    /// Nil until the process exits. `true` only when the CLI printed its own
+    /// `Authenticated …` line — NOT on a zero exit, which every OAuth failure
+    /// also produces. See `loginOutcome`.
     private(set) var succeeded: Bool?
     private(set) var errorMessage: String?
 
@@ -178,17 +180,45 @@ final class MCPLoginController {
         }
     }
 
+    /// The verdict on a finished login run, judged by what the CLI printed.
+    ///
+    /// `cmd_mcp_login` (hermes_cli/mcp_config.py:709-713 at v2026.9.7) calls
+    /// `_reauth_oauth_server(...)` and DISCARDS the `bool` it returns, so every
+    /// failure exits 0: an unknown server name (`_lookup_server`, :104), a
+    /// non-OAuth server (:631, :634), a bad `oauth.flow` (:641), a completed
+    /// probe with no token (`:676-693` — the subtle one, where the server
+    /// answers `tools/list` unauthenticated so the run LOOKS fine), and a
+    /// raised exception (`Authentication failed:`, :705). Only `_success`
+    /// (:34) prints `Authenticated — N tool(s) available` (:695) or
+    /// `Authenticated (server reported no tools)` (:697), and both lines are
+    /// byte-identical back to v2026.6.19:746, so an older host is judged the
+    /// same way (charter C1, C5).
+    ///
+    /// `fallbackDetail` is off: the failure arms print multi-line remediation
+    /// AFTER the reason (the config.yaml sample at :685-692, the
+    /// `Then re-run …` hint at :692), so the LAST line is never the reason.
+    nonisolated static func loginOutcome(exitCode: Int32, output: String) -> HermesCLIOutcome {
+        HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.mcpLoginSuccess,
+            failureMarkers: HermesCLIMarkers.mcpLoginFailure,
+            fallbackDetail: false
+        )
+    }
+
     private func finish(exitCode: Int32) {
         isRunning = false
-        succeeded = exitCode == 0
-        if exitCode != 0, errorMessage == nil {
-            // The CLI's own last line is the reason; the exit code alone tells
-            // the user nothing actionable.
-            let lastLine = output
-                .split(separator: "\n", omittingEmptySubsequences: true)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .last(where: { !$0.isEmpty })
-            errorMessage = lastLine ?? "hermes exited with code \(exitCode)"
+        let outcome = Self.loginOutcome(exitCode: exitCode, output: output)
+        succeeded = outcome.succeeded
+        if !outcome.succeeded, errorMessage == nil {
+            // The CLI's own refusal line is the reason; the exit code alone
+            // tells the user nothing actionable — and for the exit-0 failures
+            // it is affirmatively misleading.
+            errorMessage = outcome.detail
+                ?? (exitCode == 0
+                    ? "hermes mcp login exited without reporting authentication."
+                    : "hermes exited with code \(exitCode)")
         }
     }
 }

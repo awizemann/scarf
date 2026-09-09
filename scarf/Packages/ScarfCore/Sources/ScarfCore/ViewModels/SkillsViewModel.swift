@@ -556,7 +556,11 @@ public final class SkillsViewModel {
                 transport: xport,
                 timeout: 120
             )
-            await self?.finishInstall(identifier: identifier, exitCode: result.exitCode)
+            await self?.finishInstall(
+                identifier: identifier,
+                exitCode: result.exitCode,
+                output: result.output
+            )
         }
     }
 
@@ -592,7 +596,11 @@ public final class SkillsViewModel {
                 transport: xport,
                 timeout: 180
             )
-            await self?.finishInstall(identifier: url, exitCode: result.exitCode)
+            await self?.finishInstall(
+                identifier: url,
+                exitCode: result.exitCode,
+                output: result.output
+            )
         }
     }
 
@@ -673,17 +681,27 @@ public final class SkillsViewModel {
     /// "Error: 'x' is not a hub-installed skill" comes back with exit 0
     /// (verified at v0.21.0) — so the exit code alone cannot be the
     /// verdict (charter C5). A rejection is an `Error:` line in the output.
+    /// `do_uninstall` (skills_hub.py:909-918) is also `-> None`: a declined
+    /// confirmation returns silently, and `_report_pair` (:144-150) prints
+    /// `Error: …` for a refusal — both at exit 0. Success is the green
+    /// `Uninstalled '<name>' from <path>` line
+    /// (tools/skills_hub_install.py:220).
+    nonisolated static func uninstallOutcome(exitCode: Int32, output: String) -> HermesCLIOutcome {
+        HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.skillsUninstallSuccess,
+            failureMarkers: HermesCLIMarkers.skillsUninstallFailure
+        )
+    }
+
     nonisolated static func uninstallSucceeded(exitCode: Int32, output: String) -> Bool {
-        guard exitCode == 0 else { return false }
-        return !output.contains("Error:")
+        uninstallOutcome(exitCode: exitCode, output: output).succeeded
     }
 
     /// The CLI's own one-line reason for a refused uninstall, for the banner.
     nonisolated static func uninstallFailureReason(output: String) -> String? {
-        output
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .first { $0.hasPrefix("Error:") }
+        uninstallOutcome(exitCode: 0, output: output).detail
     }
 
     public func checkForUpdates() {
@@ -820,10 +838,31 @@ public final class SkillsViewModel {
         return ""
     }
 
+    /// `hermes skills install` is `do_install(...) -> None`
+    /// (hermes_cli/skills_hub.py:645-648 at v2026.9.7): a pinned-source
+    /// refusal, an unresolved short name, a fetch failure, an
+    /// already-installed skill, an invalid path, a blocked security scan and a
+    /// declined confirmation all `print()` and `return`, which Python exits 0.
+    /// Every one of those rendered as "Installed <x>" until this judged the
+    /// emitter's output instead (charter C5).
+    nonisolated static func installOutcome(exitCode: Int32, output: String) -> HermesCLIOutcome {
+        HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.skillsInstallSuccess,
+            failureMarkers: HermesCLIMarkers.skillsInstallFailure
+        )
+    }
+
     @MainActor
-    private func finishInstall(identifier: String, exitCode: Int32) async {
+    private func finishInstall(identifier: String, exitCode: Int32, output: String) async {
         isHubLoading = false
-        hubMessage = exitCode == 0 ? "Installed \(identifier)" : "Install failed"
+        let outcome = Self.installOutcome(exitCode: exitCode, output: output)
+        if outcome.succeeded {
+            hubMessage = "Installed \(identifier)"
+        } else {
+            hubMessage = outcome.detail.map { "Install failed — \($0)" } ?? "Install failed"
+        }
         await load()
         try? await Task.sleep(nanoseconds: 3_000_000_000)
         hubMessage = nil
@@ -831,10 +870,11 @@ public final class SkillsViewModel {
 
     @MainActor
     private func finishUninstall(exitCode: Int32, output: String) async {
-        if Self.uninstallSucceeded(exitCode: exitCode, output: output) {
+        let outcome = Self.uninstallOutcome(exitCode: exitCode, output: output)
+        if outcome.succeeded {
             hubMessage = "Uninstalled"
         } else {
-            hubMessage = Self.uninstallFailureReason(output: output).map { "Uninstall failed — \($0)" }
+            hubMessage = outcome.detail.map { "Uninstall failed — \($0)" }
                 ?? "Uninstall failed (exit \(exitCode))"
         }
         await load()

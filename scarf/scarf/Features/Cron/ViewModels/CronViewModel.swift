@@ -325,6 +325,26 @@ final class CronViewModel {
         return "\"\(job.name)\" has \(state) and can't just be resumed — use Resume & Run Now to re-arm it."
     }
 
+    /// The verdict on `hermes cron run <id>`, judged by what it printed.
+    ///
+    /// `_job_action` (hermes_cli/cron.py:635-663 at v2026.9.7) returns 0 for a
+    /// run that FAILED: it prints the green `Triggered job: <name> (<id>)`
+    /// line (:658, verb from `_JOB_ACTIONS`, :763) and then `_run_outcome`'s
+    /// verdict (:662), which for a synchronous failure is
+    /// `  Ran now: failed.` (:677) — and still `return 0`. So this is the one
+    /// site where a failure marker must beat a success marker that is also
+    /// present. `Ran now:` first appears at v2026.7.1:411, so on a v0.17 host
+    /// the marker never fires and the verdict is unchanged (charter C1).
+    static func runOutcome(exitCode: Int32, output: String) -> HermesCLIOutcome {
+        HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.cronRunSuccess,
+            failureMarkers: HermesCLIMarkers.cronRunFailure,
+            failureWins: true
+        )
+    }
+
     /// Translate the Hermes terminal-job refusals into one plain sentence.
     /// Both `update_job` ("Cannot activate terminal cron job") and
     /// `trigger_job` ("Cannot run: … is completed (terminal)") land here
@@ -399,9 +419,14 @@ final class CronViewModel {
             let runResult = svc.runHermesCLI(args: ["cron", "run", jobID], timeout: 30)
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                if runResult.exitCode != 0 {
+                let outcome = Self.runOutcome(
+                    exitCode: runResult.exitCode,
+                    output: runResult.output
+                )
+                if !outcome.succeeded {
                     self.post(
                         Self.friendlyCronFailure(runResult.output)
+                            ?? outcome.detail
                             ?? "Run failed to queue: \(runResult.output.prefix(200))",
                         outcome: .failure
                     )

@@ -810,29 +810,61 @@ final class HealthViewModel {
         return args
     }
 
+    /// argv for the supply-chain audit. NB the verb is `security audit`; bare
+    /// `hermes audit` is not a CLI verb and routes to an agent chat turn
+    /// instead of running the scan (charter C5).
+    ///
+    /// `--fail-on critical` is passed EXPLICITLY even though it is also the
+    /// parser default (hermes_cli/subcommands/security.py:26 at v2026.9.7, and
+    /// the same default, and the same 0/1/2 exit contract, back at
+    /// v2026.5.29:12384-12389 — the release `security audit` first shipped in,
+    /// which is exactly the `hasHermesAudit` floor gating this button). The
+    /// exit code is the only
+    /// thing distinguishing "found advisories" from "the scan broke", so the
+    /// threshold that produces it must be Scarf's choice, not whatever a
+    /// future Hermes changes the default to.
+    static let auditArgs = ["security", "audit", "--fail-on", "critical"]
+
     /// Run `hermes security audit` (v0.15 OSV.dev supply-chain scan) off
-    /// MainActor. NB the verb is `security audit`; bare `hermes audit` is not a
-    /// CLI verb and routes to an agent chat turn instead of running the scan.
-    /// Non-destructive read-only verb. On success we surface a one-line summary;
-    /// on failure we surface the tail of the advisory list / stderr so the user
-    /// can see which packages tripped the scan without leaving the view.
+    /// MainActor. Non-destructive read-only verb.
+    ///
+    /// The exit code here has THREE meanings, not two
+    /// (`hermes_cli/security_audit.py::cmd_security_audit`, v2026.9.7:286-312,
+    /// forwarded verbatim by `hermes_cli/main.py:2074-2075`):
+    /// 0 = scan ran clean, 1 = scan ran and FOUND advisories at or above
+    /// `--fail-on` (`return int(any(...))`, :311-312), 2 = the scan itself
+    /// failed (a bad `--fail-on`, :293, or an OSV `RuntimeError`, :307, both
+    /// printed to stderr). Rendering exit 1 as "Audit failed" told the user the
+    /// scan broke exactly when it had worked and had something to say. The
+    /// contract is identical at v2026.6.19:562-576, so this does not change
+    /// what a pre-target host renders (charter C1).
     func runAudit() {
         guard !isRunningAudit else { return }
         isRunningAudit = true
         auditMessage = String(localized: "Running supply-chain audit…")
         Task.detached { [fileService] in
-            let result = fileService.runHermesCLI(args: ["security", "audit"], timeout: 180)
+            let result = fileService.runHermesCLI(args: Self.auditArgs, timeout: 180)
             await MainActor.run {
                 self.isRunningAudit = false
                 let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                if result.exitCode == 0 {
+                switch HermesSecurityAuditVerdict(exitCode: result.exitCode) {
+                case .clean:
                     // Prefer a concise tail of the output (the summary line)
                     // over the full report — the panel-less inline strip is short.
                     let tail = trimmed.split(separator: "\n").suffix(2).joined(separator: " · ")
                     self.auditMessage = tail.isEmpty ? String(localized: "No known advisories found.") : tail
-                } else {
+                case .findings:
+                    // The report IS the answer here; `_render_human` leads with
+                    // `Found N known vulnerability finding(s) across M
+                    // component(s):` (security_audit.py:257) and the highest
+                    // severities sort first (:247-249), so show the head.
+                    let head = trimmed.split(separator: "\n").prefix(4).joined(separator: " · ")
+                    self.auditMessage = head.isEmpty
+                        ? String(localized: "Advisories found.")
+                        : String(localized: "Advisories found. \(head)")
+                case .failed(let code):
                     let tail = trimmed.split(separator: "\n").suffix(4).joined(separator: " · ")
-                    self.auditMessage = String(localized: "Audit failed (exit \(result.exitCode)). \(tail)")
+                    self.auditMessage = String(localized: "Audit failed (exit \(code)). \(tail)")
                 }
             }
         }
