@@ -30,7 +30,6 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
     #endif
 
     private var db: OpaquePointer?
-    private var openedAtPath: String?
 
     /// `(st_dev, st_ino)` of the file behind the open handle. An open
     /// SQLite connection follows the INODE, not the path, so a state.db
@@ -111,7 +110,6 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
                 )
                 #endif
                 isQueryOnlyFallback = true
-                openedAtPath = path
                 openedFileIdentity = Self.fileIdentity(of: path)
                 lastOpenError = nil
                 detectSchema()
@@ -124,7 +122,6 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
             #endif
             return false
         }
-        openedAtPath = path
         openedFileIdentity = Self.fileIdentity(of: path)
         lastOpenError = nil
         isQueryOnlyFallback = false
@@ -228,9 +225,9 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
             sqlite3_close(db)
         }
         db = nil
-        openedAtPath = nil
         openedFileIdentity = nil
         isQueryOnlyFallback = false
+        resetSchemaFlags()
     }
 
     deinit {
@@ -246,7 +243,33 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
 
     // MARK: - Schema detection
 
+    /// Clear every detected-schema flag.
+    ///
+    /// These are DERIVED state, not accumulated knowledge: they describe the
+    /// file behind the current handle. `detectSchema()` only ever sets them
+    /// to `true`, so without this a `refresh()` onto a different state.db —
+    /// a quarantined-and-recreated one (v0.21.1's
+    /// `quarantine_zeroed_state_db`), a restore from backup, a Hermes
+    /// DOWNGRADE — kept the previous file's answers and every widened SELECT
+    /// then failed with "no such column". `close()` clears them too, so a
+    /// refresh whose reopen FAILS reports "no schema" rather than the last
+    /// good file's.
+    private func resetSchemaFlags() {
+        hasV07Schema = false
+        hasV011Schema = false
+        hasMessagesActiveColumn = false
+        hasCompactedColumn = false
+        hasCompressedSummaryColumn = false
+        hasRewindCountColumn = false
+        hasSessionActivityColumns = false
+        hasSessionModelUsageTable = false
+        hasHiddenColumn = false
+        hasLastReadAtColumn = false
+        hasListableChildSupport = false
+    }
+
     private func detectSchema() {
+        resetSchemaFlags()
         guard let db else { return }
 
         // sessions schema

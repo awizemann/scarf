@@ -27,7 +27,14 @@ struct TelegramSetupView: View {
                 ToggleRow(label: "Require @mention", isOn: viewModel.requireMention) { viewModel.requireMention = $0 }
                 ToggleRow(label: "Reactions", isOn: viewModel.reactions) { viewModel.reactions = $0 }
                 ToggleRow(label: "Disable topic auto-rename", isOn: viewModel.disableTopicAutoRename) { viewModel.disableTopicAutoRename = $0 }
-                ToggleRow(label: "Ignore root DM", isOn: viewModel.ignoreRootDM) { viewModel.ignoreRootDM = $0 }
+                // v0.15 <= host < v0.21.1: Hermes deleted the reader at
+                // v0.21.1, so on a newer host this toggle would promise a
+                // behaviour nothing implements. The VALUE is still parsed and
+                // saved on every host (see `TelegramSettings.ignoreRootDM`),
+                // so downgrading brings the setting back.
+                if capabilitiesStore?.capabilities.hasTelegramIgnoreRootDM ?? true {
+                    ToggleRow(label: "Ignore root DM", isOn: viewModel.ignoreRootDM) { viewModel.ignoreRootDM = $0 }
+                }
                 if capabilitiesStore?.capabilities.hasTelegramRichMessages ?? false {
                     ToggleRow(label: "Rich messages (Bot API 10.1)", isOn: viewModel.richMessages) { viewModel.richMessages = $0 }
                     ToggleRow(label: "Online/offline status", isOn: viewModel.statusIndicator) { viewModel.statusIndicator = $0 }
@@ -49,7 +56,7 @@ struct TelegramSetupView: View {
                 context: context
             )
         }
-        .onAppear { viewModel.load() }
+        .onAppear { viewModel.load(capabilities: capabilitiesStore?.capabilities ?? .empty) }
     }
 
     private var instructions: some View {
@@ -74,7 +81,7 @@ struct TelegramSetupView: View {
                 onDismiss: { viewModel.dismissMessage() }
             )
             Spacer()
-            Button("Reload") { viewModel.load() }
+            Button("Reload") { viewModel.load(capabilities: capabilitiesStore?.capabilities ?? .empty) }
                 .controlSize(.small)
             Button("Save") { viewModel.save() }
                 .buttonStyle(ScarfPrimaryButton())

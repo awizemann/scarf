@@ -38,7 +38,18 @@ struct AgentTab: View {
         }
 
         SettingsSection(title: "Approvals", icon: "checkmark.shield") {
-            PickerRow(label: "Approval Mode", selection: viewModel.config.approvalMode, options: ["auto", "manual", "smart", "off"]) { viewModel.setApprovalMode($0) }
+            // `auto` was never a valid `approvals.mode` at ANY tag — Hermes
+            // warns and falls back to `manual` (`tools/approval_context.py`
+            // `_VALID_MODES = ("manual", "smart", "off")` @ v2026.9.7; the same
+            // three-member set back to v0.3). The selection is normalised the
+            // way Hermes reads it, so a config still carrying `auto` shows the
+            // `manual` the host is actually enforcing instead of a blank
+            // picker. See `HermesApprovalMode`.
+            PickerRow(
+                label: "Approval Mode",
+                selection: HermesApprovalMode.normalize(viewModel.config.approvalMode).rawValue,
+                options: HermesApprovalMode.options
+            ) { viewModel.setApprovalMode($0) }
             StepperRow(label: "Approval Timeout (s)", value: viewModel.config.approvalTimeout, range: 5...600, step: 5) { viewModel.setApprovalTimeout($0) }
         }
 

@@ -561,8 +561,10 @@ final class SettingsViewModel {
     func setTTSOpenAIVoice(_ value: String) { setSetting("tts.openai.voice", value: value) }
     func setTTSNeuTTSModel(_ value: String) { setSetting("tts.neutts.model", value: value) }
     func setTTSNeuTTSDevice(_ value: String) { setSetting("tts.neutts.device", value: value) }
-    // v0.13: xAI TTS / Custom Voices. TODO(WS-8-Q2): grep-verify key
-    // names against `~/.hermes/hermes-agent/hermes_cli/voice/tts.py`.
+    // v0.13: xAI TTS / Custom Voices. Key confirmed at v2026.9.7 —
+    // `hermes_cli/config_defaults.py:1023` seeds `tts.xai.voice_id: "eve"`
+    // (the alternatives WS-8-Q2 listed, `tts.xai.voice` and a top-level
+    // `tts.xai_voice`, exist in no Hermes version).
     func setTTSXAIVoiceID(_ value: String) { setSetting("tts.xai.voice_id", value: value) }
     // v0.15: auto-insert speech-control tags into xAI TTS output.
     func setTTSXAIAutoSpeechTags(_ value: Bool) { setSetting("tts.xai.auto_speech_tags", value: value ? "true" : "false") }

@@ -1079,6 +1079,56 @@ import Foundation
     /// `hasWebExtractAux`, and deliberately so: hiding a list entry a
     /// pre-v0.21 user is actively using would strand them on an invisible
     /// selection, whereas the aux row is a whole sub-editor.
+    /// `platforms.telegram.extra.ignore_root_dm` lost its READER at v0.21.1.
+    /// Walked over every tag and both file locations the reader has had:
+    /// `gateway/platforms/telegram.py:4879` from v2026.5.28 (0.15.0), then
+    /// `plugins/platforms/telegram/adapter.py` after the v0.18 plugin split
+    /// (`:9835` at v2026.8.31 = 0.21.0, its last appearance). A WHOLE-TREE
+    /// `git grep ignore_root_dm v2026.9.7` returns only
+    /// `scripts/release.py:798` (a contributor-attribution comment) and the
+    /// website docs — no reader anywhere in the shipped code.
+    ///
+    /// This is the assertion that fails if the flag is ever rewritten as a
+    /// plain floor (`isV015OrLater`), which would leave the row rendered on
+    /// every v0.21.1+ host.
+    @Test func hasTelegramIgnoreRootDM_windowIsV015ThroughV0210() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.14.0 (2026.5.16)").hasTelegramIgnoreRootDM)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.15.0 (2026.5.28)").hasTelegramIgnoreRootDM)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)").hasTelegramIgnoreRootDM)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.6 (2026.8.27)").hasTelegramIgnoreRootDM)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)").hasTelegramIgnoreRootDM)
+        // Ceiling: the reader is gone at 0.21.1 and stays gone.
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasTelegramIgnoreRootDM)
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.21.2 (2026.9.20)").hasTelegramIgnoreRootDM)
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.22.0 (2026.10.1)").hasTelegramIgnoreRootDM)
+    }
+
+    /// Unknown version KEEPS the row (charter C1): before this flag existed
+    /// the toggle was unconditional, so a host whose `--version` probe has
+    /// not answered must go on rendering it.
+    @Test func hasTelegramIgnoreRootDM_unknownVersionKeeps() {
+        #expect(HermesCapabilities.empty.hasTelegramIgnoreRootDM)
+    }
+
+    /// `display.busy_input_mode: steer` — floor v0.12.0, found by walking the
+    /// READER across every tag: `elif _bim == "steer":` first appears at
+    /// v2026.4.30 (0.12.0) `cli.py:1946` and is unbroken to v2026.9.7, whose
+    /// modularised reader states the member set outright (`cli.py:2592`
+    /// `_bim if _bim in ("queue", "steer") else "interrupt"`). v2026.4.23's
+    /// `"steer"` hits are the `/steer` slash command, a different surface.
+    @Test func hasBusyInputSteerMode_floorIsV012() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.11.0 (2026.4.23)").hasBusyInputSteerMode)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.12.0 (2026.4.30)").hasBusyInputSteerMode)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.13.0 (2026.5.7)").hasBusyInputSteerMode)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasBusyInputSteerMode)
+    }
+
+    /// Unknown version HIDES it: `steer` is absent from the picker today, so
+    /// an unanswered version probe must keep that rendering.
+    @Test func hasBusyInputSteerMode_unknownVersionHides() {
+        #expect(!HermesCapabilities.empty.hasBusyInputSteerMode)
+    }
+
     @Test func hasTavilyWebBackend_unknownVersionKeeps() {
         #expect(HermesCapabilities.empty.hasTavilyWebBackend)
     }

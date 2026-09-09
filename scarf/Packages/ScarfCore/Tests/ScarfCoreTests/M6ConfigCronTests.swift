@@ -88,14 +88,22 @@ import Foundation
         #expect(c.model == "unknown")
         #expect(c.provider == "unknown")
         #expect(c.display.skin == "default")
-        #expect(c.streaming == true)
+        // `display.streaming` defaults FALSE upstream and always has —
+        // `hermes_cli/config_defaults.py:796` + its reader `cli.py:2598` at
+        // v2026.9.7, and `hermes_cli/config.py:220` at v2026.3.17 (v0.3.0),
+        // the earliest tag carrying the key. This assertion pinned Scarf's
+        // own `!= "false"` bug, not Hermes's behaviour.
+        #expect(c.streaming == false)
         #expect(c.security.redactSecrets == true)
         #expect(c.compression.enabled == true)
         #expect(c.voice.ttsProvider == "edge")
-        // v0.13 additions default to empty / off when the YAML omits
-        // them — pre-v0.13 hosts produce this exact shape.
+        // v0.13 additions when the YAML omits them. `image_gen.model` has
+        // no upstream default (empty = "let the backend pick");
+        // `openrouter.response_cache` defaults TRUE — `config_defaults.py:649`
+        // at v2026.9.7 and `hermes_cli/config.py:686` at the key's floor tag
+        // v2026.5.7 (v0.13.0), True at every tag in between.
         #expect(c.imageGenModel == "")
-        #expect(c.openrouterResponseCacheEnabled == false)
+        #expect(c.openrouterResponseCacheEnabled == true)
     }
 
     @Test func parsesImageGenAndOpenRouterCache() {
@@ -124,16 +132,18 @@ import Foundation
         #expect(c.openrouterResponseCacheEnabled == false)
     }
 
-    @Test func openRouterResponseCacheLegacyNestedDecodesToFalse() {
-        // Defensive read: a legacy nested value flattens to a different
-        // dotted key, so the scalar lookup misses and we fall to the
-        // `false` default. The next save writes the scalar, healing it.
+    @Test func openRouterResponseCacheLegacyNestedDecodesToTheHostDefault() {
+        // Defensive read: a legacy nested value (`response_cache.enabled`, a
+        // shape no Hermes version has ever read) flattens to a different
+        // dotted key, so the scalar lookup misses and we fall to the host
+        // default — which is TRUE, and is also what Hermes itself would do
+        // with this file. The next save writes the scalar, healing the shape.
         let c = HermesConfig(yaml: """
         openrouter:
           response_cache:
             enabled: true
         """)
-        #expect(c.openrouterResponseCacheEnabled == false)
+        #expect(c.openrouterResponseCacheEnabled == true)
     }
 
     @Test func parsesBitwardenSecretsBlock() {

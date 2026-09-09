@@ -982,6 +982,54 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// whole time; Scarf's picker simply never listed it.
     public var hasKeenableWebBackend: Bool { isV0205OrLater }
 
+    /// Whether `platforms.telegram.extra.ignore_root_dm` still has a READER
+    /// — i.e. whether the Telegram setup form's "Ignore root DM" row does
+    /// anything on this host.
+    ///
+    /// **A WINDOW, not a floor** (same shape as `hasTavilyWebBackend`).
+    /// Walked over every tag and both file locations the reader has had:
+    /// it appears at v2026.5.28 (0.15.0)
+    /// `gateway/platforms/telegram.py:4879`, moves with the v0.18 plugin
+    /// split to `plugins/platforms/telegram/adapter.py` (`:9835` at
+    /// v2026.8.31 = 0.21.0, its last tag), and is GONE at v2026.9.7
+    /// (0.21.1): a whole-tree `git grep ignore_root_dm v2026.9.7` returns
+    /// only `scripts/release.py:798` (a contributor-attribution comment)
+    /// and the website docs — no `extra.get("ignore_root_dm")` anywhere in
+    /// the shipped code. So the window is `0.15.0 <= v < 0.21.1`.
+    ///
+    /// Unknown version keeps the row (charter C1: a host whose version
+    /// probe has not answered must render exactly what it rendered before
+    /// this flag existed, and before it the row was unconditional). The
+    /// VALUE is still parsed and written on every host, so a downgrade
+    /// back into the window finds the user's setting intact.
+    public var hasTelegramIgnoreRootDM: Bool {
+        guard let s = semver else { return true }        // unknown → keep
+        return s >= SemVer(major: 0, minor: 15, patch: 0)
+            && s < SemVer(major: 0, minor: 21, patch: 1)
+    }
+
+    /// Whether `steer` is a selectable `display.busy_input_mode` — Enter
+    /// injects the typed text into the RUNNING turn rather than
+    /// interrupting it or queueing it for the next one.
+    ///
+    /// Floor v0.12.0, found by walking the READER (not the comment): the
+    /// three-way branch `elif _bim == "steer":` first appears at
+    /// v2026.4.30 (0.12.0) `cli.py:1946` and is unbroken through
+    /// v2026.9.7, where the modularised reader states the whole member set
+    /// in one line — `cli.py:2592`
+    /// `self.busy_input_mode = _bim if _bim in ("queue", "steer") else "interrupt"`.
+    /// (v2026.4.23's `"steer"` hits are the `/steer` SLASH COMMAND, a
+    /// different surface; the `interrupt | queue | steer` comment in
+    /// `config.py` also lands at v2026.4.30, but a comment is not a
+    /// reader.) Below the floor Hermes falls back to `interrupt`, so
+    /// offering the option there would let a user pick a mode their host
+    /// silently ignores.
+    ///
+    /// Unknown version HIDES it — the option is absent from today's picker,
+    /// and C1 requires an unknown host to keep rendering what it renders
+    /// now.
+    public var hasBusyInputSteerMode: Bool { atLeastSemver(0, 12, 0) }
+
     // MARK: v0.21.1 (v2026.9.7) flags
     //
     // A light additive cycle on top of v0.21.0: the state.db schema Scarf

@@ -124,7 +124,25 @@ public enum SQLValueInliner {
         case .integer(let n):
             return String(n)
         case .real(let d):
-            // %.17g round-trips a Double precisely as a decimal.
+            // Non-finite doubles have no decimal spelling SQLite's tokenizer
+            // accepts: `%.17g` emits the bare words `nan` / `inf` / `-inf`,
+            // which parse as IDENTIFIERS, so `WHERE ts >= inf` fails with
+            // "no such column: inf" — on the REMOTE backend only, while the
+            // local one binds the same value happily. The fix is chosen for
+            // backend PARITY rather than for its own sake: every `.real`
+            // caller today is a `Date.timeIntervalSince1970` lower bound in a
+            // `WHERE`, and the two backends must answer such a query the same
+            // way whether Hermes is local or over SSH.
+            //
+            // `sqlite3_bind_double` (what `LocalSQLiteBackend` calls) stores
+            // NaN as NULL and keeps ±Infinity as a float, so the literals
+            // below reproduce it exactly: NULL for NaN, and `9e999` for
+            // infinity — SQLite's own out-of-range float literal, which its
+            // parser folds to ±Inf. Throwing instead would make the remote
+            // backend fail where the local one succeeds, which is the same
+            // divergence in the other direction.
+            guard d.isFinite else { return d.isNaN ? "NULL" : (d < 0 ? "-9e999" : "9e999") }
+            // %.17g round-trips a finite Double precisely as a decimal.
             return String(format: "%.17g", d)
         case .text(let s):
             return encodeText(s)

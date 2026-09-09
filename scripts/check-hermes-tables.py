@@ -18,6 +18,17 @@ turns the "reconcile on every Hermes bump" chore into a mechanical gate:
      neither a Hermes overlay nor a bundled plugin provider (lane 4's subject,
      which overlayOnlyProviders deliberately mirrors) fails as a stale
      provider. Lane skipped when the cache file is absent (fresh machine).
+  5. ModelCatalogService.capabilityProviderOverrides (+ providerAliases)
+                                           <->  agent/models_dev.py
+     PROVIDER_TO_MODELS_DEV. This is the SECOND provider table and it answers
+     a different question from ALIASES: which models.dev catalog a provider's
+     capability metadata lives in. The lane emulates Swift's
+     `modelsDevProviderKey` (overrides, then providers.py-alias resolution,
+     then overrides again) and FAILs on any Hermes entry Scarf resolves
+     differently — that is how `meta-ai` -> `meta` and `opencode-free` ->
+     `opencode` were silently missing. A Scarf override Hermes has no entry
+     for only WARNs: `openai-api` used to be exactly that, a deliberate Scarf
+     extension.
   4. Plugin-registered providers (plugins/model-providers/<name>/__init__.py)
      that hermes_cli/models_catalog_static.py:356-367 auto-appends to
      CANONICAL_PROVIDERS  <->  Scarf's reachable provider set (models.dev cache
@@ -102,6 +113,26 @@ def parse_hermes(providers_py):
     if not aliases or not overlay_keys:
         sys.exit(f"error: could not parse ALIASES/HERMES_OVERLAYS from {providers_py}")
     return aliases, overlay_keys, aggregators
+
+
+def parse_models_dev_map(hermes_src):
+    """``PROVIDER_TO_MODELS_DEV`` from agent/models_dev.py (a plain annotated
+    dict literal at v2026.9.7:107). Returns {} when the file or the name is
+    absent so the lane can skip rather than fail on an older checkout."""
+    path = os.path.join(hermes_src, "agent/models_dev.py")
+    if not os.path.exists(path):
+        return {}
+    tree = ast.parse(open(path).read())
+    for node in ast.walk(tree):
+        target = node.target if isinstance(node, ast.AnnAssign) else (
+            node.targets[0] if isinstance(node, ast.Assign) and node.targets else None)
+        if getattr(target, "id", "") != "PROVIDER_TO_MODELS_DEV":
+            continue
+        if not isinstance(node.value, ast.Dict):
+            continue
+        return {k.value: v.value for k, v in zip(node.value.keys, node.value.values)
+                if isinstance(k, ast.Constant) and isinstance(v, ast.Constant)}
+    return {}
 
 
 # auth_type values models_catalog_static.py refuses to auto-append (they need
@@ -251,8 +282,18 @@ def parse_static_catalog(hermes_src):
 
 
 def swift_block(path, header, close_pattern=r"^\s*\]\s*$"):
-    """Return the source lines between a declaration header and its closing bracket."""
-    lines = open(path).read().splitlines()
+    """Return the source lines between a declaration header and its closing bracket.
+
+    Whole-line ``//`` comments are dropped: every lane below reads the block
+    with a `"a": "b"` regex, and a doc comment that QUOTES an entry (as
+    `capabilityProviderOverrides` does when it explains why `meta-ai` is
+    there) is otherwise indistinguishable from the entry itself — deleting
+    the real line then leaves the lane silently passing. Only lines that
+    START with `//` are removed, so a `"https://…"` doc URL in a value
+    survives intact.
+    """
+    lines = [l for l in open(path).read().splitlines()
+             if not l.lstrip().startswith("//")]
     start = next((i for i, l in enumerate(lines) if header in l), None)
     if start is None:
         sys.exit(f"error: '{header}' not found in {path}")
@@ -394,6 +435,36 @@ def main():
                 f"name not a literal): {', '.join(sorted(plugin_skipped))}")
     else:
         warnings.append(f"[plugin-providers] skipped — {MODELS_DEV_CACHE} not found")
+
+    # Lane 5: capabilityProviderOverrides <-> PROVIDER_TO_MODELS_DEV
+    hermes_models_dev = parse_models_dev_map(hermes_src)
+    swift_overrides = dict(
+        re.findall(r'"([^"]+)"\s*:\s*"([^"]+)"',
+                   "\n".join(swift_block(CATALOG_SWIFT, "let capabilityProviderOverrides"))))
+    if hermes_models_dev:
+        def models_dev_key(pid):
+            """Swift `ModelCatalogService.modelsDevProviderKey`, in Python."""
+            key = pid.strip().lower()
+            if key in swift_overrides:
+                return swift_overrides[key]
+            canonical = swift_aliases.get(key, key)
+            return swift_overrides.get(canonical, canonical)
+
+        for hermes_id, mdev_id in sorted(hermes_models_dev.items()):
+            got = models_dev_key(hermes_id)
+            if got != mdev_id:
+                failures.append(
+                    f"[models-dev] '{hermes_id}' resolves to models.dev '{got}' in Swift "
+                    f"but PROVIDER_TO_MODELS_DEV says '{mdev_id}' — add it to "
+                    f"capabilityProviderOverrides")
+        for pid in sorted(set(swift_overrides) - set(hermes_models_dev)):
+            warnings.append(
+                f"[models-dev] capabilityProviderOverrides['{pid}'] has no "
+                f"PROVIDER_TO_MODELS_DEV entry — a deliberate Scarf extension "
+                f"(see the table's doc comment) or a stale mirror")
+    else:
+        warnings.append("[models-dev] skipped — agent/models_dev.py "
+                        "PROVIDER_TO_MODELS_DEV not found in this checkout")
 
     for w in warnings:
         print(f"WARN  {w}")

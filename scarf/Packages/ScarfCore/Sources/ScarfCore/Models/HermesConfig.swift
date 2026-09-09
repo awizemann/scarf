@@ -271,10 +271,13 @@ public struct VoiceSettings: Sendable, Equatable {
     public var ttsNeuTTSDevice: String
     /// xAI TTS voice identifier. v0.13+ — xAI shipped TTS earlier but the
     /// custom-voice / cloning surface is the v0.13 add-on.
-    // TODO(WS-8-Q2): Confirm key name vs `tts.xai.voice` /
-    // `tts.xai.voice_id` / a top-level `tts.xai_voice` once a v0.13
-    // host is on hand. The setter / YAML reader follow whatever this
-    // field name implies.
+    ///
+    /// Key confirmed: `tts.xai.voice_id`, seeded `"eve"` at
+    /// `hermes_cli/config_defaults.py:1023` (v2026.9.7). The two candidate
+    /// spellings the open question listed — `tts.xai.voice` and a top-level
+    /// `tts.xai_voice` — appear in no Hermes version. Scarf keeps `""` as
+    /// its own "unset" so an untouched field never materialises a pin; the
+    /// picker labels the empty case with the host default.
     public var ttsXAIVoiceID: String
     /// xAI TTS `auto_speech_tags`. v0.15+ — when true, xAI auto-inserts
     /// speech-control tags (emotion / emphasis) into synthesized output.
@@ -856,14 +859,35 @@ public struct TelegramSettings: Sendable, Equatable {
     /// When true, the adapter won't auto-rename forum topics. Default
     /// `false`. Pre-v0.15 hosts ignore the key.
     public var disableTopicAutoRename: Bool
-    /// Hermes v0.15 — `platforms.telegram.extra.ignore_root_dm`. When
-    /// true, the agent ignores DMs sent to the root chat. Default
-    /// `false`. Pre-v0.15 hosts ignore the key.
+    /// Hermes v0.15 through v0.21.0 ONLY —
+    /// `platforms.telegram.extra.ignore_root_dm`. When true, the adapter
+    /// ignores DMs sent to the root (non-topic) chat. Default `false`.
+    ///
+    /// **This is a WINDOW, not a floor.** The reader appears at v2026.5.28
+    /// (v0.15.0) `gateway/platforms/telegram.py:4879`, moves with the
+    /// v0.18 plugin split to `plugins/platforms/telegram/adapter.py:9835`
+    /// (last present at v2026.8.31 = v0.21.0), and is GONE at v2026.9.7
+    /// (v0.21.1) — a whole-tree grep at that tag finds the string only in
+    /// `scripts/release.py`'s contributor table and the website docs, with
+    /// no `extra.get("ignore_root_dm")` anywhere. The value is still parsed
+    /// and round-tripped so a v0.21.1 host that later downgrades keeps it;
+    /// only the editor row is gated, on
+    /// `HermesCapabilities.hasTelegramIgnoreRootDM`.
     public var ignoreRootDM: Bool
     /// Hermes v0.17 — `platforms.telegram.extra.rich_messages` (Bot API 10.1
-    /// rich formatting). Default `true` (on by default; toggle off to opt out).
-    /// Pre-v0.17 hosts ignore the key.
-    public var richMessages: Bool
+    /// rich formatting). Pre-v0.17 hosts ignore the key.
+    ///
+    /// **Sentinel, not a default.** `nil` means "absent from config.yaml",
+    /// because Hermes FLIPPED the shipped default one release after the key
+    /// landed: `True` at v2026.6.19 (v0.17.0) `hermes_cli/config.py:2144`,
+    /// `False` from v2026.7.1 (v0.18.0) `config.py:2367` onward and still
+    /// `False` at v2026.9.7 `config_defaults.py:1492` — the adapter agrees
+    /// (`plugins/platforms/telegram/adapter.py:440`
+    /// `_coerce_bool_extra("rich_messages", False)`). Baking either answer
+    /// into the parse renders one host generation's toggle backwards, so the
+    /// absent case is resolved against the host by
+    /// `displayTelegramRichMessages(capabilities:)`.
+    public var richMessages: Bool?
     /// Hermes v0.17 — `platforms.telegram.extra.status_indicator`. When true,
     /// the bot advertises an Online/Offline presence label. Default `false`.
     /// Pre-v0.17 hosts ignore the key.
@@ -875,7 +899,7 @@ public struct TelegramSettings: Sendable, Equatable {
         reactions: Bool,
         disableTopicAutoRename: Bool = false,
         ignoreRootDM: Bool = false,
-        richMessages: Bool = true,
+        richMessages: Bool? = nil,
         statusIndicator: Bool = false
     ) {
         self.requireMention = requireMention
@@ -885,7 +909,7 @@ public struct TelegramSettings: Sendable, Equatable {
         self.richMessages = richMessages
         self.statusIndicator = statusIndicator
     }
-    public nonisolated static let empty = TelegramSettings(requireMention: true, reactions: false, disableTopicAutoRename: false, ignoreRootDM: false, richMessages: true, statusIndicator: false)
+    public nonisolated static let empty = TelegramSettings(requireMention: true, reactions: false, disableTopicAutoRename: false, ignoreRootDM: false, richMessages: nil, statusIndicator: false)
 }
 
 /// Signal settings. Signal credentials live in `.env` (`SIGNAL_*`); v0.15
@@ -1362,6 +1386,25 @@ public struct HermesConfig: Sendable {
     /// and no capability gate to consult.
     ///
     /// Display-only; callers must never write the resolved value back.
+    /// Effective `platforms.telegram.extra.rich_messages` for display: the
+    /// on-disk value when set, otherwise the host's own default — **false**
+    /// on v0.18.0+, **true** on the one release that shipped it on (v0.17.x).
+    ///
+    /// The default flip lands at tag v2026.7.1 (v0.18.0)
+    /// `hermes_cli/config.py:2367` ("set True to opt in"); the immediately
+    /// preceding tag v2026.6.19 (v0.17.0) `config.py:2144` still ships
+    /// `True`, and the key exists at no earlier tag. Every later tag through
+    /// v2026.9.7 keeps `False`. An unknown host version resolves to the
+    /// CURRENT default (false), matching where every supported host but one
+    /// sits; the row itself is hidden below v0.17 by
+    /// `HermesCapabilities.hasTelegramRichMessages`.
+    ///
+    /// Display-only; callers must never write the resolved value back.
+    public func displayTelegramRichMessages(capabilities: HermesCapabilities) -> Bool {
+        if let value = telegram.richMessages { return value }
+        return capabilities.isV018OrLater ? false : capabilities.isV017OrLater
+    }
+
     public func displayCheckpointsEnabled(capabilities: HermesCapabilities) -> Bool {
         if let enabled = checkpoints.enabled { return enabled }
         return false
@@ -1596,16 +1639,19 @@ public struct HermesConfig: Sendable {
     /// `HermesCapabilities.hasImageGenModel` is `true`.
     public var imageGenModel: String
 
-    /// `openrouter.response_cache.enabled` (v0.13+) — when true, Hermes
-    /// asks OpenRouter to cache responses for repeat prompts within a
-    /// session. Off by default in Scarf's parser per WS-6 plan
-    /// recommendation. UI gated on
+    /// `openrouter.response_cache` (v0.13+) — when true, Hermes sends the
+    /// `X-OpenRouter-Cache` header so identical requests return cached
+    /// responses at zero billing. UI gated on
     /// `HermesCapabilities.hasOpenRouterResponseCache`.
-    // TODO(WS-6-Q1): the exact YAML key shape is provisional. Verify
-    // against a v0.13 host's `hermes config check` output before
-    // shipping (see WS-6-plan §Open Questions #1). Candidate alternative
-    // shapes: `providers.openrouter.response_cache_enabled` or
-    // `prompt_caching.openrouter.enabled`.
+    ///
+    /// Key shape confirmed: a SCALAR bool directly under `openrouter:`,
+    /// seeded `True` at `hermes_cli/config_defaults.py:649` (v2026.9.7)
+    /// and at `hermes_cli/config.py:686` at its floor tag v2026.5.7
+    /// (v0.13.0). The `.enabled` sub-key WS-6-Q1 hypothesised was never
+    /// real, nor were `providers.openrouter.response_cache_enabled` and
+    /// `prompt_caching.openrouter.enabled` — no Hermes version defines any
+    /// of them. Default is TRUE, not the `false` the WS-6 plan assumed;
+    /// see the parse note in `HermesConfig+YAML`.
     public var openrouterResponseCacheEnabled: Bool
 
     /// `model.base_url` / `model.api_key` / `model.api_mode` — the
