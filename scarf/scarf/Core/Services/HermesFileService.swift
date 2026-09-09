@@ -678,16 +678,33 @@ struct HermesFileService: Sendable {
     /// wholesale would delete credentials the user cannot recover.
     @discardableResult
     nonisolated func setMCPServerOAuthFlow(name: String, flow: String?) -> Bool {
-        patchMCPServerField(name: name) { entryLines in
+        // `patchMCPServerField`'s mutate closure cannot fail, so the
+        // refusal is carried out: an unsupported `oauth:` shape leaves the
+        // entry byte-identical and this returns false, which the caller
+        // surfaces instead of reporting a save that never happened.
+        let refusal = RefusalFlag()
+        let patched = patchMCPServerField(name: name) { entryLines in
             let trimmed = flow?.trimmingCharacters(in: .whitespaces) ?? ""
-            Self.replaceOrInsertNestedScalar(
+            if !Self.replaceOrInsertNestedScalar(
                 block: "oauth",
                 key: "flow",
                 value: trimmed.isEmpty ? nil : trimmed,
                 in: &entryLines
-            )
+            ) {
+                refusal.hit = true
+            }
         }
+        if refusal.hit {
+            Self.logger.warning(
+                "refusing to set oauth.flow on MCP server \(name, privacy: .public): its `oauth:` block is an inline flow mapping or a scalar, which this patcher cannot edit without risking the block's other keys"
+            )
+            return false
+        }
+        return patched
     }
+
+    /// One-bit out-param for a `mutate` closure that has no return value.
+    private final class RefusalFlag: @unchecked Sendable { var hit = false }
 
     /// Updates the v0.20.4 `strict_redirect_headers` bool scalar (HTTP/SSE
     /// only — Portable Agent Plugins v1 §7.2.1). Pass `nil` to drop the key
@@ -1684,12 +1701,20 @@ struct HermesFileService: Sendable {
     /// comment. `nil` removes just the child line (and the block itself only
     /// if that child was its sole content — an emptied `oauth:` mapping is a
     /// YAML null that Hermes would read as a missing config).
+    ///
+    /// Returns `false` — leaving `lines` untouched — when the block exists in
+    /// a shape this patcher cannot edit: an INLINE FLOW mapping
+    /// (`oauth: {client_id: x}`) or a scalar. Matching only the bare
+    /// `oauth:` header would miss those and then INSERT a second `oauth:`
+    /// block; PyYAML keeps the last duplicate key, so the user's credentials
+    /// would vanish from Hermes's view without a byte of them being deleted.
+    @discardableResult
     nonisolated private static func replaceOrInsertNestedScalar(
         block: String,
         key: String,
         value: String?,
         in lines: inout [String]
-    ) {
+    ) -> Bool {
         var blockIndex: Int?
         var childIndex: Int?
         var blockEnd: Int?
@@ -1701,6 +1726,11 @@ struct HermesFileService: Sendable {
             if blockIndex == nil {
                 if indent == 4 && trimmed == block + ":" {
                     blockIndex = index
+                } else if indent == 4, trimmed.hasPrefix(block + ":"),
+                          !Self.trimYAMLLine(String(trimmed.dropFirst(block.count + 1))).isEmpty {
+                    // `oauth: {…}` / `oauth: something` — a shape this
+                    // patcher cannot edit. Refuse; never add a second header.
+                    return false
                 } else if indent <= 2 && !trimmed.isEmpty && !trimmed.hasPrefix("#") {
                     break
                 }
@@ -1719,7 +1749,7 @@ struct HermesFileService: Sendable {
         }
 
         guard let value else {
-            guard let childIndex, let blockIndex else { return }
+            guard let childIndex, let blockIndex else { return true }
             if childCount == 1 {
                 // Removing the only child would leave `oauth:` as a null
                 // mapping, which reads differently from an absent block.
@@ -1727,14 +1757,14 @@ struct HermesFileService: Sendable {
             } else {
                 lines.remove(at: childIndex)
             }
-            return
+            return true
         }
 
-        guard let blockIndex else {
+        guard blockIndex != nil else {
             // No block yet — create it with this single child, ahead of the
             // next entry, exactly where a scalar insert would go.
             lines.insert(contentsOf: ["    \(block):", "      \(key): \(value)"], at: 1)
-            return
+            return true
         }
         if let childIndex {
             let carriageReturn = lines[childIndex].hasSuffix("\r") ? "\r" : ""
@@ -1742,6 +1772,7 @@ struct HermesFileService: Sendable {
         } else {
             lines.insert("      \(key): \(value)", at: blockEnd ?? lines.count)
         }
+        return true
     }
 
     nonisolated private static func removeScalar(key: String, in lines: inout [String]) {

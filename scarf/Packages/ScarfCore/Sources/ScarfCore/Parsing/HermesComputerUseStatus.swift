@@ -19,7 +19,42 @@ public struct HermesComputerUseCheck: Sendable, Equatable, Identifiable {
     }
 
     /// Hermes's own test for "worth showing": `if c["status"] != "ok"`.
-    public var isProblem: Bool { status != "ok" }
+    public var isProblem: Bool { severity != .ok }
+
+    /// How loudly to render this probe.
+    ///
+    /// The `status` string is **cua-driver's** vocabulary, folded through
+    /// `_doctor` verbatim (`str(p.get("status", ""))`) — Hermes neither
+    /// defines nor validates it. "Not `ok`" therefore does not mean
+    /// "failing": a driver that reports `skipped`, `n/a` or a value invented
+    /// in a later release would be painted as a red error telling the user
+    /// something is broken when nothing is. Only the failure vocabulary
+    /// Hermes itself uses for probe rows (`hermes_cli/doctor_connectivity.py:29`
+    /// — `ok` / `warn` / `fail`) reads as a fault; anything unrecognised is
+    /// shown, quietly, as a note.
+    public var severity: Severity {
+        switch status.trimmingCharacters(in: .whitespaces).lowercased() {
+        case "ok", "pass", "passed", "good", "success", "":
+            return .ok
+        case "fail", "failed", "error", "bad", "critical":
+            return .failure
+        case "warn", "warning", "degraded":
+            return .warning
+        default:
+            return .unknown
+        }
+    }
+
+    public enum Severity: Sendable, Equatable {
+        /// Healthy — not shown at all.
+        case ok
+        /// A known-bad probe: render as an error.
+        case failure
+        /// A known-degraded probe: render as a warning.
+        case warning
+        /// A spelling this Scarf doesn't know. Shown, but never as a fault.
+        case unknown
+    }
 }
 
 /// `hermes computer-use permissions status --json` — the normalized

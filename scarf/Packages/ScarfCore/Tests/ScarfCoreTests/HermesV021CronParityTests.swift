@@ -288,6 +288,39 @@ import Foundation
     /// job header, inventing findings keyed `Traceback` / `File` /
     /// `subprocess.CalledProcessError:` and truncating the real issue to
     /// "last run failed: stderr:". This fixture is that output.
+    /// M5 — a digit-less job id is legal: an id-keyed `jobs.json` written by
+    /// an external tool contributes its KEY as the id
+    /// (`cron/jobs.py:1271`), so `nightly-backup` is a real id. The
+    /// digit-requiring plausibility rule read this header as a continuation
+    /// of the previous job's traceback: the job disappeared from the
+    /// findings and its issue was glued onto the wrong job.
+    @Test func digitLessSlugIDsAfterATracebackAreStillHeaders() {
+        let output = """
+            Cron doctor found 2 issue(s) across 2 job(s):
+
+              4f2a9c1b7e03 Backup snapshot
+                - last run failed: stderr:
+            Traceback (most recent call last):
+              File "/x/backup.py", line 41, in <module>
+                main()
+            RuntimeError: boom
+              nightly-backup Nightly backup
+                - workdir not found: /gone/away
+
+            Next: fix the listed job config, then run `hermes cron doctor` again.
+            """
+        let findings = HermesCronDoctorParser.parse(text: output)
+        #expect(Set(findings.keys) == ["4f2a9c1b7e03", "nightly-backup"])
+        #expect(findings["nightly-backup"]?.jobName == "Nightly backup")
+        #expect(findings["nightly-backup"]?.issues == ["workdir not found: /gone/away"])
+        // …and the traceback still belongs entirely to the job above it.
+        #expect(findings["4f2a9c1b7e03"]?.issues.count == 1)
+        #expect(findings["4f2a9c1b7e03"]?.issues.first?.contains("RuntimeError: boom") == true)
+        // No ghost findings from the traceback's own first words.
+        #expect(findings["Traceback"] == nil)
+        #expect(findings["RuntimeError:"] == nil)
+    }
+
     @Test func parsesAMultiLineLastErrorAsOneIssue() {
         let output = """
             Cron doctor found 3 issue(s) across 2 job(s):

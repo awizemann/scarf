@@ -86,6 +86,34 @@ struct HermesMCPOAuthFlowTests {
         #expect(written.contains("client_secret: \"s3cr3t\""))
     }
 
+    /// M4 — an INLINE FLOW `oauth: {…}` is legal YAML and PyYAML reads it
+    /// exactly like the block form, but the patcher only ever matched a bare
+    /// `oauth:` header. It used to miss this shape and INSERT a second
+    /// `oauth:` block; PyYAML keeps the last duplicate key, so the user's
+    /// client_id/secret would stop existing as far as Hermes is concerned —
+    /// without one byte of them being deleted from the file. Refuse instead.
+    @Test func writingFlowRefusesAnInlineFlowOAuthMappingAndChangesNothing() throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let yaml = """
+        mcp_servers:
+          inline_api:
+            url: https://inline.example.com/mcp
+            auth: oauth
+            oauth: {client_id: "abc123", client_secret: "s3cr3t"}
+            enabled: true
+        """
+        try yaml.write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+        let service = HermesFileService(context: home.context)
+
+        #expect(!service.setMCPServerOAuthFlow(name: "inline_api", flow: "device"))
+        let written = try String(contentsOfFile: home.context.paths.configYAML, encoding: .utf8)
+        // No second header, no lost credentials, no `flow:` anywhere.
+        #expect(written.components(separatedBy: "oauth:").count - 1 == 1)
+        #expect(written.contains("client_secret: \"s3cr3t\""))
+        #expect(!written.contains("flow:"))
+    }
+
     /// Drift alarm. This is the byte-exact block Hermes prints on the device
     /// branch, from `tools/mcp_oauth_device.py::_authorize` at v2026.9.7:
     ///

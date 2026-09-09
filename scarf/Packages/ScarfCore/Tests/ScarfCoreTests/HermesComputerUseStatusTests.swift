@@ -126,4 +126,29 @@ struct HermesComputerUseStatusTests {
         let noisy = "note: using HERMES_CUA_DRIVER_CMD override\n" + Self.macFixture
         #expect(HermesComputerUseStatus.parse(noisy)?.accessibility == true)
     }
+
+    /// M6 — `status` is cua-driver's vocabulary, folded through Hermes
+    /// verbatim. "Not ok" is not "failing": a probe reporting `skipped`,
+    /// `n/a` or a spelling a later driver invents used to be painted as a
+    /// red error, telling the user something is broken when nothing is.
+    @Test(arguments: [
+        ("ok", HermesComputerUseCheck.Severity.ok),
+        ("OK", .ok),
+        ("pass", .ok),
+        ("", .ok),
+        ("fail", .failure),
+        ("error", .failure),
+        ("warn", .warning),
+        ("degraded", .warning),
+        ("skipped", .unknown),
+        ("n/a", .unknown),
+        ("quantum-unavailable", .unknown),
+    ])
+    func probeSeverityOnlyReadsKnownFailureSpellingsAsFaults(
+        _ pair: (String, HermesComputerUseCheck.Severity)
+    ) {
+        let check = HermesComputerUseCheck(label: "Screenshot probe", status: pair.0, message: "")
+        #expect(check.severity == pair.1, "status: \(pair.0)")
+        #expect(check.isProblem == (pair.1 != .ok))
+    }
 }

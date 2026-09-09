@@ -331,9 +331,12 @@ final class HealthViewModel {
         }
 
         for check in status.checks where check.isProblem {
+            // Only cua-driver's KNOWN failure spellings paint red; an
+            // unrecognised status is surfaced without claiming a fault (see
+            // `HermesComputerUseCheck.severity`).
             checks.append(HealthCheck(
                 label: check.label.isEmpty ? "cua-driver check" : check.label,
-                status: check.status == "warn" ? .warning : .error,
+                status: check.severity == .failure ? .error : .warning,
                 detail: check.message.isEmpty ? nil : check.message
             ))
         }
