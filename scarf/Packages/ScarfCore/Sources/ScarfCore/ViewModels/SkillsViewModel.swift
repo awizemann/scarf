@@ -97,7 +97,36 @@ public final class SkillsViewModel {
     /// out-of-module callers can still only read.
     public internal(set) var lastBrowseResults: [HermesHubSkill] = []
 
-    public let hubSources = ["all", "official", "skills-sh", "well-known", "github", "clawhub", "lobehub"]
+    /// Host capability snapshot, used for the hub `--source` roster and to
+    /// decide whether `skills search` can be asked for `--json`.
+    ///
+    /// Refreshed from `HermesVersionCache` by `load()` (one shared probe per
+    /// server, already warm by the time the Hub tab is reachable). Settable
+    /// so a view that already holds a resolved snapshot — and the test suite
+    /// — can seed it without a probe. `.empty` (undetected) keeps the
+    /// pre-target behaviour: the seven sources Scarf always offered, and the
+    /// table parse.
+    public var capabilities: HermesCapabilities = .empty
+
+    /// `--source` choices for the hub pickers, gated by the floor at which
+    /// each choice entered Hermes's `_SOURCE_CHOICES`
+    /// (`hermes_cli/subcommands/skills.py`). argparse REJECTS an unknown
+    /// `--source` value, so an ungated list turns a search on an older host
+    /// into an exit-2 usage error rather than a degraded result.
+    ///
+    /// - the first seven are the pre-v0.15 set Scarf already shipped;
+    /// - `browse-sh` arrived at v0.15 (`hasSkillsBrowseSHSource`);
+    /// - the seven provider filters arrived together at v0.18
+    ///   (`hasSkillsProviderSources`) — they are GitHub taps stored under
+    ///   `source="github"`, not separate registries.
+    public var hubSources: [String] {
+        var sources = ["all", "official", "skills-sh", "well-known", "github", "clawhub", "lobehub"]
+        if capabilities.hasSkillsBrowseSHSource { sources.append("browse-sh") }
+        if capabilities.hasSkillsProviderSources {
+            sources += ["nvidia", "openai", "anthropic", "huggingface", "voltagent", "gstack", "minimax"]
+        }
+        return sources
+    }
 
     public var filteredCategories: [HermesSkillCategory] {
         guard !searchText.isEmpty else { return categories }
@@ -138,6 +167,13 @@ public final class SkillsViewModel {
         lastError = nil
         let ctx = context
         let xport = transport
+        // One shared, cached `hermes --version` probe per server — this is
+        // the same instance every other gated surface reads, so the Hub
+        // tab's source roster and `--json` decision agree with the rest of
+        // the app instead of re-probing.
+        if !capabilities.detected {
+            capabilities = await HermesVersionCache.shared.capabilities(for: ctx)
+        }
         let pins = pinnedNames
         let essentialFloor = essentialHermesAgentSkill
         // v2.8 — instrumented so future captures show how many SSH
@@ -385,10 +421,22 @@ public final class SkillsViewModel {
         isHubLoading = true
         let bin = context.paths.hermesBinary
         let xport = transport
+        // `skills search`'s TABLE has no `#` column (unlike `skills
+        // browse`), so `parseHubList` discarded every row it was ever fed
+        // from this path — search results have been silently empty on every
+        // host. `--json` (v0.17+) is both the fix and the only shape that
+        // carries the full identifier; older hosts keep the table parse,
+        // which is no worse than what they had.
+        let useJSON = capabilities.hasSkillsSearchJSON
         Task.detached { [weak self] in
-            let args = ["skills", "search", query, "--limit", "40", "--source", source]
+            var args = ["skills", "search", query, "--limit", "40", "--source", source]
+            if useJSON { args.append("--json") }
             let result = Self.runHermes(executable: bin, args: args, transport: xport, timeout: 30)
-            let parsed = HermesSkillsHubParser.parseHubList(result.output)
+            // Fall back to the table parse when the JSON can't be read, so
+            // a host that answers something unexpected degrades to the old
+            // behaviour rather than to "no results".
+            let parsed = (useJSON ? HermesSkillsHubParser.parseSearchJSON(result.output) : nil)
+                ?? HermesSkillsHubParser.parseHubList(result.output)
             await self?.finishBrowse(
                 results: parsed,
                 exitCode: result.exitCode,
