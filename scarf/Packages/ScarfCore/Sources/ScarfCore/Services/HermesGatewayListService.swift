@@ -10,17 +10,28 @@ public struct GatewayListSnapshot: Sendable, Equatable {
         public let isRunning: Bool
         public let pid: Int?
         public let platforms: [String]   // always empty: text output omits it
+        /// v0.21.1: the profile is running because the DEFAULT profile's
+        /// multiplexer is carrying its inbound traffic, not because it has a
+        /// gateway process of its own. `_gateway_list` prints
+        /// `— served by the default multiplexer` in the slot where a
+        /// self-hosted profile prints `— PID <n>`
+        /// (`hermes_cli/gateway.py:1520-1522` at tag `v2026.9.7`), so
+        /// `isRunning` is true and `pid` is nil. Always `false` on a
+        /// pre-v0.21.1 host, which never emits the clause.
+        public let servedByMultiplexer: Bool
 
         public init(
             profile: String,
             isRunning: Bool,
             pid: Int?,
-            platforms: [String]
+            platforms: [String],
+            servedByMultiplexer: Bool = false
         ) {
             self.profile = profile
             self.isRunning = isRunning
             self.pid = pid
             self.platforms = platforms
+            self.servedByMultiplexer = servedByMultiplexer
         }
     }
     public let profiles: [ProfileEntry]
@@ -36,13 +47,20 @@ public struct GatewayListSnapshot: Sendable, Equatable {
     /// - 0 profiles: `"no profiles configured"`
     /// - 1 profile, running: `"default profile · running · slack, telegram"`
     /// - 1 profile, stopped: `"default profile · stopped"`
+    /// - 1 profile, multiplexed (v0.21.1+):
+    ///   `"work profile · served by the default multiplexer"`
     /// - >1 profile: `"3 profiles (2 running) · default: slack, telegram"`
     public var headerDigest: String {
         if profiles.isEmpty { return "no profiles configured" }
 
         if profiles.count == 1 {
             let p = profiles[0]
-            let state = p.isRunning ? "running" : "stopped"
+            let state: String
+            if p.servedByMultiplexer {
+                state = "served by the default multiplexer"
+            } else {
+                state = p.isRunning ? "running" : "stopped"
+            }
             if p.isRunning && !p.platforms.isEmpty {
                 let plats = p.platforms.joined(separator: ", ")
                 return "\(p.profile) profile · \(state) · \(plats)"
@@ -75,6 +93,7 @@ public struct GatewayListSnapshot: Sendable, Equatable {
 /// ```
 /// Gateways:
 ///   ✓ default (current)        — PID 44417
+///   ✓ work                     — served by the default multiplexer
 ///   ✗ scarfbox-smoke           — not running
 ///   ✗ scarfbox-test            — not running
 /// ```
@@ -82,6 +101,14 @@ public struct GatewayListSnapshot: Sendable, Equatable {
 /// trailing `(current)` marker is stripped); `— PID <n>` (em dash, U+2014)
 /// carries the pid on running lines. Text output has no per-profile platform
 /// list, so `platforms` is always `[]`.
+///
+/// **v0.21.1 third clause.** `_gateway_list` (`hermes_cli/gateway.py:1514-1525`
+/// at tag `v2026.9.7`) prints `served by the default multiplexer` in the
+/// trailing slot for a running profile whose own `gateway.pid` yields no pid
+/// but which `named_profile_served_by_running_multiplexer()` reports as
+/// multiplexed. Recognised EXPLICITLY (`servedByMultiplexer = true`, `pid`
+/// nil) rather than falling through the pid parse, so the state is
+/// distinguishable from "running, pid unreadable". Absent at v2026.8.31.
 ///
 /// The detection is **synchronous** — run from a `Task.detached` to avoid
 /// blocking MainActor on remote SSH round-trips. The pure `parse(_:)`
@@ -110,15 +137,19 @@ public enum HermesGatewayListService {
             // (em dash, U+2014) which carries pid / status.
             var rest = String(line.dropFirst()).trimmingCharacters(in: .whitespaces)
             var pid: Int?
+            var served = false
             if let dashRange = rest.range(of: "—") {
                 let after = rest[dashRange.upperBound...]
                     .trimmingCharacters(in: .whitespaces)
                 rest = String(rest[..<dashRange.lowerBound])
                     .trimmingCharacters(in: .whitespaces)
-                // Running lines read `PID <n>`; stopped lines `not running`.
+                // Running lines read `PID <n>` or (v0.21.1) `served by the
+                // default multiplexer`; stopped lines `not running`.
                 if after.hasPrefix("PID") {
                     let digits = after.drop(while: { !$0.isNumber })
                     pid = Int(digits.prefix(while: { $0.isNumber }))
+                } else if after.hasPrefix("served by the default multiplexer") {
+                    served = true
                 }
             }
 
@@ -135,7 +166,8 @@ public enum HermesGatewayListService {
                 profile: profile,
                 isRunning: isRunning,
                 pid: pid,
-                platforms: []
+                platforms: [],
+                servedByMultiplexer: served
             ))
         }
 

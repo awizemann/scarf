@@ -25,6 +25,14 @@ struct MessagingGatewayInfo {
     /// signal. There is no "service is loaded" string anywhere in the CLI;
     /// the previous `contains("service is loaded")` check could never match.
     let isLoaded: Bool
+    /// True when `hermes gateway status` reports this profile is served by
+    /// the DEFAULT profile's multiplexer rather than by a gateway process of
+    /// its own — the first branch of `_cmd_status`
+    /// (`hermes_cli/gateway.py:6112-6115` at tag `v2026.9.7`), which prints
+    /// `✓ Gateway is running via the default-profile multiplexer` and no PID
+    /// at all. v0.21.1+; a pre-target host never prints it, so this stays
+    /// `false` there and every badge renders exactly as before.
+    let isServedByMultiplexer: Bool
     /// Live liveness verdict, NOT `state == "running"`.
     ///
     /// `gateway_state.json` is written by the gateway itself and nothing
@@ -77,7 +85,7 @@ final class MessagingGatewayViewModel {
         self.capabilities = capabilities
     }
 
-    var gateway = MessagingGatewayInfo(pid: nil, state: "unknown", exitReason: nil, startTime: nil, updatedAt: nil, platforms: [], isLoaded: false, isRunning: false)
+    var gateway = MessagingGatewayInfo(pid: nil, state: "unknown", exitReason: nil, startTime: nil, updatedAt: nil, platforms: [], isLoaded: false, isServedByMultiplexer: false, isRunning: false)
     var approvedUsers: [PairedUser] = []
     var pendingPairings: [PendingPairing] = []
     var isLoading = false
@@ -165,16 +173,45 @@ final class MessagingGatewayViewModel {
             pid: pid, state: state, exitReason: exitReason,
             startTime: startTime, updatedAt: updatedAt,
             platforms: platforms, isLoaded: isLoaded,
+            isServedByMultiplexer: isServedByMultiplexer(statusOutput: statusOutput),
             isRunning: isGatewayRunning(state: state, statusOutput: statusOutput)
         )
+    }
+
+    /// The v0.21.1 multiplexer marker printed by the FIRST branch of
+    /// `_cmd_status` (`hermes_cli/gateway.py:6114` at tag `v2026.9.7`):
+    ///
+    /// ```
+    /// ✓ Gateway is running via the default-profile multiplexer
+    ///   Manage it from the default profile: hermes gateway status
+    /// ```
+    ///
+    /// That branch runs when this profile has no gateway process of its own
+    /// (`not snapshot.running`) but `named_profile_served_by_running_multiplexer()`
+    /// says the default profile's multiplexer is carrying its inbound
+    /// traffic. It prints **no PID** — the pid belongs to the default
+    /// profile's process — which is exactly why `isServiceLoaded`'s
+    /// `pid != nil` fallback badged a served satellite "not loaded".
+    ///
+    /// Matched on the distinguishing tail (`via the default-profile
+    /// multiplexer`) rather than the whole line so the shared
+    /// `✓ Gateway is running` prefix stays the property of
+    /// `isGatewayRunning`.
+    nonisolated static func isServedByMultiplexer(statusOutput: String) -> Bool {
+        statusOutput.contains("via the default-profile multiplexer")
     }
 
     /// Live-probe liveness. `✗ Gateway is not running` and
     /// `✓ Gateway is running (PID: …)` are the two verdicts the manual
     /// branch of `hermes gateway status` prints (`hermes_cli/gateway.py`
-    /// lines 8928/8958 at tag `v2026.8.31`); the systemd/launchd/Windows
+    /// lines 6133/6127 at tag `v2026.9.7`); the systemd/launchd/Windows
     /// branches print neither, so there the stored `gateway_state` is all
     /// we have and the old behaviour is kept.
+    ///
+    /// v0.21.1's multiplexer branch prints `✓ Gateway is running via the
+    /// default-profile multiplexer` (`gateway.py:6114`), which already
+    /// satisfies the `✓ Gateway is running` prefix — so a served satellite
+    /// reads as running with no change here.
     nonisolated static func isGatewayRunning(state: String, statusOutput: String) -> Bool {
         if statusOutput.contains("✗ Gateway is not running") { return false }
         if statusOutput.contains("✓ Gateway is running") { return true }
@@ -207,8 +244,17 @@ final class MessagingGatewayViewModel {
     ///  - A service-managed branch (systemd/launchd/Windows) prints
     ///    neither marker; there we still need the pid as the liveness
     ///    signal, so the original test applies.
+    ///  - **v0.21.1:** `✓ Gateway is running via the default-profile
+    ///    multiplexer` (`gateway.py:6114`) — the satellite profile IS being
+    ///    served, by a supervised process belonging to the default profile,
+    ///    and no PID is printed for it. This case is tested FIRST: it wins
+    ///    over the `pid != nil` fallback, which would otherwise badge a
+    ///    served profile "not loaded" purely for lack of a pid of its own.
+    ///    `GatewayView` renders it as "Served by default profile" rather
+    ///    than "Loaded" so the two are never conflated.
     nonisolated static func isServiceLoaded(pid: Int?, statusOutput: String) -> Bool {
         if statusOutput.contains("✗ Gateway is not running") { return false }
+        if isServedByMultiplexer(statusOutput: statusOutput) { return true }
         if statusOutput.contains("(Running manually, not as a system service)") { return false }
         return pid != nil
     }

@@ -88,6 +88,63 @@ import ScarfCore
         #expect(MessagingGatewayViewModel.isServiceLoaded(pid: nil, statusOutput: "✓ Gateway service is running") == false)
     }
 
+    // MARK: - v0.21.1: the default-profile multiplexer branch (A6)
+
+    /// Verbatim from `_cmd_status`'s FIRST branch
+    /// (`hermes_cli/gateway.py:6112-6115` at tag `v2026.9.7`): a satellite
+    /// profile whose own snapshot says "not running" but which
+    /// `named_profile_served_by_running_multiplexer()` reports as served.
+    /// Note it prints NO PID — the pid belongs to the default profile.
+    private static let multiplexerStatus = """
+    ✓ Gateway is running via the default-profile multiplexer
+      Manage it from the default profile: hermes gateway status
+
+    Other profiles:
+      ✓ default          — PID 44417
+    """
+
+    @Test func multiplexedProfileIsRunning() {
+        // The branch reuses the `✓ Gateway is running` prefix, so liveness
+        // was already right; pinned so a future prefix change is caught.
+        #expect(MessagingGatewayViewModel.isGatewayRunning(
+            state: "stopped", statusOutput: Self.multiplexerStatus) == true)
+    }
+
+    /// The A6 bug: `isServiceLoaded` fell through to `pid != nil`, and the
+    /// satellite's `gateway_state.json` has no live pid of its own — so a
+    /// profile that IS being served was badged "not loaded".
+    @Test func multiplexedProfileIsLoadedWithoutAPIDOfItsOwn() {
+        #expect(MessagingGatewayViewModel.isServiceLoaded(
+            pid: nil, statusOutput: Self.multiplexerStatus) == true)
+        #expect(MessagingGatewayViewModel.isServedByMultiplexer(
+            statusOutput: Self.multiplexerStatus) == true)
+    }
+
+    /// The multiplexer test must not fire on any pre-v0.21.1 output — that
+    /// is what keeps a pre-target host byte-identical.
+    @Test func preTargetOutputsAreNeverReadAsMultiplexed() {
+        for output in [
+            "✓ Gateway is running (PID: 4821)\n  (Running manually, not as a system service)\n",
+            "✗ Gateway is not running\n",
+            "✓ User gateway service is running\n",
+            "",
+        ] {
+            #expect(MessagingGatewayViewModel.isServedByMultiplexer(statusOutput: output) == false)
+        }
+    }
+
+    /// `✗ Gateway is not running` still wins: the two branches are mutually
+    /// exclusive in Hermes, but the ordering is load-bearing if a future
+    /// release ever prints both, and "dead" must never lose to "served".
+    @Test func notRunningStillBeatsTheMultiplexerMarker() {
+        let contradictory = """
+        ✗ Gateway is not running
+        ✓ Gateway is running via the default-profile multiplexer
+        """
+        #expect(MessagingGatewayViewModel.isServiceLoaded(
+            pid: nil, statusOutput: contradictory) == false)
+    }
+
     // MARK: - The old bug, regression-pinned
 
     @Test func theRetiredCheckWouldNeverHaveMatchedRealOutput() {
