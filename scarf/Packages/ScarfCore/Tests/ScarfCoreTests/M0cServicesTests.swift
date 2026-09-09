@@ -413,35 +413,48 @@ import Foundation
     }
 
     @Test func imageGenModelAllowlistShape() {
-        // Verbatim mirror of Hermes's FAL_MODELS catalog
-        // (tools/image_generation_catalog.py) at v2026.9.7 — `image_gen.model`
-        // is read by the FAL pipeline only (every other image_gen backend
-        // reads its own `image_gen.<provider>.model`), so the picker's rows
-        // are exactly that catalog. Free-form typing still bypasses the list.
+        // `image_gen.model` is the TOP-LEVEL key; four bundled backends read
+        // it as a fallback through `resolve_static_model`, which ignores ids
+        // it does not know. The picker's rows are the union of those four
+        // catalogs at v2026.9.7: fal (FAL_MODELS, 21),
+        // krea (plugins/image_gen/krea/__init__.py::_MODELS, 3) and
+        // openai + openai-codex (_common.py::GPT_IMAGE_2_TIERS, 3).
         let models = ModelCatalogService.imageGenModels
-        #expect(models.count == 21)
-        // DEFAULT_MODEL leads the list.
+        #expect(models.count == 27)
+        // DEFAULT_MODEL of the default (fal) backend leads the list.
         #expect(models.first?.modelID == "fal-ai/flux-2/klein/9b")
-        // Sentinels across the catalog's naming shapes (fal-ai/, vendor/, path).
+        // Sentinels across the fal catalog's naming shapes.
         #expect(models.contains(where: { $0.modelID == "fal-ai/gpt-image-2" }))
         #expect(models.contains(where: { $0.modelID == "bytedance/seedream/v5/pro/text-to-image" }))
         #expect(models.contains(where: { $0.modelID == "xai/grok-imagine-image/v2.0/text-to-image" }))
-        // The pre-v3.2 list was models Hermes's catalog never carried; a
-        // regression that reinstates them would send `image_gen.model` values
-        // the tool warns on and discards.
-        for stale in ["openai/gpt-image-1", "google/imagen-4", "krea-2-medium",
+        // Non-fal backends that resolve `image_gen.model`: dropping these
+        // strands every krea / openai / codex image-gen user on the picker's
+        // free-form field.
+        for id in ["krea-2-medium", "krea-2-large", "krea-2-medium-turbo",
+                   "gpt-image-2-low", "gpt-image-2-medium", "gpt-image-2-high"] {
+            #expect(models.contains(where: { $0.modelID == id }),
+                    "\(id) resolves from image_gen.model at v2026.9.7")
+        }
+        // Ids Hermes's catalogs never carried at either tag: reinstating one
+        // sends `image_gen.model` a value every backend warns on and discards.
+        for stale in ["openai/gpt-image-1", "google/imagen-4",
                       "fal-ai/flux-pro-1.1", "openai/dall-e-3"] {
             #expect(!models.contains(where: { $0.modelID == stale }),
-                    "\(stale) is not in Hermes's FAL catalog at v2026.9.7")
+                    "\(stale) is in no Hermes image_gen catalog at v2026.9.7")
         }
-        // Every entry has a non-empty display + a non-empty modelID, and the
-        // whole catalog is served by the FAL backend.
+        // meta-ai's `muse-image-1.0` is v2026.9.7-only and this list is
+        // ungated, so it stays out (C1: pre-target rendering parity).
+        #expect(!models.contains(where: { $0.modelID == "muse-image-1.0" }))
+        // Every entry has a non-empty display + modelID, a known backend
+        // hint, and both the ids and the visible labels are unique (the
+        // picker renders `display` alone — a collision is unpickable).
         for m in models {
             #expect(!m.modelID.isEmpty)
             #expect(!m.display.isEmpty)
-            #expect(m.providerHint == "fal")
+            #expect(["fal", "krea", "openai"].contains(m.providerHint ?? ""))
         }
         #expect(Set(models.map(\.modelID)).count == models.count)
+        #expect(Set(models.map(\.display)).count == models.count)
     }
 
     @Test func pluginRegisteredProvidersAreReachable() {

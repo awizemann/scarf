@@ -709,6 +709,19 @@ public struct ModelCatalogService: Sendable {
     /// don't block users with non-listed image providers.
     ///
     /// Order: most-likely-to-be-chosen first.
+    /// `image_gen.model` is the TOP-LEVEL key, and four bundled backends
+    /// read it as a fallback under their own `image_gen.<provider>.model`:
+    /// fal (`tools/image_generation_catalog.py::FAL_MODELS`), krea
+    /// (`plugins/image_gen/krea/__init__.py::_MODELS`), openai and
+    /// openai-codex (`plugins/image_gen/_common.py::GPT_IMAGE_2_TIERS`).
+    /// Each resolves through `resolve_static_model`, which ignores an id it
+    /// does not know — so a fal id is inert on a krea host and vice versa,
+    /// and the union is the set of values that mean something somewhere.
+    /// `xai` and `deepinfra` never read the top-level key (scoped only) and
+    /// `openrouter` takes any id verbatim (free-form field covers it).
+    /// meta-ai's `muse-image-1.0` is deliberately absent: that plugin is new
+    /// at v2026.9.7, and an ungated row here would change what a pre-target
+    /// host renders (C1).
     public static let imageGenModels: [HermesImageGenModel] = [
         // Verbatim mirror of `FAL_MODELS` in
         // `hermes-agent/tools/image_generation_catalog.py` at v2026.9.7,
@@ -735,6 +748,18 @@ public struct ModelCatalogService: Sendable {
         .init(modelID: "google/nano-banana-2-lite", display: "Nano Banana 2 Lite", providerHint: "fal"),
         .init(modelID: "fal-ai/recraft/v4.1/text-to-image", display: "Recraft V4.1", providerHint: "fal"),
         .init(modelID: "xai/grok-imagine-image/v2.0/text-to-image", display: "Grok Imagine Image 2.0", providerHint: "fal"),
+        // `plugins/image_gen/krea/__init__.py::_MODELS` (v2026.9.7; the same
+        // three ids at v2026.8.31), `DEFAULT_MODEL` (krea-2-medium) first.
+        .init(modelID: "krea-2-medium", display: "Krea 2 Medium  (Krea API)", providerHint: "krea"),
+        .init(modelID: "krea-2-large", display: "Krea 2 Large  (Krea API)", providerHint: "krea"),
+        .init(modelID: "krea-2-medium-turbo", display: "Krea 2 Medium Turbo  (Krea API)", providerHint: "krea"),
+        // `plugins/image_gen/_common.py::GPT_IMAGE_2_TIERS` (v2026.9.7),
+        // shared by the `openai` and `openai-codex` backends; the same three
+        // ids lived in `plugins/image_gen/openai/__init__.py` at v2026.8.31.
+        // `GPT_IMAGE_2_DEFAULT` (medium) first.
+        .init(modelID: "gpt-image-2-medium", display: "GPT Image 2 (Medium)", providerHint: "openai"),
+        .init(modelID: "gpt-image-2-low", display: "GPT Image 2 (Low)", providerHint: "openai"),
+        .init(modelID: "gpt-image-2-high", display: "GPT Image 2 (High)", providerHint: "openai"),
     ]
 
     // MARK: - Hermes overlay providers
