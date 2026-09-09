@@ -37,7 +37,12 @@ struct MCPLoginSheet: View {
         self.context = context
         self.onFinished = onFinished
         _controller = State(initialValue: MCPLoginController(context: context))
-        _flow = State(initialValue: configuredFlow ?? "browser")
+        // Clamp to the two values `mcp_config.py:640` accepts. An unknown
+        // spelling round-trips in the model on purpose, but selecting it here
+        // would leave the picker with nothing highlighted and then send a
+        // value Hermes rejects.
+        let known = ["browser", "device"]
+        _flow = State(initialValue: known.contains(configuredFlow ?? "") ? configuredFlow! : "browser")
     }
 
     var body: some View {

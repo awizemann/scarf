@@ -191,8 +191,16 @@ def parse_static_catalog(hermes_src):
     Returns ([], {}) when the file is absent (pre-v0.21.1 checkout), which
     leaves lane 4 behaving exactly as it did before.
     """
-    path = os.path.join(hermes_src, "hermes_cli/models_catalog_static.py")
-    if not os.path.exists(path):
+    # v0.21.1 split `hermes_cli/models.py` into models_catalog_static.py et al.
+    # Read the new path first, then the old one — checking only the new path
+    # against a pre-v0.21.1 checkout reports "absent" for a table that is very
+    # much present, which is the exact trap this cycle kept hitting.
+    path = next(
+        (p for p in (os.path.join(hermes_src, "hermes_cli/models_catalog_static.py"),
+                     os.path.join(hermes_src, "hermes_cli/models.py"))
+         if os.path.exists(p)),
+        None)
+    if path is None:
         return set(), {}
     tree = ast.parse(open(path).read())
     slugs, aliases = set(), {}
@@ -202,19 +210,32 @@ def parse_static_catalog(hermes_src):
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         name = next((getattr(t, "id", "") for t in targets), "")
         if name == "CANONICAL_PROVIDERS":
-            # [ProviderEntry(*row) for row in ( (slug, label, desc), ... )]
+            # v0.21.1: [ProviderEntry(*row) for row in ( (slug, label, desc), ... )]
             for tup in ast.walk(node.value):
                 if (isinstance(tup, ast.Tuple) and tup.elts
                         and isinstance(tup.elts[0], ast.Constant)
                         and isinstance(tup.elts[0].value, str) and len(tup.elts) == 3):
                     slugs.add(tup.elts[0].value)
+            # Pre-v0.21.1: a list of explicit ProviderEntry("slug", ...) calls.
+            for call in ast.walk(node.value):
+                if (isinstance(call, ast.Call)
+                        and getattr(call.func, "id", "") == "ProviderEntry"
+                        and call.args and isinstance(call.args[0], ast.Constant)
+                        and isinstance(call.args[0].value, str)):
+                    slugs.add(call.args[0].value)
         elif name == "_PROVIDER_ALIASES":
-            # dict(( (alias, canonical), ... ))
+            # v0.21.1: dict(( (alias, canonical), ... ))
             for tup in ast.walk(node.value):
                 if (isinstance(tup, ast.Tuple) and len(tup.elts) == 2
                         and all(isinstance(e, ast.Constant) and isinstance(e.value, str)
                                 for e in tup.elts)):
                     aliases[tup.elts[0].value] = tup.elts[1].value
+            # Pre-v0.21.1: a plain {alias: canonical} dict literal.
+            if isinstance(node.value, ast.Dict):
+                for k, v in zip(node.value.keys, node.value.values):
+                    if (isinstance(k, ast.Constant) and isinstance(k.value, str)
+                            and isinstance(v, ast.Constant) and isinstance(v.value, str)):
+                        aliases[k.value] = v.value
     return slugs, aliases
 
 
