@@ -7,7 +7,7 @@ source_paths: [scarf/scarf/Core/Services/ProjectsMCPRegistrar.swift, scarf/scarf
 source_paths_inferred: false
 source_sha: 003a06000d124baf3507ceb01cf2d24366c94064
 created: 2026-09-03
-updated: 2026-09-03
+updated: 2026-09-08
 reviewed: 2026-09-08
 reviewed_by: audit:claude-code (background)
 ---
@@ -39,3 +39,13 @@ t-1a1a9ce3. The line-based patcher's failure mode was never "one value goes wron
 - [decision] An interior space needs NO quoting — a plain YAML scalar carries it fine — and `yamlScalar` deliberately leaves it alone rather than churning quotes into the user's file. The test that claimed to assert quoting was renamed to assert the round-trip it actually checks.
 - [decision] **Registrar: a config Scarf cannot manage is retried only when it changes.** `UnmanageableMarker` persists SHA-256 over `config.yaml` bytes PLUS the binary path we would register; a match short-circuits `ensureRegistered` before any spawn. Content-keyed so the user editing the file retries automatically with no state to reset; path-keyed so a Sparkle update or a move to /Applications un-latches a failure that was never the file's fault. The `hermes mcp add` branch re-reads the fingerprint AFTER the CLI runs — that process can rewrite the config even on a non-zero exit, and recording the pre-spawn hash would put the 90-second spawn straight back on every launch.
 - [gotcha] Dev-copy detection matched only the literal `-dev.app/`, so `/Applications/scarf-dev-next.app` (which exists on the maintainer's Mac alongside `scarf-dev.app` and `scarf.app`) re-pointed `command` at itself every launch while the installed app re-pointed it back — a rewrite war on a watched file. Now matched on "dev" as a whole token in the BUNDLE NAME (`devBundleName`). Bundle id cannot tell them apart: `build-detached.sh` keeps `com.scarf.app` on purpose so iCloud keeps working.
+
+
+
+## R3: `oauth:` is a block Scarf only PARTIALLY models (v0.21.1)
+
+v0.21.1 added `mcp_servers.<name>.oauth.flow: browser|device`. It is the first key Scarf writes inside a nested block whose siblings it does not model.
+
+- [decision] `setMCPServerOAuthFlow` uses `replaceOrInsertNestedScalar(block:key:value:)`, which touches exactly one child line at indent 6 inside an indent-4 block header and leaves every sibling byte-identical. The `replaceOrInsert<Block>` family (`identity_header`, `tools`) rebuilds its block from Scarf's model and is only safe for a block Scarf models COMPLETELY — `oauth:` carries `client_id`, `client_secret`, `scope` and `timeout`, so a block writer there is silent credential loss. #dataloss
+- [gotcha] Clearing the flow when it is the block's only child removes the `oauth:` HEADER too. An `oauth:` line with nothing under it is a YAML null, which Hermes reads differently from an absent block. Pinned by `HermesMCPOAuthFlowTests`.
+- [gotcha] `oauthFlow` is modelled as `String?`, not an enum: `mcp_config.py:639-641` rejects anything outside `{browser, device}`, but keeping the raw string means an unknown future spelling round-trips instead of collapsing to a default. The two UI surfaces clamp instead — the editor picker offers ""/browser/device and the login sheet's initial selection falls back to `browser` for anything unrecognized.

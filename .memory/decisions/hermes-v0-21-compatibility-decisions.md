@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabil
 source_paths_inferred: false
 source_sha: f1952fb7c66a4b7afd2576098f7fe9f98643b52e
 created: 2026-09-01
-updated: 2026-09-02
+updated: 2026-09-08
 reviewed: 2026-09-02
 reviewed_by: audit:claude-code (background)
 ---
@@ -31,7 +31,7 @@ Removal flags use INVERSE semantics (`true` = still show it) and differ delibera
 - relates_to [[Hermes Version Compatibility Target]]
 - extends [[Hermes v0.20.5 Compatibility Decisions]]
 
-- [gotcha] `hermes gateway status` never prints \"service is loaded\" anywhere — GatewayViewModel.swift's old `contains(\"service is loaded\")` could never match (that string exists only as a Python code comment in gateway.py); `contains(\"stale\")` matched by accident against unrelated log noise. Verified against real print statements in hermes_cli/gateway.py, identical at v2026.8.19 (0.20.5) and v2026.8.31 (0.21.0) #verification
+- [gotcha] `hermes gateway status` never prints \"service is loaded\" anywhere — GatewayViewModel.swift's old `contains(\"service is loaded\")` could never match (that string exists only as a Python code comment in gateway.py); `contains(\"stale\")` matched by accident against unrelated log noise. Verified against real print statements in hermes_cli/gateway.py, identical at v2026.8.19 (0.20.5) and v2026.8.31 (0.21.0). ⚠️ v0.21.1 adds a THIRD verdict ahead of both — the default-profile multiplexer branch, printed with no PID; see [[Hermes v0.21.1 Compatibility Decisions]] #verification
 - [decision] Re-anchored `MessagingGatewayInfo.isLoaded` on \"(Running manually, not as a system service)\" (`MessagingGatewayViewModel.isServiceLoaded(pid:statusOutput:)`) — that phrase is the ONE marker unique to gateway.py's manual/no-service branch; every service-managed branch (systemd_status/launchd_status/Windows) prints different text and never it, so its absence while a PID is known reliably means service-managed. Dropped `isStale` entirely rather than fake it: launchd's \"Service definition is stale…\" and systemd's \"…definition is outdated\" are two different strings, neither reachable from the manual branch Scarf actually parses #capability-gating
 - [decision] HealthViewModel's update-status line match switched from `.contains(\"commits behind\")` to `.hasPrefix(\"Update available\")` — Hermes's `_startup_fast.py` prints three shapes (plural \"N commits behind\", singular \"1 commit behind\", count-less \"Update available — run …\"); the old substring missed the last two. Added `HealthViewModel.UpdateStatus`/`parseUpdateStatus(lines:)` as the shared parse used by load(), loadVersion(), and shouldFallBackToBareVersionSubcommand #config
 - [gotcha] Offline `hermes --version`/`version` (failed git fetch) prints NEITHER an \"Update available…\" line NOR \"Up to date\" at all (banner.py's check_for_updates() returns None on fetch failure, and _startup_fast.py has no branch for None) — HealthViewModel now surfaces this as `updateStatusUnknown = true`, distinct from a confirmed-current host, so an offline user is never told they're up to date #gotcha

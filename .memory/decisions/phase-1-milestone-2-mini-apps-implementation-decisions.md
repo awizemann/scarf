@@ -5,10 +5,10 @@ permalink: scarf/decisions/phase-1-milestone-2-mini-apps-implementation-decision
 tags: [projects, phase-1, milestone-2, miniapps, decision, security, webkit, acp]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppBridge.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppAssetResolver.swift, scarf/scarf/Features/Projects/MiniApp/ScarfMiniAppBridge.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppSchemeHandler.swift]
 source_paths_inferred: false
-source_sha: 7b1be630ce477231a804649efe75285f95c410b5
+source_sha: e29ea4246c0f3345b075a4b3aae681751cf36e1f
 created: 2026-06-16
 updated: 2026-06-16
-reviewed: 2026-09-03
+reviewed: 2026-09-08
 reviewed_by: audit:claude-code (background)
 ---
 

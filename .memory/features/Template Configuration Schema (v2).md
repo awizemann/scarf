@@ -4,10 +4,10 @@ type: note
 permalink: scarf/features/template-configuration-schema-v2
 tags: [templates, config, keychain]
 source_paths: [scarf/scarf/Core/Models/TemplateConfig.swift, scarf/scarf/Core/Services/ProjectConfigKeychain.swift, scarf/scarf/Core/Services/ProjectConfigService.swift, scarf/scarf/Features/Templates/Views/TemplateConfigSheet.swift, tools/build-catalog.py]
-source_sha: a5fb2eb0d5ab79996602b16419b9b44249680e53
+source_sha: e29ea4246c0f3345b075a4b3aae681751cf36e1f
 created: 2026-05-29
 updated: 2026-09-04
-reviewed: 2026-09-07
+reviewed: 2026-09-08
 reviewed_by: audit:claude-code (background)
 ---
 

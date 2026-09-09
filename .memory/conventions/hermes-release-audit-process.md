@@ -2,19 +2,20 @@
 title: Hermes Release Audit Process
 type: note
 permalink: scarf/conventions/hermes-release-audit-process
-tags:
-- hermes
-- process
-- audit
-- versioning
-- capability-gating
+tags: [hermes, process, audit, versioning, capability-gating]
 created: 2026-06-21
-updated: 2026-06-21
+updated: 2026-09-08
+reviewed: 2026-09-08
+reviewed_by: claude-opus-5
 ---
 
-The repeatable process for auditing a new Hermes release against Scarf. Canonical procedure lives in the repo skill `.claude/skills/hermes-release-audit/SKILL.md`; this note is the memory-backend-discoverable summary. Done six times (v0.11 → v0.17).
+The repeatable process for auditing a new Hermes release against Scarf. Canonical procedure lives in the repo skill `.claude/skills/hermes-release-audit/SKILL.md`; this note is the memory-backend-discoverable summary. Done thirteen times (v0.11 → v0.21.1).
 
 ## Observations
+
+- [gotcha] **A removal needs an upper bound, not a floor.** A patch tag can re-add a surface an earlier release deleted: `plugins/web/tavily/` was removed at v0.21.0 and restored at v0.21.1, so `hasTavilyWebBackend { !isV021OrLater }` hid a live backend on every later host. Model a removal as a WINDOW (`semver == 0.21.0`) until a later tag confirms it stayed gone, and re-check every previously-modelled removal each cycle. #gating
+- [gotcha] **A modularization moves files, so "absent at the old tag" cannot be read from a path.** v0.21.1 split `hermes_cli/main.py` into `hermes_cli/subcommands/<verb>.py`; `git show <old-tag>:<new-path>` fails and a naive floor check reports the surface as new. Four v0.21.1-looking surfaces were actually v0.15–v0.18. Walk the SYMBOL across every tag over every location it has had (`git log -S<needle> -- <old> <new>`, then `git tag --contains <commit>`), and gate at the true floor — gating an old surface at the new release hides something the host already has. #verify #gating
+
 - [law] **Release notes lie — verify every claim against the tagged Hermes source (`file:line`).** Documented burns: v0.16 "MiniMax 1M" (real 512K); v0.17 framed `/version` as new (predated it), `/billing` + MCP elicitation as universal (both gateway/CLI-only, never reach the ACP client), and listed "cron per-job profile" in both shipped AND reverted lists. #verify
 - [law] **Everything new is capability-gated; pre-target hosts render byte-identical.** Min supported Hermes v0.6.0. Gate on the minor (`>= X.Y.0`), group flags by release in `HermesCapabilities.swift`, add an `isVXYOrLater` predicate. Never throw on unknown CLI subcommand / missing column / new wire field. #gating
 - [method] **Acquire source at the exact tag, non-destructively.** `git fetch --no-tags origin tag vYYYY.M.D` in `~/.hermes/hermes-agent`, then `git worktree add --detach ~/.hermes/hermes-agent-vX-audit v<new>`. Never disturb the user's checked-out copy. Confirm semver in `pyproject.toml`. Clean up with `git worktree remove`. #source
@@ -28,4 +29,4 @@ The repeatable process for auditing a new Hermes release against Scarf. Canonica
 - relates_to [[Hermes Version Targeting Strategy]]
 - relates_to [[Hermes Capability Gating Pattern]]
 - relates_to [[Hermes Version Compatibility Target]]
-- relates_to [[Hermes v0.17.0 Audit Findings]]
+- relates_to [[Hermes v0.21.1 Audit Findings]]

@@ -5,11 +5,11 @@ permalink: scarf/conventions/macos-accessibility-label-conventions
 tags: [accessibility, voiceover, localization]
 source_paths: [scarf/scarf/Features/Servers/Views/AddServerSheet.swift, scarf/scarf/Features/Servers/Views/ManageServersView.swift, scarf/scarf/Navigation/SidebarProjectsWell.swift, scarf/scarf/Features/Skills/Views/SkillsView.swift, scarf/scarf/Features/Projects/Views/Widgets/WidgetErrorCard.swift, scarf/scarf/Features/Projects/Views/Widgets/ImageWidgetView.swift, scarf/scarf/Features/Projects/Views/Widgets/KanbanSummaryWidgetView.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppLaunchView.swift, scarf/Scarf iOS/Projects/ProjectsListView.swift, scarf/scarf/Features/Projects/Views/RegistryDamageBanner.swift, scarf/scarf/Features/Projects/Views/ProjectDoctorSheet.swift, scarf/scarf/Features/Settings/Views/Components/SettingsComponents.swift, scarf/scarf/Features/Sessions/Views/SessionsView.swift, scarf/scarf/Features/Kanban/Views/KanbanCardView.swift, scarf/scarf/Features/Logs/Views/LogsView.swift, scarf/scarf/Features/Chat/Views/RichMessageBubble.swift, scarf/scarf/Features/Cron/Views/CronView.swift, scarf/scarf/Features/Projects/Views/ProjectSessionsView.swift, scarf/scarf/Features/Common/OutcomeMessage.swift, scarf/scarf/Features/Common/OutcomeMessageBar.swift]
 source_paths_inferred: false
-source_sha: 168f30e914d476427d2de7a165d8f905edb4e923
+source_sha: e29ea4246c0f3345b075a4b3aae681751cf36e1f
 created: 2026-08-28
 updated: 2026-09-08
 reviewed: 2026-09-08
-reviewed_by: claude-fable-5-1
+reviewed_by: audit:claude-code (background)
 ---
 
 Established during the 2026-08-28 accessibility pass driven by the Walkabout macOS shakedown (W19/W22). Form fields and list rows in the macOS target now carry .accessibilityLabel; follow these rules when adding UI.

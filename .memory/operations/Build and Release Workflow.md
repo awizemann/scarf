@@ -4,10 +4,10 @@ type: note
 permalink: scarf/ops/build-and-release-workflow
 tags: [build, release, ci]
 source_paths: [scripts/release.sh, scripts/local-build.sh]
-source_sha: 32c1e2aea156bf7aadb04b1565e2fd2a029a9f9e
+source_sha: e29ea4246c0f3345b075a4b3aae681751cf36e1f
 created: 2026-05-29
 updated: 2026-09-08
-reviewed: 2026-09-01
+reviewed: 2026-09-08
 reviewed_by: audit:claude-code (background)
 ---
 

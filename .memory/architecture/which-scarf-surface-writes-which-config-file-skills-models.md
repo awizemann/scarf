@@ -5,11 +5,11 @@ permalink: scarf/architecture/which-scarf-surface-writes-which-config-file-skill
 tags: [settings, models, skills, config, testing]
 source_paths: [scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift, scarf/scarf/Features/Models/Views/ModelPresetsView.swift, scarf/scarf/Features/Skills/Views/SkillsView.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SkillsScanner.swift]
 source_paths_inferred: false
-source_sha: 09bc6bed5dd25c3aa33c4d09c861cd37c8bc0383
+source_sha: e29ea4246c0f3345b075a4b3aae681751cf36e1f
 created: 2026-09-08
 updated: 2026-09-08
 reviewed: 2026-09-08
-reviewed_by: claude-fable-5-1
+reviewed_by: audit:claude-code (background)
 ---
 
 Established while writing the P2c UI journeys (t-877c6e6f, 2026-09-08), because the obvious mental model is wrong in two places and a test written to it asserts against a file the surface never touches.
