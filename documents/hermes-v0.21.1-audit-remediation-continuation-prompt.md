@@ -1,0 +1,20 @@
+# Continuation prompt — Scarf whole-surface audit remediation (P9–P16)
+
+Paste the block below as the first message of the new session.
+
+---
+
+Continue the Scarf audit remediation. Context: the Hermes v0.21.1 (v2026.9.7) parity work is complete and merged to main as d21a5508 (not pushed). A whole-surface fresh-eyes audit of every file that work touched found a second body of mostly pre-existing defects; the findings and the phase plan are in `documents/hermes-v0.21.1-whole-surface-audit.md`, filed as Memophant tasks t-8ea370f3 (P9), t-e650c3f3 (P10), t-9b411a5e (P11), t-6bb11cb0 (P12), t-8d2a8e04 (P13), t-c66e3882 (P14), t-53e3da94 (P15), t-ae5f2f19 (P16).
+
+Run it with the same process as the parity cycle:
+
+1. Read the charter (`read_charter`), the shared agent brief `documents/hermes-v0.21.1-parity-agent-brief.md`, the audit report above, and memory notes `decisions/hermes-v0-21-1-compatibility-decisions` and `integration/hermes-v0-21-1-audit-findings` (they carry the cycle's lessons: floors are found by walking the symbol across every tag over old AND new file locations; a removal is a window not a floor; judge Hermes outcomes by emitter output not exit code; YAML scalars go through `normalizedScalar`; JSON is parsed from stdout only).
+2. Create branch `fix/whole-surface-audit` from main. One branch, phases strictly in sequence, no parallel checkouts. Never push. Never stage `.memory/`, `wiki/`, `documents/`, `tasks/`, `TASKS.md`.
+3. For each phase P9 → P16 in order: `move_task` to doing; launch ONE Opus general-purpose agent (run_in_background: false) whose prompt tells it to read the brief, `get_task` its id, ground in memory for the surface, fix every listed finding with a test that fails without the fix (say so in artifacts if it disputes a finding after checking the v2026.9.7 source), build (`xcodebuild -project scarf/scarf.xcodeproj -scheme scarf -configuration Debug build`), run ScarfCore `swift test` and the app target (`xcodebuild test -project scarf/scarf.xcodeproj -scheme scarf -destination 'platform=macOS' -only-testing:scarfTests`), do a fresh-eyes audit of its own diff, commit cleanly, `update_task` artifacts, `move_task` done, write memory only for durable gotchas (append to the existing decisions note; a separate note only for a durable contract with source_paths). Known flake: `ACPClientStartIdempotenceTests` under parallel load; rerun in isolation. Hermes source at the tag: `git -C ~/.hermes/hermes-agent show v2026.9.7:<path>`; never modify the user's Hermes checkout; safe live probes only (`--help`), never mutating verbs.
+4. After each phase: audit its commits against the task (managed tiers not staged, tests present, no scope creep) before starting the next.
+5. After P16: an independent build + full test run; a memory audit of every note the agents created or edited (merge duplicates, retire wrong ones, `memory_health`); then a cross-phase fresh-eyes review agent over `git diff main..HEAD` (read-only, findings ranked, anchored to file:line) and a remediation phase for whatever it finds; then a whole-surface audit agent over the entire content of every touched file (old and new issues, not just the diff), with a report to `documents/` and Memophant tasks for anything found, proposed to me before coding.
+6. Then merge to main with `--no-ff` (message prefix `merge(whole-surface-audit):`), leave managed tiers dirty for me, and hand me a summary plus the next continuation prompt.
+
+Decisions already made: P14 hallucination gate → DELETE the surface (fields, `KanbanHallucinationGate`, Reject button, dim glyph, banner, optimistic-override machinery); Hermes only records `completion_blocked_hallucination` in task_events and the stall is already visible via `last_failure_error`. P14 goal/diagnostics → drop the decode paths and gates unless fetching `kanban diagnostics --json` is a one-call, off-main addition; decide from the source and record it. Opus for all phases. Ask me before starting only if a phase would change user-visible behavior on a pre-target host without a verified floor, or if a finding turns out to be a product decision.
+
+---
