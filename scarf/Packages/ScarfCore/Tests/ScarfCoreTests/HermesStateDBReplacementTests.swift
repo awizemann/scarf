@@ -79,8 +79,19 @@ import SQLite3
 
         let backend = LocalSQLiteBackend(context: .local(home: home))
         #expect(await backend.open())
-        // A write through a SEPARATE connection to the same inode is
-        // visible without any reopen — proving the handle was kept.
+
+        // Mark THIS connection. A TEMP table lives in the connection's own
+        // temp database, so it survives exactly as long as the handle does —
+        // which makes it the one observable that separates "kept the handle"
+        // from "reopened and happened to read the same bytes". The previous
+        // version of this test wrote through a second connection and read
+        // the value back, which a reopen satisfies just as well: it passed
+        // with the gh#102 short-circuit deleted.
+        _ = try await backend.query("CREATE TEMP TABLE scarf_handle_probe(x)", params: [])
+        _ = try await backend.query("INSERT INTO scarf_handle_probe VALUES (1)", params: [])
+
+        // A write through a SEPARATE connection to the same inode is still
+        // visible without any reopen — the WAL does that on its own.
         var db: OpaquePointer?
         #expect(sqlite3_open_v2(path.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK)
         #expect(sqlite3_exec(db, "UPDATE sessions SET title = 'edited' WHERE id = 's1'", nil, nil, nil) == SQLITE_OK)
@@ -88,6 +99,17 @@ import SQLite3
 
         for _ in 0..<5 { #expect(await backend.refresh(forceFresh: false)) }
         #expect(await title(backend) == "edited")
+        // The probe is still there ⇒ no reopen happened across five ticks.
+        let probe = try await backend.query("SELECT x FROM scarf_handle_probe", params: [])
+        #expect(probe.count == 1)
+
+        // …and a FORCED refresh does reopen, so the probe goes away. That is
+        // the control: without it, a `query` that silently swallowed the
+        // missing table would make the assertion above vacuous.
+        #expect(await backend.refresh(forceFresh: true))
+        await #expect(throws: (any Error).self) {
+            _ = try await backend.query("SELECT x FROM scarf_handle_probe", params: [])
+        }
         await backend.close()
     }
 

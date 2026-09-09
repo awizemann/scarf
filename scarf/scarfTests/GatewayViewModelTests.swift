@@ -147,11 +147,22 @@ import ScarfCore
 
     // MARK: - The old bug, regression-pinned
 
-    @Test func theRetiredCheckWouldNeverHaveMatchedRealOutput() {
+    /// The retired check looked for `service is loaded`, a string that
+    /// appears nowhere in real `gateway status` output — it existed only as
+    /// a comment in gateway.py. So it answered "not loaded" for a gateway
+    /// that was plainly running. Assert the CURRENT function on that output
+    /// rather than the absence of a substring: the old form passed with
+    /// `isServiceLoaded` deleted outright.
+    @Test func serviceLoadednessIsDecidedByTheRealMarkers() {
+        // Manually run: a live PID, but explicitly NOT a service.
         let manualOutput = "✓ Gateway is running (PID: 4821)\n  (Running manually, not as a system service)\n"
-        // "service is loaded" is a substring nowhere in real `gateway
-        // status` output — it only ever existed as a code comment in
-        // gateway.py, never a printed line.
+        #expect(MessagingGatewayViewModel.isServiceLoaded(
+            pid: 4821, statusOutput: manualOutput) == false)
+        // Service-managed: no manual marker, and a PID ⇒ loaded.
+        #expect(MessagingGatewayViewModel.isServiceLoaded(
+            pid: 4821, statusOutput: "✓ Gateway is running (PID: 4821)\n") == true)
+        // …and the retired marker really is absent from real output, which
+        // is why the check it drove could only ever answer "no".
         #expect(manualOutput.contains("service is loaded") == false)
     }
 }

@@ -136,6 +136,9 @@ import SQLite3
     );
     CREATE INDEX idx_sessions_effective_activity
         ON sessions(COALESCE(last_activity_at, started_at) DESC, started_at DESC);
+    CREATE VIRTUAL TABLE messages_fts USING fts5(
+        content, tool_name, tool_calls, content='messages', content_rowid='id'
+    );
     """
 
     private func makeFixtureHome() throws -> URL {
@@ -158,6 +161,8 @@ import SQLite3
         INSERT INTO messages (id, session_id, role, content, timestamp)
         VALUES (1, 's1', 'user', 'hello', 1.0);
         INSERT INTO conversation_generations VALUES ('acp', 'k1', 3);
+        INSERT INTO messages_fts (rowid, content, tool_name, tool_calls)
+        VALUES (1, 'hello', NULL, NULL);
         """
         guard sqlite3_exec(db, ddl, nil, nil, &err) == SQLITE_OK else {
             let message = err.map { String(cString: $0) } ?? "unknown"
@@ -206,27 +211,43 @@ import SQLite3
         _ = await service.fetchRecentToolCalls()
         _ = await service.fetchRecentToolCallSkeleton()
         _ = await service.fetchSubagentSessions(parentId: "s1")
+        // The search path names its own column set (and, on a v0.21.1 host,
+        // a second LIKE pass over `messages`) — it belongs in this sweep or
+        // its columns are only ever exercised against a paraphrased DDL.
+        #expect(await service.searchMessages(query: "hello").count == 1)
         // A failed SELECT is swallowed into an empty result by design, so
         // a missing column would surface here rather than as a throw.
         #expect(await service.lastOpenError == nil)
         await service.close()
     }
 
-    /// `messages` did not change in v0.21.1. Pinning the DDL text keeps
-    /// the next release honest: the day this constant stops matching
-    /// `hermes_state_common.py`, the search/transcript column sets need
-    /// re-checking.
-    @Test func messagesDDLIsUnchangedFromV0210() throws {
-        let columns = Self.messagesDDL
-            .split(separator: "\n")
-            .dropFirst().dropLast()
-            .map { $0.trimmingCharacters(in: .whitespaces).split(separator: " ").first.map(String.init) ?? "" }
-        #expect(columns.count == 24)
-        #expect(columns.first == "id")
-        #expect(columns.last == "display_metadata")
-        // The v0.21 marker column is present and no v0.21.1 column joined it.
-        #expect(columns.contains("_compressed_summary"))
+    /// `messages` did not change in v0.21.1. Pinned through a REAL database
+    /// built from the release DDL and read back with `PRAGMA table_info` —
+    /// the same probe production uses — rather than by re-parsing this
+    /// file's own string constant, which proves nothing about either the
+    /// release or Scarf. The day the constant stops matching
+    /// `hermes_state_common.py`, this list has to move with it and the
+    /// search/transcript column sets need re-checking.
+    @Test func messagesDDLIsUnchangedFromV0210() async throws {
+        let home = try makeFixtureHome()
+        defer { cleanup(home) }
+        let backend = LocalSQLiteBackend(context: .local(home: home))
+        #expect(await backend.open())
+        let rows = try await backend.query("PRAGMA table_info(messages)", params: [])
+        let columns = rows.map { $0.optionalString(at: 1) ?? "" }
+        #expect(columns == [
+            "id", "session_id", "role", "content", "tool_call_id", "tool_calls",
+            "tool_name", "effect_disposition", "timestamp", "token_count",
+            "finish_reason", "reasoning", "reasoning_content", "reasoning_details",
+            "codex_reasoning_items", "codex_message_items", "platform_message_id",
+            "observed", "_compressed_summary", "active", "compacted", "api_content",
+            "display_kind", "display_metadata",
+        ])
+        // The v0.21 marker column is present and no v0.21.1 column joined it
+        // — `tool_names` landed on `sessions`, not here.
+        #expect(await backend.hasCompressedSummaryColumn)
         #expect(!columns.contains("tool_names"))
+        await backend.close()
     }
 
     /// `sessions.tool_names` is a JSON array of the tools enabled for a

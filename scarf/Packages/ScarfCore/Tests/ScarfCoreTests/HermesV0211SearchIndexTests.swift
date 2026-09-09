@@ -46,24 +46,21 @@ import SQLite3
         }
         defer { sqlite3_close(db) }
 
+        // The REAL v0.21.1 DDL, shared with `HermesV0211SchemaTests`, not a
+        // hand-stripped 14-column paraphrase: a column Scarf's search SELECT
+        // names but the release does not have would otherwise pass here and
+        // fail on a user's machine (M9).
         try exec(db, """
         CREATE TABLE state_meta (key TEXT PRIMARY KEY, value TEXT);
-        CREATE TABLE sessions (
-            id TEXT PRIMARY KEY, source TEXT, started_at REAL, ended_at REAL,
-            message_count INTEGER, tool_call_count INTEGER, input_tokens INTEGER,
-            output_tokens INTEGER, cache_read_tokens INTEGER, cache_write_tokens INTEGER,
-            estimated_cost_usd REAL
-        );
-        CREATE TABLE messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, role TEXT, content TEXT,
-            tool_call_id TEXT, tool_calls TEXT, tool_name TEXT, timestamp REAL,
-            token_count INTEGER, finish_reason TEXT, reasoning TEXT, reasoning_content TEXT,
-            active INTEGER NOT NULL DEFAULT 1, compacted INTEGER NOT NULL DEFAULT 0
-        );
+        \(HermesV0211SchemaTests.sessionsDDL)
+        \(HermesV0211SchemaTests.messagesDDL)
         CREATE VIRTUAL TABLE messages_fts USING fts5(
             content, tool_name, tool_calls, content='messages', content_rowid='id'
         );
-        INSERT INTO sessions VALUES ('s1', 'acp', 1.0, NULL, 6, 5, 0, 0, 0, 0, 0.0);
+        INSERT INTO sessions (id, source, started_at, message_count, tool_call_count,
+                              input_tokens, output_tokens, cache_read_tokens,
+                              cache_write_tokens, estimated_cost_usd)
+        VALUES ('s1', 'acp', 1.0, 6, 5, 0, 0, 0, 0, 0.0);
         """)
 
         if let highWater {
