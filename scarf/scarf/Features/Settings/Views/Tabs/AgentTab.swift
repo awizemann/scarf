@@ -98,6 +98,22 @@ struct AgentTab: View {
     /// host can't use visible instead of silently rewriting it.
     @ViewBuilder
     private var fastModeRows: some View {
+        if HermesServiceTier.editorStyle(capabilities: capabilities) == .picker {
+            boundedFastModeRows
+        } else {
+            // C1: a pre-target host (and an undetected one) renders exactly
+            // what it rendered before this cycle — the Bool toggle, which is
+            // lossless there because the two values it writes are the only
+            // two such a host's parser accepts.
+            ToggleRow(label: "Fast Mode", isOn: viewModel.config.serviceTier == "fast") { on in
+                viewModel.setServiceTier(on ? "fast" : "normal")
+            }
+        }
+    }
+
+    /// v0.21.1+: the four-way picker, plus the window the bounded modes use.
+    @ViewBuilder
+    private var boundedFastModeRows: some View {
         let tier = HermesServiceTier.normalize(viewModel.config.serviceTier)
         let options = HermesServiceTier.options(capabilities: capabilities, current: tier)
         PickerRow(
@@ -108,12 +124,10 @@ struct AgentTab: View {
         ) { raw in
             viewModel.setServiceTier(HermesServiceTier(rawValue: raw)?.configValue ?? raw)
         }
-        .help(capabilities.hasServiceTierBoundedModes
-              ? "Priority service tier for provider requests. Always = every request; Auto = the first seconds of every turn; Cold = a session's first turn only."
-              : "Priority service tier for provider requests. Bounded windows (Auto / Cold) need Hermes v0.21.1.")
-        // The window length only exists — and only means anything — on a
-        // host that has the bounded modes AND is currently set to one.
-        if capabilities.hasServiceTierBoundedModes, tier.isBounded {
+        .help("Priority service tier for provider requests. Always = every request; Auto = the first seconds of every turn; Cold = a session's first turn only.")
+        // The window length only means anything while a bounded mode is
+        // actually selected.
+        if tier.isBounded {
             StepperRow(
                 label: "Fast Window (s)",
                 value: viewModel.config.agentFastAutoSeconds,

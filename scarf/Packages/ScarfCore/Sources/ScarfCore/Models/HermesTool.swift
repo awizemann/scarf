@@ -25,15 +25,30 @@ public struct HermesToolPlatform: Identifiable, Sendable {
     public let name: String
     public let displayName: String
     public let icon: String
+    /// First Hermes version that HAS this adapter, or `nil` for a row that
+    /// predates every version Scarf supports. A row is hidden on a host
+    /// below its floor — and on an undetected one — so the Platforms list
+    /// never offers a channel the host cannot listen on (C1). Each floor
+    /// was found by walking `gateway/platforms/` and `plugins/platforms/`
+    /// across EVERY tag, not by diffing two of them.
+    public let minimumVersion: HermesCapabilities.SemVer?
 
     public init(
         name: String,
         displayName: String,
-        icon: String
+        icon: String,
+        minimumVersion: HermesCapabilities.SemVer? = nil
     ) {
         self.name = name
         self.displayName = displayName
         self.icon = icon
+        self.minimumVersion = minimumVersion
+    }
+
+    /// Whether this row belongs on `capabilities`' host.
+    public func isAvailable(on capabilities: HermesCapabilities) -> Bool {
+        guard let minimumVersion else { return true }
+        return capabilities.isAtLeast(minimumVersion)
     }
 }
 
@@ -62,7 +77,7 @@ public enum KnownPlatforms {
         // (one with the setup form, one without). The old `imessage`
         // spelling is still accepted by `icon(for:)` and by the
         // `PlatformsView` / `identifyingEnvVar` switches.
-        HermesToolPlatform(name: "bluebubbles", displayName: "iMessage (BlueBubbles)", icon: "message.fill"),
+        HermesToolPlatform(name: "bluebubbles", displayName: "iMessage (BlueBubbles)", icon: "message.fill", minimumVersion: .init(major: 0, minor: 9, patch: 0)),
         // -- v0.12 additions ---------------------------------------------
         // Yuanbao is a native gateway adapter (18th platform); Microsoft
         // Teams ships as a plugin (19th). PlatformDetail surfaces the
@@ -133,15 +148,22 @@ public enum KnownPlatforms {
         //    "auto-enables the adapter when set"); it has no token, no
         //    allowlist and no `enabled` key, so a roster row would offer
         //    nothing to configure.
+        // Floors, walked across every tag (`git ls-tree` over
+        // gateway/platforms + plugins/platforms). dingtalk / sms /
+        // api_server land at v2026.3.23 (0.4.0) and wecom at v2026.3.30
+        // (0.6.0) — at or below Scarf's oldest supported host, so no gate.
+        // The rest carry one: weixin + bluebubbles v2026.4.13 (0.9.0),
+        // qqbot v2026.4.16 (0.10.0), irc v2026.4.30 (0.12.0),
+        // msgraph_webhook v2026.5.16 (0.14.0), photon v2026.6.19 (0.17.0).
         HermesToolPlatform(name: "dingtalk", displayName: "DingTalk", icon: "text.bubble"),
         HermesToolPlatform(name: "sms", displayName: "SMS", icon: "message"),
-        HermesToolPlatform(name: "irc", displayName: "IRC", icon: "number.square"),
+        HermesToolPlatform(name: "irc", displayName: "IRC", icon: "number.square", minimumVersion: .init(major: 0, minor: 12, patch: 0)),
         HermesToolPlatform(name: "wecom", displayName: "WeCom", icon: "building.2"),
-        HermesToolPlatform(name: "weixin", displayName: "Weixin", icon: "captions.bubble"),
-        HermesToolPlatform(name: "qqbot", displayName: "QQ Bot", icon: "bubble.right"),
-        HermesToolPlatform(name: "msgraph_webhook", displayName: "Microsoft Graph Webhook", icon: "network"),
+        HermesToolPlatform(name: "weixin", displayName: "Weixin", icon: "captions.bubble", minimumVersion: .init(major: 0, minor: 9, patch: 0)),
+        HermesToolPlatform(name: "qqbot", displayName: "QQ Bot", icon: "bubble.right", minimumVersion: .init(major: 0, minor: 10, patch: 0)),
+        HermesToolPlatform(name: "msgraph_webhook", displayName: "Microsoft Graph Webhook", icon: "network", minimumVersion: .init(major: 0, minor: 14, patch: 0)),
         HermesToolPlatform(name: "api_server", displayName: "API Server", icon: "server.rack"),
-        HermesToolPlatform(name: "photon", displayName: "iMessage via Photon", icon: "antenna.radiowaves.left.and.right"),
+        HermesToolPlatform(name: "photon", displayName: "iMessage via Photon", icon: "antenna.radiowaves.left.and.right", minimumVersion: .init(major: 0, minor: 17, patch: 0)),
     ]
 
     public static func icon(for platform: String) -> String {

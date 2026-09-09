@@ -68,6 +68,25 @@ public enum HermesServiceTier: String, CaseIterable, Sendable {
     /// Whether this mode consumes `agent.fast_auto_seconds`.
     public var isBounded: Bool { self == .auto || self == .cold }
 
+    /// Which control the Settings row renders (C1).
+    ///
+    /// Only a host with the bounded modes gets the four-way picker. A
+    /// pre-target host — and an UNDETECTED one — renders the Bool toggle it
+    /// rendered before this cycle: swapping in a picker there changes what
+    /// an unchanged host looks like, and offers nothing, since the two
+    /// values the toggle wrote are the only two such a host's parser
+    /// accepts.
+    public static func editorStyle(capabilities: HermesCapabilities) -> EditorStyle {
+        capabilities.hasServiceTierBoundedModes ? .picker : .toggle
+    }
+
+    public enum EditorStyle: Sendable, Equatable {
+        /// The pre-v0.21.1 Bool "Fast Mode" row.
+        case toggle
+        /// The v0.21.1 four-way picker (+ the fast-window stepper).
+        case picker
+    }
+
     /// Options to offer for the given host generation.
     ///
     /// Pre-v0.21.1 hosts get the two-way off/always pair, which round-trips

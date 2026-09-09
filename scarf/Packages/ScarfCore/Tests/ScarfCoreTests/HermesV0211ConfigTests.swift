@@ -339,4 +339,20 @@ struct HermesV0211ConfigTests {
         """)
         #expect(cfg.gatewayPlatforms["slack"]?.gatewayRestartNotification == false)
     }
+
+    // MARK: - M8 — the Fast Mode row's control is host-gated (C1)
+
+    /// A pre-target host, and an undetected one, keep the Bool toggle they
+    /// have always rendered. Replacing it with a picker there changes what
+    /// an unchanged host looks like and buys nothing: `auto`/`cold` are
+    /// warn-and-ignored by that parser.
+    @Test func fastModeRendersTheToggleBelowV0211AndThePickerAtOrAbove() {
+        #expect(HermesServiceTier.editorStyle(capabilities: .empty) == .toggle)
+        #expect(HermesServiceTier.editorStyle(
+            capabilities: HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)")) == .toggle)
+        #expect(HermesServiceTier.editorStyle(
+            capabilities: HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")) == .picker)
+        #expect(HermesServiceTier.editorStyle(
+            capabilities: HermesCapabilities.parseLine("Hermes Agent v0.22.0 (2026.10.1)")) == .picker)
+    }
 }

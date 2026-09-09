@@ -156,7 +156,13 @@ public struct HermesCapabilities: Sendable, Equatable {
     public var hasGatewayBusyAckToggle: Bool { atLeastSemver(0, 13, 0) }
 
     /// Per-platform `gateway_restart_notification` flag controls whether the
-    /// platform posts a "Gateway restarted" notice on boot (v0.13+).
+    /// platform posts a "Gateway restarted" notice on boot.
+    ///
+    /// Floor verified by walking the symbol back through every tag: the field
+    /// lands in `gateway/config.py::PlatformConfig` at commit b71f80e6ce,
+    /// first tagged v2026.5.7 = **0.13.0**, and it has defaulted to `True`
+    /// since that first commit (`_coerce_bool(data.get(…), True)`) — which is
+    /// why Scarf's editor defaults the toggle ON, not off.
     public var hasGatewayRestartNotification: Bool { atLeastSemver(0, 13, 0) }
 
     /// `hermes gateway list` cross-profile status verb (v0.13+). Lets Scarf
@@ -1249,6 +1255,14 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// Perplexity backend), so those must be checked with `atLeastSemver(0,
     /// 21, 1)` rather than the minor-only `isV021OrLater`.
     public var isV0211OrLater: Bool { atLeastSemver(0, 21, 1) }
+
+    /// Public form of the private floor test, for tables that carry their
+    /// own floors as data (see `KnownPlatforms.minimumVersion`) rather than
+    /// as one named flag each. An UNDETECTED host is below every floor.
+    public func isAtLeast(_ version: SemVer) -> Bool {
+        guard let s = semver else { return false }
+        return s >= version
+    }
 
     private func atLeastSemver(_ major: Int, _ minor: Int, _ patch: Int) -> Bool {
         guard let s = semver else { return false }

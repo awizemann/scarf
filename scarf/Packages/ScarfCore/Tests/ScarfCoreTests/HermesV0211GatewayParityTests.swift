@@ -210,4 +210,37 @@ import Foundation
         #expect(cfg.gatewayPlatforms["discord"]?.allowedChannels == ["123456789", "general"])
         #expect(GatewayAllowlistKind.kind(for: "discord")?.yamlKey == "allowed_channels")
     }
+
+    // MARK: - M8 — platform rows carry their own floor
+
+    /// Each id added in the B4 roster sweep exists from a different Hermes
+    /// version. Offering all ten on every host puts channels in the list
+    /// that the host has no adapter for; each row's floor was walked across
+    /// EVERY tag over both `gateway/platforms/` and `plugins/platforms/`.
+    @Test func addedPlatformRowsCarryTheirVerifiedFloors() {
+        func floor(_ name: String) -> HermesCapabilities.SemVer? {
+            KnownPlatforms.all.first { $0.name == name }?.minimumVersion
+        }
+        // At or below Scarf's oldest supported host — no gate at all.
+        for name in ["dingtalk", "sms", "api_server", "wecom"] {
+            #expect(floor(name) == nil, "\(name) predates the gate")
+        }
+        #expect(floor("weixin") == .init(major: 0, minor: 9, patch: 0))
+        #expect(floor("bluebubbles") == .init(major: 0, minor: 9, patch: 0))
+        #expect(floor("qqbot") == .init(major: 0, minor: 10, patch: 0))
+        #expect(floor("irc") == .init(major: 0, minor: 12, patch: 0))
+        #expect(floor("msgraph_webhook") == .init(major: 0, minor: 14, patch: 0))
+        #expect(floor("photon") == .init(major: 0, minor: 17, patch: 0))
+    }
+
+    @Test func aRowIsHiddenBelowItsFloorAndOnAnUndetectedHost() {
+        let photon = KnownPlatforms.all.first { $0.name == "photon" }!
+        let dingtalk = KnownPlatforms.all.first { $0.name == "dingtalk" }!
+        #expect(!photon.isAvailable(on: .empty))
+        #expect(!photon.isAvailable(on: HermesCapabilities.parseLine("Hermes Agent v0.16.0 (2026.6.5)")))
+        #expect(photon.isAvailable(on: HermesCapabilities.parseLine("Hermes Agent v0.17.0 (2026.6.19)")))
+        #expect(photon.isAvailable(on: HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")))
+        // A floorless row is visible everywhere, undetected hosts included.
+        #expect(dingtalk.isAvailable(on: .empty))
+    }
 }
