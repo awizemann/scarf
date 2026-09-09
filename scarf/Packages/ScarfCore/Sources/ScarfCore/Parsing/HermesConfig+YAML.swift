@@ -29,9 +29,16 @@ public extension HermesConfig {
         let lists = parsed.lists
         let maps = parsed.maps
 
+        // Every typed reader below compares a NORMALISED scalar: the raw
+        // parse keeps everything after `key: ` verbatim, so `false  # off`
+        // and `"false"` are both legal YAML for `false` that no literal
+        // comparison would ever match. See `HermesYAML.normalizedScalar`.
+        func scalar(_ key: String) -> String? {
+            values[key].map(HermesYAML.normalizedScalar)
+        }
         func bool(_ key: String, default def: Bool) -> Bool {
-            guard let v = values[key] else { return def }
-            return v == "true"
+            guard let v = scalar(key) else { return def }
+            return v.lowercased() == "true"
         }
         // TRUE-by-default key: absent means the host is doing the thing, and
         // only an explicit falsy scalar turns it off. `bool(_:default: true)`
@@ -44,16 +51,14 @@ public extension HermesConfig {
         // for the YAML-boolean keys it is a superset of what PyYAML would
         // have turned into `False` anyway.
         func boolTrueDefault(_ key: String) -> Bool {
-            guard let v = values[key] else { return true }
-            return !["false", "0", "no", "off"].contains(
-                v.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            )
+            guard let v = scalar(key) else { return true }
+            return !["false", "0", "no", "off"].contains(v.lowercased())
         }
         func int(_ key: String, default def: Int) -> Int {
-            Int(values[key] ?? "") ?? def
+            Int(scalar(key) ?? "") ?? def
         }
         func double(_ key: String, default def: Double) -> Double {
-            Double(values[key] ?? "") ?? def
+            Double(scalar(key) ?? "") ?? def
         }
         func str(_ key: String, default def: String = "") -> String {
             let raw = values[key] ?? def
@@ -65,7 +70,7 @@ public extension HermesConfig {
         // where Hermes reads `database.get(key)` directly and treats an
         // absent key differently from `0` (see DatabaseSettings doc).
         func intOpt(_ key: String) -> Int? {
-            guard let raw = values[key] else { return nil }
+            guard let raw = scalar(key) else { return nil }
             return Int(raw)
         }
         // True-optional bool: `nil` means "key absent from config.yaml".
@@ -75,8 +80,8 @@ public extension HermesConfig {
         // capabilities instead of the parse baking in one release's
         // default. See `HermesConfig.displayCheckpointsEnabled`.
         func boolOpt(_ key: String) -> Bool? {
-            guard let v = values[key] else { return nil }
-            return v == "true"
+            guard let v = scalar(key) else { return nil }
+            return v.lowercased() == "true"
         }
 
         let dockerEnv = maps["terminal.docker_env"] ?? [:]

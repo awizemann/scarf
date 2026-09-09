@@ -267,4 +267,76 @@ struct HermesV0211ConfigTests {
     @Test func compressionThresholdFloorMatchesHermes() {
         #expect(DelegationSettings.compressionThresholdTokensMinimum == 16_000)
     }
+
+    // MARK: - Scalar normalisation (H2)
+
+    /// `parseNestedYAML` keeps everything after `key: ` verbatim, so a
+    /// trailing ` # comment` and surrounding quotes ride along with the
+    /// value. Both are legal YAML for the same scalar; a typed reader that
+    /// compares the raw text matches neither — and for a TRUE-by-default
+    /// key that means an explicit `false` reads as ON, then one Settings
+    /// save writes the `true` back over the user's choice.
+    @Test(arguments: ["false", "false  # was true", "false\t# off",
+                      "\"false\"", "'false'", "\"false\"  # quoted + comment",
+                      "False", "no", "off", "0", " off "])
+    func falsySpellingsTurnOffATrueByDefaultKey(_ spelling: String) {
+        let cfg = HermesConfig(yaml: """
+        display:
+          resume_last_session: \(spelling)
+        gateway:
+          trust_env: \(spelling)
+        updates:
+          check: \(spelling)
+        model:
+          streaming: \(spelling)
+        tool_loop_guardrails:
+          non_interactive_hard_stop_enabled: \(spelling)
+        """)
+        #expect(!cfg.display.resumeLastSession, "resume_last_session: \(spelling)")
+        #expect(!cfg.gatewayTrustEnv, "gateway.trust_env: \(spelling)")
+        #expect(!cfg.updatesCheck, "updates.check: \(spelling)")
+        #expect(!cfg.modelStreaming, "model.streaming: \(spelling)")
+        #expect(!cfg.toolLoopNonInteractiveHardStop, "hard_stop: \(spelling)")
+    }
+
+    /// The other direction: a truthy spelling with a comment or quotes must
+    /// stay ON for a FALSE-by-default key.
+    @Test(arguments: ["true", "true  # explicitly on", "\"true\"", "'true'", "True"])
+    func truthySpellingsTurnOnAFalseByDefaultKey(_ spelling: String) {
+        let cfg = HermesConfig(yaml: """
+        display:
+          bell_on_prompt: \(spelling)
+        """)
+        #expect(cfg.display.bellOnPrompt, "bell_on_prompt: \(spelling)")
+    }
+
+    /// Numeric readers share the normaliser — an int with a trailing
+    /// comment used to fall back to the default silently.
+    @Test func numericScalarsTolerateCommentsAndQuotes() {
+        let cfg = HermesConfig(yaml: """
+        delegation:
+          compression_threshold_tokens: 32000  # two ticks
+        """)
+        #expect(cfg.delegation.compressionThresholdTokens == 32_000)
+    }
+
+    /// A `#` that is not preceded by whitespace is part of the value, per
+    /// YAML — the normaliser must not eat it.
+    @Test func hashWithoutLeadingSpaceIsPartOfTheValue() {
+        #expect(HermesYAML.normalizedScalar("a#b") == "a#b")
+        #expect(HermesYAML.normalizedScalar("a#b # note") == "a#b")
+        #expect(HermesYAML.normalizedScalar("# whole line") == "")
+    }
+
+    /// Pre-target parity: `<platform>.gateway_restart_notification` reads
+    /// through the same helper, so a commented `false` must survive.
+    @Test func platformRestartNotificationHonoursACommentedFalse() {
+        let cfg = HermesConfig(yaml: """
+        slack:
+          gateway_restart_notification: false  # too noisy
+          allowed_channels:
+            - C123
+        """)
+        #expect(cfg.gatewayPlatforms["slack"]?.gatewayRestartNotification == false)
+    }
 }

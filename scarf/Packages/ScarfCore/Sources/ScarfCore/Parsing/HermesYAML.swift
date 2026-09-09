@@ -323,6 +323,46 @@ public enum HermesYAML {
     }
 
     /// Strip a single layer of surrounding single or double quotes from a YAML scalar.
+    /// A plain scalar reduced to the value PyYAML would have loaded:
+    /// surrounding quotes removed and a trailing ` # comment` dropped.
+    ///
+    /// `parseNestedYAML` stores everything after `key: ` verbatim, so
+    /// `enabled: false  # was true` arrives as `false  # was true` and
+    /// `"false"` arrives with its quotes. Both are legal YAML for the
+    /// scalar `false`, and both used to miss every typed reader's
+    /// comparison — silently flipping a TRUE-by-default key back on, or
+    /// defaulting an int. Use this before any typed comparison of a
+    /// scalar; do NOT use it for free-form text where `#` can be part of
+    /// the value (a prompt, a path, a colour).
+    ///
+    /// A comment is only recognised after whitespace (`a#b` is the value
+    /// `a#b`, per YAML), and inside quotes nothing is a comment: for a
+    /// quoted scalar the quoted span wins and any trailing text is
+    /// discarded.
+    public static func normalizedScalar(_ s: String) -> String {
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let quote = trimmed.first, quote == "'" || quote == "\"",
+           let close = trimmed[trimmed.index(after: trimmed.startIndex)...].firstIndex(of: quote) {
+            return String(trimmed[trimmed.index(after: trimmed.startIndex)..<close])
+        }
+        var out = trimmed
+        var i = out.startIndex
+        while let hash = out[i...].firstIndex(of: "#") {
+            if hash == out.startIndex {
+                out = ""
+                break
+            }
+            let before = out[out.index(before: hash)]
+            if before == " " || before == "\t" {
+                out = String(out[out.startIndex..<hash])
+                break
+            }
+            i = out.index(after: hash)
+            if i >= out.endIndex { break }
+        }
+        return out.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     public static func stripYAMLQuotes(_ s: String) -> String {
         guard s.count >= 2 else { return s }
         let first = s.first!
