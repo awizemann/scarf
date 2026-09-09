@@ -954,14 +954,123 @@ import Foundation
         #expect(!HermesCapabilities.empty.hasWebExtractAux)
     }
 
-    /// `plugins/web/tavily/` was deleted at v2026.8.31 (0.21.0) and is fully
-    /// present at v2026.8.27 (0.20.6) — a genuine v0.21 removal, unlike the
-    /// web_extract block above.
-    @Test func hasTavilyWebBackend_dropsAtV021() {
+    /// `plugins/web/tavily/` was deleted at v2026.8.31 (0.21.0) and RESTORED
+    /// at v2026.9.7 (0.21.1, commit 428e084dcd), so the removal is a window
+    /// of exactly one release, not a floor. Verified with `git ls-tree <tag>
+    /// plugins/web/` at all four tags below.
+    @Test func hasTavilyWebBackend_removalWindowIsExactlyV0210() {
         #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.6 (2026.8.27)").hasTavilyWebBackend)
         #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.5 (2026.8.19)").hasTavilyWebBackend)
         #expect(!HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)").hasTavilyWebBackend)
-        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasTavilyWebBackend)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasTavilyWebBackend)
+        // A future patch keeps it — only 0.21.0 is the hole.
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.2 (2026.9.20)").hasTavilyWebBackend)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.22.0 (2026.10.1)").hasTavilyWebBackend)
+    }
+
+    /// `plugins/web/keenable/` first appears at v2026.8.19 (0.20.5) — NOT
+    /// v0.20.6 as the v0.21.1 audit report says. Enumerated with
+    /// `git ls-tree <tag> plugins/web/` across every tag in the repo.
+    @Test func hasKeenableWebBackend_floorIsV0205() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.20.4 (2026.8.18)").hasKeenableWebBackend)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.5 (2026.8.19)").hasKeenableWebBackend)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasKeenableWebBackend)
+        #expect(!HermesCapabilities.empty.hasKeenableWebBackend)
+    }
+
+    // MARK: - v0.21.1 capability flags
+
+    @Test func parseV0211ReleaseLine() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+        #expect(caps.semver == HermesCapabilities.SemVer(major: 0, minor: 21, patch: 1))
+        #expect(caps.dateVersion == HermesCapabilities.DateVersion(year: 2026, month: 9, day: 7))
+        #expect(caps.detected)
+    }
+
+    @Test func v0211FlagsAllOnForV0211Host() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+        #expect(caps.isV0211OrLater)
+        #expect(caps.hasPluginsCompat)
+        #expect(caps.hasCronCreatePaused)
+        #expect(caps.hasCronFailureDeliver)
+        #expect(caps.hasCronDispatchDiagnostics)
+        #expect(caps.hasKanbanCompletionContract)
+        #expect(caps.hasAuthPriority)
+        #expect(caps.hasMCPOAuthFlow)
+        #expect(caps.hasComputerUseDoctorJSON)
+        #expect(caps.hasServiceTierBoundedModes)
+        #expect(caps.hasSharedMetricsSend)
+        #expect(caps.hasPerplexityWebBackend)
+        #expect(caps.hasGatewayMultiplexerStatus)
+    }
+
+    @Test func v0210HostHidesEveryV0211Flag() {
+        // Every surface above was verified ABSENT at v2026.8.31 (0.21.0):
+        // no `plugins compat` verb, no `--paused`/`--failure-deliver`, no
+        // `last_dispatch`, no `--completion-contract`, no `auth priority`,
+        // no `mcp login --flow`, no `computer-use ... --json`, no
+        // auto/cold service tiers, no `telemetry.shared_metrics.send`, no
+        // `plugins/web/perplexity/`, no multiplexer status branch.
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)")
+        #expect(!caps.isV0211OrLater)
+        #expect(!caps.hasPluginsCompat)
+        #expect(!caps.hasCronCreatePaused)
+        #expect(!caps.hasCronFailureDeliver)
+        #expect(!caps.hasCronDispatchDiagnostics)
+        #expect(!caps.hasKanbanCompletionContract)
+        #expect(!caps.hasAuthPriority)
+        #expect(!caps.hasMCPOAuthFlow)
+        #expect(!caps.hasComputerUseDoctorJSON)
+        #expect(!caps.hasServiceTierBoundedModes)
+        #expect(!caps.hasSharedMetricsSend)
+        #expect(!caps.hasPerplexityWebBackend)
+        // ...while the v0.20 COLLECTION switch it sits next to stays on.
+        #expect(caps.hasSharedMetricsTelemetry)
+        #expect(!caps.hasGatewayMultiplexerStatus)
+        // The v0.21.0 surface stays alive on a v0.21.0 host.
+        #expect(caps.hasPeerRunCommands)
+        #expect(caps.hasCronDoctor)
+        #expect(caps.isV021OrLater)
+    }
+
+    @Test func v0_21_2_patchReleaseStillEnablesAllV0211Flags() {
+        // Patches don't roll back capability gates.
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.2 (2026.9.20)")
+        #expect(caps.isV0211OrLater)
+        #expect(caps.hasPluginsCompat)
+        #expect(caps.hasCronCreatePaused)
+        #expect(caps.hasCronFailureDeliver)
+        #expect(caps.hasCronDispatchDiagnostics)
+        #expect(caps.hasKanbanCompletionContract)
+        #expect(caps.hasAuthPriority)
+        #expect(caps.hasMCPOAuthFlow)
+        #expect(caps.hasComputerUseDoctorJSON)
+        #expect(caps.hasServiceTierBoundedModes)
+        #expect(caps.hasSharedMetricsSend)
+        #expect(caps.hasPerplexityWebBackend)
+        #expect(caps.hasGatewayMultiplexerStatus)
+    }
+
+    @Test func isV0211OrLater_emptyFalse() {
+        #expect(!HermesCapabilities.empty.isV0211OrLater)
+        #expect(!HermesCapabilities.empty.hasPluginsCompat)
+        #expect(!HermesCapabilities.empty.hasPerplexityWebBackend)
+    }
+
+    @Test func v0211FlagsStillEnableEveryOlderFlag() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+        #expect(caps.hasPeerRunCommands)
+        #expect(caps.hasCronDoctor)
+        #expect(caps.hasConfigDottedKeyEscape)
+        #expect(caps.hasCronIncidents)
+        #expect(caps.hasCronResumeRunNow)
+        #expect(caps.hasCronBotChatDelivery)
+        #expect(caps.hasBrowserCloseProfile)
+        #expect(caps.hasCronReasoningEffort)
+        #expect(caps.hasVersionFlagFullOutput)
+        #expect(caps.isV0205OrLater)
+        #expect(caps.isV0206OrLater)
+        #expect(caps.isV021OrLater)
     }
 
     /// Unknown version KEEPS the picker entry — the opposite policy from
