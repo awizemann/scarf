@@ -33,6 +33,22 @@ public extension HermesConfig {
             guard let v = values[key] else { return def }
             return v == "true"
         }
+        // TRUE-by-default key: absent means the host is doing the thing, and
+        // only an explicit falsy scalar turns it off. `bool(_:default: true)`
+        // would be wrong here — it reads any spelling other than the literal
+        // `true` (a hand-edited `no`, `off`, `0`, or a capitalised `False`)
+        // as "on", which is the opposite of what the host does. The falsy
+        // set mirrors Hermes's own reader for the one key whose default
+        // lives in code rather than `config_defaults.py`
+        // (`agent/agent_init.py`: `_streaming in {"false", "0", "no", "off"}`);
+        // for the YAML-boolean keys it is a superset of what PyYAML would
+        // have turned into `False` anyway.
+        func boolTrueDefault(_ key: String) -> Bool {
+            guard let v = values[key] else { return true }
+            return !["false", "0", "no", "off"].contains(
+                v.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            )
+        }
         func int(_ key: String, default def: Int) -> Int {
             Int(values[key] ?? "") ?? def
         }
@@ -76,7 +92,12 @@ public extension HermesConfig {
             toolPreviewLength: int("display.tool_preview_length", default: 0),
             busyInputMode: str("display.busy_input_mode", default: "interrupt"),
             language: str("display.language"),
-            timestamps: bool("display.timestamps", default: false)
+            timestamps: bool("display.timestamps", default: false),
+            // v0.21.1 keys. `resume_last_session` defaults TRUE upstream, so
+            // an absent key must read `true` — reading it as `false` would
+            // render the toggle off while the host resumes anyway.
+            bellOnPrompt: bool("display.bell_on_prompt", default: false),
+            resumeLastSession: boolTrueDefault("display.resume_last_session")
         )
 
         let terminal = TerminalSettings(
@@ -270,7 +291,11 @@ public extension HermesConfig {
             // defaults (50→250, 3→10), so resolve via
             // `HermesConfig.displayDelegationMax*`.
             maxIterations: int("delegation.max_iterations", default: 0),
-            maxConcurrentChildren: int("delegation.max_concurrent_children", default: 0)
+            maxConcurrentChildren: int("delegation.max_concurrent_children", default: 0),
+            // v0.21.1 keys. Here Hermes's own default (0 = no subagent cap)
+            // and the "absent" reading coincide, so no sentinel is needed.
+            independentCompletions: bool("delegation.independent_completions", default: false),
+            compressionThresholdTokens: int("delegation.compression_threshold_tokens", default: 0)
         )
 
         let discord = DiscordSettings(
@@ -354,7 +379,12 @@ public extension HermesConfig {
         // `telemetry.shared_metrics` — v0.20+ opt-in local aggregate
         // metrics (Relay pipeline, first released v2026.7.30).
         let telemetry = TelemetrySettings(
-            sharedMetricsEnabled: bool("telemetry.shared_metrics.enabled", default: false)
+            sharedMetricsEnabled: bool("telemetry.shared_metrics.enabled", default: false),
+            // v0.21.1 transmission opt-in + its endpoint. `send` is read
+            // independently of `enabled` so the UI can show the true stored
+            // state; Hermes itself refuses to transmit without `enabled`.
+            sharedMetricsSend: bool("telemetry.shared_metrics.send", default: false),
+            sharedMetricsEndpoint: str("telemetry.shared_metrics.endpoint")
         )
 
         // `database.*` — SQLite journal/WAL sizing pragmas, v0.20+ (first
@@ -634,6 +664,23 @@ public extension HermesConfig {
             // (nil → serve-all) or being silently dropped.
             multiplexProfileAllowlist: Self.multiplexProfileAllowlist(
                 values: values, lists: lists, maps: maps
+            ),
+            // v0.21.1 scalars. Window length for the bounded `auto`/`cold`
+            // service tiers; Hermes's own default is 60 and has never been
+            // anything else, so the parse default IS the host default.
+            agentFastAutoSeconds: int("agent.fast_auto_seconds", default: 60),
+            // The next four all default TRUE upstream, so an absent key must
+            // read `true` — reading `false` would render every toggle off
+            // while the host does the opposite. `model.streaming` gets its
+            // default from its READER (`agent/agent_init.py`
+            // `_model_section.get("streaming", "true")`), not from
+            // `config_defaults.py`, and `tool_loop_guardrails` is a
+            // TOP-LEVEL block, not a child of `agent.`.
+            gatewayTrustEnv: boolTrueDefault("gateway.trust_env"),
+            updatesCheck: boolTrueDefault("updates.check"),
+            modelStreaming: boolTrueDefault("model.streaming"),
+            toolLoopNonInteractiveHardStop: boolTrueDefault(
+                "tool_loop_guardrails.non_interactive_hard_stop_enabled"
             )
         )
     }

@@ -40,6 +40,12 @@ struct AdvancedTab: View {
 
         SettingsSection(title: "Network", icon: "network") {
             ToggleRow(label: "Force IPv4", isOn: viewModel.config.forceIPv4) { viewModel.setForceIPv4($0) }
+            // v0.21.1 — default ON upstream. Turning it off is the fix for a
+            // gateway that inherits a proxy it must not use.
+            if capabilities.isV0211OrLater {
+                ToggleRow(label: "Gateway Trusts Proxy Env", isOn: viewModel.config.gatewayTrustEnv) { viewModel.setGatewayTrustEnv($0) }
+                    .help("Lets gateway adapters read HTTP_PROXY / HTTPS_PROXY / NO_PROXY / SSL_CERT_FILE and auto-detect system proxies. Turn OFF when the gateway inherits a proxy it must not use. Per-platform vars (DISCORD_PROXY, …) are honored either way.")
+            }
         }
 
         SettingsSection(title: "Context & Compression", icon: "arrow.down.right.and.arrow.up.left") {
@@ -105,10 +111,31 @@ struct AdvancedTab: View {
                 StepperRow(label: "Max Concurrent Children", value: viewModel.config.displayDelegationMaxConcurrentChildren(capabilities: capabilities), range: 1...500, step: 1) { viewModel.setDelegationMaxConcurrentChildren($0) }
                     .help("Max parallel child agents per delegation batch. Values above 10 multiply API cost linearly.")
             }
+            // v0.21.1+.
+            if capabilities.isV0211OrLater {
+                ToggleRow(label: "Independent Completions", isOn: viewModel.config.delegation.independentCompletions) { viewModel.setDelegationIndependentCompletions($0) }
+                    .help("Off (default): a background fan-out returns as one message when the whole call finishes. On: each task returns as it finishes — more orchestrator turns.")
+                // Hermes only enables the cap at >= 16000 and treats
+                // 1...15999 as a config error it warns about and ignores, so
+                // the stepper jumps straight from 0 (off) to the floor
+                // rather than offering values the host would discard.
+                StepperRow(
+                    label: "Subagent Compaction Cap",
+                    value: viewModel.config.delegation.compressionThresholdTokens,
+                    range: 0...1_000_000,
+                    step: DelegationSettings.compressionThresholdTokensMinimum,
+                    valueLabel: { $0 == 0 ? String(localized: "Off") : $0.formatted() }
+                ) { viewModel.setDelegationCompressionThresholdTokens($0) }
+                    .help("Absolute token cap on a subagent's compaction trigger, applied as the lower of this and the child's ratio threshold. Off (0) means children compact at the same ratio as the parent. Hermes ignores any value below 16,000.")
+            }
         }
 
         SettingsSection(title: "Cron", icon: "clock") {
             ToggleRow(label: "Wrap Response", isOn: viewModel.config.cronWrapResponse) { viewModel.setCronWrapResponse($0) }
+        }
+
+        if capabilities.isV0211OrLater {
+            v0211Section
         }
 
         if capabilitiesStore?.capabilities.isV017OrLater ?? false {
@@ -163,6 +190,26 @@ struct AdvancedTab: View {
         rawConfigSection
     }
 
+    /// v0.21.1 knobs that have no older home: the passive update check and
+    /// the unattended tool-loop hard stop. Both default ON upstream, so the
+    /// toggles render ON for an untouched config — the readers in
+    /// `HermesConfig+YAML` default them to `true` for exactly this reason.
+    @ViewBuilder
+    private var v0211Section: some View {
+        SettingsSection(title: "Updates & Guardrails", icon: "arrow.triangle.2.circlepath") {
+            ToggleRow(
+                label: "Check for updates",
+                isOn: viewModel.config.updatesCheck
+            ) { viewModel.setUpdatesCheck($0) }
+                .help("Passive version and banner checks. `hermes update --check` still works when this is off.")
+            ToggleRow(
+                label: "Hard-stop tool loops (unattended)",
+                isOn: viewModel.config.toolLoopNonInteractiveHardStop
+            ) { viewModel.setToolLoopNonInteractiveHardStop($0) }
+                .help("Gateway and cron sessions stop a model that keeps repeating failed tool calls — nobody is there to /stop it. Interactive sessions stay warning-only either way.")
+        }
+    }
+
     /// v0.17 knobs — curator consolidation (now opt-in) + a concurrent-session
     /// cap. Gated so a pre-v0.17 host never sees toggles that write keys it
     /// ignores.
@@ -202,24 +249,58 @@ struct AdvancedTab: View {
         .padding(.vertical, 4)
     }
 
-    /// `telemetry.shared_metrics.enabled` — v0.20+, privacy-safe opt-in
-    /// aggregate metrics written only to this profile's local telemetry
-    /// directory. No remote sink exists; collection is off by default.
+    /// Telemetry — TWO separate opt-ins, not one.
+    ///
+    /// `telemetry.shared_metrics.enabled` (v0.20+) turns on local
+    /// COLLECTION into this profile's telemetry directory.
+    /// `telemetry.shared_metrics.send` (v0.21.1+) is what TRANSMITS the
+    /// collected packages to Nous. Through v0.21.0 no sink existed, and
+    /// this tab said so; from v0.21.1 that copy is false, so it is now
+    /// written per host generation. `send` requires `enabled` (alone it
+    /// only logs an error upstream), hence the disabled state rather than
+    /// a hidden row — a user who has turned collection off should still
+    /// see that transmission exists and is off.
     @ViewBuilder
     private var telemetrySection: some View {
+        let hasSend = capabilities.hasSharedMetricsSend
+        let collecting = viewModel.config.telemetry.sharedMetricsEnabled
         SettingsSection(title: "Telemetry", icon: "chart.bar") {
             ToggleRow(
                 label: "Shared usage metrics",
-                isOn: viewModel.config.telemetry.sharedMetricsEnabled
+                isOn: collecting
             ) { viewModel.setSharedMetricsEnabled($0) }
+            if hasSend {
+                ToggleRow(
+                    label: "Send metrics to Nous",
+                    isOn: viewModel.config.telemetry.sharedMetricsSend
+                ) { viewModel.setSharedMetricsSend($0) }
+                    .disabled(!collecting)
+                    .help(collecting
+                          ? "Uploads the locally collected aggregates. Only data recorded inside an opt-in window is ever sent."
+                          : "Turn on Shared usage metrics first — Hermes refuses to send without local collection enabled.")
+            }
         }
+        telemetryHint(hasSend: hasSend)
+    }
+
+    /// Footnote under the Telemetry section. Split out so the two host
+    /// generations state exactly what is true of each — the pre-v0.21.1
+    /// wording is the byte-identical original.
+    @ViewBuilder
+    private func telemetryHint(hasSend: Bool) -> some View {
         HStack {
             Text("")
                 .font(.caption)
                 .frame(width: 160, alignment: .trailing)
-            Text("Privacy-safe aggregate metrics written only to this profile's local telemetry directory. Collection is opt-in and there is no remote sink — nothing leaves this machine.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if hasSend {
+                Text("Privacy-safe aggregate metrics collected into this profile's local telemetry directory. Collection and sending are separate opt-ins: with sending off, nothing leaves this machine. With both on, only data recorded inside an opt-in window is uploaded to \(viewModel.config.telemetry.sharedMetricsEndpointHost).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Privacy-safe aggregate metrics written only to this profile's local telemetry directory. Collection is opt-in and there is no remote sink — nothing leaves this machine.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
         }
         .padding(.horizontal, 12)

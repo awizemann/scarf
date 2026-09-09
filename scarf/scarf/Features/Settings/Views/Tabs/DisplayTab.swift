@@ -84,6 +84,15 @@ struct DisplayTab: View {
             if capabilitiesStore?.capabilities.hasDisplayTimestamps == true {
                 ToggleRow(label: "Show Timestamps", isOn: viewModel.config.display.timestamps) { viewModel.setDisplayTimestamps($0) }
             }
+            // v0.21.1 — `model.streaming`. Sits beside "Streaming"
+            // (`display.streaming`) deliberately: they are easy to confuse
+            // and the pair only reads correctly together. This one is a
+            // PROVIDER-request property (whole session, subagents included),
+            // not a rendering one, and its default is ON.
+            if capabilitiesStore?.capabilities.isV0211OrLater ?? false {
+                ToggleRow(label: "Provider Request Streaming", isOn: viewModel.config.modelStreaming) { viewModel.setModelStreaming($0) }
+                    .help("Streams the model's own API requests (parent and subagents). Turn OFF only for self-hosted OpenAI-compatible servers whose streaming tool-call path is broken — non-streaming loses liveness. Separate from Streaming above, which only affects terminal rendering.")
+            }
         }
 
         SettingsSection(title: "Layout", icon: "rectangle.3.group") {
@@ -91,6 +100,13 @@ struct DisplayTab: View {
             ToggleRow(label: "Compact", isOn: viewModel.config.display.compact) { viewModel.setDisplayCompact($0) }
             PickerRow(label: "Resume Display", selection: viewModel.config.display.resumeDisplay, options: ["full", "minimal"]) { viewModel.setResumeDisplay($0) }
             PickerRow(label: "Busy Input Mode", selection: viewModel.config.display.busyInputMode, options: ["interrupt", "queue"]) { viewModel.setBusyInputMode($0) }
+            // v0.21.1 — Hermes Desktop's own cold-start restore. Default ON
+            // upstream. Scarf's chat pane restores nothing across launches,
+            // so this row is purely the host's preference.
+            if capabilitiesStore?.capabilities.isV0211OrLater ?? false {
+                ToggleRow(label: "Resume Last Session", isOn: viewModel.config.display.resumeLastSession) { viewModel.setResumeLastSession($0) }
+                    .help("Hermes Desktop reopens the last chat or page on cold start. Does not affect Scarf, which always opens on a fresh view.")
+            }
         }
 
         SettingsSection(title: "Tool Progress", icon: "gauge") {
@@ -100,6 +116,12 @@ struct DisplayTab: View {
 
         SettingsSection(title: "Feedback", icon: "bell") {
             ToggleRow(label: "Bell on Complete", isOn: viewModel.config.display.bellOnComplete) { viewModel.setBellOnComplete($0) }
+            // v0.21.1 — the other half of the bell pair: fires when Hermes
+            // BLOCKS on a prompt rather than when a turn finishes.
+            if capabilitiesStore?.capabilities.isV0211OrLater ?? false {
+                ToggleRow(label: "Bell on Prompt", isOn: viewModel.config.display.bellOnPrompt) { viewModel.setBellOnPrompt($0) }
+                    .help("Terminal bell when a blocking prompt opens — clarify, approval or sudo.")
+            }
             ToggleRow(label: "Notify when Hermes finishes", isOn: notifyOnComplete) {
                 notifyOnComplete = $0
                 Analytics.record(.notificationToggled(enabled: $0))

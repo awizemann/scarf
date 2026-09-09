@@ -359,6 +359,23 @@ final class SettingsViewModel {
     func setDisplayCompact(_ value: Bool) { setSetting("display.compact", value: value ? "true" : "false") }
     func setResumeDisplay(_ value: String) { setSetting("display.resume_display", value: value) }
     func setBellOnComplete(_ value: Bool) { setSetting("display.bell_on_complete", value: value ? "true" : "false") }
+    /// v0.21.1+ — bell when a BLOCKING prompt opens (clarify/approval/sudo).
+    func setBellOnPrompt(_ value: Bool) { setSetting("display.bell_on_prompt", value: value ? "true" : "false") }
+    /// v0.21.1+ — Hermes Desktop reopens the last chat/page on cold start.
+    /// Scarf's own chat pane restores nothing across launches; this writes
+    /// the host's preference only.
+    func setResumeLastSession(_ value: Bool) { setSetting("display.resume_last_session", value: value ? "true" : "false") }
+    /// v0.21.1+ — `model.streaming`: PROVIDER request streaming for the whole
+    /// session (parent and subagents). Distinct from `display.streaming`
+    /// above, which only controls terminal token rendering.
+    func setModelStreaming(_ value: Bool) { setSetting("model.streaming", value: value ? "true" : "false") }
+    /// v0.21.1+ — passive version/banner update checks.
+    func setUpdatesCheck(_ value: Bool) { setSetting("updates.check", value: value ? "true" : "false") }
+    /// v0.21.1+ — gateway adapters may read proxy/cert env vars.
+    func setGatewayTrustEnv(_ value: Bool) { setSetting("gateway.trust_env", value: value ? "true" : "false") }
+    /// v0.21.1+ — hard-stop looping tool calls on unattended (gateway/cron)
+    /// platforms. Interactive sessions stay warning-only regardless.
+    func setToolLoopNonInteractiveHardStop(_ value: Bool) { setSetting("tool_loop_guardrails.non_interactive_hard_stop_enabled", value: value ? "true" : "false") }
     func setInlineDiffs(_ value: Bool) { setSetting("display.inline_diffs", value: value ? "true" : "false") }
     func setToolProgressCommand(_ value: Bool) { setSetting("display.tool_progress_command", value: value ? "true" : "false") }
     func setToolPreviewLength(_ value: Int) { setSetting("display.tool_preview_length", value: String(value)) }
@@ -378,6 +395,9 @@ final class SettingsViewModel {
     func setMaxTurns(_ value: Int) { setSetting("agent.max_turns", value: String(value)) }
     func setReasoningEffort(_ value: String) { setSetting("agent.reasoning_effort", value: value) }
     func setServiceTier(_ value: String) { setSetting("agent.service_tier", value: value) }
+    /// v0.21.1+ — length of the fast window the bounded `auto`/`cold` tiers
+    /// open. Inert unless `agent.service_tier` is one of those.
+    func setAgentFastAutoSeconds(_ value: Int) { setSetting("agent.fast_auto_seconds", value: String(value)) }
     func setGatewayNotifyInterval(_ value: Int) { setSetting("agent.gateway_notify_interval", value: String(value)) }
     func setGatewayTimeout(_ value: Int) { setSetting("agent.gateway_timeout", value: String(value)) }
     // -- v0.20.4+ (isV0204OrLater).
@@ -699,6 +719,16 @@ final class SettingsViewModel {
     /// `hasSharedMetricsTelemetry`.
     func setSharedMetricsEnabled(_ value: Bool) { setSetting("telemetry.shared_metrics.enabled", value: value ? "true" : "false") }
 
+    /// `telemetry.shared_metrics.send` — the SEPARATE v0.21.1 transmission
+    /// opt-in. Collection (`enabled`) stays local; this is what uploads the
+    /// aggregate packages to the configured endpoint. Hermes refuses to
+    /// send without `enabled` (it logs an error), so the caller both gates
+    /// this row on `hasSharedMetricsSend` and disables it while collection
+    /// is off. `.endpoint` is deliberately NOT writable here — upstream
+    /// treats it as a staging override, and Scarf only reads it to name the
+    /// real host in the copy.
+    func setSharedMetricsSend(_ value: Bool) { setSetting("telemetry.shared_metrics.send", value: value ? "true" : "false") }
+
     // MARK: - Database (v0.20+)
 
     /// `database.journal_mode` — closed enum in practice (`wal`/`delete`;
@@ -936,6 +966,14 @@ final class SettingsViewModel {
     func setDelegationMaxIterations(_ value: Int) { setSetting("delegation.max_iterations", value: String(value)) }
     /// v0.20.4+ (isV0204OrLater) — server-side default 10, floor 1, no ceiling.
     func setDelegationMaxConcurrentChildren(_ value: Int) { setSetting("delegation.max_concurrent_children", value: String(value)) }
+    /// v0.21.1+ — background fan-outs return per task instead of as one
+    /// message when the whole call finishes.
+    func setDelegationIndependentCompletions(_ value: Bool) { setSetting("delegation.independent_completions", value: value ? "true" : "false") }
+    /// v0.21.1+ — absolute cap on a subagent's compaction TRIGGER. Only `0`
+    /// (off) and values `>= 16000` are meaningful; anything between is a
+    /// config error Hermes warns about and ignores, so the caller's stepper
+    /// must not produce one.
+    func setDelegationCompressionThresholdTokens(_ value: Int) { setSetting("delegation.compression_threshold_tokens", value: String(value)) }
     func setCronWrapResponse(_ value: Bool) { setSetting("cron.wrap_response", value: value ? "true" : "false") }
 
     // MARK: - v0.17 config surfaces
