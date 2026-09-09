@@ -1008,9 +1008,13 @@ import Foundation
         // Every surface above was verified ABSENT at v2026.8.31 (0.21.0):
         // no `plugins compat` verb, no `--paused`/`--failure-deliver`, no
         // `last_dispatch`, no `--completion-contract`, no `auth priority`,
-        // no `mcp login --flow`, no `computer-use ... --json`, no
+        // no `mcp login --flow`, no `computer-use doctor --json`, no
         // auto/cold service tiers, no `telemetry.shared_metrics.send`, no
         // `plugins/web/perplexity/`, no multiplexer status branch.
+        //
+        // NB `computer-use PERMISSIONS status --json` is NOT in that list:
+        // it predates the target by three releases (v0.18) and stays ON
+        // here — see `computerUsePermissionsJSONFloorIsV018`.
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)")
         #expect(!caps.isV0211OrLater)
         #expect(!caps.hasPluginsCompat)
@@ -1079,5 +1083,66 @@ import Foundation
     /// selection, whereas the aux row is a whole sub-editor.
     @Test func hasTavilyWebBackend_unknownVersionKeeps() {
         #expect(HermesCapabilities.empty.hasTavilyWebBackend)
+    }
+
+    // MARK: - Older floors corrected in the v0.21.1 Phase-4 pass
+    //
+    // Each of these was reached for by the v0.21.1 audit and turned out to
+    // predate the target. Gating them at v0.21.1 would hide a working
+    // surface on hosts that have it, so each floor was found by walking
+    // EVERY tag's argparse rather than diffing the two endpoint tags.
+
+    /// `computer-use permissions status --json` is on the parser from
+    /// v2026.7.1 (0.18.0) — in `hermes_cli/main.py` until v0.21.1 moved the
+    /// verb into `hermes_cli/subcommands/computer_use.py`, which is why it
+    /// LOOKS new if you only grep the new module.
+    @Test func computerUsePermissionsJSONFloorIsV018() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.17.0 (2026.6.19)").hasComputerUsePermissionsJSON)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)").hasComputerUsePermissionsJSON)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)").hasComputerUsePermissionsJSON)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasComputerUsePermissionsJSON)
+        // ...while `doctor --json` really is v0.21.1-only.
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)").hasComputerUseDoctorJSON)
+        #expect(!HermesCapabilities.empty.hasComputerUsePermissionsJSON)
+    }
+
+    /// `skills search --json` first appears at v2026.6.19 (0.17.0), with the
+    /// same five keys it emits at the target tag.
+    @Test func skillsSearchJSONFloorIsV017() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.16.0 (2026.6.5)").hasSkillsSearchJSON)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.17.0 (2026.6.19)").hasSkillsSearchJSON)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasSkillsSearchJSON)
+        #expect(!HermesCapabilities.empty.hasSkillsSearchJSON)
+    }
+
+    /// `browse-sh` joins `--source` at v2026.5.28 (0.15.0); the seven
+    /// PROVIDER filters arrive together at v2026.7.1 (0.18.0). argparse
+    /// rejects an unknown `--source`, so the two floors must not be merged.
+    @Test func skillsSourceChoiceFloors() {
+        let v014 = HermesCapabilities.parseLine("Hermes Agent v0.14.0 (2026.5.16)")
+        #expect(!v014.hasSkillsBrowseSHSource)
+        #expect(!v014.hasSkillsProviderSources)
+
+        let v015 = HermesCapabilities.parseLine("Hermes Agent v0.15.0 (2026.5.28)")
+        #expect(v015.hasSkillsBrowseSHSource)
+        #expect(!v015.hasSkillsProviderSources)
+
+        let v017 = HermesCapabilities.parseLine("Hermes Agent v0.17.0 (2026.6.19)")
+        #expect(v017.hasSkillsBrowseSHSource)
+        #expect(!v017.hasSkillsProviderSources)
+
+        let v018 = HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)")
+        #expect(v018.hasSkillsBrowseSHSource)
+        #expect(v018.hasSkillsProviderSources)
+    }
+
+    /// `debug share -y/--yes` (and the non-TTY refusal it answers) arrive
+    /// together at v2026.7.1 (0.18.0). Below that the upload just proceeds,
+    /// and passing the flag would be an argparse error.
+    @Test func debugShareYesFloorIsV018() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.17.0 (2026.6.19)").hasDebugShareYes)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)").hasDebugShareYes)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasDebugShareYes)
+        #expect(!HermesCapabilities.empty.hasDebugShareYes)
     }
 }

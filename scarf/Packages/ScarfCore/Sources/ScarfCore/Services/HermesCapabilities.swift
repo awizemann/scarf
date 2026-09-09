@@ -1051,12 +1051,82 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// it has to show the CLI's output rather than a spinner.
     public var hasMCPOAuthFlow: Bool { isV0211OrLater }
 
-    /// `hermes computer-use doctor --json` / `computer-use permissions
-    /// status --json` — machine-readable macOS TCC state
-    /// (`hermes_cli/subcommands/computer_use.py:78,85`, via the shared
-    /// `add_json_flag`). v0.21.1+: at v2026.8.31 that module has no `json`
-    /// reference at all, and the text output is the only thing available.
+    /// `hermes computer-use doctor --json` — the cua-driver `health_report`
+    /// check matrix as JSON (`hermes_cli/subcommands/computer_use.py`,
+    /// `add_json_flag(computer_use_doctor, …)`). v0.21.1+.
+    ///
+    /// **Phase-4 correction.** The original comment here said "at
+    /// v2026.8.31 that module has no `json` reference at all" — true only
+    /// because `hermes_cli/subcommands/computer_use.py` did not EXIST
+    /// before v0.21.1; the verb lived in `hermes_cli/main.py`. Walking the
+    /// `computer_use_doctor = ` parser block across every tag (in main.py
+    /// where the module is absent) shows `--json` on `doctor` first at
+    /// v2026.9.7 — so this floor is right, but it is a floor for `doctor`
+    /// ALONE. `permissions status --json` is much older; see
+    /// `hasComputerUsePermissionsJSON`.
     public var hasComputerUseDoctorJSON: Bool { isV0211OrLater }
+
+    // MARK: Older floors corrected/added in the v0.21.1 pass
+    //
+    // Three surfaces the v0.21.1 audit reached for turned out to predate
+    // the target by several releases. Gating them at v0.21.1 would hide a
+    // working surface on hosts that have it (the `hasKeenableWebBackend`
+    // mistake, one release later), so each carries its own floor, found by
+    // walking EVERY tag's argparse rather than diffing the two endpoints.
+
+    /// `hermes computer-use permissions status --json` — the normalized
+    /// readiness payload `{platform, platform_supported, installed, version,
+    /// ready, can_grant, checks: [{label,status,message}], source, error,
+    /// accessibility, screen_recording, screen_recording_capturable}`
+    /// (`tools/computer_use/permissions.py::computer_use_status`, whose
+    /// docstring calls the key order "an API payload contract").
+    ///
+    /// **Floor is v0.18, not v0.21.1.** The `--json` flag is on the
+    /// `permissions status` subparser from v2026.7.1 (0.18.0) onward — in
+    /// `hermes_cli/main.py` until v0.21.1 moved it into
+    /// `hermes_cli/subcommands/computer_use.py` — and `computer_use_status`
+    /// returns the same key set at v2026.7.1 and v2026.9.7. Exits 0 when
+    /// `ready`, 1 otherwise, so a caller must read stdout regardless of
+    /// exit code.
+    public var hasComputerUsePermissionsJSON: Bool { isV018OrLater }
+
+    /// `hermes skills search --json` — a JSON array of
+    /// `{name, identifier, source, trust_level, description}` instead of the
+    /// Rich table (`hermes_cli/skills_hub.py::do_search`, `as_json`).
+    ///
+    /// **Floor is v0.17, not v0.21.1.** First tag carrying the flag is
+    /// v2026.6.19 (0.17.0), with the same five keys it emits at v2026.9.7.
+    /// This matters beyond scripting convenience: the search TABLE has no
+    /// `#` column (`Name | Description | Source | Trust | Identifier`), so
+    /// Scarf's row parser — written for `skills browse`, which does have
+    /// one — discarded every search result on every host. JSON is the fix
+    /// AND the only place the full identifier survives unwrapped.
+    public var hasSkillsSearchJSON: Bool { isV017OrLater }
+
+    /// `browse-sh` as a `hermes skills browse|search --source` choice
+    /// (v0.15+ — first tag v2026.5.28 / 0.15.0, in `main.py` then; today
+    /// `hermes_cli/subcommands/skills.py::_SOURCE_CHOICES`).
+    public var hasSkillsBrowseSHSource: Bool { isV015OrLater }
+
+    /// The seven PROVIDER `--source` filters — `nvidia`, `openai`,
+    /// `anthropic`, `huggingface`, `voltagent`, `gstack`, `minimax` — added
+    /// as one block at v2026.7.1 (0.18.0) under the comment "Provider
+    /// filters (GitHub taps stored under source=\"github\")". argparse
+    /// rejects an unknown `--source` value, so offering one of these to a
+    /// pre-v0.18 host turns a search into an exit-2 usage error.
+    public var hasSkillsProviderSources: Bool { isV018OrLater }
+
+    /// `hermes debug share -y/--yes` (v0.18+, first tag v2026.7.1).
+    ///
+    /// From v0.18 `_confirm_upload` (`hermes_cli/debug.py`) hard-EXITS 1 on
+    /// a non-TTY without `--yes` — which is every invocation Scarf makes —
+    /// so `debug share` could never once have succeeded from the app.
+    /// Passing `-y` is what makes it work; the user's consent is the
+    /// confirmation sheet, which runs before the argv is built. Pre-v0.18
+    /// hosts have no such flag AND no confirmation gate (the upload just
+    /// proceeds), so the argv must omit it there or argparse rejects the
+    /// whole command.
+    public var hasDebugShareYes: Bool { isV018OrLater }
 
     /// `agent.service_tier` accepts the two BOUNDED fast-mode values `auto`
     /// (fast for the first `agent.fast_auto_seconds`, default 60) and
