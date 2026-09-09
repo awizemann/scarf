@@ -16,6 +16,38 @@ public struct HermesCronDoctorFinding: Sendable, Equatable, Identifiable {
         self.jobName = jobName
         self.issues = issues
     }
+
+    /// How loudly one issue should read.
+    ///
+    /// v0.21.1 split the delivery story in two: `last_status ==
+    /// "delivery_failed"` no longer emits `last run failed:` at all (the
+    /// agent run succeeded — only the delivery didn't), and a NEW issue
+    /// reports a delivery that was acked without evidence
+    /// (`hermes_cli/cron.py:498-500`). "Unverified" is not a failure: the
+    /// adapter accepted the message and simply returned no receipt, so it
+    /// renders as a note rather than a warning alongside issues that mean
+    /// something is actually broken.
+    public enum IssueSeverity: Sendable, Equatable {
+        case problem
+        case unverified
+    }
+
+    /// Verbatim prefix of the v0.21.1 delivery-unverified issue.
+    static let unverifiedIssuePrefix = "last delivery unverified"
+
+    public static func severity(of issue: String) -> IssueSeverity {
+        issue.lowercased().hasPrefix(unverifiedIssuePrefix) ? .unverified : .problem
+    }
+
+    /// Issues that mean something is broken — the count the banner headlines,
+    /// so an unverified-delivery note never reads as a failure.
+    public var problemIssues: [String] {
+        issues.filter { Self.severity(of: $0) == .problem }
+    }
+
+    public var unverifiedIssues: [String] {
+        issues.filter { Self.severity(of: $0) == .unverified }
+    }
 }
 
 /// Argv builder + text parser for `hermes cron doctor`.
@@ -178,18 +210,34 @@ public enum HermesCronDoctorParser {
     /// Can `token` be a job id rather than the first word of a traceback
     /// line that happens to sit at indent 2?
     ///
-    /// `cron/jobs.py` mints ids as `uuid.uuid4().hex[:12]`, and hand-made
-    /// stores use slugs like `nightly-1`. So: identifier characters only,
-    /// and either a digit somewhere or a long hex run. Python traceback
-    /// lines fail every clause — `File`/`Traceback`/`During`/`raise` carry
-    /// no digit, and `KeyError:` / `self.run()` / `~~~~^^^` carry
-    /// characters an id can't have. This check only applies while an issue
-    /// is open; the first header of a block is accepted unconditionally.
+    /// The header grammar is `  {id} {name}` (`hermes_cli/cron.py:531`), so
+    /// the id is one token of identifier characters. Hermes mints ids as
+    /// `uuid.uuid4().hex[:12]`, but an id-keyed `jobs.json` written by an
+    /// external tool contributes its KEY as the id (`cron/jobs.py:1271`) —
+    /// any string at all, `nightly-backup` included. Requiring a DIGIT (the
+    /// original rule) swallowed exactly those: the header was read as a
+    /// continuation of the previous job's traceback, so the job vanished
+    /// from the findings and its issue was attributed to the wrong job.
+    ///
+    /// So: identifier characters only, plus one shape marker — a digit, a
+    /// `-`/`_` separator, or a long hex run. Python traceback lines fail
+    /// every clause: `File`, `Traceback`, `During`, `raise` are bare
+    /// lowercase/capitalised words with no separator and no digit, and
+    /// `KeyError:`, `self.run()`, `~~~~^^^` carry characters the charset
+    /// rejects outright.
+    ///
+    /// Residual limit, deliberate: a single bare word (`nightly`) is still
+    /// not accepted MID-TRACEBACK, because nothing distinguishes it from
+    /// `Traceback`. The first header of a block is accepted unconditionally,
+    /// so such a job is only mis-read when it directly follows a job whose
+    /// issue text contains a traceback.
     private static func isPlausibleJobID(_ token: String) -> Bool {
         guard token.count >= 3,
               token.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
         else { return false }
         if token.contains(where: { $0.isNumber }) { return true }
+        // A separator is a shape no traceback keyword has.
+        if token.contains("-") || token.contains("_") { return true }
         return token.count >= 8 && token.allSatisfy { $0.isHexDigit }
     }
 

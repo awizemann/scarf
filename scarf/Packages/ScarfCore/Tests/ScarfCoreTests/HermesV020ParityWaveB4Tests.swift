@@ -155,21 +155,36 @@ struct HermesV020ParityWaveB4Tests {
         #expect(pinned.displayMaxTurnsText(capabilities: v0205) == "250")
     }
 
-    // MARK: - Skills CLI argv (no --yes; it never existed)
+    // MARK: - Skills CLI argv (--yes exists from v0.20.5, not before)
 
-    @Test func skillsUninstallArgvHasNoYesFlag() {
-        let args = SkillsViewModel.uninstallArgs("honcho")
-        #expect(args == ["skills", "uninstall", "honcho"])
-        #expect(!args.contains("--yes"))
-        // Uninstall confirms via stdin prompt; EOF means "n", so a "y"
-        // line must be fed for the non-interactive invocation to proceed.
-        #expect(SkillsViewModel.uninstallStdin == "y\n")
+    /// L6 — `skills uninstall --yes` was added at v2026.8.19 (0.20.5) and is
+    /// consumed as `skip_confirm` (`hermes_cli/skills_hub.py:1324`). Below
+    /// that floor argparse exits 2 on the flag and the verb only confirms
+    /// through `input()`, so those hosts keep the piped "y" line.
+    @Test func skillsUninstallSendsYesOnlyFromItsFloor() {
+        let v0204 = HermesCapabilities.parseLine("Hermes Agent v0.20.4 (2026.8.18)")
+        let v0205 = HermesCapabilities.parseLine("Hermes Agent v0.20.5 (2026.8.19)")
+        let v0211 = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+
+        for old in [HermesCapabilities.empty, v0204] {
+            let args = SkillsViewModel.uninstallArgs("honcho", capabilities: old)
+            #expect(args == ["skills", "uninstall", "--", "honcho"])
+            #expect(!args.contains("--yes"))
+            // EOF reads as "n", so the confirmation must be piped.
+            #expect(SkillsViewModel.uninstallStdin(capabilities: old) == "y\n")
+        }
+        for new in [v0205, v0211] {
+            #expect(SkillsViewModel.uninstallArgs("honcho", capabilities: new)
+                    == ["skills", "uninstall", "--yes", "--", "honcho"])
+            // No prompt to answer — a stray "y" would be left on stdin.
+            #expect(SkillsViewModel.uninstallStdin(capabilities: new) == nil)
+        }
     }
 
     /// t-ec6d2e6d: the positional is the BARE name (`skill.name`), never the
     /// `<category>/<name>` id, and the verdict is the output, not the exit.
     @Test func skillsUninstallVerdictComesFromOutputNotExitCode() {
-        #expect(SkillsViewModel.uninstallArgs("openhue") == ["skills", "uninstall", "openhue"])
+        #expect(SkillsViewModel.uninstallArgs("openhue") == ["skills", "uninstall", "--", "openhue"])
         // v0.21.0, verbatim: rejection exits 0.
         let rejected = "Error: 'smart-home/openhue' is not a hub-installed skill (may be a builtin)\n"
         #expect(!SkillsViewModel.uninstallSucceeded(exitCode: 0, output: rejected))

@@ -102,6 +102,18 @@ public struct HermesMCPServer: Identifiable, Sendable, Equatable {
     /// (`cwd:` scalar, `StdioServerParameters.cwd`). `nil` = key absent =
     /// Hermes's own process cwd.
     public let cwd: String?
+    /// Hermes v0.21.1+ — `oauth.flow` inside the server's `oauth:` block:
+    /// `"browser"` (PKCE redirect, Hermes's default) or `"device"` (RFC 8628
+    /// device code). `nil` = key absent = browser. Held as a String so an
+    /// unknown future spelling round-trips instead of collapsing to a default;
+    /// `mcp_config.py:639-641` rejects anything outside the two, so Scarf's
+    /// picker only ever writes those.
+    ///
+    /// The `oauth:` block also carries `client_id` / `client_secret` / `scope`
+    /// / `timeout`, which Scarf does not model — so this key is written by a
+    /// nested-scalar patcher that touches the one line, NOT by a block writer
+    /// like `identity_header`'s, which would delete the user's credentials.
+    public let oauthFlow: String?
 
 
     public init(
@@ -128,7 +140,8 @@ public struct HermesMCPServer: Identifiable, Sendable, Equatable {
         sslVerify: String? = nil,
         identityHeader: MCPIdentityHeader? = nil,
         strictRedirectHeaders: Bool? = nil,
-        cwd: String? = nil
+        cwd: String? = nil,
+        oauthFlow: String? = nil
     ) {
         self.name = name
         self.transport = transport
@@ -154,6 +167,7 @@ public struct HermesMCPServer: Identifiable, Sendable, Equatable {
         self.identityHeader = identityHeader
         self.strictRedirectHeaders = strictRedirectHeaders
         self.cwd = cwd
+        self.oauthFlow = oauthFlow
     }
     public var id: String { name }
 

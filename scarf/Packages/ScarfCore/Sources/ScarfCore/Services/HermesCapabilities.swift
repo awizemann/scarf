@@ -156,7 +156,13 @@ public struct HermesCapabilities: Sendable, Equatable {
     public var hasGatewayBusyAckToggle: Bool { atLeastSemver(0, 13, 0) }
 
     /// Per-platform `gateway_restart_notification` flag controls whether the
-    /// platform posts a "Gateway restarted" notice on boot (v0.13+).
+    /// platform posts a "Gateway restarted" notice on boot.
+    ///
+    /// Floor verified by walking the symbol back through every tag: the field
+    /// lands in `gateway/config.py::PlatformConfig` at commit b71f80e6ce,
+    /// first tagged v2026.5.7 = **0.13.0**, and it has defaulted to `True`
+    /// since that first commit (`_coerce_bool(data.get(…), True)`) — which is
+    /// why Scarf's editor defaults the toggle ON, not off.
     public var hasGatewayRestartNotification: Bool { atLeastSemver(0, 13, 0) }
 
     /// `hermes gateway list` cross-profile status verb (v0.13+). Lets Scarf
@@ -657,6 +663,11 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// 64faff6768, 056e7df0e0, 9baa8cc96c, 36185bf2e2, 43d994986e,
     /// 841a5a744a/14bed44c8c revert+reapply, all first released
     /// v2026.7.30).
+    ///
+    /// "No remote sink" was true through v0.21.0 and is NOT true from
+    /// v0.21.1, which adds the `send`/`endpoint` transmission keys — see
+    /// `hasSharedMetricsSend`. This flag stays about the local COLLECTION
+    /// switch (`telemetry.shared_metrics.enabled`), which is unchanged.
     public var hasSharedMetricsTelemetry: Bool { isV020OrLater }
 
     /// `database.{journal_mode,wal_autocheckpoint,journal_size_limit}` —
@@ -949,7 +960,200 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// actively using is not. (This differs deliberately from
     /// `hasWebExtractAux`, whose row is a whole sub-editor rather than one
     /// entry in a list.)
-    public var hasTavilyWebBackend: Bool { !isV021OrLater }
+    ///
+    /// **v0.21.1 puts it back.** `plugins/web/tavily/` was re-added at
+    /// v2026.9.7 (commit 428e084dcd) — `git ls-tree v2026.9.7 plugins/web/`
+    /// lists it, `v2026.8.31` does not. So the removal window is EXACTLY
+    /// v0.21.0: present ≤ v0.20.6, gone at v0.21.0, present again from
+    /// v0.21.1. The kept-on-unknown policy is unchanged (`semver == nil`
+    /// falls out of the equality and keeps the option).
+    public var hasTavilyWebBackend: Bool {
+        guard let s = semver else { return true }         // unknown → keep
+        return s != SemVer(major: 0, minor: 21, patch: 0) // gone at 0.21.0 only
+    }
+
+    /// Whether `keenable` is a selectable web search/extract backend
+    /// (`plugins/web/keenable/`, registering search AND extract on
+    /// `KeenableWebSearchProvider`). **Floor corrected from the audit
+    /// report's "v0.20.6":** `git ls-tree <tag> plugins/web/` across every
+    /// tag shows the directory first appearing at v2026.8.19 (0.20.5), not
+    /// v2026.8.27 — so gating it at v0.20.6 would hide a working backend
+    /// from 0.20.5 hosts. It has been in the keyless free-tier ring the
+    /// whole time; Scarf's picker simply never listed it.
+    public var hasKeenableWebBackend: Bool { isV0205OrLater }
+
+    // MARK: v0.21.1 (v2026.9.7) flags
+    //
+    // A light additive cycle on top of v0.21.0: the state.db schema Scarf
+    // reads, the ACP wire, and every argv Scarf issues are unchanged, so
+    // everything below is a NEW surface rather than a migration. Each flag
+    // was floor-checked BOTH ways — absent at v2026.8.31 (0.21.0), present
+    // at v2026.9.7 — with `git -C ~/.hermes/hermes-agent grep <needle>
+    // <tag> -- <path>`, per charter C2.
+    //
+    // Note `hasTavilyWebBackend` above is a v0.21.1 change too, but it lives
+    // with the v0.21 removal it reverses so the whole window reads in one
+    // place; same for `hasKeenableWebBackend`, whose floor is older still.
+
+    /// `hermes plugins compat [--json]` — report installed plugins that
+    /// import pre-decomposition module paths, which stop loading after the
+    /// removal date the command reports (v0.21.1+,
+    /// `hermes_cli/subcommands/plugins.py:105`, dispatched at
+    /// `hermes_cli/plugins_cmd.py:2060`). JSON payload is
+    /// `{removal_date, in_effect, plugins: {name: [hits]}}`. **Exits 1 when
+    /// plugins are affected** — that is the finding path, not a failure, so
+    /// a caller must parse stdout regardless of exit code (same contract as
+    /// `cron doctor`). Absent at v2026.8.31, where `plugins_cmd.py` has no
+    /// `compat` verb at all, so an older host fails argparse.
+    public var hasPluginsCompat: Bool { isV0211OrLater }
+
+    /// `hermes cron create --paused [--paused-reason <text>]` — create a job
+    /// already paused, instead of create-then-`cron pause` (v0.21.1+,
+    /// `hermes_cli/subcommands/cron.py:84,86`). Prints `Created PAUSED — …`
+    /// where an armed job prints `Next run:`, so any output parse must
+    /// branch on it. argparse rejects the whole `cron create` on a host
+    /// without the flag, so every cron-write path must gate on this.
+    public var hasCronCreatePaused: Bool { isV0211OrLater }
+
+    /// `hermes cron create/edit --failure-deliver <target>` and the
+    /// corresponding `failure_deliver` job field (v0.21.1+,
+    /// `hermes_cli/subcommands/cron.py:33,94`; persisted by
+    /// `cron/jobs.py`). Scarf already round-trips the field verbatim through
+    /// `HermesCronJob.extra`; this gates SHOWING and WRITING it. Unknown
+    /// flag ⇒ argparse rejects the whole invocation, so job-cloning paths
+    /// must drop the argv on older hosts rather than pass it through.
+    public var hasCronFailureDeliver: Bool { isV0211OrLater }
+
+    /// Cron dispatch diagnostics: the job fields `last_dispatch`
+    /// (`{scheduled_at, dispatched_at, kind: on_time|late|catch_up,
+    /// lateness_seconds}`) and `last_delivery_unverified`, surfaced by
+    /// `cron list` as new `Dispatch:` and `⚠ Delivery UNVERIFIED:` rows
+    /// (`hermes_cli/cron.py:204,223`) and by `cron status` as a late-fire
+    /// block (`:433-434,498`). v0.21.1+ — absent at v2026.8.31. Read-only
+    /// diagnostics, but the two new rows are a text-parser drift risk, so
+    /// the parser expectations gate here.
+    public var hasCronDispatchDiagnostics: Bool { isV0211OrLater }
+
+    /// `hermes kanban … --completion-contract <contract>`
+    /// (`hermes_cli/kanban_parser.py:189`) plus the `completion_contract`
+    /// and `last_failure_error` fields in `kanban list --json`
+    /// (`hermes_cli/kanban_output.py:23`) — the real failure reason without
+    /// a second `kanban show` round-trip. v0.21.1+.
+    public var hasKanbanCompletionContract: Bool { isV0211OrLater }
+
+    /// `hermes auth priority <provider> <target> <n>` and `auth refresh
+    /// <provider> [target]` — reorder a credential pool and clear one
+    /// credential's cooldown (v0.21.1+,
+    /// `hermes_cli/subcommands/auth.py:47,50,52`). The same commit adds
+    /// `auth add --priority` and an optional target on `auth reset`.
+    /// Credential Pools can do neither today.
+    public var hasAuthPriority: Bool { isV0211OrLater }
+
+    /// `hermes mcp login <name> --flow {browser,device}` plus the
+    /// `mcp_servers.<name>.oauth.flow` config key (v0.21.1+,
+    /// `hermes_cli/subcommands/mcp.py:59`; device grant implemented in
+    /// `tools/mcp_oauth_device.py`). The device flow prints a verification
+    /// URL AND a user code that the user must read, so a Scarf surface for
+    /// it has to show the CLI's output rather than a spinner.
+    public var hasMCPOAuthFlow: Bool { isV0211OrLater }
+
+    // MARK: Older floors corrected/added in the v0.21.1 pass
+    //
+    // Three surfaces the v0.21.1 audit reached for turned out to predate
+    // the target by several releases. Gating them at v0.21.1 would hide a
+    // working surface on hosts that have it (the `hasKeenableWebBackend`
+    // mistake, one release later), so each carries its own floor, found by
+    // walking EVERY tag's argparse rather than diffing the two endpoints.
+
+    /// `hermes computer-use permissions status --json` — the normalized
+    /// readiness payload `{platform, platform_supported, installed, version,
+    /// ready, can_grant, checks: [{label,status,message}], source, error,
+    /// accessibility, screen_recording, screen_recording_capturable}`
+    /// (`tools/computer_use/permissions.py::computer_use_status`, whose
+    /// docstring calls the key order "an API payload contract").
+    ///
+    /// **Floor is v0.18, not v0.21.1.** The `--json` flag is on the
+    /// `permissions status` subparser from v2026.7.1 (0.18.0) onward — in
+    /// `hermes_cli/main.py` until v0.21.1 moved it into
+    /// `hermes_cli/subcommands/computer_use.py` — and `computer_use_status`
+    /// returns the same key set at v2026.7.1 and v2026.9.7. Exits 0 when
+    /// `ready`, 1 otherwise, so a caller must read stdout regardless of
+    /// exit code.
+    public var hasComputerUsePermissionsJSON: Bool { isV018OrLater }
+
+    /// `hermes skills search --json` — a JSON array of
+    /// `{name, identifier, source, trust_level, description}` instead of the
+    /// Rich table (`hermes_cli/skills_hub.py::do_search`, `as_json`).
+    ///
+    /// **Floor is v0.17, not v0.21.1.** First tag carrying the flag is
+    /// v2026.6.19 (0.17.0), with the same five keys it emits at v2026.9.7.
+    /// This matters beyond scripting convenience: the search TABLE has no
+    /// `#` column (`Name | Description | Source | Trust | Identifier`), so
+    /// Scarf's row parser — written for `skills browse`, which does have
+    /// one — discarded every search result on every host. JSON is the fix
+    /// AND the only place the full identifier survives unwrapped.
+    public var hasSkillsSearchJSON: Bool { isV017OrLater }
+
+    /// `browse-sh` as a `hermes skills browse|search --source` choice
+    /// (v0.15+ — first tag v2026.5.28 / 0.15.0, in `main.py` then; today
+    /// `hermes_cli/subcommands/skills.py::_SOURCE_CHOICES`).
+    public var hasSkillsBrowseSHSource: Bool { isV015OrLater }
+
+    /// The seven PROVIDER `--source` filters — `nvidia`, `openai`,
+    /// `anthropic`, `huggingface`, `voltagent`, `gstack`, `minimax` — added
+    /// as one block at v2026.7.1 (0.18.0) under the comment "Provider
+    /// filters (GitHub taps stored under source=\"github\")". argparse
+    /// rejects an unknown `--source` value, so offering one of these to a
+    /// pre-v0.18 host turns a search into an exit-2 usage error.
+    public var hasSkillsProviderSources: Bool { isV018OrLater }
+
+    /// `hermes debug share -y/--yes` (v0.18+, first tag v2026.7.1).
+    ///
+    /// From v0.18 `_confirm_upload` (`hermes_cli/debug.py`) hard-EXITS 1 on
+    /// a non-TTY without `--yes` — which is every invocation Scarf makes —
+    /// so `debug share` could never once have succeeded from the app.
+    /// Passing `-y` is what makes it work; the user's consent is the
+    /// confirmation sheet, which runs before the argv is built. Pre-v0.18
+    /// hosts have no such flag AND no confirmation gate (the upload just
+    /// proceeds), so the argv must omit it there or argparse rejects the
+    /// whole command.
+    public var hasDebugShareYes: Bool { isV018OrLater }
+
+    /// `agent.service_tier` accepts the two BOUNDED fast-mode values `auto`
+    /// (fast for the first `agent.fast_auto_seconds`, default 60) and
+    /// `cold` (a session's first turn only) alongside the existing
+    /// ""/`normal` and `fast`/`priority` (v0.21.1+, `cli.py:281`
+    /// `_parse_service_tier_config`, `agent/fast_mode.py:16`
+    /// `BOUNDED_MODES`, `hermes_cli/config_defaults.py:119,122`). At
+    /// v2026.8.31 the same parser knows only off/priority and LOGS A
+    /// WARNING then ignores anything else — so Scarf must not offer these
+    /// values to an older host, and its Bool "Fast Mode" toggle must not
+    /// overwrite an `auto`/`cold` value it can't represent.
+    public var hasServiceTierBoundedModes: Bool { isV0211OrLater }
+
+    /// `telemetry.shared_metrics.send` (default false) and `.endpoint`
+    /// (`https://telemetry.nousresearch.com/v1/telemetry`) — the opt-in that
+    /// TRANSMITS the locally collected aggregate metrics
+    /// (`hermes_cli/config_defaults.py:2070`). v0.21.1+: the sibling
+    /// `.enabled` collection switch already existed at v2026.8.31
+    /// (`config_defaults.py:3496`), where the block has that key and nothing
+    /// else — so this flag is specifically about the two transmission keys,
+    /// and about Scarf's Advanced-tab copy, which claims "there is no remote
+    /// sink" and is false from v0.21.1 on. Collection stays local while
+    /// `send` is false, and `send` alone (without `enabled`) logs an error.
+    ///
+    /// Named `…Send` rather than the audit's `hasSharedMetricsTelemetry`:
+    /// that name is already taken by the v0.20 flag for the sibling
+    /// COLLECTION switch, and the two gate different rows.
+    public var hasSharedMetricsSend: Bool { isV0211OrLater }
+
+    /// Whether `perplexity` is a selectable web search/extract backend
+    /// (v0.21.1+, `plugins/web/perplexity/__init__.py` registering
+    /// `PerplexityWebSearchProvider`, whose `provider.py:149,168,197`
+    /// implement `name`/`search`/`extract` — so it belongs in BOTH pickers).
+    /// Keyed only (`PERPLEXITY_API_KEY`), not a keyless-ring member.
+    /// `git ls-tree v2026.8.31 plugins/web/` has no `perplexity` entry.
+    public var hasPerplexityWebBackend: Bool { isV0211OrLater }
 
     // MARK: Convenience predicates
 
@@ -1026,6 +1230,17 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `isV020OrLater`.
     public var isV0205OrLater: Bool { atLeastSemver(0, 20, 5) }
 
+    /// `hermes skills uninstall --yes` — the non-interactive confirmation.
+    ///
+    /// Floor walked across every tag over both parser locations
+    /// (`hermes_cli/main.py`, then `hermes_cli/subcommands/skills.py`): the
+    /// flag first appears at **v2026.8.19 = 0.20.5** and is consumed as
+    /// `do_uninstall(a.name, skip_confirm=getattr(a, "yes", False))`
+    /// (`hermes_cli/skills_hub.py:1324` at v2026.9.7). Below the floor the
+    /// verb prompts through `input()` and argparse exits 2 on the flag, so
+    /// those hosts still need the piped `"y\n"`.
+    public var hasSkillsUninstallYes: Bool { isV0205OrLater }
+
     /// Whether the connected host is on v0.20.6 or newer. Patch-level floor,
     /// same rationale as `isV0204OrLater`/`isV0205OrLater`. v0.20.6
     /// (v2026.8.27) is the tag that sits between v0.20.5 and v0.21.0 and
@@ -1042,6 +1257,23 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `isV020OrLater` — the v0.21.0 surfaces gated on it are absent from
     /// every v0.20.x host including v0.20.6.
     public var isV021OrLater: Bool { atLeastSemver(0, 21, 0) }
+
+    /// Whether the connected host is on v0.21.1 or newer. Patch-level floor,
+    /// same rationale as `isV0205OrLater`/`isV0206OrLater` — every v0.21.0
+    /// host satisfies `isV021OrLater` but lacks the whole v0.21.1 surface
+    /// (`plugins compat`, `cron --paused`/`--failure-deliver`, `auth
+    /// priority`, `mcp login --flow`, bounded fast-mode tiers, the
+    /// Perplexity backend), so those must be checked with `atLeastSemver(0,
+    /// 21, 1)` rather than the minor-only `isV021OrLater`.
+    public var isV0211OrLater: Bool { atLeastSemver(0, 21, 1) }
+
+    /// Public form of the private floor test, for tables that carry their
+    /// own floors as data (see `KnownPlatforms.minimumVersion`) rather than
+    /// as one named flag each. An UNDETECTED host is below every floor.
+    public func isAtLeast(_ version: SemVer) -> Bool {
+        guard let s = semver else { return false }
+        return s >= version
+    }
 
     private func atLeastSemver(_ major: Int, _ minor: Int, _ patch: Int) -> Bool {
         guard let s = semver else { return false }

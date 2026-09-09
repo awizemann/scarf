@@ -20,19 +20,19 @@ struct PlatformsView: View {
         capabilitiesStore?.capabilities ?? .empty
     }
 
-    /// Capability-filtered platform list. Today only **Google Chat** is
-    /// gated — Yuanbao and Microsoft Teams stay unfiltered to avoid
-    /// changing v0.12 host UX in a v0.13 work-stream (WS-5 plan §Q4).
-    /// If we later decide to gate the v0.12 platforms too, add their
-    /// flags here; the `default: true` arm keeps every other platform
-    /// visible.
+    /// Capability-filtered platform list. **Google Chat** keeps its named
+    /// flag; every other gated row carries its floor as data
+    /// (`HermesToolPlatform.minimumVersion`, walked across every tag).
+    /// Yuanbao and Microsoft Teams stay unfiltered to avoid changing v0.12
+    /// host UX in a v0.13 work-stream (WS-5 plan §Q4); a row with no floor
+    /// is visible everywhere.
     private var visiblePlatforms: [HermesToolPlatform] {
         KnownPlatforms.all.filter { p in
             switch p.name {
             case "google_chat":
                 return capabilities.hasGoogleChatPlatform
             default:
-                return true
+                return p.isAvailable(on: capabilities)
             }
         }
     }
@@ -182,7 +182,10 @@ struct PlatformsView: View {
         case "ntfy":           NtfySetupView(context: ctx)
         case "whatsapp_cloud": WhatsAppCloudSetupView(context: ctx)
         case "simplex":        SimpleXSetupView(context: ctx)
-        case "imessage":       IMessageSetupView(context: ctx)
+        // `bluebubbles` is the real Hermes platform id; `imessage` was
+        // Scarf's own spelling for the same adapter (v0.21.1 B4 rename).
+        case "bluebubbles",
+             "imessage":       IMessageSetupView(context: ctx)
         case "homeassistant":  HomeAssistantSetupView(context: ctx)
         case "webhook":        WebhookSetupView(context: ctx)
         case "yuanbao":        yuanbaoPanel

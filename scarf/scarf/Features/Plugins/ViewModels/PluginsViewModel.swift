@@ -38,6 +38,11 @@ final class PluginsViewModel: OutcomeMessageHosting {
     }
 
     var plugins: [HermesPlugin] = []
+    /// `hermes plugins compat --json` (v0.21.1+). Nil means "no answer" —
+    /// an older host, or a command that didn't run — which is deliberately
+    /// distinct from a report with no affected plugins. The banner only
+    /// renders for the latter's opposite; nothing is claimed on nil.
+    var compatReport: HermesPluginCompatReport?
     var isLoading = false
     var message: String?
     /// Outcome of `message` (GW-F4). This channel carried "Install failed"
@@ -105,8 +110,18 @@ final class PluginsViewModel: OutcomeMessageHosting {
                 }
                 return Self.walkPluginsDirectory(dir: dir, context: ctx)
             }()
+            // `plugins compat` is v0.21.1+ and EXITS 1 when it finds
+            // something — that is the finding path, not a failure, so the
+            // stdout is parsed regardless of exit code (`cmd_compat`'s
+            // `sys.exit(1 if report else 0)`). It runs on the same detached
+            // hop as the roster so the pane paints once.
+            let compat: HermesPluginCompatReport? = caps.hasPluginsCompat
+                ? HermesPluginCompatReport.parse(
+                    svc.runHermesCLISplit(args: ["plugins", "compat", "--json"], timeout: 45).stdout)
+                : nil
             await MainActor.run { [weak self] in
                 self?.plugins = result
+                self?.compatReport = compat
                 self?.isLoading = false
             }
         }

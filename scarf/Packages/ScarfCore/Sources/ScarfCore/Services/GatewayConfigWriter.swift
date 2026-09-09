@@ -21,9 +21,9 @@ import Foundation
 /// byte-for-byte. Only when the section is entirely absent do we append a
 /// fresh `<platform>:` scaffold.
 ///
-/// **Scalar fields don't go through here.** `busy_ack_enabled`,
-/// `gateway_restart_notification`, and `slash_command_notice_ttl_seconds`
-/// are scalars that `hermes config set` handles cleanly — `GatewayBehaviorViewModel`
+/// **Scalar fields don't go through here.** `gateway_restart_notification`
+/// (and the legacy per-platform `busy_ack_enabled`) are scalars that
+/// `hermes config set` handles cleanly — `GatewayBehaviorViewModel`
 /// routes those through `PlatformSetupHelpers.saveForm` like every other
 /// platform toggle.
 ///

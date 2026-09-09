@@ -83,6 +83,19 @@ public struct DisplaySettings: Sendable, Equatable {
     /// hosts ignore the key; Scarf hides the toggle when
     /// `HermesCapabilities.hasDisplayTimestamps` is false.
     public var timestamps: Bool
+    /// `display.bell_on_prompt` (Hermes v0.21.1+,
+    /// `hermes_cli/config_defaults.py`) — terminal bell when a BLOCKING
+    /// prompt opens (clarify / approval / sudo), as opposed to
+    /// ``bellOnComplete``'s bell when a turn finishes. Default `false`.
+    /// Absent on pre-v0.21.1 hosts, which ignore the key.
+    public var bellOnPrompt: Bool
+    /// `display.resume_last_session` (Hermes v0.21.1+,
+    /// `hermes_cli/config_defaults.py`) — Hermes Desktop reopens the last
+    /// chat/page on cold start. Server-side default **`true`**, so an
+    /// absent key must read as `true`, not `false`. This is Hermes
+    /// Desktop's own behaviour; Scarf's chat pane restores nothing across
+    /// launches and is unaffected either way.
+    public var resumeLastSession: Bool
 
 
     public init(
@@ -95,7 +108,9 @@ public struct DisplaySettings: Sendable, Equatable {
         toolPreviewLength: Int,
         busyInputMode: String,
         language: String = "",
-        timestamps: Bool = false
+        timestamps: Bool = false,
+        bellOnPrompt: Bool = false,
+        resumeLastSession: Bool = true
     ) {
         self.skin = skin
         self.compact = compact
@@ -107,6 +122,8 @@ public struct DisplaySettings: Sendable, Equatable {
         self.busyInputMode = busyInputMode
         self.language = language
         self.timestamps = timestamps
+        self.bellOnPrompt = bellOnPrompt
+        self.resumeLastSession = resumeLastSession
     }
     public nonisolated static let empty = DisplaySettings(
         skin: "default",
@@ -750,6 +767,27 @@ public struct DelegationSettings: Sendable, Equatable {
     /// resolve through
     /// `HermesConfig.displayDelegationMaxConcurrentChildren(capabilities:)`.
     public var maxConcurrentChildren: Int
+    /// `delegation.independent_completions` (Hermes v0.21.1+,
+    /// `hermes_cli/config_defaults.py`). `false` (default): a background
+    /// fan-out returns as ONE message when the whole call finishes. `true`:
+    /// each task (or `group`) returns on its own as it finishes — more new
+    /// turns for the orchestrator. Absent on pre-v0.21.1 hosts, which
+    /// ignore the key; Scarf hides the row there.
+    public var independentCompletions: Bool
+    /// `delegation.compression_threshold_tokens` (Hermes v0.21.1+,
+    /// `hermes_cli/config_defaults.py`). Optional ABSOLUTE cap on a
+    /// subagent's compaction TRIGGER (not the request payload), applied as
+    /// the lower of this and the child's ratio threshold. `0` (the Hermes
+    /// default AND the parse sentinel — they coincide here) = no
+    /// subagent-specific cap. **Hermes only enables it at >= 16000**;
+    /// anything in `1...15999` is a config error it warns about and
+    /// ignores, so the stepper must never land there.
+    public var compressionThresholdTokens: Int
+
+    /// Minimum `delegation.compression_threshold_tokens` Hermes accepts as
+    /// a live cap (`config_defaults.py`: "A token count >= 16000 enables
+    /// it"). Below it, only `0` is meaningful.
+    public nonisolated static let compressionThresholdTokensMinimum = 16_000
 
     public init(
         model: String,
@@ -757,7 +795,9 @@ public struct DelegationSettings: Sendable, Equatable {
         baseURL: String,
         apiKey: String,
         maxIterations: Int,
-        maxConcurrentChildren: Int = 0
+        maxConcurrentChildren: Int = 0,
+        independentCompletions: Bool = false,
+        compressionThresholdTokens: Int = 0
     ) {
         self.model = model
         self.provider = provider
@@ -765,6 +805,8 @@ public struct DelegationSettings: Sendable, Equatable {
         self.apiKey = apiKey
         self.maxIterations = maxIterations
         self.maxConcurrentChildren = maxConcurrentChildren
+        self.independentCompletions = independentCompletions
+        self.compressionThresholdTokens = compressionThresholdTokens
     }
     public nonisolated static let empty = DelegationSettings(model: "", provider: "", baseURL: "", apiKey: "", maxIterations: 0, maxConcurrentChildren: 0)
 }
@@ -1157,12 +1199,47 @@ public struct CommandSecretsSettings: Sendable, Equatable {
 /// profile's local telemetry directory — collection is opt-in and no
 /// remote sink exists. Default `enabled: false`.
 public struct TelemetrySettings: Sendable, Equatable {
+    /// `telemetry.shared_metrics.enabled` — local COLLECTION opt-in (v0.20+).
     public var sharedMetricsEnabled: Bool
+    /// `telemetry.shared_metrics.send` — the SEPARATE TRANSMISSION opt-in
+    /// added at v0.21.1 (`hermes_cli/config_defaults.py`: "Collection
+    /// (`enabled`) and transmission to Nous (`send`) are SEPARATE
+    /// opt-ins"). Requires `enabled` — `send` alone logs an error and sends
+    /// nothing — and a package is transmitted only if its whole period
+    /// falls inside a recorded consent window. Default `false`.
+    public var sharedMetricsSend: Bool
+    /// `telemetry.shared_metrics.endpoint` — where `send` transmits
+    /// (v0.21.1+). Deliberately NOT env-overridable upstream and existing
+    /// only as a staging/local override, so Scarf READS it (to name the
+    /// real host in the Advanced-tab copy) and never writes it. Empty
+    /// means "key absent" — the host uses ``defaultSharedMetricsEndpoint``.
+    public var sharedMetricsEndpoint: String
 
-    public init(sharedMetricsEnabled: Bool = false) {
+    /// The v0.21.1 `config_defaults.py` value, used when the key is absent.
+    public nonisolated static let defaultSharedMetricsEndpoint =
+        "https://telemetry.nousresearch.com/v1/telemetry"
+
+    public init(
+        sharedMetricsEnabled: Bool = false,
+        sharedMetricsSend: Bool = false,
+        sharedMetricsEndpoint: String = ""
+    ) {
         self.sharedMetricsEnabled = sharedMetricsEnabled
+        self.sharedMetricsSend = sharedMetricsSend
+        self.sharedMetricsEndpoint = sharedMetricsEndpoint
     }
-    public nonisolated static let empty = TelemetrySettings(sharedMetricsEnabled: false)
+
+    /// Host to name in user-facing copy: the configured endpoint's host, or
+    /// the upstream default's when the key is absent/unparseable.
+    public var sharedMetricsEndpointHost: String {
+        let raw = sharedMetricsEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidate = raw.isEmpty ? Self.defaultSharedMetricsEndpoint : raw
+        return URL(string: candidate)?.host
+            ?? URL(string: Self.defaultSharedMetricsEndpoint)?.host
+            ?? "telemetry.nousresearch.com"
+    }
+
+    public nonisolated static let empty = TelemetrySettings()
 }
 
 /// `database.*` — SQLite journal/WAL sizing pragmas applied by every
@@ -1376,9 +1453,49 @@ public struct HermesConfig: Sendable {
     public var dockerEnv: [String: String]
     public var commandAllowlist: [String]
     public var memoryProfile: String
+    /// `agent.service_tier` — the persisted fast-mode preference. Read it
+    /// through ``HermesServiceTier/normalize(_:)`` rather than comparing
+    /// strings: Hermes accepts six spellings of "off" and three of "always"
+    /// (`cli.py` `_parse_service_tier_config`), plus the v0.21.1 bounded
+    /// modes `auto`/`cold`.
     public var serviceTier: String
+    /// `agent.fast_auto_seconds` (Hermes v0.21.1+,
+    /// `hermes_cli/config_defaults.py`) — length of the fast window that
+    /// `service_tier: auto` opens at every user turn (and `cold` on a
+    /// session's first turn only). Default 60. Inert unless the tier is a
+    /// bounded mode; ignored entirely by pre-v0.21.1 hosts.
+    public var agentFastAutoSeconds: Int
     public var gatewayNotifyInterval: Int
     public var forceIPv4: Bool
+    /// `gateway.trust_env` (Hermes v0.21.1+,
+    /// `hermes_cli/config_defaults.py`). Lets gateway adapters read
+    /// `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`/`SSL_CERT_FILE` from the
+    /// environment and auto-detect system proxies. Server-side default
+    /// **`true`** — turn it off when the gateway inherits a proxy it must
+    /// not use. Per-platform vars (`DISCORD_PROXY`, …) are honored either
+    /// way.
+    public var gatewayTrustEnv: Bool
+    /// `updates.check` (Hermes v0.21.1+, `hermes_cli/config_defaults.py`).
+    /// Governs PASSIVE version/banner checks only; an explicit `hermes
+    /// update --check` still runs. Server-side default **`true`**.
+    public var updatesCheck: Bool
+    /// `model.streaming` (Hermes v0.21.1+, read at `agent/agent_init.py:1184`
+    /// — *not* in `config_defaults.py`, which is why the default lives in
+    /// the reader: `_model_section.get("streaming", "true")`). `false`
+    /// forces NON-streaming provider requests for the whole session, parent
+    /// and subagents alike — an escape hatch for self-hosted
+    /// OpenAI-compatible servers whose streaming tool-call path is broken.
+    /// Server-side default **`true`**.
+    ///
+    /// Distinct from ``streaming`` (`display.streaming`), which only
+    /// controls token RENDERING in the terminal.
+    public var modelStreaming: Bool
+    /// `tool_loop_guardrails.non_interactive_hard_stop_enabled` (Hermes
+    /// v0.21.1+, `hermes_cli/config_defaults.py` — a TOP-LEVEL block, not
+    /// under `agent.`). Unattended gateway/cron platforms hard-stop a
+    /// looping model by default; interactive cli/tui/desktop/acp sessions
+    /// stay warning-only regardless. Server-side default **`true`**.
+    public var toolLoopNonInteractiveHardStop: Bool
     public var contextEngine: String
     public var interimAssistantMessages: Bool
     public var honchoInitOnSessionStart: Bool
@@ -1673,7 +1790,12 @@ public struct HermesConfig: Sendable {
         telemetry: TelemetrySettings = .empty,
         database: DatabaseSettings = .empty,
         profileRoutes: HermesProfileRoutes = .empty,
-        multiplexProfileAllowlist: [String]? = nil
+        multiplexProfileAllowlist: [String]? = nil,
+        agentFastAutoSeconds: Int = 60,
+        gatewayTrustEnv: Bool = true,
+        updatesCheck: Bool = true,
+        modelStreaming: Bool = true,
+        toolLoopNonInteractiveHardStop: Bool = true
     ) {
         self.cacheTTL = cacheTTL
         self.runtimeMetadataFooter = runtimeMetadataFooter
@@ -1759,6 +1881,11 @@ public struct HermesConfig: Sendable {
         self.database = database
         self.profileRoutes = profileRoutes
         self.multiplexProfileAllowlist = multiplexProfileAllowlist
+        self.agentFastAutoSeconds = agentFastAutoSeconds
+        self.gatewayTrustEnv = gatewayTrustEnv
+        self.updatesCheck = updatesCheck
+        self.modelStreaming = modelStreaming
+        self.toolLoopNonInteractiveHardStop = toolLoopNonInteractiveHardStop
     }
     public nonisolated static let empty = HermesConfig(
         model: "unknown",

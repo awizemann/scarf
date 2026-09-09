@@ -31,6 +31,7 @@ struct HermesFileServiceConfigParityTests {
       provider: ollama
       base_url: http://127.0.0.1:11434/v1
       context_length: 32768
+      streaming: false
     max_concurrent_sessions: 5
     display:
       personality: kawaii
@@ -38,6 +39,8 @@ struct HermesFileServiceConfigParityTests {
       busy_input_mode: queue
       timestamps: true
       language: en
+      bell_on_prompt: true
+      resume_last_session: false
     terminal:
       backend: docker
       docker_extra_args:
@@ -64,6 +67,23 @@ struct HermesFileServiceConfigParityTests {
           dm_policy: allowlist
     human_delay:
       mode: 'off'
+    agent:
+      service_tier: cold
+      fast_auto_seconds: 15
+    updates:
+      check: false
+    gateway:
+      trust_env: false
+    tool_loop_guardrails:
+      non_interactive_hard_stop_enabled: false
+    delegation:
+      independent_completions: true
+      compression_threshold_tokens: 200000
+    telemetry:
+      shared_metrics:
+        enabled: true
+        send: true
+        endpoint: https://staging.example.test/v1/telemetry
     """
 
     private func loadFixture() throws -> (config: HermesConfig, cleanup: () -> Void) {
@@ -103,6 +123,37 @@ struct HermesFileServiceConfigParityTests {
         #expect(config.telegram.statusIndicator == true)
         #expect(config.whatsappCloud.phoneNumberID == "123456")
         #expect(config.whatsappCloud.dmPolicy == "allowlist")
+    }
+
+    /// Hermes v0.21.1 (tag v2026.9.7) keys — the Settings batch shipped in
+    /// the v0.21.1 parity cycle. Four of these default TRUE upstream, so
+    /// the fixture sets every one of them to its NON-default value: a
+    /// reader that dropped the key would fall back to the default and the
+    /// assertion would fail, which is exactly the drift this suite exists
+    /// to catch.
+    @Test func v0211KeysRoundTrip() throws {
+        let (config, cleanup) = try loadFixture()
+        defer { cleanup() }
+        // A4 — service tier + its bounded-window length.
+        #expect(HermesServiceTier.normalize(config.serviceTier) == .cold)
+        #expect(config.agentFastAutoSeconds == 15)
+        // A5 — the two independent telemetry opt-ins and the endpoint.
+        #expect(config.telemetry.sharedMetricsEnabled == true)
+        #expect(config.telemetry.sharedMetricsSend == true)
+        #expect(config.telemetry.sharedMetricsEndpointHost == "staging.example.test")
+        // C9 — the true-by-default four, all explicitly false here.
+        #expect(config.updatesCheck == false)
+        #expect(config.gatewayTrustEnv == false)
+        #expect(config.modelStreaming == false)
+        #expect(config.toolLoopNonInteractiveHardStop == false)
+        #expect(config.display.resumeLastSession == false)
+        // C9 — the rest.
+        #expect(config.display.bellOnPrompt == true)
+        #expect(config.delegation.independentCompletions == true)
+        #expect(config.delegation.compressionThresholdTokens == 200_000)
+        // `model.streaming` must not have been mistaken for
+        // `display.streaming`, which this fixture leaves absent (→ true).
+        #expect(config.streaming == true)
     }
 
     /// Long-standing keys survive the parser swap (parity floor).

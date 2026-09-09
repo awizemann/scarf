@@ -92,6 +92,22 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
     /// unbounded, for non-goal tasks, and on pre-v0.16 hosts.
     public let goalMaxTurns: Int?
 
+    // v0.21.1 (v2026.9.7) fields. Both are new to the `list --json` task dict
+    // at this release (`hermes_cli/kanban_output.py:18-24`) — `_task_to_dict`
+    // in v2026.8.31's `hermes_cli/kanban.py:57-81` emitted neither, even though
+    // the `last_failure_error` COLUMN has existed since v0.20.x. Gate the UI on
+    // `hasKanbanCompletionContract`.
+    /// Declared acceptance boundary for the card, set at create time via
+    /// `--completion-contract`: `local-only` (Hermes's default), `OWNER/REPO`
+    /// to require publication, or an exact GitHub PR URL whose CI gates
+    /// `kanban complete`. `nil` on pre-v0.21.1 hosts and for cards created
+    /// without one.
+    public let completionContract: String?
+    /// The failure reason from the card's last failed dispatch, previously
+    /// reachable only via a second `kanban show`. `nil` on pre-v0.21.1 hosts,
+    /// and cleared by Hermes on a successful run.
+    public let lastFailureError: String?
+
     public init(
         id: String,
         title: String,
@@ -122,7 +138,9 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         currentStepKey: String? = nil,
         modelOverride: String? = nil,
         goalMode: Bool? = nil,
-        goalMaxTurns: Int? = nil
+        goalMaxTurns: Int? = nil,
+        completionContract: String? = nil,
+        lastFailureError: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -154,6 +172,8 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         self.modelOverride = modelOverride
         self.goalMode = goalMode
         self.goalMaxTurns = goalMaxTurns
+        self.completionContract = completionContract
+        self.lastFailureError = lastFailureError
     }
 
     enum CodingKeys: String, CodingKey {
@@ -180,6 +200,8 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         case modelOverride = "model_override"
         case goalMode = "goal_mode"
         case goalMaxTurns = "goal_max_turns"
+        case completionContract = "completion_contract"
+        case lastFailureError = "last_failure_error"
     }
 
     public init(from decoder: any Decoder) throws {
@@ -233,6 +255,11 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         // (no `goal_mode` / `goal_max_turns` keys) decode with both nil.
         self.goalMode = try c.decodeIfPresent(Bool.self, forKey: .goalMode)
         self.goalMaxTurns = try c.decodeIfPresent(Int.self, forKey: .goalMaxTurns)
+        // v0.21.1 fields — `decodeIfPresent` so a pre-v0.21.1 row (neither key
+        // present) decodes with both nil and every existing surface renders
+        // byte-identically.
+        self.completionContract = try c.decodeIfPresent(String.self, forKey: .completionContract)
+        self.lastFailureError = try c.decodeIfPresent(String.self, forKey: .lastFailureError)
     }
 
     /// Decode a timestamp that may arrive as a Unix integer or an

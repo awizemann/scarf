@@ -20,6 +20,10 @@ struct KanbanCreateSheet: View {
     /// first `\n`; we keep the multi-line input rendering on either way
     /// since a taller `TextField` is harmless on v0.12.
     let supportsKanbanDiagnostics: Bool
+    /// True when the connected Hermes is on v0.21.1+ — gates the completion-
+    /// contract field. A pre-v0.21.1 argparse exits 2 on the unknown flag, so
+    /// the card would never be created at all.
+    let supportsCompletionContract: Bool
     /// Closure invoked when the user submits — VM owner constructs the
     /// `KanbanService.create` call.
     let onSubmit: (KanbanCreateRequest) async throws -> Void
@@ -44,6 +48,9 @@ struct KanbanCreateSheet: View {
     /// release notes default to 3 — see TODO in KanbanCreateRequest).
     @State private var maxRetriesEnabled: Bool = false
     @State private var maxRetries: Int = 3
+    /// v0.21.1: acceptance boundary. Empty means "send no flag", which leaves
+    /// Hermes on its own `local-only` default rather than us asserting it.
+    @State private var completionContract: String = ""
     @State private var isSubmitting: Bool = false
     @State private var submitError: String?
     @FocusState private var titleFocused: Bool
@@ -75,6 +82,9 @@ struct KanbanCreateSheet: View {
                     priorityField
                     if supportsKanbanDiagnostics {
                         maxRetriesField
+                    }
+                    if supportsCompletionContract {
+                        completionContractField
                     }
                     skillsField
                     if projectWorkspacePath == nil {
@@ -184,6 +194,20 @@ struct KanbanCreateSheet: View {
                 .disabled(!maxRetriesEnabled)
                 Spacer()
             }
+        }
+    }
+
+    /// v0.21.1: `--completion-contract`. Free text because Hermes accepts
+    /// three shapes (`local-only`, `OWNER/REPO`, an exact PR URL) and
+    /// validates them itself — a picker here would have to guess the repo.
+    private var completionContractField: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ScarfSectionHeader(
+                "Completion contract",
+                subtitle: "local-only, OWNER/REPO, or a GitHub PR URL. Leave empty for Hermes's default."
+            )
+            TextField("local-only", text: $completionContract)
+                .textFieldStyle(.roundedBorder)
         }
     }
 
@@ -414,6 +438,13 @@ struct KanbanCreateSheet: View {
             ? maxRetries
             : nil
 
+        // Same belt-and-suspenders as max-retries: the field is only rendered
+        // when the flag is on, but a pre-v0.21.1 host must never see the argv.
+        let trimmedContract = completionContract.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedContract: String? = (supportsCompletionContract && !trimmedContract.isEmpty)
+            ? trimmedContract
+            : nil
+
         return KanbanCreateRequest(
             title: trimmedTitle,
             body: trimmedBody.isEmpty ? nil : trimmedBody,
@@ -427,7 +458,8 @@ struct KanbanCreateSheet: View {
             maxRuntimeSeconds: nil,
             createdBy: nil,
             skills: parsedSkills,
-            maxRetries: resolvedMaxRetries
+            maxRetries: resolvedMaxRetries,
+            completionContract: resolvedContract
         )
     }
 }

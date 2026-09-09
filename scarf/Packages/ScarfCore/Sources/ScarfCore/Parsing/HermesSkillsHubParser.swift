@@ -85,6 +85,77 @@ public enum HermesSkillsHubParser: Sendable {
         return results
     }
 
+    /// Parse `hermes skills search --json` output.
+    ///
+    /// `do_search(..., as_json=True)` (`hermes_cli/skills_hub.py`) prints
+    /// `json.dumps([...], indent=2)` — a top-level ARRAY of objects with
+    /// exactly five string keys:
+    ///
+    ///     [{"name": …, "identifier": …, "source": …,
+    ///       "trust_level": …, "description": …}]
+    ///
+    /// This is the only shape that carries the full `identifier`. The
+    /// table path can't: `skills search` renders `Name | Description |
+    /// Source | Trust | Identifier` with **no `#` column**, so
+    /// `parseHubList` — written for `skills browse`, which has one —
+    /// dropped every row, and even when it didn't it used the Name cell
+    /// as the install target.
+    ///
+    /// Returns `nil` (not `[]`) when the payload can't be read, so a
+    /// caller can fall back to the table parser instead of rendering
+    /// "no results" over a host that answered something else. An empty
+    /// search legitimately prints `[]`, which decodes to `[]`.
+    ///
+    /// `trust_level` is parsed but not modelled: the hub UI shows the
+    /// source, not the trust tier, exactly as the table path did.
+    public static func parseSearchJSON(_ output: String) -> [HermesHubSkill]? {
+        // Hermes prints the array on stdout; Scarf's runner concatenates
+        // stdout+stderr, and an INFO/warning line can precede it. Slice
+        // from the first `[` to the last `]` rather than demanding that
+        // the whole buffer be JSON.
+        guard let start = output.firstIndex(of: "["),
+              let end = output.lastIndex(of: "]"),
+              start < end,
+              let data = String(output[start...end]).data(using: .utf8)
+        else { return nil }
+        guard let rows = try? JSONDecoder().decode([SearchRow].self, from: data) else { return nil }
+        return rows.compactMap { row in
+            // The identifier is the install target; a row without one is
+            // unusable, and the name is NOT a safe substitute for a
+            // browse-sh slug. Drop it rather than install the wrong skill.
+            let identifier = row.identifier.trimmingCharacters(in: .whitespaces)
+            guard !identifier.isEmpty else { return nil }
+            return HermesHubSkill(
+                identifier: identifier,
+                name: row.name.isEmpty ? identifier : row.name,
+                description: row.description,
+                source: row.source
+            )
+        }
+    }
+
+    /// Decoding shape of one `skills search --json` row. Every field is
+    /// optional-tolerant: a future Hermes that stops emitting one of them
+    /// degrades that column rather than failing the whole parse.
+    private struct SearchRow: Decodable {
+        let name: String
+        let identifier: String
+        let source: String
+        let description: String
+
+        private enum CodingKeys: String, CodingKey {
+            case name, identifier, source, description
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            name = (try? c.decode(String.self, forKey: .name)) ?? ""
+            identifier = (try? c.decode(String.self, forKey: .identifier)) ?? ""
+            source = (try? c.decode(String.self, forKey: .source)) ?? ""
+            description = (try? c.decode(String.self, forKey: .description)) ?? ""
+        }
+    }
+
     /// Parse `hermes skills check` output for available updates. Format
     /// is undocumented; we look for `→` (U+2192) or `->` arrow markers
     /// between version strings.

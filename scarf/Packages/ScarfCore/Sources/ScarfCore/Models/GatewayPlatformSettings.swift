@@ -1,10 +1,9 @@
 import Foundation
 
-/// Per-platform Messaging Gateway settings introduced in Hermes v0.13. Bundles
-/// the allowlist (the platform-appropriate flavor of `allowed_channels` /
-/// `allowed_chats` / `allowed_rooms`) and three behavior toggles
-/// (`busy_ack_enabled`, `gateway_restart_notification`,
-/// `slash_command_notice_ttl_seconds`).
+/// Per-platform Messaging Gateway settings introduced in Hermes v0.13.
+/// Bundles the allowlist (the platform-appropriate flavor of
+/// `allowed_channels` / `allowed_chats` / `allowed_rooms`) and the
+/// `gateway_restart_notification` toggle.
 ///
 /// **Stale-doc fix (v0.20.4 audit, Tier 3 #4): keys live TOP-LEVEL, not
 /// under `gateway.platforms.<platform>.*`.** Source-verified (v0.16+) as
@@ -15,6 +14,22 @@ import Foundation
 /// actual parsing logic in `HermesConfig+YAML.swift` (`gatewayAllowlistPlatforms`
 /// loop, which already used the correct top-level prefix — only these doc
 /// comments were wrong).
+///
+/// **Two doc corrections and one dead field, v0.21.1 audit B5:**
+/// - `busy_ack_enabled` is **not** a per-platform key. Hermes reads only the
+///   GLOBAL `display.busy_ack_enabled` (bridged to
+///   `HERMES_GATEWAY_BUSY_ACK_ENABLED` by `gateway/run.py`), which is why
+///   `GatewayBehaviorViewModel` has written the global key since the v0.21
+///   sweep. `busyAckEnabled` here is kept only to round-trip a
+///   `<platform>.busy_ack_enabled` key a user may already have in their
+///   file; nothing in Hermes reads it.
+/// - `slash_command_notice_ttl_seconds` **exists nowhere in Hermes**, at
+///   either tag. The field was removed rather than kept "for round-trip":
+///   it modelled a key no Hermes version has ever defined, read or written,
+///   and nothing in Scarf wrote it either.
+/// - `gateway_restart_notification`'s upstream default is **`True`**
+///   (`gateway/config.py:393` `PlatformConfig` at tag `v2026.9.7`, identical
+///   at v2026.8.31), not `false`. See the field doc below.
 ///
 /// The struct carries all three list fields so a single shape fits every
 /// platform; only the field matching `GatewayAllowlistKind.kind(for:)` is
@@ -31,12 +46,11 @@ import Foundation
 /// (never exposed via `config.yaml`) — deliberately excluded from this
 /// Swift mapping; don't re-add it thinking it's a gap.
 ///
-/// **Defaults track Hermes v0.13.** `busyAckEnabled = true`,
-/// `gatewayRestartNotification = false`, `slashCommandNoticeTTLSeconds = 0`
-/// (disabled). An "all-default" instance therefore produces no `gateway:`
-/// block in YAML — see `HermesConfig+YAML` parsing logic which only inserts
-/// an entry into `gatewayPlatforms` when at least one v0.13 key is present
-/// in the file.
+/// **Defaults track Hermes.** `busyAckEnabled = true`,
+/// `gatewayRestartNotification = true`. An "all-default" instance therefore
+/// produces no `gateway:` block in YAML — see `HermesConfig+YAML` parsing
+/// logic which only inserts an entry into `gatewayPlatforms` when at least
+/// one of these keys is present in the file.
 public struct GatewayPlatformSettings: Sendable, Equatable {
     /// `<platform>.allowed_channels` (top-level) — Slack, Mattermost,
     /// Discord. Empty when the platform doesn't use channels.
@@ -47,31 +61,37 @@ public struct GatewayPlatformSettings: Sendable, Equatable {
     /// `<platform>.allowed_rooms` (top-level) — Matrix.
     /// Empty when the platform doesn't use rooms.
     public var allowedRooms: [String]
-    /// `<platform>.busy_ack_enabled` (top-level). Default `true` — set
-    /// to `false` to suppress per-message "agent is working…" acks.
+    /// `<platform>.busy_ack_enabled` (top-level) — **read by nothing**.
+    /// Hermes's only busy-ack switch is the global
+    /// `display.busy_ack_enabled`; this field exists solely so a
+    /// hand-written per-platform key survives a load/save round-trip.
+    /// Default `true`, matching the global default.
     public var busyAckEnabled: Bool
-    /// `<platform>.gateway_restart_notification` (top-level). Default
-    /// `false` — set to `true` to post a "Gateway restarted" notice on boot.
+    /// `<platform>.gateway_restart_notification` (top-level) — the
+    /// "♻️ Gateway online/restarted" ping.
+    ///
+    /// **Default `true`, matching Hermes** (`gateway/config.py:393`,
+    /// `PlatformConfig.gateway_restart_notification: bool = True`, identical
+    /// at v2026.8.31 and v2026.9.7). Scarf defaulted this to `false`, so an
+    /// unset key rendered the toggle OFF while the host was pinging — and
+    /// one save then wrote `false`, silently turning off a notification the
+    /// user had never disabled. The parser reads it through
+    /// `boolTrueDefault`, so an absent key is `true` and only an explicit
+    /// falsy spelling (`false`/`0`/`no`/`off`) turns it off.
     public var gatewayRestartNotification: Bool
-    /// `<platform>.slash_command_notice_ttl_seconds` (top-level).
-    /// Default `0` (disabled). Positive values auto-delete slash-command
-    /// notices after N seconds.
-    public var slashCommandNoticeTTLSeconds: Int
 
     public init(
         allowedChannels: [String] = [],
         allowedChats: [String] = [],
         allowedRooms: [String] = [],
         busyAckEnabled: Bool = true,
-        gatewayRestartNotification: Bool = false,
-        slashCommandNoticeTTLSeconds: Int = 0
+        gatewayRestartNotification: Bool = true
     ) {
         self.allowedChannels = allowedChannels
         self.allowedChats = allowedChats
         self.allowedRooms = allowedRooms
         self.busyAckEnabled = busyAckEnabled
         self.gatewayRestartNotification = gatewayRestartNotification
-        self.slashCommandNoticeTTLSeconds = slashCommandNoticeTTLSeconds
     }
 
     /// All-default instance. `HermesConfig.empty` initializes

@@ -43,9 +43,13 @@ struct AgentTab: View {
         }
 
         SettingsSection(title: "Messaging Gateway", icon: "antenna.radiowaves.left.and.right") {
-            ToggleRow(label: "Fast Mode", isOn: viewModel.config.serviceTier == "fast") { on in
-                viewModel.setServiceTier(on ? "fast" : "normal")
-            }
+            // `agent.service_tier`. Was a Bool toggle through v0.21.0; a
+            // toggle can only express two of the four values the v0.21.1
+            // parser accepts, and it showed OFF for `auto`/`cold` then
+            // overwrote them on the first tap. On a pre-v0.21.1 host the
+            // picker offers exactly the two values the toggle wrote, so
+            // nothing about that host's behaviour changes.
+            fastModeRows
             StepperRow(label: "Gateway Timeout (s)", value: viewModel.config.gatewayTimeout, range: 60...7200, step: 60) { viewModel.setGatewayTimeout($0) }
             StepperRow(label: "Notify Interval (s)", value: viewModel.config.gatewayNotifyInterval, range: 0...3600, step: 30) { viewModel.setGatewayNotifyInterval($0) }
             // v0.20.4+ (isV0204OrLater).
@@ -81,6 +85,70 @@ struct AgentTab: View {
         // Hermes 0.19.0), hence its own floor.
         if let capabilities = capabilitiesStore?.capabilities, capabilities.hasGatewayProfileRoutes {
             ProfileRoutesSection(viewModel: viewModel, capabilities: capabilities)
+        }
+    }
+
+    /// Fast-mode selection plus the window length the bounded modes use.
+    ///
+    /// The selection is normalized through `HermesServiceTier` rather than
+    /// compared literally: Hermes accepts six spellings of "off" and three
+    /// of "always" (`cli.py` `_parse_service_tier_config`), and a
+    /// hand-edited `priority` must render as Always, not as a blank row.
+    /// `HermesServiceTier.options(capabilities:current:)` keeps a value the
+    /// host can't use visible instead of silently rewriting it.
+    @ViewBuilder
+    private var fastModeRows: some View {
+        if HermesServiceTier.editorStyle(capabilities: capabilities) == .picker {
+            boundedFastModeRows
+        } else {
+            // C1: a pre-target host (and an undetected one) renders exactly
+            // what it rendered before this cycle — the Bool toggle, which is
+            // lossless there because the two values it writes are the only
+            // two such a host's parser accepts.
+            ToggleRow(label: "Fast Mode", isOn: viewModel.config.serviceTier == "fast") { on in
+                viewModel.setServiceTier(on ? "fast" : "normal")
+            }
+        }
+    }
+
+    /// v0.21.1+: the four-way picker, plus the window the bounded modes use.
+    @ViewBuilder
+    private var boundedFastModeRows: some View {
+        let tier = HermesServiceTier.normalize(viewModel.config.serviceTier)
+        let options = HermesServiceTier.options(capabilities: capabilities, current: tier)
+        PickerRow(
+            label: "Fast Mode",
+            selection: tier.rawValue,
+            options: options.map(\.rawValue),
+            optionLabel: { Self.fastModeLabel(for: $0) }
+        ) { raw in
+            viewModel.setServiceTier(HermesServiceTier(rawValue: raw)?.configValue ?? raw)
+        }
+        .help("Priority service tier for provider requests. Always = every request; Auto = the first seconds of every turn; Cold = a session's first turn only.")
+        // The window length only means anything while a bounded mode is
+        // actually selected.
+        if tier.isBounded {
+            StepperRow(
+                label: "Fast Window (s)",
+                value: viewModel.config.agentFastAutoSeconds,
+                range: 5...3600,
+                step: 5
+            ) { viewModel.setAgentFastAutoSeconds($0) }
+                .help("How long the fast window stays open once a turn opens it. Hermes default: 60.")
+        }
+    }
+
+    /// User-facing name for a `HermesServiceTier` raw value. Every option
+    /// the picker offers comes from `HermesServiceTier.options`, which
+    /// only ever yields enum cases — `normalize` maps every spelling
+    /// Hermes accepts, and everything else, onto one of them — so there is
+    /// no non-enum raw value to fall back to.
+    private static func fastModeLabel(for raw: String) -> String {
+        switch HermesServiceTier(rawValue: raw) ?? .off {
+        case .off:    String(localized: "Off")
+        case .always: String(localized: "Always")
+        case .auto:   String(localized: "Auto (bounded window)")
+        case .cold:   String(localized: "Cold (first turn only)")
         }
     }
 }

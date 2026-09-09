@@ -23,6 +23,17 @@ extension ServerContext {
         return (result.output, result.exitCode)
     }
 
+    /// Invoke the `hermes` CLI and return stdout and stderr SEPARATELY.
+    /// Use this whenever the answer is a JSON payload: `runHermes` returns
+    /// the two streams concatenated, and one INFO/warning line containing a
+    /// brace or bracket is enough to make a "first `{` … last `}`" slice cut
+    /// a payload in half. Same transport rule as `runHermes`.
+    @discardableResult
+    nonisolated func runHermesSplit(_ args: [String], timeout: TimeInterval = 60, stdin: String? = nil) -> (stdout: String, stderr: String, exitCode: Int32) {
+        let result = HermesFileService(context: self).runHermesCLISplit(args: args, timeout: timeout, stdinInput: stdin)
+        return (result.stdout, result.stderr, result.exitCode)
+    }
+
     /// Invoke the `hermes` CLI and capture stdout as raw bytes, with stderr
     /// kept separate. For piping a CLI *payload* back to this Mac — see
     /// `HermesFileService.runHermesCLIData`. Same transport rule as

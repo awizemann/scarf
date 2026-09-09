@@ -29,15 +29,36 @@ public extension HermesConfig {
         let lists = parsed.lists
         let maps = parsed.maps
 
+        // Every typed reader below compares a NORMALISED scalar: the raw
+        // parse keeps everything after `key: ` verbatim, so `false  # off`
+        // and `"false"` are both legal YAML for `false` that no literal
+        // comparison would ever match. See `HermesYAML.normalizedScalar`.
+        func scalar(_ key: String) -> String? {
+            values[key].map(HermesYAML.normalizedScalar)
+        }
         func bool(_ key: String, default def: Bool) -> Bool {
-            guard let v = values[key] else { return def }
-            return v == "true"
+            guard let v = scalar(key) else { return def }
+            return v.lowercased() == "true"
+        }
+        // TRUE-by-default key: absent means the host is doing the thing, and
+        // only an explicit falsy scalar turns it off. `bool(_:default: true)`
+        // would be wrong here — it reads any spelling other than the literal
+        // `true` (a hand-edited `no`, `off`, `0`, or a capitalised `False`)
+        // as "on", which is the opposite of what the host does. The falsy
+        // set mirrors Hermes's own reader for the one key whose default
+        // lives in code rather than `config_defaults.py`
+        // (`agent/agent_init.py`: `_streaming in {"false", "0", "no", "off"}`);
+        // for the YAML-boolean keys it is a superset of what PyYAML would
+        // have turned into `False` anyway.
+        func boolTrueDefault(_ key: String) -> Bool {
+            guard let v = scalar(key) else { return true }
+            return !["false", "0", "no", "off"].contains(v.lowercased())
         }
         func int(_ key: String, default def: Int) -> Int {
-            Int(values[key] ?? "") ?? def
+            Int(scalar(key) ?? "") ?? def
         }
         func double(_ key: String, default def: Double) -> Double {
-            Double(values[key] ?? "") ?? def
+            Double(scalar(key) ?? "") ?? def
         }
         func str(_ key: String, default def: String = "") -> String {
             let raw = values[key] ?? def
@@ -49,7 +70,7 @@ public extension HermesConfig {
         // where Hermes reads `database.get(key)` directly and treats an
         // absent key differently from `0` (see DatabaseSettings doc).
         func intOpt(_ key: String) -> Int? {
-            guard let raw = values[key] else { return nil }
+            guard let raw = scalar(key) else { return nil }
             return Int(raw)
         }
         // True-optional bool: `nil` means "key absent from config.yaml".
@@ -59,8 +80,8 @@ public extension HermesConfig {
         // capabilities instead of the parse baking in one release's
         // default. See `HermesConfig.displayCheckpointsEnabled`.
         func boolOpt(_ key: String) -> Bool? {
-            guard let v = values[key] else { return nil }
-            return v == "true"
+            guard let v = scalar(key) else { return nil }
+            return v.lowercased() == "true"
         }
 
         let dockerEnv = maps["terminal.docker_env"] ?? [:]
@@ -76,7 +97,12 @@ public extension HermesConfig {
             toolPreviewLength: int("display.tool_preview_length", default: 0),
             busyInputMode: str("display.busy_input_mode", default: "interrupt"),
             language: str("display.language"),
-            timestamps: bool("display.timestamps", default: false)
+            timestamps: bool("display.timestamps", default: false),
+            // v0.21.1 keys. `resume_last_session` defaults TRUE upstream, so
+            // an absent key must read `true` — reading it as `false` would
+            // render the toggle off while the host resumes anyway.
+            bellOnPrompt: bool("display.bell_on_prompt", default: false),
+            resumeLastSession: boolTrueDefault("display.resume_last_session")
         )
 
         let terminal = TerminalSettings(
@@ -270,7 +296,11 @@ public extension HermesConfig {
             // defaults (50→250, 3→10), so resolve via
             // `HermesConfig.displayDelegationMax*`.
             maxIterations: int("delegation.max_iterations", default: 0),
-            maxConcurrentChildren: int("delegation.max_concurrent_children", default: 0)
+            maxConcurrentChildren: int("delegation.max_concurrent_children", default: 0),
+            // v0.21.1 keys. Here Hermes's own default (0 = no subagent cap)
+            // and the "absent" reading coincide, so no sentinel is needed.
+            independentCompletions: bool("delegation.independent_completions", default: false),
+            compressionThresholdTokens: int("delegation.compression_threshold_tokens", default: 0)
         )
 
         let discord = DiscordSettings(
@@ -354,7 +384,12 @@ public extension HermesConfig {
         // `telemetry.shared_metrics` — v0.20+ opt-in local aggregate
         // metrics (Relay pipeline, first released v2026.7.30).
         let telemetry = TelemetrySettings(
-            sharedMetricsEnabled: bool("telemetry.shared_metrics.enabled", default: false)
+            sharedMetricsEnabled: bool("telemetry.shared_metrics.enabled", default: false),
+            // v0.21.1 transmission opt-in + its endpoint. `send` is read
+            // independently of `enabled` so the UI can show the true stored
+            // state; Hermes itself refuses to transmit without `enabled`.
+            sharedMetricsSend: bool("telemetry.shared_metrics.send", default: false),
+            sharedMetricsEndpoint: str("telemetry.shared_metrics.endpoint")
         )
 
         // `database.*` — SQLite journal/WAL sizing pragmas, v0.20+ (first
@@ -429,9 +464,12 @@ public extension HermesConfig {
         // v0.16): `slack.allowed_channels`, `telegram.allowed_chats`,
         // `matrix.allowed_rooms`, `dingtalk.allowed_chats`, plus the
         // top-level `<platform>.gateway_restart_notification` toggle.
-        // `busy_ack_enabled` / `slash_command_notice_ttl_seconds` are
-        // no-ops in v0.16 but kept for round-trip. Platforms without an
-        // explicit block don't appear in the dictionary, so the editor's
+        // `busy_ack_enabled` is a no-op per-platform (Hermes reads only the
+        // global `display.busy_ack_enabled`) but is kept for round-trip;
+        // `slash_command_notice_ttl_seconds` was dropped entirely in the
+        // v0.21.1 B5 sweep — no Hermes version defines it.
+        // Platforms without an explicit block don't appear in the
+        // dictionary, so the editor's
         // `?? .empty` fallback hands the user the defaults without leaving
         // stale keys littered across the YAML.
         // `google_chat` has no allowlist (its adapter gates access via
@@ -441,8 +479,13 @@ public extension HermesConfig {
         // loop made that toggle a write-only key: it saved, then the next
         // load read `false` and the switch snapped back. The allowlists
         // simply come back empty for it.
+        // `discord` joins the loop with the v0.21.1 B4 fix: its real
+        // `discord.allowed_channels` allowlist is now mapped by
+        // `GatewayAllowlistKind` and edited from `DiscordSetupView`, so it
+        // must be READ here too or the list would save and read back empty
+        // (the same write-only-key bug `google_chat` had).
         let gatewayAllowlistPlatforms = [
-            "slack", "mattermost",
+            "slack", "mattermost", "discord",
             "telegram", "whatsapp",
             "matrix", "dingtalk",
             "google_chat",
@@ -454,10 +497,10 @@ public extension HermesConfig {
             let allowedChats    = lists[prefix + "allowed_chats"]    ?? []
             let allowedRooms    = lists[prefix + "allowed_rooms"]    ?? []
             let busy            = bool(prefix + "busy_ack_enabled", default: true)
-            let restartNotice   = bool(prefix + "gateway_restart_notification",
-                                       default: false)
-            let ttl             = int(prefix + "slash_command_notice_ttl_seconds",
-                                      default: 0)
+            // Upstream default is TRUE (`gateway/config.py` PlatformConfig),
+            // so an absent key — and any non-`true` spelling of a truthy
+            // value — must NOT read as off. See `boolTrueDefault`.
+            let restartNotice   = boolTrueDefault(prefix + "gateway_restart_notification")
             // Skip platforms with no v0.13 fields present anywhere in the
             // file. Without this guard, every supported platform would
             // round-trip an all-default block back through writes even
@@ -467,15 +510,13 @@ public extension HermesConfig {
                 && allowedRooms.isEmpty
                 && values[prefix + "busy_ack_enabled"] == nil
                 && values[prefix + "gateway_restart_notification"] == nil
-                && values[prefix + "slash_command_notice_ttl_seconds"] == nil
             if !isEmpty {
                 gatewayPlatforms[platform] = GatewayPlatformSettings(
                     allowedChannels: allowedChannels,
                     allowedChats: allowedChats,
                     allowedRooms: allowedRooms,
                     busyAckEnabled: busy,
-                    gatewayRestartNotification: restartNotice,
-                    slashCommandNoticeTTLSeconds: ttl
+                    gatewayRestartNotification: restartNotice
                 )
             }
         }
@@ -634,6 +675,23 @@ public extension HermesConfig {
             // (nil → serve-all) or being silently dropped.
             multiplexProfileAllowlist: Self.multiplexProfileAllowlist(
                 values: values, lists: lists, maps: maps
+            ),
+            // v0.21.1 scalars. Window length for the bounded `auto`/`cold`
+            // service tiers; Hermes's own default is 60 and has never been
+            // anything else, so the parse default IS the host default.
+            agentFastAutoSeconds: int("agent.fast_auto_seconds", default: 60),
+            // The next four all default TRUE upstream, so an absent key must
+            // read `true` — reading `false` would render every toggle off
+            // while the host does the opposite. `model.streaming` gets its
+            // default from its READER (`agent/agent_init.py`
+            // `_model_section.get("streaming", "true")`), not from
+            // `config_defaults.py`, and `tool_loop_guardrails` is a
+            // TOP-LEVEL block, not a child of `agent.`.
+            gatewayTrustEnv: boolTrueDefault("gateway.trust_env"),
+            updatesCheck: boolTrueDefault("updates.check"),
+            modelStreaming: boolTrueDefault("model.streaming"),
+            toolLoopNonInteractiveHardStop: boolTrueDefault(
+                "tool_loop_guardrails.non_interactive_hard_stop_enabled"
             )
         )
     }

@@ -198,9 +198,16 @@ struct HealthView: View {
                 viewModel.runDebugShare()
                 showDiagnostics = true
             }
+            // `--local` collects the identical bundle and prints it with no
+            // network I/O — the honest alternative for someone who wants to
+            // read the report before deciding to share anything.
+            Button("Show Report Without Uploading") {
+                viewModel.runDebugShare(local: true)
+                showDiagnostics = true
+            }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This uploads logs, config (with secrets redacted), and system info to Nous Research support infrastructure. Review the output below before sharing the returned URL.")
+            Text("Upload sends logs, config (with secrets redacted), and system info to Nous Research support infrastructure, and prints paste URLs. Showing the report keeps everything on this machine. Review the output below before sharing anything.")
         }
     }
 

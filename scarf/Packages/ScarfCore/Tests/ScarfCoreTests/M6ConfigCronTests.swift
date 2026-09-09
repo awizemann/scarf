@@ -524,15 +524,15 @@ import Foundation
             - C01
             - C02
           busy_ack_enabled: false
-          gateway_restart_notification: true
-          slash_command_notice_ttl_seconds: 120
+          gateway_restart_notification: false
         """
         let cfg = HermesConfig(yaml: yaml)
         let block = cfg.gatewayPlatforms["slack"]
         #expect(block?.allowedChannels == ["C01", "C02"])
         #expect(block?.busyAckEnabled == false)
-        #expect(block?.gatewayRestartNotification == true)
-        #expect(block?.slashCommandNoticeTTLSeconds == 120)
+        // v0.21.1 B5: the upstream default is TRUE, so the interesting
+        // assertion is that an EXPLICIT false is honoured.
+        #expect(block?.gatewayRestartNotification == false)
     }
 
     @Test func parsesGatewayAllowlistsForTelegramAndMatrix() {

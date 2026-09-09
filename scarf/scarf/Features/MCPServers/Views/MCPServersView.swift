@@ -9,6 +9,8 @@ struct MCPServersView: View {
     // is still coordinator-owned, not view-owned.
     @Bindable var viewModel: MCPServersViewModel
     @Environment(\.hermesCapabilities) private var capabilitiesStore
+    /// Non-nil while the `hermes mcp login` sheet is up for that server.
+    @State private var loginServer: HermesMCPServer?
 
     init(viewModel: MCPServersViewModel) {
         self.viewModel = viewModel
@@ -69,6 +71,25 @@ struct MCPServersView: View {
                     viewModel: MCPServerEditorViewModel(server: server, context: viewModel.context),
                     onSave: { changed in viewModel.finishEdit(reload: changed) },
                     onCancel: { viewModel.finishEdit(reload: false) }
+                )
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { loginServer != nil },
+            set: { if !$0 { loginServer = nil } }
+        )) {
+            if let server = loginServer {
+                MCPLoginSheet(
+                    serverName: server.name,
+                    configuredFlow: server.oauthFlow,
+                    supportsFlowOverride: capabilitiesStore?.capabilities.hasMCPOAuthFlow == true,
+                    // Same reason the editor takes the context: a login must
+                    // run against the host whose servers are on screen.
+                    context: viewModel.context,
+                    onFinished: { didSucceed in
+                        loginServer = nil
+                        if didSucceed { viewModel.load() }
+                    }
                 )
             }
         }
@@ -269,7 +290,13 @@ struct MCPServersView: View {
                     onTest: { viewModel.testServer(name: server.name) },
                     onToggleEnabled: { viewModel.toggleEnabled(name: server.name) },
                     onEdit: { viewModel.beginEdit() },
-                    onDelete: { viewModel.deleteServer(name: server.name) }
+                    onDelete: { viewModel.deleteServer(name: server.name) },
+                    // `hermes mcp login` has existed since v0.18, so the
+                    // button itself is gated on that; only the --flow
+                    // override needs v0.21.1.
+                    canSignIn: capabilitiesStore?.capabilities.hasMCPReauth == true
+                        && server.auth == "oauth" && server.transport != .stdio,
+                    onSignIn: { loginServer = server }
                 )
             } else {
                 ContentUnavailableView(

@@ -7,16 +7,31 @@ import Foundation
 /// commands, which require a multi-line script for every query and
 /// add round-trip overhead with no upside for our use case.
 ///
-/// **Trust model.** This is a literal-encoder for in-tree, trusted
-/// callers — every current param source is either an integer (`limit`,
-/// `before`, `since.timeIntervalSince1970`), a Hermes-internal ID
-/// (UUID-shaped session/tool IDs that come back from the same DB), or
-/// a search query that already passes through `sanitizeFTSQuery` in
-/// HermesDataService. It is **NOT** a general SQL-injection defense.
-/// Don't extend the data-service surface with methods that accept raw
-/// untrusted user input as a `.text` param without first validating
-/// upstream. The local backend skips inlining entirely (uses
-/// `sqlite3_bind_*`) so this only affects the remote path.
+/// **Trust model — read this before adding a caller.** This is a literal
+/// encoder for in-tree callers, **NOT** a general SQL-injection defense.
+/// Do not extend the data-service surface with a method that inlines raw
+/// untrusted input without validating it upstream first. The local backend
+/// skips inlining entirely (`sqlite3_bind_*`), so this is the remote path
+/// only.
+///
+/// The accepted param sources are integers (`limit`, `before`,
+/// `since.timeIntervalSince1970`), Hermes-internal ids (UUID-shaped
+/// session/tool ids that came back out of this same DB), and search text
+/// that has been through `sanitizeFTSQuery`.
+///
+/// One caller is NOT on that list, and it is worth being precise about
+/// why it is nevertheless safe rather than filing it under "accepted
+/// sources": the v0.21.1 LIKE fallback inlines the user's search TERMS
+/// verbatim. It escapes them only for LIKE's own wildcards (`%`, `_`,
+/// `\`) — that is a matching concern and buys no safety at all. What
+/// makes those terms inert is entirely `encodeText(_:)` below: every
+/// single quote is DOUBLED, so a term can never close the literal it sits
+/// in, and every C0 control character (newline included) is lifted out
+/// into `char(<n>)` concatenation, so a term can never terminate the
+/// remote heredoc that carries the statement. A term is therefore always
+/// one SQL string constant, whatever it contains. Any future change to
+/// `encodeText` has to preserve both of those properties, or that caller
+/// stops being safe.
 ///
 /// Escape rules mirror SQLite's literal syntax:
 /// * `.null` → `NULL`

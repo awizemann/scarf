@@ -132,7 +132,14 @@ struct GatewayView: View {
                 // the stored `gateway_state` alone stays "running" forever
                 // after a crash or a failed start.
                 StatusBadge(
-                    label: viewModel.gateway.isRunning ? viewModel.gateway.state : "not running",
+                    // A profile served by the default multiplexer has no
+                    // gateway_state.json of its own being written, so its
+                    // stored `state` is stale ("stopped"/"unknown") while the
+                    // live probe says running — showing that stale word next
+                    // to a green badge would read as a contradiction.
+                    label: viewModel.gateway.isServedByMultiplexer
+                        ? "running"
+                        : (viewModel.gateway.isRunning ? viewModel.gateway.state : "not running"),
                     isActive: viewModel.gateway.isRunning
                 )
                 if let pid = viewModel.gateway.pid {
@@ -140,7 +147,18 @@ struct GatewayView: View {
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
                 }
-                if viewModel.gateway.isLoaded {
+                // v0.21.1: a satellite profile served by the default
+                // profile's multiplexer is loaded but has no PID of its own,
+                // and it is managed from elsewhere — so it gets its own label
+                // rather than the generic "Loaded" one. Pre-v0.21.1 hosts
+                // never print the marker, so this branch is unreachable there
+                // and the row renders exactly as before.
+                if viewModel.gateway.isServedByMultiplexer {
+                    Label("Served by default profile", systemImage: "arrow.triangle.branch")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                        .help("This profile has no gateway process of its own — the default profile's multiplexer carries its traffic. Manage it from the default profile.")
+                } else if viewModel.gateway.isLoaded {
                     Label("Loaded", systemImage: "checkmark.circle")
                         .font(.caption)
                         .foregroundStyle(.green)

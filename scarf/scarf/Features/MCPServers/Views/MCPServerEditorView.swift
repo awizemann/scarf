@@ -71,6 +71,14 @@ struct MCPServerEditorView: View {
                             cwdSection
                         }
                     }
+                    // v0.21.1 — OAuth flow choice. HTTP/SSE only (stdio
+                    // servers have no OAuth), and only when the entry is
+                    // actually OAuth-authed.
+                    if viewModel.server.transport != .stdio,
+                       viewModel.server.auth == "oauth",
+                       capabilitiesStore?.capabilities.hasMCPOAuthFlow == true {
+                        oauthFlowSection
+                    }
                     if viewModel.server.hasOAuthToken {
                         oauthSection
                     }
@@ -372,6 +380,25 @@ struct MCPServerEditorView: View {
                     .accessibilityLabel("Working directory")
                 Text("Working directory the server process launches in. Leave blank for Hermes's own cwd. Requires Hermes v0.20.4+.")
                     .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// v0.21.1 `oauth.flow`. "Hermes default" writes no key at all rather
+    /// than an explicit `browser`, so a config that never had the key keeps
+    /// not having it and the YAML diff stays empty for users who don't care.
+    private var oauthFlowSection: some View {
+        sectionBox(title: "OAuth Flow") {
+            VStack(alignment: .leading, spacing: 6) {
+                Picker("Flow", selection: $viewModel.oauthFlowDraft) {
+                    Text("Hermes default (browser)").tag("")
+                    Text("Browser (PKCE redirect)").tag("browser")
+                    Text("Device code").tag("device")
+                }
+                .pickerStyle(.menu)
+                Text("Device code prints a verification URL and a short code to type on another device — use it when this Mac can't complete a browser redirect. Sign in from the server's row.")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }

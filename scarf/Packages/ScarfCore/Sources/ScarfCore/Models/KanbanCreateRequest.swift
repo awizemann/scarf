@@ -30,6 +30,15 @@ public struct KanbanCreateRequest: Sendable, Equatable {
     // the field to 3; if Hermes config exposes a different default, mirror
     // it.
     public var maxRetries: Int?
+    /// v0.21.1: `--completion-contract <contract>` — `local-only` (Hermes's
+    /// own default), `OWNER/REPO` to require publication, or an exact GitHub
+    /// PR URL whose CI gates `kanban complete`
+    /// (`hermes_cli/kanban_parser.py:189`). Create-only: `kanban edit` at
+    /// v2026.9.7 takes `--result` and the step-handoff flags and nothing else,
+    /// so there is no edit path to offer. Callers MUST leave this nil unless
+    /// `HermesCapabilities.hasKanbanCompletionContract` — a pre-v0.21.1
+    /// argparse exits 2 on the unknown flag and the card is never created.
+    public var completionContract: String?
 
     public init(
         title: String,
@@ -45,7 +54,8 @@ public struct KanbanCreateRequest: Sendable, Equatable {
         createdBy: String? = nil,
         skills: [String] = [],
         maxRetries: Int? = nil,
-        branch: String? = nil
+        branch: String? = nil,
+        completionContract: String? = nil
     ) {
         self.title = title
         self.body = body
@@ -61,6 +71,7 @@ public struct KanbanCreateRequest: Sendable, Equatable {
         self.skills = skills
         self.maxRetries = maxRetries
         self.branch = branch
+        self.completionContract = completionContract
     }
 
     /// Build the argv suffix this request maps to (everything after
@@ -100,6 +111,9 @@ public struct KanbanCreateRequest: Sendable, Equatable {
         }
         if let maxRetries {
             args.append(contentsOf: ["--max-retries", String(maxRetries)])
+        }
+        if let completionContract, !completionContract.isEmpty {
+            args.append(contentsOf: ["--completion-contract", completionContract])
         }
         if let createdBy, !createdBy.isEmpty {
             args.append(contentsOf: ["--created-by", createdBy])

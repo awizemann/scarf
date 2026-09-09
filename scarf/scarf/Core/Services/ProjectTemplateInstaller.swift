@@ -280,15 +280,15 @@ struct ProjectTemplateInstaller: Sendable {
 
     // MARK: - Cron
 
-    /// Create each cron job via `hermes cron create`, then immediately pause
-    /// it (Hermes creates jobs enabled). Returns the list of resolved job
+    /// Create each cron job via `hermes cron create`, paused. On v0.21.1+
+    /// that is one write (`--paused`); older hosts create enabled and are
+    /// paused immediately afterwards. Returns the list of resolved job
     /// names, which is what the lock file records — we don't know the job
     /// ids without parsing the create output, but the name is enough to
     /// find + remove them later.
     nonisolated private func createCronJobs(plan: TemplateInstallPlan) throws -> [String] {
         guard !plan.cronJobs.isEmpty else { return [] }
 
-        let existingBefore = Set(HermesFileService(context: context).loadCronJobs().map(\.id))
         var createdNames: [String] = []
 
         // Probe the install host once: `--deliver all` is a v0.14+ value, and
@@ -301,33 +301,36 @@ struct ProjectTemplateInstaller: Sendable {
         // failed probe still yields `.empty` (never a remembered value) —
         // flag gating must not run on an optimistic guess.
         let caps = HermesVersionCache.shared.capabilitiesSync(for: context)
+        // Only the create-then-pause fallback needs the "what existed
+        // before" snapshot, and taking it costs a `jobs.json` read on the
+        // install host. On a `--paused` host there is no second step, so
+        // there is nothing to diff against.
+        let existingBefore = caps.hasCronCreatePaused
+            ? []
+            : Set(HermesFileService(context: context).loadCronJobs().map(\.id))
 
         for job in plan.cronJobs {
-            var args = ["cron", "create", "--name", job.name]
-            if let deliver = job.deliver, !deliver.isEmpty {
-                if caps.supportsCronDeliver(deliver) {
-                    args += ["--deliver", deliver]
-                } else {
-                    Self.logger.warning("template cron '\(job.name, privacy: .public)': dropping --deliver \(deliver, privacy: .public) — install host predates v0.14 deliver=all; job created with default delivery")
-                }
-            }
-            if let repeatCount = job.repeatCount { args += ["--repeat", String(repeatCount)] }
-            for skill in job.skills ?? [] where !skill.isEmpty {
-                args += ["--skill", skill]
-            }
-            args.append(job.schedule)
-            if let prompt = job.prompt, !prompt.isEmpty {
-                // Substitute template-author tokens with install-time
-                // values. Hermes doesn't set a CWD for cron runs — when
-                // the agent fires the prompt, any relative path
-                // (`.scarf/config.json`, `status-log.md`, etc.) resolves
-                // against the agent's own dir, not the project. Templates
-                // use `{{PROJECT_DIR}}` as a placeholder for the absolute
-                // path; we swap in the real project dir here so the
-                // registered cron job carries a fully-qualified prompt
-                // that works regardless of CWD.
-                let resolvedPrompt = Self.substituteCronTokens(prompt, plan: plan)
-                args.append(resolvedPrompt)
+            // ONE builder for every cron-create argv (M3): the capability
+            // gates and the `--` end-of-options marker live in
+            // `FleetApplyPlan.cronCreateArgs`, not in each call site.
+            // Substitute template-author tokens with install-time values
+            // first: Hermes doesn't set a CWD for cron runs, so any relative
+            // path in the prompt would resolve against the agent's own dir.
+            let (args, droppedDeliverAll) = FleetApplyPlan.cronCreateArgs(
+                name: job.name,
+                deliver: job.deliver,
+                repeatCount: job.repeatCount,
+                skills: job.skills ?? [],
+                schedule: job.schedule,
+                prompt: job.prompt.flatMap { $0.isEmpty ? nil : Self.substituteCronTokens($0, plan: plan) },
+                caps: caps,
+                // v0.21.1: created disabled in ONE write instead of the
+                // create-then-`cron pause` two-step below, which leaves a
+                // real window where an installed template's job can fire.
+                paused: true
+            )
+            if droppedDeliverAll {
+                Self.logger.warning("template cron '\(job.name, privacy: .public)': dropping --deliver \(job.deliver ?? "", privacy: .public) — install host predates v0.14 deliver=all; job created with default delivery")
             }
 
             let (output, exit) = context.runHermes(args)
@@ -340,6 +343,7 @@ struct ProjectTemplateInstaller: Sendable {
         // Diff the current job set against the snapshot we took before
         // creating — anything new belongs to this install and gets paused.
         // We pause by id (not name) because `cron pause` takes an id.
+        guard !caps.hasCronCreatePaused else { return createdNames }
         let currentJobs = HermesFileService(context: context).loadCronJobs()
         let newJobs = currentJobs.filter { !existingBefore.contains($0.id) && createdNames.contains($0.name) }
         for job in newJobs {

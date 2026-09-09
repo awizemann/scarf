@@ -413,22 +413,74 @@ import Foundation
     }
 
     @Test func imageGenModelAllowlistShape() {
-        // Lock the curated list size + a few sentinel entries so
-        // unintentional edits get caught in review. Free-form-typing
-        // bypasses the allowlist, so additions/removals here are
-        // purely UX (which models surface as picker rows).
+        // `image_gen.model` is the TOP-LEVEL key; four bundled backends read
+        // it as a fallback through `resolve_static_model`, which ignores ids
+        // it does not know. The picker's rows are the union of those four
+        // catalogs at v2026.9.7: fal (FAL_MODELS, 21),
+        // krea (plugins/image_gen/krea/__init__.py::_MODELS, 3) and
+        // openai + openai-codex (_common.py::GPT_IMAGE_2_TIERS, 3).
         let models = ModelCatalogService.imageGenModels
-        #expect(models.count >= 5)
-        #expect(models.contains(where: { $0.modelID == "openai/gpt-image-1" }))
-        #expect(models.contains(where: { $0.modelID == "google/imagen-4" }))
-        // v0.15: Krea image models.
-        #expect(models.contains(where: { $0.modelID == "krea-2-medium" }))
-        #expect(models.contains(where: { $0.modelID == "krea-2-large" }))
-        // Every entry has a non-empty display + a non-empty modelID.
+        #expect(models.count == 27)
+        // DEFAULT_MODEL of the default (fal) backend leads the list.
+        #expect(models.first?.modelID == "fal-ai/flux-2/klein/9b")
+        // Sentinels across the fal catalog's naming shapes.
+        #expect(models.contains(where: { $0.modelID == "fal-ai/gpt-image-2" }))
+        #expect(models.contains(where: { $0.modelID == "bytedance/seedream/v5/pro/text-to-image" }))
+        #expect(models.contains(where: { $0.modelID == "xai/grok-imagine-image/v2.0/text-to-image" }))
+        // Non-fal backends that resolve `image_gen.model`: dropping these
+        // strands every krea / openai / codex image-gen user on the picker's
+        // free-form field.
+        for id in ["krea-2-medium", "krea-2-large", "krea-2-medium-turbo",
+                   "gpt-image-2-low", "gpt-image-2-medium", "gpt-image-2-high"] {
+            #expect(models.contains(where: { $0.modelID == id }),
+                    "\(id) resolves from image_gen.model at v2026.9.7")
+        }
+        // Ids Hermes's catalogs never carried at either tag: reinstating one
+        // sends `image_gen.model` a value every backend warns on and discards.
+        for stale in ["openai/gpt-image-1", "google/imagen-4",
+                      "fal-ai/flux-pro-1.1", "openai/dall-e-3"] {
+            #expect(!models.contains(where: { $0.modelID == stale }),
+                    "\(stale) is in no Hermes image_gen catalog at v2026.9.7")
+        }
+        // meta-ai's `muse-image-1.0` is v2026.9.7-only and this list is
+        // ungated, so it stays out (C1: pre-target rendering parity).
+        #expect(!models.contains(where: { $0.modelID == "muse-image-1.0" }))
+        // Every entry has a non-empty display + modelID, a known backend
+        // hint, and both the ids and the visible labels are unique (the
+        // picker renders `display` alone — a collision is unpickable).
         for m in models {
             #expect(!m.modelID.isEmpty)
             #expect(!m.display.isEmpty)
+            #expect(["fal", "krea", "openai"].contains(m.providerHint ?? ""))
         }
+        #expect(Set(models.map(\.modelID)).count == models.count)
+        #expect(Set(models.map(\.display)).count == models.count)
+    }
+
+    @Test func pluginRegisteredProvidersAreReachable() {
+        // B7: four bundled `plugins/model-providers/` profiles that
+        // hermes_cli/models_catalog_static.py auto-appends to
+        // CANONICAL_PROVIDERS. They are NOT HERMES_OVERLAYS entries, so
+        // nothing but this table puts them in Scarf's picker.
+        // scripts/check-hermes-tables.py lane 4 is the drift gate.
+        for pid in ["meta-ai", "router", "commandcode", "commandcode-anthropic"] {
+            let overlay = ModelCatalogService.overlayOnlyProviders[pid]
+            #expect(overlay != nil, "\(pid) missing from overlayOnlyProviders")
+            #expect(overlay?.authType == .apiKey)
+            #expect(overlay?.subscriptionGated == false)
+            #expect(overlay?.keyless == false)
+        }
+        #expect(ModelCatalogService.overlayOnlyProviders["router"]?.baseURL
+                == "https://api.router.com/v1")
+        // Google AI Studio is deliberately NOT here: Hermes's canonical slug is
+        // `gemini`, models.dev ships the same endpoint under `google`, and
+        // models_catalog_static._PROVIDER_ALIASES maps google -> gemini — so
+        // the picker already reaches it and a second row would duplicate it.
+        #expect(ModelCatalogService.overlayOnlyProviders["gemini"] == nil)
+        // `custom` likewise: it is the LocalModelProviders surface, not a
+        // catalog row.
+        #expect(ModelCatalogService.overlayOnlyProviders["custom"] == nil)
+        #expect(LocalModelProvider.descriptor(for: "custom") != nil)
     }
 
     @Test func demotedProvidersEmptyAfterVercelRemoval() {

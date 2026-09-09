@@ -8,11 +8,12 @@
 
 /* Begin PBXBuildFile section */
 		53495AB62F7B992C00BD31AD /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 53SWIFTTERM0001 /* SwiftTerm */; };
+		53C0F21B3050ED2E00934DA3 /* scarf-projects-mcp in Frameworks */ = {isa = PBXBuildFile; productRef = 53PROJMCP0001 /* scarf-projects-mcp */; };
 		53MARKER00010 /* Marker in Frameworks */ = {isa = PBXBuildFile; productRef = 53MARKER00001 /* Marker */; };
+		53PROJMCP0010 /* scarf-projects-mcp in Embed scarf-projects-mcp */ = {isa = PBXBuildFile; productRef = 53PROJMCP0001 /* scarf-projects-mcp */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		53SCARFCORE0010 /* ScarfCore in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFCORE0001 /* ScarfCore */; };
 		53SCARFCORE0011 /* ScarfCore in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFCORE0002 /* ScarfCore */; };
 		53SCARFDESIGN0010 /* ScarfDesign in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFDESIGN0001 /* ScarfDesign */; };
-		53PROJMCP0010 /* scarf-projects-mcp in Embed scarf-projects-mcp */ = {isa = PBXBuildFile; productRef = 53PROJMCP0001 /* scarf-projects-mcp */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		53SCARFDESIGN0011 /* ScarfDesign in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFDESIGN0002 /* ScarfDesign */; };
 		53SCARFIOS0010 /* ScarfIOS in Frameworks */ = {isa = PBXBuildFile; productRef = 53SCARFIOS0001 /* ScarfIOS */; };
 		53SPARKLE00010 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 53SPARKLE00011 /* Sparkle */; };
@@ -52,6 +53,20 @@
 			remoteInfo = scarf;
 		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		53PROJMCP0030 /* Embed scarf-projects-mcp */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
+			files = (
+				53PROJMCP0010 /* scarf-projects-mcp in Embed scarf-projects-mcp */,
+			);
+			name = "Embed scarf-projects-mcp";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		4EAC23292F99930000654F42 /* scarf mobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "scarf mobile.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -148,6 +163,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				53C0F21B3050ED2E00934DA3 /* scarf-projects-mcp in Frameworks */,
 				53495AB62F7B992C00BD31AD /* SwiftTerm in Frameworks */,
 				53MARKER00010 /* Marker in Frameworks */,
 				53SCARFCORE0010 /* ScarfCore in Frameworks */,
@@ -176,20 +192,6 @@
 		};
 /* End PBXFrameworksBuildPhase section */
 
-/* Begin PBXCopyFilesBuildPhase section */
-		53PROJMCP0030 /* Embed scarf-projects-mcp */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = Contents/Helpers;
-			dstSubfolderSpec = 1;
-			files = (
-				53PROJMCP0010 /* scarf-projects-mcp in Embed scarf-projects-mcp */,
-			);
-			name = "Embed scarf-projects-mcp";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
-
 /* Begin PBXGroup section */
 		534959372F7B83B600BD31AD = {
 			isa = PBXGroup;
@@ -205,14 +207,6 @@
 			);
 			sourceTree = "<group>";
 		};
-		53CF9002000000000000A002 /* Configs */ = {
-			isa = PBXGroup;
-			children = (
-				53CF9001000000000000A001 /* SwiftStats.xcconfig */,
-			);
-			path = Configs;
-			sourceTree = "<group>";
-		};
 		534959412F7B83B600BD31AD /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -224,6 +218,14 @@
 				4EAC23432F99930100654F42 /* Scarf iOSUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		53CF9002000000000000A002 /* Configs */ = {
+			isa = PBXGroup;
+			children = (
+				53CF9001000000000000A001 /* SwiftStats.xcconfig */,
+			);
+			path = Configs;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -646,11 +648,11 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
 				VALIDATE_PRODUCT = YES;
-				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
 			};
 			name = Release;
 		};
@@ -693,12 +695,12 @@
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/scarf mobile.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/scarf mobile";
 				VALIDATE_PRODUCT = YES;
-				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
 			};
 			name = Release;
 		};
@@ -739,12 +741,12 @@
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = "Scarf iOS";
 				VALIDATE_PRODUCT = YES;
-				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
 			};
 			name = Release;
 		};
@@ -944,9 +946,9 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
 			};
 			name = Release;
 		};
@@ -988,10 +990,10 @@
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/scarf.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/scarf";
-				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
 			};
 			name = Release;
 		};
@@ -1029,10 +1031,10 @@
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TEST_TARGET_NAME = scarf;
-				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
 			};
 			name = Release;
 		};

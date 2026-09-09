@@ -10,6 +10,10 @@ struct MCPServerDetailView: View {
     let onToggleEnabled: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
+    /// True when this server is an OAuth HTTP/SSE entry on a host that has
+    /// `hermes mcp login` (v0.18+). Gated by the caller.
+    var canSignIn: Bool = false
+    var onSignIn: () -> Void = {}
 
     @State private var showDeleteConfirm = false
 
@@ -95,6 +99,17 @@ struct MCPServerDetailView: View {
                 .buttonStyle(ScarfSecondaryButton())
                 .help(server.enabled ? "Disable" : "Enable")
                 .accessibilityLabel(server.enabled ? Text("Disable server") : Text("Enable server"))
+
+                if canSignIn {
+                    Button {
+                        onSignIn()
+                    } label: {
+                        Image(systemName: "person.badge.key")
+                    }
+                    .buttonStyle(ScarfSecondaryButton())
+                    .help("Sign in")
+                    .accessibilityLabel(Text("Sign in to this server"))
+                }
 
                 Button {
                     onEdit()

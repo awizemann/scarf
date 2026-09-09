@@ -95,4 +95,41 @@ struct SkillsViewModelHubFilterTests {
         vm.searchHub()
         #expect(vm.lastBrowseResults == cacheBefore)
     }
+
+    // MARK: - hubSources gating (B3)
+
+    /// `--source` is an argparse `choices=` list: an unknown value is an
+    /// exit-2 usage error, not a degraded search. So the picker's roster is
+    /// gated at the floor each choice actually entered Hermes, and an
+    /// undetected host gets only the choices that have always existed.
+    @Test func hubSourcesGatedByHostFloor() {
+        let vm = makeViewModel()
+        let base = ["all", "official", "skills-sh", "well-known", "github", "clawhub", "lobehub"]
+
+        // Undetected host: exactly what Scarf always offered — no more.
+        vm.capabilities = .empty
+        #expect(vm.hubSources == base)
+
+        // v0.14: still no `browse-sh`.
+        vm.capabilities = HermesCapabilities.parseLine("Hermes Agent v0.14.0 (2026.5.16)")
+        #expect(vm.hubSources == base)
+
+        // v0.15 adds `browse-sh` and nothing else.
+        vm.capabilities = HermesCapabilities.parseLine("Hermes Agent v0.15.0 (2026.5.28)")
+        #expect(vm.hubSources == base + ["browse-sh"])
+
+        // v0.18 adds the seven provider filters as one block.
+        vm.capabilities = HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)")
+        #expect(vm.hubSources == base + ["browse-sh", "nvidia", "openai", "anthropic",
+                                         "huggingface", "voltagent", "gstack", "minimax"])
+
+        // The target host offers all fifteen — the exact `_SOURCE_CHOICES`
+        // list at `hermes_cli/subcommands/skills.py:16-18`, v2026.9.7.
+        vm.capabilities = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+        #expect(vm.hubSources.count == 15)
+        #expect(Set(vm.hubSources) == Set([
+            "all", "official", "skills-sh", "well-known", "github", "clawhub", "lobehub",
+            "browse-sh", "nvidia", "openai", "anthropic", "huggingface", "voltagent",
+            "gstack", "minimax"]))
+    }
 }

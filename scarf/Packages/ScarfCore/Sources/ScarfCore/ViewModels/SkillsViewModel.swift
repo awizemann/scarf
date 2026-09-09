@@ -22,6 +22,14 @@ public final class SkillsViewModel {
         self.transport = context.makeTransport()
     }
 
+    /// Test seam: run against an injected transport instead of the one the
+    /// context would make. Not public — the app always goes through
+    /// `init(context:)`.
+    init(context: ServerContext, transport: any ServerTransport) {
+        self.context = context
+        self.transport = transport
+    }
+
     // MARK: - Installed skills
 
     public var categories: [HermesSkillCategory] = []
@@ -97,7 +105,36 @@ public final class SkillsViewModel {
     /// out-of-module callers can still only read.
     public internal(set) var lastBrowseResults: [HermesHubSkill] = []
 
-    public let hubSources = ["all", "official", "skills-sh", "well-known", "github", "clawhub", "lobehub"]
+    /// Host capability snapshot, used for the hub `--source` roster and to
+    /// decide whether `skills search` can be asked for `--json`.
+    ///
+    /// Refreshed from `HermesVersionCache` by `load()` (one shared probe per
+    /// server, already warm by the time the Hub tab is reachable). Settable
+    /// so a view that already holds a resolved snapshot — and the test suite
+    /// — can seed it without a probe. `.empty` (undetected) keeps the
+    /// pre-target behaviour: the seven sources Scarf always offered, and the
+    /// table parse.
+    public var capabilities: HermesCapabilities = .empty
+
+    /// `--source` choices for the hub pickers, gated by the floor at which
+    /// each choice entered Hermes's `_SOURCE_CHOICES`
+    /// (`hermes_cli/subcommands/skills.py`). argparse REJECTS an unknown
+    /// `--source` value, so an ungated list turns a search on an older host
+    /// into an exit-2 usage error rather than a degraded result.
+    ///
+    /// - the first seven are the pre-v0.15 set Scarf already shipped;
+    /// - `browse-sh` arrived at v0.15 (`hasSkillsBrowseSHSource`);
+    /// - the seven provider filters arrived together at v0.18
+    ///   (`hasSkillsProviderSources`) — they are GitHub taps stored under
+    ///   `source="github"`, not separate registries.
+    public var hubSources: [String] {
+        var sources = ["all", "official", "skills-sh", "well-known", "github", "clawhub", "lobehub"]
+        if capabilities.hasSkillsBrowseSHSource { sources.append("browse-sh") }
+        if capabilities.hasSkillsProviderSources {
+            sources += ["nvidia", "openai", "anthropic", "huggingface", "voltagent", "gstack", "minimax"]
+        }
+        return sources
+    }
 
     public var filteredCategories: [HermesSkillCategory] {
         guard !searchText.isEmpty else { return categories }
@@ -138,6 +175,13 @@ public final class SkillsViewModel {
         lastError = nil
         let ctx = context
         let xport = transport
+        // One shared, cached `hermes --version` probe per server — this is
+        // the same instance every other gated surface reads, so the Hub
+        // tab's source roster and `--json` decision agree with the rest of
+        // the app instead of re-probing.
+        if !capabilities.detected {
+            capabilities = await HermesVersionCache.shared.capabilities(for: ctx)
+        }
         let pins = pinnedNames
         let essentialFloor = essentialHermesAgentSkill
         // v2.8 — instrumented so future captures show how many SSH
@@ -385,17 +429,57 @@ public final class SkillsViewModel {
         isHubLoading = true
         let bin = context.paths.hermesBinary
         let xport = transport
-        Task.detached { [weak self] in
-            let args = ["skills", "search", query, "--limit", "40", "--source", source]
-            let result = Self.runHermes(executable: bin, args: args, transport: xport, timeout: 30)
-            let parsed = HermesSkillsHubParser.parseHubList(result.output)
-            await self?.finishBrowse(
-                results: parsed,
-                exitCode: result.exitCode,
-                rawOutput: result.output,
-                isSearch: true
-            )
+        // `skills search`'s TABLE has no `#` column (unlike `skills
+        // browse`), so `parseHubList` discarded every row it was ever fed
+        // from this path — search results have been silently empty on every
+        // host. `--json` (v0.17+) is both the fix and the only shape that
+        // carries the full identifier; older hosts keep the table parse,
+        // which is no worse than what they had.
+        Task { [weak self] in
+            // L1: the Hub can be searched before `load()`'s capability probe
+            // has landed (a cold launch straight into the tab). Reading the
+            // undetected snapshot here would drop `--json` and route a
+            // perfectly capable host through the table parser, which returns
+            // nothing. Resolve first — it is the same cached, shared probe.
+            guard let caps = await self?.resolvedCapabilities() else { return }
+            let useJSON = caps.hasSkillsSearchJSON
+            await Task.detached { [weak self] in
+                // The query is a USER string: `--` (argparse's end-of-options
+                // marker, honoured by every Hermes version) keeps a query
+                // that starts with `-` from being read as a flag and exiting
+                // 2. It comes last — everything after it is positional.
+                var args = ["skills", "search", "--limit", "40", "--source", source]
+                if useJSON { args.append("--json") }
+                args += ["--", query]
+                let result = Self.runHermesSplit(
+                    executable: bin, args: args, transport: xport, timeout: 30)
+                // The JSON array is read from STDOUT alone — a stderr
+                // warning carrying a `]` would otherwise truncate the sliced
+                // payload and drop the result set into the table fallback.
+                // Fall back to the table parse when the JSON can't be read,
+                // so a host that answers something unexpected degrades to
+                // the old behaviour rather than to "no results".
+                let combined = result.stdout + result.stderr
+                let parsed = (useJSON ? HermesSkillsHubParser.parseSearchJSON(result.stdout) : nil)
+                    ?? HermesSkillsHubParser.parseHubList(combined)
+                await self?.finishBrowse(
+                    results: parsed,
+                    exitCode: result.exitCode,
+                    rawOutput: combined,
+                    isSearch: true
+                )
+            }.value
         }
+    }
+
+    /// This server's capability snapshot, probing once if `load()` has not
+    /// already resolved it. Shared cache, so a warm app pays nothing.
+    @MainActor
+    private func resolvedCapabilities() async -> HermesCapabilities {
+        if !capabilities.detected {
+            capabilities = await HermesVersionCache.shared.capabilities(for: context)
+        }
+        return capabilities
     }
 
     /// Run a browse fetch and then immediately apply a client-side
@@ -538,15 +622,28 @@ public final class SkillsViewModel {
         }
     }
 
-    /// `skills uninstall` has no `--yes` flag (argparse exits 2 if passed —
-    /// this action silently failed for every release that sent it). The
-    /// command confirms via an interactive `input("Confirm [y/N]: ")` prompt
-    /// that reads EOF as "n" when stdin is closed, so the caller must feed a
-    /// "y" line (`uninstallStdin`) to confirm non-interactively.
-    nonisolated static func uninstallArgs(_ identifier: String) -> [String] {
-        ["skills", "uninstall", identifier]
+    /// `skills uninstall` gained `--yes` at v0.20.5
+    /// (`HermesCapabilities.hasSkillsUninstallYes`). Below that floor the
+    /// verb only confirms through an interactive `input("Confirm [y/N]: ")`
+    /// that reads EOF as "n", so the caller pipes a `"y"` line instead —
+    /// and argparse there exits 2 on the flag, which is why this is gated
+    /// rather than always sent. `--` keeps a skill name starting with `-`
+    /// from being read as a flag.
+    nonisolated static func uninstallArgs(
+        _ identifier: String, capabilities: HermesCapabilities = .empty
+    ) -> [String] {
+        var args = ["skills", "uninstall"]
+        if capabilities.hasSkillsUninstallYes { args.append("--yes") }
+        args += ["--", identifier]
+        return args
     }
-    nonisolated static let uninstallStdin = "y\n"
+
+    /// The stdin to feed `uninstallArgs`. `nil` on a host that takes
+    /// `--yes`: piping a stray "y" into a command that no longer prompts
+    /// leaves it on the next reader's stdin.
+    nonisolated static func uninstallStdin(capabilities: HermesCapabilities = .empty) -> String? {
+        capabilities.hasSkillsUninstallYes ? nil : "y\n"
+    }
 
     /// `skills update` has no `--yes` flag (argparse exits 2 if passed) and
     /// never prompts — `do_update` in hermes_cli/skills_hub.py runs straight
@@ -557,15 +654,18 @@ public final class SkillsViewModel {
     public func uninstallHubSkill(_ identifier: String) {
         let bin = context.paths.hermesBinary
         let xport = transport
-        Task.detached { [weak self] in
-            let result = Self.runHermes(
-                executable: bin,
-                args: Self.uninstallArgs(identifier),
-                transport: xport,
-                timeout: 60,
-                stdin: Self.uninstallStdin
-            )
-            await self?.finishUninstall(exitCode: result.exitCode, output: result.output)
+        Task { [weak self] in
+            guard let caps = await self?.resolvedCapabilities() else { return }
+            await Task.detached { [weak self] in
+                let result = Self.runHermes(
+                    executable: bin,
+                    args: Self.uninstallArgs(identifier, capabilities: caps),
+                    transport: xport,
+                    timeout: 60,
+                    stdin: Self.uninstallStdin(capabilities: caps)
+                )
+                await self?.finishUninstall(exitCode: result.exitCode, output: result.output)
+            }.value
         }
     }
 
@@ -784,6 +884,34 @@ public final class SkillsViewModel {
     }
 
     // MARK: - Transport helpers
+
+    /// Split-stream CLI runner. Use this for any answer that is parsed as
+    /// JSON: the combined runner below concatenates stderr onto stdout, and
+    /// one warning line containing a `]` is enough for a "first `[` … last
+    /// `]`" slice to cut the payload short.
+    nonisolated static func runHermesSplit(
+        executable: String,
+        args: [String],
+        transport: any ServerTransport,
+        timeout: TimeInterval,
+        stdin: String? = nil
+    ) -> (exitCode: Int32, stdout: String, stderr: String) {
+        do {
+            let result = try transport.runProcess(
+                executable: executable,
+                args: args,
+                stdin: stdin.flatMap { $0.data(using: .utf8) },
+                timeout: timeout
+            )
+            return (result.exitCode, result.stdoutString, result.stderrString)
+        } catch let error as TransportError {
+            return (-1, "", error.diagnosticStderr.isEmpty
+                ? (error.errorDescription ?? "transport error")
+                : error.diagnosticStderr)
+        } catch {
+            return (-1, "", error.localizedDescription)
+        }
+    }
 
     /// Combined stdout+stderr CLI runner. Mirrors the legacy
     /// `HermesFileService.runHermesCLI` shape so callers grepping

@@ -25,15 +25,30 @@ public struct HermesToolPlatform: Identifiable, Sendable {
     public let name: String
     public let displayName: String
     public let icon: String
+    /// First Hermes version that HAS this adapter, or `nil` for a row that
+    /// predates every version Scarf supports. A row is hidden on a host
+    /// below its floor — and on an undetected one — so the Platforms list
+    /// never offers a channel the host cannot listen on (C1). Each floor
+    /// was found by walking `gateway/platforms/` and `plugins/platforms/`
+    /// across EVERY tag, not by diffing two of them.
+    public let minimumVersion: HermesCapabilities.SemVer?
 
     public init(
         name: String,
         displayName: String,
-        icon: String
+        icon: String,
+        minimumVersion: HermesCapabilities.SemVer? = nil
     ) {
         self.name = name
         self.displayName = displayName
         self.icon = icon
+        self.minimumVersion = minimumVersion
+    }
+
+    /// Whether this row belongs on `capabilities`' host.
+    public func isAvailable(on capabilities: HermesCapabilities) -> Bool {
+        guard let minimumVersion else { return true }
+        return capabilities.isAtLeast(minimumVersion)
     }
 }
 
@@ -52,7 +67,22 @@ public enum KnownPlatforms {
         HermesToolPlatform(name: "matrix", displayName: "Matrix", icon: "lock.rectangle.stack"),
         HermesToolPlatform(name: "feishu", displayName: "Feishu", icon: "message.badge.circle"),
         HermesToolPlatform(name: "mattermost", displayName: "Mattermost", icon: "bubble.left.and.exclamationmark.bubble.right"),
-        HermesToolPlatform(name: "imessage", displayName: "iMessage", icon: "message.fill"),
+        // `bluebubbles` is the id Hermes uses (`Platform.BLUEBUBBLES`,
+        // `gateway/platforms/bluebubbles.py`); Scarf shipped it as
+        // `imessage`, which is not a Hermes platform id at any version — so
+        // the row's `bluebubbles:` config block was invisible to the
+        // "Configured" check, which fell back to the env var alone. Renamed
+        // in the v0.21.1 B4 sweep rather than adding a SECOND row for the
+        // real id, which would have given the same platform two entries
+        // (one with the setup form, one without). The old `imessage`
+        // spelling is still accepted by `icon(for:)` and by the
+        // `PlatformsView` / `identifyingEnvVar` switches.
+        // NOT gated, deliberately: this row has shipped in Scarf since long
+        // before the roster sweep (as `imessage`), so putting its true 0.9
+        // floor on it would REMOVE a row users already see whenever the
+        // version probe has not answered yet (C1). The adapter itself lands
+        // at v2026.4.13 = 0.9.0.
+        HermesToolPlatform(name: "bluebubbles", displayName: "iMessage (BlueBubbles)", icon: "message.fill"),
         // -- v0.12 additions ---------------------------------------------
         // Yuanbao is a native gateway adapter (18th platform); Microsoft
         // Teams ships as a plugin (19th). PlatformDetail surfaces the
@@ -83,14 +113,62 @@ public enum KnownPlatforms {
         HermesToolPlatform(name: "ntfy", displayName: "ntfy", icon: "bell.badge"),
         // -- v0.17 additions ---------------------------------------------
         // WhatsApp Business Cloud API (25th platform) — Meta's hosted webhook
-        // path, distinct from the older `whatsapp` web-bridge. iMessage via
-        // Photon (24th) is intentionally not surfaced yet (moving protocol).
+        // path, distinct from the older `whatsapp` web-bridge. (iMessage via
+        // Photon was held back here as a moving protocol; it is rostered
+        // below as of the v0.21.1 B4 sweep, still without a setup form.)
         HermesToolPlatform(name: "whatsapp_cloud", displayName: "WhatsApp Cloud", icon: "phone.bubble.fill"),
         // -- v0.20 additions ---------------------------------------------
         // Buzz — Block's Nostr-based messenger (plugins/platforms/buzz/).
         // User-gated via `allowed_users` (hex pubkeys / npubs), so it has
         // no GatewayAllowlistKind mapping.
         HermesToolPlatform(name: "buzz", displayName: "Buzz", icon: "bolt.horizontal.circle"),
+        // -- v0.21.1 audit finding B4 -------------------------------------
+        // Ten platform ids that are REAL and user-configurable at BOTH
+        // v2026.8.31 (0.21.0) and v2026.9.7 (0.21.1) but were never in this
+        // roster. Sources at tag v2026.9.7: the `Platform` enum in
+        // `gateway/config.py:198-224` (sms, dingtalk, api_server,
+        // msgraph_webhook, wecom, weixin, qqbot) plus the bundled plugin
+        // adapter directories `plugins/platforms/{irc,photon}` (dynamic enum
+        // members via `Platform._missing_`). The tenth, `bluebubbles`, was
+        // already in the roster under the wrong id — see the rename above.
+        //
+        // These are NOT release-gated: they exist at every Hermes version
+        // Scarf supports, so surfacing them is a bug fix rather than a
+        // v0.21.1 surface, and no capability flag applies. Platforms without
+        // a per-field setup view fall to `PlatformsView`'s default panel
+        // ("No setup form for this platform yet"), which is the same
+        // degradation `buzz` has had since v0.20.
+        //
+        // DELIBERATELY EXCLUDED, verified at v2026.9.7:
+        //  - `local` (Platform.LOCAL), `relay` (marked EXPERIMENTAL in the
+        //    enum comment) and `wecom_callback` — internal/infrastructure
+        //    members with no adapter directory of their own and no user
+        //    messaging account behind them.
+        //  - `a2a` (`plugins/platforms/a2a/`) — agent-to-agent protocol
+        //    infrastructure, `requires_env: []`, configured entirely through
+        //    `optional_env` bearer tokens/bind host in `hermes config`. This
+        //    repeats the explicit v0.20 decision not to roster it.
+        //  - `raft` (`plugins/platforms/raft/`) — an experimental external
+        //    bridge whose whole config surface is one env var (`RAFT_PROFILE`,
+        //    "auto-enables the adapter when set"); it has no token, no
+        //    allowlist and no `enabled` key, so a roster row would offer
+        //    nothing to configure.
+        // Floors, walked across every tag (`git ls-tree` over
+        // gateway/platforms + plugins/platforms). dingtalk / sms /
+        // api_server land at v2026.3.23 (0.4.0) and wecom at v2026.3.30
+        // (0.6.0) — at or below Scarf's oldest supported host, so no gate.
+        // The rest carry one: weixin v2026.4.13 (0.9.0),
+        // qqbot v2026.4.16 (0.10.0), irc v2026.4.30 (0.12.0),
+        // msgraph_webhook v2026.5.16 (0.14.0), photon v2026.6.19 (0.17.0).
+        HermesToolPlatform(name: "dingtalk", displayName: "DingTalk", icon: "text.bubble"),
+        HermesToolPlatform(name: "sms", displayName: "SMS", icon: "message"),
+        HermesToolPlatform(name: "irc", displayName: "IRC", icon: "number.square", minimumVersion: .init(major: 0, minor: 12, patch: 0)),
+        HermesToolPlatform(name: "wecom", displayName: "WeCom", icon: "building.2"),
+        HermesToolPlatform(name: "weixin", displayName: "Weixin", icon: "captions.bubble", minimumVersion: .init(major: 0, minor: 9, patch: 0)),
+        HermesToolPlatform(name: "qqbot", displayName: "QQ Bot", icon: "bubble.right", minimumVersion: .init(major: 0, minor: 10, patch: 0)),
+        HermesToolPlatform(name: "msgraph_webhook", displayName: "Microsoft Graph Webhook", icon: "network", minimumVersion: .init(major: 0, minor: 14, patch: 0)),
+        HermesToolPlatform(name: "api_server", displayName: "API Server", icon: "server.rack"),
+        HermesToolPlatform(name: "photon", displayName: "iMessage via Photon", icon: "antenna.radiowaves.left.and.right", minimumVersion: .init(major: 0, minor: 17, patch: 0)),
     ]
 
     public static func icon(for platform: String) -> String {
@@ -107,7 +185,9 @@ public enum KnownPlatforms {
         case "matrix": return "lock.rectangle.stack"
         case "feishu": return "message.badge.circle"
         case "mattermost": return "bubble.left.and.exclamationmark.bubble.right"
-        case "imessage": return "message.fill"
+        // `bluebubbles` is the real Hermes id; `imessage` is the legacy
+        // Scarf spelling, kept so old callers still resolve.
+        case "bluebubbles", "imessage": return "message.fill"
         case "yuanbao": return "bubble.left.and.bubble.right.fill"
         // Legacy hyphenated spellings accepted for callers still holding
         // pre-fix identifiers (Scarf < v0.20 parity used them wrongly).
@@ -118,6 +198,16 @@ public enum KnownPlatforms {
         case "ntfy": return "bell.badge"
         case "whatsapp_cloud": return "phone.bubble.fill"
         case "buzz": return "bolt.horizontal.circle"
+        // -- v0.21.1 audit finding B4 -------------------------------------
+        case "dingtalk": return "text.bubble"
+        case "sms": return "message"
+        case "irc": return "number.square"
+        case "wecom": return "building.2"
+        case "weixin": return "captions.bubble"
+        case "qqbot": return "bubble.right"
+        case "msgraph_webhook": return "network"
+        case "api_server": return "server.rack"
+        case "photon": return "antenna.radiowaves.left.and.right"
         default: return "bubble.left"
         }
     }

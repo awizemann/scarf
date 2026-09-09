@@ -709,17 +709,57 @@ public struct ModelCatalogService: Sendable {
     /// don't block users with non-listed image providers.
     ///
     /// Order: most-likely-to-be-chosen first.
+    /// `image_gen.model` is the TOP-LEVEL key, and four bundled backends
+    /// read it as a fallback under their own `image_gen.<provider>.model`:
+    /// fal (`tools/image_generation_catalog.py::FAL_MODELS`), krea
+    /// (`plugins/image_gen/krea/__init__.py::_MODELS`), openai and
+    /// openai-codex (`plugins/image_gen/_common.py::GPT_IMAGE_2_TIERS`).
+    /// Each resolves through `resolve_static_model`, which ignores an id it
+    /// does not know — so a fal id is inert on a krea host and vice versa,
+    /// and the union is the set of values that mean something somewhere.
+    /// `xai` and `deepinfra` never read the top-level key (scoped only) and
+    /// `openrouter` takes any id verbatim (free-form field covers it).
+    /// meta-ai's `muse-image-1.0` is deliberately absent: that plugin is new
+    /// at v2026.9.7, and an ungated row here would change what a pre-target
+    /// host renders (C1).
     public static let imageGenModels: [HermesImageGenModel] = [
-        .init(modelID: "openai/gpt-image-1", display: "OpenAI · gpt-image-1", providerHint: "openai"),
-        .init(modelID: "google/imagen-4", display: "Google · Imagen 4", providerHint: "google-vertex"),
-        .init(modelID: "google/imagen-3", display: "Google · Imagen 3", providerHint: "google-vertex"),
-        .init(modelID: "stability/stable-image-ultra", display: "Stability · Stable Image Ultra", providerHint: "stability"),
-        // v0.15: Krea joins image_gen as a built-in plugin (env KREA_API_KEY).
-        .init(modelID: "krea-2-medium", display: "Krea · Krea 2 Medium", providerHint: "krea"),
-        .init(modelID: "krea-2-large", display: "Krea · Krea 2 Large", providerHint: "krea"),
-        .init(modelID: "fal-ai/flux-pro-1.1", display: "fal · FLUX 1.1 Pro", providerHint: "fal"),
-        .init(modelID: "black-forest-labs/flux-1.1-pro", display: "Black Forest Labs · FLUX 1.1 Pro", providerHint: "openrouter"),
-        .init(modelID: "openai/dall-e-3", display: "OpenAI · DALL·E 3", providerHint: "openai"),
+        // Verbatim mirror of `FAL_MODELS` in
+        // `hermes-agent/tools/image_generation_catalog.py` at v2026.9.7,
+        // in catalog order; `DEFAULT_MODEL` (flux-2/klein/9b) leads.
+        // Value-identical at v2026.8.31 — this list was simply stale.
+        .init(modelID: "fal-ai/flux-2/klein/9b", display: "FLUX 2 Klein 9B  (default)", providerHint: "fal"),
+        .init(modelID: "fal-ai/flux-2-pro", display: "FLUX 2 Pro", providerHint: "fal"),
+        .init(modelID: "fal-ai/z-image/turbo", display: "Z-Image Turbo", providerHint: "fal"),
+        .init(modelID: "fal-ai/nano-banana-pro", display: "Nano Banana Pro (Gemini 3 Pro Image)", providerHint: "fal"),
+        .init(modelID: "fal-ai/nano-banana-2", display: "Nano Banana 2 (Gemini 3.1 Flash Image)", providerHint: "fal"),
+        .init(modelID: "fal-ai/gpt-image-1.5", display: "GPT Image 1.5", providerHint: "fal"),
+        .init(modelID: "fal-ai/gpt-image-2", display: "GPT Image 2", providerHint: "fal"),
+        .init(modelID: "fal-ai/ideogram/v3", display: "Ideogram V3", providerHint: "fal"),
+        .init(modelID: "fal-ai/recraft/v4/pro/text-to-image", display: "Recraft V4 Pro", providerHint: "fal"),
+        .init(modelID: "fal-ai/qwen-image", display: "Qwen Image", providerHint: "fal"),
+        .init(modelID: "fal-ai/krea/v2/medium/text-to-image", display: "Krea 2 Medium", providerHint: "fal"),
+        .init(modelID: "fal-ai/krea/v2/large/text-to-image", display: "Krea 2 Large", providerHint: "fal"),
+        .init(modelID: "bytedance/seedream/v5/pro/text-to-image", display: "Seedream 5.0 Pro", providerHint: "fal"),
+        .init(modelID: "bytedance/seedream/v5/lite/text-to-image", display: "Seedream 5.0 Lite", providerHint: "fal"),
+        .init(modelID: "ideogram/v4/instant", display: "Ideogram V4 (Instant)", providerHint: "fal"),
+        .init(modelID: "ideogram/v4/fast", display: "Ideogram V4 (Fast)", providerHint: "fal"),
+        .init(modelID: "alibaba/qwen-image-3/text-to-image", display: "Qwen Image 3", providerHint: "fal"),
+        .init(modelID: "microsoft/mai-image-2.5-pro", display: "MAI Image 2.5 Pro", providerHint: "fal"),
+        .init(modelID: "google/nano-banana-2-lite", display: "Nano Banana 2 Lite", providerHint: "fal"),
+        .init(modelID: "fal-ai/recraft/v4.1/text-to-image", display: "Recraft V4.1", providerHint: "fal"),
+        .init(modelID: "xai/grok-imagine-image/v2.0/text-to-image", display: "Grok Imagine Image 2.0", providerHint: "fal"),
+        // `plugins/image_gen/krea/__init__.py::_MODELS` (v2026.9.7; the same
+        // three ids at v2026.8.31), `DEFAULT_MODEL` (krea-2-medium) first.
+        .init(modelID: "krea-2-medium", display: "Krea 2 Medium  (Krea API)", providerHint: "krea"),
+        .init(modelID: "krea-2-large", display: "Krea 2 Large  (Krea API)", providerHint: "krea"),
+        .init(modelID: "krea-2-medium-turbo", display: "Krea 2 Medium Turbo  (Krea API)", providerHint: "krea"),
+        // `plugins/image_gen/_common.py::GPT_IMAGE_2_TIERS` (v2026.9.7),
+        // shared by the `openai` and `openai-codex` backends; the same three
+        // ids lived in `plugins/image_gen/openai/__init__.py` at v2026.8.31.
+        // `GPT_IMAGE_2_DEFAULT` (medium) first.
+        .init(modelID: "gpt-image-2-medium", display: "GPT Image 2 (Medium)", providerHint: "openai"),
+        .init(modelID: "gpt-image-2-low", display: "GPT Image 2 (Low)", providerHint: "openai"),
+        .init(modelID: "gpt-image-2-high", display: "GPT Image 2 (High)", providerHint: "openai"),
     ]
 
     // MARK: - Hermes overlay providers
@@ -949,6 +989,53 @@ public struct ModelCatalogService: Sendable {
             authType: .apiKey,
             subscriptionGated: false,
             docURL: nil
+        ),
+        // -- Plugin-registered providers (B7) ------------------------------
+        // These four are NOT in `HERMES_OVERLAYS`. They are bundled
+        // `plugins/model-providers/<name>/` profiles that
+        // `hermes_cli/models_catalog_static.py:353-368` auto-appends to
+        // CANONICAL_PROVIDERS at import time (every registered provider whose
+        // `auth_type` is outside the bespoke-UX skip set). Hermes's picker
+        // reaches them; Scarf's could not, because it only merges models.dev
+        // plus the overlay table — so they are mirrored here, with the base
+        // URL / auth type read off each plugin's own `register_provider()`
+        // call at v2026.9.7.
+        //
+        // NOT gated: all four predate v0.21.1 (commandcode v2026.8.16.2,
+        // meta-ai v2026.8.18, router v2026.8.31) and this table is a
+        // merge-if-absent fallback — a host without the plugin simply never
+        // has the provider configured, exactly like the dormant entries above.
+        // `check-hermes-tables.py` lane 4 is the drift gate.
+        "meta-ai": HermesProviderOverlay(
+            displayName: "Meta Model API",
+            baseURL: "https://api.meta.ai/v1",
+            authType: .apiKey,
+            subscriptionGated: false,
+            docURL: "https://developer.meta.com/ai/"
+        ),
+        "router": HermesProviderOverlay(
+            displayName: "Ramp Router",
+            baseURL: "https://api.router.com/v1",
+            authType: .apiKey,
+            subscriptionGated: false,
+            docURL: "https://app.router.com/keys"
+        ),
+        "commandcode": HermesProviderOverlay(
+            displayName: "CommandCode",
+            baseURL: "https://api.commandcode.ai/provider/v1",
+            authType: .apiKey,
+            subscriptionGated: false,
+            docURL: "https://commandcode.ai/"
+        ),
+        // Same account and the same COMMANDCODE_API_KEY as the row above; a
+        // separate slug because the transport differs (Anthropic Messages vs
+        // OpenAI chat) and Hermes registers it as its own profile.
+        "commandcode-anthropic": HermesProviderOverlay(
+            displayName: "CommandCode (Anthropic)",
+            baseURL: "https://api.commandcode.ai/provider/v1",
+            authType: .apiKey,
+            subscriptionGated: false,
+            docURL: "https://commandcode.ai/"
         ),
     ]
 

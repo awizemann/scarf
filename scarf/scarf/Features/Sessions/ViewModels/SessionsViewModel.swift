@@ -157,6 +157,11 @@ final class SessionsViewModel {
     var searchText = ""
     var searchResults: [HermesMessage] = []
     var isSearching = false
+
+    /// Set when Hermes is mid-FTS-rebuild, so search can say its results
+    /// are knowingly partial instead of quietly under-returning. Probed
+    /// per search (the markers move, and vanish when the backfill lands).
+    var searchIndexRebuilding = false
     var storeStats: SessionStoreStats?
     var subagentSessions: [HermesSession] = []
 
@@ -427,6 +432,7 @@ final class SessionsViewModel {
         }
         isSearching = true
         searchResults = await dataService.searchMessages(query: query)
+        searchIndexRebuilding = await dataService.searchIndexStatus().isRebuilding
     }
 
     func cleanup() async {

@@ -76,6 +76,33 @@ struct CronView: View {
     private var hasCronBotChatDelivery: Bool {
         capabilitiesStore?.capabilities.hasCronBotChatDelivery ?? false
     }
+    /// v0.21.1 — `--failure-deliver` on create/edit plus the `failure_deliver`
+    /// job field. Unlike the deliver hints above this one is NOT cosmetic:
+    /// the flag is unknown to older argparse, so the field is hidden AND the
+    /// form value is stripped before it can reach the CLI.
+    private var hasCronFailureDeliver: Bool {
+        capabilitiesStore?.capabilities.hasCronFailureDeliver ?? false
+    }
+    /// v0.21.1 — `last_dispatch` / `last_delivery_unverified` read-only
+    /// diagnostics. Field-presence decides what renders; this only decides
+    /// whether to look, so a pre-v0.21.1 host is byte-identical to today.
+    private var hasCronDispatchDiagnostics: Bool {
+        capabilitiesStore?.capabilities.hasCronDispatchDiagnostics ?? false
+    }
+    /// v0.21.1 — `cron create --paused`, which also gates the past-one-shot
+    /// pre-check (only a v0.21.1 host refuses such a create).
+    private var hasCronCreatePaused: Bool {
+        capabilitiesStore?.capabilities.hasCronCreatePaused ?? false
+    }
+
+    /// The past-one-shot pre-check is gated on the RELEASE, not on any one
+    /// flag: only a v0.21.1 host rejects a one-shot whose timestamp is
+    /// already past, and refusing locally on an older host would deny a
+    /// write that host accepts. Reading `hasCronCreatePaused` for it worked
+    /// only by having the same floor today.
+    private var isV0211OrLater: Bool {
+        capabilitiesStore?.capabilities.isV0211OrLater ?? false
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -109,6 +136,7 @@ struct CronView: View {
         .onAppear {
             viewModel.load(changeToken: fileWatcher.lastChangeDate)
             viewModel.isV0206OrLater = hasCronResumeRunNow
+            viewModel.isV0211OrLater = isV0211OrLater
             // Both probes are one cheap read-only CLI call each, and both
             // feed always-visible affordances (row badge / warning icon),
             // so they can't be deferred behind a disclosure the way RUN
@@ -128,10 +156,11 @@ struct CronView: View {
         // work when it does — otherwise a cold launch shows no incidents,
         // no doctor findings, and the wrong terminal-refusal wording.
         .onChange(of: hasCronResumeRunNow) { _, newValue in viewModel.isV0206OrLater = newValue }
+        .onChange(of: isV0211OrLater) { _, newValue in viewModel.isV0211OrLater = newValue }
         .onChange(of: hasCronIncidents) { _, newValue in if newValue { viewModel.loadIncidents() } }
         .onChange(of: hasCronDoctor) { _, newValue in if newValue { viewModel.loadDoctor() } }
         .sheet(isPresented: $viewModel.showCreateSheet) {
-            CronJobEditor(mode: .create, availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery) { form in
+            CronJobEditor(mode: .create, availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver) { form in
                 viewModel.createJob(
                     schedule: form.schedule,
                     prompt: form.prompt,
@@ -145,7 +174,8 @@ struct CronView: View {
                     // hosts get a hard `false`, so a stale form value (or a
                     // hand-edited jobs.json round-tripped through edit-mode)
                     // can't sneak `--no-agent` into a CLI that doesn't grok it.
-                    noAgent: hasCronNoAgent ? form.noAgent : false
+                    noAgent: hasCronNoAgent ? form.noAgent : false,
+                    failureDeliver: hasCronFailureDeliver ? form.failureDeliver : ""
                 )
                 viewModel.showCreateSheet = false
             } onCancel: {
@@ -153,7 +183,7 @@ struct CronView: View {
             }
         }
         .sheet(item: $viewModel.editingJob) { job in
-            CronJobEditor(mode: .edit(job), availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery) { form in
+            CronJobEditor(mode: .edit(job), availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver) { form in
                 viewModel.updateJob(
                     id: job.id,
                     // Untouched schedule → omit `--schedule` entirely. Re-sending
@@ -170,7 +200,10 @@ struct CronView: View {
                     clearSkills: form.clearSkills,
                     script: form.script,
                     workdir: hasCronWorkdir ? form.workdir : nil,
-                    noAgent: hasCronNoAgent ? form.noAgent : nil
+                    noAgent: hasCronNoAgent ? form.noAgent : nil,
+                    // `""` on edit is Hermes's clear-the-override gesture, so an
+                    // emptied field is forwarded; `nil` (older host) omits it.
+                    failureDeliver: hasCronFailureDeliver ? form.failureDeliver : nil
                 )
                 viewModel.editingJob = nil
             } onCancel: {
@@ -684,6 +717,23 @@ struct CronView: View {
             .foregroundStyle(ScarfColor.foregroundMuted)
         }
 
+        if hasCronFailureDeliver, let failureDeliver = job.failureDeliver {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 11))
+                Text(failureDeliver == "local"
+                     ? String(localized: "Failures: suppressed (local)")
+                     : String(localized: "Failures: \(failureDeliver)"))
+                    .scarfStyle(.caption)
+            }
+            .foregroundStyle(ScarfColor.foregroundMuted)
+        }
+
+        if hasCronDispatchDiagnostics {
+            dispatchRow(job: job)
+            deliveryUnverifiedBanner(job: job)
+        }
+
         if hasCronDoctor, let finding = viewModel.doctorFindings[job.id] {
             doctorBanner(finding)
         }
@@ -703,6 +753,52 @@ struct CronView: View {
         }
     }
 
+    /// v0.21.1 `last_dispatch` — scheduled-vs-actual timing for the last
+    /// fire. Mirrors `hermes_cli/cron.py::_dispatch_display`: an on-time
+    /// dispatch reads quietly, a late / catch-up one reads loudly, because a
+    /// run that fired long after gateway downtime must not look like an
+    /// ordinary success. Renders nothing when the stamp is absent or
+    /// incomplete — presence, not version, decides (charter C4).
+    @ViewBuilder
+    private func dispatchRow(job: HermesCronJob) -> some View {
+        if let dispatch = job.lastDispatch {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: dispatch.isLate ? "clock.badge.exclamationmark" : "clock")
+                    .font(.system(size: 11))
+                Text(Self.dispatchSummary(dispatch))
+                    .scarfStyle(.caption)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(dispatch.isLate ? ScarfColor.warning : ScarfColor.foregroundMuted)
+            .accessibilityIdentifier("cron.detail.dispatch")
+        }
+    }
+
+    /// One line, matching `_dispatch_display`'s three shapes. The wording
+    /// lives on `CronDispatchStamp` in ScarfCore so the parity suite can
+    /// assert it against the CLI's own text.
+    static func dispatchSummary(_ dispatch: CronDispatchStamp) -> String { dispatch.summary }
+
+    /// v0.21.1 `last_delivery_unverified` — a live adapter acked the send but
+    /// returned no `message_id`/`raw_response` (the Slack/Matrix/Mattermost
+    /// shape). Accepted as delivered, so this is a note, not a failure.
+    @ViewBuilder
+    private func deliveryUnverifiedBanner(job: HermesCronJob) -> some View {
+        if let note = job.deliveryUnverifiedNote {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 11))
+                Text(note)
+                    .scarfStyle(.caption)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(ScarfColor.warning)
+            .accessibilityIdentifier("cron.detail.deliveryUnverified")
+        }
+    }
+
     /// Tooltip text for the list-row `cron doctor` warning icon.
     private func doctorTooltip(_ finding: HermesCronDoctorFinding) -> String {
         String(localized: "Health check: \(finding.issues.joined(separator: " · "))")
@@ -715,11 +811,26 @@ struct CronView: View {
             Image(systemName: "stethoscope")
                 .foregroundStyle(ScarfColor.warning)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Health check found ^[\(finding.issues.count) issue](inflect: true)")
+                // v0.21.1 split the delivery story: `delivery_failed` no
+                // longer also emits `last run failed:`, and a new
+                // "unverified" issue reports an ack with no receipt. That
+                // last one is NOT a fault, so it is counted and rendered
+                // apart — headlining it as an issue would have every
+                // Slack-delivering job permanently badged broken.
+                Text(finding.problemIssues.isEmpty
+                     ? String(localized: "Health check: delivery unverified")
+                     : String(localized: "Health check found ^[\(finding.problemIssues.count) issue](inflect: true)"))
                     .scarfStyle(.bodyEmph)
                     .foregroundStyle(ScarfColor.foregroundPrimary)
-                ForEach(finding.issues, id: \.self) { issue in
+                ForEach(finding.problemIssues, id: \.self) { issue in
                     Text("• \(issue)")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(finding.unverifiedIssues, id: \.self) { issue in
+                    Label(issue, systemImage: "questionmark.circle")
                         .scarfStyle(.caption)
                         .foregroundStyle(ScarfColor.foregroundMuted)
                         .textSelection(.enabled)
@@ -1140,6 +1251,9 @@ struct CronJobEditor: View {
         var schedule: String = ""
         var prompt: String = ""
         var deliver: String = ""
+        /// v0.21.1 `--failure-deliver` — same grammar as Deliver, applied to
+        /// FAILURE notices only. Empty = failures follow Deliver.
+        var failureDeliver: String = ""
         var repeatCount: String = ""
         var skills: [String] = []
         var clearSkills: Bool = false
@@ -1172,6 +1286,10 @@ struct CronJobEditor: View {
     /// `cron create` at argparse, which `supportsCronDeliver` guards for
     /// the copy/fleet paths.
     var supportsBotChatDelivery: Bool = false
+    /// Pass `true` on v0.21.1+ hosts. Unlike the two hints above this hides
+    /// the whole row: `--failure-deliver` is an unknown flag to older
+    /// argparse and would fail the entire create/edit.
+    var supportsFailureDeliver: Bool = false
     let onSave: (FormState) -> Void
     let onCancel: () -> Void
 
@@ -1222,6 +1340,19 @@ struct CronJobEditor: View {
             }
             if supportsBotChatDelivery {
                 Text("`bot-chat[:profile]` injects the output into a local profile's Bot Chat as a message the bot responds to — v0.20.6+ only.")
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if supportsFailureDeliver {
+                formField(
+                    "Failure deliver",
+                    text: $form.failureDeliver,
+                    verbatimPlaceholder: deliverPlaceholder,
+                    mono: true
+                )
+                .accessibilityIdentifier("cron.editor.failureDeliver")
+                Text("Where FAILURE notices go instead of Deliver — `local` suppresses them entirely (run state still shows in the list). Empty = failures follow Deliver. v0.21.1+ only.")
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1306,6 +1437,7 @@ struct CronJobEditor: View {
                 form.schedule = job.schedule.editValue
                 form.prompt = job.prompt
                 form.deliver = job.deliver ?? ""
+                form.failureDeliver = job.failureDeliver ?? ""
                 form.skills = job.skills ?? []
                 form.script = job.preRunScript ?? ""
                 form.workdir = job.workdir ?? ""

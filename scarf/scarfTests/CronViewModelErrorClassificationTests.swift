@@ -137,6 +137,82 @@ import ScarfCore
         #expect(Self.fixtureJob(lastError: nil, state: "running").isTerminal == false)
     }
 
+    // MARK: - v0.21.1 create surfaces (Phase 3)
+
+    /// A9: `cron/lifecycle_guard.py::check_gateway_lifecycle` refuses a
+    /// `--script` on a cloud-synced FileProvider path WITHOUT opening it. The
+    /// refusal reaches Scarf as `Failed to create job: Blocked: …` — on
+    /// STDOUT, because `tools/cronjob_tools.py::cronjob` catches the
+    /// `ValueError` and returns it as a JSON `error` payload. The remedy is
+    /// the LAST clause of the sentence, so the generic `prefix(200)`
+    /// truncation would have cut off exactly the actionable half.
+    @Test func cloudPlaceholderRefusalIsSurfacedVerbatim() {
+        let output = """
+            Failed to create job: Blocked: the cron script lives on a cloud-synced path (iCloud Drive / ~/Library/CloudStorage). Opening an evicted FileProvider placeholder can hang the guard's preflight scan indefinitely, so it is refused without being read. Move the script to a local, non-cloud path (e.g. ~/.hermes/scripts/) and recreate the job.
+            """
+        let message = try? #require(CronViewModel.friendlyCronFailure(output))
+        #expect(message?.hasPrefix("Blocked: the cron script lives on a cloud-synced path") == true)
+        // The whole sentence, remedy included — not a 200-char stub.
+        #expect(message?.hasSuffix("and recreate the job.") == true)
+        #expect((message?.count ?? 0) > 200)
+    }
+
+    @Test func gatewayLifecycleRefusalAlsoComesThroughVerbatim() {
+        let output = "Failed to create job: Blocked: cron job contains a gateway lifecycle command or persistent launchctl submit operation."
+        #expect(CronViewModel.friendlyCronFailure(output)?.hasPrefix("Blocked: cron job contains") == true)
+        #expect(CronViewModel.blockedSentence(in: "nothing to see here") == nil)
+    }
+
+    /// A8: `_oneshot_past_grace_error` wording from `cron/jobs.py`.
+    @Test func pastOneShotRejectionIsTranslated() {
+        let output = "Failed to create job: Requested one-shot time 2026-01-01T09:00:00+00:00 is more than 120s in the past and cannot be scheduled."
+        #expect(CronViewModel.friendlyCronFailure(output)?.contains("already in the past") == true)
+    }
+
+    /// The pre-check only fires on a host that would actually refuse — a
+    /// v0.21.0 host stores the job, and denying it locally would refuse a
+    /// write the host accepts. Same rule as the v0.20.6 terminal guards.
+    @Test @MainActor func pastOneShotPreCheckIsGatedOnV0211() {
+        let past = "2020-01-01T09:00:00+00:00"
+
+        let modern = CronViewModel()
+        modern.isV0211OrLater = true
+        var modernOutcome: Bool?
+        modern.createJob(schedule: past, prompt: "p", name: "n", deliver: "", skills: [],
+                         script: "", repeatCount: "") { modernOutcome = $0 }
+        #expect(modernOutcome == false)
+        #expect(modern.message?.contains("already in the past") == true)
+
+        // Pre-v0.21.1 the same schedule is left to the CLI. Asserted on the
+        // predicate rather than by calling `createJob` — the legacy path
+        // deliberately falls through to a REAL `hermes cron create`, which a
+        // unit test must not run against the user's Hermes home.
+        #expect(HermesCronJob.oneShotScheduleIsPastGrace(past))
+        let legacy = CronViewModel()
+        #expect(legacy.isV0211OrLater == false)
+    }
+
+    /// C3: `--failure-deliver` composition. The VIEW strips the value on a
+    /// host without `hasCronFailureDeliver`, so the builder's contract is
+    /// simply "empty means omit".
+    @Test func failureDeliverArgvComposition() {
+        let withOverride = CronViewModel.createJobArguments(
+            schedule: "30m", prompt: "p", name: "n", deliver: "telegram:1", skills: [],
+            script: "", repeatCount: "", failureDeliver: "local"
+        )
+        #expect(withOverride.contains("--failure-deliver"))
+        #expect(withOverride.firstIndex(of: "local") == withOverride.firstIndex(of: "--failure-deliver").map { $0 + 1 })
+        // Every flag still precedes the `--` end-of-options marker.
+        let marker = try? #require(withOverride.firstIndex(of: "--"))
+        #expect((withOverride.firstIndex(of: "--failure-deliver") ?? .max) < (marker ?? 0))
+
+        let without = CronViewModel.createJobArguments(
+            schedule: "30m", prompt: "p", name: "n", deliver: "", skills: [],
+            script: "", repeatCount: ""
+        )
+        #expect(without.contains("--failure-deliver") == false)
+    }
+
     // MARK: - Fixtures
 
     private static func fixtureJob(lastError: String?, state: String? = nil) -> HermesCronJob {
