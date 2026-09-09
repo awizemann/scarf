@@ -77,7 +77,12 @@ public enum KnownPlatforms {
         // (one with the setup form, one without). The old `imessage`
         // spelling is still accepted by `icon(for:)` and by the
         // `PlatformsView` / `identifyingEnvVar` switches.
-        HermesToolPlatform(name: "bluebubbles", displayName: "iMessage (BlueBubbles)", icon: "message.fill", minimumVersion: .init(major: 0, minor: 9, patch: 0)),
+        // NOT gated, deliberately: this row has shipped in Scarf since long
+        // before the roster sweep (as `imessage`), so putting its true 0.9
+        // floor on it would REMOVE a row users already see whenever the
+        // version probe has not answered yet (C1). The adapter itself lands
+        // at v2026.4.13 = 0.9.0.
+        HermesToolPlatform(name: "bluebubbles", displayName: "iMessage (BlueBubbles)", icon: "message.fill"),
         // -- v0.12 additions ---------------------------------------------
         // Yuanbao is a native gateway adapter (18th platform); Microsoft
         // Teams ships as a plugin (19th). PlatformDetail surfaces the
@@ -152,7 +157,7 @@ public enum KnownPlatforms {
         // gateway/platforms + plugins/platforms). dingtalk / sms /
         // api_server land at v2026.3.23 (0.4.0) and wecom at v2026.3.30
         // (0.6.0) — at or below Scarf's oldest supported host, so no gate.
-        // The rest carry one: weixin + bluebubbles v2026.4.13 (0.9.0),
+        // The rest carry one: weixin v2026.4.13 (0.9.0),
         // qqbot v2026.4.16 (0.10.0), irc v2026.4.30 (0.12.0),
         // msgraph_webhook v2026.5.16 (0.14.0), photon v2026.6.19 (0.17.0).
         HermesToolPlatform(name: "dingtalk", displayName: "DingTalk", icon: "text.bubble"),

@@ -225,8 +225,11 @@ import Foundation
         for name in ["dingtalk", "sms", "api_server", "wecom"] {
             #expect(floor(name) == nil, "\(name) predates the gate")
         }
+        // `bluebubbles` really lands at 0.9.0, but the ROW predates the
+        // sweep (it shipped as `imessage`), so gating it would remove a row
+        // users already see on an undetected host — C1 cuts the other way.
+        #expect(floor("bluebubbles") == nil)
         #expect(floor("weixin") == .init(major: 0, minor: 9, patch: 0))
-        #expect(floor("bluebubbles") == .init(major: 0, minor: 9, patch: 0))
         #expect(floor("qqbot") == .init(major: 0, minor: 10, patch: 0))
         #expect(floor("irc") == .init(major: 0, minor: 12, patch: 0))
         #expect(floor("msgraph_webhook") == .init(major: 0, minor: 14, patch: 0))

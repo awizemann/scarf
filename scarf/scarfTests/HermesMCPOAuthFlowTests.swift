@@ -114,6 +114,29 @@ struct HermesMCPOAuthFlowTests {
         #expect(!written.contains("flow:"))
     }
 
+    /// …but a header with only a trailing COMMENT after the colon is still
+    /// an ordinary block, and must not be refused.
+    @Test func writingFlowAcceptsAHeaderWithATrailingComment() throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let yaml = """
+        mcp_servers:
+          noted_api:
+            url: https://noted.example.com/mcp
+            auth: oauth
+            oauth:  # set up 2026-08
+              client_id: "abc123"
+            enabled: true
+        """
+        try yaml.write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+        let service = HermesFileService(context: home.context)
+        #expect(service.setMCPServerOAuthFlow(name: "noted_api", flow: "device"))
+        let written = try String(contentsOfFile: home.context.paths.configYAML, encoding: .utf8)
+        #expect(written.contains("flow: device"))
+        #expect(written.contains("client_id: \"abc123\""))
+        #expect(written.components(separatedBy: "oauth:").count - 1 == 1)
+    }
+
     /// Drift alarm. This is the byte-exact block Hermes prints on the device
     /// branch, from `tools/mcp_oauth_device.py::_authorize` at v2026.9.7:
     ///

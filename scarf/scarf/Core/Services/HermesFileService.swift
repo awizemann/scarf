@@ -1724,13 +1724,18 @@ struct HermesFileService: Sendable {
             let indent = line.prefix(while: { $0 == " " }).count
             let trimmed = Self.trimYAMLLine(line)
             if blockIndex == nil {
-                if indent == 4 && trimmed == block + ":" {
-                    blockIndex = index
-                } else if indent == 4, trimmed.hasPrefix(block + ":"),
-                          !Self.trimYAMLLine(String(trimmed.dropFirst(block.count + 1))).isEmpty {
-                    // `oauth: {…}` / `oauth: something` — a shape this
-                    // patcher cannot edit. Refuse; never add a second header.
-                    return false
+                if indent == 4, trimmed.hasPrefix(block + ":") {
+                    // What follows the colon decides: nothing (or only a
+                    // trailing comment) is an ordinary block header; a VALUE
+                    // is an inline-flow mapping or a scalar, which this
+                    // patcher cannot edit — refuse rather than insert a
+                    // second `oauth:` header PyYAML would let win.
+                    let rest = Self.stripInlineComment(String(trimmed.dropFirst(block.count + 1)))
+                    if rest.isEmpty {
+                        blockIndex = index
+                    } else {
+                        return false
+                    }
                 } else if indent <= 2 && !trimmed.isEmpty && !trimmed.hasPrefix("#") {
                     break
                 }
