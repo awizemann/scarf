@@ -39,7 +39,6 @@
 - [ ] Fix charter.md guardrail indent (human edit) (id: t-00f9972e) (added: 2026-09-01) (priority: high)
 - [ ] AdvancedTab: Max Concurrent Children row over-gated on isV0204OrLater (id: t-8f4f5d68) (added: 2026-09-01)
 - [ ] Delete resolved WS-* TODO comments + stale doc comments (id: t-1febd6fa) (added: 2026-09-02) (priority: low)
-- [ ] v0.21 platform adapters not in Scarf roster + Discord allowlist gap (id: t-0c0b1aa7) (added: 2026-09-02)
 - [ ] UI automation pass (re-enable scarfUITests, cover real-file flows) (id: t-d11c4fef) (added: 2026-09-02)
 - [ ] Template export: review agent-authored config schema before sharing (id: t-6f770a34) (added: 2026-09-04) (priority: low)
 - [ ] Give ServerTransport an O_NOFOLLOW/openat-style primitive to close deletion TOCTOU (id: t-9c40eb26) (added: 2026-09-04) (priority: low)
@@ -53,6 +52,17 @@
 - [ ] **[followup/t-aud01]** Lazy-load `reasoning_content` (v0.11 rich chain-of-thought) on REASONING disclosure open. `fetchReasoningContent(for:)` exists but has zero callers; the bulk fetch excludes reasoning_content (perf, issue #74) so it's never shown on ANY historical load. Wire a per-message lazy fetch from `RichMessageBubble` (macOS) + `Scarf iOS/Chat/ChatView.swift:2464`. Gotchas to resolve: (1) `RichMessageBubble` `==` short-circuit (issue #46) doesn't compare reasoning for settled bubbles, so a spliced result won't redraw — use a view-local `@State` cache instead; (2) need a cheap "reasoning_content available" probe so the disclosure shows even when content isn't loaded; (3) confirm whether v0.11 models populate `reasoning` too or only `reasoning_content`. (id: t-aud21) (added: 2026-06-13, source: t-aud01)
 - [ ] Flaky ACPClientStartIdempotenceTests under full parallel swift test (id: t-f3820038) (added: 2026-09-07) (priority: low)
 - [ ] Stabilize the UI gate: journeys flake on a loaded Mac (id: t-e3926f86) (added: 2026-09-08)
+- [ ] Setup forms for the nine newly-rostered gateway platforms (id: t-1ca040c2) (added: 2026-09-08)
+- [ ] Cron copy paths miss argparse's `--` end-of-options marker (id: t-ff609789) (added: 2026-09-08)
+- [ ] Surface image_gen.provider (incl. new meta-ai backend) (id: t-e7af69d4) (added: 2026-09-08) (priority: low)
+- [ ] Audit P9: exit-code-as-truth (skills install, sessions export, mcp login, cron run, plugins enable, security audit) (id: t-8ea370f3) (added: 2026-09-08) (priority: high)
+- [ ] Audit P10: YAML writers and parser that can break config.yaml (id: t-e650c3f3) (added: 2026-09-08) (priority: high)
+- [ ] Audit P11: main-actor blocking writes and uncoalesced gateway loads (C10) (id: t-9b411a5e) (added: 2026-09-08) (priority: high)
+- [ ] Audit P12: skills hub identifier/updates, MCP login stream, mcp test rows (id: t-6bb11cb0) (added: 2026-09-08) (priority: high)
+- [ ] Audit P13: config read correctness (defaults, boolish, enums, ceilings, aliases) (id: t-8d2a8e04) (added: 2026-09-08)
+- [ ] Audit P14: Kanban dead gate surface, goal/diagnostics, sessions rename, HermesDataService dead code (id: t-c66e3882) (added: 2026-09-08)
+- [ ] Audit P15: cron edit skills diff, repeat seed, doctor ids, timestamps, citations (id: t-53e3da94) (added: 2026-09-08)
+- [ ] Audit P16: capabilities/roster hygiene and small dead-code cleanups (id: t-ae5f2f19) (added: 2026-09-08)
 
 ## Doing
 
@@ -62,6 +72,16 @@
 
 ## Done
 
+- [x] v0.21.1 P8: remediate cross-phase fresh-eyes audit findings (id: t-d8992262) (added: 2026-09-08) (priority: high)
+- [x] v0.21.1 P7: Memory, wiki, version-target reconciliation (id: t-7cc4a105) (added: 2026-09-08)
+- [x] v0.21.1 P6: Providers, image-gen, kanban contract, auth priority, MCP device flow (id: t-eefcfa4e) (added: 2026-09-08)
+- [x] v0.21.1 P5: Search FTS 8KB fallback, rebuild affordance, quarantine watcher, schema test (id: t-e9947a7d) (added: 2026-09-08) (priority: high)
+- [x] v0.21.1 P4: Skills search, hub sources, debug share, plugins compat, computer-use doctor (id: t-77aa11a0) (added: 2026-09-08) (priority: high)
+- [x] v0.21.1 P3: Cron — paused create, failure-deliver, dispatch diagnostics, guards (id: t-61e9f8aa) (added: 2026-09-08) (priority: high)
+- [x] v0.21 platform adapters not in Scarf roster + Discord allowlist gap (id: t-0c0b1aa7) (added: 2026-09-02)
+- [x] v0.21.1 P2: Gateway — multiplexer status, platform roster, dead fields (id: t-2d39ff83) (added: 2026-09-08) (priority: high)
+- [x] v0.21.1 P1: Settings — fast mode picker, telemetry, new config keys (id: t-bcdef737) (added: 2026-09-08) (priority: high)
+- [x] v0.21.1 P0: capability flags, drift script, web backends (id: t-80fb5589) (added: 2026-09-08) (priority: high)
 - [x] Cron detail pane is unreachable: no click/context menu, absent from a11y tree (id: t-0fb3b91f) (added: 2026-09-08) (priority: high)
 - [x] Follow-up: RemoteSQLiteBackend has the same WAL -readonly trap over SSH (id: t-fb136a08) (added: 2026-09-08)
 - [x] Make SkillsView's tab strip UI-test drivable (buttons, not segmented Picker) (id: t-42c56c2f) (added: 2026-09-08) (priority: low)
