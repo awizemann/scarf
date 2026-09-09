@@ -48,9 +48,17 @@ struct GatewayView: View {
         .navigationTitle("Messaging Gateway")
         .onAppear {
             attachCapabilitiesIfNeeded()
-            viewModel.load()
+            // Forced: `gateway status` is a LIVE liveness probe, and the
+            // gateway can die without rewriting `gateway_state.json` — so
+            // re-entering the section must re-probe even when no file has
+            // changed since the last load. Only watcher ticks coalesce.
+            viewModel.load(force: true)
         }
-        .onChange(of: fileWatcher.lastChangeDate) { viewModel.load() }
+        .onChange(of: fileWatcher.lastChangeDate) { _, token in
+            // Carry the token so repeated ticks for the same change coalesce
+            // into one in-flight load instead of three CLI spawns apiece.
+            viewModel.load(changeToken: token)
+        }
     }
 
     /// Re-create the VM with the resolved capabilities the first time the

@@ -159,13 +159,23 @@ struct AdvancedTab: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 160, alignment: .trailing)
                 Button("Check") {
-                    diagnosticsOutput = viewModel.runConfigCheck()
+                    // Both verbs spawn `hermes` (an SSH round-trip on a
+                    // remote host); running them from the Button action
+                    // froze the window until the CLI returned. The output
+                    // panel opens immediately and fills in when it lands.
+                    diagnosticsOutput = String(localized: "Running…")
                     showDiagnostics = true
+                    Task { diagnosticsOutput = await viewModel.runConfigCheck() }
                 }
                 .controlSize(.small)
                 Button("Migrate") {
-                    diagnosticsOutput = viewModel.runConfigMigrate()
+                    // Both verbs spawn `hermes` (an SSH round-trip on a
+                    // remote host); running them from the Button action
+                    // froze the window until the CLI returned. The output
+                    // panel opens immediately and fills in when it lands.
+                    diagnosticsOutput = String(localized: "Running…")
                     showDiagnostics = true
+                    Task { diagnosticsOutput = await viewModel.runConfigMigrate() }
                 }
                 .controlSize(.small)
                 Spacer()
