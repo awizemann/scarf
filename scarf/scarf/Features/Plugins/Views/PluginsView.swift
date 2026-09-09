@@ -182,9 +182,53 @@ struct PluginsView: View {
         .padding()
     }
 
+    /// v0.21.1 — `hermes plugins compat`: installed plugins still importing
+    /// module paths the Sep 2026 decomposition removes. After the removal
+    /// date those plugins are simply not loaded, so this is the only warning
+    /// a user gets before a plugin goes quiet. Nothing renders when the
+    /// command didn't run (older host) or found nothing.
+    @ViewBuilder
+    private var compatBanner: some View {
+        if let report = viewModel.compatReport, report.isAffected {
+            VStack(alignment: .leading, spacing: 6) {
+                Label(
+                    report.inEffect
+                        ? "\(report.affectedNames.count) plugin(s) are no longer loaded"
+                        : "\(report.affectedNames.count) plugin(s) stop loading on \(report.removalDate)",
+                    systemImage: report.inEffect ? "xmark.octagon.fill" : "exclamationmark.triangle.fill"
+                )
+                .font(.headline)
+                .foregroundStyle(report.inEffect ? ScarfColor.danger : ScarfColor.warning)
+                Text("They import Hermes module paths removed by the Sep 2026 decomposition. Update the plugin, or set `plugins.allow_deprecated_imports: true` in config.yaml to force-load it while the compat layer lasts.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ForEach(report.affectedNames, id: \.self) { name in
+                    let hits = report.hits(for: name)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(name) — \(hits.count) import(s)")
+                            .font(.caption.monospaced().bold())
+                        ForEach(hits) { hit in
+                            Text("\(hit.file):\(hit.line)  \(hit.old) → \(hit.new)")
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background((report.inEffect ? ScarfColor.danger : ScarfColor.warning).opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
     private var list: some View {
         ScrollView {
             LazyVStack(spacing: 1) {
+                compatBanner
+                    .padding(.bottom, ScarfSpace.s2)
                 // v0.16 Spotify sign-in affordance: surface when the
                 // spotify plugin is present and we're on v0.16+. Reuses
                 // the same SpotifySignInSheet and SpotifyAuthFlow as the
@@ -232,6 +276,18 @@ struct PluginsView: View {
                     // plugin's manifest (`tool_override: true`).
                     if plugin.toolOverride {
                         ScarfBadge("tool-override", kind: .info)
+                    }
+                    // v0.21.1 — this plugin is one of the ones
+                    // `plugins compat` flagged. The badge puts the finding
+                    // on the row the user acts on; the banner above carries
+                    // the file:line detail.
+                    if let report = viewModel.compatReport,
+                       let hits = report.plugins[plugin.name] {
+                        ScarfBadge(
+                            report.inEffect ? "not loaded" : "breaks \(report.removalDate)",
+                            kind: report.inEffect ? .danger : .warning
+                        )
+                        .help("\(hits.count) import(s) of module paths removed by the Sep 2026 decomposition.")
                     }
                 }
                 if !plugin.description.isEmpty {

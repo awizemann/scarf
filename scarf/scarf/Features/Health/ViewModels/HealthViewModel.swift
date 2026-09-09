@@ -188,6 +188,18 @@ final class HealthViewModel {
             async let doctorProbe     = Task.detached { ctx.runHermes(["doctor"]).output }.value
             async let subscriptionRead = Task.detached { subSvc.loadState() }.value
             async let configRead      = Task.detached { svc.loadConfig() }.value
+            // v0.18+ — `computer-use permissions status --json` exits 1
+            // when not ready, which is a STATE, not a failure, so the
+            // stdout is parsed regardless of exit code. Skipped entirely
+            // on hosts without the flag so no extra round-trip is spent.
+            async let computerUseProbe = Task.detached { () -> HermesComputerUseStatus? in
+                guard caps.hasComputerUsePermissionsJSON else { return nil }
+                // cua-driver's own probes cap at ~12s + ~10s + 5s inside
+                // Hermes, so 45 bounds the whole thing without truncating a
+                // slow-but-succeeding driver (C10: every subprocess has one).
+                return HermesComputerUseStatus.parse(
+                    ctx.runHermes(["computer-use", "permissions", "status", "--json"], timeout: 45).output)
+            }.value
 
             let pid = await pidProbe
             let versionOutput = await versionProbe
@@ -195,6 +207,7 @@ final class HealthViewModel {
             let doctorOutput = await doctorProbe
             let subscription = await subscriptionRead
             let config = await configRead
+            let computerUse = await computerUseProbe
             // Cancellation drops the commit rather than painting a stale
             // panel (t-aud11). It no longer aborts BETWEEN round-trips —
             // there are no "between"s left — but since all six now overlap,
@@ -210,6 +223,7 @@ final class HealthViewModel {
 
             let statusSections = Self.parseOutputStatic(statusOutput)
                 + [Self.toolGatewaySection(subscription: subscription, config: config, capabilities: caps)]
+                + (computerUse.map { [Self.computerUseSection($0)] } ?? [])
             let doctorSections = Self.parseOutputStatic(doctorOutput)
 
             await MainActor.run { [weak self] in
@@ -250,6 +264,84 @@ final class HealthViewModel {
     ///
     /// `nonisolated` so `load()` can call it from `Task.detached` alongside
     /// `parseOutputStatic` without hopping back to MainActor.
+    /// Computer Use readiness card from `computer-use permissions status
+    /// --json` (v0.18+).
+    ///
+    /// Two things this deliberately does NOT do:
+    /// - It never renders an unknown boolean as "denied". Hermes uses
+    ///   `None` for "we couldn't ask" (driver missing, probe failed), and
+    ///   telling a user to grant a permission they may already hold is
+    ///   worse than saying "unknown".
+    /// - It only shows the macOS TCC rows when `can_grant` is true. On a
+    ///   remote Linux or Windows host there is no TCC model at all, and
+    ///   readiness is driver health — Hermes's own CLI branches the same
+    ///   way (`if st["can_grant"]: … else: driver health`).
+    ///
+    /// `nonisolated` so `load()` builds it on the detached hop.
+    nonisolated static func computerUseSection(_ status: HermesComputerUseStatus) -> HealthSection {
+        var checks: [HealthCheck] = []
+
+        if !status.platformSupported {
+            checks.append(HealthCheck(
+                label: "Not supported on \(status.platform)",
+                status: .warning,
+                detail: "Computer Use runs on macOS, Windows and Linux."
+            ))
+        } else if !status.installed {
+            checks.append(HealthCheck(
+                label: "cua-driver not installed",
+                status: .warning,
+                detail: "Run `hermes computer-use install` on the host."
+            ))
+        } else {
+            checks.append(HealthCheck(
+                label: "cua-driver installed",
+                status: .ok,
+                detail: status.version
+            ))
+            if status.hasTCCPermissions {
+                // Tri-state: nil = unknown, rendered as a warning with the
+                // reason rather than as a denial.
+                func tcc(_ label: String, _ value: Bool?) -> HealthCheck {
+                    switch value {
+                    case .some(true):  return HealthCheck(label: "\(label) granted", status: .ok, detail: nil)
+                    case .some(false): return HealthCheck(
+                        label: "\(label) not granted",
+                        status: .error,
+                        detail: "Run `hermes computer-use permissions grant` on the host."
+                    )
+                    case nil: return HealthCheck(
+                        label: "\(label) unknown",
+                        status: .warning,
+                        detail: status.error ?? "cua-driver did not report this permission."
+                    )
+                    }
+                }
+                checks.append(tcc("Accessibility", status.accessibility))
+                checks.append(tcc("Screen Recording", status.screenRecording))
+            } else {
+                checks.append(HealthCheck(
+                    label: status.ready == true ? "Driver healthy" : "Driver not ready",
+                    status: status.ready == true ? .ok : (status.ready == nil ? .warning : .error),
+                    detail: "No permission toggles on \(status.platform)."
+                ))
+            }
+        }
+
+        for check in status.checks where check.isProblem {
+            checks.append(HealthCheck(
+                label: check.label.isEmpty ? "cua-driver check" : check.label,
+                status: check.status == "warn" ? .warning : .error,
+                detail: check.message.isEmpty ? nil : check.message
+            ))
+        }
+        if let error = status.error, !error.isEmpty {
+            checks.append(HealthCheck(label: "Probe error", status: .warning, detail: error))
+        }
+
+        return HealthSection(title: "Computer Use", icon: "cursorarrow.rays", checks: checks)
+    }
+
     nonisolated private static func toolGatewaySection(subscription: NousSubscriptionState, config: HermesConfig, capabilities: HermesCapabilities) -> HealthSection {
         var checks: [HealthCheck] = []
 
@@ -658,22 +750,59 @@ final class HealthViewModel {
     /// class of long CLI call and was the only one still run inline.
     private(set) var isRunningDump = false
 
-    /// Upload a debug report via `hermes debug share`. THIS UPLOADS DATA to Nous
-    /// Research support infrastructure — caller must confirm with the user first.
-    func runDebugShare() {
+    /// Run `hermes debug share`. With `local: false` THIS UPLOADS DATA to
+    /// Nous Research support infrastructure — the caller must confirm with
+    /// the user first (`HealthView`'s share confirmation dialog).
+    ///
+    /// **`-y` is what makes the upload path work at all.** From v0.18
+    /// `_confirm_upload` (`hermes_cli/debug.py`) prints "Non-interactive
+    /// mode requires --yes to confirm upload" and `sys.exit(1)` whenever
+    /// stdin is not a TTY — which is every invocation Scarf makes — so this
+    /// button could never once have produced a URL. The user's consent is
+    /// the confirmation sheet that ran before we got here; `-y` just tells
+    /// Hermes that consent was collected. Pre-v0.18 hosts have neither the
+    /// flag nor the gate, so the argv omits it there (argparse would reject
+    /// the whole command) and the upload proceeds as it always did.
+    ///
+    /// `local: true` passes `--local`, which collects the identical bundle
+    /// and prints it WITHOUT any network I/O (`run_debug_share`'s first
+    /// branch). The flag predates every version Scarf supports, so it needs
+    /// no gate — it is the "just show me the report" answer for a user who
+    /// does not want to upload.
+    func runDebugShare(local: Bool = false) {
         isSharingDebug = true
-        actionMessage = "Uploading debug report…"
+        actionMessage = local ? "Collecting debug report…" : "Uploading debug report…"
+        let argv = Self.debugShareArguments(local: local, capabilities: capabilities)
         Task.detached { [fileService, self] in
-            let result = fileService.runHermesCLI(args: ["debug", "share"], timeout: 120)
+            let result = fileService.runHermesCLI(args: argv, timeout: 120)
             await MainActor.run {
                 self.isSharingDebug = false
                 self.diagnosticsOutput = result.output
-                self.actionMessage = result.exitCode == 0 ? "Upload complete" : "Upload failed"
+                self.actionMessage = result.exitCode == 0
+                    ? (local ? "Report collected" : "Upload complete")
+                    : (local ? "Collection failed" : "Upload failed")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
                     self?.actionMessage = nil
                 }
             }
         }
+    }
+
+    /// argv for `debug share`. Extracted so the gate is testable without a
+    /// live host: on a pre-v0.18 host `-y` must be ABSENT (argparse would
+    /// reject the whole command), and `--local` and `-y` are mutually
+    /// exclusive by construction — there is nothing to confirm when nothing
+    /// is uploaded.
+    nonisolated static func debugShareArguments(
+        local: Bool, capabilities: HermesCapabilities
+    ) -> [String] {
+        var args = ["debug", "share"]
+        if local {
+            args.append("--local")
+        } else if capabilities.hasDebugShareYes {
+            args.append("-y")
+        }
+        return args
     }
 
     /// Run `hermes security audit` (v0.15 OSV.dev supply-chain scan) off
