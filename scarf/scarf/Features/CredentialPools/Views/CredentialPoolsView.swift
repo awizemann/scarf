@@ -18,6 +18,16 @@ struct CredentialPoolsView: View {
     @State private var reauthInitialProvider: String?
     @Environment(AppCoordinator.self) private var coordinator
     @Environment(HermesFileWatcher.self) private var fileWatcher
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
+
+    /// v0.21.1+ gate for `auth priority` / `auth refresh` / a targeted
+    /// `auth reset`. On an older host none of those exist — `priority` and
+    /// `refresh` are not choices of the `auth_action` subparser and `reset`
+    /// takes no target — so argparse exits 2. A missing store reads as "off"
+    /// (Previews), matching every other gated surface.
+    private var supportsAuthPriority: Bool {
+        capabilitiesStore?.capabilities.hasAuthPriority ?? false
+    }
 
     /// Mirror of `OAuthKeepaliveCronService.isEnabled()` so the
     /// toggle reads from local @State (instant) instead of hitting
@@ -475,6 +485,9 @@ struct CredentialPoolsView: View {
                         }
                     }
                     Spacer()
+                    if supportsAuthPriority {
+                        credentialActionsMenu(pool: pool, cred: cred)
+                    }
                     Button("Remove", role: .destructive) { pendingRemove = cred }
                         .controlSize(.small)
                 }
@@ -492,6 +505,48 @@ struct CredentialPoolsView: View {
             .padding(.vertical, 6)
             .background(.quaternary.opacity(0.3))
         }
+    }
+
+    /// v0.21.1 per-credential pool administration. Reorder is expressed as
+    /// move-up / move-down rather than a numeric field: `auth priority` takes a
+    /// 0-based destination and clamps it, and Hermes may re-sort afterwards, so
+    /// a stepper would imply a precision the host does not promise.
+    ///
+    /// Note the two index bases in one argv — `target` is 1-based (like
+    /// `auth remove`), the destination priority is 0-based. Both are derived
+    /// from `cred.index` here so no call site can get them out of step.
+    @ViewBuilder
+    private func credentialActionsMenu(pool: HermesCredentialPool, cred: HermesCredential) -> some View {
+        Menu {
+            Button("Move Up") {
+                viewModel.setPriority(provider: pool.provider, index: cred.index, to: cred.index - 1)
+            }
+            .disabled(cred.index == 0)
+            Button("Move Down") {
+                viewModel.setPriority(provider: pool.provider, index: cred.index, to: cred.index + 1)
+            }
+            .disabled(cred.index >= pool.credentials.count - 1)
+            Divider()
+            Button("Clear Cooldown") {
+                viewModel.resetCredential(provider: pool.provider, index: cred.index)
+            }
+            // `auth refresh` rotates the stored tokens and clears the block,
+            // but only for a refreshable OAuth grant — offering it on an
+            // api-key row would only ever produce a refusal.
+            if cred.authType == "oauth" {
+                Button("Refresh Tokens") {
+                    viewModel.refreshCredential(provider: pool.provider, index: cred.index)
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .controlSize(.small)
+        .disabled(viewModel.isMutating)
+        .help("Reorder this credential, clear its cooldown, or refresh its tokens")
+        .accessibilityLabel("Credential actions for \(pool.provider) #\(cred.index + 1)")
     }
 
     private func statusColor(_ status: String) -> Color {

@@ -81,3 +81,32 @@ import ScarfCore
         #expect(CredentialPoolsOAuthGate.resolve(providerID: "   ", catalog: catalog) == .providerEmpty)
     }
 }
+
+/// v0.21.1 pool administration argv. The contract worth pinning is the two
+/// index bases inside one command: `hermes auth priority` resolves its
+/// `target` 1-based (`CredentialPool.resolve_target` enumerates from 1, like
+/// `auth remove`) while `priority` is 0-based ("0 = tried first"). Scarf
+/// stores a 0-based index, so exactly one of the two gets +1.
+@Suite struct CredentialPoolsAdminArgvTests {
+
+    @MainActor
+    @Test func priorityArgvSendsOneBasedTargetAndZeroBasedDestination() {
+        // Second credential in the pool (index 1) promoted to the front.
+        #expect(CredentialPoolsViewModel.priorityArgv(provider: "openrouter", index: 1, to: 0)
+                == ["auth", "priority", "openrouter", "2", "0"])
+        // Move-down from the front: target #1, destination 1.
+        #expect(CredentialPoolsViewModel.priorityArgv(provider: "anthropic", index: 0, to: 1)
+                == ["auth", "priority", "anthropic", "1", "1"])
+    }
+
+    @MainActor
+    @Test func refreshAndResetTargetOneCredential() {
+        #expect(CredentialPoolsViewModel.refreshArgv(provider: "nous", index: 2)
+                == ["auth", "refresh", "nous", "3"])
+        // The target is what makes this a per-credential reset; without it
+        // Hermes clears the whole pool.
+        #expect(CredentialPoolsViewModel.resetCredentialArgv(provider: "nous", index: 0)
+                == ["auth", "reset", "nous", "1"])
+        #expect(CredentialPoolsViewModel.resetCredentialArgv(provider: "nous", index: 0).count == 4)
+    }
+}
