@@ -17,6 +17,7 @@ struct KanbanInspectorPane: View {
     /// model-override + branch chips. Pre-v0.15 hosts never populate
     /// those fields, so this is belt-and-suspenders.
     let supportsKanbanV015: Bool
+    let supportsKanbanCompletionContract: Bool
     /// Resolves an effective hallucination gate — the board VM owns the
     /// optimistic-override merge so the banner disappears immediately on
     /// Verify before the polled state confirms the new gate. Falls back
@@ -48,6 +49,7 @@ struct KanbanInspectorPane: View {
         availableAssignees: [HermesKanbanAssignee] = [],
         supportsKanbanDiagnostics: Bool = false,
         supportsKanbanV015: Bool = false,
+        supportsKanbanCompletionContract: Bool = false,
         effectiveHallucinationGate: @escaping (HermesKanbanTask) -> KanbanHallucinationGate? = { _ in nil },
         onClose: @escaping () -> Void,
         onClaim: @escaping () -> Void,
@@ -62,6 +64,7 @@ struct KanbanInspectorPane: View {
         self.availableAssignees = availableAssignees
         self.supportsKanbanDiagnostics = supportsKanbanDiagnostics
         self.supportsKanbanV015 = supportsKanbanV015
+        self.supportsKanbanCompletionContract = supportsKanbanCompletionContract
         self.effectiveHallucinationGate = effectiveHallucinationGate
         self.onClose = onClose
         self.onClaim = onClaim
@@ -217,6 +220,16 @@ struct KanbanInspectorPane: View {
                                 ScarfBadge("Branch: \(branch)", kind: .neutral)
                                     .fixedSize()
                                     .help("Git branch the worker is operating on.")
+                            }
+                            // v0.21.1: acceptance boundary declared at create
+                            // time. Read-only — `kanban edit` at v2026.9.7
+                            // takes only `--result` and the step-handoff
+                            // flags, so there is no update path.
+                            if supportsKanbanCompletionContract,
+                               let contract = task.completionContract, !contract.isEmpty {
+                                ScarfBadge("Contract: \(contract)", kind: .neutral)
+                                    .fixedSize()
+                                    .help("Completion contract set at create time: local-only, OWNER/REPO for publication, or a PR URL whose CI gates completion. Read-only — Hermes has no update verb.")
                             }
                             if let tenant = task.tenant, !tenant.isEmpty {
                                 ScarfBadge(verbatim: tenant, kind: .brand)
@@ -374,9 +387,19 @@ struct KanbanInspectorPane: View {
                                           && (task.autoBlockedReason?.isEmpty == false))
             ? task.autoBlockedReason
             : nil
-        // Suppress the generic last-run banner when the more specific
+        // v0.21.1: the last dispatch's failure reason, now carried on the
+        // list row itself. Hidden once the card is `done` (the failure is
+        // history) and while it is `running` again, matching how the generic
+        // last-run banner is suppressed. nil on every pre-v0.21.1 host.
+        let lastFailureError: String? = (supportsKanbanCompletionContract
+                                         && status != .done
+                                         && status != .running
+                                         && (task.lastFailureError?.isEmpty == false))
+            ? task.lastFailureError
+            : nil
+        // Suppress the generic last-run banner when a more specific
         // server-side reason supersedes it.
-        let suppressGenericFailure = autoBlockedReason != nil
+        let suppressGenericFailure = autoBlockedReason != nil || lastFailureError != nil
 
         VStack(alignment: .leading, spacing: ScarfSpace.s2) {
             if hallucination == .pending {
@@ -389,6 +412,15 @@ struct KanbanInspectorPane: View {
                     title: "Auto-blocked",
                     // Verbatim — Hermes-side message is the source of truth.
                     message: reason
+                )
+            }
+            if let failure = lastFailureError, autoBlockedReason == nil {
+                bannerRow(
+                    icon: "exclamationmark.octagon.fill",
+                    tint: ScarfColor.danger,
+                    title: "Last failure",
+                    // Verbatim — Hermes-side message is the source of truth.
+                    message: failure
                 )
             }
             if needsAssignee {

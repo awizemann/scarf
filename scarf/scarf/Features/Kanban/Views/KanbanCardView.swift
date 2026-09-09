@@ -42,6 +42,7 @@ struct KanbanCardView: View {
     /// v0.16+ gate for the goal-mode badge. Pre-v0.16 hosts never see the
     /// "Goal" pill even if a future `goal_mode` field somehow appears.
     let supportsKanbanGoalMode: Bool
+    let supportsKanbanCompletionContract: Bool
     /// Context-menu callbacks. The board wires these to the VM's
     /// `promote` / `schedule` / `purge` (delete-permanently after a
     /// confirm). Each shown conditionally by `task.status`.
@@ -55,6 +56,7 @@ struct KanbanCardView: View {
         effectiveHallucinationGate: @escaping (HermesKanbanTask) -> KanbanHallucinationGate? = { _ in nil },
         supportsKanbanV015: Bool = false,
         supportsKanbanGoalMode: Bool = false,
+        supportsKanbanCompletionContract: Bool = false,
         onPromote: @escaping () -> Void = {},
         onSchedule: @escaping () -> Void = {},
         onDeletePermanently: @escaping () -> Void = {},
@@ -65,6 +67,7 @@ struct KanbanCardView: View {
         self.effectiveHallucinationGate = effectiveHallucinationGate
         self.supportsKanbanV015 = supportsKanbanV015
         self.supportsKanbanGoalMode = supportsKanbanGoalMode
+        self.supportsKanbanCompletionContract = supportsKanbanCompletionContract
         self.onPromote = onPromote
         self.onSchedule = onSchedule
         self.onDeletePermanently = onDeletePermanently
@@ -380,6 +383,22 @@ struct KanbanCardView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(reason)
+            } else if supportsKanbanCompletionContract,
+                      let failure = task.lastFailureError, !failure.isEmpty,
+                      KanbanStatus.from(task.status) != .done {
+                // v0.21.1: the real reason the last dispatch failed, straight
+                // off `list --json` — no second `kanban show`. Second to the
+                // auto-blocked reason, which is the more specific verdict when
+                // Hermes has one; and hidden on `done`, where the failure is
+                // history the card has moved past. Pre-v0.21.1 hosts never
+                // emit the key, so `lastFailureError` is nil and this whole
+                // branch is unreachable.
+                Text(failure)
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.danger)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(failure)
             }
             HStack(spacing: ScarfSpace.s2) {
                 Text(relativeTimeLabel)

@@ -61,6 +61,14 @@ struct KanbanBoardView: View {
         capabilitiesStore?.capabilities.hasKanbanGoalMode ?? false
     }
 
+    /// v0.21.1+ gate for the completion-contract field on the create sheet and
+    /// for the `completion_contract` / `last_failure_error` task fields, which
+    /// only enter `kanban list --json` at v2026.9.7. Pre-v0.21.1 hosts get the
+    /// board unchanged. Missing store treated as "off" (Previews).
+    private var supportsKanbanCompletionContract: Bool {
+        capabilitiesStore?.capabilities.hasKanbanCompletionContract ?? false
+    }
+
     @State private var inspectorTaskId: String?
     @State private var showingCreateSheet = false
     /// Pending permanent-delete (archived-card context action). Drives
@@ -136,7 +144,8 @@ struct KanbanBoardView: View {
                 assignees: viewModel.assignees,
                 tenantPrefill: viewModel.tenantFilter,
                 projectWorkspacePath: viewModel.projectPath,
-                supportsKanbanDiagnostics: supportsKanbanDiagnostics
+                supportsKanbanDiagnostics: supportsKanbanDiagnostics,
+                supportsCompletionContract: supportsKanbanCompletionContract
             ) { request in
                 _ = try await viewModel.createTask(request)
             }
@@ -386,6 +395,7 @@ struct KanbanBoardView: View {
                         effectiveHallucinationGate: { viewModel.effectiveHallucinationGate($0) },
                         supportsKanbanV015: supportsKanbanV015,
                         supportsKanbanGoalMode: supportsKanbanGoalMode,
+                        supportsKanbanCompletionContract: supportsKanbanCompletionContract,
                         onPromote: { viewModel.promote($0.id) },
                         onSchedule: { viewModel.schedule($0.id) },
                         onDeletePermanently: { pendingPurge = $0 }
@@ -410,6 +420,7 @@ struct KanbanBoardView: View {
                 availableAssignees: viewModel.assignees,
                 supportsKanbanDiagnostics: supportsKanbanDiagnostics,
                 supportsKanbanV015: supportsKanbanV015,
+                supportsKanbanCompletionContract: supportsKanbanCompletionContract,
                 effectiveHallucinationGate: { viewModel.effectiveHallucinationGate($0) },
                 onClose: { inspectorTaskId = nil },
                 onClaim: {

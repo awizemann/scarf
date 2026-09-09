@@ -255,6 +255,52 @@ import Foundation
         #expect(argv.contains("worktree:/tmp/wt"))
     }
 
+    @Test func createRequestArgvIncludesCompletionContract() {
+        // v0.21.1 `--completion-contract` (hermes_cli/kanban_parser.py:189).
+        let req = KanbanCreateRequest(title: "gated", completionContract: "nousresearch/hermes")
+        let argv = req.argv()
+        guard let i = argv.firstIndex(of: "--completion-contract") else {
+            Issue.record("expected --completion-contract in argv: \(argv)")
+            return
+        }
+        #expect(argv[argv.index(after: i)] == "nousresearch/hermes")
+        // Still behind `--` so the title stays a positional.
+        #expect(argv.last == "gated")
+        // Absent (and empty) means "send no flag" — Hermes keeps its own
+        // local-only default rather than Scarf asserting it.
+        #expect(!KanbanCreateRequest(title: "x").argv().contains("--completion-contract"))
+        #expect(!KanbanCreateRequest(title: "x", completionContract: "").argv()
+                    .contains("--completion-contract"))
+    }
+
+    @Test func taskDecodesV0211FieldsAndToleratesTheirAbsence() {
+        // v0.21.1 adds `completion_contract` + `last_failure_error` to the
+        // `list --json` task dict (hermes_cli/kanban_output.py:18-24). A
+        // pre-v0.21.1 row carries neither key and must still decode.
+        let withFields = Data("""
+        {"id": "t1", "title": "gated", "status": "blocked",
+         "completion_contract": "nousresearch/hermes",
+         "last_failure_error": "worker exited (code 1) before completing"}
+        """.utf8)
+        let a = try! JSONDecoder().decode(HermesKanbanTask.self, from: withFields)
+        #expect(a.completionContract == "nousresearch/hermes")
+        #expect(a.lastFailureError == "worker exited (code 1) before completing")
+
+        let legacy = Data("""
+        {"id": "t2", "title": "old", "status": "todo"}
+        """.utf8)
+        let b = try! JSONDecoder().decode(HermesKanbanTask.self, from: legacy)
+        #expect(b.completionContract == nil)
+        #expect(b.lastFailureError == nil)
+        // And a null (Hermes clears the column on a successful run).
+        let cleared = Data("""
+        {"id": "t3", "title": "ok", "status": "done",
+         "completion_contract": null, "last_failure_error": null}
+        """.utf8)
+        let c = try! JSONDecoder().decode(HermesKanbanTask.self, from: cleared)
+        #expect(c.lastFailureError == nil)
+    }
+
     // MARK: - KanbanListFilter argv
 
     @Test func listFilterEmptyOnlyJSON() {
