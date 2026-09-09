@@ -139,7 +139,7 @@ final class PlatformsViewModel: OutcomeMessageHosting {
         case "matrix": return "MATRIX_HOMESERVER"
         case "mattermost": return "MATTERMOST_URL"
         case "feishu": return "FEISHU_APP_ID"
-        case "imessage": return "BLUEBUBBLES_SERVER_URL"
+        case "bluebubbles", "imessage": return "BLUEBUBBLES_SERVER_URL"
         case "homeassistant": return "HASS_TOKEN"
         case "webhook": return "WEBHOOK_ENABLED"
         default: return nil

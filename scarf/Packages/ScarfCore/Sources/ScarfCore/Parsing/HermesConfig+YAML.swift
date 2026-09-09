@@ -459,9 +459,12 @@ public extension HermesConfig {
         // v0.16): `slack.allowed_channels`, `telegram.allowed_chats`,
         // `matrix.allowed_rooms`, `dingtalk.allowed_chats`, plus the
         // top-level `<platform>.gateway_restart_notification` toggle.
-        // `busy_ack_enabled` / `slash_command_notice_ttl_seconds` are
-        // no-ops in v0.16 but kept for round-trip. Platforms without an
-        // explicit block don't appear in the dictionary, so the editor's
+        // `busy_ack_enabled` is a no-op per-platform (Hermes reads only the
+        // global `display.busy_ack_enabled`) but is kept for round-trip;
+        // `slash_command_notice_ttl_seconds` was dropped entirely in the
+        // v0.21.1 B5 sweep — no Hermes version defines it.
+        // Platforms without an explicit block don't appear in the
+        // dictionary, so the editor's
         // `?? .empty` fallback hands the user the defaults without leaving
         // stale keys littered across the YAML.
         // `google_chat` has no allowlist (its adapter gates access via
@@ -471,8 +474,13 @@ public extension HermesConfig {
         // loop made that toggle a write-only key: it saved, then the next
         // load read `false` and the switch snapped back. The allowlists
         // simply come back empty for it.
+        // `discord` joins the loop with the v0.21.1 B4 fix: its real
+        // `discord.allowed_channels` allowlist is now mapped by
+        // `GatewayAllowlistKind` and edited from `DiscordSetupView`, so it
+        // must be READ here too or the list would save and read back empty
+        // (the same write-only-key bug `google_chat` had).
         let gatewayAllowlistPlatforms = [
-            "slack", "mattermost",
+            "slack", "mattermost", "discord",
             "telegram", "whatsapp",
             "matrix", "dingtalk",
             "google_chat",
@@ -484,10 +492,10 @@ public extension HermesConfig {
             let allowedChats    = lists[prefix + "allowed_chats"]    ?? []
             let allowedRooms    = lists[prefix + "allowed_rooms"]    ?? []
             let busy            = bool(prefix + "busy_ack_enabled", default: true)
-            let restartNotice   = bool(prefix + "gateway_restart_notification",
-                                       default: false)
-            let ttl             = int(prefix + "slash_command_notice_ttl_seconds",
-                                      default: 0)
+            // Upstream default is TRUE (`gateway/config.py` PlatformConfig),
+            // so an absent key — and any non-`true` spelling of a truthy
+            // value — must NOT read as off. See `boolTrueDefault`.
+            let restartNotice   = boolTrueDefault(prefix + "gateway_restart_notification")
             // Skip platforms with no v0.13 fields present anywhere in the
             // file. Without this guard, every supported platform would
             // round-trip an all-default block back through writes even
@@ -497,15 +505,13 @@ public extension HermesConfig {
                 && allowedRooms.isEmpty
                 && values[prefix + "busy_ack_enabled"] == nil
                 && values[prefix + "gateway_restart_notification"] == nil
-                && values[prefix + "slash_command_notice_ttl_seconds"] == nil
             if !isEmpty {
                 gatewayPlatforms[platform] = GatewayPlatformSettings(
                     allowedChannels: allowedChannels,
                     allowedChats: allowedChats,
                     allowedRooms: allowedRooms,
                     busyAckEnabled: busy,
-                    gatewayRestartNotification: restartNotice,
-                    slashCommandNoticeTTLSeconds: ttl
+                    gatewayRestartNotification: restartNotice
                 )
             }
         }

@@ -52,7 +52,17 @@ public enum KnownPlatforms {
         HermesToolPlatform(name: "matrix", displayName: "Matrix", icon: "lock.rectangle.stack"),
         HermesToolPlatform(name: "feishu", displayName: "Feishu", icon: "message.badge.circle"),
         HermesToolPlatform(name: "mattermost", displayName: "Mattermost", icon: "bubble.left.and.exclamationmark.bubble.right"),
-        HermesToolPlatform(name: "imessage", displayName: "iMessage", icon: "message.fill"),
+        // `bluebubbles` is the id Hermes uses (`Platform.BLUEBUBBLES`,
+        // `gateway/platforms/bluebubbles.py`); Scarf shipped it as
+        // `imessage`, which is not a Hermes platform id at any version — so
+        // the row's `bluebubbles:` config block was invisible to the
+        // "Configured" check, which fell back to the env var alone. Renamed
+        // in the v0.21.1 B4 sweep rather than adding a SECOND row for the
+        // real id, which would have given the same platform two entries
+        // (one with the setup form, one without). The old `imessage`
+        // spelling is still accepted by `icon(for:)` and by the
+        // `PlatformsView` / `identifyingEnvVar` switches.
+        HermesToolPlatform(name: "bluebubbles", displayName: "iMessage (BlueBubbles)", icon: "message.fill"),
         // -- v0.12 additions ---------------------------------------------
         // Yuanbao is a native gateway adapter (18th platform); Microsoft
         // Teams ships as a plugin (19th). PlatformDetail surfaces the
@@ -83,14 +93,55 @@ public enum KnownPlatforms {
         HermesToolPlatform(name: "ntfy", displayName: "ntfy", icon: "bell.badge"),
         // -- v0.17 additions ---------------------------------------------
         // WhatsApp Business Cloud API (25th platform) — Meta's hosted webhook
-        // path, distinct from the older `whatsapp` web-bridge. iMessage via
-        // Photon (24th) is intentionally not surfaced yet (moving protocol).
+        // path, distinct from the older `whatsapp` web-bridge. (iMessage via
+        // Photon was held back here as a moving protocol; it is rostered
+        // below as of the v0.21.1 B4 sweep, still without a setup form.)
         HermesToolPlatform(name: "whatsapp_cloud", displayName: "WhatsApp Cloud", icon: "phone.bubble.fill"),
         // -- v0.20 additions ---------------------------------------------
         // Buzz — Block's Nostr-based messenger (plugins/platforms/buzz/).
         // User-gated via `allowed_users` (hex pubkeys / npubs), so it has
         // no GatewayAllowlistKind mapping.
         HermesToolPlatform(name: "buzz", displayName: "Buzz", icon: "bolt.horizontal.circle"),
+        // -- v0.21.1 audit finding B4 -------------------------------------
+        // Ten platform ids that are REAL and user-configurable at BOTH
+        // v2026.8.31 (0.21.0) and v2026.9.7 (0.21.1) but were never in this
+        // roster. Sources at tag v2026.9.7: the `Platform` enum in
+        // `gateway/config.py:198-224` (sms, dingtalk, api_server,
+        // msgraph_webhook, wecom, weixin, qqbot) plus the bundled plugin
+        // adapter directories `plugins/platforms/{irc,photon}` (dynamic enum
+        // members via `Platform._missing_`). The tenth, `bluebubbles`, was
+        // already in the roster under the wrong id — see the rename above.
+        //
+        // These are NOT release-gated: they exist at every Hermes version
+        // Scarf supports, so surfacing them is a bug fix rather than a
+        // v0.21.1 surface, and no capability flag applies. Platforms without
+        // a per-field setup view fall to `PlatformsView`'s default panel
+        // ("No setup form for this platform yet"), which is the same
+        // degradation `buzz` has had since v0.20.
+        //
+        // DELIBERATELY EXCLUDED, verified at v2026.9.7:
+        //  - `local` (Platform.LOCAL), `relay` (marked EXPERIMENTAL in the
+        //    enum comment) and `wecom_callback` — internal/infrastructure
+        //    members with no adapter directory of their own and no user
+        //    messaging account behind them.
+        //  - `a2a` (`plugins/platforms/a2a/`) — agent-to-agent protocol
+        //    infrastructure, `requires_env: []`, configured entirely through
+        //    `optional_env` bearer tokens/bind host in `hermes config`. This
+        //    repeats the explicit v0.20 decision not to roster it.
+        //  - `raft` (`plugins/platforms/raft/`) — an experimental external
+        //    bridge whose whole config surface is one env var (`RAFT_PROFILE`,
+        //    "auto-enables the adapter when set"); it has no token, no
+        //    allowlist and no `enabled` key, so a roster row would offer
+        //    nothing to configure.
+        HermesToolPlatform(name: "dingtalk", displayName: "DingTalk", icon: "text.bubble"),
+        HermesToolPlatform(name: "sms", displayName: "SMS", icon: "message"),
+        HermesToolPlatform(name: "irc", displayName: "IRC", icon: "number.square"),
+        HermesToolPlatform(name: "wecom", displayName: "WeCom", icon: "building.2"),
+        HermesToolPlatform(name: "weixin", displayName: "Weixin", icon: "captions.bubble"),
+        HermesToolPlatform(name: "qqbot", displayName: "QQ Bot", icon: "bubble.right"),
+        HermesToolPlatform(name: "msgraph_webhook", displayName: "Microsoft Graph Webhook", icon: "network"),
+        HermesToolPlatform(name: "api_server", displayName: "API Server", icon: "server.rack"),
+        HermesToolPlatform(name: "photon", displayName: "iMessage via Photon", icon: "antenna.radiowaves.left.and.right"),
     ]
 
     public static func icon(for platform: String) -> String {
@@ -107,7 +158,9 @@ public enum KnownPlatforms {
         case "matrix": return "lock.rectangle.stack"
         case "feishu": return "message.badge.circle"
         case "mattermost": return "bubble.left.and.exclamationmark.bubble.right"
-        case "imessage": return "message.fill"
+        // `bluebubbles` is the real Hermes id; `imessage` is the legacy
+        // Scarf spelling, kept so old callers still resolve.
+        case "bluebubbles", "imessage": return "message.fill"
         case "yuanbao": return "bubble.left.and.bubble.right.fill"
         // Legacy hyphenated spellings accepted for callers still holding
         // pre-fix identifiers (Scarf < v0.20 parity used them wrongly).
@@ -118,6 +171,16 @@ public enum KnownPlatforms {
         case "ntfy": return "bell.badge"
         case "whatsapp_cloud": return "phone.bubble.fill"
         case "buzz": return "bolt.horizontal.circle"
+        // -- v0.21.1 audit finding B4 -------------------------------------
+        case "dingtalk": return "text.bubble"
+        case "sms": return "message"
+        case "irc": return "number.square"
+        case "wecom": return "building.2"
+        case "weixin": return "captions.bubble"
+        case "qqbot": return "bubble.right"
+        case "msgraph_webhook": return "network"
+        case "api_server": return "server.rack"
+        case "photon": return "antenna.radiowaves.left.and.right"
         default: return "bubble.left"
         }
     }

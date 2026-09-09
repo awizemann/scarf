@@ -182,7 +182,10 @@ struct PlatformsView: View {
         case "ntfy":           NtfySetupView(context: ctx)
         case "whatsapp_cloud": WhatsAppCloudSetupView(context: ctx)
         case "simplex":        SimpleXSetupView(context: ctx)
-        case "imessage":       IMessageSetupView(context: ctx)
+        // `bluebubbles` is the real Hermes platform id; `imessage` was
+        // Scarf's own spelling for the same adapter (v0.21.1 B4 rename).
+        case "bluebubbles",
+             "imessage":       IMessageSetupView(context: ctx)
         case "homeassistant":  HomeAssistantSetupView(context: ctx)
         case "webhook":        WebhookSetupView(context: ctx)
         case "yuanbao":        yuanbaoPanel

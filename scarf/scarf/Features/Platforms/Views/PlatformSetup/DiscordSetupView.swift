@@ -5,7 +5,12 @@ import ScarfDesign
 struct DiscordSetupView: View {
     @State private var viewModel: DiscordSetupViewModel
     @Environment(\.hermesCapabilities) private var capabilitiesStore
-    init(context: ServerContext) { _viewModel = State(initialValue: DiscordSetupViewModel(context: context)) }
+    let context: ServerContext
+
+    init(context: ServerContext) {
+        self.context = context
+        _viewModel = State(initialValue: DiscordSetupViewModel(context: context))
+    }
 
 
     var body: some View {
@@ -36,6 +41,17 @@ struct DiscordSetupView: View {
             }
 
             saveBar
+
+            // v0.13 Messaging Gateway behavior — self-hides on pre-v0.13.
+            // Discord's `allowed_channels` is a REAL allowlist
+            // (plugins/platforms/discord/adapter.py:4620-4622, enforced at
+            // :5675-5677, identical at v2026.8.31 and v2026.9.7); this is the
+            // editor the v0.20.4 "KNOWN GAP" note was waiting for.
+            GatewayBehaviorSection(
+                platform: "discord",
+                capabilities: capabilitiesStore?.capabilities ?? .empty,
+                context: context
+            )
         }
         .onAppear { viewModel.load() }
     }

@@ -20,7 +20,7 @@ final class GatewayBehaviorViewModel: OutcomeMessageHosting {
     let context: ServerContext
     let capabilities: HermesCapabilities
     /// Allowlist kind for this platform, or `nil` for platforms without
-    /// an allowlist surface (Discord, Signal, etc. — `GatewayBehaviorSection`
+    /// an allowlist surface (Signal, Google Chat, etc. — `GatewayBehaviorSection`
     /// short-circuits before instantiating this VM in that case, but the
     /// field is `nil` for safety).
     let kind: GatewayAllowlistKind?
@@ -36,7 +36,13 @@ final class GatewayBehaviorViewModel: OutcomeMessageHosting {
     // to write was never read. The toggle is surfaced in each platform's
     // setup view for discoverability but edits apply gateway-wide.
     var busyAckEnabled: Bool = true
-    var gatewayRestartNotification: Bool = false
+    // Hermes's own default is TRUE (`gateway/config.py` `PlatformConfig
+    // .gateway_restart_notification: bool = True`, unchanged v2026.8.31 →
+    // v2026.9.7). Scarf's `false` made the pre-load form — and any platform
+    // with no key in config.yaml — render OFF while the host pinged on every
+    // restart; saving from that form then wrote the `false` the user never
+    // asked for. v0.21.1 audit B5.
+    var gatewayRestartNotification: Bool = true
 
     var message: String?
     /// Outcome of `message` (GW-F4) — the save bar's colour, glyph and
