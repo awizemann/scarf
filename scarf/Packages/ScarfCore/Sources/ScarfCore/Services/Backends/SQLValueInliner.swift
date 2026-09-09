@@ -10,9 +10,12 @@ import Foundation
 /// **Trust model.** This is a literal-encoder for in-tree, trusted
 /// callers — every current param source is either an integer (`limit`,
 /// `before`, `since.timeIntervalSince1970`), a Hermes-internal ID
-/// (UUID-shaped session/tool IDs that come back from the same DB), or
-/// a search query that already passes through `sanitizeFTSQuery` in
-/// HermesDataService. It is **NOT** a general SQL-injection defense.
+/// (UUID-shaped session/tool IDs that come back from the same DB), a
+/// search query that already passes through `sanitizeFTSQuery`, or the
+/// raw search TERMS the v0.21.1 LIKE fallback carries (escaped only for
+/// LIKE's own wildcards, so `encodeText`'s quote-doubling and
+/// control-character split are what keep them inert). It is **NOT** a
+/// general SQL-injection defense.
 /// Don't extend the data-service surface with methods that accept raw
 /// untrusted user input as a `.text` param without first validating
 /// upstream. The local backend skips inlining entirely (uses

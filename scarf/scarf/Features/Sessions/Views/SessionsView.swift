@@ -290,6 +290,7 @@ struct SessionsView: View {
                     if viewModel.searchText.isEmpty {
                         viewModel.isSearching = false
                         viewModel.searchResults = []
+                        viewModel.searchIndexRebuilding = false
                     }
                 }
         }
@@ -406,8 +407,31 @@ struct SessionsView: View {
             .padding(ScarfSpace.s10)
     }
 
+    /// Hermes rebuilds `messages_fts` in chunks; while it does, MATCH
+    /// cannot see the ids it hasn't reached yet. Say so rather than let
+    /// a short result read as "nothing here".
+    @ViewBuilder
+    private var searchIndexRebuildingNote: some View {
+        if viewModel.searchIndexRebuilding {
+            HStack(spacing: 6) {
+                Image(systemName: "clock.arrow.circlepath")
+                Text("Hermes is rebuilding its search index — results may be incomplete.")
+            }
+            .scarfStyle(.caption)
+            .foregroundStyle(ScarfColor.foregroundMuted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, ScarfSpace.s4)
+            .padding(.vertical, ScarfSpace.s2)
+            .overlay(
+                Rectangle().fill(ScarfColor.border).frame(height: 1),
+                alignment: .bottom
+            )
+        }
+    }
+
     @ViewBuilder
     private var searchResultRows: some View {
+        searchIndexRebuildingNote
         if viewModel.searchResults.isEmpty {
             Text("No matches for \"\(viewModel.searchText)\".")
                 .scarfStyle(.body)

@@ -48,6 +48,15 @@ public actor HermesDataService {
     private var hasLastReadAtColumn = false
     private var hasListableChildSupport = false
 
+    /// Cached `state_meta.fts_tool_full_content_high_water`, read once
+    /// per open on the first search that needs it. `.some(nil)` means
+    /// "probed, and this host does not bound tool indexing"; `nil` means
+    /// "not probed yet". The value is immutable for the life of a DB —
+    /// Hermes stamps it once and returns early ever after
+    /// (`hermes_state_schema.py:292-295`) — so caching it is sound, and
+    /// `open()`/`refresh()` clear it anyway.
+    private var ftsToolPrefixHighWaterProbe: Int??
+
     /// Last error from `open()` / `refresh()`, user-presentable. `nil`
     /// means the last attempt succeeded. Views surface this when their
     /// own load path fails, so the user sees "Permission denied
@@ -91,6 +100,7 @@ public actor HermesDataService {
         hasHiddenColumn = await backend.hasHiddenColumn
         hasLastReadAtColumn = await backend.hasLastReadAtColumn
         hasListableChildSupport = await backend.hasListableChildSupport
+        ftsToolPrefixHighWaterProbe = nil
         lastOpenError = await backend.lastOpenError
         return ok
     }
@@ -109,6 +119,7 @@ public actor HermesDataService {
         hasHiddenColumn = await backend.hasHiddenColumn
         hasLastReadAtColumn = await backend.hasLastReadAtColumn
         hasListableChildSupport = await backend.hasListableChildSupport
+        ftsToolPrefixHighWaterProbe = nil
         lastOpenError = await backend.lastOpenError
         return ok
     }
@@ -803,12 +814,164 @@ public actor HermesDataService {
             ORDER BY rank
             LIMIT ?
             """
+        let matches: [HermesMessage]
         do {
             let rows = try await backend.query(sql, params: [.text(sanitized), .integer(Int64(limit))])
-            return rows.map { messageFromRow($0) }
+            matches = rows.map { messageFromRow($0) }
         } catch {
             return []
         }
+
+        // v0.21.1 (A10): on a host that bounds tool-row indexing to the
+        // first 8 KB of `content`, a term occurring only DEEPER than that
+        // is invisible to MATCH — so top up with a bounded scan the FTS
+        // pass could not have seen. Everything about this is conditional
+        // on the `state_meta` marker being present, so a pre-v0.21.1 DB
+        // issues byte-identical SQL to the release before this one, and a
+        // full result set skips it regardless (there is no room to add).
+        guard matches.count < limit,
+              let highWater = await ftsToolPrefixHighWater() else { return matches }
+        let extra = await deepToolContentMatches(
+            query: query,
+            highWater: highWater,
+            msgCols: msgCols,
+            activeClause: activeClause,
+            limit: limit - matches.count
+        )
+        guard !extra.isEmpty else { return matches }
+        let seen = Set(matches.map(\.id))
+        return matches + extra.filter { !seen.contains($0.id) }
+    }
+
+    /// `state_meta.fts_tool_full_content_high_water`, or nil when this
+    /// host does not bound tool-row FTS indexing. Probed at most once
+    /// per `open()`; a DB old enough to lack `state_meta` entirely
+    /// throws and is cached as "no bound", same as a missing key.
+    private func ftsToolPrefixHighWater() async -> Int? {
+        if let cached = ftsToolPrefixHighWaterProbe { return cached }
+        var value: Int?
+        do {
+            let rows = try await backend.query(
+                "SELECT CAST(value AS INTEGER) AS v FROM state_meta WHERE key = ? LIMIT 1",
+                params: [.text(HermesFTSIndex.toolFullContentHighWaterKey)]
+            )
+            value = rows.first?.optionalInt(at: 0)
+        } catch {
+            value = nil
+        }
+        ftsToolPrefixHighWaterProbe = .some(value)
+        return value
+    }
+
+    /// The LIKE half of the v0.21.1 search fallback: tool rows above the
+    /// prefix high-water whose payload is longer than the indexed prefix
+    /// and which contain every search term somewhere.
+    ///
+    /// **Why it is bounded by rows READ, not by rows returned.** A plain
+    /// `WHERE … LIKE … LIMIT n` lets SQLite scan the whole tool history
+    /// looking for the n-th match, and each candidate here is by
+    /// definition a >8 KB (often multi-megabyte) payload it must read off
+    /// disk. The inner `LIMIT` pins the work to the newest
+    /// `fallbackScanBudget` candidates instead, so the cost of a
+    /// no-result search is the same as a full-result one and does not
+    /// grow with the size of state.db.
+    ///
+    /// Matching deliberately runs over the WHOLE content rather than
+    /// `substr(content, 8193)`: a term straddling the prefix boundary
+    /// would fall between the two windows, and rows the FTS pass already
+    /// returned are removed by id afterwards anyway.
+    private func deepToolContentMatches(
+        query: String,
+        highWater: Int,
+        msgCols: String,
+        activeClause: String,
+        limit: Int
+    ) async -> [HermesMessage] {
+        let terms = query
+            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+            .prefix(HermesFTSIndex.fallbackMaxTerms)
+            .map(String.init)
+        guard !terms.isEmpty else { return [] }
+
+        // The inner query is over bare `messages`, so the alias-qualified
+        // active clause the FTS join uses has to lose its `m.` prefix.
+        let innerActive = activeClause.replacingOccurrences(of: "m.", with: "")
+        let likeClause = terms.map { _ in "m.content LIKE ? ESCAPE '\\'" }.joined(separator: " AND ")
+        let sql = """
+            SELECT \(msgCols)
+            FROM (
+                SELECT * FROM messages
+                WHERE role = 'tool' AND id > ? AND length(content) > ?\(innerActive)
+                ORDER BY id DESC
+                LIMIT ?
+            ) m
+            WHERE \(likeClause)
+            ORDER BY m.id DESC
+            LIMIT ?
+            """
+        var params: [SQLValue] = [
+            .integer(Int64(highWater)),
+            .integer(Int64(HermesFTSIndex.toolContentPrefixChars)),
+            .integer(Int64(HermesFTSIndex.fallbackScanBudget))
+        ]
+        params.append(contentsOf: terms.map { .text("%\(Self.escapedForLIKE($0))%") })
+        params.append(.integer(Int64(limit)))
+
+        return await ScarfMon.measureAsync(.sessionLoad, "mac.searchDeepToolContent") {
+            do {
+                let rows = try await backend.query(sql, params: params)
+                ScarfMon.event(.sessionLoad, "mac.searchDeepToolContent.rows", count: rows.count)
+                return rows.map { messageFromRow($0) }
+            } catch {
+                Self.logger.warning("deep tool-content search failed: \(error.localizedDescription, privacy: .public)")
+                return []
+            }
+        }
+    }
+
+    /// Neutralise SQL LIKE's wildcards in a user term. Paired with
+    /// `ESCAPE '\'` at the call site — without it, searching for `100%`
+    /// or `snake_case` silently matches far more than the user asked for.
+    private nonisolated static func escapedForLIKE(_ term: String) -> String {
+        var out = ""
+        out.reserveCapacity(term.count)
+        for ch in term {
+            if ch == "\\" || ch == "%" || ch == "_" { out.append("\\") }
+            out.append(ch)
+        }
+        return out
+    }
+
+    /// What `messages_fts` can currently answer for. Read fresh (the
+    /// rebuild markers move while a backfill runs, and vanish when it
+    /// finishes), off the main actor, in one round-trip. A DB with no
+    /// `state_meta` reports a healthy index.
+    public func searchIndexStatus() async -> HermesSearchIndexStatus {
+        var status = HermesSearchIndexStatus(toolPrefixHighWater: await ftsToolPrefixHighWater())
+        do {
+            let rows = try await backend.query(
+                "SELECT key AS k, CAST(value AS INTEGER) AS v FROM state_meta WHERE key IN (?, ?)",
+                params: [
+                    .text(HermesFTSIndex.rebuildProgressKey),
+                    .text(HermesFTSIndex.rebuildHighWaterKey)
+                ]
+            )
+            for row in rows {
+                switch row.string(at: 0) {
+                case HermesFTSIndex.rebuildProgressKey: status.rebuildProgress = row.optionalInt(at: 1)
+                case HermesFTSIndex.rebuildHighWaterKey: status.rebuildHighWater = row.optionalInt(at: 1)
+                default: break
+                }
+            }
+        } catch {
+            return status
+        }
+        // Hermes deletes BOTH markers together when the backfill lands
+        // (`_CLEAR_REBUILD_MARKERS_SQL`), so presence is the signal. A
+        // progress that has caught up with the high-water is a rebuild in
+        // its last moments, not a finished one — still honestly partial.
+        status.isRebuilding = status.rebuildHighWater != nil || status.rebuildProgress != nil
+        return status
     }
 
     public func fetchToolResult(callId: String) async -> String? {
