@@ -31,6 +31,12 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
 
     private var db: OpaquePointer?
     private var openedAtPath: String?
+
+    /// `(st_dev, st_ino)` of the file behind the open handle. An open
+    /// SQLite connection follows the INODE, not the path, so a state.db
+    /// that gets replaced underneath us leaves this backend reading a
+    /// file nobody writes to any more — see `refresh(forceFresh:)`.
+    private var openedFileIdentity: (dev: UInt64, ino: UInt64)?
     private(set) public var hasV07Schema = false
     private(set) public var hasV011Schema = false
     private(set) public var hasMessagesActiveColumn = false
@@ -106,6 +112,7 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
                 #endif
                 isQueryOnlyFallback = true
                 openedAtPath = path
+                openedFileIdentity = Self.fileIdentity(of: path)
                 lastOpenError = nil
                 detectSchema()
                 return true
@@ -118,6 +125,7 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
             return false
         }
         openedAtPath = path
+        openedFileIdentity = Self.fileIdentity(of: path)
         lastOpenError = nil
         isQueryOnlyFallback = false
         detectSchema()
@@ -179,9 +187,40 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
         // `forceFresh: true` remains the schema-migration escape hatch
         // (rare; only when the user upgrades Hermes and table_info
         // changes mid-session).
-        if !forceFresh, db != nil { return true }
+        if !forceFresh, db != nil, !stateDBWasReplaced() { return true }
         await close()
         return await open()
+    }
+
+    /// True when the file at `context.paths.stateDB` is no longer the
+    /// one this handle is reading.
+    ///
+    /// Hermes v0.21.1 added `quarantine_zeroed_state_db`
+    /// (`hermes_state_dbfile.py:238-278`), which MOVES a corrupt state.db
+    /// aside — `state.db` → `state.db.zeroed-<ts>-<pid>.bak` — and lets
+    /// the next open create a fresh one at the same path. An `sqlite3`
+    /// connection is bound to the inode it opened, so without this check
+    /// the steady-state `refresh` short-circuit above would keep serving
+    /// the quarantined file for the rest of the process's life: no error,
+    /// no empty result, just data that silently stops changing. A restore
+    /// from backup or a `cp` over the DB has exactly the same shape.
+    ///
+    /// One `stat(2)` per refresh tick, and only on the path that would
+    /// otherwise have done nothing at all. Mirrors Hermes's own
+    /// `stat_db_file_identity` (`hermes_state_common.py:245-252`),
+    /// including its rule that `st_ino == 0` (some network filesystems)
+    /// counts as UNKNOWN — an unknown identity must not be read as a
+    /// replacement, or every tick would reopen.
+    private func stateDBWasReplaced() -> Bool {
+        guard let known = openedFileIdentity,
+              let current = Self.fileIdentity(of: context.paths.stateDB) else { return false }
+        return known != current
+    }
+
+    private static func fileIdentity(of path: String) -> (dev: UInt64, ino: UInt64)? {
+        var st = stat()
+        guard stat(path, &st) == 0, st.st_ino != 0 else { return nil }
+        return (UInt64(st.st_dev), UInt64(st.st_ino))
     }
 
     public func close() async {
@@ -190,6 +229,7 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
         }
         db = nil
         openedAtPath = nil
+        openedFileIdentity = nil
         isQueryOnlyFallback = false
     }
 
