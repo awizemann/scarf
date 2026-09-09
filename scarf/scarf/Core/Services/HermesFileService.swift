@@ -342,7 +342,8 @@ struct HermesFileService: Sendable {
                 sslVerify: server.sslVerify,
                 identityHeader: server.identityHeader,
                 strictRedirectHeaders: server.strictRedirectHeaders,
-                cwd: server.cwd
+                cwd: server.cwd,
+                oauthFlow: server.oauthFlow
             )
         }
     }
@@ -666,6 +667,28 @@ struct HermesFileService: Sendable {
         }
     }
 
+    /// Updates the v0.21.1 `oauth.flow` scalar — `"browser"` (Hermes's
+    /// default) or `"device"` (RFC 8628). Pass `nil`/empty to drop the key.
+    /// Caller is responsible for capability-gating —
+    /// `HermesCapabilities.hasMCPOAuthFlow`.
+    ///
+    /// Uses the nested-SCALAR patcher, not the `identity_header` block writer:
+    /// the `oauth:` block also holds the user's `client_id`, `client_secret`,
+    /// `scope` and `timeout`, which Scarf does not model. Rewriting the block
+    /// wholesale would delete credentials the user cannot recover.
+    @discardableResult
+    nonisolated func setMCPServerOAuthFlow(name: String, flow: String?) -> Bool {
+        patchMCPServerField(name: name) { entryLines in
+            let trimmed = flow?.trimmingCharacters(in: .whitespaces) ?? ""
+            Self.replaceOrInsertNestedScalar(
+                block: "oauth",
+                key: "flow",
+                value: trimmed.isEmpty ? nil : trimmed,
+                in: &entryLines
+            )
+        }
+    }
+
     /// Updates the v0.20.4 `strict_redirect_headers` bool scalar (HTTP/SSE
     /// only — Portable Agent Plugins v1 §7.2.1). Pass `nil` to drop the key
     /// (Hermes default `false` applies).
@@ -927,6 +950,10 @@ struct HermesFileService: Sendable {
         var identityHeaderName: String?
         var identityHeaderValueFrom: String?
         var identityHeaderValue: String?
+        // v0.21.1 — `oauth.flow`. The ONLY key Scarf reads out of the `oauth:`
+        // block; client_id / client_secret / scope / timeout stay unmodelled
+        // and untouched (see HermesMCPServer.oauthFlow).
+        var oauthFlow: String?
 
         func flush() {
             guard let name = currentName else { return }
@@ -1043,7 +1070,8 @@ struct HermesFileService: Sendable {
                 sslVerify: sslVerify,
                 identityHeader: identityHeader,
                 strictRedirectHeaders: strictRedirectHeaders,
-                cwd: cwd
+                cwd: cwd,
+                oauthFlow: oauthFlow
             )
             servers.append(server)
 
@@ -1060,6 +1088,7 @@ struct HermesFileService: Sendable {
             identityHeaderName = nil
             identityHeaderValueFrom = nil
             identityHeaderValue = nil
+            oauthFlow = nil
         }
 
         /// `key: value` split shared by every scalar site below: trims CRLF,
@@ -1147,6 +1176,10 @@ struct HermesFileService: Sendable {
                 case "tools.exclude":
                     if trimmed.hasPrefix("- ") {
                         excludeList.append(Self.unquote(String(trimmed.dropFirst(2))))
+                    }
+                case "oauth":
+                    if let (key, value) = keyValue(trimmed), key == "flow" {
+                        oauthFlow = Self.unquote(value)
                     }
                 case "identity_header":
                     if let (key, value) = keyValue(trimmed) {
@@ -1634,6 +1667,81 @@ struct HermesFileService: Sendable {
         }
         // Insert right after header.
         lines.insert("    \(key): \(value)", at: 1)
+    }
+
+    /// Set (or drop) ONE child scalar inside a nested block, leaving every
+    /// sibling key in that block byte-identical.
+    ///
+    /// This is the writer for `oauth.flow`, whose block also holds the user's
+    /// `client_id` / `client_secret` / `scope` / `timeout`. The
+    /// `replaceOrInsert<Block>` writers rebuild their block from Scarf's model
+    /// and are only safe for blocks Scarf models COMPLETELY — using one here
+    /// would silently delete credentials.
+    ///
+    /// Containment mirrors the other writers: the block header must be at
+    /// indent 4 and match exactly, children are read at indent 6, and the block
+    /// ends at the first line with indent <= 4 that is neither blank nor a
+    /// comment. `nil` removes just the child line (and the block itself only
+    /// if that child was its sole content — an emptied `oauth:` mapping is a
+    /// YAML null that Hermes would read as a missing config).
+    nonisolated private static func replaceOrInsertNestedScalar(
+        block: String,
+        key: String,
+        value: String?,
+        in lines: inout [String]
+    ) {
+        var blockIndex: Int?
+        var childIndex: Int?
+        var blockEnd: Int?
+        var childCount = 0
+        for index in 1..<lines.count {
+            let line = lines[index]
+            let indent = line.prefix(while: { $0 == " " }).count
+            let trimmed = Self.trimYAMLLine(line)
+            if blockIndex == nil {
+                if indent == 4 && trimmed == block + ":" {
+                    blockIndex = index
+                } else if indent <= 2 && !trimmed.isEmpty && !trimmed.hasPrefix("#") {
+                    break
+                }
+                continue
+            }
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            if indent >= 6 {
+                childCount += 1
+                if childIndex == nil, trimmed.hasPrefix(key + ":") || trimmed == key + ":" {
+                    childIndex = index
+                }
+                continue
+            }
+            blockEnd = index
+            break
+        }
+
+        guard let value else {
+            guard let childIndex, let blockIndex else { return }
+            if childCount == 1 {
+                // Removing the only child would leave `oauth:` as a null
+                // mapping, which reads differently from an absent block.
+                lines.removeSubrange(blockIndex...childIndex)
+            } else {
+                lines.remove(at: childIndex)
+            }
+            return
+        }
+
+        guard let blockIndex else {
+            // No block yet — create it with this single child, ahead of the
+            // next entry, exactly where a scalar insert would go.
+            lines.insert(contentsOf: ["    \(block):", "      \(key): \(value)"], at: 1)
+            return
+        }
+        if let childIndex {
+            let carriageReturn = lines[childIndex].hasSuffix("\r") ? "\r" : ""
+            lines[childIndex] = "      \(key): \(value)\(carriageReturn)"
+        } else {
+            lines.insert("      \(key): \(value)", at: blockEnd ?? lines.count)
+        }
     }
 
     nonisolated private static func removeScalar(key: String, in lines: inout [String]) {

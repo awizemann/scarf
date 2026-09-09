@@ -51,6 +51,10 @@ final class MCPServerEditorViewModel {
     /// v0.20.4 — strict_redirect_headers (HTTP / SSE only). `nil` = key
     /// absent = Hermes default (`false`).
     var strictRedirectHeadersDraft: Bool?
+    /// v0.21.1 — `oauth.flow`. Empty string means "leave the key absent",
+    /// which is how Hermes's own default (browser) is expressed; the picker
+    /// only ever offers "" / "browser" / "device".
+    var oauthFlowDraft: String
     /// v0.20.4 — cwd (stdio only). Empty string = key absent.
     var cwdDraft: String
     var showSecrets: Bool = false
@@ -90,6 +94,7 @@ final class MCPServerEditorViewModel {
         self.identityHeaderValueFromDraft = server.identityHeader?.valueFrom ?? .static
         self.identityHeaderValueDraft = server.identityHeader?.value ?? ""
         self.strictRedirectHeadersDraft = server.strictRedirectHeaders
+        self.oauthFlowDraft = server.oauthFlow ?? ""
         self.cwdDraft = server.cwd ?? ""
     }
 
@@ -168,6 +173,9 @@ final class MCPServerEditorViewModel {
         let originalIdentityHeader = server.identityHeader
         let strictRedirectValue = strictRedirectHeadersDraft
         let originalStrictRedirect = server.strictRedirectHeaders
+        let trimmedOAuthFlow = oauthFlowDraft.trimmingCharacters(in: .whitespaces)
+        let oauthFlowValue: String? = trimmedOAuthFlow.isEmpty ? nil : trimmedOAuthFlow
+        let originalOAuthFlow = server.oauthFlow
         let trimmedCwd = cwdDraft.trimmingCharacters(in: .whitespaces)
         let cwdValue: String? = trimmedCwd.isEmpty ? nil : trimmedCwd
         let originalCwd = server.cwd
@@ -235,6 +243,13 @@ final class MCPServerEditorViewModel {
                     }
                     if strictRedirectValue != originalStrictRedirect {
                         if !service.setMCPServerStrictRedirectHeaders(name: name, value: strictRedirectValue) { ok = false }
+                    }
+                    // v0.21.1 — oauth.flow. Delta-gated like every scalar
+                    // above, which also means a pre-v0.21.1 host (where the
+                    // row is hidden, so the draft equals the loaded value)
+                    // never writes the key at all.
+                    if oauthFlowValue != originalOAuthFlow {
+                        if !service.setMCPServerOAuthFlow(name: name, flow: oauthFlowValue) { ok = false }
                     }
                 } else if cwdValue != originalCwd {
                     // v0.20.4 — cwd is stdio-only.
