@@ -238,4 +238,27 @@ struct HermesV0204SkillsParityTests {
         #expect(snapshot.skills.isEmpty)
         #expect(!snapshot.hasUntrustedSkills)
     }
+    // MARK: - install argv (`--` end-of-options)
+
+    /// `skills install` takes one positional; a registry identifier can start
+    /// with `-` (nothing stops a browse.sh slug or a pasted URL fragment
+    /// from doing so) and argparse would then read it as an unknown flag and
+    /// exit 2 before `do_install` runs. Fails without the fix: the old argv
+    /// put the identifier BEFORE `--yes` with no `--` at all.
+    @Test func installArgvEndsOptionsBeforeThePositional() {
+        #expect(SkillsViewModel.installArgs("1password")
+            == ["skills", "install", "--yes", "--", "1password"])
+        // Every flag lands before the `--`.
+        #expect(SkillsViewModel.installArgs(
+            "https://example.test/SKILL.md", category: "ops", name: "deployer")
+            == ["skills", "install", "--yes", "--category", "ops", "--name", "deployer",
+                "--", "https://example.test/SKILL.md"])
+        // Empty overrides are omitted rather than sent as blank values.
+        #expect(SkillsViewModel.installArgs("x", category: "", name: "")
+            == ["skills", "install", "--yes", "--", "x"])
+        // The dash-leading identifier this exists for.
+        let dashed = SkillsViewModel.installArgs("-weird-slug")
+        #expect(dashed.last == "-weird-slug")
+        #expect(dashed[dashed.count - 2] == "--")
+    }
 }

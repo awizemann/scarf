@@ -843,7 +843,7 @@ struct HermesFileService: Sendable {
     /// `mcp test` exits 0 even when the inner connection fails — it reports
     /// on stdout — so the exit code alone can't decide. But every failure
     /// path goes through `hermes_cli/mcp_config.py::_error`, which prints
-    /// `  ✗ {text}` (line 56, verified at tag `v2026.8.31`): the ✗ marker
+    /// `  ✗ {text}` (`hermes_cli/mcp_config.py:36`, verified at tag `v2026.9.7`): the ✗ marker
     /// covers `Connection failed …`, `Server '…' not found …`, and every
     /// other error the command can emit.
     ///
@@ -859,19 +859,98 @@ struct HermesFileService: Sendable {
         output.contains("✗")
     }
 
-    nonisolated private static func parseToolListFromTestOutput(_ output: String) -> [String] {
+    /// Tool names out of `hermes mcp test` output.
+    ///
+    /// The old implementation looked for `- ` / `* ` bullets. **Hermes has
+    /// never printed those**, so the tool chips this feeds have been empty on
+    /// every host. `_print_tools` (`hermes_cli/mcp_config.py:49-52` at
+    /// `v2026.9.7`) emits, for each tool, four leading spaces then the name
+    /// padded to `width` (36, from the call site at `:619`) then the
+    /// description truncated to 55:
+    ///
+    ///     ✓ Connected (412ms)
+    ///     ✓ Tools discovered: 2
+    ///
+    ///         read_file                            Read a file from disk
+    ///         write_file                           Write a file to disk
+    ///
+    /// Two things make a bare "indented line" test unsafe, so the block is
+    /// anchored on the `Tools discovered: N` line (`:616`) instead:
+    ///
+    /// * The `Auth:` header arm at `:605` also prints a four-space-indented
+    ///   `    {header}: {masked}` line, ABOVE the count — anchoring below it
+    ///   keeps masked header values out of the tool list.
+    /// * `N` bounds the block, so a description that wraps in the user's
+    ///   terminal cannot contribute a phantom tool.
+    ///
+    /// ANSI is stripped even though `color()` (`hermes_cli/colors.py`) is a
+    /// no-op whenever stdout is not a TTY — which is always, for a piped
+    /// Scarf run. It costs nothing and it keeps the parse honest if that
+    /// ever stops being true; note that when colour IS on, the `:{width}s`
+    /// padding is applied to the ESCAPED string, so column alignment is not
+    /// something this can rely on. It splits on whitespace instead.
+    nonisolated static func parseToolListFromTestOutput(_ output: String) -> [String] {
+        let lines = output.components(separatedBy: "\n")
+        guard let countIndex = lines.firstIndex(where: {
+            stripANSI($0).contains(toolsDiscoveredMarker)
+        }) else { return [] }
+        let after = stripANSI(lines[countIndex])
+            .components(separatedBy: toolsDiscoveredMarker)
+            .last ?? ""
+        let expected = Int(after.trimmingCharacters(in: .whitespaces)) ?? 0
+        guard expected > 0 else { return [] }
+
         var tools: [String] = []
-        for rawLine in output.components(separatedBy: "\n") {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            guard line.hasPrefix("- ") || line.hasPrefix("* ") else { continue }
-            let candidate = String(line.dropFirst(2)).trimmingCharacters(in: .whitespaces)
-            // Take only the identifier before any separator (":" or whitespace).
-            let token = candidate.split(whereSeparator: { ":(".contains($0) || $0.isWhitespace }).first.map(String.init) ?? candidate
-            if !token.isEmpty, token.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }) {
-                tools.append(token)
-            }
+        for rawLine in lines[(countIndex + 1)...] {
+            let line = stripANSI(rawLine)
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            // A blank line separates the count from the block (`:618`); it
+            // does not end it.
+            if trimmed.isEmpty { continue }
+            // The block is exactly the indented rows. The first line that
+            // isn't one ends it — `cmd_mcp_test` prints nothing else in
+            // between, so this is a fail-closed bound, not a heuristic.
+            guard line.hasPrefix("    ") else { break }
+            guard let token = trimmed.split(whereSeparator: { $0.isWhitespace }).first else { continue }
+            let name = String(token)
+            // MCP tool names are `[a-zA-Z0-9_-]` by convention and by every
+            // name Hermes registers; anything else is not a tool row.
+            guard !name.isEmpty,
+                  name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" })
+            else { continue }
+            tools.append(name)
+            if tools.count == expected { break }
         }
         return tools
+    }
+
+    private static let toolsDiscoveredMarker = "Tools discovered: "
+
+    /// Drop CSI/OSC escape sequences from a CLI line.
+    nonisolated private static func stripANSI(_ text: String) -> String {
+        guard text.contains("\u{1B}") else { return text }
+        var out = ""
+        var iterator = text.makeIterator()
+        while let ch = iterator.next() {
+            guard ch == "\u{1B}" else { out.append(ch); continue }
+            guard let next = iterator.next() else { break }
+            if next == "[" {
+                // CSI: parameter/intermediate bytes, then a final byte in
+                // 0x40…0x7E.
+                while let c = iterator.next() {
+                    if let ascii = c.asciiValue, ascii >= 0x40, ascii <= 0x7E { break }
+                }
+            } else if next == "]" {
+                // OSC: runs to BEL or ST (ESC \).
+                while let c = iterator.next() {
+                    if c == "\u{07}" { break }
+                    if c == "\u{1B}" { _ = iterator.next(); break }
+                }
+            }
+            // Anything else is a two-character escape; `next` is consumed
+            // with it and nothing is emitted.
+        }
+        return out
     }
 
     @discardableResult
@@ -1003,8 +1082,8 @@ struct HermesFileService: Sendable {
         var headersMap: [String: String] = [:]
         var includeList: [String] = []
         var excludeList: [String] = []
-        var resources = false
-        var prompts = false
+        var resources = true
+        var prompts = true
         var subSection: String?
         // v0.20.4 — identity_header is a small fixed-shape nested block
         // (name / value_from / value). Captured separately from `fields`
@@ -1029,20 +1108,25 @@ struct HermesFileService: Sendable {
                 if fields["url"] != nil { return .http }
                 return .stdio
             }()
-            let enabledStr = fields["enabled"]?.lowercased()
-            let enabled = enabledStr != "false"
+            // Hermes reads every one of these through `_parse_boolish`
+            // (`tools/mcp_tool_common.py:120-137` at `v2026.9.7`; the same
+            // word sets back to `v2026.6.19:tools/mcp_tool.py:3754`), which
+            // accepts {true,1,yes,on} / {false,0,no,off} case-insensitively
+            // and falls back to the DEFAULT for anything else. An exact
+            // `!= "false"` test read `enabled: no` as enabled — Scarf showed
+            // a live server the gateway was ignoring.
+            let enabled = Self.boolish(fields["enabled"], default: true)
             let timeout = fields["timeout"].flatMap(Int.init)
             let connectTimeout = fields["connect_timeout"].flatMap(Int.init)
             let sseReadTimeout = fields["sse_read_timeout"].flatMap(Int.init)
             // v0.14 — supports_parallel_tool_calls is an optional bool;
             // absent means "use Hermes's default" and stays nil.
-            let parallelStr = fields["supports_parallel_tool_calls"]?.lowercased()
-            let parallel: Bool? = {
-                guard let s = parallelStr else { return nil }
-                if s == "true" { return true }
-                if s == "false" { return false }
-                return nil
-            }()
+            // Absent stays nil ("use Hermes's default"); a present value is
+            // read with the same boolish words Hermes uses
+            // (`mcp_tool_discovery.py:254`). A present-but-unparseable value
+            // stays nil, which renders as the default Hermes will apply.
+            let parallel: Bool? = fields["supports_parallel_tool_calls"]
+                .flatMap { Self.boolishOptional($0) }
             // v0.15 — mTLS client-certificate config. `client_cert` is normally
             // a scalar PEM-path string but Hermes also accepts an inline list
             // form `[cert, key, password]`; tolerate it by taking the first
@@ -1144,8 +1228,13 @@ struct HermesFileService: Sendable {
             headersMap = [:]
             includeList = []
             excludeList = []
-            resources = false
-            prompts = false
+            // `_parse_boolish(tools_filter.get(f), default=True)`
+            // (`tools/mcp_tool_registration.py:77`): an ABSENT key means
+            // exposed, not hidden. Defaulting these to false made the editor
+            // render both toggles off for every server that had never set
+            // them — and one save then wrote the `false` the user never chose.
+            resources = true
+            prompts = true
             subSection = nil
             identityHeaderName = nil
             identityHeaderValueFrom = nil
@@ -1226,10 +1315,10 @@ struct HermesFileService: Sendable {
                         subSection = "tools.include"
                     } else if trimmed == "exclude:" {
                         subSection = "tools.exclude"
-                    } else if trimmed.hasPrefix("resources:") {
-                        resources = trimmed.lowercased().hasSuffix("true")
-                    } else if trimmed.hasPrefix("prompts:") {
-                        prompts = trimmed.lowercased().hasSuffix("true")
+                    } else if let (key, value) = keyValue(trimmed), key == "resources" {
+                        resources = Self.boolish(value, default: true)
+                    } else if let (key, value) = keyValue(trimmed), key == "prompts" {
+                        prompts = Self.boolish(value, default: true)
                     }
                 case "tools.include":
                     if trimmed.hasPrefix("- ") {
@@ -2049,6 +2138,36 @@ struct HermesFileService: Sendable {
     /// filesystem path, so an unescape that doesn't undo the escape is a
     /// permanent "the command moved" — a rewrite of a file Hermes watches,
     /// every launch, forever.
+    // MARK: - Boolish scalars
+
+    /// The two word sets `_parse_boolish` accepts
+    /// (`tools/mcp_tool_common.py:120-121` at `v2026.9.7`; identical at
+    /// `v2026.6.19:tools/mcp_tool.py:3762-3765`, so this is not gated).
+    private static let boolishTrueWords: Set<String> = ["true", "1", "yes", "on"]
+    private static let boolishFalseWords: Set<String> = ["false", "0", "no", "off"]
+
+    /// Read a YAML scalar the way Hermes's `_parse_boolish` does: the value is
+    /// unquoted and inline-comment-stripped first (a `"false"` and a
+    /// `false  # was true` are both `false` to PyYAML, and neither matches a
+    /// literal comparison), then matched against the word sets. Anything else
+    /// — including an absent key — is `default`, which is what Hermes falls
+    /// back to after its `logger.warning`.
+    nonisolated static func boolish(_ raw: String?, default fallback: Bool) -> Bool {
+        boolishOptional(raw) ?? fallback
+    }
+
+    /// As `boolish` but `nil` for absent-or-unrecognised, for the callers that
+    /// must distinguish "the user set it" from "Hermes decides".
+    nonisolated static func boolishOptional(_ raw: String?) -> Bool? {
+        guard let raw else { return nil }
+        let value = unquote(stripInlineComment(raw))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if boolishTrueWords.contains(value) { return true }
+        if boolishFalseWords.contains(value) { return false }
+        return nil
+    }
+
     nonisolated static func unquote(_ value: String) -> String {
         let v = value
         if v.count >= 2, v.hasPrefix("\""), v.hasSuffix("\"") {

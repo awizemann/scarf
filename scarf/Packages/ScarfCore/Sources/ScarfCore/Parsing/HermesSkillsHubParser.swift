@@ -9,19 +9,42 @@ import Foundation
 /// without isolation gymnastics. All members are `nonisolated`.
 public enum HermesSkillsHubParser: Sendable {
 
-    /// Parse `hermes skills browse|search` output.
+    /// Parse `hermes skills browse` output.
     ///
-    /// Hermes emits a Rich box-drawn table with vertical bars as column
-    /// separators:
+    /// `_render_browse_page` (`hermes_cli/skills_hub.py:393-399` at
+    /// `v2026.9.7`) builds a six-column Rich table:
     ///
-    ///     │    # │ Name           │ Description            │ Source       │ Trust      │
-    ///     ├──────┼────────────────┼────────────────────────┼──────────────┼────────────┤
-    ///     │    1 │ 1password      │ Set up and use 1Pass…  │ official     │ ★ official │
+    ///     ┏━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+    ///     ┃    # ┃ Name      ┃ Description   ┃ Source       ┃ Trust      ┃ Identifier    ┃
+    ///     ┡━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+    ///     │    2 │ pdf-tools │ Split, merge  │ skills-sh    │ community  │ pdf-tools-a1b │
+    ///     │      │           │ and OCR PDF   │              │            │ 2c3           │
     ///
-    /// Description cells can wrap across multiple rows — the
-    /// continuation rows have an empty `#` column. We join consecutive
-    /// rows with the same skill by checking whether the first column
-    /// (after `│`) is whitespace-only.
+    /// **The Identifier column is the install target, and the Name is not.**
+    /// `do_install` resolves the string it is given through
+    /// `_resolve_identifier`; a browse.sh row's identifier ends in a
+    /// `-XXXXXX` content hash (`pdf-tools-a1b2c3` above) and a GitHub-tap
+    /// row's is a `<owner>/skills/<name>` path. Installing by Name either
+    /// fails or — worse — resolves to a same-named skill in a different
+    /// registry. Name is kept for display only.
+    ///
+    /// Two wrap rules matter, and they differ per column:
+    ///
+    /// * Description wraps on WORD boundaries (Rich's default), so its
+    ///   continuation cells are joined with a space.
+    /// * Identifier is declared `overflow="fold"` (`_ident_col`,
+    ///   `skills_hub.py:64-69`), which is a hard character fold — the slug
+    ///   above is `pdf-tools-a1b` + `2c3`, so its continuation cells are
+    ///   concatenated with NOTHING between them. Joining them with a space
+    ///   would produce an identifier that installs nothing.
+    ///
+    /// The column set is byte-identical back to `v2026.6.19` (v0.17,
+    /// `skills_hub.py:424-432`), so this needs no capability gate: every
+    /// host Scarf supports that can browse prints an Identifier column.
+    ///
+    /// A row with fewer than the browse table's cells (the `skills search`
+    /// table, which has no `#` column) is skipped exactly as before —
+    /// that path goes through `parseSearchJSON`.
     public static func parseHubList(_ output: String) -> [HermesHubSkill] {
         var results: [HermesHubSkill] = []
         for raw in output.components(separatedBy: "\n") {
@@ -34,9 +57,10 @@ public enum HermesSkillsHubParser: Sendable {
             let cells = line
                 .split(separator: "│", omittingEmptySubsequences: false)
                 .map { $0.trimmingCharacters(in: .whitespaces) }
-            // Expect at least: leading empty, #, Name, Description,
-            // Source, Trust, trailing empty
-            guard cells.count >= 6 else { continue }
+            // Leading empty, #, Name, Description, Source, Trust,
+            // Identifier, trailing empty — eight fields for the six
+            // columns. Anything shorter is not the browse table.
+            guard cells.count >= 8 else { continue }
 
             let numCell = cells[1]
             let nameCell = cells[2]
@@ -44,9 +68,10 @@ public enum HermesSkillsHubParser: Sendable {
             let sourceCell = cells[4]
             // Trust column (index 5) is informational only — we ignore
             // it in the UI.
+            let identCell = cells[6]
 
-            // Continuation row: `#` column is empty. Merge its
-            // description into the last-added entry if present.
+            // Continuation row: `#` column is empty. Merge its cells into
+            // the last-added entry, each column by its own wrap rule.
             if numCell.isEmpty {
                 guard !results.isEmpty else { continue }
                 let last = results.removeLast()
@@ -54,7 +79,7 @@ public enum HermesSkillsHubParser: Sendable {
                     .filter { !$0.isEmpty }
                     .joined(separator: " ")
                 results.append(HermesHubSkill(
-                    identifier: last.identifier,
+                    identifier: last.identifier + identCell,
                     name: last.name,
                     description: merged,
                     source: last.source
@@ -66,17 +91,17 @@ public enum HermesSkillsHubParser: Sendable {
             if Int(numCell) == nil { continue }
             // Empty name cell shouldn't happen but guard anyway.
             guard !nameCell.isEmpty else { continue }
+            // An identifier-less row cannot be installed, and the Name is
+            // not a safe substitute (the browse.sh hash, the GitHub path).
+            // Drop it rather than install the wrong skill — the same rule
+            // `parseSearchJSON` applies.
+            guard !identCell.isEmpty else { continue }
 
-            // Identifier: `hermes skills browse` shows the short name
-            // in the Name column. For install we need the full
-            // identifier like `<source>/<name>`. The CLI accepts just
-            // the name for official hub, so we use that as the install
-            // target.
             let source = sourceCell
                 .replacingOccurrences(of: "★", with: "")
                 .trimmingCharacters(in: .whitespaces)
             results.append(HermesHubSkill(
-                identifier: nameCell,
+                identifier: identCell,
                 name: nameCell,
                 description: descCell,
                 source: source
@@ -156,30 +181,50 @@ public enum HermesSkillsHubParser: Sendable {
         }
     }
 
-    /// Parse `hermes skills check` output for available updates. Format
-    /// is undocumented; we look for `→` (U+2192) or `->` arrow markers
-    /// between version strings.
+    /// Parse `hermes skills check` output.
+    ///
+    /// The old implementation hunted for `→` between two version strings.
+    /// **Hermes has never printed one.** `do_check`
+    /// (`hermes_cli/skills_hub.py:806-808` at `v2026.9.7`; the same three
+    /// columns at `v2026.6.19:993-996`) renders a Rich table titled
+    /// `Skill Updates` with `Name | Source | Status`, and the status is one
+    /// of five words produced by `check_for_skill_updates`
+    /// (`tools/skills_hub_install.py:251-303`):
+    ///
+    ///     ┏━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┓
+    ///     ┃ Name          ┃ Source    ┃ Status           ┃
+    ///     ┡━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━┩
+    ///     │ 1password     │ official  │ update_available │
+    ///     │ pdf-tools     │ skills-sh │ up_to_date       │
+    ///
+    /// Hermes carries no version numbers here at all — the comparison is a
+    /// content hash (`bundle_content_hash`, `:300`), so there is nothing
+    /// to render as "1.0.0 → 1.1.0". Every row is returned, status and
+    /// all; `SkillsViewModel` splits the actionable `update_available`
+    /// rows (the only ones `do_update` acts on, `skills_hub.py:843`) from
+    /// the three fault statuses, which are diagnostics the user has to fix
+    /// by hand.
+    ///
+    /// A status Scarf does not know decodes to `.unknown` and is dropped
+    /// rather than badged, so a future Hermes word never renders as an
+    /// available update.
     public static func parseUpdateList(_ output: String) -> [HermesSkillUpdate] {
         var results: [HermesSkillUpdate] = []
         for raw in output.components(separatedBy: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            guard line.contains("→") || line.contains("->") else { continue }
-            let marker = line.contains("→") ? "→" : "->"
-            let parts = line.components(separatedBy: marker)
-            guard parts.count == 2 else { continue }
-            let left = parts[0].trimmingCharacters(in: .whitespaces)
-            let available = parts[1].trimmingCharacters(in: .whitespaces)
-            let leftTokens = left
-                .split(separator: " ", omittingEmptySubsequences: true)
-                .map(String.init)
-            guard leftTokens.count >= 2 else { continue }
-            let identifier = leftTokens[0]
-            let current = leftTokens[leftTokens.count - 1]
-            results.append(HermesSkillUpdate(
-                identifier: identifier,
-                currentVersion: current,
-                availableVersion: available
-            ))
+            guard raw.contains("│") else { continue }
+            let cells = raw
+                .split(separator: "│", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            // Leading empty, Name, Source, Status, trailing empty.
+            guard cells.count >= 5 else { continue }
+            let name = cells[1]
+            let source = cells[2]
+            // The Status cell is the row key: it rejects the header row
+            // (`Status`), the title line, and any continuation row a
+            // wrapped Name/Source could produce, without guessing.
+            guard let status = HermesSkillUpdateStatus(rawValue: cells[3]) else { continue }
+            guard !name.isEmpty else { continue }
+            results.append(HermesSkillUpdate(identifier: name, source: source, status: status))
         }
         return results
     }
@@ -300,20 +345,56 @@ public struct HermesHubSkill: Identifiable, Sendable, Equatable {
     }
 }
 
-/// A local skill that has an upstream version available.
+/// One row of `hermes skills check`.
+///
+/// `identifier` is the lock-file skill NAME — which is what
+/// `hermes skills update <name>` takes (`skills_hub.py:843`, keyed off
+/// `entry["name"]`). It is deliberately NOT the hub identifier: the update
+/// path resolves through the lock file, not through a registry slug.
 public struct HermesSkillUpdate: Identifiable, Sendable, Equatable {
     public var id: String { identifier }
     public let identifier: String
-    public let currentVersion: String
-    public let availableVersion: String
+    /// Registry the skill was installed from, as recorded in the lock file.
+    public let source: String
+    public let status: HermesSkillUpdateStatus
 
-    public init(
-        identifier: String,
-        currentVersion: String,
-        availableVersion: String
-    ) {
+    public init(identifier: String, source: String, status: HermesSkillUpdateStatus) {
         self.identifier = identifier
-        self.currentVersion = currentVersion
-        self.availableVersion = availableVersion
+        self.source = source
+        self.status = status
+    }
+}
+
+/// The five `status` words `check_for_skill_updates` can emit
+/// (`tools/skills_hub_install.py:277-302` at `v2026.9.7`). `orphaned` and
+/// `invalid_install` arrived after `v2026.6.19`, where only the other three
+/// exist — an older host simply never emits them, so no gate is needed.
+public enum HermesSkillUpdateStatus: String, Sendable, Equatable, CaseIterable {
+    /// The upstream bundle hashes differently from what is installed.
+    case updateAvailable = "update_available"
+    case upToDate = "up_to_date"
+    /// The lock-file entry's directory is gone or is not a directory.
+    case orphaned
+    /// No adapter matching the recorded source could fetch the identifier.
+    case unavailable
+    /// The recorded `install_path` does not resolve at all.
+    case invalidInstall = "invalid_install"
+
+    /// Only `update_available` is something `hermes skills update` acts on.
+    public var isActionable: Bool { self == .updateAvailable }
+
+    /// Human wording for the three fault statuses, shown next to the row.
+    public var faultDescription: String? {
+        switch self {
+        case .updateAvailable, .upToDate:
+            return nil
+        case .orphaned:
+            return String(
+                localized: "Installed directory is missing — remove the stale entry with hermes skills uninstall.")
+        case .unavailable:
+            return String(localized: "Its source registry did not answer, so no update could be checked.")
+        case .invalidInstall:
+            return String(localized: "The lock file records an install path that cannot be resolved.")
+        }
     }
 }

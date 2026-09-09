@@ -124,17 +124,11 @@ struct UpdatesView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(update.identifier)
                                 .font(.callout.monospaced())
-                            HStack(spacing: 6) {
-                                Text(update.currentVersion)
-                                    .font(.caption.monospaced())
-                                    .foregroundStyle(ScarfColor.foregroundMuted)
-                                Image(systemName: "arrow.right")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                                Text(update.availableVersion)
-                                    .font(.caption.monospaced())
-                                    .foregroundStyle(.green)
-                            }
+                            // Hermes reports a source and a status, never a
+                            // version pair — the comparison is a content hash.
+                            Text(update.source)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(ScarfColor.foregroundMuted)
                         }
                         Spacer()
                     }

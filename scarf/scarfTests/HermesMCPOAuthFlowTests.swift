@@ -169,6 +169,71 @@ struct HermesMCPOAuthFlowTests {
         #expect(HermesMCPDevicePrompt.parse("""
           MCP OAuth: open <unavailable> on any device.
           Code: ABCD
+          Waiting for approval...
+
         """) == nil)
+    }
+
+    /// **A chunk boundary inside the `Code:` line must not latch a truncated
+    /// code.** `availableData` splits on a byte count, so the pane can hold
+    /// `…\n  Code: WDJB-MJ` with no newline after it — and `WDJB-MJ` is a
+    /// perfectly non-empty string. The old parser returned it, the sheet
+    /// showed it, and `MCPLoginController` never re-parsed because it only
+    /// re-parses while `devicePrompt == nil`. The user then types a code that
+    /// cannot work, with nothing on screen saying so.
+    ///
+    /// Fails without the fix: the first three expectations returned a prompt
+    /// carrying a truncated code or a code with no sentinel behind it.
+    @Test func devicePromptRefusesAnUnterminatedCodeLine() {
+        let head = "\n  MCP OAuth: open https://github.com/login/device on any device.\n"
+        // Mid-code, no newline yet.
+        #expect(HermesMCPDevicePrompt.parse(head + "  Code: WDJB-MJ") == nil)
+        // The code line is complete, but the block is not: Hermes writes all
+        // three lines in ONE print, so until the sentinel lands the buffer is
+        // still mid-write.
+        #expect(HermesMCPDevicePrompt.parse(head + "  Code: WDJB-MJHT\n") == nil)
+        // Sentinel line itself still unterminated.
+        #expect(HermesMCPDevicePrompt.parse(
+            head + "  Code: WDJB-MJHT\n  Waiting for approv") == nil)
+        // Complete block — now, and only now, a prompt.
+        let done = HermesMCPDevicePrompt.parse(
+            head + "  Code: WDJB-MJHT\n  Waiting for approval...\n")
+        #expect(done?.userCode == "WDJB-MJHT")
+        #expect(done?.verificationURL == "https://github.com/login/device")
+    }
+
+    /// Re-parsing chunk by chunk, exactly as `MCPLoginController.append`
+    /// does, must yield the WHOLE code and never an intermediate value.
+    @Test func devicePromptSurvivesByteWiseAccumulation() {
+        let block = """
+
+          MCP OAuth: open https://github.com/login/device on any device.
+          Code: WDJB-MJHT
+          Waiting for approval...
+
+        """
+        var accumulated = ""
+        var seen: [HermesMCPDevicePrompt] = []
+        for character in block {
+            accumulated.append(character)
+            if let prompt = HermesMCPDevicePrompt.parse(accumulated) {
+                seen.append(prompt)
+            }
+        }
+        #expect(!seen.isEmpty)
+        // Every prompt the accumulation ever produced is the correct one.
+        #expect(seen.allSatisfy { $0.userCode == "WDJB-MJHT" })
+        #expect(seen.allSatisfy { $0.verificationURL == "https://github.com/login/device" })
+    }
+
+    /// A remote `stop()` reaps by `pkill -f <pattern>`; the pattern embeds a
+    /// user-chosen server name, so every ERE metacharacter in it must be
+    /// escaped or the pattern widens to processes Scarf has no business
+    /// signalling.
+    @Test func remoteReapPatternEscapesRegexMetacharacters() {
+        #expect(MCPLoginController.regexEscaped("my.server") == "my\\.server")
+        #expect(MCPLoginController.regexEscaped("a|b") == "a\\|b")
+        #expect(MCPLoginController.regexEscaped("x(1)*") == "x\\(1\\)\\*")
+        #expect(MCPLoginController.regexEscaped("plain-name") == "plain-name")
     }
 }

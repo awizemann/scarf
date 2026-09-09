@@ -83,7 +83,14 @@ public final class SkillsViewModel {
 
     public var hubQuery = ""
     public var hubResults: [HermesHubSkill] = []
+    /// Rows `hermes skills check` reported as `update_available` — the
+    /// only ones `hermes skills update` acts on.
     public var updates: [HermesSkillUpdate] = []
+    /// Rows the same check reported as `orphaned` / `unavailable` /
+    /// `invalid_install`. These are faults the user has to fix by hand;
+    /// "Update All" cannot help them, and counting them as updates was
+    /// the reason the tab promised work it could never do.
+    public internal(set) var updateFaults: [HermesSkillUpdate] = []
     /// Skills the last `updateAll()` left untouched because they carry
     /// local edits (Hermes v0.20.4+). Always empty on older hosts — they
     /// never skip — so the UI section stays hidden and Updates renders
@@ -549,10 +556,9 @@ public final class SkillsViewModel {
         let xport = transport
         let identifier = skill.identifier
         Task.detached { [weak self] in
-            // --yes skips confirmation since we're running non-interactively.
             let result = Self.runHermes(
                 executable: bin,
-                args: ["skills", "install", identifier, "--yes"],
+                args: Self.installArgs(identifier),
                 transport: xport,
                 timeout: 120
             )
@@ -583,13 +589,8 @@ public final class SkillsViewModel {
         let bin = context.paths.hermesBinary
         let xport = transport
         Task.detached { [weak self] in
-            var args = ["skills", "install", url, "--yes"]
-            if let category = categoryOverride, !category.isEmpty {
-                args += ["--category", category]
-            }
-            if let name = nameOverride, !name.isEmpty {
-                args += ["--name", name]
-            }
+            let args = Self.installArgs(
+                url, category: categoryOverride, name: nameOverride)
             let result = Self.runHermes(
                 executable: bin,
                 args: args,
@@ -651,6 +652,31 @@ public final class SkillsViewModel {
     /// leaves it on the next reader's stdin.
     nonisolated static func uninstallStdin(capabilities: HermesCapabilities = .empty) -> String? {
         capabilities.hasSkillsUninstallYes ? nil : "y\n"
+    }
+
+    /// argv for `hermes skills install`.
+    ///
+    /// **Flags first, then `--`, then the positional.** The identifier is
+    /// registry text Scarf does not control — a browse.sh slug, a GitHub
+    /// `owner/skills/name` path, or a user-pasted URL — and argparse reads a
+    /// leading `-` as a flag and exits 2 before `do_install` ever runs.
+    /// `skills install` takes exactly one positional (`identifier`,
+    /// `hermes_cli/subcommands/skills.py:54-63` at `v2026.9.7`), so
+    /// everything after `--` is unambiguous.
+    ///
+    /// `--yes` (`add_yes_flag`, `:63`) skips the confirmation prompt Scarf
+    /// has no TTY to answer; `--category` / `--name` are the direct-URL
+    /// overrides (`:58-61`).
+    nonisolated static func installArgs(
+        _ identifier: String,
+        category: String? = nil,
+        name: String? = nil
+    ) -> [String] {
+        var args = ["skills", "install", "--yes"]
+        if let category, !category.isEmpty { args += ["--category", category] }
+        if let name, !name.isEmpty { args += ["--name", name] }
+        args += ["--", identifier]
+        return args
     }
 
     /// `skills update` has no `--yes` flag (argparse exits 2 if passed) and
@@ -883,9 +909,10 @@ public final class SkillsViewModel {
     }
 
     @MainActor
-    private func finishCheckForUpdates(updates: [HermesSkillUpdate]) async {
+    private func finishCheckForUpdates(updates rows: [HermesSkillUpdate]) async {
         isHubLoading = false
-        self.updates = updates
+        self.updates = rows.filter { $0.status.isActionable }
+        self.updateFaults = rows.filter { $0.status.faultDescription != nil }
         hubMessage = updates.isEmpty ? "No updates available" : "\(updates.count) update(s)"
         try? await Task.sleep(nanoseconds: 3_000_000_000)
         hubMessage = nil

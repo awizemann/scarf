@@ -838,6 +838,13 @@ struct SkillsView: View {
                 keptLocalEditsSection
                 Divider()
             }
+            // Rows `skills check` returned as orphaned / unavailable /
+            // invalid_install. "Update All" cannot act on any of them, so
+            // they are listed as faults rather than counted as updates.
+            if !viewModel.updateFaults.isEmpty {
+                updateFaultsSection
+                Divider()
+            }
             if viewModel.updates.isEmpty {
                 ContentUnavailableView(
                     "No Updates",
@@ -855,7 +862,11 @@ struct SkillsView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(update.identifier)
                                         .font(.system(.body, design: .monospaced, weight: .medium))
-                                    Text("\(update.currentVersion) → \(update.availableVersion)")
+                                    // Hermes compares CONTENT HASHES, not
+                                    // versions (`bundle_content_hash`), so
+                                    // there is no "1.0 → 1.1" to render. The
+                                    // source registry is what it does report.
+                                    Text(update.source)
                                         .font(.caption.monospaced())
                                         .foregroundStyle(.secondary)
                                 }
@@ -863,7 +874,7 @@ struct SkillsView: View {
                             }
                             .accessibilityElement(children: .combine)
                             .accessibilityLabel(
-                                "\(update.identifier), update available, \(update.currentVersion) to \(update.availableVersion)"
+                                "\(update.identifier), update available from \(update.source)"
                             )
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
@@ -874,6 +885,35 @@ struct SkillsView: View {
                 }
             }
         }
+    }
+
+    /// Skills whose `skills check` row reported a fault the user has to fix
+    /// by hand: a missing install directory, an unreachable registry, or an
+    /// unresolvable recorded path. Each carries Hermes's own remedy.
+    private var updateFaultsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(
+                "\(viewModel.updateFaults.count) skill(s) could not be checked",
+                systemImage: "exclamationmark.triangle"
+            )
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(.orange)
+            ForEach(viewModel.updateFaults) { fault in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(fault.identifier)
+                        .font(.system(.body, design: .monospaced))
+                    if let detail = fault.status.faultDescription {
+                        Text(detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     /// Skills the last "Update All" deliberately did not touch because

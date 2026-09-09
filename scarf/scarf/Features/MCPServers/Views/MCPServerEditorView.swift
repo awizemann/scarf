@@ -412,7 +412,16 @@ struct MCPServerEditorView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Clear Token", role: .destructive) {
-                    viewModel.clearOAuthToken { _ in }
+                    // A failed delete leaves the token on disk and the
+                    // gateway silently keeps using it — the one outcome the
+                    // user must be told about. Route it into the same
+                    // `saveError` banner every other write failure uses.
+                    viewModel.clearOAuthToken { ok in
+                        if !ok {
+                            viewModel.saveError = String(
+                                localized: "Could not delete the stored OAuth token. Check permissions on the MCP tokens directory.")
+                        }
+                    }
                 }
             }
         }
