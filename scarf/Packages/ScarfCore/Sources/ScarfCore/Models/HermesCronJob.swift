@@ -506,6 +506,16 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         }
     }
 
+    /// The unverified-delivery note, or `nil` when there is nothing to
+    /// say. Mirrors `_job_warnings`' "adapter acked … without
+    /// message_id/raw_response" line; in the view so a test can hold the
+    /// rendering against the CLI's own wording.
+    public nonisolated var deliveryUnverifiedNote: String? {
+        let targets = lastDeliveryUnverifiedTargets
+        guard !targets.isEmpty else { return nil }
+        return "Delivery unverified: \(targets.joined(separator: ", ")) acked without a message id"
+    }
+
     private nonisolated static func plainText(_ value: JSONValue) -> String? {
         switch value {
         case .string(let s): return s
@@ -855,6 +865,19 @@ public struct CronDispatchStamp: Sendable, Equatable {
     }
 
     public var isLate: Bool { kind != .onTime }
+
+    /// One line per `_dispatch_display`'s three shapes. Lives here rather
+    /// than in the view so a test can hold it against the CLI's own text.
+    public var summary: String {
+        switch kind {
+        case .onTime:
+            return "Dispatch: on time (scheduled \(scheduledAt))"
+        case .late:
+            return "Late: scheduled \(scheduledAt), ran \(dispatchedAt) (\(latenessDisplay) late)"
+        case .catchUp:
+            return "Catch-up after missed fire: scheduled \(scheduledAt), ran \(dispatchedAt) (\(latenessDisplay) late)"
+        }
+    }
 
     /// Port of `hermes_cli/cron.py::_format_lateness` (`45s`, `2h 5m`,
     /// `1d 3h`, `0m`) so the number Scarf shows matches `cron list`.

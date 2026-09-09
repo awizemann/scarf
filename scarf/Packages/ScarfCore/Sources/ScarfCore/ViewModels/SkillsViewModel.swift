@@ -22,6 +22,14 @@ public final class SkillsViewModel {
         self.transport = context.makeTransport()
     }
 
+    /// Test seam: run against an injected transport instead of the one the
+    /// context would make. Not public — the app always goes through
+    /// `init(context:)`.
+    init(context: ServerContext, transport: any ServerTransport) {
+        self.context = context
+        self.transport = transport
+    }
+
     // MARK: - Installed skills
 
     public var categories: [HermesSkillCategory] = []
@@ -431,16 +439,20 @@ public final class SkillsViewModel {
         Task.detached { [weak self] in
             var args = ["skills", "search", query, "--limit", "40", "--source", source]
             if useJSON { args.append("--json") }
-            let result = Self.runHermes(executable: bin, args: args, transport: xport, timeout: 30)
+            let result = Self.runHermesSplit(executable: bin, args: args, transport: xport, timeout: 30)
+            // The JSON array is read from STDOUT alone — a stderr warning
+            // carrying a `]` would otherwise truncate the sliced payload and
+            // drop the whole result set into the table fallback.
             // Fall back to the table parse when the JSON can't be read, so
             // a host that answers something unexpected degrades to the old
             // behaviour rather than to "no results".
-            let parsed = (useJSON ? HermesSkillsHubParser.parseSearchJSON(result.output) : nil)
-                ?? HermesSkillsHubParser.parseHubList(result.output)
+            let combined = result.stdout + result.stderr
+            let parsed = (useJSON ? HermesSkillsHubParser.parseSearchJSON(result.stdout) : nil)
+                ?? HermesSkillsHubParser.parseHubList(combined)
             await self?.finishBrowse(
                 results: parsed,
                 exitCode: result.exitCode,
-                rawOutput: result.output,
+                rawOutput: combined,
                 isSearch: true
             )
         }
@@ -832,6 +844,34 @@ public final class SkillsViewModel {
     }
 
     // MARK: - Transport helpers
+
+    /// Split-stream CLI runner. Use this for any answer that is parsed as
+    /// JSON: the combined runner below concatenates stderr onto stdout, and
+    /// one warning line containing a `]` is enough for a "first `[` … last
+    /// `]`" slice to cut the payload short.
+    nonisolated static func runHermesSplit(
+        executable: String,
+        args: [String],
+        transport: any ServerTransport,
+        timeout: TimeInterval,
+        stdin: String? = nil
+    ) -> (exitCode: Int32, stdout: String, stderr: String) {
+        do {
+            let result = try transport.runProcess(
+                executable: executable,
+                args: args,
+                stdin: stdin.flatMap { $0.data(using: .utf8) },
+                timeout: timeout
+            )
+            return (result.exitCode, result.stdoutString, result.stderrString)
+        } catch let error as TransportError {
+            return (-1, "", error.diagnosticStderr.isEmpty
+                ? (error.errorDescription ?? "transport error")
+                : error.diagnosticStderr)
+        } catch {
+            return (-1, "", error.localizedDescription)
+        }
+    }
 
     /// Combined stdout+stderr CLI runner. Mirrors the legacy
     /// `HermesFileService.runHermesCLI` shape so callers grepping

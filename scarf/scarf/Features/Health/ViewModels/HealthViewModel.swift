@@ -197,8 +197,10 @@ final class HealthViewModel {
                 // cua-driver's own probes cap at ~12s + ~10s + 5s inside
                 // Hermes, so 45 bounds the whole thing without truncating a
                 // slow-but-succeeding driver (C10: every subprocess has one).
+                // stdout ONLY: cua-driver logs to stderr, and a warning
+                // line carrying a `}` would truncate a brace-sliced payload.
                 return HermesComputerUseStatus.parse(
-                    ctx.runHermes(["computer-use", "permissions", "status", "--json"], timeout: 45).output)
+                    ctx.runHermesSplit(["computer-use", "permissions", "status", "--json"], timeout: 45).stdout)
             }.value
 
             let pid = await pidProbe

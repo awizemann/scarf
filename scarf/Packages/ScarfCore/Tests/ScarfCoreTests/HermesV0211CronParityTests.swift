@@ -311,10 +311,9 @@ import Foundation
     /// same strings a future format change would break — and prove Scarf's
     /// own renderings say the same thing.
     @Test func cronListDispatchAndUnverifiedRowsMatchScarfsRendering() throws {
-        _ = """
-              Dispatch: ⚠ late: scheduled 2026-09-07T09:00:00+00:00, ran 2026-09-07T09:41:12+00:00 (41m late)
-            ⚠ Delivery UNVERIFIED: adapter acked slack:C123, matrix:!room without message_id/raw_response
-            """
+        // The CLI's own two lines, verbatim (color disabled).
+        let cliDispatch = "Dispatch: ⚠ late: scheduled 2026-09-07T09:00:00+00:00, ran 2026-09-07T09:41:12+00:00 (41m late)"
+        let cliUnverified = "⚠ Delivery UNVERIFIED: adapter acked slack:C123, matrix:!room without message_id/raw_response"
         let j = try job("""
             "last_dispatch":{"scheduled_at":"2026-09-07T09:00:00+00:00","dispatched_at":"2026-09-07T09:41:12+00:00","lateness_seconds":2472.0,"kind":"late"},
             "last_delivery_unverified":["slack:C123","matrix:!room"]
@@ -323,5 +322,41 @@ import Foundation
         #expect(stamp.kind == .late)
         #expect(stamp.latenessDisplay == "41m")
         #expect(j.lastDeliveryUnverifiedTargets == ["slack:C123", "matrix:!room"])
+
+        // Scarf's renderings (CronView delegates to both) say the same
+        // thing as the CLI's lines: same timestamps, same lateness, same
+        // targets, same verdict.
+        let summary = stamp.summary
+        #expect(summary == "Late: scheduled 2026-09-07T09:00:00+00:00, ran 2026-09-07T09:41:12+00:00 (41m late)")
+        for fragment in ["2026-09-07T09:00:00+00:00", "2026-09-07T09:41:12+00:00", "41m late"] {
+            #expect(cliDispatch.contains(fragment) && summary.contains(fragment))
+        }
+        let note = try #require(j.deliveryUnverifiedNote)
+        #expect(note == "Delivery unverified: slack:C123, matrix:!room acked without a message id")
+        for fragment in ["slack:C123", "matrix:!room"] {
+            #expect(cliUnverified.contains(fragment) && note.contains(fragment))
+        }
+        // Nothing to say when the field is absent — no empty banner.
+        #expect(try job("\"name\":\"n\"").deliveryUnverifiedNote == nil)
+    }
+
+    /// The other two `_dispatch_display` shapes, including `catch_up`,
+    /// which no test reached (L9).
+    @Test func dispatchSummaryCoversOnTimeAndCatchUp() throws {
+        let onTime = try #require(job("""
+            "last_dispatch":{"scheduled_at":"2026-09-07T09:00:00+00:00","dispatched_at":"2026-09-07T09:00:02+00:00","lateness_seconds":2.0,"kind":"on_time"}
+            """).lastDispatch)
+        #expect(onTime.kind == .onTime)
+        #expect(!onTime.isLate)
+        #expect(onTime.summary == "Dispatch: on time (scheduled 2026-09-07T09:00:00+00:00)")
+
+        let catchUp = try #require(job("""
+            "last_dispatch":{"scheduled_at":"2026-09-06T09:00:00+00:00","dispatched_at":"2026-09-07T12:00:00+00:00","lateness_seconds":97200.0,"kind":"catch_up"}
+            """).lastDispatch)
+        #expect(catchUp.kind == .catchUp)
+        #expect(catchUp.isLate)
+        // `_format_lateness` drops minutes once days are present.
+        #expect(catchUp.latenessDisplay == "1d 3h")
+        #expect(catchUp.summary == "Catch-up after missed fire: scheduled 2026-09-06T09:00:00+00:00, ran 2026-09-07T12:00:00+00:00 (1d 3h late)")
     }
 }

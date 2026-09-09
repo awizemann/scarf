@@ -117,7 +117,7 @@ final class PluginsViewModel: OutcomeMessageHosting {
             // hop as the roster so the pane paints once.
             let compat: HermesPluginCompatReport? = caps.hasPluginsCompat
                 ? HermesPluginCompatReport.parse(
-                    svc.runHermesCLI(args: ["plugins", "compat", "--json"], timeout: 45).output)
+                    svc.runHermesCLISplit(args: ["plugins", "compat", "--json"], timeout: 45).stdout)
                 : nil
             await MainActor.run { [weak self] in
                 self?.plugins = result

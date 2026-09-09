@@ -766,29 +766,21 @@ struct CronView: View {
         }
     }
 
-    /// One line, matching `_dispatch_display`'s three shapes.
-    static func dispatchSummary(_ dispatch: CronDispatchStamp) -> String {
-        switch dispatch.kind {
-        case .onTime:
-            return String(localized: "Dispatch: on time (scheduled \(dispatch.scheduledAt))")
-        case .late:
-            return String(localized: "Late: scheduled \(dispatch.scheduledAt), ran \(dispatch.dispatchedAt) (\(dispatch.latenessDisplay) late)")
-        case .catchUp:
-            return String(localized: "Catch-up after missed fire: scheduled \(dispatch.scheduledAt), ran \(dispatch.dispatchedAt) (\(dispatch.latenessDisplay) late)")
-        }
-    }
+    /// One line, matching `_dispatch_display`'s three shapes. The wording
+    /// lives on `CronDispatchStamp` in ScarfCore so the parity suite can
+    /// assert it against the CLI's own text.
+    static func dispatchSummary(_ dispatch: CronDispatchStamp) -> String { dispatch.summary }
 
     /// v0.21.1 `last_delivery_unverified` — a live adapter acked the send but
     /// returned no `message_id`/`raw_response` (the Slack/Matrix/Mattermost
     /// shape). Accepted as delivered, so this is a note, not a failure.
     @ViewBuilder
     private func deliveryUnverifiedBanner(job: HermesCronJob) -> some View {
-        let targets = job.lastDeliveryUnverifiedTargets
-        if !targets.isEmpty {
+        if let note = job.deliveryUnverifiedNote {
             HStack(alignment: .top, spacing: 6) {
                 Image(systemName: "questionmark.circle")
                     .font(.system(size: 11))
-                Text("Delivery unverified: \(targets.joined(separator: ", ")) acked without a message id")
+                Text(note)
                     .scarfStyle(.caption)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
