@@ -281,6 +281,13 @@ final class CronViewModel {
     /// avoid. On such a host we let the CLI decide.
     var isV0206OrLater = false
 
+    /// Set by `CronView` from `hasCronCreatePaused` (v0.21.1). Gates the
+    /// one-shot pre-check below: only a v0.21.1 host REJECTS a past one-shot
+    /// (`cron/jobs.py::_next_run_or_reject_past_oneshot`) — an older one
+    /// stores it, and refusing locally there would deny a write the host
+    /// would have accepted. Same rule as `isV0206OrLater`.
+    var isV0211OrLater = false
+
     /// Should Scarf refuse a terminal-job resume/run locally instead of
     /// round-tripping to the CLI? Only when the host is new enough to
     /// refuse it too. Factored out so both call sites — and the tests —
@@ -330,7 +337,35 @@ final class CronViewModel {
         if output.contains("(terminal)") && output.contains("Cannot run") {
             return "That job already finished — use Resume & Run Now to re-arm it, or duplicate it."
         }
+        // v0.21.1 (A9): the cron lifecycle guard refuses a `--script` that
+        // lives on a cloud-synced FileProvider path WITHOUT opening it
+        // (`cron/lifecycle_guard.py:981-994`), and the same wording covers
+        // the older gateway-lifecycle refusal. Both sentences END in the
+        // remedy, so the generic `prefix(200)` truncation would cut off
+        // exactly the actionable half — hand back the whole sentence.
+        if let blocked = blockedSentence(in: output) { return blocked }
+        // v0.21.1 (A8): `create_job` rejects a past one-shot outright
+        // (`_oneshot_past_grace_error`). Reachable when the create-sheet
+        // pre-check couldn't decide (a naive timestamp, or an older host's
+        // job edited into the past).
+        if output.contains("cannot be scheduled"), output.contains("in the past") {
+            return "That one-shot time is already in the past — pick a future time."
+        }
         return nil
+    }
+
+    /// The full `Blocked: …` sentence Hermes printed, verbatim, or `nil`.
+    ///
+    /// The CLI prints it as `Failed to create job: Blocked: …` on STDOUT
+    /// (`hermes_cli/cron.py::cron_create`) — not stderr — because the guard's
+    /// `ValueError` is caught by `tools/cronjob_tools.py::cronjob` and
+    /// returned as a JSON `error` payload. `runHermesCLI` merges both
+    /// streams, so matching on the text is what works either way.
+    static func blockedSentence(in output: String) -> String? {
+        guard let start = output.range(of: "Blocked: ") else { return nil }
+        let rest = output[start.lowerBound...]
+        let line = rest.prefix { $0 != "\n" }
+        return line.trimmingCharacters(in: .whitespaces)
     }
 
     func runNow(_ job: HermesCronJob) {
@@ -403,12 +438,23 @@ final class CronViewModel {
         }
     }
 
-    func createJob(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, onOutcome: (@MainActor @Sendable (Bool) -> Void)? = nil) {
+    func createJob(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "", onOutcome: (@MainActor @Sendable (Bool) -> Void)? = nil) {
+        // A8 (v0.21.1): Hermes rejects a one-shot whose `run_at` is past the
+        // grace window with a non-zero exit. Say so before the round-trip —
+        // and only on a host that would actually refuse (see `isV0211OrLater`).
+        if isV0211OrLater, HermesCronJob.oneShotScheduleIsPastGrace(schedule) {
+            post(
+                "That one-shot time is already in the past (more than \(Int(HermesCronJob.oneShotGraceSeconds))s) — pick a future time.",
+                outcome: .failure
+            )
+            onOutcome?(false)
+            return
+        }
         runAndReload(
             Self.createJobArguments(
                 schedule: schedule, prompt: prompt, name: name, deliver: deliver,
                 skills: skills, script: script, repeatCount: repeatCount,
-                workdir: workdir, noAgent: noAgent
+                workdir: workdir, noAgent: noAgent, failureDeliver: failureDeliver
             ),
             success: "Job created",
             onOutcome: onOutcome
@@ -419,10 +465,14 @@ final class CronViewModel {
     /// that compose a create — and the tests that pin their composition —
     /// assert the PRODUCTION command line rather than a parallel builder that
     /// can drift from it.
-    nonisolated static func createJobArguments(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false) -> [String] {
+    nonisolated static func createJobArguments(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "") -> [String] {
         var args = ["cron", "create"]
         if !name.isEmpty { args += ["--name", name] }
         if !deliver.isEmpty { args += ["--deliver", deliver] }
+        // v0.21.1 `--failure-deliver`. The caller (CronView) clears the form
+        // value on a host without `hasCronFailureDeliver`, so the unknown flag
+        // is never emitted — argparse would fail the whole create.
+        if !failureDeliver.isEmpty { args += ["--failure-deliver", failureDeliver] }
         if !repeatCount.isEmpty { args += ["--repeat", repeatCount] }
         for skill in skills where !skill.isEmpty { args += ["--skill", skill] }
         if !script.isEmpty { args += ["--script", script] }
@@ -451,7 +501,7 @@ final class CronViewModel {
         return args
     }
 
-    func updateJob(id: String, schedule: String?, prompt: String?, name: String?, deliver: String?, repeatCount: String?, newSkills: [String]?, clearSkills: Bool, script: String?, workdir: String? = nil, noAgent: Bool? = nil) {
+    func updateJob(id: String, schedule: String?, prompt: String?, name: String?, deliver: String?, repeatCount: String?, newSkills: [String]?, clearSkills: Bool, script: String?, workdir: String? = nil, noAgent: Bool? = nil, failureDeliver: String? = nil) {
         // `job_id` is `cron edit`'s only positional, so it moves to the very
         // end behind `--` — every flag has to precede the marker, since
         // argparse treats each token after it as a positional.
@@ -460,6 +510,10 @@ final class CronViewModel {
         if let prompt, !prompt.isEmpty { args += ["--prompt", prompt] }
         if let name, !name.isEmpty { args += ["--name", name] }
         if let deliver { args += ["--deliver", deliver] }
+        // v0.21.1: `nil` = untouched (omit the flag); `""` is Hermes's own
+        // documented "clear the override" gesture on edit, so it is passed
+        // through rather than dropped like an empty create value.
+        if let failureDeliver { args += ["--failure-deliver", failureDeliver] }
         if let repeatCount, !repeatCount.isEmpty { args += ["--repeat", repeatCount] }
         if clearSkills {
             args.append("--clear-skills")

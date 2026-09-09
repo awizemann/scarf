@@ -365,7 +365,8 @@ public struct FleetApplyPlan: Sendable, Equatable {
         schedule: CronScheduleArgument,
         caps: HermesCapabilities,
         sourceRoot: String,
-        targetRoot: String
+        targetRoot: String,
+        paused: Bool = false
     ) -> (args: [String], droppedDeliverAll: Bool) {
         var args = ["cron", "create", "--name", job.name]
         var droppedDeliverAll = false
@@ -377,6 +378,22 @@ public struct FleetApplyPlan: Sendable, Equatable {
                 droppedDeliverAll = true
             }
         }
+        // v0.21.1 `--failure-deliver`. Two gates, both required: the FLAG is
+        // unknown to older argparse (`hasCronFailureDeliver`), and its VALUE
+        // shares `--deliver`'s grammar, so a `bot-chat`/`all` target that the
+        // target host can't parse must be dropped exactly as the deliver lane
+        // drops it. A dropped failure lane is not `droppedDeliverAll` — the
+        // copy still delivers, failures just follow `deliver` as they did
+        // before the feature existed.
+        if caps.hasCronFailureDeliver,
+           let failureDeliver = job.failureDeliver,
+           caps.supportsCronDeliver(failureDeliver) {
+            args += ["--failure-deliver", failureDeliver]
+        }
+        // v0.21.1 `--paused`: create disabled in ONE write. Callers that pass
+        // `true` keep a create-then-`cron pause` fallback for older hosts —
+        // the flag itself is fatal to argparse there.
+        if paused, caps.hasCronCreatePaused { args.append("--paused") }
         for skill in job.skills ?? [] where !skill.isEmpty { args += ["--skill", skill] }
         if let workdir = job.workdir, !workdir.isEmpty, caps.hasCronWorkdir {
             args += ["--workdir", rewriteCronPrompt(workdir, sourceRoot: sourceRoot, targetRoot: targetRoot)]

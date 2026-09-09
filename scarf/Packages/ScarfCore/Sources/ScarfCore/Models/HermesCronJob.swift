@@ -458,6 +458,93 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         }
     }
 
+    // MARK: - v0.21.1 fields (read through `extra`, never modeled as stored)
+    //
+    // `failure_deliver`, `last_dispatch` and `last_delivery_unverified` are
+    // deliberately NOT `CodingKeys` members. Modeling them would make Scarf
+    // responsible for re-encoding them on every `withEnabled` rewrite, and
+    // two of the three have shapes Scarf cannot faithfully round-trip: the
+    // dispatch stamp grows keys per release, and `last_delivery_unverified`
+    // is a list in Hermes's writer (`cron/scheduler_delivery.py:1003`) but
+    // is rendered scalar-tolerantly by the CLI (`_unverified_targets`,
+    // `hermes_cli/cron.py:133`). Reading through `extra` gives the UI every
+    // field while the generic passthrough keeps the bytes verbatim — the
+    // same rule `repeatSpec` already follows.
+
+    /// `failure_deliver` — the v0.21.1 override target for FAILURE notices
+    /// only (`cron/jobs.py::_normalize_failure_deliver`, resolved at
+    /// `cron/scheduler_delivery.py:790-793`). Absent means failures follow
+    /// `deliver`; `local` suppresses failure notices entirely while run
+    /// state stays visible in `cron list`.
+    public nonisolated var failureDeliver: String? {
+        guard case .string(let s)? = extra["failure_deliver"] else { return nil }
+        let trimmed = s.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// `last_dispatch` — scheduled-vs-actual timing for the last fire
+    /// (`cron/jobs.py:2974-2980`). Recurring jobs only; a manual trigger and
+    /// an expired one-shot never write one.
+    public nonisolated var lastDispatch: CronDispatchStamp? {
+        CronDispatchStamp(extra["last_dispatch"])
+    }
+
+    /// `last_delivery_unverified` — targets a live adapter acked without a
+    /// `message_id`/`raw_response` (Slack/Matrix/Mattermost shape). Accepted
+    /// as delivered, but unproven. Empty when the key is absent or null.
+    ///
+    /// Hermes writes a list; the CLI's `_unverified_targets` also tolerates a
+    /// bare scalar, so this does too.
+    public nonisolated var lastDeliveryUnverifiedTargets: [String] {
+        switch extra["last_delivery_unverified"] {
+        case .array(let items)?:
+            return items.compactMap(Self.plainText).filter { !$0.isEmpty }
+        case .string(let s)? where !s.isEmpty:
+            return [s]
+        default:
+            return []
+        }
+    }
+
+    private nonisolated static func plainText(_ value: JSONValue) -> String? {
+        switch value {
+        case .string(let s): return s
+        case .int(let i): return String(i)
+        case .double(let d): return String(d)
+        case .bool(let b): return b ? "true" : "false"
+        case .null, .array, .object: return nil
+        }
+    }
+
+    /// Whether `schedule` — as typed into the create form — is an absolute
+    /// one-shot Hermes v0.21.1 would REJECT outright
+    /// (`cron/jobs.py::_next_run_or_reject_past_oneshot`: a `kind == "once"`
+    /// whose `run_at` is more than `ONESHOT_GRACE_SECONDS` in the past exits
+    /// non-zero instead of storing a ghost job).
+    ///
+    /// Only the ISO-timestamp form of `parse_schedule` (cron/jobs.py:762-780)
+    /// can be in the past — `in 30m` is computed from now, and intervals and
+    /// cron expressions always have a future occurrence — so nothing else is
+    /// inspected.
+    ///
+    /// **Naive timestamps.** Hermes resolves an offset-less timestamp in the
+    /// *configured Hermes timezone*, which Scarf cannot know. Guessing would
+    /// refuse a schedule the host would have accepted, so a naive value is
+    /// only refused when it is past-grace in EVERY timezone: the latest
+    /// instant it can denote is `T + 12h` (UTC−12, the westernmost offset).
+    public nonisolated static func oneShotScheduleIsPastGrace(
+        _ schedule: String, now: Date = Date()
+    ) -> Bool {
+        let text = schedule.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.contains("T") || text.range(of: "^\\d{4}-\\d{2}-\\d{2}", options: .regularExpression) != nil
+        else { return false }
+        let cutoff = now.addingTimeInterval(-oneShotGraceSeconds)
+        // An explicit offset (or `Z`) names one instant — compare it directly.
+        if let exact = CronScheduleFormatter.isoDate(text) { return exact < cutoff }
+        guard let naive = parseHermesTimestamp(text) else { return false }
+        return naive.addingTimeInterval(12 * 3600) < cutoff
+    }
+
     public nonisolated var deliveryDisplay: String? {
         guard let deliver, !deliver.isEmpty else { return nil }
         // v0.9.0 extends Discord routing to threads: `discord:<chat>:<thread>`.
@@ -713,5 +800,74 @@ public struct CronJobsFile: Sendable, Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(jobs, forKey: .jobs)
         try c.encodeIfPresent(updatedAt, forKey: .updatedAt)
+    }
+}
+
+/// `last_dispatch` — Hermes v0.21.1's scheduled-vs-actual stamp for a
+/// recurring job's last fire (`cron/jobs.py:2974-2980`, issue #99879).
+///
+/// Read-only diagnostics, decoded by FIELD PRESENCE rather than by version
+/// (charter C4): a host that doesn't write the stamp simply has no key, and
+/// `hermes_cli/cron.py::_dispatch_display` itself renders nothing unless
+/// `scheduled_at`, `dispatched_at` and `kind` are all present — so this
+/// mirrors that requirement instead of inventing a partial reading.
+public struct CronDispatchStamp: Sendable, Equatable {
+    /// `on_time` (within ticker slack), `late` (> 300s but within the
+    /// catch-up grace window), or `catch_up` (beyond grace — accumulated
+    /// misses were skipped and the job executed once now).
+    /// `cron/jobs.py::_classify_dispatch_lateness`.
+    public enum Kind: String, Sendable, Equatable {
+        case onTime = "on_time"
+        case late
+        case catchUp = "catch_up"
+    }
+
+    public let scheduledAt: String
+    public let dispatchedAt: String
+    public let kind: Kind
+    public let latenessSeconds: Double
+
+    public init(scheduledAt: String, dispatchedAt: String, kind: Kind, latenessSeconds: Double) {
+        self.scheduledAt = scheduledAt
+        self.dispatchedAt = dispatchedAt
+        self.kind = kind
+        self.latenessSeconds = latenessSeconds
+    }
+
+    /// `nil` for an absent, non-object, or incomplete stamp — including a
+    /// `kind` spelling a future Hermes introduces, which must degrade to
+    /// "no diagnostics" rather than to a wrong badge.
+    public init?(_ value: JSONValue?) {
+        guard case .object(let o)? = value,
+              case .string(let scheduled)? = o["scheduled_at"], !scheduled.isEmpty,
+              case .string(let dispatched)? = o["dispatched_at"], !dispatched.isEmpty,
+              case .string(let rawKind)? = o["kind"],
+              let kind = Kind(rawValue: rawKind)
+        else { return nil }
+        self.scheduledAt = scheduled
+        self.dispatchedAt = dispatched
+        self.kind = kind
+        switch o["lateness_seconds"] {
+        case .double(let d)?: self.latenessSeconds = d
+        case .int(let i)?: self.latenessSeconds = Double(i)
+        default: self.latenessSeconds = 0
+        }
+    }
+
+    public var isLate: Bool { kind != .onTime }
+
+    /// Port of `hermes_cli/cron.py::_format_lateness` (`45s`, `2h 5m`,
+    /// `1d 3h`, `0m`) so the number Scarf shows matches `cron list`.
+    public var latenessDisplay: String {
+        let seconds = Int(latenessSeconds.rounded())
+        if seconds < 60 { return "\(seconds)s" }
+        let totalMinutes = seconds / 60
+        let days = totalMinutes / 1440
+        let hours = (totalMinutes % 1440) / 60
+        let minutes = days > 0 ? 0 : totalMinutes % 60
+        let parts = [(days, "d"), (hours, "h"), (minutes, "m")]
+            .filter { $0.0 > 0 }
+            .map { "\($0.0)\($0.1)" }
+        return parts.isEmpty ? "0m" : parts.joined(separator: " ")
     }
 }

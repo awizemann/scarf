@@ -280,8 +280,9 @@ struct ProjectTemplateInstaller: Sendable {
 
     // MARK: - Cron
 
-    /// Create each cron job via `hermes cron create`, then immediately pause
-    /// it (Hermes creates jobs enabled). Returns the list of resolved job
+    /// Create each cron job via `hermes cron create`, paused. On v0.21.1+
+    /// that is one write (`--paused`); older hosts create enabled and are
+    /// paused immediately afterwards. Returns the list of resolved job
     /// names, which is what the lock file records — we don't know the job
     /// ids without parsing the create output, but the name is enough to
     /// find + remove them later.
@@ -312,6 +313,11 @@ struct ProjectTemplateInstaller: Sendable {
                 }
             }
             if let repeatCount = job.repeatCount { args += ["--repeat", String(repeatCount)] }
+            // v0.21.1: create disabled in ONE write instead of the
+            // create-then-`cron pause` two-step below, which leaves a real
+            // window where an installed template's job can fire. The flag is
+            // fatal to older argparse, so the two-step stays for them.
+            if caps.hasCronCreatePaused { args.append("--paused") }
             for skill in job.skills ?? [] where !skill.isEmpty {
                 args += ["--skill", skill]
             }
@@ -340,6 +346,7 @@ struct ProjectTemplateInstaller: Sendable {
         // Diff the current job set against the snapshot we took before
         // creating — anything new belongs to this install and gets paused.
         // We pause by id (not name) because `cron pause` takes an id.
+        guard !caps.hasCronCreatePaused else { return createdNames }
         let currentJobs = HermesFileService(context: context).loadCronJobs()
         let newJobs = currentJobs.filter { !existingBefore.contains($0.id) && createdNames.contains($0.name) }
         for job in newJobs {

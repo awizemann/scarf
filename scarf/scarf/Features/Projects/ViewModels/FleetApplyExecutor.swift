@@ -318,7 +318,8 @@ struct FleetApplyExecutor: Sendable {
                 schedule: scheduleArg,
                 caps: caps,
                 sourceRoot: sourceRoot,
-                targetRoot: targetRoot
+                targetRoot: targetRoot,
+                paused: true
             )
 
             let (output, exit) = ctx.runHermes(args)
@@ -340,8 +341,12 @@ struct FleetApplyExecutor: Sendable {
         // Count how many we actually managed to pause; an unpaused created
         // job is the one outcome the user must SEE (it's live on a remote),
         // so it goes in the result message, not just a log line.
-        var paused = 0
-        if !createdNames.isEmpty {
+        // v0.21.1 hosts got `--paused` in the create argv above, so the job
+        // was never armed for even one tick — nothing left to pause, and the
+        // whole create-then-pause race is gone. Older hosts still need the
+        // second write.
+        var paused = caps.hasCronCreatePaused ? created : 0
+        if !createdNames.isEmpty, !caps.hasCronCreatePaused {
             let newlyCreated = fileService.loadCronJobs().filter {
                 !beforeIDs.contains($0.id) && createdNames.contains($0.name)
             }

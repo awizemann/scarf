@@ -16,6 +16,38 @@ public struct HermesCronDoctorFinding: Sendable, Equatable, Identifiable {
         self.jobName = jobName
         self.issues = issues
     }
+
+    /// How loudly one issue should read.
+    ///
+    /// v0.21.1 split the delivery story in two: `last_status ==
+    /// "delivery_failed"` no longer emits `last run failed:` at all (the
+    /// agent run succeeded — only the delivery didn't), and a NEW issue
+    /// reports a delivery that was acked without evidence
+    /// (`hermes_cli/cron.py:498-500`). "Unverified" is not a failure: the
+    /// adapter accepted the message and simply returned no receipt, so it
+    /// renders as a note rather than a warning alongside issues that mean
+    /// something is actually broken.
+    public enum IssueSeverity: Sendable, Equatable {
+        case problem
+        case unverified
+    }
+
+    /// Verbatim prefix of the v0.21.1 delivery-unverified issue.
+    static let unverifiedIssuePrefix = "last delivery unverified"
+
+    public static func severity(of issue: String) -> IssueSeverity {
+        issue.lowercased().hasPrefix(unverifiedIssuePrefix) ? .unverified : .problem
+    }
+
+    /// Issues that mean something is broken — the count the banner headlines,
+    /// so an unverified-delivery note never reads as a failure.
+    public var problemIssues: [String] {
+        issues.filter { Self.severity(of: $0) == .problem }
+    }
+
+    public var unverifiedIssues: [String] {
+        issues.filter { Self.severity(of: $0) == .unverified }
+    }
 }
 
 /// Argv builder + text parser for `hermes cron doctor`.
