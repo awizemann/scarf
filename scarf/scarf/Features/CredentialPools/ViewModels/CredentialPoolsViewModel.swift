@@ -540,20 +540,21 @@ final class CredentialPoolsViewModel {
 
     /// `auth priority <provider> <1-based target> <0-based priority>`.
     static func priorityArgv(provider: String, index: Int, to priority: Int) -> [String] {
-        ["auth", "priority", provider, String(index + 1), String(priority)]
+        // `--` ends the options: a provider id is data, not a flag.
+        ["auth", "priority", "--", provider, String(index + 1), String(priority)]
     }
 
     /// `auth refresh <provider> <1-based target>`. The target is always sent:
     /// Hermes only allows it to be omitted when the pool holds exactly one
     /// credential, and errors out otherwise.
     static func refreshArgv(provider: String, index: Int) -> [String] {
-        ["auth", "refresh", provider, String(index + 1)]
+        ["auth", "refresh", "--", provider, String(index + 1)]
     }
 
     /// `auth reset <provider> <1-based target>` — the optional target v0.21.1
     /// adds. Without it the verb clears every credential in the pool.
     static func resetCredentialArgv(provider: String, index: Int) -> [String] {
-        ["auth", "reset", provider, String(index + 1)]
+        ["auth", "reset", "--", provider, String(index + 1)]
     }
 
     /// First non-empty line of the CLI's combined output — the line carrying

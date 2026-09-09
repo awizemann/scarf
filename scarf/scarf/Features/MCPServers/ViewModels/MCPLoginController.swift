@@ -43,6 +43,10 @@ final class MCPLoginController {
 
     private var process: Process?
     private var stdoutPipe: Pipe?
+    /// Bumped by `stop()` (and so by every `start()`, which calls it first).
+    /// Output and exits from a retired run are dropped rather than attributed
+    /// to the run that replaced it.
+    private var generation: UInt64 = 0
 
     /// Start the login. `flow` is `nil` to let Hermes use the server's
     /// configured `oauth.flow`, or `"browser"` / `"device"` to override it —
@@ -58,10 +62,13 @@ final class MCPLoginController {
         succeeded = nil
         errorMessage = nil
 
-        var args = ["mcp", "login", server]
+        var args = ["mcp", "login"]
         if let flow, !flow.isEmpty {
             args += ["--flow", flow]
         }
+        // `--` ends the options: a server name is user-chosen text from
+        // `mcp_servers`, and one starting with `-` would otherwise exit 2.
+        args += ["--", server]
 
         // Same PYTHONUNBUFFERED reasoning as OAuthFlowController: without it
         // Python block-buffers when stdout is a pipe, and the device prompt —
@@ -87,22 +94,38 @@ final class MCPLoginController {
         proc.standardOutput = outPipe
         proc.standardError = outPipe
 
+        // A read can land mid-codepoint: `availableData` is a byte count,
+        // not a character boundary, and `String(data:encoding:.utf8)`
+        // returns nil for a truncated sequence — which used to drop the
+        // WHOLE chunk. The device code or the verification URL disappearing
+        // because a multi-byte glyph straddled a read is not recoverable by
+        // the user. Keep the undecodable tail and prepend it to the next
+        // read. Reads are serialised on the pipe's own queue, so the buffer
+        // needs no lock beyond being owned by this run's closure.
+        let decoder = IncrementalUTF8Decoder()
+        let generation = self.generation
         outPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.isEmpty {
                 handle.readabilityHandler = nil
                 return
             }
-            let chunk = String(data: data, encoding: .utf8) ?? ""
+            let chunk = decoder.decode(data)
+            guard !chunk.isEmpty else { return }
             Task { @MainActor [weak self] in
-                self?.append(chunk)
+                guard let self, self.generation == generation else { return }
+                self.append(chunk)
             }
         }
         proc.terminationHandler = { [weak self] p in
             let code = p.terminationStatus
             Task { @MainActor [weak self] in
                 outPipe.fileHandleForReading.readabilityHandler = nil
-                self?.finish(exitCode: code)
+                // A run that `stop()` already retired must not report its
+                // exit: a retried login would be marked failed by run A's
+                // SIGTERM landing after run B started.
+                guard let self, self.generation == generation else { return }
+                self.finish(exitCode: code)
             }
         }
 
@@ -121,7 +144,14 @@ final class MCPLoginController {
     /// calls this on dismiss so a device flow doesn't keep polling the token
     /// endpoint after the user walked away.
     func stop() {
+        // Retire this run BEFORE terminating it: `terminate()` fires the
+        // termination handler asynchronously, and without the generation
+        // bump (and without clearing the handler on the process itself)
+        // run A's SIGTERM exit would land on run B and mark the retried
+        // login failed.
+        generation &+= 1
         stdoutPipe?.fileHandleForReading.readabilityHandler = nil
+        process?.terminationHandler = nil
         process?.terminate()
         process = nil
         stdoutPipe = nil

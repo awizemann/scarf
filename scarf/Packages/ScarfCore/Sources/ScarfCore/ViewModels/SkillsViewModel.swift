@@ -437,8 +437,13 @@ public final class SkillsViewModel {
         // which is no worse than what they had.
         let useJSON = capabilities.hasSkillsSearchJSON
         Task.detached { [weak self] in
-            var args = ["skills", "search", query, "--limit", "40", "--source", source]
+            // The query is a USER string: `--` (argparse's end-of-options
+            // marker, honoured by every Hermes version) keeps a query that
+            // starts with `-` from being read as a flag and exiting 2. It
+            // has to come last, since everything after it is positional.
+            var args = ["skills", "search", "--limit", "40", "--source", source]
             if useJSON { args.append("--json") }
+            args += ["--", query]
             let result = Self.runHermesSplit(executable: bin, args: args, transport: xport, timeout: 30)
             // The JSON array is read from STDOUT alone — a stderr warning
             // carrying a `]` would otherwise truncate the sliced payload and

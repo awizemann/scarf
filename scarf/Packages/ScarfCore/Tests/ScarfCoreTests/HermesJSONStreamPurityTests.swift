@@ -72,6 +72,22 @@ struct HermesJSONStreamPurityTests {
         #expect(transport.lastArgs.contains("--json"))
     }
 
+    /// M2 — the query is user text and goes after `--`, or a query that
+    /// starts with `-` exits 2 as an unknown flag.
+    @MainActor
+    @Test func hubSearchEndsOptionsBeforeTheQuery() async throws {
+        let transport = SplitStreamTransport(stdout: "[]", stderr: "", exitCode: 0)
+        let vm = SkillsViewModel(context: .local, transport: transport)
+        vm.capabilities = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+        vm.hubSource = "github"
+        vm.hubQuery = "--json"
+        vm.searchHub()
+        try await Self.settle(vm)
+        #expect(Array(transport.lastArgs.suffix(2)) == ["--", "--json"])
+        // The real `--json` flag is still before the marker.
+        #expect(transport.lastArgs.firstIndex(of: "--json")! < transport.lastArgs.count - 1)
+    }
+
     /// Wait for the detached hub fetch to commit, bounded.
     private static func settle(_ vm: SkillsViewModel) async throws {
         for _ in 0..<200 {

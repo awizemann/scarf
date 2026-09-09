@@ -368,10 +368,47 @@ public struct FleetApplyPlan: Sendable, Equatable {
         targetRoot: String,
         paused: Bool = false
     ) -> (args: [String], droppedDeliverAll: Bool) {
-        var args = ["cron", "create", "--name", job.name]
+        let (args, droppedDeliverAll) = cronCreateArgs(
+            name: job.name,
+            deliver: job.deliver,
+            failureDeliver: job.failureDeliver,
+            repeatCount: nil,
+            skills: job.skills ?? [],
+            workdir: job.workdir.map { rewriteCronPrompt($0, sourceRoot: sourceRoot, targetRoot: targetRoot) },
+            schedule: schedule.argumentValue,
+            prompt: rewriteCronPrompt(job.prompt, sourceRoot: sourceRoot, targetRoot: targetRoot),
+            caps: caps,
+            paused: paused
+        )
+        return (args, droppedDeliverAll)
+    }
+
+    /// The ONE `hermes cron create` argv builder. Every caller that creates
+    /// a cron job goes through this — the fleet copier above and the
+    /// project-template installer — so the capability gates (`--deliver`
+    /// grammar, `--failure-deliver`, `--paused`, `--workdir`) and the `--`
+    /// end-of-options marker are decided in one place instead of being
+    /// re-derived, differently, per call site.
+    ///
+    /// `droppedDeliverAll` reports that a `--deliver` value the target host
+    /// cannot parse was omitted; the job is still created and still
+    /// delivers, so the caller surfaces it as a note, not a failure.
+    public static func cronCreateArgs(
+        name: String,
+        deliver: String?,
+        failureDeliver: String? = nil,
+        repeatCount: Int? = nil,
+        skills: [String] = [],
+        workdir: String? = nil,
+        schedule: String,
+        prompt: String?,
+        caps: HermesCapabilities,
+        paused: Bool = false
+    ) -> (args: [String], droppedDeliverAll: Bool) {
+        var args = ["cron", "create", "--name", name]
         var droppedDeliverAll = false
 
-        if let deliver = job.deliver, !deliver.isEmpty {
+        if let deliver, !deliver.isEmpty {
             if caps.supportsCronDeliver(deliver) {
                 args += ["--deliver", deliver]
             } else {
@@ -386,20 +423,25 @@ public struct FleetApplyPlan: Sendable, Equatable {
         // copy still delivers, failures just follow `deliver` as they did
         // before the feature existed.
         if caps.hasCronFailureDeliver,
-           let failureDeliver = job.failureDeliver,
+           let failureDeliver, !failureDeliver.isEmpty,
            caps.supportsCronDeliver(failureDeliver) {
             args += ["--failure-deliver", failureDeliver]
         }
+        if let repeatCount { args += ["--repeat", String(repeatCount)] }
         // v0.21.1 `--paused`: create disabled in ONE write. Callers that pass
         // `true` keep a create-then-`cron pause` fallback for older hosts —
         // the flag itself is fatal to argparse there.
         if paused, caps.hasCronCreatePaused { args.append("--paused") }
-        for skill in job.skills ?? [] where !skill.isEmpty { args += ["--skill", skill] }
-        if let workdir = job.workdir, !workdir.isEmpty, caps.hasCronWorkdir {
-            args += ["--workdir", rewriteCronPrompt(workdir, sourceRoot: sourceRoot, targetRoot: targetRoot)]
+        for skill in skills where !skill.isEmpty { args += ["--skill", skill] }
+        if let workdir, !workdir.isEmpty, caps.hasCronWorkdir {
+            args += ["--workdir", workdir]
         }
-        args.append(schedule.argumentValue)  // positional schedule
-        args.append(rewriteCronPrompt(job.prompt, sourceRoot: sourceRoot, targetRoot: targetRoot))  // positional prompt
+        // `--` ends the options: the positionals below are user text, and a
+        // prompt or schedule beginning with `-` would otherwise be read as
+        // an unknown flag (argparse exit 2, aborting the whole apply).
+        args.append("--")
+        args.append(schedule)
+        if let prompt, !prompt.isEmpty { args.append(prompt) }
         return (args, droppedDeliverAll)
     }
 }

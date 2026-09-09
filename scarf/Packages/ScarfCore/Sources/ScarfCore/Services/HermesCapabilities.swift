@@ -1051,21 +1051,6 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// it has to show the CLI's output rather than a spinner.
     public var hasMCPOAuthFlow: Bool { isV0211OrLater }
 
-    /// `hermes computer-use doctor --json` — the cua-driver `health_report`
-    /// check matrix as JSON (`hermes_cli/subcommands/computer_use.py`,
-    /// `add_json_flag(computer_use_doctor, …)`). v0.21.1+.
-    ///
-    /// **Phase-4 correction.** The original comment here said "at
-    /// v2026.8.31 that module has no `json` reference at all" — true only
-    /// because `hermes_cli/subcommands/computer_use.py` did not EXIST
-    /// before v0.21.1; the verb lived in `hermes_cli/main.py`. Walking the
-    /// `computer_use_doctor = ` parser block across every tag (in main.py
-    /// where the module is absent) shows `--json` on `doctor` first at
-    /// v2026.9.7 — so this floor is right, but it is a floor for `doctor`
-    /// ALONE. `permissions status --json` is much older; see
-    /// `hasComputerUsePermissionsJSON`.
-    public var hasComputerUseDoctorJSON: Bool { isV0211OrLater }
-
     // MARK: Older floors corrected/added in the v0.21.1 pass
     //
     // Three surfaces the v0.21.1 audit reached for turned out to predate
@@ -1163,15 +1148,6 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// Keyed only (`PERPLEXITY_API_KEY`), not a keyless-ring member.
     /// `git ls-tree v2026.8.31 plugins/web/` has no `perplexity` entry.
     public var hasPerplexityWebBackend: Bool { isV0211OrLater }
-
-    /// `hermes gateway status` gained a FIRST branch — `✓ Gateway is running
-    /// via the default-profile multiplexer` — printed with no PID
-    /// (`hermes_cli/gateway.py:6114`; `gateway list` gains a matching
-    /// `— served by the default multiplexer` clause). v0.21.1+, absent at
-    /// v2026.8.31. It matters because Scarf infers "service loaded" from
-    /// `pid != nil`, which this branch never supplies: a satellite profile
-    /// that IS being served would be badged "not loaded".
-    public var hasGatewayMultiplexerStatus: Bool { isV0211OrLater }
 
     // MARK: Convenience predicates
 

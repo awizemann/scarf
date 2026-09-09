@@ -997,20 +997,22 @@ import Foundation
         #expect(caps.hasKanbanCompletionContract)
         #expect(caps.hasAuthPriority)
         #expect(caps.hasMCPOAuthFlow)
-        #expect(caps.hasComputerUseDoctorJSON)
         #expect(caps.hasServiceTierBoundedModes)
         #expect(caps.hasSharedMetricsSend)
         #expect(caps.hasPerplexityWebBackend)
-        #expect(caps.hasGatewayMultiplexerStatus)
     }
 
     @Test func v0210HostHidesEveryV0211Flag() {
         // Every surface above was verified ABSENT at v2026.8.31 (0.21.0):
         // no `plugins compat` verb, no `--paused`/`--failure-deliver`, no
         // `last_dispatch`, no `--completion-contract`, no `auth priority`,
-        // no `mcp login --flow`, no `computer-use doctor --json`, no
-        // auto/cold service tiers, no `telemetry.shared_metrics.send`, no
-        // `plugins/web/perplexity/`, no multiplexer status branch.
+        // no `mcp login --flow`, no auto/cold service tiers, no
+        // `telemetry.shared_metrics.send`, no `plugins/web/perplexity/`.
+        //
+        // `computer-use doctor --json` and `gateway status`'s multiplexer
+        // branch are NOT flags: the doctor payload is cua-driver's, with no
+        // stable contract, and the multiplexer verdict is detected in the
+        // output Scarf already reads, which is correct on every host.
         //
         // NB `computer-use PERMISSIONS status --json` is NOT in that list:
         // it predates the target by three releases (v0.18) and stays ON
@@ -1024,13 +1026,11 @@ import Foundation
         #expect(!caps.hasKanbanCompletionContract)
         #expect(!caps.hasAuthPriority)
         #expect(!caps.hasMCPOAuthFlow)
-        #expect(!caps.hasComputerUseDoctorJSON)
         #expect(!caps.hasServiceTierBoundedModes)
         #expect(!caps.hasSharedMetricsSend)
         #expect(!caps.hasPerplexityWebBackend)
         // ...while the v0.20 COLLECTION switch it sits next to stays on.
         #expect(caps.hasSharedMetricsTelemetry)
-        #expect(!caps.hasGatewayMultiplexerStatus)
         // The v0.21.0 surface stays alive on a v0.21.0 host.
         #expect(caps.hasPeerRunCommands)
         #expect(caps.hasCronDoctor)
@@ -1048,11 +1048,9 @@ import Foundation
         #expect(caps.hasKanbanCompletionContract)
         #expect(caps.hasAuthPriority)
         #expect(caps.hasMCPOAuthFlow)
-        #expect(caps.hasComputerUseDoctorJSON)
         #expect(caps.hasServiceTierBoundedModes)
         #expect(caps.hasSharedMetricsSend)
         #expect(caps.hasPerplexityWebBackend)
-        #expect(caps.hasGatewayMultiplexerStatus)
     }
 
     @Test func isV0211OrLater_emptyFalse() {
@@ -1101,8 +1099,6 @@ import Foundation
         #expect(HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)").hasComputerUsePermissionsJSON)
         #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)").hasComputerUsePermissionsJSON)
         #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasComputerUsePermissionsJSON)
-        // ...while `doctor --json` really is v0.21.1-only.
-        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)").hasComputerUseDoctorJSON)
         #expect(!HermesCapabilities.empty.hasComputerUsePermissionsJSON)
     }
 

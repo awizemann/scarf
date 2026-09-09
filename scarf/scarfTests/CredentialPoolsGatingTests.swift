@@ -93,20 +93,20 @@ import ScarfCore
     @Test func priorityArgvSendsOneBasedTargetAndZeroBasedDestination() {
         // Second credential in the pool (index 1) promoted to the front.
         #expect(CredentialPoolsViewModel.priorityArgv(provider: "openrouter", index: 1, to: 0)
-                == ["auth", "priority", "openrouter", "2", "0"])
+                == ["auth", "priority", "--", "openrouter", "2", "0"])
         // Move-down from the front: target #1, destination 1.
         #expect(CredentialPoolsViewModel.priorityArgv(provider: "anthropic", index: 0, to: 1)
-                == ["auth", "priority", "anthropic", "1", "1"])
+                == ["auth", "priority", "--", "anthropic", "1", "1"])
     }
 
     @MainActor
     @Test func refreshAndResetTargetOneCredential() {
         #expect(CredentialPoolsViewModel.refreshArgv(provider: "nous", index: 2)
-                == ["auth", "refresh", "nous", "3"])
+                == ["auth", "refresh", "--", "nous", "3"])
         // The target is what makes this a per-credential reset; without it
         // Hermes clears the whole pool.
         #expect(CredentialPoolsViewModel.resetCredentialArgv(provider: "nous", index: 0)
-                == ["auth", "reset", "nous", "1"])
-        #expect(CredentialPoolsViewModel.resetCredentialArgv(provider: "nous", index: 0).count == 4)
+                == ["auth", "reset", "--", "nous", "1"])
+        #expect(CredentialPoolsViewModel.resetCredentialArgv(provider: "nous", index: 0).count == 5)
     }
 }

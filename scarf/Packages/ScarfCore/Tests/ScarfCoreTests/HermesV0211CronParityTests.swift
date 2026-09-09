@@ -359,4 +359,52 @@ import Foundation
         #expect(catchUp.latenessDisplay == "1d 3h")
         #expect(catchUp.summary == "Catch-up after missed fire: scheduled 2026-09-06T09:00:00+00:00, ran 2026-09-07T12:00:00+00:00 (1d 3h late)")
     }
+
+    // MARK: - M2 / M3 — one argv builder, and `--` before user text
+
+    /// A prompt or schedule beginning with `-` is user text, not a flag.
+    /// Without `--` argparse exits 2 on it and the whole fleet apply (or
+    /// template install) aborts.
+    @Test func cronCreateArgsEndsOptionsBeforeTheUserPositionals() {
+        let (args, _) = FleetApplyPlan.cronCreateArgs(
+            name: "n", deliver: nil, schedule: "@daily",
+            prompt: "--summarize the inbox", caps: v0211)
+        let end = try! #require(args.firstIndex(of: "--"))
+        #expect(Array(args[end...]) == ["--", "@daily", "--summarize the inbox"])
+        // …and nothing option-shaped follows the marker.
+        #expect(args.firstIndex(of: "--name")! < end)
+    }
+
+    /// The template installer used to hand-roll this argv; both callers now
+    /// resolve the same gates through the one builder.
+    @Test func templateAndFleetCreatesShareTheBuilder() {
+        // Repeat count is the installer's own field and rides the same path.
+        let (args, dropped) = FleetApplyPlan.cronCreateArgs(
+            name: "nightly", deliver: "all", repeatCount: 3,
+            skills: ["research"], schedule: "0 9 * * *", prompt: "go",
+            caps: v0211, paused: true)
+        #expect(!dropped)
+        #expect(args.contains("--paused"))
+        #expect(Array(args.suffix(3)) == ["--", "0 9 * * *", "go"])
+        #expect(args.firstIndex(of: "--repeat").map { args[$0 + 1] } == "3")
+
+        // A pre-v0.14 host can parse neither `--deliver all` nor `--paused`:
+        // the deliver value is dropped (reported), the flag is omitted, and
+        // the caller falls back to create-then-pause.
+        let old = HermesCapabilities.parse("Hermes Agent v0.13.0")
+        let (oldArgs, oldDropped) = FleetApplyPlan.cronCreateArgs(
+            name: "nightly", deliver: "all", schedule: "0 9 * * *", prompt: "go",
+            caps: old, paused: true)
+        #expect(oldDropped)
+        #expect(!oldArgs.contains("--deliver"))
+        #expect(!oldArgs.contains("--paused"))
+    }
+
+    /// An empty prompt is omitted rather than sent as an empty positional —
+    /// `cron create` takes `prompt` with `nargs="?"`.
+    @Test func cronCreateArgsOmitsAnEmptyPrompt() {
+        let (args, _) = FleetApplyPlan.cronCreateArgs(
+            name: "n", deliver: nil, schedule: "@daily", prompt: nil, caps: v0211)
+        #expect(args.last == "@daily")
+    }
 }
