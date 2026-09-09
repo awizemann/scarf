@@ -413,22 +413,61 @@ import Foundation
     }
 
     @Test func imageGenModelAllowlistShape() {
-        // Lock the curated list size + a few sentinel entries so
-        // unintentional edits get caught in review. Free-form-typing
-        // bypasses the allowlist, so additions/removals here are
-        // purely UX (which models surface as picker rows).
+        // Verbatim mirror of Hermes's FAL_MODELS catalog
+        // (tools/image_generation_catalog.py) at v2026.9.7 — `image_gen.model`
+        // is read by the FAL pipeline only (every other image_gen backend
+        // reads its own `image_gen.<provider>.model`), so the picker's rows
+        // are exactly that catalog. Free-form typing still bypasses the list.
         let models = ModelCatalogService.imageGenModels
-        #expect(models.count >= 5)
-        #expect(models.contains(where: { $0.modelID == "openai/gpt-image-1" }))
-        #expect(models.contains(where: { $0.modelID == "google/imagen-4" }))
-        // v0.15: Krea image models.
-        #expect(models.contains(where: { $0.modelID == "krea-2-medium" }))
-        #expect(models.contains(where: { $0.modelID == "krea-2-large" }))
-        // Every entry has a non-empty display + a non-empty modelID.
+        #expect(models.count == 21)
+        // DEFAULT_MODEL leads the list.
+        #expect(models.first?.modelID == "fal-ai/flux-2/klein/9b")
+        // Sentinels across the catalog's naming shapes (fal-ai/, vendor/, path).
+        #expect(models.contains(where: { $0.modelID == "fal-ai/gpt-image-2" }))
+        #expect(models.contains(where: { $0.modelID == "bytedance/seedream/v5/pro/text-to-image" }))
+        #expect(models.contains(where: { $0.modelID == "xai/grok-imagine-image/v2.0/text-to-image" }))
+        // The pre-v3.2 list was models Hermes's catalog never carried; a
+        // regression that reinstates them would send `image_gen.model` values
+        // the tool warns on and discards.
+        for stale in ["openai/gpt-image-1", "google/imagen-4", "krea-2-medium",
+                      "fal-ai/flux-pro-1.1", "openai/dall-e-3"] {
+            #expect(!models.contains(where: { $0.modelID == stale }),
+                    "\(stale) is not in Hermes's FAL catalog at v2026.9.7")
+        }
+        // Every entry has a non-empty display + a non-empty modelID, and the
+        // whole catalog is served by the FAL backend.
         for m in models {
             #expect(!m.modelID.isEmpty)
             #expect(!m.display.isEmpty)
+            #expect(m.providerHint == "fal")
         }
+        #expect(Set(models.map(\.modelID)).count == models.count)
+    }
+
+    @Test func pluginRegisteredProvidersAreReachable() {
+        // B7: four bundled `plugins/model-providers/` profiles that
+        // hermes_cli/models_catalog_static.py auto-appends to
+        // CANONICAL_PROVIDERS. They are NOT HERMES_OVERLAYS entries, so
+        // nothing but this table puts them in Scarf's picker.
+        // scripts/check-hermes-tables.py lane 4 is the drift gate.
+        for pid in ["meta-ai", "router", "commandcode", "commandcode-anthropic"] {
+            let overlay = ModelCatalogService.overlayOnlyProviders[pid]
+            #expect(overlay != nil, "\(pid) missing from overlayOnlyProviders")
+            #expect(overlay?.authType == .apiKey)
+            #expect(overlay?.subscriptionGated == false)
+            #expect(overlay?.keyless == false)
+        }
+        #expect(ModelCatalogService.overlayOnlyProviders["router"]?.baseURL
+                == "https://api.router.com/v1")
+        // Google AI Studio is deliberately NOT here: Hermes's canonical slug is
+        // `gemini`, models.dev ships the same endpoint under `google`, and
+        // models_catalog_static._PROVIDER_ALIASES maps google -> gemini — so
+        // the picker already reaches it and a second row would duplicate it.
+        #expect(ModelCatalogService.overlayOnlyProviders["gemini"] == nil)
+        // `custom` likewise: it is the LocalModelProviders surface, not a
+        // catalog row.
+        #expect(ModelCatalogService.overlayOnlyProviders["custom"] == nil)
+        #expect(LocalModelProvider.descriptor(for: "custom") != nil)
     }
 
     @Test func demotedProvidersEmptyAfterVercelRemoval() {
