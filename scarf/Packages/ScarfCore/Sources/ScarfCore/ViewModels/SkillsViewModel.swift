@@ -628,12 +628,14 @@ public final class SkillsViewModel {
         }
     }
 
-    /// v0.12: trigger a hot reload of `~/.hermes/skills/` so the agent
-    /// picks up file edits without a session restart. Hermes ships
-    /// `/reload-skills` as a slash command in chat AND `hermes skills
-    /// audit` as a CLI form. We use `audit` here so the reload works
-    /// even when no chat session is active.
-    public func reloadSkills() async {
+    /// Re-runs Hermes's **security scanner** over every hub-installed skill
+    /// — `hermes skills audit`, whose `do_audit` scans each install path with
+    /// `scan_skill` and prints the report (`hermes_cli/skills_hub.py:879-904`
+    /// at v2026.9.7). It does NOT reload anything: the only reload Hermes has
+    /// is the `/reload-skills` slash command inside a chat session
+    /// (`gateway/slash_commands.py:1038-1048`), which has no CLI form, so a
+    /// running gateway is untouched by this call.
+    public func rescanSkills() async {
         isHubLoading = true
         let bin = context.paths.hermesBinary
         let xport = transport
@@ -649,11 +651,11 @@ public final class SkillsViewModel {
         // even for the unknown-name refusal (:890). `Auditing <n> skill(s)...`
         // (:891) is the only line that says the scanner ran; the empty-hub
         // line (:886) is a legitimate no-op. Both byte-identical back to
-        // v2026.6.19. (This button re-runs the security scanner; the label is
-        // P25's to change, not the verdict's.)
+        // v2026.6.19. The button re-runs the security scanner — the banner
+        // says "re-scanned", never "reloaded".
         hubMessage = Self.auditOutcome(exitCode: result.exitCode, output: result.output).succeeded
-            ? "Skills reloaded"
-            : "Reload failed"
+            ? "Skills re-scanned"
+            : "Re-scan failed"
         isHubLoading = false
         await load()
         Task { @MainActor [weak self] in
@@ -897,7 +899,7 @@ public final class SkillsViewModel {
         return ""
     }
 
-    /// The verdict on `hermes skills audit` — see `reloadSkills()`.
+    /// The verdict on `hermes skills audit` — see `rescanSkills()`.
     nonisolated static func auditOutcome(exitCode: Int32, output: String) -> HermesCLIOutcome {
         HermesCLIVerdict.judge(
             output: output,

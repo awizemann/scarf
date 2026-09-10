@@ -1306,6 +1306,13 @@ struct CronJobEditor: View {
     @State private var form = FormState()
     @State private var isEditMode = false
 
+    /// The host roster plus any skill already on the job that the roster
+    /// doesn't list, in roster order then job order. Keeps the block (and
+    /// "Clear all skills on save") reachable on a host with an empty roster.
+    private var skillRows: [String] {
+        availableSkills + form.skills.filter { !availableSkills.contains($0) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: ScarfSpace.s3) {
             headerText
@@ -1383,19 +1390,24 @@ struct CronJobEditor: View {
                         .padding(.leading, ScarfSpace.s3)
                 }
             }
-            if !availableSkills.isEmpty {
+            // Rows = the host's roster PLUS any skill this job already
+            // carries that the roster doesn't list (an uninstalled skill, or
+            // a host whose roster read failed). Without that union the whole
+            // block vanished on an empty roster, so a job's existing skills
+            // could be neither edited nor cleared — see `skillRows`.
+            if !skillRows.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Skills")
                         .scarfStyle(.caption)
                         .foregroundStyle(ScarfColor.foregroundMuted)
                     ScrollView {
                         VStack(alignment: .leading, spacing: 2) {
-                            ForEach(availableSkills, id: \.self) { skill in
+                            ForEach(skillRows, id: \.self) { skill in
                                 Toggle(skill, isOn: Binding(
                                     get: { form.skills.contains(skill) },
                                     set: { on in
                                         if on {
-                                            form.skills.append(skill)
+                                            if !form.skills.contains(skill) { form.skills.append(skill) }
                                         } else {
                                             form.skills.removeAll { $0 == skill }
                                         }
@@ -1413,10 +1425,21 @@ struct CronJobEditor: View {
                         RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
                             .fill(ScarfColor.backgroundSecondary)
                     )
+                    // `--clear-skills` wins over `--add-skill` in
+                    // `cron_edit` (hermes_cli/cron.py:612-618), so the two
+                    // controls are mutually exclusive in the UI rather than
+                    // silently discarding the checkboxes at save time.
+                    .opacity(form.clearSkills ? 0.4 : 1.0)
+                    .disabled(form.clearSkills)
                     if isEditMode {
                         Toggle("Clear all skills on save", isOn: $form.clearSkills)
                             .scarfStyle(.caption)
                             .tint(ScarfColor.accent)
+                        if form.clearSkills {
+                            Text("Every skill is removed from this job on save. Turn this off to pick skills individually.")
+                                .scarfStyle(.caption)
+                                .foregroundStyle(ScarfColor.foregroundMuted)
+                        }
                     }
                 }
                 .opacity(form.noAgent ? 0.4 : 1.0)
