@@ -167,18 +167,20 @@ struct ProfileRoutesSection: View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle")
                 .foregroundStyle(ScarfColor.warning)
-            if block.multiplexIsTopLevel {
-                Text("Routing is off: `multiplex_profiles: false` is set at the top level of config.yaml. Edit it there — a `gateway.multiplex_profiles` value would be ignored.")
-                    .scarfStyle(.caption)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Text("Routing is off until profile multiplexing is enabled — routes are ignored entirely.")
-                    .scarfStyle(.caption)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer()
-                Button("Enable Multiplexing") { viewModel.setMultiplexProfiles(true) }
-                    .controlSize(.small)
-            }
+            // The button is offered in BOTH shapes now:
+            // `setMultiplexProfiles` writes to whichever spelling Hermes is
+            // actually reading (top-level when a non-null one is present, else
+            // `gateway.`), so the top-level case is no longer a dead end that
+            // could only be fixed by hand. The copy still names the key the
+            // user will find in their file.
+            Text(block.multiplexIsTopLevel
+                 ? "Routing is off: `multiplex_profiles` is set at the top level of config.yaml, where it overrides any `gateway.multiplex_profiles` value. Enabling updates that top-level key."
+                 : "Routing is off until profile multiplexing is enabled — routes are ignored entirely.")
+                .scarfStyle(.caption)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button("Enable Multiplexing") { viewModel.setMultiplexProfiles(true) }
+                .controlSize(.small)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)

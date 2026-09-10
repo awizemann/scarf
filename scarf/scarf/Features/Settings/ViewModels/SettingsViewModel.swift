@@ -70,7 +70,29 @@ final class SettingsViewModel {
     // `HermesCapabilities.hasXAIVoiceCloning` and the badge in VoiceTab.
     // The provider option itself is ungated so pre-v0.13 hosts with xAI
     // keys can still pick it.
-    var ttsProviders = ["edge", "elevenlabs", "openai", "minimax", "mistral", "neutts", "piper", "xai", "deepinfra"]
+    static let ttsProvidersBase = ["edge", "elevenlabs", "openai", "minimax", "mistral", "neutts", "piper", "xai"]
+
+    /// `tts.provider` options for the connected host — every name in Hermes's
+    /// own `BUILTIN_TTS_PROVIDERS` (`tools/tts_command_provider.py:269` @
+    /// v2026.9.7), each floor-gated where its registration postdates the
+    /// v0.6.0 supported minimum.
+    ///
+    /// `gemini` and `kittentts` were missing entirely, so a config pinned to
+    /// either rendered as an unrecognised value (the picker appends it, per
+    /// the `strEnum` convention) and there was no way to select one. Both have
+    /// been in the roster since v0.11.0; `deepinfra` since v0.19.0.
+    /// A stored value outside the host's roster is APPENDED rather than
+    /// dropped, the same rule `DisplayTab.busyInputModeOptions` applies — a
+    /// plugin-registered provider (`PluginContext.register_tts_provider`) is a
+    /// perfectly valid `tts.provider` that no built-in list can enumerate, and
+    /// a blank picker over it would be overwritten by the next save.
+    static func ttsProviders(capabilities: HermesCapabilities, current: String = "") -> [String] {
+        var out = ttsProvidersBase
+        if capabilities.hasGeminiKittenTTS { out += ["gemini", "kittentts"] }
+        if capabilities.hasDeepInfraTTS { out.append("deepinfra") }
+        if !current.isEmpty, !out.contains(current) { out.append(current) }
+        return out
+    }
     /// `stt.provider` options. The leading empty row means "key absent —
     /// Hermes decides".
     ///
@@ -82,13 +104,38 @@ final class SettingsViewModel {
     /// every supported host, and it is the only way back out of a pin — but
     /// it is gated on `hasConfigUnset` (v0.19+) in the view, because it must
     /// be written with `hermes config unset` rather than an empty scalar.
-    var sttProviders: [(id: String, label: String)] = [
+    private static let sttProvidersBase: [(id: String, label: String)] = [
         ("",        "Auto (unset)"),
         ("local",   "Local"),
         ("groq",    "Groq"),
         ("openai",  "OpenAI"),
         ("mistral", "Mistral"),
     ]
+
+    /// `stt.provider` options for the connected host. Mirrors Hermes's
+    /// `BUILTIN_STT_PROVIDERS` (`tools/transcription_common.py:45` @
+    /// v2026.9.7) for the cloud providers Scarf can express, floor-gated where
+    /// registration postdates the supported minimum.
+    ///
+    /// `elevenlabs` and `deepinfra` join the roster at v2026.7.20 (v0.19.0).
+    /// `local_command` is deliberately absent: it is not a provider a user
+    /// picks but the marker for a user-defined command provider, configured
+    /// through `stt.local_command.*` rather than by name. `xai` is a genuine
+    /// member (since v0.15.0) that Scarf has no `stt.xai.*` surface for — see
+    /// the follow-up task rather than adding a pin with no settings behind it.
+    /// Same append-the-unrecognised-value rule as `ttsProviders`.
+    static func sttProviders(
+        capabilities: HermesCapabilities, current: String = ""
+    ) -> [(id: String, label: String)] {
+        var out = sttProvidersBase
+        if capabilities.hasElevenLabsDeepInfraSTT {
+            out += [("elevenlabs", "ElevenLabs"), ("deepinfra", "DeepInfra")]
+        }
+        if !current.isEmpty, !out.contains(where: { $0.id == current }) {
+            out.append((current, current))
+        }
+        return out
+    }
     /// Static-message translation languages honored by Hermes v0.13's
     /// `display.language` key. The first row's empty value writes no
     /// key — equivalent to "Hermes default" — while explicit `en` writes
@@ -461,6 +508,13 @@ final class SettingsViewModel {
     // MARK: - Agent
 
     func setMaxTurns(_ value: Int) { setSetting("agent.max_turns", value: String(value)) }
+    /// Empty is the picker's "Provider default" row and IS writable here,
+    /// unlike `setApprovalMode`'s host-default row: `parse_reasoning_effort`
+    /// (`hermes_constants.py:876-889` @ v2026.9.7) returns `None` for an empty
+    /// string exactly as it does for an absent key, and its callers then use
+    /// the provider's own default — so `agent.reasoning_effort: ''` and no key
+    /// at all are the same thing to Hermes. That gives the user a way back out
+    /// of a pinned level without needing `hermes config unset`.
     func setReasoningEffort(_ value: String) { setSetting("agent.reasoning_effort", value: value) }
     func setServiceTier(_ value: String) { setSetting("agent.service_tier", value: value) }
     /// v0.21.1+ — length of the fast window the bounded `auto`/`cold` tiers
@@ -472,7 +526,18 @@ final class SettingsViewModel {
     func setCronDrainTimeout(_ value: Int) { setSetting("agent.cron_drain_timeout", value: String(value)) }
     func setGatewayTurnLeaseTimeout(_ value: Int) { setSetting("agent.gateway_turn_lease_timeout", value: String(value)) }
     func setToolUseEnforcement(_ value: String) { setSetting("agent.tool_use_enforcement", value: value) }
-    func setApprovalMode(_ value: String) { setSetting("approvals.mode", value: value) }
+    /// Empty is the picker's "Host default (…)" row, which by decision writes
+    /// NOTHING: the point of that row is that the key is absent and the host
+    /// decides. Writing an empty scalar would persist `approvals.mode: ''`,
+    /// which `_normalize_approval_mode` warns about and reads as `manual` —
+    /// i.e. selecting "host default" would pin the mode that row exists to
+    /// avoid claiming. Getting back OUT of an explicit mode needs `hermes
+    /// config unset`, which is `hasConfigUnset`-gated; that is a separate row,
+    /// not this one.
+    func setApprovalMode(_ value: String) {
+        guard !value.isEmpty else { return }
+        setSetting("approvals.mode", value: value)
+    }
     func setApprovalTimeout(_ value: Int) { setSetting("approvals.timeout", value: String(value)) }
     /// `approvals.smart_policy` (v0.20+) — free-text policy appended to the
     /// smart-approval guardian's system prompt. Empty writes an empty
@@ -913,11 +978,31 @@ final class SettingsViewModel {
         }
     }
 
-    /// `gateway.multiplex_profiles` — the prerequisite for profile routing
-    /// (gateway/run.py:23923 returns before matching when it's off). Plain
-    /// scalar, so the CLI handles it.
+    /// `multiplex_profiles` — the prerequisite for profile routing
+    /// (gateway/run.py returns before matching when it's off). Plain scalar,
+    /// so the CLI handles it.
+    ///
+    /// Writes to whichever spelling is currently IN EFFECT. Hermes resolves
+    /// this key top-level-first-when-not-null: `multiplex_profiles =
+    /// data.get("multiplex_profiles"); if multiplex_profiles is None:
+    /// multiplex_profiles = nested_gateway.get("multiplex_profiles")`
+    /// (`gateway/config.py:708-710` @ v2026.9.7). So on a config carrying a
+    /// non-null TOP-LEVEL `multiplex_profiles: false`, unconditionally writing
+    /// `gateway.multiplex_profiles: true` changed a key the host never reads —
+    /// the save toast said "Saved" and routing stayed off. `multiplexIsTopLevel`
+    /// is exactly that "top-level and not null" test (`ProfileRoutesYAML
+    /// .parseMultiplex`), which is why it also gates the explanatory banner.
     func setMultiplexProfiles(_ value: Bool) {
-        setSetting("gateway.multiplex_profiles", value: value ? "true" : "false")
+        setSetting(
+            Self.multiplexProfilesKey(isTopLevel: config.profileRoutes.multiplexIsTopLevel),
+            value: value ? "true" : "false"
+        )
+    }
+
+    /// The `multiplex_profiles` spelling currently in effect. Pure so the key
+    /// choice is testable without shelling out through `setSetting`.
+    static func multiplexProfilesKey(isTopLevel: Bool) -> String {
+        isTopLevel ? "multiplex_profiles" : "gateway.multiplex_profiles"
     }
 
     /// Shared read → transform → write → reload path for the direct-YAML

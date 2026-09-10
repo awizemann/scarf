@@ -13,7 +13,10 @@ struct VoiceTab: View {
     /// offered-and-failing, but stays visible when it is the current state so
     /// an absent key still renders a selected label instead of a blank picker.
     private var sttProviderOptions: [(id: String, label: String)] {
-        let all = viewModel.sttProviders
+        let all = SettingsViewModel.sttProviders(
+            capabilities: capabilitiesStore?.capabilities ?? .empty,
+            current: viewModel.config.voice.sttProvider
+        )
         guard capabilitiesStore?.capabilities.hasConfigUnset == true else {
             return viewModel.config.voice.sttProvider.isEmpty
                 ? all
@@ -25,6 +28,7 @@ struct VoiceTab: View {
     var body: some View {
         SettingsSection(title: "Push-to-Talk", icon: "mic") {
             ToggleRow(label: "Auto TTS", isOn: viewModel.config.autoTTS) { viewModel.setAutoTTS($0) }
+                .help("Speak every reply aloud. Off by default on every supported host.")
             EditableTextField(label: "Record Key", value: viewModel.config.voice.recordKey) { viewModel.setRecordKey($0) }
             StepperRow(label: "Max Recording (s)", value: viewModel.config.voice.maxRecordingSeconds, range: 10...600, step: 10) { viewModel.setMaxRecordingSeconds($0) }
             StepperRow(label: "Silence Threshold", value: viewModel.config.silenceThreshold, range: 50...500, step: 10) { viewModel.setSilenceThreshold($0) }
@@ -32,7 +36,14 @@ struct VoiceTab: View {
         }
 
         SettingsSection(title: "Text-to-Speech", icon: "speaker.wave.3") {
-            PickerRow(label: "Provider", selection: viewModel.config.voice.ttsProvider, options: viewModel.ttsProviders) { viewModel.setTTSProvider($0) }
+            PickerRow(
+                label: "Provider",
+                selection: viewModel.config.voice.ttsProvider,
+                options: SettingsViewModel.ttsProviders(
+                    capabilities: capabilitiesStore?.capabilities ?? .empty,
+                    current: viewModel.config.voice.ttsProvider
+                )
+            ) { viewModel.setTTSProvider($0) }
             switch viewModel.config.voice.ttsProvider {
             case "edge":
                 EditableTextField(label: "Voice", value: viewModel.config.voice.ttsEdgeVoice) { viewModel.setTTSEdgeVoice($0) }
