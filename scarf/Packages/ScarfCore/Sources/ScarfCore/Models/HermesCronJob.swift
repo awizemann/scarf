@@ -252,7 +252,7 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// round-trip silently strips it from jobs.json (workdir/contextFrom/
     /// noAgent were dropped this way until the v0.18 audit caught it).
     ///
-    /// Flipping `enabled` alone is NOT enough. Since v0.20.4
+    /// Flipping `enabled` alone is NOT enough. Since v0.20.1
     /// `is_job_runnable()` (`cron/jobs.py::is_job_runnable`, v2026.9.7
     /// :482-485; its one in-file call site is the claim gate at :2509, and
     /// the scheduler's own scan filter is
@@ -268,7 +268,10 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     ///
     /// Deliberately UNGATED (no `hasCronPauseMarkerGate` check). Those two
     /// Hermes functions are byte-identical at v0.20.0 (v2026.8.3) and
-    /// v0.20.4 (v2026.8.18), so these markers are exactly what every
+    /// v0.20.1 (v2026.8.13 — the tag that introduced `_has_pause_marker`,
+    /// `cron/jobs.py:482`, called from `is_job_runnable` at `:489`/`:498`;
+    /// the name does not occur at v2026.8.3 at all), so these markers are
+    /// exactly what every
     /// supported host already writes for itself; older hosts simply ignore
     /// them in the runnable check. Gating would also be awkward here — the
     /// capability store is a service, unreachable from the model layer —

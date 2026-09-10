@@ -1117,11 +1117,24 @@ struct HermesFileService: Sendable {
 
         func flush() {
             guard let name = currentName else { return }
-            // 3-way transport discriminator: an explicit `transport: sse` scalar
-            // wins (Hermes v0.13+ emits it for SSE servers); otherwise URL-bearing
-            // entries fall back to .http (v0.12 shape) and command-bearing entries
-            // to .stdio. This preserves byte-for-byte round-trip on existing files
-            // — pre-v0.13 entries have no `transport:` key so they parse identically.
+            // 3-way transport discriminator, in HERMES'S OWN ORDER: `url`
+            // first, then `transport`.
+            //
+            // `_is_http()` is `"url" in self._config`
+            // (`tools/mcp_tool_health.py:27` @ `v2026.9.7`), and
+            // `:412`'s `config.get("transport") == "sse"` is only REACHED on
+            // the HTTP path. Hermes's own status payload says the same thing:
+            // `cfg.get("transport", "http") if "url" in cfg else "stdio"`
+            // (`tools/mcp_tool_discovery.py:484`) — a url-less entry is
+            // `stdio` whatever its `transport:` key says. Testing `transport`
+            // first made Scarf render `.sse` for a url-less `transport: sse`
+            // entry: a transport the host does not run, with the editor then
+            // offering SSE-only fields for it.
+            //
+            // Below the SSE check, URL-bearing entries fall back to .http
+            // (v0.12 shape) and command-bearing entries to .stdio. This
+            // preserves byte-for-byte round-trip on existing files — pre-v0.13
+            // entries have no `transport:` key so they parse identically.
             //
             // The comparison is EXACT-CASE because Hermes's is:
             // `if config.get("transport") == "sse"` (`tools/mcp_tool_transport.py:412`
@@ -1133,9 +1146,8 @@ struct HermesFileService: Sendable {
             // the same `str` to PyYAML as bare `sse`, and the old
             // `.lowercased()` matched NEITHER of them.
             let transport: MCPTransport = {
-                if Self.unquote(fields["transport"] ?? "") == "sse" { return .sse }
-                if fields["url"] != nil { return .http }
-                return .stdio
+                guard fields["url"] != nil else { return .stdio }
+                return Self.unquote(fields["transport"] ?? "") == "sse" ? .sse : .http
             }()
             // Hermes reads every one of these through `_parse_boolish`
             // (`tools/mcp_tool_common.py:120-137` at `v2026.9.7`; the same

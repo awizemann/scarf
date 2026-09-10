@@ -181,8 +181,11 @@ public struct ModelCatalogService: Sendable {
     ///
     /// Raw id first, then the canonical alias, exactly as `providerByID` and
     /// `validateModel` resolve it: an alias spelling Hermes accepts
-    /// (`grok-oauth`, `ai-gateway`, …) must find the overlay registered under
-    /// its canonical id instead of silently returning nil.
+    /// (`grok-oauth` → `xai-oauth`) must find the overlay registered under its
+    /// canonical id instead of silently returning nil. Only aliases whose
+    /// CANONICAL id is an `overlayOnlyProviders` key are reachable this way —
+    /// `ai-gateway` canonicalises to `vercel`, which is not one, so that
+    /// spelling still returns nil and is not an example of what this fixes.
     public func overlayMetadata(for providerID: String) -> HermesProviderOverlay? {
         Self.overlayOnlyProviders[providerID]
             ?? Self.overlayOnlyProviders[Self.canonicalProviderID(providerID)]

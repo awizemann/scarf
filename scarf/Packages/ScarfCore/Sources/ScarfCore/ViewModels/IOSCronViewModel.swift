@@ -107,8 +107,8 @@ public final class IOSCronViewModel {
     /// Toggle `enabled` on the job with the given id.
     ///
     /// **Preferred route: the Hermes CLI.** `hermes cron pause|resume <id>`
-    /// carries the full upstream semantics — `resume_job` (cron/jobs.py:
-    /// 2212-2233) recomputes `next_run_at` from now and refuses a
+    /// carries the full upstream semantics — `resume_job`
+    /// (`cron/jobs.py:1986-2003` @ v2026.9.7) recomputes `next_run_at` from now and refuses a
     /// past-deadline one-shot — which a jobs.json rewrite can't reproduce.
     /// iOS reaches it the same way macOS's `CronViewModel` does
     /// (CronViewModel.swift:126-130): `ServerTransport.runProcess`, which

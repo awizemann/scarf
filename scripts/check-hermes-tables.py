@@ -219,7 +219,7 @@ MODELS_DEV_PY = "agent/models_dev.py"
 
 def parse_models_dev_map(src):
     """``PROVIDER_TO_MODELS_DEV`` from agent/models_dev.py (a plain annotated
-    dict literal at v2026.9.7:107).
+    dict literal at v2026.9.7:108; :107 is the section comment above it).
 
     FAILS CLOSED, exactly as `parse_hermes` does for ALIASES: the only benign
     absence is the whole FILE being missing (a pre-v0.21 checkout), which

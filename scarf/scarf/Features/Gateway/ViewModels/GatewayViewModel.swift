@@ -392,7 +392,7 @@ final class MessagingGatewayViewModel {
             if trimmed.isEmpty || trimmed.hasPrefix("Platform") || trimmed.hasPrefix("--------") { continue }
 
             // The two hint lines `_cmd_list` prints after the pending block
-            // (hermes_cli/pairing.py:38-39) are inside the pending section and
+            // (hermes_cli/pairing.py:39-40) are inside the pending section and
             // have the shape of a row. Unfiltered they became two pending
             // pairings with a live Approve button: `Approve with: hermes
             // pairing approve …` parsed as platform `Approve` / code `with:`,
@@ -404,7 +404,7 @@ final class MessagingGatewayViewModel {
 
             let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true)
             // An approved row is `{platform:<12} {user_id:<20} {user_name:<20}`
-            // (pairing.py:48, the same shape back to v2026.6.19:57) and
+            // (pairing.py:49, the same shape back to v2026.6.19:57) and
             // `user_name` is `a.get("user_name") or ""` —
             // so a user who never set a display name yields TWO tokens, and
             // requiring three dropped them from the list entirely: invisible,
@@ -423,7 +423,7 @@ final class MessagingGatewayViewModel {
         return (approved, pending)
     }
 
-    /// `_cmd_list`'s two trailing hints (hermes_cli/pairing.py:38-39 at
+    /// `_cmd_list`'s two trailing hints (hermes_cli/pairing.py:39-40 at
     /// v2026.9.7), matched by their own leading text. Rich is not involved —
     /// these are plain `print()`s — so the text reaches Scarf verbatim; only
     /// the leading indent is trimmed before this test.

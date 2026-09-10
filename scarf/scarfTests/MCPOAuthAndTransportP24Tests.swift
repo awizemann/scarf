@@ -255,6 +255,49 @@ struct MCPOAuthAndTransportP24Tests {
         #expect(service.loadMCPServers().first?.transport == .sse, "transport: \(spelling)")
     }
 
+    /// P29 · `url` is the FIRST discriminator, because Hermes's is.
+    /// `_is_http()` is `"url" in self._config`
+    /// (`tools/mcp_tool_health.py:27` @ `v2026.9.7`) and `:412`'s
+    /// `transport == "sse"` is only reached on the HTTP path; the status
+    /// payload agrees — `cfg.get("transport", "http") if "url" in cfg else
+    /// "stdio"` (`tools/mcp_tool_discovery.py:484`). So a url-less entry is
+    /// stdio whatever its `transport:` key says, and testing `transport` first
+    /// made Scarf render a transport the host does not run.
+    @Test(arguments: ["sse", "\"sse\"", "'sse'"])
+    func aURLlessEntryIsStdioWhateverItsTransportKeySays(_ spelling: String) throws {
+        let (service, temp) = try home(config: """
+        mcp_servers:
+          srv:
+            command: uvx
+            args: [some-server]
+            transport: \(spelling)
+        """)
+        defer { temp.cleanup() }
+        #expect(service.loadMCPServers().first?.transport == .stdio, "transport: \(spelling)")
+    }
+
+    /// …and with no `transport:` key at all, a url-bearing entry is still
+    /// `.http` and a command-bearing one still `.stdio`. The reorder must not
+    /// move the other two arms.
+    @Test func theOtherTwoArmsAreUnchanged() throws {
+        let (http, t1) = try home(config: """
+        mcp_servers:
+          srv:
+            url: https://example.com/mcp
+        """)
+        defer { t1.cleanup() }
+        #expect(http.loadMCPServers().first?.transport == .http)
+
+        let (stdio, t2) = try home(config: """
+        mcp_servers:
+          srv:
+            command: uvx
+            args: [some-server]
+        """)
+        defer { t2.cleanup() }
+        #expect(stdio.loadMCPServers().first?.transport == .stdio)
+    }
+
     // MARK: - Remote reap ERE
 
     /// Run one POSIX ERE against one subject with the real `grep -E`, so
