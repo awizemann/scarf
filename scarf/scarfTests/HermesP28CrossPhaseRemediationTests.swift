@@ -387,6 +387,15 @@ struct HermesP28CrossPhaseRemediationTests {
             vm.load()
             let deadline = Date().addingTimeInterval(120)
             while vm.isLoading, Date() < deadline { try? await Task.sleep(for: .milliseconds(20)) }
+            // Separate "the load did not finish" from "the load read the wrong
+            // value": under heavy parallel contention this form's load has been
+            // observed taking minutes, and a timed-out read leaves
+            // `skipAttachments` at its unset default — which reads as a
+            // boolish bug and is not one.
+            guard !vm.isLoading else {
+                Issue.record("skip_attachments: \(scalar) — the form's load never completed")
+                continue
+            }
             // The parsed raw value is reported on failure: a read that came
             // back nil is a file/fixture problem, a read that came back with
             // the scalar is a boolish problem, and the two want different
