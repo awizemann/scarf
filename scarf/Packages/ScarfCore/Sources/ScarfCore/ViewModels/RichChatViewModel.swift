@@ -706,9 +706,35 @@ public final class RichChatViewModel {
     /// - **Always** (no session AND active session): `/new`. It's the
     ///   "open a session" affordance and arms the v0.13+ `[<name>]`
     ///   argument hint via `hasNewWithSessionName`.
-    /// - **Active-session-only**: `/clear`, `/compress`, `/cost`, `/model`,
-    ///   `/tools`, `/reload-skills`, `/help`, `/exit`. Each requires a
-    ///   live session; surfacing them pre-session would mislead.
+    /// - **Active-session-only**: `/clear`, the version-appropriate
+    ///   `/compact`-or-`/compress` (see ``compressSlashName(capabilities:)``),
+    ///   `/cost`, `/model`, `/tools`, `/reload-skills`, `/help`, `/exit`.
+    ///   Each requires a live session; surfacing them pre-session would
+    ///   mislead.
+    /// The slash command name that compresses the conversation on THIS host,
+    /// without a leading slash: `"compress"` at/above v0.19.1, `"compact"`
+    /// below it (and on an undetected host).
+    ///
+    /// Scarf's chat composer speaks ACP, and the ACP adapter renamed the
+    /// command mid-window with no alias in either direction — so sending the
+    /// other spelling does not error, it falls through to the LLM and burns a
+    /// turn. See ``HermesCapabilities/hasACPCompressSpelling`` for the
+    /// per-tag evidence.
+    public static func compressSlashName(capabilities: HermesCapabilities) -> String {
+        capabilities.hasACPCompressSpelling ? "compress" : "compact"
+    }
+
+    /// The full text the compress gesture sends, focus topic optional —
+    /// `/compress`, `/compact`, or either with a trailing focus topic.
+    public static func compressSlashCommand(
+        capabilities: HermesCapabilities,
+        focus: String = ""
+    ) -> String {
+        let name = compressSlashName(capabilities: capabilities)
+        let trimmed = focus.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "/\(name)" : "/\(name) \(trimmed)"
+    }
+
     public static func alwaysAvailableCommands(
         capabilities: HermesCapabilities,
         hasActiveSession: Bool
@@ -734,21 +760,18 @@ public final class RichChatViewModel {
                 argumentHint: nil,
                 source: .alwaysAvailable
             ),
-            // ALWAYS `compress`, never `compact`. `CommandDef("compress", …)`
-            // is canonical from `hermes_cli/commands.py:57` at tag v2026.3.17
-            // (0.3.0) — below Scarf's v0.6.0 supported minimum — and
-            // `aliases=("compact",)` only lands at `commands.py:92`, tag
-            // v2026.7.7 (0.18.1). Scarf had this inverted behind a
-            // `hasCompressCommand` flag floored at v0.20, so on every
-            // 0.12–0.18.0 host it offered and SENT `/compact`, which those
-            // hosts do not route to compression at all — on the TUI gateway
-            // `/compact` is "Toggle compact display mode"
-            // (`tui_gateway/server.py:3845` `_TUI_EXTRA` at v2026.4.30), so
-            // the user's compress gesture silently flipped a display mode.
-            // `RichChatInputBar`'s compress sheet already sent `/compress`
-            // unconditionally; this is the menu catching up.
+            // The SPELLING is version-dependent, and the table that decides
+            // it is the ACP adapter's — not `hermes_cli/commands.py`, which
+            // the chat composer never talks to. ACP's `_SLASH_COMMANDS` says
+            // `compact` through v2026.7.20 (0.19.0) and `compress` from
+            // v2026.7.30 (0.19.1), with no alias either way, so the wrong
+            // spelling falls through to the LLM and nothing compresses. See
+            // ``HermesCapabilities/hasACPCompressSpelling`` for the 32-tag
+            // walk; on a v0.12 host the TUI's unrelated `/compact` display
+            // toggle (`tui_gateway/server.py:3846` `_TUI_EXTRA` at
+            // v2026.4.30) is a different surface again.
             HermesSlashCommand(
-                name: "compress",
+                name: Self.compressSlashName(capabilities: capabilities),
                 description: "Compress the conversation history",
                 argumentHint: nil,
                 source: .alwaysAvailable
@@ -958,7 +981,8 @@ public final class RichChatViewModel {
         }
         let nonInterruptive = supported.filter { !occupied.contains($0.name) }
         // Static fallbacks. `/new` always shows; the rest of the agent-
-        // level command set (`/clear`, `/compact`/`/compress`, `/cost`, `/model`,
+        // level command set (`/clear`, the version-appropriate
+        // `/compact`-or-`/compress`, `/cost`, `/model`,
         // `/tools`, `/reload-skills`, `/help`, `/exit`) only when a
         // session is active — Hermes ACP doesn't re-emit
         // `available_commands_update` after `session/load`, so without
@@ -1326,7 +1350,8 @@ public final class RichChatViewModel {
     ///
     /// Two grey-out conditions:
     /// - **No active session** (P2 of the projects-feature fix): every
-    ///   agent-side command (`/clear /compact(/compress) /cost /model /tools
+    ///   agent-side command (`/clear`, the version-appropriate
+    ///   `/compact`-or-`/compress`, `/cost /model /tools
     ///   /reload-skills /help /exit`, plus capability-gated `/yolo
     ///   /sessions /codex-runtime` and non-interruptive `/steer /goal
     ///   /queue /subgoal`) needs a live ACP session to do anything.
@@ -1417,7 +1442,11 @@ public final class RichChatViewModel {
         return ProjectSlashCommandService(context: context).expand(cmd, withArgument: argument)
     }
 
-    public var supportsCompress: Bool { availableCommands.contains { $0.name == "compress" } }
+    public var supportsCompress: Bool {
+        // Either spelling counts: pre-0.19.1 ACP hosts advertise `compact`
+        // and that is their compress command. See `compressSlashName`.
+        availableCommands.contains { $0.name == "compress" || $0.name == "compact" }
+    }
 
     /// True when the menu carries more than just `/compress` — used to hide
     /// the dedicated compress button in favor of the full slash menu.

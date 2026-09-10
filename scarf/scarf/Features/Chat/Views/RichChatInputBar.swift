@@ -123,7 +123,7 @@ struct RichChatInputBar: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(!isEnabled)
-                    .help("Compress conversation (/compress)")
+                    .help("Compress conversation (\(RichChatViewModel.compressSlashCommand(capabilities: capabilitiesStore?.capabilities ?? .empty)))")
                     .accessibilityLabel(Text("Compress Conversation"))
                 }
 
@@ -512,8 +512,13 @@ struct RichChatInputBar: View {
                 Button("Cancel") { showCompressSheet = false }
                     .buttonStyle(ScarfGhostButton())
                 Button("Compress") {
-                    let focus = compressFocus.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let command = focus.isEmpty ? "/compress" : "/compress \(focus)"
+                    // Spelling is version-dependent on the ACP adapter —
+                    // `/compact` below v0.19.1, `/compress` at/above, no
+                    // alias either way. See `hasACPCompressSpelling`.
+                    let command = RichChatViewModel.compressSlashCommand(
+                        capabilities: capabilitiesStore?.capabilities ?? .empty,
+                        focus: compressFocus
+                    )
                     onSend(command, [], .quickCommand)
                     showCompressSheet = false
                 }

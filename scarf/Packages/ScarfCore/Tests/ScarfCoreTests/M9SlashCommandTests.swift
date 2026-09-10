@@ -299,39 +299,43 @@ import Foundation
     }
 
     @MainActor
-    @Test func availableCommandsUsesCompressNameOnEveryHost() {
-        // P23 fixed an INVERTED gate. `CommandDef("compress", …)` is
-        // canonical from `hermes_cli/commands.py:57` at v2026.3.17 (0.3.0)
-        // and `aliases=("compact",)` only lands at `:92`, v2026.7.7
-        // (0.18.1) — so `/compress` is right on every supported host and
-        // `/compact` on a v0.12 host is the TUI's "Toggle compact display
-        // mode" (`tui_gateway/server.py:3845`), not a compression command.
-        // Scarf used to send that. This fails if the flag comes back.
-        for line in [
-            "Hermes Agent v0.12.0 (2026.4.30)",
-            "Hermes Agent v0.19.0 (2026.7.20)",
-            "Hermes Agent v0.20.0 (2026.8.3)",
-            "Hermes Agent v0.21.1 (2026.9.7)"
+    @Test func availableCommandsFollowsTheACPCompressSpellingFloor() {
+        // The table that decides the spelling is the ACP adapter's, not
+        // `hermes_cli/commands.py`: `_SLASH_COMMANDS` says `compact` through
+        // v2026.7.20 (0.19.0) (`acp_adapter/server.py:459`) and `compress`
+        // from v2026.7.30 (0.19.1) (`:574`), with no alias either way. So the
+        // menu must change names at the floor, not pin one spelling.
+        for (line, expected) in [
+            ("Hermes Agent v0.12.0 (2026.4.30)", "compact"),
+            ("Hermes Agent v0.19.0 (2026.7.20)", "compact"),
+            ("Hermes Agent v0.19.1 (2026.7.30)", "compress"),
+            ("Hermes Agent v0.20.0 (2026.8.3)", "compress"),
+            ("Hermes Agent v0.21.1 (2026.9.7)", "compress")
         ] {
             let vm = RichChatViewModel(context: .local)
             vm.setSessionId("scratch-session")
             vm.publishCapabilities(HermesCapabilities.parseLine(line))
             let names = vm.availableCommands.map(\.name)
-            #expect(names.contains("compress"), "\(line)")
-            #expect(!names.contains("compact"), "\(line)")
+            let other = expected == "compress" ? "compact" : "compress"
+            #expect(names.contains(expected), "\(line)")
+            #expect(!names.contains(other), "\(line)")
+            // Either spelling still lights the compress affordance.
+            #expect(vm.supportsCompress, "\(line)")
         }
     }
 
     @MainActor
-    @Test func availableCommandsUsesCompressNameOnUndetectedHost() {
-        // An undetected host (`.empty` — the probe failed) must not fall
-        // back to the spelling no supported host routes to compression.
+    @Test func availableCommandsUsesCompactOnUndetectedHost() {
+        // An undetected host (`.empty` — the probe failed) must behave as the
+        // OLDER one (C1): thirteen of the sixteen supported releases are
+        // below the 0.19.1 rename, so `/compact` is the safer default.
         let vm = RichChatViewModel(context: .local)
         vm.setSessionId("scratch-session")
         vm.publishCapabilities(.empty)
         let names = vm.availableCommands.map(\.name)
-        #expect(names.contains("compress"))
-        #expect(!names.contains("compact"))
+        #expect(names.contains("compact"))
+        #expect(!names.contains("compress"))
+        #expect(vm.supportsCompress)
     }
 
     @MainActor

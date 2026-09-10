@@ -33,9 +33,10 @@ struct SessionsView: View {
         capabilitiesStore?.capabilities.hasSessionsExportFormats ?? false
     }
 
-    /// `hermes sessions export --no-redact` (v0.21.1+). Below the floor a
-    /// `trace` export always redacts and the flag is an argparse error, so
-    /// the toggle can't be honoured for that format — the sheet says so.
+    /// `hermes sessions export --no-redact` (v0.18.1+, `hermes_cli/main.py:13567`
+    /// @ v2026.7.7). It shares its floor with `--format trace`
+    /// (`hasSessionsExportFormats`), so any host that offers a trace export
+    /// also honours the opt-out; below the floor neither exists.
     private var hasTraceNoRedact: Bool {
         capabilitiesStore?.capabilities.hasSessionsExportNoRedact ?? false
     }

@@ -845,18 +845,12 @@ public struct HermesCapabilities: Sendable, Equatable {
     // MARK: v0.20 (v2026.8.3) flags
     //
     // `hasCompressCommand` used to live here, claiming ACP's `/compact` was
-    // renamed `/compress` at v0.20. The claim is backwards and the flag is
-    // gone: `CommandDef("compress", …)` is the CANONICAL name from
-    // `hermes_cli/commands.py:57` at tag v2026.3.17 (0.3.0) — below Scarf's
-    // v0.6.0 supported minimum, and present at every tag since — while
-    // `aliases=("compact",)` only appears at `commands.py:92`, tag v2026.7.7
-    // (0.18.1). So `/compress` works on EVERY supported host and `/compact`
-    // works on none below 0.18.1; on a v0.12 host `/compact` is the TUI's
-    // "Toggle compact display mode" (`tui_gateway/server.py:3845`
-    // `_TUI_EXTRA` at v2026.4.30), not a compression command at all. The
-    // floor being below the supported minimum means the correct outcome is
-    // NO gate (the P15 `--clear-skills` rule), so `RichChatViewModel`
-    // hardcodes `compress`.
+    // renamed `/compress` at v0.20. That floor was wrong, but so was the
+    // round-2 conclusion that the answer is NO gate: the flag moved to
+    // ``hasACPCompressSpelling`` below, floored at v0.19.1, because the
+    // renaming is real and happened inside the supported window — it just
+    // happened in the ACP adapter rather than in `hermes_cli/commands.py`.
+    // See that flag's doc for the 32-tag walk.
 
     /// `hermes curator adopt` / `hermes curator list-unmanaged` — adopt
     /// stray notes into curator management and list unmanaged ones.
@@ -1002,6 +996,43 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `pyproject.toml` reads `version = "0.19.0"` (the preceding tag
     /// v2026.7.7.2 was 0.18.2), so the true floor is **v0.19**, not v0.20.
     public var hasGatewayProfileRoutes: Bool { isV019OrLater }
+
+    /// The spelling of ACP's "compress conversation context" slash command:
+    /// `true` means `/compress`, `false` means `/compact`.
+    ///
+    /// **This gates the ACP adapter, not the CLI/TUI command table.** Scarf's
+    /// chat composer speaks ACP, whose slash set is its own smaller dict —
+    /// `hermes_cli/commands.py`, where `compress` has been canonical since
+    /// v2026.3.17 (0.3.0), is a different table and says nothing about what
+    /// the composer may send. Walked across all 32 `v2026.*` tags:
+    ///
+    /// * `_SLASH_COMMANDS` carries `"compact": "Compress conversation
+    ///   context"` from v2026.3.17 (0.3.0) through **v2026.7.20 (0.19.0)**
+    ///   (`acp_adapter/server.py:459` @ v2026.7.20, handler registered at
+    ///   `:1759`).
+    /// * It flips to `"compress"` at **v2026.7.30 (0.19.1)**
+    ///   (`acp_adapter/server.py:574`, `:603`, handler `:2051`) and stays
+    ///   there through v2026.9.7, where the set moved to
+    ///   `acp_adapter/commands.py:54`.
+    ///
+    /// **There is no alias in either direction.** `_handle_slash_command` is
+    /// `if cmd not in self._COMMANDS: return None`, and its own docstring says
+    /// unknown commands "fall through to the LLM" (`acp_adapter/commands.py:88-95`
+    /// @ v2026.9.7; same shape at `acp_adapter/server.py:1743-1748` @
+    /// v2026.7.20). So the wrong spelling does not error — it silently burns a
+    /// turn prompting the model with the literal text, and nothing compresses.
+    ///
+    /// That makes this a real gate on the LARGER half of the window: 0.6.0
+    /// through 0.19.0 is thirteen of the sixteen supported releases, and on
+    /// those hosts `/compact` is the only spelling that works. On a v0.12 host
+    /// `/compress` is not even a display-mode toggle — the TUI's `/compact`
+    /// entry (`tui_gateway/server.py:3846` `_TUI_EXTRA` at v2026.4.30) is a
+    /// different surface again, and the ACP adapter is the one Scarf drives.
+    ///
+    /// An undetected host (`.empty`) resolves to `/compact`, the pre-0.19.1
+    /// spelling, per C1: a host Scarf cannot version must behave as the older
+    /// one.
+    public var hasACPCompressSpelling: Bool { isV0191OrLater }
 
     // MARK: v0.20 (v2026.8.3) flags — continued
 
@@ -1476,20 +1507,27 @@ public struct HermesCapabilities: Sendable, Equatable {
     public var hasMCPOAuthFlow: Bool { isV0211OrLater }
 
     /// `hermes sessions export --no-redact` — the opt-OUT for the forced
-    /// redaction a `trace` export applies by default (v0.21.1+,
-    /// `hermes_cli/subcommands/sessions.py:83`; read by `_export_trace` as
-    /// `redact_trace = not args.no_redact`, `hermes_cli/sessions_cmd.py:394`).
+    /// redaction a `trace` export applies by default.
     ///
-    /// **The flag is newer than `--format trace` itself is.** `trace` has been
-    /// a `--format` choice since v0.18.1 (`hasSessionsExportFormats`), and
-    /// `_export_trace` read `getattr(args, "no_redact", False)` at v2026.8.31
-    /// already — but argparse registered no such option there, so the getattr
-    /// always saw `False` and a 0.21.0 host ALWAYS redacts a trace while
-    /// rejecting the flag outright (exit 2). A walk of all 32 v2026.* tags puts
-    /// the first registration at v2026.9.7. So the export argv may only carry
-    /// `--no-redact` above this floor; below it, "Redact secrets" off cannot be
-    /// honoured for `trace` and the UI says so instead of lying.
-    public var hasSessionsExportNoRedact: Bool { isV0211OrLater }
+    /// **Floor v0.18.1, the same tag that introduced `--format trace`.** The
+    /// round-2 pass floored this at v0.21.1 on the claim that "a walk of all
+    /// 32 v2026.* tags puts the first registration at v2026.9.7"; that walk
+    /// was wrong. `sessions_export.add_argument("--no-redact",
+    /// action="store_true", …)` is `hermes_cli/main.py:13567` at tag
+    /// **v2026.7.7** (`pyproject.toml:10` = `0.18.1`) and is absent from
+    /// `hermes_cli/main.py` at v2026.7.1 (0.18.0). It is functional there,
+    /// not vestigial: `redact_trace = not getattr(args, "no_redact", False)`
+    /// at `hermes_cli/main.py:13944` @ v2026.7.7. It is still registered at
+    /// every later tag — `hermes_cli/main.py:14245` @ v2026.8.31 (0.21.0),
+    /// and after the subcommand split `hermes_cli/subcommands/sessions.py:83`
+    /// @ v2026.9.7, read by `_export_trace` as `redact_trace = not
+    /// getattr(args, "no_redact", False)` (`hermes_cli/sessions_cmd.py:395`).
+    ///
+    /// So ten releases below the previous floor DO honour the opt-out, and
+    /// force-disabling "Redact secrets" on them was the bug. Below v0.18.1
+    /// there is no `trace` format at all (`hasSessionsExportFormats` shares
+    /// the floor), so the two gates move together.
+    public var hasSessionsExportNoRedact: Bool { isV0181OrLater }
 
     // MARK: Older floors corrected/added in the v0.21.1 pass
     //

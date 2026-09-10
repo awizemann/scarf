@@ -174,9 +174,9 @@ import Foundation
         #expect(vm.projectScopedCommands.isEmpty)
         #expect(vm.globalScopedCommands.isEmpty)
         #expect(vm.quickCommands.isEmpty)
-        // `/compress` is in the static fallback list on EVERY host (P23:
-        // `CommandDef("compress", …)` is canonical from v2026.3.17 = 0.3.0,
-        // below Scarf's supported minimum), so a fresh VM reports it — the
+        // The compress command is in the static fallback list on EVERY host
+        // (the ACP spelling varies at the 0.19.1 floor; `supportsCompress`
+        // accepts either), so a fresh VM reports it — the
         // menu greys it out pre-session via `sessionRequiredCommandNames`.
         // The dedicated compress BUTTON is still hidden, because
         // `showCompressButton` also requires `!hasBroaderCommandMenu` and the

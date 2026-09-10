@@ -328,8 +328,11 @@ import Foundation
         // commands stay in the menu (greyed out via
         // disabledSlashCommandNames) instead of being filtered out.
         // Both states must include them; only the disabled set differs.
+        // A target-tag host, so the compress command carries its post-0.19.1
+        // `compress` spelling (see `hasACPCompressSpelling`) — this test is
+        // about grey-out, not about the ACP rename.
         let vm = RichChatViewModel(context: .local)
-        vm.publishCapabilities(HermesCapabilities.empty)
+        vm.publishCapabilities(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)"))
         let namesBefore = Set(vm.availableCommands.map(\.name))
         #expect(namesBefore.contains("clear"))
         #expect(namesBefore.contains("compress"))
