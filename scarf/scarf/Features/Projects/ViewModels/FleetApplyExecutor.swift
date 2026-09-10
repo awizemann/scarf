@@ -55,7 +55,7 @@ struct FleetApplyExecutor: Sendable {
         /// channel) only ever exists in that output.
         let detail: String?
         var id: String { field.rawValue }
-        nonisolated enum Status: Sendable { case applied, skipped, failed }
+        nonisolated enum Status: Sendable, Equatable { case applied, skipped, failed }
 
         init(field: FleetApplyField, status: Status, message: String, detail: String? = nil) {
             self.field = field
@@ -377,15 +377,36 @@ struct FleetApplyExecutor: Sendable {
         if deliverAllDowngrades > 0 {
             parts.append(String(localized: "\(deliverAllDowngrades) w/o deliver=all (host < v0.14)"))
         }
-        // `.failed` only when nothing landed; a created-but-unpaused job
-        // still applied (its live state is surfaced in the message above).
-        let status: FieldResult.Status = (created == 0 && failed > 0) ? .failed : .applied
+        let status = Self.cronFieldStatus(
+            created: created, failed: failed, scriptOnlySkipped: scriptOnlySkipped)
         return FieldResult(
             field: .cron,
             status: status,
             message: parts.isEmpty ? String(localized: "no changes") : parts.joined(separator: ", "),
             detail: firstFailureDetail
         )
+    }
+
+    /// Verdict for the cron field from what the pass actually wrote.
+    ///
+    /// - `.failed` only when nothing landed AND something errored; a
+    ///   created-but-unpaused job still applied (its live state is surfaced
+    ///   in the field message).
+    /// - `.skipped` when nothing was created, nothing failed, and at least
+    ///   one job was skipped for being script-only (`no_agent`). That is a
+    ///   real outcome — the source's cron jobs all carry a `pre_run_script`
+    ///   fleet-apply does not replicate — and calling it `.applied` told the
+    ///   user their cron field had been applied when not one job was written,
+    ///   and counted toward `TargetResult.appliedCount`.
+    /// - `.applied` otherwise, INCLUDING the all-already-present case: a
+    ///   target that already has every job is genuinely in the desired state,
+    ///   which is not the same as a job Scarf declined to copy.
+    nonisolated static func cronFieldStatus(
+        created: Int, failed: Int, scriptOnlySkipped: Int
+    ) -> FieldResult.Status {
+        if created == 0 && failed > 0 { return .failed }
+        if created == 0 && scriptOnlySkipped > 0 { return .skipped }
+        return .applied
     }
 
     /// Humanize a failed `hermes` invocation for the result sheet: the job

@@ -408,10 +408,11 @@ final class CredentialPoolsViewModel {
         oauthFlow.stop()
     }
 
-    func removeCredential(provider: String, index: Int) {
-        // The CLI uses 1-based indexing ("#1", "#2" in `hermes auth list`); our
-        // stored `index` is 0-based, so add 1 when handing to the CLI.
-        runMutation(["auth", "remove", provider, String(index + 1)]) { [weak self] output, exitCode in
+    func removeCredential(provider: String, index: Int, internalID: String = "") {
+        // Target encoding (stable id when we have one, 1-based index
+        // otherwise) lives in `credentialTarget` — see its note on why a bare
+        // index is not unambiguous.
+        runMutation(Self.removeArgv(provider: provider, index: index, internalID: internalID)) { [weak self] output, exitCode in
             guard let self else { return }
             if exitCode == 0 {
                 self.message = "Credential removed"
@@ -488,10 +489,10 @@ final class CredentialPoolsViewModel {
     /// manually added anthropic credentials ahead of seeded ones), so the toast
     /// reports the CLI's own verdict line instead of asserting the position we
     /// asked for.
-    func setPriority(provider: String, index: Int, to priority: Int) {
+    func setPriority(provider: String, index: Int, internalID: String = "", to priority: Int) {
         guard index >= 0, priority >= 0 else { return }
         runMutation(
-            Self.priorityArgv(provider: provider, index: index, to: priority),
+            Self.priorityArgv(provider: provider, index: index, internalID: internalID, to: priority),
             clearAfter: 4
         ) { [weak self] output, exitCode in
             guard let self else { return }
@@ -506,9 +507,9 @@ final class CredentialPoolsViewModel {
     /// anything that is not a refreshable OAuth credential with a refresh
     /// token, and for `nous` only the device_code singleton qualifies — so the
     /// refusal is surfaced verbatim rather than translated.
-    func refreshCredential(provider: String, index: Int) {
+    func refreshCredential(provider: String, index: Int, internalID: String = "") {
         guard index >= 0 else { return }
-        runMutation(Self.refreshArgv(provider: provider, index: index), clearAfter: 4) {
+        runMutation(Self.refreshArgv(provider: provider, index: index, internalID: internalID), clearAfter: 4) {
             [weak self] output, exitCode in
             guard let self else { return }
             self.message = Self.firstLine(of: output)
@@ -520,9 +521,9 @@ final class CredentialPoolsViewModel {
     /// Clear the cooldown on ONE credential — the optional `target` v0.21.1
     /// adds to `auth reset`. Unlike `refresh` this works for api-key entries
     /// too, since it only drops the local exhaustion marker.
-    func resetCredential(provider: String, index: Int) {
+    func resetCredential(provider: String, index: Int, internalID: String = "") {
         guard index >= 0 else { return }
-        runMutation(Self.resetCredentialArgv(provider: provider, index: index), clearAfter: 4) {
+        runMutation(Self.resetCredentialArgv(provider: provider, index: index, internalID: internalID), clearAfter: 4) {
             [weak self] output, exitCode in
             guard let self else { return }
             if exitCode == 0 {
@@ -535,26 +536,58 @@ final class CredentialPoolsViewModel {
         }
     }
 
-    // The three argv builders are static and pure so the index bases are
-    // pinned by a test instead of by reading the call sites.
+    // The argv builders are static and pure so the target encoding is pinned
+    // by a test instead of by reading the call sites.
 
-    /// `auth priority <provider> <1-based target> <0-based priority>`.
-    static func priorityArgv(provider: String, index: Int, to priority: Int) -> [String] {
-        // `--` ends the options: a provider id is data, not a flag.
-        ["auth", "priority", "--", provider, String(index + 1), String(priority)]
+    /// How a credential is named on the wire.
+    ///
+    /// Hermes resolves `<target>` in THREE ordered passes
+    /// (`agent/credential_pool_admin.py:87` `resolve_target` at v2026.9.7):
+    /// entry `id` first (`:94` `if entry.id == raw`), then a unique
+    /// case-insensitive label match (`:97`), and only then a 1-based numeric
+    /// index (`:106` `if raw.isdigit()`).
+    ///
+    /// So a bare `"2"` is NOT unambiguously "the second credential": a pool
+    /// whose first entry is LABELLED `2` resolves it to that one instead, and
+    /// the mutation lands on the wrong credential silently. The stable
+    /// `internalID` from auth.json is checked in the FIRST pass and cannot
+    /// collide with a label, so it is sent whenever Scarf has one. The index
+    /// stays as the fallback for an entry auth.json gave no `id`.
+    static func credentialTarget(index: Int, internalID: String) -> String {
+        let id = internalID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return id.isEmpty ? String(index + 1) : id
     }
 
-    /// `auth refresh <provider> <1-based target>`. The target is always sent:
+    /// `auth priority <provider> <target> <0-based priority>`.
+    static func priorityArgv(
+        provider: String, index: Int, internalID: String = "", to priority: Int
+    ) -> [String] {
+        // `--` ends the options: a provider id is data, not a flag.
+        ["auth", "priority", "--", provider,
+         credentialTarget(index: index, internalID: internalID), String(priority)]
+    }
+
+    /// `auth refresh <provider> <target>`. The target is always sent:
     /// Hermes only allows it to be omitted when the pool holds exactly one
     /// credential, and errors out otherwise.
-    static func refreshArgv(provider: String, index: Int) -> [String] {
-        ["auth", "refresh", "--", provider, String(index + 1)]
+    static func refreshArgv(provider: String, index: Int, internalID: String = "") -> [String] {
+        ["auth", "refresh", "--", provider,
+         credentialTarget(index: index, internalID: internalID)]
     }
 
-    /// `auth reset <provider> <1-based target>` — the optional target v0.21.1
+    /// `auth reset <provider> <target>` — the optional target v0.21.1
     /// adds. Without it the verb clears every credential in the pool.
-    static func resetCredentialArgv(provider: String, index: Int) -> [String] {
-        ["auth", "reset", "--", provider, String(index + 1)]
+    static func resetCredentialArgv(
+        provider: String, index: Int, internalID: String = ""
+    ) -> [String] {
+        ["auth", "reset", "--", provider,
+         credentialTarget(index: index, internalID: internalID)]
+    }
+
+    /// `auth remove <provider> <target>`.
+    static func removeArgv(provider: String, index: Int, internalID: String = "") -> [String] {
+        ["auth", "remove", "--", provider,
+         credentialTarget(index: index, internalID: internalID)]
     }
 
     /// First non-empty line of the CLI's combined output — the line carrying

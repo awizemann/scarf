@@ -22,14 +22,14 @@ import Testing
     /// this tag), no perplexity (not yet).
     @Test func searchRosterAtV0210() {
         #expect(WebToolsBackendRoster.search(caps("Hermes Agent v0.21.0 (2026.8.31)")) == [
-            "exa", "parallel", "firecrawl", "searxng",
+            "", "exa", "parallel", "firecrawl", "searxng",
             "brave-free", "ddgs", "xai", "keenable",
         ])
     }
 
     @Test func extractRosterAtV0210() {
         #expect(WebToolsBackendRoster.extract(caps("Hermes Agent v0.21.0 (2026.8.31)")) == [
-            "exa", "parallel", "firecrawl", "keenable",
+            "", "exa", "parallel", "firecrawl", "keenable",
         ])
     }
 
@@ -37,7 +37,7 @@ import Testing
     /// firecrawl, keenable, parallel, perplexity, searxng, tavily, xai.
     @Test func searchRosterAtV0211() {
         #expect(WebToolsBackendRoster.search(caps("Hermes Agent v0.21.1 (2026.9.7)")) == [
-            "exa", "parallel", "firecrawl", "tavily", "searxng",
+            "", "exa", "parallel", "firecrawl", "tavily", "searxng",
             "brave-free", "ddgs", "xai", "keenable", "perplexity",
         ])
     }
@@ -47,7 +47,7 @@ import Testing
     /// (`plugins/web/keenable/provider.py:39,60`), so both belong here.
     @Test func extractRosterAtV0211() {
         #expect(WebToolsBackendRoster.extract(caps("Hermes Agent v0.21.1 (2026.9.7)")) == [
-            "exa", "parallel", "firecrawl", "tavily", "keenable", "perplexity",
+            "", "exa", "parallel", "firecrawl", "tavily", "keenable", "perplexity",
         ])
     }
 
@@ -55,11 +55,11 @@ import Testing
     /// there (since v0.20.5), perplexity is not.
     @Test func rosterAtV0206() {
         #expect(WebToolsBackendRoster.search(caps("Hermes Agent v0.20.6 (2026.8.27)")) == [
-            "exa", "parallel", "firecrawl", "tavily", "searxng",
+            "", "exa", "parallel", "firecrawl", "tavily", "searxng",
             "brave-free", "ddgs", "xai", "keenable",
         ])
         #expect(WebToolsBackendRoster.extract(caps("Hermes Agent v0.20.6 (2026.8.27)")) == [
-            "exa", "parallel", "firecrawl", "tavily", "keenable",
+            "", "exa", "parallel", "firecrawl", "tavily", "keenable",
         ])
     }
 
@@ -67,18 +67,18 @@ import Testing
     /// v0.20.4 has no keenable and no perplexity.
     @Test func rosterAtV0204IsUnchanged() {
         #expect(WebToolsBackendRoster.search(caps("Hermes Agent v0.20.4 (2026.8.18)")) == [
-            "exa", "parallel", "firecrawl", "tavily", "searxng",
+            "", "exa", "parallel", "firecrawl", "tavily", "searxng",
             "brave-free", "ddgs", "xai",
         ])
         #expect(WebToolsBackendRoster.extract(caps("Hermes Agent v0.20.4 (2026.8.18)")) == [
-            "exa", "parallel", "firecrawl", "tavily",
+            "", "exa", "parallel", "firecrawl", "tavily",
         ])
     }
 
     /// v0.13 (the tag that split the two keys) — no v0.14/v0.15 additions.
     @Test func rosterAtV013() {
         #expect(WebToolsBackendRoster.search(caps("Hermes Agent v0.13.0 (2026.5.7)")) == [
-            "exa", "parallel", "firecrawl", "tavily", "searxng",
+            "", "exa", "parallel", "firecrawl", "tavily", "searxng",
         ])
     }
 
@@ -86,13 +86,13 @@ import Testing
     /// addition — the conservative direction on both counts.
     @Test func rosterForUnknownVersion() {
         #expect(WebToolsBackendRoster.search(.empty) == [
-            "exa", "parallel", "firecrawl", "tavily", "searxng",
+            "", "exa", "parallel", "firecrawl", "tavily", "searxng",
         ])
         #expect(WebToolsBackendRoster.extract(.empty) == [
-            "exa", "parallel", "firecrawl", "tavily",
+            "", "exa", "parallel", "firecrawl", "tavily",
         ])
         #expect(WebToolsBackendRoster.combined(.empty) == [
-            "exa", "parallel", "firecrawl", "tavily", "searxng",
+            "", "exa", "parallel", "firecrawl", "tavily", "searxng",
         ])
     }
 
@@ -102,7 +102,7 @@ import Testing
     @Test func tavilySurvivesInV0210WhenSelected() {
         let v0210 = caps("Hermes Agent v0.21.0 (2026.8.31)")
         #expect(WebToolsBackendRoster.search(v0210, selected: "tavily") == [
-            "exa", "parallel", "firecrawl", "tavily", "searxng",
+            "", "exa", "parallel", "firecrawl", "tavily", "searxng",
             "brave-free", "ddgs", "xai", "keenable",
         ])
         #expect(!WebToolsBackendRoster.search(v0210, selected: "exa").contains("tavily"))
@@ -110,11 +110,52 @@ import Testing
         #expect(WebToolsBackendRoster.combined(v0210, selected: "tavily").contains("tavily"))
     }
 
-    /// `selected:` only ever widens — it never adds a backend the host
-    /// doesn't have. A stale `perplexity` in a v0.21.0 config is still
-    /// unavailable there.
-    @Test func selectedNeverInventsABackend() {
+    /// Widening is for EVERY backend, not just `tavily`. Previously only
+    /// tavily survived, so an unknown-version host (or any host below the
+    /// backend's floor) whose config named `perplexity` bound the picker to
+    /// a value it did not offer — SwiftUI renders that as a blank row with
+    /// no way back. Regression guard for that bug.
+    @Test func unknownVersionHostWithPerplexitySelectedIsNotBlank() {
+        for selected in ["perplexity", "keenable", "brave-free", "some-future-backend"] {
+            let list = WebToolsBackendRoster.search(.empty, selected: selected)
+            #expect(list.contains(selected), "search roster dropped \(selected)")
+            #expect(list.first == "", "inherit row missing for \(selected)")
+        }
+        // Appended at the end so the known roster's order never reshuffles.
+        #expect(WebToolsBackendRoster.search(.empty, selected: "perplexity") == [
+            "", "exa", "parallel", "firecrawl", "tavily", "searxng", "perplexity",
+        ])
+        #expect(WebToolsBackendRoster.extract(.empty, selected: "perplexity") == [
+            "", "exa", "parallel", "firecrawl", "tavily", "perplexity",
+        ])
+        #expect(WebToolsBackendRoster.combined(.empty, selected: "perplexity") == [
+            "", "exa", "parallel", "firecrawl", "tavily", "searxng", "perplexity",
+        ])
+        // A v0.21.0 host with a stale `perplexity` config sees it too.
         let v0210 = caps("Hermes Agent v0.21.0 (2026.8.31)")
-        #expect(!WebToolsBackendRoster.search(v0210, selected: "perplexity").contains("perplexity"))
+        #expect(WebToolsBackendRoster.search(v0210, selected: "perplexity").last == "perplexity")
+    }
+
+    /// A stock Hermes config leaves all three keys at `""`
+    /// (`config_defaults.py:350-352`). The picker must offer that value on
+    /// every host and every capability, or the row renders blank out of the
+    /// box and there is no way back to "inherit" after picking once.
+    @Test func inheritRowIsAlwaysOffered() {
+        let hosts: [HermesCapabilities] = [
+            .empty,
+            caps("Hermes Agent v0.13.0 (2026.5.7)"),
+            caps("Hermes Agent v0.20.6 (2026.8.27)"),
+            caps("Hermes Agent v0.21.0 (2026.8.31)"),
+            caps("Hermes Agent v0.21.1 (2026.9.7)"),
+        ]
+        for host in hosts {
+            #expect(WebToolsBackendRoster.search(host).first == "")
+            #expect(WebToolsBackendRoster.extract(host).first == "")
+            #expect(WebToolsBackendRoster.combined(host).first == "")
+            // Exactly one, and never a duplicate when "" is also selected.
+            #expect(WebToolsBackendRoster.search(host, selected: "").filter { $0.isEmpty }.count == 1)
+            #expect(WebToolsBackendRoster.extract(host, selected: "").filter { $0.isEmpty }.count == 1)
+            #expect(WebToolsBackendRoster.combined(host, selected: "").filter { $0.isEmpty }.count == 1)
+        }
     }
 }

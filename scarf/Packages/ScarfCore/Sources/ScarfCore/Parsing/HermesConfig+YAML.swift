@@ -221,11 +221,11 @@ public extension HermesConfig {
             ttsDeepInfraVoice: str("tts.deepinfra.voice", default: "default"),
             // Predates version tracking, like sttOpenAIModel; ungated.
             sttOpenAILanguage: str("stt.openai.language"),
-            // v0.20 round-trip (hasSTTUnifiedLanguage).
+            // v0.19.1 round-trip (hasSTTUnifiedLanguage).
             sttLanguage: str("stt.language", default: "en"),
             sttGroqModel: str("stt.groq.model", default: "whisper-large-v3-turbo"),
             sttGroqLanguage: str("stt.groq.language"),
-            // v0.20 round-trip (hasSTTLocalVADTuning).
+            // v0.19.1 round-trip (hasSTTLocalVADTuning).
             sttLocalVAD: boolTrueDefault("stt.local.vad"),
             sttLocalVADMinSilenceMS: int("stt.local.vad_min_silence_ms", default: 500),
             sttLocalNoSpeechProbThreshold: double("stt.local.no_speech_prob_threshold", default: 0.6),

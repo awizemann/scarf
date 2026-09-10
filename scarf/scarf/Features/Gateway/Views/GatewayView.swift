@@ -77,7 +77,8 @@ struct GatewayView: View {
     // MARK: - v0.13 cross-profile digest
 
     /// One-line summary above the gateway controls when the host is on
-    /// v0.13+ and `hermes gateway list --json` returned at least one
+    /// v0.13+ and `hermes gateway list` (a text table — there is no `--json`
+    /// form; see `HermesGatewayListService`) returned at least one
     /// profile. Doubly-guarded — `hasGatewayList` AND `profiles != []`
     /// — so a v0.13 host with no registered profiles doesn't render
     /// an empty pill.
@@ -150,7 +151,16 @@ struct GatewayView: View {
                         : (viewModel.gateway.isRunning ? viewModel.gateway.state : "not running"),
                     isActive: viewModel.gateway.isRunning
                 )
-                if let pid = viewModel.gateway.pid {
+                // Only while the live probe says running, and only for a
+                // profile that owns its own process. `pid` comes from the
+                // stored `gateway_state.json`, which nobody clears on a crash
+                // or a failed start — so beside a "not running" badge it was
+                // a stale number the user could read as a live process. A
+                // multiplexed satellite has no process of its own at all: the
+                // pid it carries, if any, belongs to a run that ended.
+                if viewModel.gateway.isRunning,
+                   !viewModel.gateway.isServedByMultiplexer,
+                   let pid = viewModel.gateway.pid {
                     Label("PID \(pid)", systemImage: "number")
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)

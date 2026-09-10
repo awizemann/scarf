@@ -196,4 +196,29 @@ import ScarfCore
         // The pre-existing modelPresetID sibling survives the tenant write.
         #expect(ProjectModelPresetReader.presetID(fromManifestData: data) == "keep-me")
     }
+
+    // MARK: - Cron field verdict
+
+    /// A pass that created nothing because every job was script-only
+    /// (`no_agent`, whose `pre_run_script` fleet-apply does not replicate)
+    /// used to report `.applied` — a green "applied" row, and a bump to
+    /// `TargetResult.appliedCount`, for a target where not one job was
+    /// written. It is `.skipped`.
+    @Test func cronFieldIsSkippedWhenEveryJobWasScriptOnly() {
+        #expect(FleetApplyExecutor.cronFieldStatus(created: 0, failed: 0, scriptOnlySkipped: 3) == .skipped)
+        #expect(FleetApplyExecutor.cronFieldStatus(created: 0, failed: 0, scriptOnlySkipped: 1) == .skipped)
+    }
+
+    @Test func cronFieldStatusKeepsItsOtherVerdicts() {
+        // Nothing landed and something errored → failed, script-only or not.
+        #expect(FleetApplyExecutor.cronFieldStatus(created: 0, failed: 2, scriptOnlySkipped: 0) == .failed)
+        #expect(FleetApplyExecutor.cronFieldStatus(created: 0, failed: 1, scriptOnlySkipped: 1) == .failed)
+        // Something landed → applied, even alongside a skip or a failure.
+        #expect(FleetApplyExecutor.cronFieldStatus(created: 1, failed: 0, scriptOnlySkipped: 2) == .applied)
+        #expect(FleetApplyExecutor.cronFieldStatus(created: 2, failed: 1, scriptOnlySkipped: 0) == .applied)
+        // Nothing to do at all, and nothing declined: the target is already
+        // in the desired state, which is applied — not skipped.
+        #expect(FleetApplyExecutor.cronFieldStatus(created: 0, failed: 0, scriptOnlySkipped: 0) == .applied)
+    }
+
 }

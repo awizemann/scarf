@@ -109,7 +109,13 @@ struct AgentTab: View {
     /// host can't use visible instead of silently rewriting it.
     @ViewBuilder
     private var fastModeRows: some View {
-        if HermesServiceTier.editorStyle(capabilities: capabilities) == .picker {
+        // `current:` matters: when the probe failed (`capabilities` is
+        // `.empty`, every floor false) but the config already holds a bounded
+        // `auto`/`cold`, the toggle would render it as "off" and overwrite it
+        // with `normal` on the first tap. Pass the stored value so that one
+        // state falls through to the picker instead.
+        let storedTier = HermesServiceTier.normalize(viewModel.config.serviceTier)
+        if HermesServiceTier.editorStyle(capabilities: capabilities, current: storedTier) == .picker {
             boundedFastModeRows
         } else {
             // C1: a pre-target host (and an undetected one) renders exactly

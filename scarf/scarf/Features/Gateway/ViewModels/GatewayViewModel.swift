@@ -108,7 +108,10 @@ final class MessagingGatewayViewModel {
     var pendingPairings: [PendingPairing] = []
     var isLoading = false
     var actionMessage: String?
-    /// `hermes gateway list --json` snapshot. `nil` when the verb fails
+    /// `hermes gateway list` snapshot, parsed from its TEXT table — the verb
+    /// has no `--json` flag at any supported tag (`hermes_cli/subcommands/
+    /// gateway.py:108` at v2026.9.7 registers `list` with no arguments).
+    /// `nil` when the verb fails
     /// (pre-v0.13 host or no profiles registered yet) — the digest row
     /// hides itself in that case.
     var gatewayList: GatewayListSnapshot?

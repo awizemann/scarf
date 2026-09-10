@@ -157,13 +157,17 @@ import Testing
 
     // MARK: - Capability boundary tests (below floor vs at/above floor)
 
-    @Test func sttUnifiedLanguageGatesAtV020() {
-        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.19.2 (2026.7.30)").hasSTTUnifiedLanguage)
+    // Floor is v0.19.1 (tag v2026.7.30, `pyproject.toml:5` = "0.19.1"), not
+    // v0.20 — see `HermesCapabilities.isV0191OrLater`.
+    @Test func sttUnifiedLanguageGatesAtV0191() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.7.20)").hasSTTUnifiedLanguage)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.19.1 (2026.7.30)").hasSTTUnifiedLanguage)
         #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)").hasSTTUnifiedLanguage)
     }
 
-    @Test func sttLocalVADTuningGatesAtV020() {
-        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.19.2 (2026.7.30)").hasSTTLocalVADTuning)
+    @Test func sttLocalVADTuningGatesAtV0191() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.7.20)").hasSTTLocalVADTuning)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.19.1 (2026.7.30)").hasSTTLocalVADTuning)
         #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)").hasSTTLocalVADTuning)
     }
 

@@ -99,8 +99,8 @@ struct VoiceTab: View {
                     sttProviderOptions.first { $0.id == id }?.label ?? id
                 }
             ) { viewModel.setSTTProvider($0) }
-            // v0.20: global language hint applied to every provider unless a
-            // per-provider language overrides it — hidden on pre-v0.20 hosts
+            // v0.19.1: global language hint applied to every provider unless a
+            // per-provider language overrides it — hidden below v0.19.1
             // (hasSTTUnifiedLanguage). Default "en"; empty restores auto-detect.
             if capabilitiesStore?.capabilities.hasSTTUnifiedLanguage == true {
                 EditableTextField(label: "Language (global)", value: viewModel.config.voice.sttLanguage) { viewModel.setSTTLanguage($0) }
@@ -115,8 +115,8 @@ struct VoiceTab: View {
             case "local", "":
                 PickerRow(label: "Model", selection: viewModel.config.voice.sttLocalModel, options: ["tiny", "base", "small", "medium", "large-v3"]) { viewModel.setSTTLocalModel($0) }
                 EditableTextField(label: "Language", value: viewModel.config.voice.sttLocalLanguage) { viewModel.setSTTLocalLanguage($0) }
-                // v0.20: faster-whisper anti-hallucination VAD tuning —
-                // hidden on pre-v0.20 hosts (hasSTTLocalVADTuning).
+                // v0.19.1: faster-whisper anti-hallucination VAD tuning —
+                // hidden below v0.19.1 (hasSTTLocalVADTuning).
                 if capabilitiesStore?.capabilities.hasSTTLocalVADTuning == true {
                     ToggleRow(label: "VAD Filter", isOn: viewModel.config.voice.sttLocalVAD) { viewModel.setSTTLocalVAD($0) }
                     StepperRow(label: "Min Silence (ms)", value: viewModel.config.voice.sttLocalVADMinSilenceMS, range: 0...5000, step: 50) { viewModel.setSTTLocalVADMinSilenceMS($0) }
@@ -130,8 +130,8 @@ struct VoiceTab: View {
                         .help("0 = never unload the local whisper model. A positive value releases it (freeing VRAM on GPU) after this many idle seconds; the next voice message reloads it.")
                 }
             case "groq":
-                // v0.20: config-driven Groq STT knobs — hidden on pre-v0.20
-                // hosts (hasSTTUnifiedLanguage; the provider itself is
+                // v0.19.1: config-driven Groq STT knobs — hidden below v0.19.1
+                // (hasSTTUnifiedLanguage; the provider itself is
                 // older, but the model/language keys were env-only before).
                 if capabilitiesStore?.capabilities.hasSTTUnifiedLanguage == true {
                     PickerRow(label: "Model", selection: viewModel.config.voice.sttGroqModel, options: ["whisper-large-v3", "whisper-large-v3-turbo", "distil-whisper-large-v3-en"]) { viewModel.setSTTGroqModel($0) }

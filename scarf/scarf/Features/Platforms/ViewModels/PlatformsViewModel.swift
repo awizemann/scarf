@@ -154,7 +154,9 @@ final class PlatformsViewModel: OutcomeMessageHosting {
         case "matrix": return "MATRIX_HOMESERVER"
         case "mattermost": return "MATTERMOST_URL"
         case "feishu": return "FEISHU_APP_ID"
-        case "bluebubbles", "imessage": return "BLUEBUBBLES_SERVER_URL"
+        // `imessage` was Scarf's own spelling for this adapter; it is no
+        // longer a KnownPlatforms row, so that arm was unreachable.
+        case "bluebubbles": return "BLUEBUBBLES_SERVER_URL"
         case "homeassistant": return "HASS_TOKEN"
         case "webhook": return "WEBHOOK_ENABLED"
         default: return nil

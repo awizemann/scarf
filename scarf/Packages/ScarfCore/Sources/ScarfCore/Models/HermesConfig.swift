@@ -323,14 +323,14 @@ public struct VoiceSettings: Sendable, Equatable {
     /// like the sibling `sttOpenAIModel`; ungated.
     public var sttOpenAILanguage: String
     /// Global STT language hint applied to every provider unless a
-    /// per-provider `language` overrides it. v0.20+ (`hasSTTUnifiedLanguage`).
+    /// per-provider `language` overrides it. v0.19.1+ (`hasSTTUnifiedLanguage`).
     /// Default `"en"` (Hermes default as of v2026.7.30; empty restores
     /// auto-detect).
     public var sttLanguage: String
-    /// `stt.groq.{model,language}`. v0.20+ (`hasSTTUnifiedLanguage`).
+    /// `stt.groq.{model,language}`. v0.19.1+ (`hasSTTUnifiedLanguage`).
     public var sttGroqModel: String
     public var sttGroqLanguage: String
-    /// `stt.local.*` anti-hallucination VAD tuning. v0.20+
+    /// `stt.local.*` anti-hallucination VAD tuning. v0.19.1+
     /// (`hasSTTLocalVADTuning`). `vad` defaults true (Silero VAD filter);
     /// the three numeric knobs only take effect when `vad` is enabled.
     public var sttLocalVAD: Bool

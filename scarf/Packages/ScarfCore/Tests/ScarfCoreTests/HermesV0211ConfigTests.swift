@@ -355,4 +355,46 @@ struct HermesV0211ConfigTests {
         #expect(HermesServiceTier.editorStyle(
             capabilities: HermesCapabilities.parseLine("Hermes Agent v0.22.0 (2026.10.1)")) == .picker)
     }
+
+    /// A probe that failed reads as `.empty` — every floor false — but the
+    /// config on disk may genuinely hold a bounded `auto`/`cold`. Rendering
+    /// the Bool toggle there showed it as "off" and rewrote the key to
+    /// `normal` on the first tap, destroying a value Scarf had no grounds to
+    /// call invalid. That one state falls through to the picker.
+    @Test func probeFailedButBoundedStoredValueRendersThePickerNotTheToggle() {
+        for stored in [HermesServiceTier.auto, .cold] {
+            #expect(HermesServiceTier.editorStyle(capabilities: .empty, current: stored) == .picker,
+                    "\(stored) on an undetected host must not get the lossy toggle")
+            // Same on a genuinely pre-target host that was downgraded under a
+            // config written by a newer one.
+            #expect(HermesServiceTier.editorStyle(
+                capabilities: HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)"),
+                current: stored) == .picker)
+        }
+        // The unbounded values are untouched: a pre-target host still gets
+        // exactly the toggle it always rendered (C1).
+        for stored in [HermesServiceTier.off, .always] {
+            #expect(HermesServiceTier.editorStyle(capabilities: .empty, current: stored) == .toggle)
+            #expect(HermesServiceTier.editorStyle(
+                capabilities: HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)"),
+                current: stored) == .toggle)
+        }
+    }
+
+    /// End-to-end for the same bug through the real entry points: the value
+    /// on disk normalizes to a bounded mode, the editor is the picker, the
+    /// picker lists that mode, and round-tripping the selection writes the
+    /// SAME scalar back rather than `normal`.
+    @Test func boundedStoredValueSurvivesOnAnUndetectedHost() {
+        for raw in ["auto", " Cold ", "COLD"] {
+            let tier = HermesServiceTier.normalize(raw)
+            #expect(tier.isBounded, "\(raw) should normalize to a bounded mode")
+            #expect(HermesServiceTier.editorStyle(capabilities: .empty, current: tier) == .picker)
+            let options = HermesServiceTier.options(capabilities: .empty, current: tier)
+            #expect(options.contains(tier), "picker must list the stored \(raw)")
+            #expect(options == [.off, .always, tier], "widened at the end, order preserved")
+            // Re-selecting what is already selected is a no-op on the file.
+            #expect(tier.configValue == raw.trimmingCharacters(in: .whitespaces).lowercased())
+        }
+    }
 }

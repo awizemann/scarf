@@ -109,4 +109,36 @@ import ScarfCore
                 == ["auth", "reset", "--", "nous", "1"])
         #expect(CredentialPoolsViewModel.resetCredentialArgv(provider: "nous", index: 0).count == 5)
     }
+
+    // MARK: - Target encoding: stable id beats the numeric index
+
+    /// Hermes resolves `<target>` id-first, then by unique LABEL, and only
+    /// then as a 1-based index (`agent/credential_pool_admin.py:87`
+    /// `resolve_target` at v2026.9.7 — `:94` id, `:97` label, `:106`
+    /// `raw.isdigit()`). So a bare `"2"` lands on a credential LABELLED "2"
+    /// whenever one exists, not on the second entry. Every mutation sends
+    /// the stable auth.json id instead when Scarf has one.
+    @MainActor
+    @Test func argvSendsTheStableIDRatherThanACollidableIndex() {
+        #expect(CredentialPoolsViewModel.credentialTarget(index: 1, internalID: "9f8d9b") == "9f8d9b")
+        #expect(CredentialPoolsViewModel.priorityArgv(
+            provider: "openrouter", index: 1, internalID: "9f8d9b", to: 0)
+                == ["auth", "priority", "--", "openrouter", "9f8d9b", "0"])
+        #expect(CredentialPoolsViewModel.refreshArgv(provider: "nous", index: 2, internalID: "a1b2c3")
+                == ["auth", "refresh", "--", "nous", "a1b2c3"])
+        #expect(CredentialPoolsViewModel.resetCredentialArgv(provider: "nous", index: 0, internalID: "a1b2c3")
+                == ["auth", "reset", "--", "nous", "a1b2c3"])
+        #expect(CredentialPoolsViewModel.removeArgv(provider: "nous", index: 0, internalID: "a1b2c3")
+                == ["auth", "remove", "--", "nous", "a1b2c3"])
+    }
+
+    /// auth.json entries without an `id` still have to be addressable — the
+    /// 1-based index stays the fallback, and whitespace-only is not an id.
+    @MainActor
+    @Test func argvFallsBackToTheOneBasedIndexWithoutAnID() {
+        #expect(CredentialPoolsViewModel.credentialTarget(index: 0, internalID: "") == "1")
+        #expect(CredentialPoolsViewModel.credentialTarget(index: 4, internalID: "   ") == "5")
+        #expect(CredentialPoolsViewModel.removeArgv(provider: "nous", index: 1)
+                == ["auth", "remove", "--", "nous", "2"])
+    }
 }

@@ -168,7 +168,9 @@ public enum KnownPlatforms {
         HermesToolPlatform(name: "qqbot", displayName: "QQ Bot", icon: "bubble.right", minimumVersion: .init(major: 0, minor: 10, patch: 0)),
         HermesToolPlatform(name: "msgraph_webhook", displayName: "Microsoft Graph Webhook", icon: "network", minimumVersion: .init(major: 0, minor: 14, patch: 0)),
         HermesToolPlatform(name: "api_server", displayName: "API Server", icon: "server.rack"),
-        HermesToolPlatform(name: "photon", displayName: "iMessage via Photon", icon: "antenna.radiowaves.left.and.right", minimumVersion: .init(major: 0, minor: 17, patch: 0)),
+        // Floor shared with `HermesCapabilities.hasPhotonPlatform` rather than
+        // repeated as a literal, so the roster row and the flag cannot drift.
+        HermesToolPlatform(name: "photon", displayName: "iMessage via Photon", icon: "antenna.radiowaves.left.and.right", minimumVersion: HermesCapabilities.photonPlatformFloor),
     ]
 
     public static func icon(for platform: String) -> String {

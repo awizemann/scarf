@@ -9,7 +9,6 @@ public struct GatewayListSnapshot: Sendable, Equatable {
         public let profile: String
         public let isRunning: Bool
         public let pid: Int?
-        public let platforms: [String]   // always empty: text output omits it
         /// v0.21.1: the profile is running because the DEFAULT profile's
         /// multiplexer is carrying its inbound traffic, not because it has a
         /// gateway process of its own. `_gateway_list` prints
@@ -24,13 +23,11 @@ public struct GatewayListSnapshot: Sendable, Equatable {
             profile: String,
             isRunning: Bool,
             pid: Int?,
-            platforms: [String],
             servedByMultiplexer: Bool = false
         ) {
             self.profile = profile
             self.isRunning = isRunning
             self.pid = pid
-            self.platforms = platforms
             self.servedByMultiplexer = servedByMultiplexer
         }
     }
@@ -45,11 +42,18 @@ public struct GatewayListSnapshot: Sendable, Equatable {
     /// One-line digest for the Messaging Gateway page header. Format depends
     /// on shape:
     /// - 0 profiles: `"no profiles configured"`
-    /// - 1 profile, running: `"default profile · running · slack, telegram"`
+    /// - 1 profile, running: `"default profile · running"`
     /// - 1 profile, stopped: `"default profile · stopped"`
     /// - 1 profile, multiplexed (v0.21.1+):
     ///   `"work profile · served by the default multiplexer"`
-    /// - >1 profile: `"3 profiles (2 running) · default: slack, telegram"`
+    /// - >1 profile: `"3 profiles (2 running)"`
+    ///
+    /// There is no per-profile platform clause: `hermes gateway list` prints
+    /// a text table with no platform column and no `--json` alternative, so
+    /// the parser has nothing to fill one from. The clauses that used to be
+    /// here were guarded on a list the only producer always built empty —
+    /// dead in every run, and a standing invitation to "fix" the digest by
+    /// inventing platform data Hermes never gave us.
     public var headerDigest: String {
         if profiles.isEmpty { return "no profiles configured" }
 
@@ -61,25 +65,11 @@ public struct GatewayListSnapshot: Sendable, Equatable {
             } else {
                 state = p.isRunning ? "running" : "stopped"
             }
-            if p.isRunning && !p.platforms.isEmpty {
-                let plats = p.platforms.joined(separator: ", ")
-                return "\(p.profile) profile · \(state) · \(plats)"
-            }
             return "\(p.profile) profile · \(state)"
         }
 
         let runningCount = profiles.filter(\.isRunning).count
-        // Surface the platforms of the first running profile (or first profile
-        // if none are running) so the digest carries one specimen of context
-        // beyond just counts.
-        let highlight = profiles.first(where: \.isRunning) ?? profiles[0]
-        let platsClause: String
-        if highlight.platforms.isEmpty {
-            platsClause = ""
-        } else {
-            platsClause = " · \(highlight.profile): \(highlight.platforms.joined(separator: ", "))"
-        }
-        return "\(profiles.count) profiles (\(runningCount) running)\(platsClause)"
+        return "\(profiles.count) profiles (\(runningCount) running)"
     }
 }
 
@@ -100,7 +90,8 @@ public struct GatewayListSnapshot: Sendable, Equatable {
 /// `✓`/`✗` gives `isRunning`; the word after it is the profile name (a
 /// trailing `(current)` marker is stripped); `— PID <n>` (em dash, U+2014)
 /// carries the pid on running lines. Text output has no per-profile platform
-/// list, so `platforms` is always `[]`.
+/// list, and there is no `--json` form to get one from, so the snapshot
+/// carries none.
 ///
 /// **v0.21.1 third clause.** `_gateway_list` (`hermes_cli/gateway.py:1514-1525`
 /// at tag `v2026.9.7`) prints `served by the default multiplexer` in the
@@ -117,8 +108,7 @@ public enum HermesGatewayListService {
 
     /// Parse the text table from `hermes gateway list` into a snapshot.
     /// Skips the `Gateways:` header; each subsequent profile line yields a
-    /// `ProfileEntry`. `platforms` is always `[]` (the text output omits
-    /// it). Returns `nil` for empty / whitespace-only input.
+    /// `ProfileEntry`. Returns `nil` for empty / whitespace-only input.
     public static func parse(_ text: String) -> GatewayListSnapshot? {
         let trimmedWhole = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedWhole.isEmpty else { return nil }
@@ -166,7 +156,6 @@ public enum HermesGatewayListService {
                 profile: profile,
                 isRunning: isRunning,
                 pid: pid,
-                platforms: [],
                 servedByMultiplexer: served
             ))
         }

@@ -593,11 +593,11 @@ final class SettingsViewModel {
     func setSTTOpenAIModel(_ value: String) { setSetting("stt.openai.model", value: value) }
     func setSTTOpenAILanguage(_ value: String) { setSetting("stt.openai.language", value: value) }
     func setSTTMistralModel(_ value: String) { setSetting("stt.mistral.model", value: value) }
-    // -- Global STT language hint + Groq knobs (v0.20+, hasSTTUnifiedLanguage).
+    // -- Global STT language hint + Groq knobs (v0.19.1+, hasSTTUnifiedLanguage).
     func setSTTLanguage(_ value: String) { setSetting("stt.language", value: value) }
     func setSTTGroqModel(_ value: String) { setSetting("stt.groq.model", value: value) }
     func setSTTGroqLanguage(_ value: String) { setSetting("stt.groq.language", value: value) }
-    // -- Local STT VAD anti-hallucination tuning (v0.20+, hasSTTLocalVADTuning).
+    // -- Local STT VAD anti-hallucination tuning (v0.19.1+, hasSTTLocalVADTuning).
     func setSTTLocalVAD(_ value: Bool) { setSetting("stt.local.vad", value: value ? "true" : "false") }
     func setSTTLocalVADMinSilenceMS(_ value: Int) { setSetting("stt.local.vad_min_silence_ms", value: String(value)) }
     func setSTTLocalNoSpeechProbThreshold(_ value: Double) { setSetting("stt.local.no_speech_prob_threshold", value: String(value)) }

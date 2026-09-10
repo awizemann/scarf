@@ -6,21 +6,30 @@ import os
 
 /// What this Hermes installation can do, derived from `hermes --version`.
 ///
-/// Scarf tracks Hermes feature releases by date-version + semver. v0.12 added
-/// a dozen surfaces (Curator, Kanban, multimodal ACP, ...) and removed a few
-/// (`flush_memories` aux task); v0.13 added Persistent Goals, ACP `/queue`,
-/// Kanban diagnostics + recovery UX, Curator archive/prune, Google Chat (20th
-/// platform), cross-platform allowlists, MCP SSE transport, Cron `no_agent`
-/// mode, Web Tools per-capability backends, Profiles `--no-skills`, and a
-/// handful of UX additions; v0.14 launched Windows beta + PyPI, OpenAI-compatible
-/// local proxy, two new platforms (LINE + SimpleX), two new providers (xAI OAuth +
-/// NovitaAI), new search backends, and /subgoal + YOLO mode; v0.15 added chat-scoped
-/// Kanban, Kanban maturation, ntfy platform, xAI web search + TTS tags, Azure Entra
-/// auth, Bitwarden secrets, hermes audit, skill bundles, and MCP mTLS; v0.16 adds
-/// sessions rename/optimize, kanban goal-mode, insights analytics, and dashboard
-/// web-UI. UI that branches on these surfaces calls the boolean accessors here so
-/// older Hermes installs degrade silently instead of throwing on an unknown CLI
-/// subcommand.
+/// Scarf tracks Hermes feature releases by date-version + semver. UI that
+/// branches on a release-gated surface calls the boolean accessors here, so
+/// older Hermes installs degrade silently instead of throwing on an unknown
+/// CLI subcommand or writing a config key the host ignores (charter C1).
+///
+/// **There is no per-release narrative here.** It stopped at v0.16 and went
+/// stale, and a prose summary of "what v0.14 added" is exactly the kind of
+/// release-note claim charter C2 forbids trusting. The authority is the
+/// `// MARK: vX.Y (<tag>) flags` sections below: each flag carries the tagged
+/// Hermes `file:line` its floor was verified against, and each cluster has a
+/// matching parse / all-on / prior-host-degradation / patch-still-on group in
+/// `HermesCapabilitiesTests`. Read the MARK sections, not a changelog.
+///
+/// Two shapes recur and are easy to get wrong:
+/// - a **floor** (the surface exists from tag T onward) is `atLeastSemver`;
+/// - a **removal window** (present until T, gone after) is an explicit
+///   `semver` comparison with inverse semantics — see `hasWebExtractAux` and
+///   `hasTavilyWebBackend`.
+///
+/// A floor is found by walking the symbol across EVERY tag over both the old
+/// and new file locations (the v0.21.1 modularization moved argparse blocks
+/// from `hermes_cli/main.py` into `hermes_cli/subcommands/<verb>.py`), never
+/// by diffing two endpoints — that mistake floored seven surfaces a release
+/// too high, see `isV0191OrLater`.
 ///
 /// Pure value type — no side effects. The async detection lives in
 /// `HermesCapabilitiesStore`.
@@ -65,12 +74,18 @@ public struct HermesCapabilities: Sendable, Equatable {
     public var hasCurator: Bool { atLeastSemver(0, 12, 0) }
 
     /// `hermes fallback` provider management (v0.12+).
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasFallbackCommand: Bool { atLeastSemver(0, 12, 0) }
 
     /// `hermes kanban` task board CLI (v0.12+).
     public var hasKanban: Bool { atLeastSemver(0, 12, 0) }
 
     /// `hermes -z <prompt>` non-interactive one-shot mode (v0.12+).
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasOneShot: Bool { atLeastSemver(0, 12, 0) }
 
     /// `hermes skills install <https-url>` direct-URL install (v0.12+).
@@ -83,9 +98,15 @@ public struct HermesCapabilities: Sendable, Equatable {
     public var hasUpdateCheck: Bool { atLeastSemver(0, 12, 0) }
 
     /// Pluggable TTS providers including native Piper (v0.12+).
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasPiperTTS: Bool { atLeastSemver(0, 12, 0) }
 
     /// `terminal.backend = vercel` Vercel Sandbox option (v0.12+).
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasVercelTerminal: Bool { atLeastSemver(0, 12, 0) }
 
     /// `auxiliary.flush_memories` config row was removed in v0.12.
@@ -99,7 +120,13 @@ public struct HermesCapabilities: Sendable, Equatable {
     public var hasCuratorAux: Bool { atLeastSemver(0, 12, 0) }
 
     /// Microsoft Teams (19th platform) and Yuanbao (18th) added in v0.12.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasTeamsPlatform: Bool { atLeastSemver(0, 12, 0) }
+
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasYuanbaoPlatform: Bool { atLeastSemver(0, 12, 0) }
 
     /// Cron jobs accept `--workdir` and `--context-from` flags (v0.12+).
@@ -111,6 +138,9 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `redaction.enabled` is now off by default in v0.12 — Scarf surfaces
     /// the toggle so users can flip it back on. v0.13 flips the server-side
     /// default back to ON; the toggle remains so users on v0.13 can opt out.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasRedactionToggle: Bool { atLeastSemver(0, 12, 0) }
 
     // MARK: v0.13 (v2026.5.7) flags
@@ -215,11 +245,17 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// compatible models (v0.13+). Hermes handles this transparently inside
     /// the agent loop; Scarf has no UI surface yet, but the flag lets future
     /// dashboards / activity views light up video-tool annotations.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasVideoAnalyze: Bool { atLeastSemver(0, 13, 0) }
 
     /// `transform_llm_output` plugin hook for shaping LLM output before the
-    /// conversation receives it (v0.13+). Plugin-author concern; Scarf's
-    /// PluginsView surfaces it as a documented hook in plugin metadata.
+    /// conversation receives it (v0.13+). Plugin-author concern.
+    ///
+    /// **No consumer yet** — a plugin-author concern. PluginsView does NOT
+    /// surface it (nothing in Scarf mentions `transform_llm_output` outside
+    /// this file); the earlier claim that it did was wrong.
     public var hasTransformLLMOutputHook: Bool { atLeastSemver(0, 13, 0) }
 
     /// ACP `session/set_model` JSON-RPC method (v0.13+). Lets Scarf
@@ -249,6 +285,9 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `clear` (v0.14+). Available in ACP and gateway contexts. Scarf
     /// renders the active subgoals as a trailing line under the goal pill
     /// in `SessionInfoBar`.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasSubgoal: Bool { atLeastSemver(0, 14, 0) }
 
     /// `/yolo` slash command — toggles YOLO mode (skip all dangerous
@@ -274,18 +313,30 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// auth, base URL `https://api.x.ai/v1` (v0.14+). Wire ID is
     /// `xai-oauth` (canonical); `x-ai-oauth` / `grok-oauth` /
     /// `xai-grok-oauth` are accepted aliases.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasGrokOAuthProvider: Bool { atLeastSemver(0, 14, 0) }
 
     /// NovitaAI inference provider (v0.14+). Overlay-only, API-key auth,
     /// base URL `https://api.novita.ai/v3/openai`. Wire ID is `novita`
     /// (canonical); `novita-ai` / `novitaai` are aliases.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasNovitaProvider: Bool { atLeastSemver(0, 14, 0) }
 
     /// LINE Messaging API — 21st gateway platform (v0.14+). Wire ID `line`.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasLINEPlatform: Bool { atLeastSemver(0, 14, 0) }
 
     /// SimpleX Chat — 22nd gateway platform (v0.14+). Wire ID `simplex`.
     /// Requires a local `simplex-chat` daemon running in WebSocket mode.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasSimpleXPlatform: Bool { atLeastSemver(0, 14, 0) }
 
     /// Brave Search (free tier) web-search backend (v0.14+). Wire ID
@@ -347,16 +398,25 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// (0.0–1.0, default 0.65) — routes to the cheapest model meeting the
     /// quality bar (v0.14+). Used together with the
     /// `openrouter/pareto-code` model alias.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasOpenRouterParetoCoder: Bool { atLeastSemver(0, 14, 0) }
 
     /// Custom provider `api_mode` field — explicit `chat_completions` /
     /// `anthropic_messages` / etc. selection persisted per provider
     /// (v0.14+). Pre-v0.14 hosts inferred from base URL.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasCustomProviderAPIMode: Bool { atLeastSemver(0, 14, 0) }
 
     /// Plugin `tool_override` flag — plugins can replace built-in tools
     /// (v0.14+). Scarf reads the manifest field to render a badge in
     /// `PluginsView`.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasPluginToolOverride: Bool { atLeastSemver(0, 14, 0) }
 
     /// `hermes plugins enable <name> --allow-tool-override` /
@@ -403,6 +463,9 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// of files written on disk to every assistant turn that mutated
     /// files (v0.14+; default on via `file_mutation_verifier` config).
     /// Scarf detects and styles the block in chat output.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasFileMutationVerifier: Bool { atLeastSemver(0, 14, 0) }
 
     /// Hermes surfaces a YOLO mode warning in its banner + status bar
@@ -415,12 +478,18 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// existing config keys still work. Scarf mirrors the display
     /// rename in the catalog so users see consistent naming across
     /// CLI and GUI.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasQwenCloudDisplayName: Bool { atLeastSemver(0, 14, 0) }
 
     /// Cross-session 1-hour Claude prompt cache shared across sessions
     /// on Anthropic / OpenRouter / Nous Portal (v0.14+). Server-side
     /// behavior; Scarf surfaces it as a documentation note in Settings →
     /// Prompt Caching when on a v0.14 host.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasCrossSessionClaudeCache: Bool { atLeastSemver(0, 14, 0) }
 
     // MARK: v0.15 (v2026.5.28) flags
@@ -456,6 +525,9 @@ public struct HermesCapabilities: Sendable, Equatable {
 
     /// ntfy — 23rd messaging platform (push notifications via a topic URL,
     /// no account). Config under `platforms.ntfy.extra`.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasNtfyPlatform: Bool { atLeastSemver(0, 15, 0) }
 
     /// Opt-in `tts.xai.auto_speech_tags` — inserts light `[pause]` tags
@@ -465,6 +537,9 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// Microsoft Entra ID auth for Azure AI Foundry — config knob
     /// `model.auth_mode = "entra_id"` (+ `model.entra.scope`); credentials
     /// flow through the Azure SDK env chain (`DefaultAzureCredential`).
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasAzureEntraAuth: Bool { atLeastSemver(0, 15, 0) }
 
     /// Bitwarden Secrets Manager — `secrets.bitwarden.*` config + a
@@ -493,6 +568,9 @@ public struct HermesCapabilities: Sendable, Equatable {
 
     /// Skills Hub index-level freshness (`generated_at` + `skill_count` in
     /// skills-index.json). Index-level only — no per-skill staleness.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasSkillHubFreshness: Bool { atLeastSemver(0, 15, 0) }
 
     /// ACP session edit auto-approval modes — `session/set_mode` with
@@ -514,16 +592,26 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// integer) columns for Ralph-style goal loops (v0.16+). Lets the kanban
     /// surface allow users to dispatch a task as a persistent goal-seeking
     /// worker with a turn budget instead of a one-shot execution.
+    ///
+    /// **No consumer yet** — the goal-mode surface it gated was deleted in the
+    /// whole-surface audit (it read a field Hermes never emitted), so this flag
+    /// is currently unread. Kept as the verified floor for a future one.
     public var hasKanbanGoalMode: Bool { atLeastSemver(0, 16, 0) }
 
     /// `hermes insights` — on-demand analytics verb showing agent usage
     /// statistics across all sessions and projects (v0.16+). Surfaced in a
     /// dedicated sidebar destination alongside existing reports.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasInsightsCommand: Bool { atLeastSemver(0, 16, 0) }
 
     /// `hermes dashboard` — web-UI backend verb for the desktop dashboard
     /// application (v0.16+). Scarf doesn't directly invoke this; it documents
     /// the version boundary for dashboard-aware installs.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasDashboardCommand: Bool { atLeastSemver(0, 16, 0) }
 
     // MARK: v0.17 (v2026.6.19) flags
@@ -532,20 +620,37 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// now OPT-IN (default off); deterministic pruning stays default-on
     /// (v0.17+). Surfaced as a Settings toggle so users can re-enable the merge
     /// pass that ran automatically before v0.17.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasCuratorConsolidate: Bool { atLeastSemver(0, 17, 0) }
 
     /// `max_concurrent_sessions` top-level config key — optional cap on
     /// simultaneously-active chat sessions, with automatic cleanup of the
     /// oldest when exceeded (v0.17+). `0`/empty means unbounded.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasMaxConcurrentSessions: Bool { atLeastSemver(0, 17, 0) }
 
     /// `photon` gateway platform — iMessage via Photon Spectrum (device-code
     /// OAuth + local gRPC sidecar), 24th platform (v0.17+).
-    public var hasPhotonPlatform: Bool { atLeastSemver(0, 17, 0) }
+    ///
+    /// The floor lives in ``photonPlatformFloor`` so the Platforms roster row
+    /// (`HermesToolPlatform`, which gates on a `SemVer` rather than a Bool)
+    /// and this flag cannot drift apart.
+    public var hasPhotonPlatform: Bool { atLeast(Self.photonPlatformFloor) }
+
+    /// First Hermes version carrying the `photon` gateway adapter. Shared by
+    /// ``hasPhotonPlatform`` and `HermesToolPlatform.known`'s `photon` row.
+    public static let photonPlatformFloor = SemVer(major: 0, minor: 17, patch: 0)
 
     /// `whatsapp_cloud` gateway platform — WhatsApp Business Cloud API (Meta's
     /// hosted webhook path, distinct from the older `whatsapp` web bridge),
     /// 25th platform (v0.17+).
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasWhatsAppCloudPlatform: Bool { atLeastSemver(0, 17, 0) }
 
     /// Telegram `rich_messages` (Bot API 10.1, default-on) + `status_indicator`
@@ -565,6 +670,9 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// overriding the global `cron.mirror_delivery` config (v0.18+).
     /// Scarf round-trips the field on all hosts (unknown keys are
     /// simply absent pre-v0.18); gate any future editor UI on this.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasCronAttachToSession: Bool { atLeastSemver(0, 18, 0) }
 
     /// `hermes mcp reauth [name|--all]` — refresh expired MCP OAuth
@@ -636,30 +744,49 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// session export formats beyond the default (v0.20+, v2026.8.3).
     public var hasSessionsExportFormats: Bool { isV020OrLater }
 
+    // MARK: v0.19.x re-floored flags (v2026.7.20 = 0.19.0, v2026.7.30 = 0.19.1)
+    //
+    // These shipped in the v0.20 audit's flag cluster because v2026.7.30 was
+    // read as an unnumbered pre-release. It is not — `pyproject.toml:5` at
+    // that tag reads `version = "0.19.1"` — so each floor below is the tag
+    // the surface actually landed in, and 0.19.x hosts get the surfaces they
+    // genuinely have. Each doc comment carries the verified file:line.
+
     /// `approvals.smart_policy` — operator-customizable free-text policy
     /// appended to the smart-approval guardian's system prompt
     /// (hermes-agent commit bd1db5460a "feat(approvals): operator-
-    /// customizable smart-approval policy", first released v2026.7.30 —
-    /// between the v0.19.0 tag (v2026.7.20) and the v0.20.0 tag
-    /// (v2026.8.3), so the next numbered floor this key is guaranteed
-    /// present at is v0.20).
-    public var hasApprovalSmartPolicy: Bool { isV020OrLater }
+    /// customizable smart-approval policy", first released v2026.7.30).
+    ///
+    /// **Floor v0.19.1, not v0.20.** v2026.7.30 is not an unnumbered
+    /// pre-release: its `pyproject.toml:5` reads `version = "0.19.1"`
+    /// (v2026.7.20 = 0.19.0, v2026.8.3 = 0.20.0). Verified present at that
+    /// tag: `hermes_cli/config_defaults.py:1945` `"smart_policy": ""`,
+    /// inside the `"approvals"` block opened at `:1935`.
+    public var hasApprovalSmartPolicy: Bool { isV0191OrLater }
 
     /// `secrets.bitwarden.encrypted_cache.{enabled,max_stale_seconds}` —
     /// optional encrypted last-good Bitwarden fallback for network/timeout
-    /// outages (v0.20+, hermes-agent commit 1384087729 "fix(secrets): add
-    /// encrypted Bitwarden stale cache", first released v2026.7.30).
-    public var hasBitwardenEncryptedCache: Bool { isV020OrLater }
+    /// outages (hermes-agent commit 1384087729 "fix(secrets): add
+    /// encrypted Bitwarden stale cache", first released v2026.7.30 = 0.19.1
+    /// per that tag's `pyproject.toml:5`). Verified at v2026.7.30:
+    /// `hermes_cli/config_defaults.py:2792` `"encrypted_cache": {`, `:2793`
+    /// `"enabled": False,`, `:2794` `"max_stale_seconds": 0,`.
+    public var hasBitwardenEncryptedCache: Bool { isV0191OrLater }
 
-    /// `secrets.command.*` — any-CLI vault helper secret source (v0.20+,
-    /// hermes-agent commit 3d5dd8efa5 "feat(secrets): add `command` secret
-    /// source + unified secrets.provider selector", first released
-    /// v2026.7.30).
-    public var hasCommandSecretSource: Bool { isV020OrLater }
+    /// `secrets.command.*` — any-CLI vault helper secret source
+    /// (hermes-agent commit 3d5dd8efa5 "feat(secrets): add `command` secret
+    /// source", first released v2026.7.30 = 0.19.1 per that tag's
+    /// `pyproject.toml:5`). These keys are NOT in `config_defaults.py` on
+    /// any tag — the source declares its own schema and reads the block
+    /// itself. Verified at v2026.7.30: `agent/secret_sources/command.py:416`
+    /// `"enabled": {"description": "Master switch", "default": False}`,
+    /// `:436` `command = str(cfg.get("command") or "").strip()`, registered
+    /// at `agent/secret_sources/registry.py:179-181`.
+    public var hasCommandSecretSource: Bool { isV0191OrLater }
 
     /// `telemetry.shared_metrics.enabled` — privacy-safe opt-in aggregate
     /// metrics written only to this profile's local telemetry directory,
-    /// no remote sink (v0.20+, Relay pipeline commits 3bd338d2a9,
+    /// no remote sink (Relay pipeline commits 3bd338d2a9,
     /// 64faff6768, 056e7df0e0, 9baa8cc96c, 36185bf2e2, 43d994986e,
     /// 841a5a744a/14bed44c8c revert+reapply, all first released
     /// v2026.7.30).
@@ -668,34 +795,53 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// v0.21.1, which adds the `send`/`endpoint` transmission keys — see
     /// `hasSharedMetricsSend`. This flag stays about the local COLLECTION
     /// switch (`telemetry.shared_metrics.enabled`), which is unchanged.
-    public var hasSharedMetricsTelemetry: Bool { isV020OrLater }
+    ///
+    /// Floor v0.19.1: v2026.7.30's `pyproject.toml:5` reads
+    /// `version = "0.19.1"`, and that tag's
+    /// `hermes_cli/config_defaults.py:2627` opens `"telemetry": {`, `:2628`
+    /// `"shared_metrics": {`, `:2629` `"enabled": False,`.
+    public var hasSharedMetricsTelemetry: Bool { isV0191OrLater }
 
     /// `database.{journal_mode,wal_autocheckpoint,journal_size_limit}` —
     /// SQLite journal mode + WAL sizing pragmas applied by every Hermes
-    /// database opener (v0.20+; `journal_mode` via commit 91351b7b7
+    /// database opener (`journal_mode` via commit 91351b7b7
     /// "fix(state): make journal mode canonical and behaviorally
     /// verified", `wal_autocheckpoint`/`journal_size_limit` via commit
     /// 9d4bfd5e3 "fix(config): register WAL sizing pragmas in
-    /// DEFAULT_CONFIG" — both first released v2026.7.30).
-    public var hasDatabaseJournalSettings: Bool { isV020OrLater }
+    /// DEFAULT_CONFIG" — both first released v2026.7.30 = 0.19.1 per that
+    /// tag's `pyproject.toml:5`). Verified at v2026.7.30:
+    /// `hermes_cli/config_defaults.py:16` `"database": {`, `:17`
+    /// `"journal_mode": "wal",`, `:20` `"wal_autocheckpoint": None,`,
+    /// `:21` `"journal_size_limit": None,`.
+    public var hasDatabaseJournalSettings: Bool { isV0191OrLater }
 
     /// `stt.language` (global fallback hint, default `"en"`) +
     /// `stt.groq.{model,language}` — the unified STT language resolver
-    /// (v0.20+, hermes-agent commit a10bd49ddd "feat(stt): unify language
+    /// (hermes-agent commit a10bd49ddd "feat(stt): unify language
     /// resolution across all STT providers" + commit bc997a36a8 "feat(stt):
     /// default global stt.language to 'en'", both first released
-    /// v2026.7.30 — between the v0.19.0 tag (v2026.7.20) and the v0.20.0
-    /// tag (v2026.8.3), so the next guaranteed floor is v0.20). Groq's STT
-    /// provider itself predates this (env-var only); the commit is what
-    /// makes `stt.groq.model`/`stt.groq.language` config-driven.
-    public var hasSTTUnifiedLanguage: Bool { isV020OrLater }
+    /// v2026.7.30). Groq's STT provider itself predates this (env-var
+    /// only); the commit is what makes `stt.groq.model`/`stt.groq.language`
+    /// config-driven.
+    ///
+    /// **Floor v0.19.1, not v0.20** — v2026.7.30's `pyproject.toml:5` reads
+    /// `version = "0.19.1"`, a numbered release, so the surface is
+    /// guaranteed at v0.19.1. Verified at that tag:
+    /// `hermes_cli/config_defaults.py:1420` `"language": "en",` under
+    /// `"stt": {` (`:1408`), and `:1432-1435` the `"groq": {` block with
+    /// `"model": "whisper-large-v3-turbo"` / `"language": ""`.
+    public var hasSTTUnifiedLanguage: Bool { isV0191OrLater }
 
     /// `stt.local.{vad,vad_min_silence_ms,no_speech_prob_threshold,
     /// logprob_threshold}` — faster-whisper anti-hallucination tuning
-    /// (v0.20+, hermes-agent commit bf8004e3a8 "fix(stt): kill
-    /// faster-whisper silence hallucinations at the source", first released
-    /// v2026.7.30 — same window as `hasSTTUnifiedLanguage`, floor v0.20).
-    public var hasSTTLocalVADTuning: Bool { isV020OrLater }
+    /// (hermes-agent commit bf8004e3a8 "fix(stt): kill faster-whisper
+    /// silence hallucinations at the source", first released v2026.7.30 =
+    /// 0.19.1 — same tag as `hasSTTUnifiedLanguage`, same floor). Verified
+    /// at v2026.7.30: `hermes_cli/config_defaults.py:1427` `"vad": True,`,
+    /// `:1428` `"vad_min_silence_ms": 500,`, `:1429`
+    /// `"no_speech_prob_threshold": 0.6,`, `:1430`
+    /// `"logprob_threshold": -1.0,`.
+    public var hasSTTLocalVADTuning: Bool { isV0191OrLater }
 
     /// `gateway.profile_routes` (and the top-level `profile_routes` form) —
     /// per-guild/channel/thread routing of inbound gateway messages to
@@ -706,6 +852,8 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `pyproject.toml` reads `version = "0.19.0"` (the preceding tag
     /// v2026.7.7.2 was 0.18.2), so the true floor is **v0.19**, not v0.20.
     public var hasGatewayProfileRoutes: Bool { isV019OrLater }
+
+    // MARK: v0.20 (v2026.8.3) flags — continued
 
     // MARK: v0.20.3 (v2026.8.16.2) flags
 
@@ -748,7 +896,10 @@ public struct HermesCapabilities: Sendable, Equatable {
 
     /// `is_job_runnable()` now blocks a cron job from firing whenever
     /// `state == "paused"` or `paused_at` is set, regardless of `enabled`
-    /// (v0.20.4+, cron/jobs.py:571–582, claim gate :2862). Scarf's
+    /// (v0.20.4+; at v2026.9.7 `cron/jobs.py:482-485` `is_job_runnable`
+    /// returns `bool(job.get("enabled", True)) and not _has_pause_marker(job)`,
+    /// with `_has_pause_marker` at `:477` and the claim gate at `:2509`
+    /// `if not force and not is_job_runnable(job)`). Scarf's
     /// `withEnabled(true)` must also force `state = "scheduled"` and strip
     /// `paused_at`/`paused_reason`, not just flip `enabled`, or a
     /// re-enabled job silently never runs again. This is a patch-level
@@ -759,7 +910,7 @@ public struct HermesCapabilities: Sendable, Equatable {
 
     /// The 14 inline built-in personalities were removed from
     /// `config.yaml`'s `agent.personalities` block; canon moved to
-    /// `hermes_cli/personality.py:43` `BUILTIN_PERSONALITIES` in code
+    /// `hermes_cli/personality.py:17` `BUILTIN_PERSONALITIES` in code
     /// (v0.20.4+). Scarf's personality pickers must hardcode/union the
     /// built-in list instead of relying solely on the YAML scrape.
     public var hasBuiltinPersonalitiesInCode: Bool { isV0204OrLater }
@@ -794,9 +945,11 @@ public struct HermesCapabilities: Sendable, Equatable {
     // MARK: v0.20.5 (v2026.8.19) flags
 
     /// The bare `hermes version` subcommand was removed (dropped from
-    /// `_BUILTIN_SUBCOMMANDS`, `hermes_cli/main.py:11648`; `subcommands/
-    /// version.py` deleted) and `hermes --version` (`main.py:13955`) now
-    /// carries the full output including the `commits behind` line
+    /// `_BUILTIN_SUBCOMMANDS`, `hermes_cli/main.py:2595` — no `"version"`
+    /// entry in the frozenset at v2026.9.7; `subcommands/version.py`
+    /// deleted) and `hermes --version` (`hermes_cli/_parser.py:112`
+    /// `add("--version", "-V", action="store_true", ...)`) now carries the
+    /// full output including the `commits behind` line (`banner.py:267`)
     /// (v0.20.5+). Pre-v0.20.5 hosts print only the short banner from
     /// `--version` and need the `version` subcommand for update status, so
     /// argv selection must branch on this flag: on a v0.20.5 host `version`
@@ -805,9 +958,16 @@ public struct HermesCapabilities: Sendable, Equatable {
 
     /// `hermes cron create/edit --reasoning-effort <level>` — per-job
     /// thinking-level override persisted as `reasoning_effort` in
-    /// `jobs.json` (v0.20.5+, `hermes_cli/subcommands/cron.py:108,244`).
+    /// `jobs.json` (v0.20.5+; at v2026.9.7 the argparse blocks are
+    /// `hermes_cli/subcommands/cron.py:72` for `cron create` and `:135` for
+    /// `cron edit` — the v0.21.1 modularization moved them out of main.py).
+    /// There is NO `cron --reasoning-effort` at the `cron` parser level;
+    /// only the two subverbs take it.
     /// Older hosts reject the unknown argument outright — argparse fails the
     /// whole `cron create` — so every cron-write path must gate on this.
+    ///
+    /// **No consumer yet** — no Scarf cron-write path passes
+    /// `--reasoning-effort`, so nothing reads this flag today.
     public var hasCronReasoningEffort: Bool { isV0205OrLater }
 
     // MARK: v0.21 (v2026.8.31) flags
@@ -823,14 +983,17 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `hermes peer run` / `peer status` / `peer stop` — start a long peer
     /// turn asynchronously (with an `--idempotency-key`), poll its status
     /// and final output, and stop one run without touching another
-    /// (v0.21+, `hermes_cli/subcommands/peer.py:484-541`). Verified absent
+    /// (v0.21+, `hermes_cli/subcommands/peer.py:432-434` — the three
+    /// `_remote("run"/"status"/"stop", ...)` registrations, dispatched at
+    /// `:361`). Verified absent
     /// at both v2026.8.19 (0.20.5) and v2026.8.27 (0.20.6), whose `peer`
     /// subparser stops at `add`/`list`/`remove`/`dm` — so older hosts fail
     /// argparse outright on these verbs.
     public var hasPeerRunCommands: Bool { isV021OrLater }
 
     /// `hermes cron doctor` — check scheduled jobs for common health
-    /// issues (v0.21+, `hermes_cli/subcommands/cron.py:324`). Unlike its
+    /// issues (v0.21+, `hermes_cli/subcommands/cron.py:184`
+    /// `cron_subparsers.add_parser("doctor", ...)`). Unlike its
     /// `cron incidents` sibling this one is genuinely new at v0.21:
     /// verified absent from cron.py at v2026.8.27 (0.20.6).
     public var hasCronDoctor: Bool { isV021OrLater }
@@ -849,20 +1012,25 @@ public struct HermesCapabilities: Sendable, Equatable {
 
     /// `hermes cron incidents [list|ack]` — durable cron failure incidents
     /// backed by a `cron_incidents` table in `cron/executions.db`
-    /// (`hermes_cli/subcommands/cron.py:264-282`). Advertised with v0.21
+    /// (`hermes_cli/subcommands/cron.py:165-166`
+    /// `cron_incidents = cron_subparsers.add_parser("incidents", ...)`,
+    /// `--state` at `:167`). Advertised with v0.21
     /// but present already at v2026.8.27 (0.20.6), hence the patch floor.
     public var hasCronIncidents: Bool { isV0206OrLater }
 
     /// `hermes cron resume --run-now` / `--at <ISO-8601>` — re-arm a paused
     /// job to fire immediately or at a chosen time, i.e. "Trigger now"
-    /// (`cron.py:262-264`). Absent at v2026.8.19 (0.20.5) — where `cron
+    /// (`hermes_cli/subcommands/cron.py:146` `--at` / `:147` `--run-now`).
+    /// Absent at v2026.8.19 (0.20.5) — where `cron
     /// resume` takes a bare `job_id` and argparse rejects the flags — but
     /// present at v2026.8.27 (0.20.6), so the floor is v0.20.6.
     public var hasCronResumeRunNow: Bool { isV0206OrLater }
 
     /// `hermes cron create/edit --deliver bot-chat[:profile]` — inject a
     /// job's output into a local profile's canonical Bot Chat session as a
-    /// message the bot then responds to (`cron.py:36-44`). Like
+    /// message the bot then responds to (`hermes_cli/subcommands/cron.py:29`
+    /// — the `cron create --deliver` help text lists `bot-chat[:profile]`;
+    /// `cron edit --deliver` at `:93`). Like
     /// `--deliver all` before it (see `supportsCronDeliver(_:)`), an
     /// unsupported `--deliver` value makes argparse reject the whole
     /// `cron create`. Absent at v2026.8.19, present at v2026.8.27.
@@ -896,12 +1064,18 @@ public struct HermesCapabilities: Sendable, Equatable {
     public var hasBotChatCreationCLI: Bool { isV021OrLater }
 
     /// `hermes browser close-profile` and the rest of the new top-level
-    /// `browser` subcommand (added to `_BUILTIN_SUBCOMMANDS`,
-    /// `hermes_cli/main.py:12420`; the verb itself at `main.py:13343`).
+    /// `browser` subcommand (registered in `_BUILTIN_SUBCOMMANDS` at
+    /// `hermes_cli/main.py:2595` — `"browser"` is the 16th entry of that
+    /// frozenset at v2026.9.7; the parser itself at
+    /// `hermes_cli/subcommands/browser.py:10`, with `close-profile` at
+    /// `:18-19`).
     /// Destructive — it terminates the browser process tree holding the
     /// user's real profile — so any Scarf affordance must be
     /// confirmation-gated on top of this version gate. Absent at
     /// v2026.8.19, present at v2026.8.27, so the floor is v0.20.6.
+    ///
+    /// **No consumer yet** — nothing in Scarf reads this flag. Kept because the
+    /// floor is source-verified and rediscovering it costs a tag walk.
     public var hasBrowserCloseProfile: Bool { isV0206OrLater }
 
     /// Whether the `auxiliary.web_extract.*` config block still exists on the
@@ -1244,6 +1418,16 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// proxying through a feature-specific flag.
     public var isV019OrLater: Bool { atLeastSemver(0, 19, 0) }
 
+    /// Whether the connected host is on v0.19.1 or newer. Patch-level floor
+    /// for the surfaces that first shipped in tag **v2026.7.30**, whose
+    /// `pyproject.toml:5` reads `version = "0.19.1"` — NOT an unnumbered
+    /// pre-release. The v0.20 audit mis-read that tag as "between v0.19.0
+    /// and v0.20.0, so round the floor up to v0.20"; walking the tags shows
+    /// v2026.7.20 = 0.19.0, v2026.7.30 = 0.19.1, v2026.8.3 = 0.20.0, so
+    /// v0.19.1 is itself a numbered release a host can be running and the
+    /// floor belongs here. See `hasApprovalSmartPolicy` and its siblings.
+    public var isV0191OrLater: Bool { atLeastSemver(0, 19, 1) }
+
     /// Whether the connected host is on the v0.20 line or newer. Convenience
     /// for UI copy that toggles on the v0.19 → v0.20 boundary without
     /// proxying through a feature-specific flag.
@@ -1324,8 +1508,14 @@ public struct HermesCapabilities: Sendable, Equatable {
     }
 
     private func atLeastSemver(_ major: Int, _ minor: Int, _ patch: Int) -> Bool {
+        atLeast(SemVer(major: major, minor: minor, patch: patch))
+    }
+
+    /// Same test as ``atLeastSemver(_:_:_:)`` against an already-built floor,
+    /// for the floors that are shared with a non-Bool consumer.
+    private func atLeast(_ floor: SemVer) -> Bool {
         guard let s = semver else { return false }
-        return s >= SemVer(major: major, minor: minor, patch: patch)
+        return s >= floor
     }
 
     public struct SemVer: Sendable, Equatable, Comparable, CustomStringConvertible {

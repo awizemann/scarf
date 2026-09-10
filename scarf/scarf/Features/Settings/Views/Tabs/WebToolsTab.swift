@@ -40,18 +40,33 @@ struct WebToolsTab: View {
         WebToolsBackendRoster.combined(caps, selected: viewModel.config.webToolsBackend)
     }
 
+    /// `""` is Hermes's default for both override keys and means "fall back
+    /// to `web.backend`" — name it so, rather than PickerRow's generic
+    /// "(none)", which reads like "no backend at all".
+    private static func overrideOptionLabel(_ option: String) -> String {
+        option.isEmpty ? String(localized: "Inherit (web.backend)") : option
+    }
+
+    /// The shared `web.backend` key has nothing above it to inherit from —
+    /// empty there means Hermes picks, via the keyless free-tier ring.
+    private static func sharedOptionLabel(_ option: String) -> String {
+        option.isEmpty ? String(localized: "Automatic") : option
+    }
+
     var body: some View {
         if split {
             SettingsSection(title: "Web Tools", icon: "globe.americas") {
                 PickerRow(
                     label: "Search backend",
                     selection: viewModel.config.webToolsSearchBackend,
-                    options: searchBackends
+                    options: searchBackends,
+                    optionLabel: Self.overrideOptionLabel
                 ) { viewModel.setWebToolsSearchBackend($0) }
                 PickerRow(
                     label: "Extract backend",
                     selection: viewModel.config.webToolsExtractBackend,
-                    options: extractBackends
+                    options: extractBackends,
+                    optionLabel: Self.overrideOptionLabel
                 ) { viewModel.setWebToolsExtractBackend($0) }
             }
             // Footer copy adapts to the connected host — v0.14 adds the
@@ -81,7 +96,8 @@ struct WebToolsTab: View {
                 PickerRow(
                     label: "Backend",
                     selection: viewModel.config.webToolsBackend,
-                    options: combinedBackends
+                    options: combinedBackends,
+                    optionLabel: Self.sharedOptionLabel
                 ) { viewModel.setWebToolsBackend($0) }
             }
             Text("Hermes v0.13 splits search and extract into separate backends. Update Hermes to access the per-capability picker.")

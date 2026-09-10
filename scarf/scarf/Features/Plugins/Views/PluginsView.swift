@@ -30,6 +30,15 @@ struct PluginsView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            // Hoisted OUT of `list`: the deprecated-import compat report is
+            // about the host's plugin directory, not about the rows Scarf
+            // managed to render. Inside `list` it was unreachable in exactly
+            // the case that matters most — a roster that came back empty
+            // because every plugin failed to load — so the one banner
+            // explaining WHY never appeared.
+            compatBanner
+                .padding(.horizontal)
+                .padding(.top, ScarfSpace.s2)
             if viewModel.isLoading && viewModel.plugins.isEmpty {
                 ProgressView().padding()
             } else if viewModel.plugins.isEmpty {
@@ -227,8 +236,6 @@ struct PluginsView: View {
     private var list: some View {
         ScrollView {
             LazyVStack(spacing: 1) {
-                compatBanner
-                    .padding(.bottom, ScarfSpace.s2)
                 // v0.16 Spotify sign-in affordance: surface when the
                 // spotify plugin is present and we're on v0.16+. Reuses
                 // the same SpotifySignInSheet and SpotifyAuthFlow as the
