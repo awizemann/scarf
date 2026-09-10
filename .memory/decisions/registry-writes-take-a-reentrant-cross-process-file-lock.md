@@ -5,10 +5,10 @@ permalink: scarf/decisions/registry-writes-take-a-reentrant-cross-process-file-l
 tags: [projects, registry, concurrency, mcp, dataloss, locking]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RegistryWriteLock.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDashboardService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SessionAttributionService.swift, scarf/scarf/Core/Services/HermesFileWatcher.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedTextFile.swift, scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift]
 source_paths_inferred: false
-source_sha: 92d062bdc2c76f94828de482292db860b4da4cbd
+source_sha: 012316d0d66c732c238b25f4990bc173867747cf
 created: 2026-09-04
 updated: 2026-09-07
-reviewed: 2026-09-08
+reviewed: 2026-09-09
 reviewed_by: audit:claude-code (background)
 ---
 

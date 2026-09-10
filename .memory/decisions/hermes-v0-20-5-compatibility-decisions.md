@@ -3,12 +3,12 @@ title: Hermes v0.20.5 Compatibility Decisions
 type: note
 permalink: scarf/decisions/hermes-v0-20-5-compatibility-decisions
 tags: [hermes, compatibility, v0.20.5, decisions]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/scarf/Features/Health/ViewModels/HealthViewModel.swift, scarf/scarf/Features/Profiles/ViewModels/ProfilesViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesConfig.swift, scarf/scarf/Features/Settings/Views/Tabs/VoiceTab.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesConfig.swift, scarf/scarf/Features/Health/ViewModels/HealthViewModel.swift, scarf/scarf/Features/Profiles/ViewModels/ProfilesViewModel.swift, scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift, scarf/scarf/Features/Settings/Views/Tabs/VoiceTab.swift, scarf/scarf/Features/CredentialPools/Views/CredentialPoolsView.swift]
 source_paths_inferred: false
-source_sha: d0bc77bd0c89f2596dcfc69d532f257420f50029
+source_sha: 012316d0d66c732c238b25f4990bc173867747cf
 created: 2026-08-26
 updated: 2026-08-26
-reviewed: 2026-09-04
+reviewed: 2026-09-09
 reviewed_by: audit:claude-code (background)
 ---
 

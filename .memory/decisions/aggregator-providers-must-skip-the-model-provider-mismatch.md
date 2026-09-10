@@ -40,5 +40,7 @@ reviewed_by: audit:claude-code (background)
 - [fact] check-hermes-tables.py also passes against the ACTUAL Hermes target tag v2026.6.19 (v0.17.0) via `git show v2026.6.19:hermes_cli/providers.py` — ALIASES and aggregator overlay data are byte-identical v0.16→v0.17, so v2.15.1 shipped correct tables despite the vendored checkout sitting on v0.16.0. #verified
 - [done] Hermes v0.17 changed `is_aggregator()` to normalize aliases first and return True for any `custom:`-prefixed provider. ModelPreflight now MIRRORS this: `detectMismatch` skips `custom` and any `custom:*` provider outright (ModelPreflight.swift:122-123, citing Hermes #48305), so a custom provider (e.g. LiteLLM proxy) serving org/model IDs no longer raises the false mismatch banner. Landed via task t-ed3700b2 (TASKS.md Done). #fixed
 
-## Provider expansion (2026-08-26)
-- [fact] `opencode-free` added to aggregatorProviders (commit ef5cc6c, v0.20.5 parity cycle, 2026-08-26). Vercel (`vercel` canonical ID) added as an aggregator in the same cycle (also native org/model namespacing via OpenAI-compat proxy). Both additions transparent to this preflight logic — slash handling is identical. #expansion
+
+## Provider expansion (2026-08)
+- [fact] Vercel (`vercel` canonical ID) added as an aggregator to aggregatorProviders (commit 421ba75e, "reconcile provider tables with Hermes v0.20", 2026-08-03). Native org/model namespacing via OpenAI-compat proxy. #expansion
+- [fact] `opencode-free` added to aggregatorProviders (commit ef5cc6c, v0.20.5 parity cycle, 2026-08-26). Zero-auth OpenCode tier with same org/model ID namespace. Both additions transparent to preflight logic — slash handling is identical. #expansion

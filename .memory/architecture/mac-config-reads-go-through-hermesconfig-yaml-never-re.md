@@ -5,10 +5,10 @@ permalink: scarf/architecture/mac-config-reads-go-through-hermesconfig-yaml-neve
 tags: [settings, config-parsing, drift]
 source_paths: [scarf/scarf/Core/Services/HermesFileService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift]
 source_paths_inferred: false
-source_sha: 92d062bdc2c76f94828de482292db860b4da4cbd
+source_sha: 012316d0d66c732c238b25f4990bc173867747cf
 created: 2026-07-14
 updated: 2026-07-14
-reviewed: 2026-09-08
+reviewed: 2026-09-09
 reviewed_by: audit:claude-code (background)
 ---
 

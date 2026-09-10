@@ -5,10 +5,10 @@ permalink: scarf/architecture/prefer-task-over-onappear-for-view-load-fetches-be
 tags: [performance, swiftui, navigation, architecture, audit-2026-06-13]
 source_paths: [scarf/scarf/ContentView.swift, scarf/scarf/Features/Health/Views/HealthView.swift, scarf/scarf/Features/Projects/Views/ProjectsView.swift, scarf/scarf/Features/Settings/Views/SettingsView.swift]
 source_paths_inferred: false
-source_sha: 168f30e914d476427d2de7a165d8f905edb4e923
+source_sha: 012316d0d66c732c238b25f4990bc173867747cf
 created: 2026-06-13
 updated: 2026-06-13
-reviewed: 2026-09-08
+reviewed: 2026-09-09
 reviewed_by: audit:claude-code (background)
 ---
 

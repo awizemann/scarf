@@ -2,12 +2,12 @@
 title: Analytics via swift-stats: Analytics facade, ScarfAnalytics seam, event conventions
 type: note
 permalink: scarf/architecture/analytics-via-swift-stats-analytics-facade-scarfanalytics
-source_paths: [scarf/scarf/Core/Services/Analytics.swift, scarf/scarf/Core/Services/UsageEvent.swift, scarf/scarf/Core/Services/UsageTracking.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Diagnostics/ScarfAnalytics.swift, scarf/scarf/Core/Services/StatsScarfMonBackend.swift, scarf/scarf/Features/Settings/Views/Tabs/AdvancedTab.swift]
+source_paths: [scarf/scarf/Core/Services/Analytics.swift, scarf/scarf/Core/Services/UsageEvent.swift, scarf/scarf/Core/Services/UsageTracking.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Diagnostics/ScarfAnalytics.swift, scarf/scarf/Core/Services/StatsScarfMonBackend.swift]
 source_paths_inferred: false
-source_sha: 2e1a26f6834951023226883f24f70a495897d440
+source_sha: 012316d0d66c732c238b25f4990bc173867747cf
 created: 2026-08-20
 updated: 2026-08-26
-reviewed: 2026-09-04
+reviewed: 2026-09-09
 reviewed_by: audit:claude-code (background)
 ---
 

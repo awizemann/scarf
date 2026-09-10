@@ -7,12 +7,13 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabil
 source_paths_inferred: false
 source_sha: 238674747424f516c7b840a69371d1b0fb004fa7
 created: 2026-09-08
-updated: 2026-09-08
-reviewed: 2026-09-08
-reviewed_by: claude-opus-5
+updated: 2026-09-09
+reviewed: 2026-09-09
+reviewed_by: claude-fable-5-1
 ---
 The decision record for the v0.21.1 ("v2026.9.7") parity cycle, Phases 0–7.
-Tag map: v2026.7.30 = 0.20.2, v2026.8.19 = 0.20.5, v2026.8.27 = 0.20.6,
+Tag map: v2026.7.30 = 0.19.1 (NOT 0.20.2 — corrected in the P16 section
+below, which carries the full tag walk), v2026.8.19 = 0.20.5, v2026.8.27 = 0.20.6,
 v2026.8.31 = 0.21.0, v2026.9.7 = 0.21.1.
 
 The shape of this cycle: **a capability floor is neither monotonic nor readable
@@ -108,3 +109,475 @@ deliberate NO-OPs.
 - implements [[Hermes Capability Gating Pattern]]
 - relates_to [[Hermes v0.21.1 Audit Findings]]
 - relates_to [[Hermes messages_fts contract: an 8 KB tool prefix and two rebuild markers]]
+
+
+## Whole-surface remediation — P9 exit-code-as-truth (C5)
+
+- [gotcha] **A `hermes` handler declared `-> None` exits 0 on every refusal it prints.** This is the general form of C5, and it hit six surfaces at once: `do_install` (`hermes_cli/skills_hub.py:645`, nine bare `return`s), `_cmd_export` (`sessions_cmd.py:295`), `cmd_mcp_login` (`mcp_config.py:709`, which DISCARDS `_reauth_oauth_server`'s bool), `_job_action` (`cron.py:635`) and `cmd_enable` (`plugins_cmd.py:1033`, which discards `_run_capability_consent`'s bool). The rule that survives: judge by the emitter's own SUCCESS line, and treat exit 0 with no success line as a FAILURE — never the reverse #verification #cli
+- [gotcha] Two emitters print BOTH markers by design, so "any failure marker ⇒ failure" and "any success marker ⇒ success" are each wrong on their own. `cron run` prints the green `Triggered job:` (`cron.py:658`) and THEN `Ran now: failed.` (`:662`, `:677`); `plugins enable` prints `enabled. Takes effect on next session.` (`:1023`) and THEN runs the consent screen (`:1033`). Everywhere else the refusal arms `return` before the success line, so a success marker is proof and a failure phrase inside a report body must not flip it — hence a per-site `failureWins`, not a global precedence #cli
+- [gotcha] `hermes sessions export -` has **no success line to judge**: `_write_output` (`sessions_cmd.py:78-80`) writes the payload and prints the `Exported …` summary ONLY for a real `--output` path. Its refusals go to STDOUT, so `Session '<id>' not found.` was the payload Scarf wrote into the user's `.jsonl`. The stdout path is judged by validating the payload shape instead (first non-blank line must parse as a JSON object — both stdout formats are JSON Lines), and only the first line inside a 64 KB window is decoded, because a real export can be hundreds of MB #verification #dataloss
+- [gotcha] `plugins enable`'s non-TTY arm (`plugins_cmd.py:1092-1098`) is the arm Scarf **always** takes for a capability-declaring plugin: it prints `capabilities NOT granted (fail closed)` and grants nothing, while the plugin still lands on the allow-list. "Enabled" was true and misleading at the same time. Its actionable half is the line's LAST clause, so it gets a purpose-written sentence rather than a `prefix(200)` — the same trap the v0.21.1 cron lifecycle-guard message set #plugins
+- [fact] `hermes security audit` is the INVERSE mistake and the exception to this whole group: its exit code is meaningful in THREE states, not two (`security_audit.py:311-312` returns `int(any(severity >= threshold))`), so **1 means findings, not a broken scan**; 2 is the only real failure (`:293` bad `--fail-on`, `:307` OSV `RuntimeError`). Contract and the `critical` default are unchanged since v2026.5.29 — the release the verb shipped in, and the floor of `hasHermesAudit` — so passing `--fail-on critical` explicitly pins the threshold without any pre-target risk #health #verification
+- [decision] The markers live in one `HermesCLIMarkers` table (`ScarfCore/Services/HermesCLIOutcome.swift`) with the emitting `file:line` on every entry, judged by one `HermesCLIVerdict.judge`, rather than six ad-hoc `output.contains` scans. Every marker was walked over EVERY tag back to v2026.6.19 (v0.17) before being trusted; all are byte-identical, and the one that is not that old (`Ran now:`, v2026.7.1) simply never fires on an older host — which is what makes an output-judged verdict safe under C1 #capability-gating #verification
+
+
+## Whole-surface remediation — P10 (YAML writers + parser)
+
+Commit `bf1645b1` on `fix/whole-surface-audit`.
+
+**The hazard, cited.** `gateway/config.py:776-791` at `v2026.9.7` wraps
+`config_loader.load_yaml_layer(...)` in a bare `except Exception` that logs
+*"Failed to process config.yaml — falling back to .env / gateway.json values."*
+and **continues**. A PyYAML syntax error in a file Scarf wrote therefore never
+fails loudly — it makes Hermes discard the **entire** config.yaml layer. Any
+new config.yaml writer must be round-tripped through real PyYAML in a test
+(`python3 -c 'import sys,yaml; yaml.safe_load(sys.stdin.read())'`), not merely
+eyeballed.
+
+**Durable gotchas learned here:**
+
+- **Never assume 2/4 indent.** `GatewayConfigWriter` hardcoded it. A 4-space
+  config is ordinary YAML; splicing an indent-2 key into it is a hard parse
+  error, and matching keys only at indent 2 means the existing key is never
+  found and a **duplicate** is appended (PyYAML resolves duplicates last-wins →
+  the section's siblings are silently lost). Derive the key indent from the
+  section's own first body line and the item indent from the block's own first
+  bullet; use the body indent as the step (`step * 2`), not `+ 2`.
+- **`"\r\n"` is ONE Swift `Character`.** `"a\r\nb".contains("\n")` is `false`.
+  Any CR/LF guard must scan `unicodeScalars`. This silently defeated the first
+  cut of the embedded-newline check.
+- **`.whitespaces` does not contain `\r`.** `HermesYAML` trimmed with it, so in
+  a CRLF config.yaml `slack:\r` failed the `key: value` separator scan and every
+  section header was dropped with its whole subtree. Strip `\r` per line.
+- **A section header is `<name>:` followed by ANYTHING.** `hasSuffix(":")`
+  misses `slack: {}` — which is what Hermes itself emits for a
+  preserved-but-empty section (`_strip_default_values` preserve_keys) — and
+  `slack:  # comment`. Split at the first separator colon.
+- **`ssl_verify` is bool OR path**, so it is the one MCP scalar that must NOT
+  go through `yamlScalar`'s bool-quoting: a quoted `"true"` is a CA-bundle path
+  named `true` to Hermes, i.e. a silent downgrade of cert verification. Every
+  other path scalar (`client_cert`, `client_key`, `cwd`) must go through it.
+- **Refusal is a required outcome for a line-oriented YAML editor.** Shapes it
+  cannot rewrite (nested inline flow mapping, a value carrying a line break)
+  must return "declined", distinct from "already correct" — otherwise the
+  no-op path reports success while the file is wrong.
+  `GatewayConfigWriter.WriteOutcome` is that seam; `setList`/`setMap` keep the
+  String signature and return the input unchanged.
+- **Block-scalar headers are not just `|` and `>`** — `|-`, `|+`, `>-`, `>+`,
+  `|2`, `|2-` and `|  # comment` all open a block. Treating them as values made
+  every deeper body line fold onto the header string.
+
+
+## Whole-surface remediation — P11 (main-actor writes, gateway load coalescing)
+
+- [gotcha] Measuring the elapsed time of a synchronous VM method proves NOTHING about main-actor blocking when the method kicks off `Task { … }` on a MainActor-isolated class: that body cannot start until the caller returns, so the call is fast whether or not the spawn inside it blocks. Both P11 timing tests were first written that way and passed with the `Task.detached` hop deleted — the same trap as the `@MainActor` detached-read note. #testing #concurrency
+- [convention] The honest signal for "this spawn does not run on the main actor" is `Thread.isMainThread` recorded INSIDE the injected fake runner. Deterministic and load-independent; a wall-clock main-actor-latency budget (repeated `Task.yield()` after the kick-off) does distinguish the two, but flakes under the full parallel `scarfTests` run where other suites' main-actor work inflates it. #testing #concurrency
+- [convention] `ServerContext` is a Sendable struct and `runHermes` is a concrete extension in the Mac target, so there is no protocol or subclass seam. `HermesCLIRunner` (`scarf/Core/Models/HermesCLIRunner.swift`) is the injectable `@Sendable ([String], TimeInterval) -> (output, exitCode)` alias plus `ServerContext.cliRunner`; a VM that must prove a C10 invariant takes it as an optional init parameter defaulting to `context.cliRunner`. #concurrency
+- [decision] A config write is `run CLI` + `re-read config.yaml`, so the two halves must be atomic with respect to each other: `SettingsViewModel.writeChain` serialises every write (including `memory off` and `config migrate`). Without it two quick toggles commit a snapshot belonging to neither, and the control visibly snaps back. #settings
+- [decision] Adopting `load(changeToken:force:)` on a VM whose load is a LIVE probe (`hermes gateway status` derives pids from the runtime snapshot; the gateway can die without rewriting `gateway_state.json`) requires `force: true` on section re-entry and on every post-mutation reload — coalescing is only safe for file-watcher ticks. `PlatformsViewModel`'s pattern coalesces re-entry too, which is fine there because its load reads files only. #gateway
+
+
+
+## Whole-surface remediation — P12 (skills hub, MCP login, mcp test rows)
+
+Commit `7e8e5c41` on `fix/whole-surface-audit`. All eight findings were real
+and all eight are PRE-existing — every shape fixed here is byte-identical
+back to `v2026.6.19` (v0.17), so nothing needed a capability flag.
+
+- [convention] **A Rich-table fixture must be RENDERED, not drawn.** Copy the
+  tag's own column specs + helpers into a scratch script and run them through
+  the Hermes venv's Rich (`$(dirname $(realpath ~/.local/bin/hermes))/python3`
+  — the system python3 has no `rich`) at **width 80**, the fallback a bare
+  `Console()` takes on a pipe. The width is load-bearing: at 80 the browse
+  Identifier column folds and the fold is the bug. Generators are preserved in
+  `documents/audits/hermes-v0.21.1-p12-fixture-provenance.md` #testing #verification
+- [gotcha] **Rich's two wrap modes need two different merge rules.** The browse
+  Description column word-wraps, so continuation cells are space-joined; the
+  Identifier column is `overflow="fold"` (`skills_hub.py:64-69`), a HARD
+  character wrap, so its continuation cells must be CONCATENATED. Space-joining
+  a folded browse.sh slug yields an identifier that installs nothing — and the
+  slug's trailing `-XXXXXX` content hash is exactly what folds off the end #skills
+- [gotcha] `hermes skills check` has never printed a version anywhere. It
+  compares CONTENT HASHES (`skills_hub_install.py:300`) and renders
+  `Name | Source | Status` with status ∈ {update_available, up_to_date,
+  orphaned, unavailable, invalid_install}. Only `update_available` is
+  actionable (`skills_hub.py:843`); the other three are faults a user fixes by
+  hand, so counting them as updates makes the tab promise work it cannot do.
+  `orphaned`/`invalid_install` postdate v0.17, where only the other three exist #skills
+- [gotcha] `hermes_cli/colors.py::should_use_color()` is `sys.stdout.isatty()`,
+  so for every piped Scarf run `color()` is the IDENTITY function — there is no
+  ANSI in `mcp test` output at all, and a finding that says "with ANSI" is
+  describing the TTY case. Conversely, when colour IS on, `f"{color(n):{w}s}"`
+  pads the ESCAPED string, so column alignment can never be parsed on #verification #cli
+- [decision] **`ssh -tt` is not available as a remote-stop fix.** Forcing a pty
+  would flip `should_use_color()` on for the remote command and make Rich wrap
+  at the pty's 80 columns — folding the very verification URL the MCP login
+  sheet exists to show. That is a user-visible change on a remote host, which
+  C1 forbids for a stop-path fix. A shell wrapper is impossible by construction:
+  `SSHTransport.composedRemoteCommand` quotes every token through
+  `remotePathArg`, so no caller can inject a shell operator. What is left is a
+  best-effort `pkill -f` over the same transport, anchored with `$` on the
+  server name (which matches the `hermes` process, not the `bash -lc` wrapper
+  whose cmdline ends in a quote) and with every ERE metacharacter escaped #mcp #concurrency
+- [gotcha] The MCP device prompt is ONE `print` of three lines
+  (`mcp_oauth_device.py:125-126`), and a `readabilityHandler` chunk splits on a
+  byte count — so `…\n  Code: WDJB-MJ` is a legal intermediate state and
+  `WDJB-MJ` is a perfectly non-empty string. A streaming parser must (a) ignore
+  everything after the LAST newline and (b) require the block's own last line,
+  `Waiting for approval...`, as a completion sentinel. Without both, a caller
+  that re-parses only while its result is nil latches a truncated code forever #mcp
+- [gotcha] `enabled`, `tools.resources` and `tools.prompts` all go through
+  `_parse_boolish` ({true,1,yes,on}/{false,0,no,off}, `mcp_tool_common.py:120-137`),
+  and resources/prompts default to **True** when absent
+  (`mcp_tool_registration.py:77`). Scarf defaulted both to false, so the editor
+  showed two toggles off for every server that had never set them and one save
+  wrote the `false` the user never chose — the same trap as
+  `gateway_restart_notification`. Note `mcp list`'s own display uses a
+  DIFFERENT, narrower set ({true,1,yes}, `mcp_config.py:575-577`); the gateway's
+  behaviour is what a client must model, not the list renderer's #config-parsing #mcp
+
+
+
+## Whole-surface remediation — P13 (config read correctness)
+
+Commit `c95caedb` on `fix/whole-surface-audit`.
+
+- [gotcha] **A default lives in whichever layer the reader can actually see.**
+  `hermes_cli/config.py::_load_config_impl` (`:2197,2211`) starts from
+  `deepcopy(DEFAULT_CONFIG)` and deep-merges the user's config.yaml over it, so
+  for any key present in `config_defaults.py` the READER's own
+  `.get(key, fallback)` arm is UNREACHABLE and the schema value is the answer.
+  `openrouter.response_cache` is the trap: schema `True` (`:649`), reader
+  `or_config.get("response_cache", False)` (`agent/auxiliary_client.py:860`).
+  Citing the reader alone would have "confirmed" Scarf's wrong `false`. Where
+  the schema has NO entry the reader's fallback IS the default — `model.streaming`,
+  `matrix.auto_thread`, `display.busy_ack_enabled`, `telegram.require_mention`
+  all work that way, so a key must be looked up in BOTH layers, in that order #config-parsing #verification
+- [gotcha] **A default that CHANGED mid-window is not a default, it is a sentinel.**
+  `platforms.telegram.extra.rich_messages` shipped `True` at v0.17.0
+  (`config.py:2144`) and `False` from v0.18.0 (`:2367`) — one release later.
+  Reading either as "the" default renders one host generation's toggle
+  backwards, so the parse reports ABSENCE (`boolishOpt`) and
+  `displayTelegramRichMessages(capabilities:)` resolves it, the
+  `checkpoints.enabled` pattern. This is why the phase rule "verify at the
+  target tag AND at the floor tag" exists: a two-endpoint check (v0.21.0 vs
+  v0.21.1) sees a stable `False` and misses the flip entirely #config-parsing #capability-gating
+- [gotcha] `platforms.telegram.extra.ignore_root_dm` is a **WINDOW ceiling**
+  (0.15.0 <= v < 0.21.1), the mirror of `hasTavilyWebBackend`: reader at
+  `gateway/platforms/telegram.py:4879` from v2026.5.28, moved by the v0.18
+  plugin split to `plugins/platforms/telegram/adapter.py:9835` (last at
+  v2026.8.31), and at v2026.9.7 a WHOLE-TREE grep finds it only in
+  `scripts/release.py:798` and the docs. A ceiling gates the ROW and the WRITE
+  but never the PARSE — the value round-trips on every host so a downgrade back
+  into the window finds the user's setting intact #capability-gating
+- [gotcha] **`boolTrueDefault` has a mirror image and Scarf was missing it.**
+  `bool(_:default: false)` reads `yes`/`on`/`1` as OFF while Hermes's
+  `_coerce_bool_extra` (`plugins/platforms/telegram/adapter.py:1176-1186`)
+  reads them ON — the same class of bug as the true-default one, in the other
+  direction. `boolish(_:default:)` / `boolishOpt` carry Hermes's actual sets
+  (truthy {true,1,yes,on}, falsy {false,0,no,off}, else the default) #config-parsing
+- [gotcha] A `??` chain over RAW values picks the first non-nil string and then
+  compares it literally, which is not "first key present wins": Slack's
+  `platforms.slack.require_mention: false` fell through to a true `extra:` one.
+  `boolTrueDefaultAt([keys])` decides on the first key PRESENT, then reads it
+  boolishly — Hermes's bridge is `extra.update(bridged)`, so top-level
+  overwrites `extra:` (`gateway/config_loader.py`) #config-parsing
+- [gotcha] `mattermost.reply_mode` is read from `config.extra` ONLY
+  (`plugins/platforms/mattermost/adapter.py:120-121`) and is NOT in
+  `gateway/config_loader.py`'s `_SHARED_KEYS` (`:197-215`), so the top-level
+  spelling Scarf read is never bridged and never reaches the adapter. The
+  `_SHARED_KEYS` tuple is the only list of top-level platform keys that ARE
+  bridged — check a platform key against it before believing a top-level path #config-parsing
+- [decision] `strEnum()` normalises closed-enum scalars through
+  `normalizedScalar` but deliberately does NOT validate against a member set.
+  `wal  # weak-fsync FS` is legal YAML for `wal` that no picker option matched
+  (blank control, then a save over a value the user never saw); but snapping an
+  UNKNOWN member back to the default would hide a value a newer host honours
+  and overwrite it. Both pickers instead APPEND an unrecognised stored value #settings
+- [gotcha] `approvals.mode` never accepted `auto` at any tag —
+  `tools/approval_context.py:197` `_VALID_MODES = ("manual","smart","off")`,
+  and from v0.18 the docstring names `'auto'` as *the* rejected example. Scarf's
+  picker offered it, so choosing it wrote a scalar Hermes logged and discarded.
+  A picker that drops an invalid member must also NORMALISE the selection
+  (`HermesApprovalMode.normalize`) or a config still carrying it renders blank #settings
+- [gotcha] `display.busy_input_mode: steer`'s floor is **v0.12.0**, and finding
+  it needs the READER: `elif _bim == "steer":` at `cli.py:1946` (v2026.4.30).
+  v2026.4.23's `"steer"` hits are the `/steer` SLASH COMMAND, and the
+  `interrupt | queue | steer` comment lands at the same tag as the reader but a
+  comment is not a reader. At v2026.9.7 the modularised line states the whole
+  set: `_bim if _bim in ("queue","steer") else "interrupt"` (`cli.py:2592`) #verification
+- [gotcha] There are TWO Hermes provider tables and Scarf mirrors both:
+  `providers.py::ALIASES` (inference ROUTING) and
+  `agent/models_dev.py::PROVIDER_TO_MODELS_DEV` (capability METADATA). They
+  disagree ON PURPOSE — bare `openai` routes to `openrouter` but resolves
+  metadata against models.dev's `openai` — so **catalog lookups must try the
+  RAW spelling first and only consult the alias table when it misses**.
+  Unconditional canonicalisation would have swapped an `openai` user's entire
+  model list for OpenRouter's. `meta-ai`/`opencode-free` were missing because
+  neither is an ALIASES entry at all #verification #settings
+- [gotcha] **A table-diff scan that reads a Swift block with a `"a": "b"` regex
+  is defeated by its own doc comment.** `check-hermes-tables.py`'s new
+  `models-dev` lane stayed green after the real `"meta-ai": "meta"` line was
+  deleted, because the comment above it QUOTES the entry. `swift_block()` now
+  drops whole-line `//` comments (only whole-line, so a `"https://…"` doc URL in
+  a value survives). Every lane reads through it #testing #ops
+- [decision] `SQLValueInliner`'s non-finite doubles are chosen for BACKEND
+  PARITY, not on their own merits: `%.17g` spells them `nan`/`inf`, which
+  SQLite parses as IDENTIFIERS, so the remote backend failed "no such column:
+  inf" where the local one bound the value happily. `sqlite3_bind_double`
+  stores NaN as NULL and keeps ±Infinity, so the literals reproduce it exactly
+  (`NULL`, `±9e999` — SQLite's own out-of-range float literal). Throwing would
+  invert the same divergence rather than remove it #state-db
+- [gotcha] `LocalSQLiteBackend`'s detected-schema flags are DERIVED state
+  describing the file behind the current handle, not accumulated knowledge.
+  `detectSchema()` only ever set them TRUE, so a `refresh()` onto a narrower
+  state.db — a v0.21.1 quarantine-and-recreate, a restore, a Hermes DOWNGRADE —
+  kept the previous file's answers and every widened SELECT failed "no such
+  column". Cleared in `close()` AND at the top of `detectSchema()`, so a
+  refresh whose reopen FAILS reports "no schema" rather than the last good
+  file's #state-db
+
+
+## Whole-surface remediation — P14 (Kanban dead gate surface, diagnostics, sessions rename)
+
+- **The Kanban "hallucination gate" was never real.** `hallucination_gate_status` and
+  `auto_blocked_reason` are emitted by NO Hermes version: a whole-tree `git grep` for both
+  names across **all 38 tags** in `~/.hermes/hermes-agent` (through v2026.9.7) returns zero
+  hits, and `_TASK_DICT_FIELDS` (`hermes_cli/kanban_output.py:18-24`) has never carried them.
+  They were modelled in Scarf v2.8.0 from the v0.13 release notes. Deleted outright (Alan's
+  call, 2026-09-09): the fields, `KanbanHallucinationGate`, the Reject button + `comment`
+  +`archive` reject path, the dim/glyph, the inspector banner, the card sub-line, the
+  board-VM optimistic-override side, and the iOS badge. The stall they were meant to show
+  reaches the UI through `last_failure_error` (real, v0.21.1). Hermes's only equivalent
+  signal is the `completion_blocked_hallucination` task_event (`kanban_db.py:2629`) —
+  design from that payload if it's ever wanted again.
+- **`goal_mode` / `goal_max_turns` are real COLUMNS but not a real WIRE surface.** They exist
+  on the `tasks` table (`kanban_db.py:922-925`) and as `kanban create` flags
+  (`kanban_parser.py:191-197`), but are absent from `_TASK_DICT_FIELDS`, so no `list --json`
+  / `show --json` has ever emitted them. Only the `created` task_event payload carries
+  `goal_mode` (`kanban_db.py:1359`). The Goal badge could never render; decode paths deleted.
+  `HermesCapabilities.hasKanbanGoalMode` now has NO consumer.
+- **Diagnostics: `hermes kanban diagnostics --json` is the ONLY emitter.** No task row, run
+  row, or `show` envelope has ever had a `diagnostics` key (`_TASK_DICT_FIELDS`,
+  `_SHOW_RUN_FIELDS`/`_RUNS_RUN_FIELDS` at `kanban_output.py:18-33`; `_cmd_show`'s envelope
+  at `kanban.py:493-498`). Fleet mode returns `[{task_id, title, status, assignee,
+  diagnostics:[…]}]` in ONE call (`kanban.py:676-678`) — mergeable by task id, so Scarf now
+  fetches it once per board load and merges. **Verified floor: v2026.5.7 (v0.13.0)** — the
+  `diagnostics` subcommand + `--json` + that exact JSON shape have existed unchanged since
+  (`kanban.py:350-370` at v2026.5.7; `kanban_parser.py:251-256` at v2026.9.7), which is
+  exactly `hasKanbanDiagnostics`, so no new flag was needed.
+- **Scarf's diagnostic model was invented too.** The real wire shape is
+  `Diagnostic.to_dict()` = `asdict` of `kanban_diagnostics.py:48-64`: `kind, severity, title,
+  detail, actions, first_seen_at, last_seen_at, count, run_id, data` — Unix-int timestamps,
+  `0` meaning unset. There is no `message` and no `detected_at`. Severity comes OFF THE WIRE
+  (`warning|error|critical`); Scarf must not infer it from `kind`. The nine real kinds are
+  `DIAGNOSTIC_KINDS` (`kanban_diagnostics.py`): hallucinated_cards, triage_aux_unavailable,
+  prose_phantom_refs, repeated_failures, repeated_crashes, review_dependency_deadlock,
+  stuck_in_blocked, block_unblock_cycling, stranded_in_ready. Scarf's previous seven
+  (`heartbeat_stalled`, `retry_cap_hit`, `darwin_zombie_detected`, …) matched none of them.
+- **`--max-retries` is a FAILURE limit, not an extra-attempt count.** `DEFAULT_FAILURE_LIMIT
+  = 2` (`kanban_db_dispatch.py:33`); `record_failure` trips when `failures >=
+  effective_limit` (`:1026-1034`). Hermes's own help says it: "`--max-retries 1` blocks on
+  the first failure (no retries), `--max-retries 3` allows two retries"
+  (`kanban_parser.py:176-181`). Scarf's create sheet said "0 = no retries. Defaults to 3."
+- **`sessions rename` needs `--`.** `title` is `nargs="+"`
+  (`hermes_cli/subcommands/sessions.py:210-213`), so a dash-leading title was eaten as an
+  option and argparse exited 2. Fixed to `["sessions","rename","--",id,title]`; the title
+  stays ONE argv element because `_cmd_rename` re-joins with single spaces
+  (`sessions_cmd.py:681`).
+- **Gotcha: `sessions.api_call_count` cannot be read at a fixed index.** `sessionColumns`
+  appends the v0.7 block only when present and `api_call_count` after it, and the two PRAGMA
+  probes are independent (Hermes adds columns without bumping SCHEMA_VERSION, C4). A host
+  with `api_call_count` but no `reasoning_tokens` made the hardcoded `row.int(at: 20)` read
+  past the row; `Row.int(at:)` is bounds-safe, so it silently reported 0. Resolve by column
+  NAME via `row.columnIndex`, like `rewind_count` / `last_read_at` already did.
+- Board diagnostics are throttled to one fetch per 30 s (thresholds in the rule engine are
+  minutes-to-hours) so the 5 s board poll doesn't gain a third process spawn per tick.
+
+
+## Whole-surface remediation — P15 (cron edit, doctor ids, timestamps)
+
+Commit `7a51abea` on `fix/whole-surface-audit`.
+
+- [gotcha] **`cron edit` cannot express "no skills" with `--skill`.**
+  `hermes_cli/cron.py::cron_edit` (v2026.9.7 :606-618): `_normalize_skills`
+  returns **None** for an empty or absent `--skill` list, and `final_skills`
+  stays `None` unless `--clear-skills`, a non-empty replacement, or an
+  add/remove pair is present — `None` reaches `update_job` as "field
+  untouched". So "the user unticked every skill" and "the user didn't touch
+  skills" were the SAME argv. An emptied set must be spelled
+  `--clear-skills`; a non-empty one is better sent as an
+  `--add-skill`/`--remove-skill` diff, which Hermes applies to the
+  `existing_skills` it reads at edit time (:606) rather than to the form's
+  snapshot #cron
+- [fact] Floor walk for `--clear-skills` / `--add-skill` / `--remove-skill`:
+  all three are `cron edit` arguments from **v0.3.0** —
+  `hermes_cli/main.py:2854-2857` at tag `v2026.3.17`, absent at
+  `v2026.3.12` (v0.2.0) — relocated to `hermes_cli/subcommands/cron.py:98-104`
+  by the v0.17 modularisation (`v2026.6.19`) and unchanged at `v2026.9.7`.
+  That is BELOW Scarf's minimum supported Hermes (v0.6.0), so the correct
+  outcome of the floor walk was **no gate at all**. A floor below the
+  project minimum is a legitimate answer; adding a flag for it would be
+  ceremony, and the test that matters is the one pinning the builder as
+  capability-free #capability-gating #verification
+- [gotcha] **A cron job id is not a single token.** `cron/jobs.py::load_jobs`
+  (v2026.9.7 :1271) adopts an id-keyed `jobs.json` map KEY verbatim
+  (`{**v, "id": v.get("id") or k}`) and nothing sanitizes it, so
+  `nightly backup` is a legal id. `cron doctor` prints its header as
+  `  {id} {name}`, so splitting on the first space files the finding under a
+  job that doesn't exist AND leaves the real one unwarned. The header must
+  be resolved against the ids the client already holds, by longest
+  token-boundary prefix — which also means the roster has to be snapshotted
+  on the main actor before the parse hops off, and the parse re-run when the
+  roster arrives after the doctor answer (the cold-launch order) #cron
+- [gotcha] **`_ensure_aware` never reads a naive timestamp as UTC.**
+  `cron/jobs.py:807-814` stamps it with the *system-local* zone of the
+  process reading it and converts to the *configured Hermes* zone. Scarf can
+  know neither (the system zone belongs to the SSH HOST, the configured zone
+  isn't exposed), so every consumer of a naive `run_at` must carry the same
+  ±12h conservative window `oneShotScheduleIsPastGrace` already had — the
+  latest instant a naive value can denote is `T + 12h` at UTC−12.
+  `oneShotIsUnresumable` did not, so it refused resumes the host accepts.
+  An OFFSET-bearing value keeps the tight `ONESHOT_GRACE_SECONDS` (:96)
+  comparison; the two arms are genuinely different problems #cron
+- [gotcha] `hermes_cli/cron.py::_format_lateness` (v2026.9.7 :88-91) opens
+  `seconds = max(0, int(seconds))` — Python `int()` TRUNCATES toward zero
+  and the `max` CLAMPS. Scarf rounded and never clamped, so `59.7s` read
+  `1m` where the CLI says `59s` and an early dispatch rendered `-1s late`.
+  Note the Swift trap the port then needs: `Int(_: Double)` **crashes** on
+  NaN/±inf, and `lateness_seconds` is untrusted JSON — Hermes's own
+  `except (TypeError, ValueError): return "?"` arm is the admission that it
+  is not trusted #cron
+- [convention] A post-mutation refresh of a CAPABILITY-GATED diagnostic verb
+  is gated on that verb having already ANSWERED on this host, not on a
+  version flag the view holds: a pre-target host then provably gains no
+  spawn it did not already make (C1), and the check needs no capability
+  plumbing into the view model. The C1-critical half is testable without a
+  CLI seam — on a fresh VM the refresh must leave both in-flight flags false #capability-gating #cron
+
+
+## Whole-surface remediation — P16 (capabilities/roster hygiene)
+
+**The tag map in this note's header was WRONG and is corrected here.** It
+read `v2026.7.30 = 0.20.2`. Walking `pyproject.toml:5` across every tag:
+
+| tag | version | | tag | version |
+|---|---|---|---|---|
+| v2026.7.1 | 0.18.0 | | v2026.8.16 | 0.20.2 |
+| v2026.7.7 | 0.18.1 | | v2026.8.16.2 | 0.20.3 |
+| v2026.7.7.2 | 0.18.2 | | v2026.8.18 | 0.20.4 |
+| v2026.7.20 | **0.19.0** | | v2026.8.19 | 0.20.5 |
+| v2026.7.30 | **0.19.1** | | v2026.8.27 | 0.20.6 |
+| v2026.8.3 | 0.20.0 | | v2026.8.31 | 0.21.0 |
+| v2026.8.13 | 0.20.1 | | v2026.9.7 | 0.21.1 |
+
+`v2026.7.30` is a NUMBERED patch release, 0.19.1. The v0.20 audit read it
+as an unnumbered pre-release ("between v0.19.0 and v0.20.0, so the next
+guaranteed floor is v0.20") and floored seven surfaces a whole minor too
+high, hiding them from every 0.19.1 host. Fixed via `isV0191OrLater`:
+`hasApprovalSmartPolicy`, `hasBitwardenEncryptedCache`,
+`hasCommandSecretSource`, `hasSharedMetricsTelemetry`,
+`hasDatabaseJournalSettings`, `hasSTTUnifiedLanguage`,
+`hasSTTLocalVADTuning`.
+
+**The rule this makes explicit: read `pyproject.toml:5` AT the tag before
+calling a tag "between releases".** Never infer a version from the date
+tag's position between two other tags. Cheapest possible check:
+`git -C ~/.hermes/hermes-agent show <tag>:pyproject.toml | sed -n 5p`.
+
+Durable gotchas from this phase:
+
+- **Not every config key is in `config_defaults.py`.** `secrets.command.*`
+  is absent from that file on EVERY tag including v2026.9.7 — the secret
+  source declares its own schema and reads its block directly
+  (`agent/secret_sources/command.py:416,436`, registered at
+  `agent/secret_sources/registry.py:179-181`). Absence from
+  `config_defaults.py` is NOT evidence a key does not exist.
+- **`hermes gateway list` has no `--json`** at any tag
+  (`hermes_cli/subcommands/gateway.py:108` registers it with zero
+  arguments). Its output is a text table with no platform column, so any
+  per-profile platform data in a `gateway list` snapshot is invented.
+- **`auth <verb> <provider> <target>` resolves `target` id → unique label
+  → 1-based index**, in that order (`agent/credential_pool_admin.py:87`
+  `resolve_target`; `:94` id, `:97` label, `:106` `raw.isdigit()`). A bare
+  `"2"` therefore lands on a credential *labelled* `2` whenever one
+  exists. Send the stable auth.json `id`. This ordering is byte-identical
+  back to the pool's first tag (v2026.4.30), so no capability gate is
+  needed — and `auth remove`'s own help says "by index, id, or label".
+- **`screen_recording_capturable` is a second signal, not a restatement of
+  the grant.** `tools/computer_use/doctor.py:204-207` makes
+  granted-but-not-capturable a FAILING row that outranks the plain pass.
+  Tri-state like the grants: `nil` = could not ask, never "cannot".
+- **An `.empty` capabilities value means "the probe failed", not "old
+  host".** Any gate that renders a *lossy* editor on the false branch must
+  also consider the stored value — `HermesServiceTier.editorStyle` showed
+  a bounded `auto`/`cold` as a Bool "off" and destroyed it on first tap.
+  Widening branches that only the detected path can reach are dead code
+  and a sign the gate is wrong.
+
+
+## Whole-surface remediation — P17 (cross-phase review remediation)
+
+Commit `ac61b5f7` on `fix/whole-surface-audit`.
+
+- [gotcha] **The YAML boolean coercion lives in the LOADER, not the reader —
+  so "is this key's reader boolish-tolerant?" is the wrong question.**
+  `hermes_cli/config.py::_load_config_impl` hands config.yaml to
+  `yaml.safe_load`, so `yes`/`on`/`no`/`off` are already Python bools and
+  `1`/`0` are truthy/falsy ints before ANY per-key reader runs. That makes the
+  boolish contract UNIVERSAL across every boolean key in config.yaml,
+  whichever module reads it — there is no per-key verification to do, and no
+  literal `== "true"` comparer can be correct. P13 fixed only the true-default
+  direction and two keys; P17 folded in the remaining 39 and DELETED the
+  literal `bool(_:default:)` reader so it cannot return. Verified against
+  PyYAML that bare `y`/`n` are NOT bools (they stay strings), so those are
+  paths/values, not booleans #config-parsing
+- [gotcha] `ssl_verify` on an MCP server is the bool-OR-path scalar again, and
+  its bool half is boolish for the same loader reason:
+  `tools/mcp_tool_transport.py:410` (v2026.9.7) passes
+  `config.get("ssl_verify", True)` straight into httpx's `verify=`. Reading
+  only the literal `"false"` put the word `no` in the CA-path field, and the
+  next save quoted it into a CA bundle literally NAMED `no` — the P10
+  bare-bool writer rule defeated through the READER. A split control that
+  collapses two widgets into one scalar has to hydrate with the same
+  vocabulary it writes #config-parsing #mcp
+- [gotcha] **`Task.cancel()` does not reach an inner `Task.detached`.**
+  `Task { … await Task.detached { … }.value }` reads exactly like a
+  cancellable load and is not one: every `Task.isCancelled` check inside the
+  detached body is dead, so a superseded load runs all its probes anyway.
+  Detaching the WHOLE body and hopping back with `await MainActor.run { … }`
+  gives real cancellation and still satisfies C10. The honest test is
+  behavioural — park the first probe on a semaphore, issue the superseding
+  load, then count the second probe #concurrency #gateway
+- [gotcha] Scarf reads `cron/jobs.json` **directly**, so none of
+  `cron/jobs.py`'s read-time normalisation applies to that path — `list_jobs`
+  → `_normalize_job_record` → `_apply_skill_fields` only runs for `cron list`.
+  A legacy job carries the singular `skill` and no `skills`, so the skill-edit
+  diff saw an empty existing set, emitted no `--remove-skill`, and `cron edit`
+  (which computes its own `existing_skills` via `_normalize_skill_list`) kept
+  the skill the user had just unticked. Mirror the rules exactly: `skills`
+  present WINS even when empty, `skills: null` is `None` and falls back to
+  `skill`, a bare STRING `skills` is a one-element list (decoding it strictly
+  throws and blanks the WHOLE board) #cron #state-db
+- [convention] A legacy alias key read in a decoder gets its OWN `CodingKey`
+  type, never a new case on the model's `CodingKeys`: `CodingKeys.allCases` is
+  what decides which keys get swept into `extra` and re-emitted verbatim, so
+  listing it there silently STRIPS the alias from every file Scarf writes back
+  #conventions
+- [convention] A test that re-states the production call site's own verdict
+  rules (markers, `failureWins`) proves nothing — reverting the call site
+  leaves it green. Drive the real entry point instead; `PluginsViewModel` took
+  the `HermesCLIRunner` injection P11 introduced for exactly this #testing
+- [convention] An optional test lane (PyYAML round-trip) that no-ops when its
+  dependency is missing must SAY so. One `@Test` wrapping
+  `#expect(dependencyAvailable)` in `withKnownIssue(…, isIntermittent: true)`
+  is green when the lane ran and prints a named known issue when it did not,
+  without ever failing a machine that lacks it #testing
+- [decision] NO-OP on finding 8 (cron-doctor roster branch ordering). Verified
+  against the emitter: `cron_doctor` (`hermes_cli/cron.py:517-536`) prints
+  exactly one header shape, `  {id} {name}` at indent 2, and issues at indent
+  4. The roster branch requires an EXACT known job id at a token boundary,
+  which is strictly stronger evidence than the shape heuristic that follows
+  it, so reordering changes nothing; `File` / `Traceback` fail
+  `isPlausibleJobID` too. Pinned with a traceback fixture instead of a reorder
+  #cron #verification

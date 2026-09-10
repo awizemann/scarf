@@ -5,10 +5,10 @@ permalink: scarf/conventions/driving-cron-and-kanban-from-xcuitest-what-actually
 tags: [testing, xcuitest, cron, kanban, gotcha]
 source_paths: [scarf/scarf/ContentView.swift, scarf/scarf/Features/Cron/Views/CronView.swift, scarf/scarf/Features/Kanban/Views/KanbanColumnView.swift]
 source_paths_inferred: false
-source_sha: e29ea4246c0f3345b075a4b3aae681751cf36e1f
+source_sha: 012316d0d66c732c238b25f4990bc173867747cf
 created: 2026-09-08
 updated: 2026-09-08
-reviewed: 2026-09-08
+reviewed: 2026-09-09
 reviewed_by: audit:claude-code (background)
 ---
 

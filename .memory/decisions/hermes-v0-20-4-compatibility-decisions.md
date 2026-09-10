@@ -25,5 +25,5 @@ reviewed_by: audit:claude-code (background)
 
 ## Relations
 - implements [[Hermes Capability Gating Pattern]]
-- relates_to [[Hermes v0.20.4 Audit Findings]]
+- relates_to [[Hermes v0.20.5 Compatibility Decisions]]
 - supersedes_partially [[Hermes v0.20 Compatibility Decisions]]

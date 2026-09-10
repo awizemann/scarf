@@ -3,13 +3,13 @@ title: Hermes Version Compatibility Target
 type: note
 permalink: scarf/integration/hermes-version-compatibility-target
 tags: [hermes, compatibility, versioning]
-source_paths: [README.md, scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift]
+source_paths: [README.md, scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, documents/hermes-v0.21.1-audit-report.md, wiki/Hermes-Version-Compatibility.md]
 source_paths_inferred: false
-source_sha: 6479e44021208a95e59f7885507b0fafaacb6335
+source_sha: 012316d0d66c732c238b25f4990bc173867747cf
 created: 2026-05-29
 updated: 2026-09-08
-reviewed: 2026-09-08
-reviewed_by: claude-opus-5
+reviewed: 2026-09-09
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

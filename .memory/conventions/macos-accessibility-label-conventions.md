@@ -12,8 +12,6 @@ reviewed: 2026-09-08
 reviewed_by: audit:claude-code (background)
 ---
 
-Established during the 2026-08-28 accessibility pass driven by the Walkabout macOS shakedown (W19/W22). Form fields and list rows in the macOS target now carry .accessibilityLabel; follow these rules when adding UI.
-
 ## Observations
 
 - [convention] Every macOS TextField whose visible label is a sibling Text needs .accessibilityLabel matching the visible label exactly (Voice Control resolves spoken names against it) #accessibility
@@ -46,11 +44,6 @@ Extended in the 2026-09-04 Projects AX batch (t-44d4ad5b, from the P7 audit's Ac
 - [convention] An `NSViewRepresentable`-hosted `WKWebView` needs `webView.setAccessibilityLabel(_:)` set directly in `makeNSView` — SwiftUI's `.accessibilityLabel` modifier does not reach across the AppKit bridge onto the represented view itself #accessibility
 - [gotcha] A deliberately non-modal overlay panel (see mini-app inspector: sidebar/cockpit stay live behind it by design) can still justify `.accessibilityAddTraits(.isModal)` for VoiceOver specifically — sighted mouse/keyboard users reach the background genuinely, but VO has no equivalent of peripheral vision, so scoping VO navigation to the newly-opened panel is the closer analogue to where a sighted user's attention actually goes. Don't let "not modal for the mouse" become "not modal for VoiceOver either" #accessibility
 
-## Relations
-
-- relates_to [[Localization Workflow]]
-
-
 Extended in the 2026-09-04 Projects A2 pass (t-572428b3, from the P8 audit's Accessibility section) — WidgetErrorCard is now the highest-traffic surface in Projects since every new refusal state (image policy, size caps) routes through it.
 
 - [convention] A shared "error card" component (title + reason + optional hint stacked in a VStack) reused across many call sites needs `.accessibilityElement(children: .combine)` on the OUTER container plus `.accessibilityHidden(true)` on its status glyph — fixing it once at the component fixes every call site, versus 2-4 VO stops per instance multiplied by every place that renders it #accessibility
@@ -60,13 +53,11 @@ Extended in the 2026-09-04 Projects A2 pass (t-572428b3, from the P8 audit's Acc
 - [convention] A consequential action button whose visible label doesn't state its scope (e.g. "Approve & Run" approving only the CHECKED permissions, not all requested ones) needs an `.accessibilityHint` spelling that out — sighted users infer it from the checkbox list above; VoiceOver users landing on the button via rotor don't necessarily have that context in short-term memory #accessibility
 - [convention] iOS parity with the Mac `RegistryDamageBanner` announce-on-appear pattern: when a view polls/refreshes repeatedly (`.refreshable`, `.task` re-runs) and a damage/error string can persist unchanged across refreshes, track the last-announced value in `@State` and post `AccessibilityNotification.Announcement(AttributedString(...))` only on the nil→non-nil (or changed-value) transition — otherwise a stable warning re-announces on every pull-to-refresh, which is worse than the silence it was meant to fix #accessibility
 
-
 Extended 2026-09-04 by the sidebar restructure (t-e5bc2ad4). NOTE: the `ProjectsSidebar.swift` anchor in `source_paths` above was DELETED by that task — the in-area second project sidebar is gone and its rows, filter, folder groups and context menu now live in `scarf/scarf/Navigation/SidebarProjectsWell.swift`, which carries the same labelling rules forward.
 
 - [convention] A hand-rolled disclosure (a section header `Button` with a chevron, used where the app owns its own row chrome and can't take `DisclosureGroup`'s) has to re-supply by hand everything DisclosureGroup gave for free: a real `Button` (not `.onTapGesture`), `.accessibilityLabel` for the section name, `.accessibilityValue("expanded"/"collapsed")` for the state the chevron conveys visually, and an `.accessibilityHint` — the chevron itself gets `.accessibilityHidden(true)` #accessibility
 - [gotcha] Replacing a `List(selection:)` with hand-rolled `Button` rows LOSES arrow-key list navigation; the rows stay Full-Keyboard-Access reachable as buttons, but this is a real keyboard-navigation trade and should be a deliberate, stated one rather than a discovery #accessibility
 - [convention] A container "well" grouping a list needs `.accessibilityElement(children: .contain)` PLUS `.accessibilityLabel` — `.contain` keeps each row its own stop while the label gives VoiceOver one stop naming the region; a bare label on the container would instead propagate down and overwrite every row's #accessibility
-
 
 Extended 2026-09-07 by GW-F4 (t-667fd332, the GW-E5 audit's Accessibility section). This batch's headline finding was not a labelling one: 21 surfaces rendered an outcome-BLIND `String?` channel with a hardcoded green checkmark, so every guarded-write refusal ("Failed to write .env", `registryBusy`) was shown as a success — to sighted users as much as VoiceOver ones. The fix is shared infrastructure: `scarf/scarf/Features/Common/OutcomeMessage.swift` (`OutcomeMessage` + the `OutcomeMessageHosting` protocol) and `OutcomeMessageBar.swift` (the one bar), now at 24 call sites.
 
@@ -79,8 +70,11 @@ Extended 2026-09-07 by GW-F4 (t-667fd332, the GW-E5 audit's Accessibility sectio
 - [decision] `ProjectRegistryError.registryBusy` now carries a per-file `label` threaded from `GuardedTextFile`'s existing label through `RegistryWriteLock.withLock(path:label:)`. GW-F3 pointed one lock at four more files than the registry it is named for, and the busy message had only a raw path to show for a `.env` or a MEMORY.md #i18n
 - [gotcha] ScarfCore has NO string catalog and will not get one (a headless `xcodebuild` never merges keys back, and a second catalog would fork the vocabulary). Its refusal sentences reach users VERBATIM via `localizedDescription` passthrough at app-side bars — documented at both `errorDescription` sites rather than papered over; app-side surfaces wrap what they compose themselves in `String(localized:)` #i18n
 
-
 Extended 2026-09-08 by t-0fb3b91f (the cron detail pane the P2b UI gate could not reach). The headline finding was a HIT-TESTING one, not a labelling one, and it made an entire pane unreachable for VoiceOver as well as for XCUITest.
 
 - [gotcha] A `.plain` Button's hit area is its label's OPAQUE content: a row whose background is `.fill(isSelected ? tint : Color.clear)` is clickable only on its glyphs, so a click in the row's empty middle — where XCUITest clicks, and where a mouse user aims — falls through. `.contentShape(Rectangle())` inside the label is the fix; the symptom reads as "the row does nothing and its `.contextMenu` never presents", and downstream as "the detail pane is missing" when nothing can be selected #accessibility
 - [convention] `HSplitView`'s children's `minWidth`s ADD UP and it overflows rather than shrinks below their sum — the overflowing pane is clipped, and a clipped SwiftUI subtree is absent from the accessibility tree entirely. Master-detail panes take the app's `resizableColumn` + `HStack` pattern (Bots, Chat, now Cron): a fixed, persisted list width beside a flexible detail can never overflow #accessibility
+
+## Relations
+
+- relates_to [[Localization Workflow]]
