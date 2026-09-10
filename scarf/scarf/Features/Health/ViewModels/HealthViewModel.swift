@@ -184,8 +184,12 @@ final class HealthViewModel {
             // `async let` would park five cooperative-pool threads.
             async let pidProbe        = Task.detached { svc.hermesPID() }.value
             async let versionProbe    = Task.detached { Self.probeVersion(ctx) }.value
-            async let statusProbe     = Task.detached { ctx.runHermes(["status"]).output }.value
-            async let doctorProbe     = Task.detached { ctx.runHermes(["doctor"]).output }.value
+            // Every `runHermes` NAMES its timeout (P22's rule): the 60 s
+            // default in `ServerContext+Mac.swift:21` is silent, so a site
+            // that omits it cannot be read as having chosen anything. These
+            // two are read-only probes behind a spinner.
+            async let statusProbe     = Task.detached { ctx.runHermes(["status"], timeout: 60).output }.value
+            async let doctorProbe     = Task.detached { ctx.runHermes(["doctor"], timeout: 60).output }.value
             async let subscriptionRead = Task.detached { subSvc.loadState() }.value
             async let configRead      = Task.detached { svc.loadConfig() }.value
             // v0.18+ — `computer-use permissions status --json` exits 1
@@ -505,7 +509,7 @@ final class HealthViewModel {
         actionMessage = "Starting…"
         let ctx = context
         Task { [weak self] in
-            let result = await Task.detached { ctx.runHermes(["gateway", "start"]) }.value
+            let result = await Task.detached { ctx.runHermes(["gateway", "start"], timeout: 60) }.value
             guard let self else { return }
             self.isControlBusy = false
             let started = result.exitCode == 0
@@ -530,7 +534,7 @@ final class HealthViewModel {
         Task { [weak self] in
             let stopped = await Task.detached { svc.stopHermes() }.value
             try? await Task.sleep(for: .seconds(2))
-            let result = await Task.detached { ctx.runHermes(["gateway", "start"]) }.value
+            let result = await Task.detached { ctx.runHermes(["gateway", "start"], timeout: 60) }.value
             guard let self else { return }
             self.isControlBusy = false
             let started = result.exitCode == 0
@@ -663,7 +667,10 @@ final class HealthViewModel {
         actionMessage = "Running dump…"
         let ctx = context
         Task { [weak self] in
-            let result = await Task.detached { ctx.runHermes(["dump"]) }.value
+            // Longer than the 60 s default on purpose: `hermes dump` walks
+            // state.db and the config tree, and on a remote host that is an
+            // SSH round trip over the whole thing.
+            let result = await Task.detached { ctx.runHermes(["dump"], timeout: 120) }.value
             guard let self else { return }
             self.isRunningDump = false
             self.diagnosticsOutput = result.output

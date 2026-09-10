@@ -351,6 +351,29 @@ struct MainActorSpawnDisciplineP22Tests {
         #expect(Date().timeIntervalSince(started) < 20)
     }
 
+    /// P29 · The overrun arm itself. The test above drives `sh -c "sleep 30"`,
+    /// which obeys SIGTERM, so it never exercised the escalation — with the
+    /// original `terminate(); waitUntilExit()` a child that IGNORES SIGTERM
+    /// hung this call forever. `trap "" TERM` is that child.
+    @Test func waitUntilExitEscalatesPastAChildThatIgnoresSIGTERM() async {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+        proc.arguments = ["-c", #"trap "" TERM; sleep 30"#]
+        try? proc.run()
+
+        let started = Date()
+        let exited = await Task.detached { proc.waitUntilExit(timeout: 0.5) }.value
+        let elapsed = Date().timeIntervalSince(started)
+
+        #expect(exited == false)
+        // The point of the test: it RETURNED. With the bare `waitUntilExit()`
+        // this never completes, because SIGTERM is trapped and `sleep 30` runs
+        // its full half-minute. Well under that, and well over the poll budget.
+        #expect(elapsed < 20, "the overrun path was unbounded (\(elapsed)s)")
+        // SIGKILL cannot be trapped, so this child really is gone.
+        #expect(proc.isRunning == false)
+    }
+
     /// A process that exits on its own is reported as such.
     @Test func waitUntilExitReportsANormalExit() async {
         let proc = Process()

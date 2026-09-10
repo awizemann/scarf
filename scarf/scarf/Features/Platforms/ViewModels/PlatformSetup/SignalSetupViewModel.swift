@@ -58,12 +58,26 @@ final class SignalSetupViewModel: PlatformSetupForm {
             homeChannel = env["SIGNAL_HOME_CHANNEL"] ?? ""
             allowAllUsers = PlatformSetupHelpers.parseEnvBool(env["SIGNAL_ALLOW_ALL_USERS"])
             if let cfg = snapshot.config?.signal { requireMention = cfg.requireMention }
-            signalCLIInstalled = Self.detectSignalCLI()
+        }
+        // NOT inside the apply closure above: that closure runs on the main
+        // actor, and `detectSignalCLI` reads `HermesFileService.enrichedEnvironment()`,
+        // whose backing `enrichedShellEnv` is a `static let` initialised by two
+        // `zsh` probes at 5 s + 3 s (`HermesFileService.swift:2468-2484`).
+        // `scarfApp.swift:89-91` warms it on a detached task at launch, but a
+        // `static let` initialiser is a `swift_once`: a main-actor reader that
+        // arrives while the warm-up is still running BLOCKS on it, for up to
+        // eight seconds of frozen UI (C10). Its own detached hop, since it
+        // needs nothing from `self` and nothing from the snapshot.
+        PlatformSetupHelpers.detached({ Self.detectSignalCLI() }) { [weak self] installed in
+            self?.signalCLIInstalled = installed
         }
     }
 
     /// Best-effort `signal-cli` binary lookup on the login-shell PATH.
-    private static func detectSignalCLI() -> Bool {
+    ///
+    /// `nonisolated` on purpose: it touches no state of this `@MainActor`
+    /// class, and it MUST be callable from off the main actor — see `load()`.
+    nonisolated private static func detectSignalCLI() -> Bool {
         let env = HermesFileService.enrichedEnvironment()
         let paths = env["PATH"]?.split(separator: ":").map(String.init) ?? []
         for dir in paths {

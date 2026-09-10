@@ -196,8 +196,13 @@ final class KanbanBoardViewModel {
             // One fleet-mode `kanban diagnostics --json` per board load —
             // the ONLY surface that emits diagnostics. Best-effort like
             // stats: a failure leaves the previous signals on screen
-            // rather than blanking the board. Runs inside the actor, off
-            // the main actor (C10).
+            // rather than blanking the board. The THROTTLE itself runs on the
+            // main actor — `refreshDiagnosticsIfDue` is a method on this
+            // `@MainActor` class; it is the `fetch` closure's body that is
+            // actor-isolated and detached inside `KanbanService`
+            // (`KanbanService.swift:25, 613`), which is what keeps C10. The
+            // stamp is taken BEFORE the await, so a slow fetch cannot let a
+            // second one in.
             await refreshDiagnosticsIfDue { [service] in try? await service.diagnostics() }
         } catch let err as KanbanError {
             lastError = err.errorDescription
