@@ -229,8 +229,15 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// show which profile is currently running which platform.
     public var hasGatewayList: Bool { atLeastSemver(0, 13, 0) }
 
-    /// MCP servers can use SSE transport (v0.13+). Adds an `sse_read_timeout`
-    /// knob alongside the existing stdio/pipe transports.
+    /// MCP servers can use SSE transport (v0.13+).
+    ///
+    /// There is no `sse_read_timeout` CONFIG KEY to go with it, and there never
+    /// was at any of the 32 tags (P24 removed the knob Scarf offered): Hermes
+    /// hard-codes the value, `"sse_read_timeout": 300.0` in `sse_client`'s
+    /// kwargs (`tools/mcp_tool_transport.py:352` @ v2026.9.7; the same literal
+    /// in `tools/mcp_tool.py` at the v0.13 origin tag v2026.5.7), and reads no
+    /// such key from an `mcp_servers` entry. The comment here used to claim the
+    /// knob existed.
     public var hasMCPSSETransport: Bool { atLeastSemver(0, 13, 0) }
 
     /// Cron `--no-agent` mode for script-only watchdog jobs (v0.13+). Skips

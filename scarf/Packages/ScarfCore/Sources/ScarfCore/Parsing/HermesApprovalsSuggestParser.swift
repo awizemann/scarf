@@ -1,7 +1,7 @@
 import Foundation
 
 /// One allowlist proposal mined by `hermes approvals suggest --json`
-/// (v0.20+, caller gates on `HermesCapabilities.hasApprovalsSuggest`).
+/// (v0.19.1+, caller gates on `HermesCapabilities.hasApprovalsSuggest`).
 ///
 /// Mirrors the CLI's JSON payload exactly:
 /// `{"n": 1, "pattern": "git push *", "kind": "glob", "count": 4,
@@ -30,7 +30,8 @@ public struct HermesApprovalProposal: Sendable, Equatable, Identifiable {
     }
 }
 
-/// Parser + argv builder for `hermes approvals suggest` (Hermes v0.20+).
+/// Parser + argv builder for `hermes approvals suggest` (Hermes v0.19.1+ —
+/// `hermes_cli/approvals_suggest.py` first exists at tag v2026.7.30 = 0.19.1).
 ///
 /// The suggest run is read-only (mines the session DB); only an explicit
 /// `--apply N[,M...]` writes to `command_allowlist` in config.yaml —

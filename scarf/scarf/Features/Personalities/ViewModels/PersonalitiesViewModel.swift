@@ -36,7 +36,7 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
     /// Host capability, pushed in by `PersonalitiesView` from
     /// `\.hermesCapabilities` before `load()`. Decides whether the 14 in-code
     /// built-ins are unioned into the list — see `HermesPersonalities.resolve`.
-    /// Defaults to `false` (the conservative pre-v0.20.4 reading: show only
+    /// Defaults to `false` (the conservative pre-v0.20.1 reading: show only
     /// what the config actually contains) until capabilities are known.
     var hasBuiltinPersonalitiesInCode: Bool = false
 
@@ -86,7 +86,7 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
 
     /// The user entries under `agent.personalities`, unioned with Hermes'
     /// in-code `BUILTIN_PERSONALITIES` only on hosts that actually have them
-    /// in code — see `HermesPersonalities.resolve` for why a pre-v0.20.4
+    /// in code — see `HermesPersonalities.resolve` for why a pre-v0.20.1
     /// host must not have deleted built-ins resurrected.
     ///
     /// Static form so the detached load can call into it without touching

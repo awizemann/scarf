@@ -1,6 +1,6 @@
 import Foundation
 
-/// One durable cron execution attempt from `hermes cron runs` (v0.20+,
+/// One durable cron execution attempt from `hermes cron runs` (v0.19.0+,
 /// caller gates on `HermesCapabilities.hasCronRuns`).
 public struct HermesCronRun: Sendable, Equatable, Identifiable {
     /// Execution id — a uuid4 hex string in practice.

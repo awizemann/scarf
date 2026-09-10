@@ -41,17 +41,17 @@ struct CuratorView: View {
         capabilitiesStore?.capabilities.hasCuratorAdopt ?? false
     }
 
-    /// v0.20.4 ledger surface. Hidden entirely on pre-0.20.4 hosts.
+    /// v0.20.3 ledger surface. Hidden entirely on pre-0.20.3 hosts.
     private var ledgerAvailable: Bool {
         capabilitiesStore?.capabilities.hasCuratorLedger ?? false
     }
 
-    /// v0.20.4 purge (permanent delete) surface.
+    /// v0.20.3 purge (permanent delete) surface.
     private var purgeAvailable: Bool {
         capabilitiesStore?.capabilities.hasCuratorPurge ?? false
     }
 
-    /// v0.20.4 per-entry rollback surface. Gates the "roll back this
+    /// v0.20.3 per-entry rollback surface. Gates the "roll back this
     /// entry" action on ledger rows independently of `ledgerAvailable` —
     /// a host could in principle have one without the other.
     private var entryRollbackAvailable: Bool {
@@ -282,7 +282,7 @@ struct CuratorView: View {
         }
     }
 
-    /// v0.20 unmanaged-skills card. Surfaces the count from the status
+    /// v0.19.1 unmanaged-skills card. Surfaces the count from the status
     /// header plus per-row / bulk Adopt actions. Empty state renders
     /// nothing — no unmanaged skills means nothing to adopt.
     @ViewBuilder
