@@ -29,9 +29,10 @@ struct TelegramSetupView: View {
                 ToggleRow(label: "Disable topic auto-rename", isOn: viewModel.disableTopicAutoRename) { viewModel.disableTopicAutoRename = $0 }
                 // v0.15 <= host < v0.21.1: Hermes deleted the reader at
                 // v0.21.1, so on a newer host this toggle would promise a
-                // behaviour nothing implements. The VALUE is still parsed and
-                // saved on every host (see `TelegramSettings.ignoreRootDM`),
-                // so downgrading brings the setting back.
+                // behaviour nothing implements. The VALUE is still PARSED on
+                // every host (see `TelegramSettings.ignoreRootDM`) but only
+                // WRITTEN inside the window, so the stored setting survives
+                // untouched and downgrading brings it back.
                 if capabilitiesStore?.capabilities.hasTelegramIgnoreRootDM ?? true {
                     ToggleRow(label: "Ignore root DM", isOn: viewModel.ignoreRootDM) { viewModel.ignoreRootDM = $0 }
                 }

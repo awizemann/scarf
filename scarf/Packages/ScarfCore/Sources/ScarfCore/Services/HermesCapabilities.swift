@@ -1174,8 +1174,11 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// Unknown version keeps the row (charter C1: a host whose version
     /// probe has not answered must render exactly what it rendered before
     /// this flag existed, and before it the row was unconditional). The
-    /// VALUE is still parsed and written on every host, so a downgrade
-    /// back into the window finds the user's setting intact.
+    /// VALUE is still PARSED on every host, so a downgrade back into the
+    /// window finds the user's setting intact. The WRITE is gated by this
+    /// same flag (`TelegramSetupViewModel.save`): writing a key whose row
+    /// this host never rendered would stamp a value the user was never
+    /// shown over whatever config.yaml already held.
     public var hasTelegramIgnoreRootDM: Bool {
         guard let s = semver else { return true }        // unknown → keep
         return s >= SemVer(major: 0, minor: 15, patch: 0)

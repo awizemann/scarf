@@ -31,10 +31,16 @@ final class PluginsViewModel: OutcomeMessageHosting {
     private let logger = Logger(subsystem: "com.scarf", category: "PluginsViewModel")
     let context: ServerContext
     private let fileService: HermesFileService
+    /// Injectable CLI seam so `enable` / `disable` can be exercised through
+    /// their real production entry points in tests (the verdict rules —
+    /// markers and `failureWins` — live at those call sites, so a test that
+    /// re-states them itself proves nothing about the shipped behaviour).
+    private let cliRunner: HermesCLIRunner
 
-    init(context: ServerContext = .local) {
+    init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
         self.context = context
         self.fileService = HermesFileService(context: context)
+        self.cliRunner = cliRunner ?? context.cliRunner
     }
 
     var plugins: [HermesPlugin] = []
@@ -377,9 +383,7 @@ final class PluginsViewModel: OutcomeMessageHosting {
     nonisolated static func friendlyPluginFailure(_ detail: String?) -> String? {
         guard let detail, !detail.isEmpty else { return nil }
         if detail.contains("capabilities NOT granted") {
-            return String(localized: """
-                Enabled, but its requested capabilities were NOT granted — Hermes fails                 closed without a terminal. Grant them with `hermes plugins enable` in a                 terminal; the plugin should otherwise degrade gracefully.
-                """)
+            return String(localized: "Enabled, but its requested capabilities were NOT granted — Hermes fails closed without a terminal. Grant them with `hermes plugins enable` in a terminal; the plugin should otherwise degrade gracefully.")
         }
         return String(detail.prefix(200))
     }
@@ -397,8 +401,9 @@ final class PluginsViewModel: OutcomeMessageHosting {
         failureMarkers: [String] = [],
         failureWins: Bool = false
     ) {
-        Task.detached { [weak self, fileService] in
-            let result = fileService.runHermesCLI(args: args, timeout: 60)
+        let run = cliRunner
+        Task.detached { [weak self] in
+            let result = run(args, 60)
             let outcome: HermesCLIOutcome = successMarkers.map { markers in
                 HermesCLIVerdict.judge(
                     output: result.output,

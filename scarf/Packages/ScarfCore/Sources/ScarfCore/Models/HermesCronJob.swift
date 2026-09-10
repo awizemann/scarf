@@ -50,6 +50,52 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// class (workdir/contextFrom/noAgent in v0.18, run_claim in v0.18.2).
     public nonisolated let extra: [String: JSONValue]
 
+    /// `_normalize_skill_list(job.get("skill"), job.get("skills"))` in Swift:
+    /// trims, drops blanks, de-duplicates preserving order. Returns `nil`
+    /// only when NEITHER key is present, so "no skills key at all" stays
+    /// distinguishable from "explicitly empty".
+    ///
+    /// The legacy `skill` key is read through its OWN key type rather than
+    /// being added to `CodingKeys`: `CodingKeys.allCases` is what decides
+    /// which keys get swept into `extra` and re-emitted verbatim, so listing
+    /// it there would silently STRIP `skill` from every jobs.json Scarf
+    /// writes back. Left in `extra` it round-trips, and Hermes re-derives it
+    /// from `skills` on its next load anyway (`_apply_skill_fields`).
+    private enum LegacySkillKey: String, CodingKey { case skill }
+
+    private nonisolated static func decodeSkills(
+        from c: KeyedDecodingContainer<CodingKeys>,
+        legacy l: KeyedDecodingContainer<LegacySkillKey>
+    ) throws -> [String]? {
+        let raw: [String]?
+        // `skills: null` is `skills is None` in Python, which is the arm that
+        // falls back to `skill` — so it counts as ABSENT here, not as empty.
+        let skillsPresent = c.contains(.skills) && !((try? c.decodeNil(forKey: .skills)) ?? true)
+        if skillsPresent {
+            if let list = try? c.decode([String].self, forKey: .skills) {
+                raw = list
+            } else if let single = try? c.decode(String.self, forKey: .skills) {
+                raw = [single]                    // `isinstance(skills, str)`
+            } else {
+                // Neither a list nor a string (a number, an object): Hermes's
+                // `list(skills)` raises and the record is treated as
+                // skill-less rather than failing the whole file.
+                raw = []
+            }
+        } else if let legacy = try? l.decodeIfPresent(String.self, forKey: .skill) {
+            raw = [legacy]
+        } else {
+            raw = nil
+        }
+        guard let raw else { return nil }
+        var out: [String] = []
+        for item in raw {
+            let text = item.trimmingCharacters(in: .whitespaces)
+            if !text.isEmpty, !out.contains(text) { out.append(text) }
+        }
+        return out
+    }
+
     public enum CodingKeys: String, CodingKey, CaseIterable {
         case id, name, prompt, skills, model, schedule, enabled, state, deliver, silent
         case nextRunAt = "next_run_at"
@@ -134,7 +180,23 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         // every other job's list entry down with it. Default instead.
         self.name              = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
         self.prompt            = try c.decodeIfPresent(String.self, forKey: .prompt) ?? ""
-        self.skills            = try c.decodeIfPresent([String].self, forKey: .skills)
+        // `skills` mirrors `cron/jobs.py::_normalize_skill_list` (v2026.9.7
+        // :384-397), because Scarf reads `cron/jobs.json` DIRECTLY — the
+        // normalisation `list_jobs` applies (`_normalize_job_record` →
+        // `_apply_skill_fields`, :456/:400) never runs on this path, so the
+        // record arrives raw:
+        //   * `skills` PRESENT wins outright, even when empty;
+        //   * a bare STRING `skills` is a one-element list (`isinstance(
+        //     skills, str)`), not a decode failure — and a decode failure
+        //     here fails the WHOLE file;
+        //   * `skills` ABSENT falls back to the legacy singular `skill`,
+        //     which is what every pre-multi-skill job still carries and what
+        //     `cron edit` will compute its own `existing_skills` from.
+        // Getting the last one wrong meant the skill-edit diff saw no
+        // existing skills, emitted no `--remove-skill`, and the job kept a
+        // skill the user had just unticked.
+        self.skills            = try Self.decodeSkills(
+            from: c, legacy: decoder.container(keyedBy: HermesCronJob.LegacySkillKey.self))
         self.model             = try c.decodeIfPresent(String.self, forKey: .model)
         // Hermes's own reader is tolerant here (`cron/jobs.py`):
         // `(job.get("schedule") or {})` — schedule may be null or absent —

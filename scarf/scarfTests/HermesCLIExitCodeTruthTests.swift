@@ -228,7 +228,7 @@ struct HermesCLIExitCodeTruthTests {
     /// function takes the :1092-1098 arm, prints this, and returns False. The
     /// plugin lands on the allow-list but runs without the host surfaces it
     /// declared, which "Enabled" does not say.
-    @Test func pluginsEnableNonInteractiveConsentRefusalIsAFailure() {
+    @Test @MainActor func pluginsEnableNonInteractiveConsentRefusalIsAFailure() async {
         let fixture = """
         ✓ Plugin web/firecrawl enabled. Takes effect on next session.
 
@@ -237,21 +237,21 @@ struct HermesCLIExitCodeTruthTests {
           Granting trusts the plugin author with these host surfaces. This is consent, not a sandbox — plugins run as regular Python in-process.
           Non-interactive session: capabilities NOT granted (fail closed). Run `hermes plugins capabilities web/firecrawl` to review and `hermes plugins enable web/firecrawl` to grant interactively.
         """
-        let outcome = HermesCLIVerdict.judge(
-            output: fixture,
-            exitCode: 0,
-            successMarkers: HermesCLIMarkers.pluginsEnableSuccess,
-            failureMarkers: HermesCLIMarkers.pluginsEnableFailure,
-            failureWins: true
-        )
-        #expect(outcome.succeeded == false)
-        #expect(outcome.detail?.contains("capabilities NOT granted") == true)
-        // The banner says what actually happened, and keeps the remedy — the
-        // refusal line's actionable half is its LAST clause, so a leading
-        // truncation would have thrown it away.
-        let banner = PluginsViewModel.friendlyPluginFailure(outcome.detail)
-        #expect(banner?.contains("NOT granted") == true)
-        #expect(banner?.contains("terminal") == true)
+        let vm = Self.pluginsViewModel(returning: fixture, exitCode: 0)
+        vm.enable(Self.plugin("web/firecrawl"))
+        let message = await Self.awaitMessage(on: vm)
+
+        // The verdict rules (markers + `failureWins`) live in `enable` itself,
+        // so this has to run through `enable` — a test that passes
+        // `failureWins: true` to `HermesCLIVerdict.judge` by hand stays green
+        // even when the production call site loses it.
+        #expect(vm.messageIsFailure)
+        #expect(message?.contains("NOT granted") == true)
+        // The banner keeps the remedy — the refusal line's actionable half is
+        // its LAST clause, so a leading truncation would have thrown it away.
+        #expect(message?.contains("terminal") == true)
+        // …and it is prose, not a re-indented multi-line literal.
+        #expect(message?.contains("   ") == false)
     }
 
     /// A plugin with no `capabilities:` declaration runs no consent screen
@@ -259,15 +259,56 @@ struct HermesCLIExitCodeTruthTests {
     /// success too — neither may regress.
     @Test(arguments: [
         "✓ Plugin web/tavily enabled. Takes effect on next session.\n",
-        "Plugin 'web/tavily' is already enabled.\n",
+        "Plugin \'web/tavily\' is already enabled.\n",
     ])
-    func pluginsEnableSuccessLines(fixture: String) {
-        #expect(HermesCLIVerdict.judge(
-            output: fixture, exitCode: 0,
-            successMarkers: HermesCLIMarkers.pluginsEnableSuccess,
-            failureMarkers: HermesCLIMarkers.pluginsEnableFailure,
-            failureWins: true
-        ).succeeded)
+    @MainActor func pluginsEnableSuccessLines(fixture: String) async {
+        let vm = Self.pluginsViewModel(returning: fixture, exitCode: 0)
+        vm.enable(Self.plugin("web/tavily"))
+        let message = await Self.awaitMessage(on: vm)
+        #expect(vm.messageIsFailure == false)
+        #expect(message == "Enabled")
+    }
+
+    /// `plugins disable` has no consent screen, so its failure markers must
+    /// NOT win over a success line — the mirror of the enable case.
+    @Test @MainActor func pluginsDisableSuccessLine() async {
+        let vm = Self.pluginsViewModel(returning: "✓ Plugin web/tavily disabled. Takes effect on next session.\n", exitCode: 0)
+        vm.disable(Self.plugin("web/tavily"))
+        let message = await Self.awaitMessage(on: vm)
+        #expect(vm.messageIsFailure == false)
+        #expect(message == "Disabled")
+    }
+
+    // MARK: - plugins test helpers
+
+    /// A `PluginsViewModel` whose CLI seam answers with one canned result and
+    /// whose home is an empty temp dir, so the post-run `load(force:)` reads
+    /// nothing on the developer's machine.
+    @MainActor private static func pluginsViewModel(returning output: String, exitCode: Int32) -> PluginsViewModel {
+        let home = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("scarf-plugins-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        return PluginsViewModel(
+            context: .local(home: home),
+            cliRunner: { _, _ in (output, exitCode) }
+        )
+    }
+
+    private static func plugin(_ name: String) -> HermesPlugin {
+        HermesPlugin(
+            name: name, source: name, activation: .enabled,
+            description: "", version: "", path: "", toolOverride: false
+        )
+    }
+
+    /// The verdict is committed from a detached task hopping back to the main
+    /// actor; poll rather than sleep a fixed interval.
+    @MainActor private static func awaitMessage(on vm: PluginsViewModel) async -> String? {
+        for _ in 0..<400 {
+            if let message = vm.message { return message }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        return vm.message
     }
 
     // MARK: - security audit — hermes_cli/security_audit.py

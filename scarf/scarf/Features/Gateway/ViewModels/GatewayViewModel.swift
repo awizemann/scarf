@@ -168,28 +168,34 @@ final class MessagingGatewayViewModel {
         // Cancel-prior so a superseded load stops between its probes rather
         // than running all three to completion just to have its result
         // dropped by the generation guard.
+        //
+        // The load task is DETACHED, not a `Task { … }` wrapping an inner
+        // `Task.detached { … }.value`. That shape looked identical but could
+        // not be cancelled: cancelling the outer task does not propagate into
+        // a detached child, so the `Task.isCancelled` checks between the
+        // probes were dead and every superseded load still ran all three CLI
+        // invocations to completion. Detaching the whole body is also what
+        // keeps the two sync transport calls and three CLI invocations off
+        // the main actor (C10); the commit hops back explicitly.
         loadTask?.cancel()
-        loadTask = Task { [weak self] in
-            // Two sync transport calls + three CLI invocations — substantial
-            // remote latency. Detach the whole load and commit at the end.
-            let snapshot = await Task.detached { () -> (MessagingGatewayInfo, (approved: [PairedUser], pending: [PendingPairing]), GatewayListSnapshot?)? in
-                let status = Self.fetchGatewayStatus(context: ctx, run: run)
-                if Task.isCancelled { return nil }
-                let pairing = Self.fetchPairing(context: ctx, run: run)
-                if Task.isCancelled { return nil }
-                let listSnap = caps.hasGatewayList
-                    ? HermesGatewayListService.fetch(context: ctx)
-                    : nil
-                return (status, pairing, listSnap)
-            }.value
-            guard let self, self.loadGeneration == generation else { return }
-            guard let snapshot else { return }
-            self.gateway = snapshot.0
-            self.approvedUsers = snapshot.1.approved
-            self.pendingPairings = snapshot.1.pending
-            self.gatewayList = snapshot.2
-            self.isLoading = false
-            self.loadedChangeToken = changeToken
+        loadTask = Task.detached { [weak self] in
+            let status = Self.fetchGatewayStatus(context: ctx, run: run)
+            if Task.isCancelled { return }
+            let pairing = Self.fetchPairing(context: ctx, run: run)
+            if Task.isCancelled { return }
+            let listSnap = caps.hasGatewayList
+                ? HermesGatewayListService.fetch(context: ctx)
+                : nil
+            if Task.isCancelled { return }
+            await MainActor.run {
+                guard let self, self.loadGeneration == generation else { return }
+                self.gateway = status
+                self.approvedUsers = pairing.approved
+                self.pendingPairings = pairing.pending
+                self.gatewayList = listSnap
+                self.isLoading = false
+                self.loadedChangeToken = changeToken
+            }
         }
     }
 

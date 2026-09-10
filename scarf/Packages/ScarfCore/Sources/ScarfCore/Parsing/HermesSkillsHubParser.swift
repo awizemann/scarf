@@ -205,9 +205,10 @@ public enum HermesSkillsHubParser: Sendable {
     /// the three fault statuses, which are diagnostics the user has to fix
     /// by hand.
     ///
-    /// A status Scarf does not know decodes to `.unknown` and is dropped
-    /// rather than badged, so a future Hermes word never renders as an
-    /// available update.
+    /// A status Scarf does not know fails `HermesSkillUpdateStatus(rawValue:)`
+    /// — there is no `.unknown` case — and the ROW IS SKIPPED (`:225`) rather
+    /// than badged, so a future Hermes word never renders as an available
+    /// update.
     public static func parseUpdateList(_ output: String) -> [HermesSkillUpdate] {
         var results: [HermesSkillUpdate] = []
         for raw in output.components(separatedBy: "\n") {

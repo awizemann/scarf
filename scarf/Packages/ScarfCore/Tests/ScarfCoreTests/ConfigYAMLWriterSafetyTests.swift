@@ -72,8 +72,30 @@ struct ConfigYAMLWriterSafetyTests {
         private static func quoted(_ s: String) -> String { "'\(s)'" }
     }
 
-    /// Assert the emitted YAML parses under PyYAML (skipped, with the reason
-    /// recorded, when PyYAML isn't installed here).
+    /// The whole point of this suite is that Hermes discards the config.yaml
+    /// layer on ONE PyYAML error, so a run where PyYAML is missing has tested
+    /// only the structural half. That used to be invisible — every
+    /// `if Self.pyYAMLAvailable` arm simply evaporated and the suite reported
+    /// a clean pass. This records it as a KNOWN ISSUE instead: green when the
+    /// lane ran, an explicit "known issue" line naming the missing dependency
+    /// when it did not, and never a false failure on a machine without it.
+    @Test func pyYAMLRoundTripLaneIsPresent() {
+        withKnownIssue(
+            """
+            PyYAML is not installed for `python3` on this machine — the \
+            round-trip half of ConfigYAMLWriterSafetyTests did NOT run. \
+            Install it (`python3 -m pip install pyyaml`) to exercise the \
+            lane that proves Hermes can still read what Scarf writes.
+            """,
+            isIntermittent: true
+        ) {
+            #expect(Self.pyYAMLAvailable)
+        }
+    }
+
+    /// Assert the emitted YAML parses under PyYAML (no-op when PyYAML isn't
+    /// installed here — `pyYAMLRoundTripLaneIsPresent` is what makes that
+    /// visible in the run).
     private func expectParses(_ yaml: String, _ what: String, sourceLocation: SourceLocation = #_sourceLocation) {
         guard Self.pyYAMLAvailable else { return }
         #expect(

@@ -870,9 +870,11 @@ public struct TelegramSettings: Sendable, Equatable {
     /// (v0.21.1) — a whole-tree grep at that tag finds the string only in
     /// `scripts/release.py`'s contributor table and the website docs, with
     /// no `extra.get("ignore_root_dm")` anywhere. The value is still parsed
-    /// and round-tripped so a v0.21.1 host that later downgrades keeps it;
-    /// only the editor row is gated, on
-    /// `HermesCapabilities.hasTelegramIgnoreRootDM`.
+    /// so a v0.21.1 host that later downgrades keeps it. The editor row AND
+    /// the write are both gated on
+    /// `HermesCapabilities.hasTelegramIgnoreRootDM` — leaving the stored
+    /// scalar untouched outside the window is what makes the round trip
+    /// non-destructive.
     public var ignoreRootDM: Bool
     /// Hermes v0.17 — `platforms.telegram.extra.rich_messages` (Bot API 10.1
     /// rich formatting). Pre-v0.17 hosts ignore the key.
