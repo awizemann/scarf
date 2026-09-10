@@ -206,7 +206,25 @@ public enum HermesYAML {
                 // render the SECOND block's list, not the two concatenated.
                 // Scalars were already last-wins by assignment; bullets
                 // appended. Drop the earlier block's items as this one opens.
+                //
+                // P32: last-wins is a property of the whole MAPPING, not of
+                // the keys that happen to be repeated. PyYAML replaces the
+                // first block outright, so a sibling that appears ONLY in
+                // the first block is gone on the host — Scarf kept it and
+                // rendered a value Hermes does not have. Purge the earlier
+                // block's descendants (`values` and `maps` as well as
+                // `lists`) as the second one opens.
                 lists.removeValue(forKey: path)
+                let staleDescendant = path + "."
+                for key in values.keys where key.hasPrefix(staleDescendant) {
+                    values.removeValue(forKey: key)
+                }
+                for key in maps.keys where key.hasPrefix(staleDescendant) {
+                    maps.removeValue(forKey: key)
+                }
+                for key in lists.keys where key.hasPrefix(staleDescendant) {
+                    lists.removeValue(forKey: key)
+                }
                 stack.append((indent: indent, name: key))
                 lastScalarIndent = nil
                 continue

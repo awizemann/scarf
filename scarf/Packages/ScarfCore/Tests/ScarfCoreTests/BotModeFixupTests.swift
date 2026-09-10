@@ -4,7 +4,8 @@ import Foundation
 
 /// The fresh-eyes audit's fixup package for Bot Mode Phase A.
 ///
-/// The headline finding: `HermesBotProfileYAML.quoted` emitted a REAL newline
+/// The headline finding: the bot writer's own `quoted` (P32 deleted it; the
+/// writer now emits through `YAMLScalar.quoteIfNeeded`) emitted a REAL newline
 /// inside a single-quoted YAML scalar for any multi-line value (the editor's
 /// "Role" `TextEditor` produces them freely). A single-quoted scalar has no
 /// escape for a line break, so PyYAML folded the rest of the `hermes-bots`
@@ -205,17 +206,23 @@ import Foundation
 
     @Test("a plain value is still written unquoted — no gratuitous churn")
     func ordinaryValuesAreUntouched() {
-        #expect(HermesBotProfileYAML.quoted("Athena") == "Athena")
-        #expect(HermesBotProfileYAML.quoted("Research bot") == "Research bot")
-        #expect(HermesBotProfileYAML.quoted("has: colon") == "'has: colon'")
+        #expect(YAMLScalar.quoteIfNeeded("Athena") == "Athena")
+        #expect(YAMLScalar.quoteIfNeeded("Research bot") == "Research bot")
+        #expect(YAMLScalar.quoteIfNeeded("has: colon") == "'has: colon'")
         // A bare apostrophe mid-word needs no quoting in YAML at all; only a
         // LEADING quote does, and then it is doubled.
-        #expect(HermesBotProfileYAML.quoted("it's") == "it's")
-        #expect(HermesBotProfileYAML.quoted("'quoted'") == "'''quoted'''")
-        #expect(HermesBotProfileYAML.quoted("") == "''")
-        // Only a control character forces the double-quoted style.
-        #expect(HermesBotProfileYAML.quoted("a\nb") == "\"a\\nb\"")
-        #expect(HermesBotProfileYAML.quoted("a\tb") == "\"a\\tb\"")
+        #expect(YAMLScalar.quoteIfNeeded("it's") == "it's")
+        #expect(YAMLScalar.quoteIfNeeded("'quoted'") == "'''quoted'''")
+        #expect(YAMLScalar.quoteIfNeeded("") == "''")
+        // P32: the bot writer emits through the one shared routine now, so
+        // these pin `YAMLScalar` in the position the bot block puts it in.
+        // A line break or an unrepresentable control forces the
+        // double-quoted style; a TAB does not — it is legal raw inside a
+        // single-quoted scalar (PyYAML 6.0.3) and only a PLAIN scalar
+        // cannot carry one.
+        #expect(YAMLScalar.quoteIfNeeded("a\nb") == "\"a\\nb\"")
+        #expect(YAMLScalar.quoteIfNeeded("a\u{1}b") == "\"a\\x01b\"")
+        #expect(YAMLScalar.quoteIfNeeded("a\tb") == "'a\tb'")
     }
 
     // MARK: - 4. Duplicate hermes-bots inside ui_meta

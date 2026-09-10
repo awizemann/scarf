@@ -189,11 +189,39 @@ nonisolated struct BotDraft: Equatable {
     /// it. NOT applied to `description`: Hermes stores that through
     /// `yaml.safe_dump` and round-trips real newlines, so flattening it would
     /// destroy user content to work around a writer bug that
-    /// `HermesBotProfileYAML.quoted` now handles correctly at the YAML layer.
+    /// `YAMLScalar.quoteIfNeeded` handles correctly at the YAML layer (P32 deleted
+    /// `HermesBotProfileYAML.quoted` and routed the bot writer through the
+    /// shared routine).
     static func singleLine(_ raw: String) -> String {
         raw.split(whereSeparator: \.isNewline)
             .joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Label of the first field whose value would reach `profile.yaml`
+    /// carrying a control character, or `nil`.
+    ///
+    /// Round-3 decision 6: refuse in the editor with a visible message
+    /// rather than reshape silently at the writer. Checked on the values as
+    /// ``apply(to:)`` will WRITE them — `singleLine` has already flattened a
+    /// pasted newline out of Name / Color / Shape, so the only thing left to
+    /// refuse there is a tab or another control, and the multi-line Role
+    /// field keeps its line breaks (Hermes round-trips them through
+    /// `yaml.safe_dump`; `YAMLScalar.doubleQuoted` represents them
+    /// losslessly). Anything else makes PyYAML refuse the file, which
+    /// `read_profile_meta` turns into empty defaults and the bot drops out
+    /// of the roster (`hermes_cli/profiles.py:471-480`, `:609-618` @
+    /// `v2026.9.7`).
+    var controlCharacterFieldLabel: String? {
+        if YAMLScalar.containsControlCharacter(profileName) { return "Profile id" }
+        if YAMLScalar.containsControlCharacter(Self.singleLine(title)) { return "Name" }
+        if YAMLScalar.containsControlCharacter(Self.singleLine(color)) { return "Color" }
+        if YAMLScalar.containsControlCharacter(Self.singleLine(shape)) { return "Shape" }
+        if YAMLScalar.containsControlCharacter(
+            description.trimmingCharacters(in: .whitespacesAndNewlines),
+            allowingLineBreaks: true
+        ) { return "Role" }
+        return nil
     }
 
     func apply(to identity: inout HermesBotIdentity) {

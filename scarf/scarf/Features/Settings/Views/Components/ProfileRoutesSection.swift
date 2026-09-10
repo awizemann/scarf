@@ -318,7 +318,29 @@ private struct ProfileRouteEditorSheet: View {
     }
 
     private var canSave: Bool {
-        !route.platform.trimmingCharacters(in: .whitespaces).isEmpty && !trimmedProfile.isEmpty
+        !route.platform.trimmingCharacters(in: .whitespaces).isEmpty
+            && !trimmedProfile.isEmpty
+            && controlCharacterField == nil
+    }
+
+    /// The field carrying a pasted control character, or `nil`.
+    ///
+    /// Round-3 decision 6: a tab, line break or other C0/C1 control in a
+    /// user-typed scalar is a visible validation error that blocks Save —
+    /// the shape `MCPServerEditorViewModel.duplicateKey` established — not a
+    /// silent reshape. Every field here is a single-line scalar, and an
+    /// unquotable one costs the user their entire config.yaml layer:
+    /// `load_gateway_config` wraps the load in a bare `except Exception`
+    /// that logs and CONTINUES (`gateway/config.py:773-792` @ `v2026.9.7`).
+    /// Checked on the NORMALIZED route, because `.whitespaces` trimming
+    /// removes a leading/trailing tab but nothing removes an interior one —
+    /// except for `profile`, where `HermesProfileName.normalized` turns any
+    /// invalid name into `""` and would swallow the very character we want
+    /// to name. That field is probed in its trimmed, un-slugged form.
+    private var controlCharacterField: String? {
+        var probe = normalizedRoute()
+        probe.profile = route.profile.trimmingCharacters(in: .whitespaces)
+        return probe.controlCharacterFieldLabel
     }
 
     var body: some View {
@@ -360,6 +382,14 @@ private struct ProfileRouteEditorSheet: View {
                 .scarfStyle(.caption)
                 .foregroundStyle(ScarfColor.foregroundMuted)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if let field = controlCharacterField {
+                Text("“\(field)” contains a tab or line break. Hermes can't read a config.yaml with one in it — it falls back to your .env values and ignores the whole file. Remove it, then save.")
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Validation error: \(field) contains a tab or line break. Remove it, then save.")
+            }
 
             if !trimmedProfile.isEmpty, !HermesProfileName.isValid(trimmedProfile) {
                 Text("Hermes would ignore this route: profile names must be lowercase [a-z0-9][a-z0-9_-] (up to 64 chars) and not one of hermes/test/tmp/root/sudo.")

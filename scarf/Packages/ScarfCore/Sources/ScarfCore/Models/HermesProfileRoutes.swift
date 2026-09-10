@@ -117,6 +117,28 @@ public struct HermesProfileRoute: Sendable, Equatable, Identifiable, Hashable {
         return nil
     }
 
+    /// Label of the first field carrying a control character, or `nil` when
+    /// every field is clean.
+    ///
+    /// Round-3 decision 6. Every field on a route is a single-line scalar,
+    /// so a tab, line break or other C0/C1 control is always a paste
+    /// accident — and it is the one class of input the old
+    /// `ProfileRoutesWriter.quoted` (deleted in P32) emitted BARE, which makes PyYAML's
+    /// scanner reject the row and Hermes discard the entire config.yaml
+    /// layer (`gateway/config.py:773-792` @ `v2026.9.7`). The editor
+    /// refuses it up front, in the shape
+    /// `MCPServerEditorViewModel.duplicateKey` established, rather than
+    /// silently reshaping a value the user cannot see.
+    public var controlCharacterFieldLabel: String? {
+        for (label, value) in [
+            ("Name", name), ("Platform", platform), ("Server / Guild ID", guildID),
+            ("Channel / Chat ID", chatID), ("Thread ID", threadID), ("Profile", profile)
+        ] where YAMLScalar.containsControlCharacter(value) {
+            return label
+        }
+        return nil
+    }
+
     /// One-line scope summary for list rows (e.g. `discord · server 123 · channel 456`).
     public var scopeSummary: String {
         var parts: [String] = []

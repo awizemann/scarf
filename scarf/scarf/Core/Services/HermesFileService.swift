@@ -2320,19 +2320,46 @@ struct HermesFileService: Sendable {
     nonisolated static func unquote(_ value: String) -> String {
         let v = value
         if v.count >= 2, v.hasPrefix("\""), v.hasSuffix("\"") {
-            // Double-quoted YAML: `\\`, `\"`, `\n` and `\r` are the escapes
-            // we emit (the last two since P19 gave `yamlScalar` a
-            // line-break guard). Anything else is left as written rather
-            // than half-decoded — we never produce it, and inventing a
-            // partial decoder for `\uXXXX` would be a new way to be wrong.
+            // Double-quoted YAML: `\\`, `\"`, `\n`, `\r` and — since P32
+            // gave `YAMLScalar.doubleQuoted` a control-character arm (a RAW
+            // C0/C1 control makes PyYAML's reader refuse the whole document
+            // in EVERY quoting style, so the emitter has no choice) —
+            // `\xNN` / `\uNNNN`. P19's lesson is that a quote-escaping
+            // writer needs its reader un-escaping in the SAME commit, so
+            // this is the matching half. `\t` is decoded for symmetry with
+            // PyYAML's own writer even though Scarf emits a tab raw inside
+            // quotes. Every other escape is left as written rather than
+            // half-decoded — we never produce one.
             var out = ""
             var escaped = false
+            var pending: Character?
+            var hexDigits = ""
+            var hexWanted = 0
             for char in v.dropFirst().dropLast() {
+                if hexWanted > 0 {
+                    hexDigits.append(char)
+                    hexWanted -= 1
+                    if hexWanted == 0 {
+                        if let value = UInt32(hexDigits, radix: 16),
+                           let scalar = Unicode.Scalar(value) {
+                            out.append(Character(scalar))
+                        } else {
+                            out.append("\\")
+                            if let marker = pending { out.append(marker) }
+                            out.append(contentsOf: hexDigits)
+                        }
+                        hexDigits = ""
+                        pending = nil
+                    }
+                    continue
+                }
                 if escaped {
                     switch char {
                     case "\\", "\"": out.append(char)
                     case "n": out.append("\n")
                     case "r": out.append("\r")
+                    case "t": out.append("\t")
+                    case "x", "u": pending = char; hexWanted = char == "x" ? 2 : 4
                     default:
                         out.append("\\")
                         out.append(char)
@@ -2343,6 +2370,12 @@ struct HermesFileService: Sendable {
                 } else {
                     out.append(char)
                 }
+            }
+            // A truncated escape is emitted verbatim rather than dropped.
+            if hexWanted > 0 {
+                out.append("\\")
+                if let marker = pending { out.append(marker) }
+                out.append(contentsOf: hexDigits)
             }
             if escaped { out.append("\\") }
             return out
