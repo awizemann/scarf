@@ -95,6 +95,113 @@ import ScarfCore
         #expect(preRange.lowerBound == 1, "a pre-0.20.5 host has no unlimited semantics")
     }
 
+    // MARK: - P29: Save must not write the sentinel as an empty scalar
+
+    /// The regression P28 shipped: P28 made the sheet PRIME the sentinel, and
+    /// pinned that, but never exercised the WRITE. On a host with a stored
+    /// mode, selecting "Host default" differs from `primedValue`, so Save fell
+    /// through and wrote `approvals.mode: ''`. That is not an unset —
+    /// `_coerce_config_set_value` keeps the empty string for a str-typed key
+    /// (`hermes_cli/config.py:3306-3312` @ v2026.9.7) and
+    /// `_normalize_approval_mode("")` resolves it to `manual`
+    /// (`tools/approval_context.py:197-214`), while Scarf's own reader
+    /// (`raw.isEmpty ? nil : …`) goes back to rendering "Host default". Decision
+    /// 5: the host-default row writes nothing.
+    ///
+    /// `valueToWrite` IS Save's gate — `save()` returns early, without touching
+    /// `vm.saveValue`, for exactly the cases that return `nil` — so `nil` here
+    /// means no `saveValue` call.
+    @Test func theHostDefaultRowWritesNothingEvenOverAStoredMode() {
+        let resolved = spec("approvals.mode").resolved(capabilities: caps("Hermes Agent v0.21.1 (2026.9.7)"))
+
+        // Every stored mode, with the sentinel row selected: no write.
+        for stored in HermesApprovalMode.options {
+            let primed = resolved.kind.primedScalar(currentValue: stored)
+            #expect(primed == stored)
+            #expect(
+                SettingEditorSheet.valueToWrite(
+                    kind: resolved.kind, stringValue: "", primedValue: primed
+                ) == nil,
+                "Save wrote an empty approvals.mode over a stored `\(stored)` — the host resolves that to `manual`"
+            )
+        }
+
+        // An untouched sheet on an ABSENT key: also no write (the P28 rule).
+        #expect(
+            SettingEditorSheet.valueToWrite(
+                kind: resolved.kind, stringValue: "", primedValue: ""
+            ) == nil
+        )
+
+        // ...while a real mode change still writes, over both a stored value
+        // and the sentinel. The guard must not swallow genuine edits.
+        #expect(
+            SettingEditorSheet.valueToWrite(
+                kind: resolved.kind, stringValue: "off", primedValue: "manual"
+            ) == "off"
+        )
+        #expect(
+            SettingEditorSheet.valueToWrite(
+                kind: resolved.kind, stringValue: "smart", primedValue: ""
+            ) == "smart"
+        )
+    }
+
+    /// The empty-scalar refusal is specific to a picker that HAS a sentinel
+    /// row. A picker without one, and the other kinds, are untouched — in
+    /// particular `approvals.smart_policy` is a free-text key where an empty
+    /// scalar is Hermes's own default and writing it is correct.
+    @Test func theEmptyScalarRefusalIsScopedToSentinelPickers() {
+        // No sentinel row → an empty selection is not a sentinel. (It cannot
+        // be reached through the UI either: `hasValidValue` blocks Save.)
+        #expect(
+            SettingEditorSheet.valueToWrite(
+                kind: .enumPicker(options: ["manual", "smart", "off"]),
+                stringValue: "",
+                primedValue: "manual"
+            ) == ""
+        )
+        // Free text clears to an empty scalar, which is a real write.
+        #expect(
+            SettingEditorSheet.valueToWrite(
+                kind: .text, stringValue: "", primedValue: "be careful"
+            ) == ""
+        )
+        // A toggle and a stepper always write their scalar when it changed.
+        #expect(
+            SettingEditorSheet.valueToWrite(
+                kind: .toggle, stringValue: "false", primedValue: "true"
+            ) == "false"
+        )
+        #expect(
+            SettingEditorSheet.valueToWrite(
+                kind: .number(range: 0...1000), stringValue: "0", primedValue: "500"
+            ) == "0"
+        )
+    }
+
+    /// `save()` has exactly ONE `vm.saveValue` call and it sits behind the
+    /// `valueToWrite` guard, so "`valueToWrite` returned nil" really does mean
+    /// "nothing was written". Fails if a second write path is ever added, or
+    /// if the guard is bypassed — the shape of both bugs so far.
+    @Test func saveHasOneWriteAndItIsBehindTheGuard() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()          // Scarf iOSTests
+            .deletingLastPathComponent()          // scarf
+            .appendingPathComponent("Scarf iOS/Settings/SettingEditorSheet.swift")
+        let source = try String(contentsOf: url, encoding: .utf8)
+        let writes = source.components(separatedBy: "vm.saveValue(").count - 1
+        #expect(writes == 1, "expected one write site in the sheet, found \(writes)")
+        guard let guardRange = source.range(of: "guard let value = Self.valueToWrite("),
+              let writeRange = source.range(of: "try await vm.saveValue(")
+        else {
+            Issue.record("the sheet no longer routes Save through `valueToWrite`")
+            return
+        }
+        #expect(guardRange.upperBound < writeRange.lowerBound)
+        #expect(source.contains("value: value"), "the write must use the guarded value")
+    }
+
     /// Every other kind still primes exactly what it used to — the guard must
     /// not change what a stored value does.
     @Test func theOtherKindsPrimeUnchanged() {

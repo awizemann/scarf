@@ -148,18 +148,63 @@ struct SettingEditorSheet: View {
         primedValue = primed
     }
 
+    /// The scalar Save must hand `saveValue`, or `nil` for "write nothing".
+    ///
+    /// The whole of Save's write/no-write policy lives here rather than inline
+    /// in `save()`, because `save()` is a `private func` on a SwiftUI `View`
+    /// whose inputs are `@State` — unreachable from a test — and this rule is
+    /// the part that has been wrong twice.
+    ///
+    /// Two reasons to write nothing:
+    ///
+    /// 1. **Unchanged.** `stringValue == primedValue`. Several keys prime a
+    ///    RESOLVED host default rather than a stored value, so writing an
+    ///    untouched sheet back PINS a default the user never chose.
+    /// 2. **The host-default sentinel row is selected.** Picking the empty
+    ///    `enumPicker` row IS a real edit (it differs from `primedValue`
+    ///    whenever the key had a stored value), but what it means is "unset
+    ///    this key" — and `hermes config set <key> ''` does not unset
+    ///    anything. For a str-typed key `_coerce_config_set_value` returns the
+    ///    string verbatim (`hermes_cli/config.py:3306-3312` @ v2026.9.7), so
+    ///    an empty scalar lands on disk, and `_normalize_approval_mode("")`
+    ///    falls through `if normalized:` and resolves to `"manual"`
+    ///    (`tools/approval_context.py:197-214`). Scarf's own reader is
+    ///    `raw.isEmpty ? nil : …` (`HermesConfig.swift`), so the row would go
+    ///    back to rendering "Host default (smart)" while the host enforced
+    ///    `manual` — silently wrong, and worse than the bug the sentinel row
+    ///    was added to fix.
+    ///
+    /// So the host-default row writes nothing, mirroring
+    /// `SettingsViewModel.setApprovalMode`'s `guard !value.isEmpty` on the
+    /// Mac. Clearing a key that is already set needs `config unset`, which
+    /// this sheet does not drive.
+    static func valueToWrite(
+        kind: SettingSpec.Kind,
+        stringValue: String,
+        primedValue: String?
+    ) -> String? {
+        if stringValue == primedValue { return nil }
+        if case .enumPicker(let options, _) = kind,
+           stringValue.isEmpty, options.contains("") {
+            return nil
+        }
+        return stringValue
+    }
+
     @MainActor
     private func save() async {
         saveError = nil
-        guard stringValue != primedValue else {
-            // Nothing was changed, so there is nothing Hermes needs told —
-            // and for a sentinel-primed key, writing would pin a default.
+        guard let value = Self.valueToWrite(
+            kind: spec.kind,
+            stringValue: stringValue,
+            primedValue: primedValue
+        ) else {
             onDismiss()
             dismiss()
             return
         }
         do {
-            try await vm.saveValue(key: spec.key, value: stringValue)
+            try await vm.saveValue(key: spec.key, value: value)
             onDismiss()
             dismiss()
         } catch {
