@@ -71,6 +71,13 @@ struct CronView: View {
         capabilitiesStore?.capabilities.hasCronResumeRunNow ?? false
     }
 
+    /// v0.21.0 — `_is_recoverable_error_job`: a recurring job in
+    /// `state = "error"` is exempt from the terminal block and plain
+    /// `cron resume` recovers it.
+    private var hasCronRecoverableErrorResume: Bool {
+        capabilitiesStore?.capabilities.hasCronRecoverableErrorResume ?? false
+    }
+
     /// v0.20.6 — `--deliver bot-chat[:profile]`. Placeholder/hint only;
     /// the strip happens in `supportsCronDeliver`.
     private var hasCronBotChatDelivery: Bool {
@@ -136,6 +143,7 @@ struct CronView: View {
         .onAppear {
             viewModel.load(changeToken: fileWatcher.lastChangeDate)
             viewModel.isV0206OrLater = hasCronResumeRunNow
+            viewModel.isV021OrLater = hasCronRecoverableErrorResume
             viewModel.isV0211OrLater = isV0211OrLater
             // Both probes are one cheap read-only CLI call each, and both
             // feed always-visible affordances (row badge / warning icon),
@@ -156,6 +164,7 @@ struct CronView: View {
         // work when it does — otherwise a cold launch shows no incidents,
         // no doctor findings, and the wrong terminal-refusal wording.
         .onChange(of: hasCronResumeRunNow) { _, newValue in viewModel.isV0206OrLater = newValue }
+        .onChange(of: hasCronRecoverableErrorResume) { _, newValue in viewModel.isV021OrLater = newValue }
         .onChange(of: isV0211OrLater) { _, newValue in viewModel.isV0211OrLater = newValue }
         .onChange(of: hasCronIncidents) { _, newValue in if newValue { viewModel.loadIncidents() } }
         .onChange(of: hasCronDoctor) { _, newValue in if newValue { viewModel.loadDoctor() } }
@@ -579,21 +588,37 @@ struct CronView: View {
             }
             .buttonStyle(ScarfPrimaryButton())
 
-            Button {
-                if job.enabled { viewModel.pauseJob(job) } else { viewModel.resumeJob(job) }
-            } label: {
-                Image(systemName: job.enabled ? "pause" : "play")
-            }
-            .buttonStyle(ScarfSecondaryButton())
-            .help(job.enabled ? "Pause" : "Resume")
-            .accessibilityIdentifier("cron.detail.pauseToggle")
+            // The offer is computed once, from the two Hermes predicates —
+            // `_is_recoverable_error_job` and `rearm_oneshot`'s
+            // one-shot-only guard — so this pane, `BotRoutinesView` and iOS
+            // all show the same buttons for the same job.
+            let offer = viewModel.recoveryOffer(for: job)
 
-            // v0.20.6 `cron resume --run-now`. Offered next to Resume
-            // whenever plain Resume isn't the whole story: a paused job
-            // the user wants fired immediately, and — the case Hermes
-            // actually refuses — a terminal (completed/error) job, whose
-            // ONLY re-arm path this is.
-            if hasCronResumeRunNow, !job.enabled || job.isTerminal {
+            if job.enabled, !job.isTerminal {
+                Button {
+                    viewModel.pauseJob(job)
+                } label: {
+                    Image(systemName: "pause")
+                }
+                .buttonStyle(ScarfSecondaryButton())
+                .help("Pause")
+                .accessibilityIdentifier("cron.detail.pauseToggle")
+            } else if offer.canResume {
+                Button {
+                    viewModel.resumeJob(job)
+                } label: {
+                    Image(systemName: "play")
+                }
+                .buttonStyle(ScarfSecondaryButton())
+                .help("Resume")
+                .accessibilityIdentifier("cron.detail.pauseToggle")
+            }
+
+            // v0.20.6 `cron resume --run-now` — re-arm. ONE-SHOT ONLY:
+            // `rearm_oneshot` raises `_REARM_RECURRING_ERROR` for any other
+            // schedule (`cron/jobs.py:2065-2066` @ v2026.9.7), so offering
+            // it for a recurring job was a guaranteed exit 1.
+            if offer.canRearm {
                 Button {
                     viewModel.resumeAndRunNow(job)
                 } label: {
@@ -601,8 +626,18 @@ struct CronView: View {
                 }
                 .buttonStyle(ScarfSecondaryButton())
                 .help(job.isTerminal
-                      ? "This job is \(job.effectiveState) — re-arm it to fire immediately."
-                      : "Resume and fire immediately instead of at the next scheduled time.")
+                      ? "This one-shot is \(job.effectiveState) — re-arm it for the next scheduler tick."
+                      : "Resume and fire at the next scheduler tick instead of at its scheduled time.")
+            }
+
+            // Nothing Hermes would accept. Say so instead of offering a
+            // dead end (round-3 product decision 1).
+            if let hint = offer.hint {
+                Text(hint)
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("cron.detail.recoveryHint")
             }
 
             Button {

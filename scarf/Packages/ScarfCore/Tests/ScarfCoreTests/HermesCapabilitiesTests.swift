@@ -936,6 +936,7 @@ import Foundation
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)")
         #expect(caps.hasPeerRunCommands)
         #expect(caps.hasCronDoctor)
+        #expect(caps.hasCronRecoverableErrorResume)
         #expect(caps.hasConfigDottedKeyEscape)
         #expect(caps.hasCronIncidents)
         #expect(caps.hasCronResumeRunNow)
@@ -953,6 +954,7 @@ import Foundation
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.5 (2026.8.19)")
         #expect(!caps.hasPeerRunCommands)
         #expect(!caps.hasCronDoctor)
+        #expect(!caps.hasCronRecoverableErrorResume)
         #expect(!caps.hasConfigDottedKeyEscape)
         #expect(!caps.hasCronIncidents)
         #expect(!caps.hasCronResumeRunNow)
@@ -979,6 +981,7 @@ import Foundation
         #expect(caps.hasBrowserCloseProfile)
         #expect(!caps.hasPeerRunCommands)
         #expect(!caps.hasCronDoctor)
+        #expect(!caps.hasCronRecoverableErrorResume)
         #expect(!caps.hasConfigDottedKeyEscape)
     }
 
@@ -988,6 +991,7 @@ import Foundation
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
         #expect(caps.hasPeerRunCommands)
         #expect(caps.hasCronDoctor)
+        #expect(caps.hasCronRecoverableErrorResume)
         #expect(caps.hasConfigDottedKeyEscape)
         #expect(caps.hasCronIncidents)
         #expect(caps.hasCronResumeRunNow)
@@ -1116,6 +1120,7 @@ import Foundation
         // The v0.21.0 surface stays alive on a v0.21.0 host.
         #expect(caps.hasPeerRunCommands)
         #expect(caps.hasCronDoctor)
+        #expect(caps.hasCronRecoverableErrorResume)
         #expect(caps.isV021OrLater)
     }
 
@@ -1172,6 +1177,7 @@ import Foundation
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
         #expect(caps.hasPeerRunCommands)
         #expect(caps.hasCronDoctor)
+        #expect(caps.hasCronRecoverableErrorResume)
         #expect(caps.hasConfigDottedKeyEscape)
         #expect(caps.hasCronIncidents)
         #expect(caps.hasCronResumeRunNow)

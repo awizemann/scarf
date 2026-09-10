@@ -80,14 +80,41 @@ import ScarfCore
         #expect(CronViewModel.friendlyCronFailure("") == nil)
     }
 
-    /// The pre-check: on a v0.20.6+ host, resuming a completed/error job
-    /// never reaches the CLI, and the message names the affordance that
-    /// actually works.
-    @Test @MainActor func resumingATerminalJobIsRefusedLocallyOnV0206Hosts() {
+    /// The pre-check: on a v0.20.6+ host, resuming a terminal ONE-SHOT never
+    /// reaches the CLI, and the message names the affordance that actually
+    /// works — `rearm_oneshot` accepts a `once` schedule.
+    @Test @MainActor func resumingATerminalOneShotNamesTheRearmHatch() {
         let vm = CronViewModel()
         vm.isV0206OrLater = true
-        vm.resumeJob(Self.fixtureJob(lastError: nil, state: "completed"))
+        vm.isV021OrLater = true
+        vm.resumeJob(Self.fixtureJob(lastError: nil, state: "completed", kind: "once"))
         #expect(vm.message?.contains("Resume & Run Now") == true)
+    }
+
+    /// P30: the same refusal for a RECURRING completed job must NOT name
+    /// re-arm — `rearm_oneshot` raises `_REARM_RECURRING_ERROR` for any
+    /// schedule but `once` (`cron/jobs.py:2065-2066` @ `v2026.9.7`), so the
+    /// old wording pointed at a guaranteed exit 1. It quotes the hint
+    /// instead (round-3 product decision 1).
+    @Test @MainActor func resumingACompletedRecurringJobPointsAtTheSchedule() {
+        let vm = CronViewModel()
+        vm.isV0206OrLater = true
+        vm.isV021OrLater = true
+        vm.resumeJob(Self.fixtureJob(lastError: nil, state: "completed"))
+        #expect(vm.message?.contains("Resume & Run Now") == false)
+        #expect(vm.message?.contains(CronRecoveryOffer.noFutureOccurrencesHint) == true)
+    }
+
+    /// P30: a RECURRING job in `error` is exempt from the terminal block on
+    /// a v0.21.0+ host (`_is_recoverable_error_job`), so Scarf must offer
+    /// plain Resume and must not pre-refuse it.
+    @Test @MainActor func aRecurringErrorJobIsNotRefusedOnAV021Host() {
+        let vm = CronViewModel()
+        vm.isV0206OrLater = true
+        vm.isV021OrLater = true
+        let offer = vm.recoveryOffer(for: Self.fixtureJob(lastError: "boom", state: "error"))
+        #expect(offer.canResume)
+        #expect(!offer.canRearm)
     }
 
     /// The refusal is a *mirror* of a host-side guard, not a Scarf policy.
@@ -215,12 +242,15 @@ import ScarfCore
 
     // MARK: - Fixtures
 
-    private static func fixtureJob(lastError: String?, state: String? = nil) -> HermesCronJob {
+    private static func fixtureJob(lastError: String?, state: String? = nil,
+                                   kind: String = "cron") -> HermesCronJob {
         HermesCronJob(
             id: "test-job",
             name: "Test Job",
             prompt: "noop",
-            schedule: CronSchedule(kind: "cron", expression: "0 9 * * *"),
+            schedule: kind == "once"
+                ? CronSchedule(kind: "once", runAt: "2099-01-01T09:00:00+00:00")
+                : CronSchedule(kind: "cron", expression: "0 9 * * *"),
             enabled: true,
             state: state ?? (lastError != nil ? "failed" : "scheduled"),
             lastError: lastError

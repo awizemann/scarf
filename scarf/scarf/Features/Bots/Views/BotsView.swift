@@ -140,6 +140,9 @@ struct BotsView: View {
             mirrorRoutinesCapability(forProfile: viewModel.selectedProfileName)
             mirrorAgentCapability(forProfile: viewModel.selectedProfileName)
         }
+        .onChange(of: hasCronRecoverableErrorResume) { _, _ in
+            mirrorRoutinesCapability(forProfile: viewModel.selectedProfileName)
+        }
         .onChange(of: viewModel.selectedProfileName) { _, newValue in
             mirrorRoutinesCapability(forProfile: newValue)
             mirrorAgentCapability(forProfile: newValue)
@@ -612,6 +615,13 @@ struct BotsView: View {
         capabilitiesStore?.capabilities.hasCronResumeRunNow ?? false
     }
 
+    /// v0.21.0 — the `_is_recoverable_error_job` exemption that makes a
+    /// recurring job in `error` resumable. Mirrored alongside
+    /// `hasCronResumeRunNow` so this pane's offer matches `CronView`'s.
+    private var hasCronRecoverableErrorResume: Bool {
+        capabilitiesStore?.capabilities.hasCronRecoverableErrorResume ?? false
+    }
+
     /// Fetch the cached per-bot routines view model. Pure — no capability
     /// mirroring here. That write used to happen inline in this accessor,
     /// which is called from the `@ViewBuilder` `detail` body: a stored
@@ -634,7 +644,9 @@ struct BotsView: View {
     /// the CronViewModel-shaped flag `BotRoutinesView` reads directly).
     private func mirrorRoutinesCapability(forProfile profileName: String?) {
         guard let profileName else { return }
-        viewModel.routinesViewModel(for: profileName).isV0206OrLater = hasCronResumeRunNow
+        let vm = viewModel.routinesViewModel(for: profileName)
+        vm.isV0206OrLater = hasCronResumeRunNow
+        vm.isV021OrLater = hasCronRecoverableErrorResume
     }
 
     // MARK: - Selection

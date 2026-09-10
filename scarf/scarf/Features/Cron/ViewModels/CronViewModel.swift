@@ -382,10 +382,33 @@ final class CronViewModel {
     /// would have accepted. Same rule as `isV0206OrLater`.
     var isV0211OrLater = false
 
-    /// Should Scarf refuse a terminal-job resume/run locally instead of
+    /// Set by `CronView` from `hasCronRecoverableErrorResume` (v0.21.0).
+    /// Hermes exempts a RECURRING job in `state = "error"` from the terminal
+    /// block (`_reject_terminal_activation`'s `and not
+    /// _is_recoverable_error_job(job)`, `cron/jobs.py:1865-1878` @
+    /// `v2026.9.7`), so plain `cron resume` recovers it — but only from
+    /// v0.21.0 on (`:2369-2375` @ `v2026.8.27` has no exemption).
+    var isV021OrLater = false
+
+    /// What Scarf may offer this job — the shared, cross-platform answer.
+    /// `IOSCronViewModel.recoveryOffer(for:)` computes the same thing from
+    /// the same model function, so the two platforms cannot diverge.
+    func recoveryOffer(for job: HermesCronJob) -> CronRecoveryOffer {
+        job.recoveryOffer(
+            hostRefusesTerminalJobs: isV0206OrLater,
+            hostRecoversErrorRecurring: isV021OrLater
+        )
+    }
+
+    /// Should Scarf refuse a terminal-job **run** locally instead of
     /// round-tripping to the CLI? Only when the host is new enough to
-    /// refuse it too. Factored out so both call sites — and the tests —
-    /// share one contract.
+    /// refuse it too.
+    ///
+    /// This stays the BARE `is_terminal_job` test on purpose: `trigger_job`
+    /// checks `is_terminal_job(job)` with no recoverable-error exemption
+    /// (`cron/jobs.py:2012` @ `v2026.9.7`), unlike the `update_job` door
+    /// resume goes through. A recurring job in `error` is therefore
+    /// resumable and NOT runnable, and the two gates must not be shared.
     func refusesTerminalJobLocally(_ job: HermesCronJob) -> Bool {
         isV0206OrLater && job.isTerminal
     }
@@ -398,27 +421,46 @@ final class CronViewModel {
         // funnels through it.
         // Catch it before the CLI round-trip so the user gets the
         // actionable sentence instead of a Python ValueError tail.
-        if refusesTerminalJobLocally(job) {
-            post(terminalRefusalMessage(job), outcome: .failure)
+        let offer = recoveryOffer(for: job)
+        if job.isTerminal, !offer.canResume {
+            post(terminalRefusalMessage(job, offer: offer), outcome: .failure)
             return
         }
         runAndReload(["cron", "resume", job.id], success: "Resumed")
     }
 
     /// `hermes cron resume <id> --run-now` (v0.20.6+) — the documented
-    /// escape hatch for a terminal job: re-arms it to fire immediately
-    /// rather than at its (spent) schedule. Callers gate on
-    /// `hasCronResumeRunNow`.
+    /// escape hatch for a **one-shot**: re-arms it to fire at the next
+    /// scheduler tick rather than at its (spent) schedule.
+    ///
+    /// **One-shot-only.** `rearm_oneshot` re-checks the job's own schedule
+    /// inside `apply` and raises `_REARM_RECURRING_ERROR` for anything but
+    /// `once` (`cron/jobs.py:2040-2042`, `:2065-2066` @ `v2026.9.7`), which
+    /// `cron_resume` turns into exit 1 (`hermes_cli/cron.py:691-695`).
+    /// Callers gate on `recoveryOffer(for:).canRearm`, never on
+    /// "the job is paused".
+    ///
+    /// The success copy says "next tick", not "running now": `rearm_oneshot`
+    /// only sets `next_run_at` to now and returns (`cron/jobs.py:2055`,
+    /// `:2072-2075`), and unlike `runNow` this path does not follow up with
+    /// `cron tick` — nothing dispatches until the scheduler wakes.
     func resumeAndRunNow(_ job: HermesCronJob) {
-        runAndReload(["cron", "resume", job.id, "--run-now"], success: "Resumed — running now")
+        runAndReload(["cron", "resume", job.id, "--run-now"],
+                     success: "Re-armed — will run at the next scheduler tick")
     }
 
-    /// Only reachable when `refusesTerminalJobLocally` said yes, i.e. on a
-    /// v0.20.6+ host — which is exactly the generation that has the
-    /// `--run-now` escape hatch, so the wording can name it outright.
-    private func terminalRefusalMessage(_ job: HermesCronJob) -> String {
+    /// Only reachable on a v0.20.6+ host — the generation that has the
+    /// `--run-now` escape hatch — so the wording may name it, but ONLY when
+    /// the offer actually includes it: naming a button that
+    /// `_REARM_RECURRING_ERROR` would refuse is the dead end this phase
+    /// removed.
+    private func terminalRefusalMessage(_ job: HermesCronJob, offer: CronRecoveryOffer) -> String {
         let state = job.effectiveState == "error" ? "failed" : "finished"
-        return "\"\(job.name)\" has \(state) and can't just be resumed — use Resume & Run Now to re-arm it."
+        let lead = "\"\(job.name)\" has \(state) and can't just be resumed"
+        if offer.canRearm {
+            return lead + " — use Resume & Run Now to re-arm it."
+        }
+        return lead + ". " + (offer.hint ?? CronRecoveryOffer.noFutureOccurrencesHint)
     }
 
     /// The verdict on `hermes cron run <id>`, judged by what it printed.
@@ -510,7 +552,7 @@ final class CronViewModel {
         // (`cron/jobs.py::trigger_job`, v2026.9.7 :2012-2017)
         // — but only from v0.20.6 on; see `refusesTerminalJobLocally`.
         if refusesTerminalJobLocally(job) {
-            post(terminalRefusalMessage(job), outcome: .failure)
+            post(terminalRefusalMessage(job, offer: recoveryOffer(for: job)), outcome: .failure)
             return
         }
         let svc = fileService

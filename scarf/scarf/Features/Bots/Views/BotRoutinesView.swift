@@ -126,20 +126,29 @@ struct BotRoutinesView: View {
             }
             Spacer(minLength: 0)
             HStack(spacing: ScarfSpace.s2) {
-                if job.isTerminal {
-                    if viewModel.refusesTerminalJobLocally(job) {
-                        Button("Resume & Run Now") { viewModel.resumeAndRunNow(job) }
-                            .buttonStyle(ScarfGhostButton())
-                    } else {
-                        Button("Resume") { viewModel.resume(job) }
-                            .buttonStyle(ScarfGhostButton())
-                    }
-                } else if job.effectiveState == "paused" {
-                    Button("Resume") { viewModel.resume(job) }
-                        .buttonStyle(ScarfGhostButton())
-                } else {
+                // One shared offer, same as `CronView`'s detail pane: plain
+                // Resume for a paused job and for a recoverable-error
+                // recurring one, "Resume & Run Now" only where
+                // `rearm_oneshot` accepts it (`schedule.kind == "once"`),
+                // and a hint where Hermes has no door at all.
+                let offer = viewModel.recoveryOffer(for: job)
+                if !job.isTerminal, job.enabled {
                     Button("Pause") { viewModel.pause(job) }
                         .buttonStyle(ScarfGhostButton())
+                } else if offer.canResume {
+                    Button("Resume") { viewModel.resume(job) }
+                        .buttonStyle(ScarfGhostButton())
+                }
+                if offer.canRearm {
+                    Button("Resume & Run Now") { viewModel.resumeAndRunNow(job) }
+                        .buttonStyle(ScarfGhostButton())
+                }
+                if let hint = offer.hint {
+                    Text(hint)
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                        .frame(maxWidth: 200, alignment: .trailing)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Button("Run Now") { viewModel.runNow(job) }
                     .buttonStyle(ScarfGhostButton())

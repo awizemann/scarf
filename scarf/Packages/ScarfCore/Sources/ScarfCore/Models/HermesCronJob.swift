@@ -485,11 +485,7 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     public nonisolated var effectiveState: String {
         let stored = state.trimmingCharacters(in: .whitespaces)
         if stored == "completed" || stored == "error" { return stored }
-        let hasPauseMarker: Bool = {
-            guard let marker = extra["paused_at"] else { return false }
-            if case .null = marker { return false }
-            return true
-        }()
+        let hasPauseMarker = Self.isTruthyPauseMarker(extra["paused_at"])
         if !enabled {
             if hasPauseMarker || stored == "paused" { return "paused" }
             return stored.isEmpty ? "paused" : stored
@@ -512,6 +508,107 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     public nonisolated var isTerminal: Bool {
         let s = effectiveState
         return s == "completed" || s == "error"
+    }
+
+    /// Hermes's pause marker is `bool(job.get("paused_at"))`
+    /// (`cron/jobs.py::_has_pause_marker`, v2026.9.7 :477-479), i.e. Python
+    /// truthiness — so `""`, `0`, `false`, `[]` and `{}` are NOT markers, only
+    /// `null` used to be read that way by Scarf. A record carrying
+    /// `paused_at: ""` therefore renders "paused" in Scarf while the host
+    /// keeps firing it, which is exactly the divergence `effective_job_state`
+    /// exists to prevent.
+    static nonisolated func isTruthyPauseMarker(_ value: JSONValue?) -> Bool {
+        switch value {
+        case nil, .null:            return false
+        case .bool(let b):          return b
+        case .int(let i):           return i != 0
+        case .double(let d):        return d != 0
+        case .string(let s):        return !s.isEmpty
+        case .array(let a):         return !a.isEmpty
+        case .object(let o):        return !o.isEmpty
+        }
+    }
+
+    /// Hermes's `_is_recoverable_error_job` (`cron/jobs.py:504-522` @
+    /// `v2026.9.7`): `state == "error"` AND `schedule.kind` in
+    /// `{"cron", "interval"}`.
+    ///
+    /// `state = "error"` is set ONLY when `compute_next_run()` fails for a
+    /// recurring job (croniter missing, malformed schedule), so such a job
+    /// still has future occurrences once the cause is fixed — treating it as
+    /// terminal "would wedge it forever". `_reject_terminal_activation`
+    /// exempts it (`:1865-1878`), so plain `hermes cron resume` recovers it.
+    ///
+    /// **Floor v0.21.0.** The symbol first exists at `v2026.8.31`
+    /// (`pyproject.toml version = "0.21.0"`); at `v2026.8.27` (0.20.6) — the
+    /// last tag without it — `update_job`'s terminal block is unconditional,
+    /// so resume is refused there. Callers gate on
+    /// `HermesCapabilities.hasCronRecoverableErrorResume`.
+    ///
+    /// Read off `effectiveState` for consistency with `isTerminal`, which the
+    /// two predicates are always evaluated together with; `effectiveState`
+    /// preserves `error` verbatim (`effective_job_state` returns a terminal
+    /// stored state unchanged, `:490-491`).
+    public nonisolated var isRecoverableErrorJob: Bool {
+        effectiveState == "error" && (schedule.kind == "cron" || schedule.kind == "interval")
+    }
+
+    /// Whether `hermes cron resume <id> --run-now` / `--at` can succeed at
+    /// all: `rearm_oneshot` re-checks the JOB's own schedule inside `apply`
+    /// and raises `_REARM_RECURRING_ERROR` — "Cannot re-arm recurring jobs:
+    /// re-arm is one-shot-only; use plain resume or cron run." — for
+    /// anything but `once` (`cron/jobs.py:2040-2042`, `:2065-2066` @
+    /// `v2026.9.7`); `cron_resume` prints it and returns 1
+    /// (`hermes_cli/cron.py:691-695`).
+    ///
+    /// **No flag needed.** The guard is present verbatim inside
+    /// `rearm_oneshot` at the function's FIRST tag, `v2026.8.27` (0.20.6,
+    /// `cron/jobs.py:2467-2471` + `:2469` inside the loop) and at
+    /// `v2026.8.31` — i.e. re-arm has never accepted a recurring job on any
+    /// host that has re-arm at all, and that is exactly
+    /// `hasCronResumeRunNow`'s floor.
+    public nonisolated var isRearmableOneShot: Bool { schedule.kind == "once" }
+
+    /// What Scarf may offer this job, given the host's floors. The single
+    /// source of truth both platforms' view models delegate to, so the Mac
+    /// detail pane, the Bots routines list and the iOS toggle cannot drift
+    /// apart again.
+    ///
+    /// - Parameters:
+    ///   - hostRefusesTerminalJobs: `HermesCapabilities.hasCronResumeRunNow`
+    ///     (`isV0206OrLater`). Below it neither `update_job` nor
+    ///     `trigger_job` refuses a terminal job and `--run-now` does not
+    ///     exist, so Scarf pre-refuses nothing and offers no re-arm — the
+    ///     rule `refusesTerminalJobLocally` already documented.
+    ///   - hostRecoversErrorRecurring:
+    ///     `HermesCapabilities.hasCronRecoverableErrorResume`
+    ///     (`isV021OrLater`) — the `_is_recoverable_error_job` exemption.
+    public nonisolated func recoveryOffer(
+        hostRefusesTerminalJobs: Bool,
+        hostRecoversErrorRecurring: Bool
+    ) -> CronRecoveryOffer {
+        guard isTerminal else {
+            // A running job is offered Pause, not recovery.
+            guard !enabled else { return .none }
+            return CronRecoveryOffer(
+                canResume: true,
+                canRearm: hostRefusesTerminalJobs && isRearmableOneShot
+            )
+        }
+        // Pre-v0.20.6: the host accepts what Scarf would refuse. Let the CLI
+        // decide and show no re-arm button (it does not exist there).
+        guard hostRefusesTerminalJobs else { return CronRecoveryOffer(canResume: true) }
+
+        if isRecoverableErrorJob {
+            return hostRecoversErrorRecurring
+                ? CronRecoveryOffer(canResume: true)
+                : CronRecoveryOffer(hint: CronRecoveryOffer.errorNeedsNewerHermesHint)
+        }
+        // Genuinely terminal. Re-arm is the documented escape hatch, and it
+        // is one-shot-only.
+        return isRearmableOneShot
+            ? CronRecoveryOffer(canRearm: true)
+            : CronRecoveryOffer(hint: CronRecoveryOffer.noFutureOccurrencesHint)
     }
 
     // MARK: - repeat (unmodeled; lives in `extra`)

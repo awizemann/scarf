@@ -31,6 +31,24 @@ public final class IOSCronViewModel {
     /// rule `saveRegistry` enforces for `projects.json`.
     private var baseline: Data?
 
+    /// Mirrored from the capability store by `CronListView`, exactly as the
+    /// Mac's `CronView` mirrors them onto `CronViewModel`. Defaults are the
+    /// pre-floor posture: refuse nothing locally, offer no re-arm, let the
+    /// CLI decide — the same default the Mac VM carries.
+    public var isV0206OrLater = false
+    public var isV021OrLater = false
+
+    /// What Scarf may offer this job. Delegates to the SAME model function
+    /// the Mac's `CronViewModel.recoveryOffer(for:)` calls, so both
+    /// platforms make an identical offer for an identical job and host
+    /// (`HermesCronJob.recoveryOffer(hostRefusesTerminalJobs:hostRecoversErrorRecurring:)`).
+    public func recoveryOffer(for job: HermesCronJob) -> CronRecoveryOffer {
+        job.recoveryOffer(
+            hostRefusesTerminalJobs: isV0206OrLater,
+            hostRecoversErrorRecurring: isV021OrLater
+        )
+    }
+
     public init(context: ServerContext) {
         self.context = context
     }
@@ -145,6 +163,21 @@ public final class IOSCronViewModel {
             return false
         }
 
+        // Scarf-side port of `_reject_terminal_activation` MINUS its
+        // `_is_recoverable_error_job` exemption — the recurring half the
+        // one-shot guard above never covered. A recurring job in `error` is
+        // resumable from v0.21.0 (`cron/jobs.py:1865-1878` @ `v2026.9.7`); a
+        // recurring job in `completed` is resumable nowhere. Same offer the
+        // Mac renders, so the two platforms refuse the same jobs.
+        if enabled, prev.isTerminal {
+            let offer = recoveryOffer(for: prev)
+            if !offer.canResume {
+                lastToggleRoute = .refused
+                lastError = Self.terminalRefusalMessage(prev, offer: offer)
+                return false
+            }
+        }
+
         // The CLI route is remote-only. On iOS every real context is
         // `.ssh` (there is no local Hermes on a phone); a `.local`
         // context here only ever comes from a macOS-hosted unit test,
@@ -187,6 +220,19 @@ public final class IOSCronViewModel {
             updated[idx] = next
             return await saveJobs(updated)
         }
+    }
+
+    /// The sentence for a terminal job whose only doors are shut. Mirrors
+    /// the Mac's `CronViewModel.terminalRefusalMessage` — it names
+    /// "Resume & Run Now" only where `rearm_oneshot` would actually accept
+    /// the job, and otherwise quotes the offer's hint.
+    static func terminalRefusalMessage(_ job: HermesCronJob, offer: CronRecoveryOffer) -> String {
+        let state = job.effectiveState == "error" ? "failed" : "finished"
+        let lead = "\"\(job.name)\" has \(state) and can't just be resumed"
+        if offer.canRearm {
+            return lead + " — re-arm it from the Mac app (Resume & Run Now)."
+        }
+        return lead + ". " + (offer.hint ?? CronRecoveryOffer.noFutureOccurrencesHint)
     }
 
     static func oneShotRefusalMessage(_ job: HermesCronJob) -> String {

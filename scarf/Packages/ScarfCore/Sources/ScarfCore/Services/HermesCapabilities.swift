@@ -1293,6 +1293,25 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// present at v2026.8.27 (0.20.6), so the floor is v0.20.6.
     public var hasCronResumeRunNow: Bool { isV0206OrLater }
 
+    /// Whether `hermes cron resume <id>` recovers a RECURRING job stuck in
+    /// `state = "error"`.
+    ///
+    /// `_reject_terminal_activation` gained its `and not
+    /// _is_recoverable_error_job(job)` arm at `v2026.8.31`
+    /// (`pyproject.toml version = "0.21.0"`, `cron/jobs.py:2583-2595` and
+    /// `:2684-2696`); the predicate itself is defined there at `:504-522` and
+    /// is absent from every earlier tag. At `v2026.8.27` (0.20.6) the same
+    /// block reads `is_terminal_job(job) and (…)` with no exemption
+    /// (`:2272-2278`, `:2369-2375`), so a resume of an error-state cron or
+    /// interval job raises "Cannot activate terminal cron job …" and
+    /// `cron_resume` returns 1.
+    ///
+    /// A walk of all 32 `v2026.*` tags for `_is_recoverable_error_job`
+    /// matches exactly `v2026.8.31` and `v2026.9.7` — first tag with it
+    /// `v2026.8.31` (0.21.0), last tag without it `v2026.8.27` (0.20.6).
+    /// Minor-level floor, so a v0.21.0 host gets it too.
+    public var hasCronRecoverableErrorResume: Bool { isV021OrLater }
+
     /// `hermes cron create/edit --deliver bot-chat[:profile]` — inject a
     /// job's output into a local profile's canonical Bot Chat session as a
     /// message the bot then responds to (`hermes_cli/subcommands/cron.py:29`
