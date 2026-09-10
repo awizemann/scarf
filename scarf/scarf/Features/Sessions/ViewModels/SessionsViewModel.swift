@@ -470,6 +470,18 @@ final class SessionsViewModel {
         performRename()
     }
 
+    /// argv for `hermes sessions rename`. The `--` separator is REQUIRED:
+    /// `title` is `nargs="+"` on Hermes's parser
+    /// (`hermes_cli/subcommands/sessions.py:210-213` at v2026.9.7), so a
+    /// title that begins with a dash ("-- draft", "-v2 notes") is consumed
+    /// as an option and argparse exits 2 instead of renaming. Everything
+    /// after `--` is positional. Title stays ONE argv element — Hermes
+    /// re-joins the list with a single space (`sessions_cmd.py:681`), so
+    /// splitting here would collapse the user's internal spacing.
+    static func renameArgv(sessionId: String, title: String) -> [String] {
+        ["sessions", "rename", "--", sessionId, title]
+    }
+
     private func performRename() {
         guard let sessionId = renameSessionId else { return }
         let title = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -486,7 +498,7 @@ final class SessionsViewModel {
             // freezing the sheet (and the whole window) for the round-trip.
             // Detached, matching `loadImpl()`'s attribution batch.
             let result = await Task.detached {
-                ctx.runHermes(["sessions", "rename", sessionId, title])
+                ctx.runHermes(SessionsViewModel.renameArgv(sessionId: sessionId, title: title))
             }.value
             guard let self else { return }
             self.isRenaming = false

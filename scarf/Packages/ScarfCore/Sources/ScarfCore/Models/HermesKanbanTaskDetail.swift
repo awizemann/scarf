@@ -12,24 +12,22 @@ public struct HermesKanbanTaskDetail: Sendable, Equatable, Codable {
     /// to the worker as upstream context; surfacing them in the
     /// inspector is useful for understanding why a task started.
     public let parentResults: [String: String]
-    /// Envelope-level diagnostics array (sibling to `task`, not nested
-    /// inside it). Defensive — Hermes v0.13's wire shape may attach
-    /// diagnostics to the task itself OR to the envelope.
-    /// `allDiagnostics` dedupes both sources by `(kind, detected_at)`.
-    public let envelopeDiagnostics: [HermesKanbanDiagnostic]?
+    // NOTE: an envelope-level `diagnostics` sibling was modelled here
+    // defensively; `_cmd_show`'s JSON envelope
+    // (`hermes_cli/kanban.py:493-498`, v2026.9.7) carries only task /
+    // latest_summary / parents / children / comments / events / runs, and
+    // never has. Diagnostics come from `kanban diagnostics --json`.
 
     public init(
         task: HermesKanbanTask,
         comments: [HermesKanbanComment] = [],
         events: [HermesKanbanEvent] = [],
-        parentResults: [String: String] = [:],
-        envelopeDiagnostics: [HermesKanbanDiagnostic]? = nil
+        parentResults: [String: String] = [:]
     ) {
         self.task = task
         self.comments = comments
         self.events = events
         self.parentResults = parentResults
-        self.envelopeDiagnostics = envelopeDiagnostics
     }
 
     enum CodingKeys: String, CodingKey {
@@ -37,7 +35,6 @@ public struct HermesKanbanTaskDetail: Sendable, Equatable, Codable {
         case comments
         case events
         case parentResults = "parent_results"
-        case envelopeDiagnostics = "diagnostics"
     }
 
     public init(from decoder: any Decoder) throws {
@@ -56,9 +53,6 @@ public struct HermesKanbanTaskDetail: Sendable, Equatable, Codable {
         self.comments = (try? container.decodeIfPresent([HermesKanbanComment].self, forKey: .comments)) ?? []
         self.events = (try? container.decodeIfPresent([HermesKanbanEvent].self, forKey: .events)) ?? []
         self.parentResults = (try? container.decodeIfPresent([String: String].self, forKey: .parentResults)) ?? [:]
-        // Same `try?` shield as the rest — a malformed envelope
-        // diagnostics array shouldn't reject the whole show response.
-        self.envelopeDiagnostics = try? container.decodeIfPresent([HermesKanbanDiagnostic].self, forKey: .envelopeDiagnostics)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -67,20 +61,5 @@ public struct HermesKanbanTaskDetail: Sendable, Equatable, Codable {
         try c.encode(comments, forKey: .comments)
         try c.encode(events, forKey: .events)
         try c.encode(parentResults, forKey: .parentResults)
-        try c.encodeIfPresent(envelopeDiagnostics, forKey: .envelopeDiagnostics)
-    }
-
-    /// Unified diagnostics view for the inspector. Combines `task.diagnostics`
-    /// with envelope-level diagnostics (when present) and dedupes on the
-    /// `(kind, detectedAt)` tuple. Wire-side dupes are unlikely but cheap to
-    /// filter. Empty for pre-v0.13 hosts.
-    public var allDiagnostics: [HermesKanbanDiagnostic] {
-        let onTask = task.diagnostics
-        let onEnvelope = envelopeDiagnostics ?? []
-        var seen = Set<String>()
-        return (onTask + onEnvelope).filter { diag in
-            let key = "\(diag.kind)|\(diag.detectedAt ?? "")"
-            return seen.insert(key).inserted
-        }
     }
 }

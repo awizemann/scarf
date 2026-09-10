@@ -151,6 +151,45 @@ public actor KanbanService {
         }
     }
 
+    /// argv for `hermes kanban diagnostics --json`. Fleet mode (no
+    /// `--task`) returns every non-archived task that has at least one
+    /// active signal, so ONE call feeds a whole board load.
+    /// `hermes_cli/kanban_parser.py:251-256` (v2026.9.7); the same
+    /// subcommand + `--json` shape has existed unchanged since v2026.5.7
+    /// (`hermes_cli/kanban.py:350-370`), which is the `hasKanbanDiagnostics`
+    /// floor — callers MUST gate on that flag.
+    nonisolated static func diagnosticsArgv(board: String? = nil, taskId: String? = nil) -> [String] {
+        var args = ["diagnostics", "--json"]
+        if let taskId, !taskId.isEmpty {
+            args.append(contentsOf: ["--task", taskId])
+        }
+        return prefix(board: board, args)
+    }
+
+    /// Active diagnostics keyed by task id. Gate the call site on
+    /// `HermesCapabilities.hasKanbanDiagnostics` — a pre-v0.13 argparse
+    /// has no `diagnostics` subcommand and Hermes routes an unknown
+    /// kanban verb to the agent (charter C5).
+    ///
+    /// Returns `[:]` when the board is healthy: fleet mode prints `[]`.
+    public func diagnostics(taskId: String? = nil) async throws -> [String: [HermesKanbanDiagnostic]] {
+        let args = KanbanService.diagnosticsArgv(board: board, taskId: taskId)
+        let (code, stdout, stderr) = await runHermes(args: args, timeout: 20)
+        try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "diagnostics")
+        guard let data = stdout.data(using: .utf8) else {
+            throw KanbanError.decoding(message: "non-UTF8 stdout")
+        }
+        do {
+            let entries = try JSONDecoder().decode([HermesKanbanDiagnosticsEntry].self, from: data)
+            return Dictionary(
+                entries.map { ($0.taskId, $0.diagnostics) },
+                uniquingKeysWith: { $1 }
+            ).filter { !$0.value.isEmpty }
+        } catch {
+            throw KanbanError.decoding(message: error.localizedDescription)
+        }
+    }
+
     public func show(taskId: String) async throws -> HermesKanbanTaskDetail {
         let args = prefix("show", taskId, "--json")
         let (code, stdout, stderr) = await runHermes(args: args, timeout: 15)
@@ -509,41 +548,6 @@ public actor KanbanService {
         args.append(contentsOf: ["--", goal])
         let (code, stdout, stderr) = await runHermes(args: args, timeout: 60)
         try ensureSuccess(code: code, stdout: stdout, stderr: stderr, verb: "swarm")
-    }
-
-    // MARK: - Hallucination gate (v0.13)
-
-    // NOTE: there is NO `hermes kanban verify` verb in Hermes (re-verified
-    // against v0.16 — `kanban` has no verify/reject subcommand). The
-    // former `verify(taskId:)` shelled a non-existent verb and has been
-    // removed. Rejection (below) routes through the real `comment` +
-    // `archive` verbs, so the recovery UX stays functional.
-
-    /// Reject a worker-created card as a hallucinated reference. There
-    /// is no dedicated `kanban reject` verb in v0.13; the right action
-    /// per the v0.13 release notes is to archive the card (the work
-    /// doesn't exist) with a comment recording the rejection reason for
-    /// the audit trail. Routing this through the existing `comment` +
-    /// `archive` verbs keeps the wire shape stable across versions.
-    ///
-    /// If a future Hermes adds a dedicated `kanban reject` verb, swap
-    /// the body here — the public surface stays "reject" returning Void.
-    public func rejectHallucinated(taskId: String) async throws {
-        // Best-effort comment first so the audit trail records the
-        // rejection. A failure here shouldn't block the archive — log
-        // and continue.
-        do {
-            try await comment(
-                taskId: taskId,
-                text: "Rejected as hallucinated (no underlying work).",
-                author: nil
-            )
-        } catch {
-            #if canImport(os)
-            Self.logger.warning("kanban reject: comment failed, proceeding to archive (\(error.localizedDescription, privacy: .public))")
-            #endif
-        }
-        try await archive(taskIds: [taskId])
     }
 
     // MARK: - Drag-drop transition mapper

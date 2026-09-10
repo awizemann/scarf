@@ -43,11 +43,12 @@ struct KanbanCreateSheet: View {
     @State private var skillsInput: String = ""
     @State private var tenant: String = ""
     @State private var sendToTriage: Bool = false
-    /// v0.13: per-task retry budget. Toggle-gated so the user can opt
-    /// into "send the flag" vs. "let Hermes pick its default" (the
-    /// release notes default to 3 — see TODO in KanbanCreateRequest).
+    /// v0.13: per-task failure budget. Toggle-gated so the user can opt
+    /// into "send the flag" vs. "let Hermes pick its default"
+    /// (`DEFAULT_FAILURE_LIMIT = 2`, `hermes_cli/kanban_db_dispatch.py:33`
+    /// at v2026.9.7), which the seeded value mirrors.
     @State private var maxRetriesEnabled: Bool = false
-    @State private var maxRetries: Int = 3
+    @State private var maxRetries: Int = KanbanCreateRequest.hermesDefaultFailureLimit
     /// v0.21.1: acceptance boundary. Empty means "send no flag", which leaves
     /// Hermes on its own `local-only` default rather than us asserting it.
     @State private var completionContract: String = ""
@@ -175,13 +176,13 @@ struct KanbanCreateSheet: View {
         VStack(alignment: .leading, spacing: 4) {
             ScarfSectionHeader(
                 "Max retries",
-                subtitle: "0 = no retries. Defaults to 3."
+                subtitle: "Consecutive failures before Hermes blocks the card. 1 = no retries. Hermes defaults to 2."
             )
             HStack(spacing: ScarfSpace.s3) {
                 Toggle("Override default", isOn: $maxRetriesEnabled)
                     .toggleStyle(.switch)
                     .labelsHidden()
-                Stepper(value: $maxRetries, in: 0...20) {
+                Stepper(value: $maxRetries, in: 1...20) {
                     Text("\(maxRetries)")
                         .scarfStyle(.bodyEmph)
                         .frame(minWidth: 24, alignment: .trailing)

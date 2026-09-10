@@ -84,9 +84,14 @@ import Foundation
         #expect(task.modelOverride == nil)
     }
 
-    @Test func decodeV016GoalModeFields() throws {
-        // v0.16 `list --json` / `show --json` expose goal_mode + the
-        // optional goal_max_turns turn budget for Ralph-style goal loops.
+    @Test func goalModeIsNeverOnTheWire() throws {
+        // Drift alarm. `goal_mode` / `goal_max_turns` are REAL columns on
+        // Hermes's `tasks` table (`hermes_cli/kanban_db.py:922-925`,
+        // v2026.9.7) but are NOT in `_TASK_DICT_FIELDS`
+        // (`hermes_cli/kanban_output.py:18-24`), so no `--json` surface has
+        // ever emitted them and Scarf's goal badge could never render.
+        // The decode paths are gone; a row carrying the keys must still
+        // decode (forward compat), it just carries nothing extra.
         let json = """
         {
           "id": "t_v016",
@@ -97,20 +102,8 @@ import Foundation
         }
         """
         let task = try JSONDecoder().decode(HermesKanbanTask.self, from: Data(json.utf8))
-        #expect(task.goalMode == true)
-        #expect(task.goalMaxTurns == 5)
-    }
-
-    @Test func decodeV016GoalModeFieldsAbsentBecomesNil() throws {
-        // A row missing the v0.16 goal fields (pre-v0.16 host, or a
-        // one-shot task) decodes with both nil — pins the tolerant-decode
-        // contract so a v0.15 user upgrading Scarf doesn't break the board.
-        let json = """
-        {"id": "t_legacy16", "title": "no v0.16 fields", "status": "ready"}
-        """
-        let task = try JSONDecoder().decode(HermesKanbanTask.self, from: Data(json.utf8))
-        #expect(task.goalMode == nil)
-        #expect(task.goalMaxTurns == nil)
+        #expect(task.id == "t_v016")
+        #expect(task.status == "running")
     }
 
     @Test func decodeSessionId() throws {
@@ -463,87 +456,87 @@ import Foundation
     // user not yet on Hermes v0.13.
 
     @Test func decodeV013TaskFields() throws {
+        // `max_retries` is the only one of the "v0.13 reliability" fields
+        // that is real on the wire (`_TASK_DICT_FIELDS`,
+        // `hermes_cli/kanban_output.py:18-24` at v2026.9.7).
         let json = """
         {
           "id": "t_v013",
           "title": "v0.13 task",
           "status": "blocked",
-          "max_retries": 5,
-          "auto_blocked_reason": "worker exited without `kanban complete`",
-          "hallucination_gate_status": "pending",
-          "diagnostics": [
-            {"kind": "worker_exit_no_complete", "message": "exit code 0 with no complete call", "detected_at": 1778160614},
-            {"kind": "darwin_zombie_detected", "detected_at": "2026-05-09T12:00:00Z"}
-          ]
+          "max_retries": 5
         }
         """
         let task = try JSONDecoder().decode(HermesKanbanTask.self, from: Data(json.utf8))
         #expect(task.maxRetries == 5)
-        #expect(task.autoBlockedReason?.contains("kanban complete") == true)
-        #expect(task.hallucinationGateStatus == "pending")
-        #expect(task.diagnostics.count == 2)
-        #expect(task.diagnostics.first?.kind == "worker_exit_no_complete")
-        #expect(task.diagnostics.last?.detectedAt?.contains("2026") == true)
+    }
+
+    @Test func hallucinationGateFieldsAreNotDecoded() throws {
+        // Drift alarm for the surface deleted in the 2026-09 whole-surface
+        // audit. `hallucination_gate_status` / `auto_blocked_reason` /
+        // a task-level `diagnostics` array are emitted by NO Hermes version
+        // (whole-tree `git grep` over every tag through v2026.9.7 returns
+        // zero hits for the first two; `_TASK_DICT_FIELDS` has never
+        // carried `diagnostics`). A row inventing them must decode without
+        // error and without reviving any of it — if a future Hermes DOES
+        // start emitting them, this test still passes and the surface is
+        // re-derived deliberately, not by accident.
+        let json = """
+        {
+          "id": "t_v013b",
+          "title": "invented fields",
+          "status": "blocked",
+          "auto_blocked_reason": "worker exited without `kanban complete`",
+          "hallucination_gate_status": "pending",
+          "diagnostics": [{"kind": "worker_exit_no_complete"}]
+        }
+        """
+        let task = try JSONDecoder().decode(HermesKanbanTask.self, from: Data(json.utf8))
+        #expect(task.id == "t_v013b")
+        #expect(task.status == "blocked")
+        // Nothing on the model can carry them any more: the properties are
+        // gone, so this compiling at all is half the assertion.
+        let encoded = try JSONEncoder().encode(task)
+        let round = String(data: encoded, encoding: .utf8) ?? ""
+        #expect(!round.contains("hallucination_gate_status"))
+        #expect(!round.contains("auto_blocked_reason"))
+        #expect(!round.contains("diagnostics"))
     }
 
     @Test func decodeV012TaskHasNoNewFields() throws {
         // The most damaging failure mode is a v0.12 user upgrading Scarf
-        // and having the board stop loading because a v0.13-only field
-        // is required. Pin the contract.
+        // and having the board stop loading because a newer field is
+        // required. Pin the contract.
         let json = """
         {"id": "t_legacy", "title": "v0.12 task", "status": "ready"}
         """
         let task = try JSONDecoder().decode(HermesKanbanTask.self, from: Data(json.utf8))
         #expect(task.maxRetries == nil)
-        #expect(task.autoBlockedReason == nil)
-        #expect(task.hallucinationGateStatus == nil)
-        #expect(task.diagnostics.isEmpty)
+        #expect(task.lastFailureError == nil)
+        #expect(task.completionContract == nil)
     }
 
-    @Test func decodeMalformedDiagnosticTolerated() throws {
-        // If Hermes emits a malformed diagnostics value, the rest of the
-        // task should still decode. We use try? on the diagnostics decode
-        // so a single bad entry doesn't reject the whole row.
-        let json = """
-        {
-          "id": "t_x",
-          "title": "x",
-          "status": "ready",
-          "diagnostics": "not-an-array"
-        }
-        """
-        let task = try JSONDecoder().decode(HermesKanbanTask.self, from: Data(json.utf8))
-        #expect(task.id == "t_x")
-        // Diagnostics field couldn't decode — treat as empty.
-        #expect(task.diagnostics.isEmpty)
+    @Test func diagnosticKindMirrorMatchesHermesRules() {
+        // Mirrors `DIAGNOSTIC_KINDS` (`hermes_cli/kanban_diagnostics.py`,
+        // v2026.9.7). The pre-audit mirror listed seven kinds
+        // (`heartbeat_stalled`, `retry_cap_hit`, `darwin_zombie_detected`, …)
+        // that NO rule in that module has ever emitted.
+        #expect(KanbanDiagnosticKind.from("repeated_failures") == .repeatedFailures)
+        #expect(KanbanDiagnosticKind.from("REPEATED_CRASHES") == .repeatedCrashes)
+        #expect(KanbanDiagnosticKind.from("stranded_in_ready") == .strandedInReady)
+        #expect(KanbanDiagnosticKind.from("hallucinated_cards") == .hallucinatedCards)
+        // Retired inventions must NOT resolve.
+        #expect(KanbanDiagnosticKind.from("heartbeat_stalled") == .unknown)
+        #expect(KanbanDiagnosticKind.from("retry_cap_hit") == .unknown)
+        #expect(KanbanDiagnosticKind.from("future_kind_v99") == .unknown)
     }
 
-    @Test func hallucinationGateMirrorMapsKnownValues() {
-        #expect(KanbanHallucinationGate.from("pending") == .pending)
-        #expect(KanbanHallucinationGate.from("verified") == .verified)
-        #expect(KanbanHallucinationGate.from("REJECTED") == .rejected)  // case-insensitive
-        #expect(KanbanHallucinationGate.from(nil) == nil)
-        #expect(KanbanHallucinationGate.from("") == nil)
-        // Unknown wire values fall through to nil so the banner stays
-        // hidden; future Hermes versions can add `quarantined` etc.
-        // without a Scarf release.
-        #expect(KanbanHallucinationGate.from("quarantined") == nil)
-    }
-
-    @Test func diagnosticKindMirrorMapsKnownValues() {
-        #expect(KanbanDiagnosticKind.from("heartbeat_stalled") == .heartbeatStalled)
-        #expect(KanbanDiagnosticKind.from("DARWIN_ZOMBIE_DETECTED") == .darwinZombieDetected)
-        // Unknown kinds fall through to .unknown so views can render
-        // the raw string verbatim.
-        #expect(KanbanDiagnosticKind.from("future_kind_v014") == .unknown)
-    }
-
-    @Test func diagnosticSeverityMapping() {
-        #expect(KanbanDiagnosticKind.retryCapHit.severity == .danger)
-        #expect(KanbanDiagnosticKind.darwinZombieDetected.severity == .danger)
-        #expect(KanbanDiagnosticKind.heartbeatStalled.severity == .warning)
-        #expect(KanbanDiagnosticKind.workerExitNoComplete.severity == .warning)
-        #expect(KanbanDiagnosticKind.unknown.severity == .neutral)
+    @Test func diagnosticSeverityComesOffTheWire() {
+        #expect(KanbanDiagnosticSeverity.from("critical") == .critical)
+        #expect(KanbanDiagnosticSeverity.from("ERROR") == .error)
+        #expect(KanbanDiagnosticSeverity.from("warning") == .warning)
+        // An unknown tier must never render as the loudest one.
+        #expect(KanbanDiagnosticSeverity.from("catastrophic") == .warning)
     }
 
     @Test func createRequestArgvIncludesMaxRetries() {
@@ -559,7 +552,10 @@ import Foundation
         #expect(!argv.contains("--max-retries"))
     }
 
-    @Test func decodeRunWithDiagnostics() throws {
+    @Test func runRowsCarryNoDiagnostics() throws {
+        // Drift alarm: `_SHOW_RUN_FIELDS` / `_RUNS_RUN_FIELDS`
+        // (`hermes_cli/kanban_output.py:25-32`, v2026.9.7) have never had a
+        // `diagnostics` key. A run row that invents one still decodes.
         let json = """
         {
           "id": 1,
@@ -569,81 +565,146 @@ import Foundation
           "ended_at": 1778160300,
           "outcome": "crashed",
           "error": "OOM",
-          "diagnostics": [
-            {"kind": "retry_cap_hit", "message": "3/3 retries exhausted"}
-          ],
+          "diagnostics": [{"kind": "retry_cap_hit"}],
           "failure_count": 3
         }
         """
         let run = try JSONDecoder().decode(HermesKanbanRun.self, from: Data(json.utf8))
-        #expect(run.diagnostics.count == 1)
-        #expect(run.diagnostics.first?.kind == "retry_cap_hit")
+        #expect(run.id == 1)
         #expect(run.failureCount == 3)
+        let round = String(data: try JSONEncoder().encode(run), encoding: .utf8) ?? ""
+        #expect(!round.contains("diagnostics"))
     }
 
-    @Test func decodeRunWithoutDiagnostics() throws {
-        // v0.12 run row — no diagnostics, no failure_count, must still
-        // decode cleanly.
+    @Test func decodeMinimalRun() throws {
         let json = """
         {"id": 1, "task_id": "t_x", "status": "running", "started_at": 1778160000}
         """
         let run = try JSONDecoder().decode(HermesKanbanRun.self, from: Data(json.utf8))
-        #expect(run.diagnostics.isEmpty)
         #expect(run.failureCount == nil)
     }
 
-    @Test func taskDetailMergesEnvelopeAndTaskDiagnostics() throws {
-        // Hermes's wire shape may put diagnostics on the task envelope OR
-        // on the inner task. `allDiagnostics` dedupes by (kind, detected_at)
-        // so a server emitting both sides doesn't surface dupes.
+    @Test func taskDetailEnvelopeHasNoDiagnostics() throws {
+        // `_cmd_show`'s envelope (`hermes_cli/kanban.py:493-498`, v2026.9.7)
+        // is task / latest_summary / parents / children / comments / events /
+        // runs — never `diagnostics`. An envelope that invents one must
+        // still decode, and must not resurrect the field.
         let json = """
         {
-          "task": {
-            "id": "t_y",
-            "title": "y",
-            "status": "blocked",
-            "diagnostics": [
-              {"kind": "heartbeat_stalled", "detected_at": "2026-05-09T12:00:00Z"}
-            ]
-          },
+          "task": {"id": "t_y", "title": "y", "status": "blocked"},
           "comments": [],
           "events": [],
-          "diagnostics": [
-            {"kind": "heartbeat_stalled", "detected_at": "2026-05-09T12:00:00Z"},
-            {"kind": "retry_cap_hit"}
-          ]
+          "diagnostics": [{"kind": "repeated_failures"}]
         }
         """
         let detail = try JSONDecoder().decode(HermesKanbanTaskDetail.self, from: Data(json.utf8))
-        let merged = detail.allDiagnostics
-        #expect(merged.count == 2)
-        #expect(merged.contains(where: { $0.kind == "heartbeat_stalled" }))
-        #expect(merged.contains(where: { $0.kind == "retry_cap_hit" }))
+        #expect(detail.task.id == "t_y")
+        #expect(detail.comments.isEmpty)
     }
 
-    @Test func taskDetailWithoutEnvelopeDiagnosticsDecodes() throws {
-        // Pre-v0.13 task detail — no envelope diagnostics. Must decode.
+    // MARK: - `kanban diagnostics --json` (the real diagnostics surface)
+
+    @Test func decodeDiagnosticsEnvelopeVerbatimFixture() throws {
+        // Verbatim shape of `hermes kanban diagnostics --json`
+        // (`hermes_cli/kanban.py:676-678` composing
+        // `Diagnostic.to_dict()` = `dataclasses.asdict` of
+        // `kanban_diagnostics.py:48-64`, v2026.9.7). Timestamps are Unix
+        // integer seconds; `actions` / `data` are present and deliberately
+        // not decoded.
         let json = """
-        {
-          "task": {"id": "t_z", "title": "z", "status": "ready"},
-          "comments": [],
-          "events": []
-        }
+        [
+          {
+            "task_id": "t_abc123",
+            "title": "Ship the parser",
+            "status": "blocked",
+            "assignee": "worker-1",
+            "diagnostics": [
+              {
+                "kind": "repeated_failures",
+                "severity": "critical",
+                "title": "Agent failed x3: ModuleNotFoundError: no module named 'foo'",
+                "detail": "This task has failed 3 times in a row (most recent: failed).",
+                "actions": [
+                  {"kind": "reclaim", "label": "Reclaim task", "payload": {}, "suggested": true}
+                ],
+                "first_seen_at": 1778160614,
+                "last_seen_at": 1778160614,
+                "count": 3,
+                "run_id": null,
+                "data": {"consecutive_failures": 3}
+              },
+              {
+                "kind": "stranded_in_ready",
+                "severity": "warning",
+                "title": "Ready for 2h with no worker",
+                "detail": "No profile has claimed this task.",
+                "actions": [],
+                "first_seen_at": 0,
+                "last_seen_at": 1778160000,
+                "count": 1,
+                "run_id": 7,
+                "data": {}
+              }
+            ]
+          }
+        ]
         """
-        let detail = try JSONDecoder().decode(HermesKanbanTaskDetail.self, from: Data(json.utf8))
-        #expect(detail.envelopeDiagnostics == nil)
-        #expect(detail.allDiagnostics.isEmpty)
+        let entries = try JSONDecoder().decode([HermesKanbanDiagnosticsEntry].self, from: Data(json.utf8))
+        #expect(entries.count == 1)
+        let entry = try #require(entries.first)
+        #expect(entry.taskId == "t_abc123")
+        #expect(entry.diagnostics.count == 2)
+
+        let first = try #require(entry.diagnostics.first)
+        #expect(first.kind == "repeated_failures")
+        #expect(first.severity == "critical")
+        #expect(first.count == 3)
+        #expect(first.runId == nil)
+        #expect(first.displayLabel.hasPrefix("Agent failed x3"))
+        // Unix seconds normalize to ISO-8601 like every other Kanban model.
+        #expect(first.lastSeenAt?.contains("2026") == true)
+
+        let second = try #require(entry.diagnostics.last)
+        #expect(second.runId == 7)
+        // `first_seen_at: 0` means "unset" — never render 1970.
+        #expect(second.firstSeenAt == nil)
     }
 
-    @Test func diagnosticDecodesUnixTimestamp() throws {
+    @Test func diagnosticFallsBackToKindWhenTitleEmpty() throws {
         let json = """
-        {"kind": "spawn_failure", "detected_at": 1778160614}
+        {"kind": "block_unblock_cycling", "severity": "warning", "title": "", "detail": "", "count": 1}
         """
         let diag = try JSONDecoder().decode(HermesKanbanDiagnostic.self, from: Data(json.utf8))
-        #expect(diag.kind == "spawn_failure")
-        // Decoder normalizes Unix int → ISO-8601 string.
-        #expect(diag.detectedAt?.contains("2026") == true)
+        #expect(diag.displayLabel == "block_unblock_cycling")
     }
+
+    @Test func emptyDiagnosticsBoardDecodesToNoEntries() throws {
+        // A healthy board prints `[]` — must not be read as an error.
+        let entries = try JSONDecoder().decode([HermesKanbanDiagnosticsEntry].self, from: Data("[]".utf8))
+        #expect(entries.isEmpty)
+    }
+
+    @Test func diagnosticsArgvFleetAndTaskScoped() {
+        // `hermes_cli/kanban_parser.py:251-256` (v2026.9.7): the subcommand
+        // takes `--json`, an optional `--task <id>`, and `--severity`.
+        // `--board` stays a GLOBAL flag right after `kanban`.
+        #expect(KanbanService.diagnosticsArgv() == ["kanban", "diagnostics", "--json"])
+        #expect(KanbanService.diagnosticsArgv(taskId: "t_1")
+                == ["kanban", "diagnostics", "--json", "--task", "t_1"])
+        #expect(KanbanService.diagnosticsArgv(board: "ops", taskId: "t_1")
+                == ["kanban", "--board", "ops", "diagnostics", "--json", "--task", "t_1"])
+        // Empty task id must not emit a bare `--task`.
+        #expect(KanbanService.diagnosticsArgv(taskId: "") == ["kanban", "diagnostics", "--json"])
+    }
+
+    // MARK: - Failure limit
+
+    @Test func hermesDefaultFailureLimitMatchesDispatcher() {
+        // `DEFAULT_FAILURE_LIMIT = 2` (`hermes_cli/kanban_db_dispatch.py:33`,
+        // v2026.9.7). The create sheet used to claim "Defaults to 3".
+        #expect(KanbanCreateRequest.hermesDefaultFailureLimit == 2)
+    }
+
 }
 
 /// `LocalTransport.subprocessEnvironment` tests, isolated into their own

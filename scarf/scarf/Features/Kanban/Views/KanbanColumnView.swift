@@ -18,17 +18,16 @@ struct KanbanColumnView: View {
     let onDrop: (KanbanTaskRef) -> Void
     let canCreate: Bool
     /// True when the connected Hermes is on v0.13+. Forwarded to each
-    /// `KanbanCardView` so the hallucination dim/glyph + diagnostics dot
+    /// `KanbanCardView` so the diagnostics dot
     /// + auto-block sub-line gate uniformly.
     let supportsKanbanDiagnostics: Bool
     /// Optimistic-aware accessor forwarded to cards. Default is
     /// "no override" so Previews and harness contexts still render
     /// without wiring up a board VM.
-    let effectiveHallucinationGate: (HermesKanbanTask) -> KanbanHallucinationGate?
+    let diagnostics: (HermesKanbanTask) -> [HermesKanbanDiagnostic]
     /// v0.15+ gate forwarded to each card's context menu.
     let supportsKanbanV015: Bool
     /// v0.16+ gate forwarded to each card's goal-mode badge.
-    let supportsKanbanGoalMode: Bool
     let supportsKanbanCompletionContract: Bool
     /// v0.15 context-menu callbacks, keyed by the acted-on task.
     let onPromote: (HermesKanbanTask) -> Void
@@ -45,9 +44,8 @@ struct KanbanColumnView: View {
         onDrop: @escaping (KanbanTaskRef) -> Void,
         canCreate: Bool,
         supportsKanbanDiagnostics: Bool = false,
-        effectiveHallucinationGate: @escaping (HermesKanbanTask) -> KanbanHallucinationGate? = { _ in nil },
+        diagnostics: @escaping (HermesKanbanTask) -> [HermesKanbanDiagnostic] = { _ in [] },
         supportsKanbanV015: Bool = false,
-        supportsKanbanGoalMode: Bool = false,
         supportsKanbanCompletionContract: Bool = false,
         onPromote: @escaping (HermesKanbanTask) -> Void = { _ in },
         onSchedule: @escaping (HermesKanbanTask) -> Void = { _ in },
@@ -62,9 +60,8 @@ struct KanbanColumnView: View {
         self.onDrop = onDrop
         self.canCreate = canCreate
         self.supportsKanbanDiagnostics = supportsKanbanDiagnostics
-        self.effectiveHallucinationGate = effectiveHallucinationGate
+        self.diagnostics = diagnostics
         self.supportsKanbanV015 = supportsKanbanV015
-        self.supportsKanbanGoalMode = supportsKanbanGoalMode
         self.supportsKanbanCompletionContract = supportsKanbanCompletionContract
         self.onPromote = onPromote
         self.onSchedule = onSchedule
@@ -92,9 +89,8 @@ struct KanbanColumnView: View {
                             KanbanCardView(
                                 task: task,
                                 supportsKanbanDiagnostics: supportsKanbanDiagnostics,
-                                effectiveHallucinationGate: effectiveHallucinationGate,
+                                diagnostics: diagnostics(task),
                                 supportsKanbanV015: supportsKanbanV015,
-                                supportsKanbanGoalMode: supportsKanbanGoalMode,
                                 supportsKanbanCompletionContract: supportsKanbanCompletionContract,
                                 onPromote: { onPromote(task) },
                                 onSchedule: { onSchedule(task) },

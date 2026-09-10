@@ -42,21 +42,6 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
     /// Hermes pattern is write-once — no `set_max_retries` verb. Scarf
     /// surfaces this read-only on the inspector header.
     public let maxRetries: Int?
-    /// Server-supplied reason a task was auto-blocked (e.g. "worker
-    /// exited (code 0) without calling `kanban complete`"). Surfaced
-    /// verbatim in the inspector banner.
-    public let autoBlockedReason: String?
-    /// `pending` / `verified` / `rejected` / nil. Pending means a worker
-    /// claimed it created this card but Hermes hasn't confirmed the
-    /// underlying work exists. Read through `KanbanHallucinationGate.from`
-    /// to map to a typed mirror — kept as a String at the wire level so
-    /// Hermes can add new gate states (e.g. `quarantined`) without a
-    /// Scarf release.
-    public let hallucinationGateStatus: String?
-    /// Cross-run distress signals (retry cap hit, etc.). Per-run signals
-    /// hang off `HermesKanbanRun.diagnostics`. Empty array for pre-v0.13
-    /// hosts AND for tasks the diagnostics engine hasn't flagged.
-    public let diagnostics: [HermesKanbanDiagnostic]
 
     // v0.15 (v2026.5.28) field.
     /// Originating ACP chat session id, stamped by `kanban_create` from
@@ -82,15 +67,6 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
     /// model). Only emitted by `show --json` / tool calls, NOT `list
     /// --json` — still decoded tolerantly so it's `nil` from list rows.
     public let modelOverride: String?
-
-    // v0.16 (v2026.6.5) goal-mode fields.
-    /// Whether the task runs as a Ralph-style persistent goal loop instead
-    /// of a one-shot execution. `nil` for non-goal tasks and on pre-v0.16
-    /// hosts (no `goal_mode` key on the wire).
-    public let goalMode: Bool?
-    /// Optional per-task turn budget for a goal-mode loop. `nil` when
-    /// unbounded, for non-goal tasks, and on pre-v0.16 hosts.
-    public let goalMaxTurns: Int?
 
     // v0.21.1 (v2026.9.7) fields. Both are new to the `list --json` task dict
     // at this release (`hermes_cli/kanban_output.py:18-24`) — `_task_to_dict`
@@ -129,16 +105,11 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         maxRuntimeSeconds: Int? = nil,
         currentRunId: Int? = nil,
         maxRetries: Int? = nil,
-        autoBlockedReason: String? = nil,
-        hallucinationGateStatus: String? = nil,
-        diagnostics: [HermesKanbanDiagnostic] = [],
         sessionId: String? = nil,
         branchName: String? = nil,
         workflowTemplateId: String? = nil,
         currentStepKey: String? = nil,
         modelOverride: String? = nil,
-        goalMode: Bool? = nil,
-        goalMaxTurns: Int? = nil,
         completionContract: String? = nil,
         lastFailureError: String? = nil
     ) {
@@ -162,16 +133,11 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         self.maxRuntimeSeconds = maxRuntimeSeconds
         self.currentRunId = currentRunId
         self.maxRetries = maxRetries
-        self.autoBlockedReason = autoBlockedReason
-        self.hallucinationGateStatus = hallucinationGateStatus
-        self.diagnostics = diagnostics
         self.sessionId = sessionId
         self.branchName = branchName
         self.workflowTemplateId = workflowTemplateId
         self.currentStepKey = currentStepKey
         self.modelOverride = modelOverride
-        self.goalMode = goalMode
-        self.goalMaxTurns = goalMaxTurns
         self.completionContract = completionContract
         self.lastFailureError = lastFailureError
     }
@@ -190,16 +156,11 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         case maxRuntimeSeconds = "max_runtime_seconds"
         case currentRunId = "current_run_id"
         case maxRetries = "max_retries"
-        case autoBlockedReason = "auto_blocked_reason"
-        case hallucinationGateStatus = "hallucination_gate_status"
-        case diagnostics
         case sessionId = "session_id"
         case branchName = "branch_name"
         case workflowTemplateId = "workflow_template_id"
         case currentStepKey = "current_step_key"
         case modelOverride = "model_override"
-        case goalMode = "goal_mode"
-        case goalMaxTurns = "goal_max_turns"
         case completionContract = "completion_contract"
         case lastFailureError = "last_failure_error"
     }
@@ -234,13 +195,6 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         // task row decodes successfully with these all nil/empty. The
         // tolerant-decode contract is pinned by KanbanModelsTests.
         self.maxRetries = try c.decodeIfPresent(Int.self, forKey: .maxRetries)
-        self.autoBlockedReason = try c.decodeIfPresent(String.self, forKey: .autoBlockedReason)
-        self.hallucinationGateStatus = try c.decodeIfPresent(String.self, forKey: .hallucinationGateStatus)
-        // Wrap diagnostics decode in `try?` so a single malformed entry
-        // (or the whole array being the wrong shape) doesn't poison the
-        // task row — the rest of the decoder still produces a usable
-        // task. Empty default matches the `skills` pattern.
-        self.diagnostics = (try? c.decodeIfPresent([HermesKanbanDiagnostic].self, forKey: .diagnostics)) ?? []
         // v0.15 field — `decodeIfPresent` so pre-v0.15 task rows (no
         // `session_id` key) decode with `sessionId == nil`.
         self.sessionId = try c.decodeIfPresent(String.self, forKey: .sessionId)
@@ -251,10 +205,6 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         self.workflowTemplateId = try c.decodeIfPresent(String.self, forKey: .workflowTemplateId)
         self.currentStepKey = try c.decodeIfPresent(String.self, forKey: .currentStepKey)
         self.modelOverride = try c.decodeIfPresent(String.self, forKey: .modelOverride)
-        // v0.16 goal-mode fields — `decodeIfPresent` so pre-v0.16 task rows
-        // (no `goal_mode` / `goal_max_turns` keys) decode with both nil.
-        self.goalMode = try c.decodeIfPresent(Bool.self, forKey: .goalMode)
-        self.goalMaxTurns = try c.decodeIfPresent(Int.self, forKey: .goalMaxTurns)
         // v0.21.1 fields — `decodeIfPresent` so a pre-v0.21.1 row (neither key
         // present) decodes with both nil and every existing surface renders
         // byte-identically.
@@ -376,28 +326,4 @@ public enum KanbanBoardColumn: String, Sendable, CaseIterable, Identifiable {
     public static let defaultVisible: [KanbanBoardColumn] = [
         .triage, .scheduled, .upNext, .running, .review, .blocked, .done
     ]
-}
-
-// MARK: - Hallucination gate (v0.13)
-
-/// Typed mirror of Hermes v0.13's hallucination-gate state. Worker-created
-/// cards land in `pending` until something verifies the underlying work
-/// exists; Scarf surfaces a Verify / Reject UX above the task body so the
-/// user can act as the verification gate.
-///
-/// Kept separate from `KanbanStatus` because hallucination state is
-/// orthogonal to the lifecycle — a card can be `ready` *and* `pending`,
-/// for example.
-public enum KanbanHallucinationGate: String, Sendable, CaseIterable {
-    case pending
-    case verified
-    case rejected
-
-    /// Map a raw `hallucination_gate_status` string (case-insensitive) to
-    /// a typed gate. Returns nil for empty/nil/unknown values so callers
-    /// can short-circuit "no gate" branches with `if let gate = …`.
-    public static func from(_ raw: String?) -> KanbanHallucinationGate? {
-        guard let raw, !raw.isEmpty else { return nil }
-        return KanbanHallucinationGate(rawValue: raw.lowercased())
-    }
 }

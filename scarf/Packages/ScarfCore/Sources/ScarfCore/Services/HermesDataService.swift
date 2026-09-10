@@ -1265,16 +1265,6 @@ public actor HermesDataService {
         }
     }
 
-    public func fetchMessageCount(sessionId: String) async -> Int {
-        let sql = "SELECT COUNT(*) FROM messages WHERE session_id = ?"
-        do {
-            let rows = try await backend.query(sql, params: [.text(sessionId)])
-            return rows.first?.int(at: 0) ?? 0
-        } catch {
-            return 0
-        }
-    }
-
     public func fetchSession(id: String) async -> HermesSession? {
         let sql = "SELECT \(sessionColumns) FROM sessions WHERE id = ? LIMIT 1"
         do {
@@ -1611,79 +1601,6 @@ public actor HermesDataService {
             totalReasoningTokens: hasV07Schema ? row.int(at: 6) : 0,
             totalActualCostUSD: hasV07Schema ? row.double(at: 7) : 0
         )
-    }
-
-    // MARK: - Insights Queries
-
-    public func fetchUserMessageCount(since: Date) async -> Int {
-        let sql = """
-            SELECT COUNT(*) FROM messages m
-            JOIN sessions s ON m.session_id = s.id
-            WHERE m.role = 'user' AND s.parent_session_id IS NULL AND s.started_at >= ?
-            """
-        do {
-            let rows = try await backend.query(sql, params: [.real(since.timeIntervalSince1970)])
-            return rows.first?.int(at: 0) ?? 0
-        } catch {
-            return 0
-        }
-    }
-
-    public func fetchToolUsage(since: Date) async -> [(name: String, count: Int)] {
-        let sql = """
-            SELECT m.tool_name, COUNT(*) as cnt
-            FROM messages m
-            JOIN sessions s ON m.session_id = s.id
-            WHERE m.tool_name IS NOT NULL AND m.tool_name <> '' AND s.parent_session_id IS NULL AND s.started_at >= ?
-            GROUP BY m.tool_name
-            ORDER BY cnt DESC
-            """
-        do {
-            let rows = try await backend.query(sql, params: [.real(since.timeIntervalSince1970)])
-            return rows.map { (name: $0.string(at: 0), count: $0.int(at: 1)) }
-        } catch {
-            return []
-        }
-    }
-
-    public func fetchSessionStartHours(since: Date) async -> [Int: Int] {
-        let sql = """
-            SELECT started_at FROM sessions WHERE parent_session_id IS NULL AND started_at >= ?
-            """
-        do {
-            let rows = try await backend.query(sql, params: [.real(since.timeIntervalSince1970)])
-            var hours: [Int: Int] = [:]
-            let calendar = Calendar.current
-            for row in rows {
-                if let date = row.date(at: 0) {
-                    let hour = calendar.component(.hour, from: date)
-                    hours[hour, default: 0] += 1
-                }
-            }
-            return hours
-        } catch {
-            return [:]
-        }
-    }
-
-    public func fetchSessionDaysOfWeek(since: Date) async -> [Int: Int] {
-        let sql = """
-            SELECT started_at FROM sessions WHERE parent_session_id IS NULL AND started_at >= ?
-            """
-        do {
-            let rows = try await backend.query(sql, params: [.real(since.timeIntervalSince1970)])
-            var days: [Int: Int] = [:]
-            let calendar = Calendar.current
-            for row in rows {
-                if let date = row.date(at: 0) {
-                    let weekday = (calendar.component(.weekday, from: date) + 5) % 7 // Mon=0
-                    days[weekday, default: 0] += 1
-                }
-            }
-            return days
-        } catch {
-            return [:]
-        }
     }
 
     // MARK: - Batched snapshots
@@ -2047,11 +1964,17 @@ public actor HermesDataService {
     // MARK: - Row Parsing
 
     private func sessionFromRow(_ row: Row) -> HermesSession {
-        // v0.11 column lives at index 20 (after the 16 base + 4 v0.7
-        // columns). Reading defensively — old DBs that lack the column
-        // never reach this code path because hasV011Schema gates the
-        // SELECT shape.
-        let apiCallCount: Int = hasV011Schema ? row.int(at: 20) : 0
+        // v0.11 `api_call_count` is appended by the v0.11 block in
+        // `sessionColumns`, so its position depends on whether the v0.7
+        // block ran — and the analytics / subagent SELECT shapes don't
+        // include it at all. Resolve by column NAME (same rule as
+        // `rewind_count` / `last_read_at` below); a hardcoded index 20
+        // read whatever column happened to sit there on a v0.11 host
+        // without the v0.7 columns.
+        let apiCallCount: Int = {
+            guard hasV011Schema, let idx = row.columnIndex["api_call_count"] else { return 0 }
+            return row.int(at: idx)
+        }()
         // v0.16 `rewind_count` is appended LAST in sessionColumns, so its
         // positional index shifts with the v0.7 (+4 cols) and v0.11 (+1
         // col) blocks. Resolve the position by column name via the

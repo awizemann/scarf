@@ -3,8 +3,8 @@ import ScarfDesign
 
 /// "Learn more" sheet behind the v0.13 features-active badge in
 /// `SettingsView`. Text-only summary of what shipped in Hermes v0.13
-/// (Persistent Goals, ACP /queue, Kanban diagnostics, hallucination
-/// gate, Curator archive, Google Chat platform). Every row spells out
+/// (Persistent Goals, ACP /queue, Kanban diagnostics, Curator archive,
+/// Google Chat platform). Every row spells out
 /// where the editing lives — Mac for v2.8.0; iOS write surfaces are
 /// deferred to v2.8.x.
 ///
@@ -29,12 +29,7 @@ struct V013FeaturesSheet: View {
                     featureRow(
                         icon: "stethoscope",
                         title: "Kanban diagnostics",
-                        description: "Worker distress signals (heartbeat stalls, retry caps, zombies) surface on the task detail."
-                    )
-                    featureRow(
-                        icon: "questionmark.diamond.fill",
-                        title: "Hallucination gate",
-                        description: "Worker-created cards are flagged for verify or reject. Verify on the Mac app."
+                        description: "Worker distress signals (repeated failures, crashes, stuck cards) surface on the task detail."
                     )
                     featureRow(
                         icon: "archivebox",

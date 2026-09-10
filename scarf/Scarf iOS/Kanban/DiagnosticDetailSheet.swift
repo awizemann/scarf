@@ -5,7 +5,7 @@ import ScarfDesign
 /// iOS substitute for the Mac inspector's `.help()` tooltip on a Kanban
 /// diagnostic chip. iOS doesn't have hover, so each diagnostic chip in
 /// the detail sheet is tappable; tap presents this sheet with the kind,
-/// severity, server-supplied message, and detection timestamp.
+/// severity, Hermes's summary + detail, and when it was last seen.
 ///
 /// Read-only — there are no recovery actions on iOS in v2.8.0. The
 /// surface is deliberately small (one screen, no scroll padding) so it
@@ -25,12 +25,18 @@ struct DiagnosticDetailSheet: View {
                             .foregroundStyle(.primary)
                     }
                     LabeledContent("Severity") {
-                        ScarfBadge(severityLabel, kind: severityBadgeKind)
+                        ScarfBadge(verbatim: severityLabel, kind: severityBadgeKind)
                     }
-                    if let detectedAt = diagnostic.detectedAt, !detectedAt.isEmpty {
-                        LabeledContent("Detected at") {
-                            Text(detectedAt)
+                    if let lastSeenAt = diagnostic.lastSeenAt, !lastSeenAt.isEmpty {
+                        LabeledContent("Last seen") {
+                            Text(lastSeenAt)
                                 .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    if diagnostic.count > 1 {
+                        LabeledContent("Occurrences") {
+                            Text("\(diagnostic.count)")
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -38,13 +44,23 @@ struct DiagnosticDetailSheet: View {
                     Text("Diagnostic")
                 }
 
-                if let message = diagnostic.message, !message.isEmpty {
+                if !diagnostic.title.isEmpty {
                     Section {
-                        Text(message)
+                        Text(diagnostic.title)
                             .font(.body)
                             .textSelection(.enabled)
                     } header: {
-                        Text("Message")
+                        Text("Summary")
+                    }
+                }
+
+                if !diagnostic.detail.isEmpty {
+                    Section {
+                        Text(diagnostic.detail)
+                            .font(.body)
+                            .textSelection(.enabled)
+                    } header: {
+                        Text("Detail")
                     }
                 }
 
@@ -66,21 +82,16 @@ struct DiagnosticDetailSheet: View {
         }
     }
 
-    private var severityLabel: LocalizedStringKey {
-        let kind = KanbanDiagnosticKind.from(diagnostic.kind)
-        switch kind.severity {
-        case .danger:  return "danger"
-        case .warning: return "warning"
-        case .neutral: return "neutral"
-        }
+    /// Hermes's own severity string — rendered verbatim so a tier Scarf
+    /// doesn't know still reads correctly.
+    private var severityLabel: String {
+        diagnostic.severity
     }
 
     private var severityBadgeKind: ScarfBadgeKind {
-        let kind = KanbanDiagnosticKind.from(diagnostic.kind)
-        switch kind.severity {
-        case .danger:  return .danger
-        case .warning: return .warning
-        case .neutral: return .neutral
+        switch KanbanDiagnosticSeverity.from(diagnostic.severity) {
+        case .critical, .error: return .danger
+        case .warning:          return .warning
         }
     }
 }
