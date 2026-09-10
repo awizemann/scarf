@@ -26,7 +26,7 @@ struct SessionsView: View {
         _viewModel = State(initialValue: SessionsViewModel(context: context))
     }
 
-    /// `hermes sessions export --format …` (v0.20+). Pre-0.20 hosts keep
+    /// `hermes sessions export --format …` (v0.18.1+). Pre-0.18.1 hosts keep
     /// the export flow exactly as it was: jsonl only, straight to the save
     /// panel, no picker sheet.
     private var hasExportFormats: Bool {

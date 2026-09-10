@@ -52,7 +52,7 @@ enum SessionRenamedSignal {
     nonisolated static let contextKey = "context"
 }
 
-/// `hermes sessions export --format {jsonl,md,qmd,html,trace}` (v0.20+,
+/// `hermes sessions export --format {jsonl,md,qmd,html,trace}` (v0.18.1+,
 /// gated on `HermesCapabilities.hasSessionsExportFormats`). Cases mirror the
 /// CLI's own `--format` choices exactly, so `cliValue == rawValue`.
 ///
@@ -197,7 +197,7 @@ final class SessionsViewModel {
     /// reports nothing at all is the bug this replaced.
     var exportMessage: String?
 
-    // MARK: - Export format picker (v0.20, hasSessionsExportFormats)
+    // MARK: - Export format picker (v0.18.1, hasSessionsExportFormats)
 
     /// Bound to the format-picker sheet's `Picker`. Reset to `.jsonl`
     /// whenever a new export flow starts so a stale pick from a previous
@@ -206,7 +206,7 @@ final class SessionsViewModel {
     /// Bound to the format-picker sheet's "Redact secrets" `Toggle`.
     var exportRedact = false
     /// Drives the format-picker sheet. Only ever set `true` by
-    /// `beginExportFlow` when the host is v0.20+; pre-0.20 hosts skip
+    /// `beginExportFlow` when the host is v0.18.1+; pre-0.18.1 hosts skip
     /// straight to the save panel exactly as before.
     var showExportOptionsSheet = false
 
@@ -634,7 +634,7 @@ final class SessionsViewModel {
         beginExportFlow(sessionId: nil, suggestedBaseName: "hermes-sessions", formatsAvailable: formatsAvailable)
     }
 
-    /// Pre-0.20 hosts: identical to the original behavior — straight to the
+    /// Pre-0.18.1 hosts: identical to the original behavior — straight to the
     /// save panel, jsonl only, no picker sheet. v0.20+: opens the
     /// format/redact picker sheet; `confirmExportOptions()` continues once
     /// the user picks.

@@ -7,13 +7,13 @@ struct SecurityTab: View {
     @Bindable var viewModel: SettingsViewModel
     @Environment(\.hermesCapabilities) private var capabilitiesStore
 
-    /// v0.20+ `hermes approvals suggest`. Pre-0.20 hosts render the tab
+    /// v0.19.1+ `hermes approvals suggest`. Pre-0.19.1 hosts render the tab
     /// byte-identically — no section, no CLI probe.
     private var hasApprovalsSuggest: Bool {
         capabilitiesStore?.capabilities.hasApprovalsSuggest ?? false
     }
 
-    /// v0.20+ `approvals.smart_policy`. Same floor as `hasApprovalsSuggest`
+    /// v0.19.1+ `approvals.smart_policy`. Same floor as `hasApprovalsSuggest`
     /// but a distinct capability flag — the two features shipped together
     /// but are unrelated, so each gets its own name rather than one
     /// standing in for the other.

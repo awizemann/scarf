@@ -45,8 +45,8 @@ struct CronView: View {
         capabilitiesStore?.capabilities.hasCronDeliverAll ?? false
     }
 
-    /// v0.20 — durable per-job execution history (`hermes cron runs`).
-    /// Pre-0.20 hosts render the detail pane byte-identically: no RUN
+    /// v0.19.0 — durable per-job execution history (`hermes cron runs`).
+    /// Pre-0.19.0 hosts render the detail pane byte-identically: no RUN
     /// HISTORY disclosure and no CLI probe.
     private var hasCronRuns: Bool {
         capabilitiesStore?.capabilities.hasCronRuns ?? false
@@ -973,7 +973,7 @@ struct CronView: View {
         }
     }
 
-    /// Per-job durable run-history disclosure (v0.20+; gated on
+    /// Per-job durable run-history disclosure (v0.19.0+; gated on
     /// `hasCronRuns`). Collapsed by default and lazy — `hermes cron runs
     /// <id>` only fires when the user expands it, and re-fires when the
     /// selection changes while expanded. Mirrors the LAST RUN OUTPUT

@@ -1257,11 +1257,11 @@ final class SettingsViewModel {
     }
 
 
-    // MARK: - Allowlist suggestions (Hermes v0.20+, `hermes approvals suggest`)
+    // MARK: - Allowlist suggestions (Hermes v0.19.1+, `hermes approvals suggest`)
 
-    /// Proposals mined from approval history. Only populated on v0.20+
+    /// Proposals mined from approval history. Only populated on v0.19.1+
     /// hosts — the SecurityTab section that triggers `loadApprovalSuggestions`
-    /// is capability-gated on `hasApprovalsSuggest`, so pre-0.20 hosts never
+    /// is capability-gated on `hasApprovalsSuggest`, so pre-0.19.1 hosts never
     /// issue the CLI call and never see the section.
     var approvalProposals: [HermesApprovalProposal] = []
     var isLoadingApprovalSuggestions = false

@@ -35,7 +35,7 @@ struct CuratorView: View {
         capabilitiesStore?.capabilities.hasCuratorArchive ?? false
     }
 
-    /// v0.20 adopt surface. Hidden entirely on pre-0.20 hosts so the
+    /// v0.19.1 adopt surface. Hidden entirely on pre-0.19.1 hosts so the
     /// legacy layout renders byte-identical.
     private var adoptAvailable: Bool {
         capabilitiesStore?.capabilities.hasCuratorAdopt ?? false

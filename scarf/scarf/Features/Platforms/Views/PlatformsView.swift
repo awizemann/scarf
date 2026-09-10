@@ -12,28 +12,27 @@ struct PlatformsView: View {
     @Environment(\.hermesCapabilities) private var capabilitiesStore
 
     /// Capabilities resolved at view-eval time. Defaults to `.empty` outside
-    /// the per-server `ContextBoundRoot`. Used to filter `KnownPlatforms.all`
-    /// for v0.13-only entries (Google Chat) — see `visiblePlatforms` for
-    /// the deliberate asymmetry: pre-v0.12 hosts still see Yuanbao + Teams
-    /// unfiltered, by design.
+    /// the per-server `ContextBoundRoot`.
     private var capabilities: HermesCapabilities {
         capabilitiesStore?.capabilities ?? .empty
     }
 
-    /// Capability-filtered platform list. **Google Chat** keeps its named
-    /// flag; every other gated row carries its floor as data
-    /// (`HermesToolPlatform.minimumVersion`, walked across every tag).
-    /// Yuanbao and Microsoft Teams stay unfiltered to avoid changing v0.12
-    /// host UX in a v0.13 work-stream (WS-5 plan §Q4); a row with no floor
-    /// is visible everywhere.
+    /// Capability-filtered platform list. Every gated row carries its floor
+    /// as DATA (`HermesToolPlatform.minimumVersion`, walked across every
+    /// tag), so there is one uniform rule here — the `google_chat` special
+    /// case this filter used to carry read the same floor by a different
+    /// route, and Yuanbao / Teams / ntfy / WhatsApp Cloud / Buzz joined the
+    /// gated set in P23 (Alan's round-2 decision 6).
+    ///
+    /// `isVisible` rather than `isAvailable`: a platform the user has
+    /// already CONFIGURED stays listed even below the floor, so a failed
+    /// version probe never hides their own setup from them.
     private var visiblePlatforms: [HermesToolPlatform] {
-        KnownPlatforms.all.filter { p in
-            switch p.name {
-            case "google_chat":
-                return capabilities.hasGoogleChatPlatform
-            default:
-                return p.isAvailable(on: capabilities)
-            }
+        KnownPlatforms.all.filter {
+            $0.isVisible(
+                on: capabilities,
+                isConfigured: viewModel.configuredPlatforms.contains($0.name)
+            )
         }
     }
 

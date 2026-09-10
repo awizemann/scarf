@@ -332,14 +332,14 @@ import Foundation
         vm.publishCapabilities(HermesCapabilities.empty)
         let namesBefore = Set(vm.availableCommands.map(\.name))
         #expect(namesBefore.contains("clear"))
-        #expect(namesBefore.contains("compact"))
+        #expect(namesBefore.contains("compress"))
         #expect(namesBefore.contains("model"))
         #expect(namesBefore.contains("help"))
 
         vm.setSessionId("abc-123")
         let namesAfter = Set(vm.availableCommands.map(\.name))
         #expect(namesAfter.contains("clear"))
-        #expect(namesAfter.contains("compact"))
+        #expect(namesAfter.contains("compress"))
         #expect(namesAfter.contains("model"))
         #expect(namesAfter.contains("help"))
     }

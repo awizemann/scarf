@@ -706,7 +706,7 @@ public final class RichChatViewModel {
     /// - **Always** (no session AND active session): `/new`. It's the
     ///   "open a session" affordance and arms the v0.13+ `[<name>]`
     ///   argument hint via `hasNewWithSessionName`.
-    /// - **Active-session-only**: `/clear`, `/compact` (`/compress` on v0.20+), `/cost`, `/model`,
+    /// - **Active-session-only**: `/clear`, `/compress`, `/cost`, `/model`,
     ///   `/tools`, `/reload-skills`, `/help`, `/exit`. Each requires a
     ///   live session; surfacing them pre-session would mislead.
     public static func alwaysAvailableCommands(
@@ -734,8 +734,21 @@ public final class RichChatViewModel {
                 argumentHint: nil,
                 source: .alwaysAvailable
             ),
+            // ALWAYS `compress`, never `compact`. `CommandDef("compress", …)`
+            // is canonical from `hermes_cli/commands.py:57` at tag v2026.3.17
+            // (0.3.0) — below Scarf's v0.6.0 supported minimum — and
+            // `aliases=("compact",)` only lands at `commands.py:92`, tag
+            // v2026.7.7 (0.18.1). Scarf had this inverted behind a
+            // `hasCompressCommand` flag floored at v0.20, so on every
+            // 0.12–0.18.0 host it offered and SENT `/compact`, which those
+            // hosts do not route to compression at all — on the TUI gateway
+            // `/compact` is "Toggle compact display mode"
+            // (`tui_gateway/server.py:3845` `_TUI_EXTRA` at v2026.4.30), so
+            // the user's compress gesture silently flipped a display mode.
+            // `RichChatInputBar`'s compress sheet already sent `/compress`
+            // unconditionally; this is the menu catching up.
             HermesSlashCommand(
-                name: capabilities.hasCompressCommand ? "compress" : "compact",
+                name: "compress",
                 description: "Compress the conversation history",
                 argumentHint: nil,
                 source: .alwaysAvailable
@@ -1342,9 +1355,11 @@ public final class RichChatViewModel {
     /// user is looking at the input bar pre-session. Kept in one place
     /// so the menu and any future enable/disable checks stay in sync.
     /// Includes both `compact` and `compress` since this set is a static,
-    /// capability-independent membership check — `alwaysAvailableCommands`
-    /// only ever emits one of the two spellings depending on
-    /// `hasCompressCommand`, so the unused name here is inert.
+    /// capability-independent membership check. `alwaysAvailableCommands`
+    /// only ever emits `compress` (see its comment — the `compact` alias
+    /// postdates most supported hosts), but a 0.18.1+ host advertises the
+    /// alias over ACP, and an ACP-sourced `/compact` row needs a live
+    /// session just the same.
     public static let sessionRequiredCommandNames: Set<String> = [
         "clear", "compact", "compress", "cost", "model", "tools",
         "reload-skills", "help", "exit",

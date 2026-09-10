@@ -141,11 +141,11 @@ final class CronViewModel {
         }
     }
 
-    // MARK: - Run history (Hermes v0.20+, `hermes cron runs`)
+    // MARK: - Run history (Hermes v0.19.0+, `hermes cron runs`)
 
     /// Durable execution attempts for the selected job. Only loaded when
     /// the (capability-gated) RUN HISTORY disclosure is expanded — the
-    /// view gates on `hasCronRuns`, so pre-0.20 hosts never issue the call.
+    /// view gates on `hasCronRuns`, so pre-0.19.0 hosts never issue the call.
     var runHistory: [HermesCronRun] = []
     var isLoadingRunHistory = false
     /// Job id the current `runHistory` belongs to; stale-guard for
