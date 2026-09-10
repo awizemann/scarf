@@ -58,8 +58,18 @@ enum PlatformSetupHelpers {
     /// so callers can — and now do — run it from a `Task.detached` instead of
     /// freezing the window for a round-trip per key.
     @discardableResult
-    nonisolated static func saveForm(context: ServerContext, envPairs: [String: String], configKV: [String: String]) -> SaveOutcome {
+    nonisolated static func saveForm(
+        context: ServerContext,
+        envPairs: [String: String],
+        configKV: [String: String],
+        runner: HermesCLIRunner? = nil
+    ) -> SaveOutcome {
         let envService = HermesEnvService(context: context)
+        // `runner` is the C10 test seam (see `HermesCLIRunner`): production
+        // passes nil and gets the context's own spawn, a test passes a fake
+        // that records `Thread.isMainThread`. The timeout stays this site's
+        // own 15 s cap either way.
+        let run = runner ?? context.cliRunner
 
         // Split env pairs into set vs. unset.
         var toSet: [String: String] = [:]
@@ -86,7 +96,12 @@ enum PlatformSetupHelpers {
 
         var configFailures: [String] = []
         for (key, value) in configKV {
-            let result = runHermesCLI(context: context, args: ["config", "set", key, value])
+            // `hermes config set` takes exactly ONE key/value pair at
+            // v2026.9.7 (`hermes_cli/config.py::_cmd_config_set`, dispatched
+            // from `_CONFIG_SUBCOMMANDS`) — there is no batch form, so the
+            // loop stays one spawn per key. It is the whole reason this
+            // function must not run on the main actor.
+            let result = run(["config", "set", key, value], configSetTimeout)
             if result.exitCode != 0 {
                 configFailures.append(key)
                 logger.warning("hermes config set \(key) failed: \(result.output)")
@@ -101,13 +116,6 @@ enum PlatformSetupHelpers {
             return .failure(String(localized: "Saved, but failed to update: \(configFailures.joined(separator: ", "))"))
         }
         return .success(String(localized: "Saved — restart gateway to apply"))
-    }
-
-    /// Synchronous hermes CLI invocation against the given server. Use only
-    /// for fast commands like `config set`; longer commands should use
-    /// `HermesFileService.runHermesCLI` from a `Task.detached`.
-    nonisolated static func runHermesCLI(context: ServerContext, args: [String], timeout: TimeInterval = 15) -> (exitCode: Int32, output: String) {
-        HermesFileService(context: context).runHermesCLI(args: args, timeout: timeout)
     }
 
     /// Ask the user's default browser to open a URL (typically a hermes doc page
@@ -128,6 +136,166 @@ enum PlatformSetupHelpers {
         switch s.lowercased() {
         case "true", "1", "yes", "on": return true
         default: return false
+        }
+    }
+
+    /// Per-key timeout for the `hermes config set` spawns a form save makes.
+    nonisolated static let configSetTimeout: TimeInterval = 15
+
+    /// What a setup form's `load()` reads off disk, gathered in ONE off-main
+    /// pass so the form can commit it all in a single main-actor hop.
+    struct FormSnapshot: Sendable {
+        var env: [String: String] = [:]
+        /// Non-nil when `.env` exists but could not be read (GW-F6 / DI L10).
+        var envFailure: String?
+        /// `nil` when the caller asked for env only.
+        var config: HermesConfig?
+        /// Raw config.yaml text — only for the one form that needs a key
+        /// `HermesConfig` does not model (see `EmailSetupViewModel.load`).
+        var rawConfigText: String?
+    }
+
+    /// Run `work` off the main actor and commit its result back on it.
+    ///
+    /// Charter C10: a setup form's load is an `.env` read plus a config.yaml
+    /// read, and its save is an `.env` write plus one `hermes config set`
+    /// spawn per key — on an ssh context every one of those is a network
+    /// round-trip. Running them inline froze the window for the whole batch.
+    /// `Task.detached` (not `Task { }`) is required: these view models are
+    /// `@MainActor`, so a plain child task would inherit that isolation and
+    /// run the I/O right back on the main actor.
+    static func detached<T: Sendable>(
+        _ work: @escaping @Sendable () -> T,
+        then commit: @escaping @MainActor (T) -> Void
+    ) {
+        Task { @MainActor in
+            let value = await Task.detached { work() }.value
+            commit(value)
+        }
+    }
+
+    /// Read a setup form's `.env` and/or config.yaml off the main actor.
+    ///
+    /// `includeEnv` / `includeConfig` exist so a form only pays for the files
+    /// it reads: the whatsapp_cloud form is config-only, several others are
+    /// env-only, and an unnecessary read is a whole extra SFTP round-trip on
+    /// a remote host.
+    static func loadForm(
+        context: ServerContext,
+        includeEnv: Bool = true,
+        includeConfig: Bool = true,
+        includeRawConfigText: Bool = false,
+        then commit: @escaping @MainActor (FormSnapshot) -> Void
+    ) {
+        detached({
+            var snapshot = FormSnapshot()
+            if includeEnv {
+                let (env, failure) = loadEnv(context: context)
+                snapshot.env = env
+                snapshot.envFailure = failure
+            }
+            if includeConfig {
+                snapshot.config = HermesFileService(context: context).loadConfig()
+            }
+            if includeRawConfigText {
+                snapshot.rawConfigText = context.readText(context.paths.configYAML) ?? ""
+            }
+            return snapshot
+        }, then: commit)
+    }
+
+    /// Apply a form save off the main actor and commit the outcome back on it.
+    /// See ``saveForm(context:envPairs:configKV:runner:)`` for the write rules.
+    static func save(
+        context: ServerContext,
+        envPairs: [String: String],
+        configKV: [String: String],
+        runner: HermesCLIRunner? = nil,
+        then commit: @escaping @MainActor (SaveOutcome) -> Void
+    ) {
+        detached({
+            saveForm(context: context, envPairs: envPairs, configKV: configKV, runner: runner)
+        }, then: commit)
+    }
+
+}
+
+
+/// The shared load/save choreography every per-platform setup form uses.
+///
+/// Charter C10: the I/O both halves do (an `.env` read/write, a config.yaml
+/// read, one `hermes config set` spawn per key) is a network round-trip each
+/// on an ssh context, so neither half may run on the main actor. Hoisting the
+/// choreography here keeps that single-sourced instead of 14 hand-written
+/// `Task.detached` blocks, and carries the two invariants the detachment
+/// introduces:
+///
+/// - A load that lands while a save is in flight must NOT overwrite the
+///   values being committed (the same guard `GatewayBehaviorViewModel` has).
+/// - A save must not run while the first load is still in flight. The form is
+///   rendering its pre-load blanks then, and `saveForm` treats a blank field
+///   as an `unset` — so saving from an unhydrated form would comment live
+///   credentials out of `.env`. This is GW-F6 / DI L10 reached through the
+///   other door.
+@MainActor
+protocol PlatformSetupForm: OutcomeMessageHosting {
+    /// The server whose `.env` and config.yaml this form reads and writes.
+    var context: ServerContext { get }
+    /// C10 test seam — nil in production (see ``HermesCLIRunner``).
+    var cliRunner: HermesCLIRunner? { get }
+    /// True while the initial (or a re-entered) load is in flight.
+    var isLoading: Bool { get set }
+    /// True while a save is in flight.
+    var isSaving: Bool { get set }
+}
+
+extension PlatformSetupForm {
+    /// True while either half is in flight — what a view disables Save on.
+    var isBusy: Bool { isLoading || isSaving }
+
+    /// Read this form's files off the main actor, then hand the snapshot to
+    /// `apply` back on it. `apply` assigns the form's fields and nothing else.
+    func loadSnapshot(
+        includeEnv: Bool = true,
+        includeConfig: Bool = true,
+        includeRawConfigText: Bool = false,
+        apply: @escaping @MainActor (PlatformSetupHelpers.FormSnapshot) -> Void
+    ) {
+        // One load at a time, and never one on top of a save: two overlapping
+        // loads would commit in completion order (last writer wins
+        // arbitrarily), and a load landing on a save would undo it.
+        guard !isBusy else { return }
+        isLoading = true
+        PlatformSetupHelpers.loadForm(
+            context: context,
+            includeEnv: includeEnv,
+            includeConfig: includeConfig,
+            includeRawConfigText: includeRawConfigText
+        ) { [weak self] snapshot in
+            guard let self else { return }
+            self.isLoading = false
+            guard !self.isSaving else { return }
+            // GW-F6 / DI L10: absent `.env` is an empty form (nothing is set
+            // yet); UNREADABLE says so, because a Save from the blank form it
+            // would otherwise render comments the live keys out.
+            if let failure = snapshot.envFailure { self.showSaveFailure(failure) }
+            apply(snapshot)
+        }
+    }
+
+    /// Write this form off the main actor and put the outcome on the save bar.
+    func commitSave(envPairs: [String: String], configKV: [String: String]) {
+        guard !isBusy else { return }
+        isSaving = true
+        PlatformSetupHelpers.save(
+            context: context,
+            envPairs: envPairs,
+            configKV: configKV,
+            runner: cliRunner
+        ) { [weak self] outcome in
+            guard let self else { return }
+            self.isSaving = false
+            self.applySaveOutcome(outcome)
         }
     }
 }

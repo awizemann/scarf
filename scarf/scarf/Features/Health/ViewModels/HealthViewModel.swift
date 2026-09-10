@@ -1065,6 +1065,10 @@ final class HealthViewModel {
         actionMessage = "Starting dashboard…"
 
         let port = dashboardStatus.port
+        // No timeout on THIS process, deliberately: it is the dashboard
+        // server, meant to outlive the click. C10's "every subprocess has a
+        // timeout" is about waits — nothing here waits on it; liveness comes
+        // from the HTTP probe below and the stop path signals it by PID.
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: binary)
         proc.arguments = ["dashboard", "--no-open", "--port", String(port)]
@@ -1074,45 +1078,48 @@ final class HealthViewModel {
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = FileHandle.nullDevice
 
-        do {
-            try proc.run()
-            dashboardProcess = proc
-            Task { [weak self] in
-                // Give uvicorn up to ~6 seconds to bind the port, probing
-                // every 300ms. First 200 response opens the browser.
-                for _ in 0..<20 {
-                    if await Self.probeDashboard(port: port) {
-                        if let url = URL(string: "http://127.0.0.1:\(port)") {
-                            await MainActor.run {
-                                _ = NSWorkspace.shared.open(url)
-                            }
-                        }
-                        break
-                    }
-                    try? await Task.sleep(nanoseconds: 300_000_000)
+        // C10: `Process.run()` is fork/exec plus PATH and bundle resolution —
+        // it can block for tens of milliseconds, and on a wedged filesystem
+        // far longer. Spawn off the main actor and come back with either the
+        // live process or the error; everything that touches view state stays
+        // on MainActor.
+        Task { [weak self] in
+            let spawnError: (any Error)? = await Task.detached {
+                do { try proc.run(); return nil } catch { return error }
+            }.value
+            guard let self else { return }
+            if let spawnError {
+                Self.dashboardLogger.error("Failed to spawn hermes dashboard: \(spawnError.localizedDescription, privacy: .public)")
+                self.dashboardProcess = nil
+                self.dashboardStatus = WebDashboardStatus(
+                    running: self.dashboardStatus.running,
+                    port: self.dashboardStatus.port,
+                    busy: false
+                )
+                self.actionMessage = "Failed to start: \(spawnError.localizedDescription)"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                    self?.actionMessage = nil
                 }
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    self.dashboardStatus = WebDashboardStatus(
-                        running: self.dashboardStatus.running,
-                        port: self.dashboardStatus.port,
-                        busy: false
-                    )
-                    self.actionMessage = nil
-                }
+                return
             }
-        } catch {
-            Self.dashboardLogger.error("Failed to spawn hermes dashboard: \(error.localizedDescription, privacy: .public)")
-            dashboardProcess = nil
-            dashboardStatus = WebDashboardStatus(
-                running: dashboardStatus.running,
-                port: dashboardStatus.port,
+            self.dashboardProcess = proc
+            // Give uvicorn up to ~6 seconds to bind the port, probing every
+            // 300ms. First 200 response opens the browser.
+            for _ in 0..<20 {
+                if await Self.probeDashboard(port: port) {
+                    if let url = URL(string: "http://127.0.0.1:\(port)") {
+                        _ = NSWorkspace.shared.open(url)
+                    }
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 300_000_000)
+            }
+            self.dashboardStatus = WebDashboardStatus(
+                running: self.dashboardStatus.running,
+                port: self.dashboardStatus.port,
                 busy: false
             )
-            actionMessage = "Failed to start: \(error.localizedDescription)"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                self?.actionMessage = nil
-            }
+            self.actionMessage = nil
         }
     }
 
@@ -1130,29 +1137,36 @@ final class HealthViewModel {
         )
         actionMessage = "Stopping dashboard…"
 
-        if let proc = dashboardProcess, proc.isRunning {
-            proc.terminate()
-            dashboardProcess = nil
-        } else if let pid = Self.dashboardListenerPID(port: dashboardStatus.port) {
-            // External instance — signal only the process actually
-            // bound to our dashboard port, not anything that happens
-            // to mention "hermes dashboard" in its argv.
-            _ = Darwin.kill(pid, SIGTERM)
-        }
+        let port = dashboardStatus.port
+        let owned = dashboardProcess
+        let terminateOwned = owned?.isRunning == true
+        if terminateOwned { dashboardProcess = nil }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-            guard let self else { return }
-            Task {
-                let running = await Self.probeDashboard(port: self.dashboardStatus.port)
-                await MainActor.run {
-                    self.dashboardStatus = WebDashboardStatus(
-                        running: running,
-                        port: self.dashboardStatus.port,
-                        busy: false
-                    )
-                    self.actionMessage = nil
+        // C10: `terminate()` and the `lsof` probe are both process work — and
+        // `lsof` is a whole spawn whose `waitUntilExit()` had no timeout, so a
+        // hung lsof froze the window. Off the main actor, then hop back.
+        Task { [weak self] in
+            await Task.detached {
+                if terminateOwned {
+                    owned?.terminate()
+                } else if let pid = Self.dashboardListenerPID(port: port) {
+                    // External instance — signal only the process actually
+                    // bound to our dashboard port, not anything that happens
+                    // to mention "hermes dashboard" in its argv.
+                    _ = Darwin.kill(pid, SIGTERM)
                 }
-            }
+            }.value
+            // Same settle delay as before, now a suspension rather than a
+            // main-queue timer.
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            let running = await Self.probeDashboard(port: port)
+            guard let self else { return }
+            self.dashboardStatus = WebDashboardStatus(
+                running: running,
+                port: port,
+                busy: false
+            )
+            self.actionMessage = nil
         }
     }
 
@@ -1164,6 +1178,8 @@ final class HealthViewModel {
     /// `lsof -c hermes` — Hermes installs as a Python shebang script,
     /// so the process COMM is `python` / `python3` and a `-c hermes`
     /// filter silently misses every standard install.
+    private static let lsofTimeout: TimeInterval = 3
+
     private static func dashboardListenerPID(port: Int) -> pid_t? {
         let lsof = Process()
         lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
@@ -1175,7 +1191,15 @@ final class HealthViewModel {
 
         do {
             try lsof.run()
-            lsof.waitUntilExit()
+            // C10: every subprocess gets a timeout. `waitUntilExit()` alone
+            // waits forever, and lsof CAN hang — a stuck NFS/FUSE mount or an
+            // unresponsive socket makes it block in the kernel. An overrun is
+            // reported as "no listener", the same answer a failed lsof has
+            // always given.
+            guard lsof.waitUntilExit(timeout: lsofTimeout) else {
+                Self.dashboardLogger.warning("lsof timed out locating the dashboard listener")
+                return nil
+            }
             // lsof exits 1 when nothing matches — that's "no listener",
             // not an error. Anything else is something we can't recover
             // from in this code path; log and bail.

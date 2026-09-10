@@ -9,9 +9,17 @@ import ScarfCore
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/signal
 @Observable
 @MainActor
-final class SignalSetupViewModel: OutcomeMessageHosting {
+final class SignalSetupViewModel: PlatformSetupForm {
     let context: ServerContext
-    init(context: ServerContext = .local) { self.context = context }
+    /// C10 test seam — nil in production. See ``PlatformSetupForm``.
+    let cliRunner: HermesCLIRunner?
+    /// Load/save in-flight flags owned by ``PlatformSetupForm``.
+    var isLoading = false
+    var isSaving = false
+    init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
+        self.context = context
+        self.cliRunner = cliRunner
+    }
 
     var httpURL: String = "http://127.0.0.1:8080"
     var account: String = ""            // E.164 phone, e.g. +15551234567
@@ -38,24 +46,20 @@ final class SignalSetupViewModel: OutcomeMessageHosting {
         case daemon
     }
 
+    /// Off the main actor (C10) — see ``PlatformSetupForm``.
     func load() {
-        // GW-F6 / audit DI L10: an unreadable `.env` used to arrive as an
-        // EMPTY one, so this form rendered blank fields over live values and
-        // a Save then commented those keys out. Absent is still an empty
-        // form (correct — nothing is set yet); unreadable says so.
-        let (env, envReadFailure) = PlatformSetupHelpers.loadEnv(context: context)
-        if let envReadFailure {
-            message = envReadFailure
-            messageIsFailure = true
+        loadSnapshot { [weak self] snapshot in
+            guard let self else { return }
+            let env = snapshot.env
+            httpURL = env["SIGNAL_HTTP_URL"] ?? "http://127.0.0.1:8080"
+            account = env["SIGNAL_ACCOUNT"] ?? ""
+            allowedUsers = env["SIGNAL_ALLOWED_USERS"] ?? ""
+            groupAllowedUsers = env["SIGNAL_GROUP_ALLOWED_USERS"] ?? ""
+            homeChannel = env["SIGNAL_HOME_CHANNEL"] ?? ""
+            allowAllUsers = PlatformSetupHelpers.parseEnvBool(env["SIGNAL_ALLOW_ALL_USERS"])
+            if let cfg = snapshot.config?.signal { requireMention = cfg.requireMention }
+            signalCLIInstalled = Self.detectSignalCLI()
         }
-        httpURL = env["SIGNAL_HTTP_URL"] ?? "http://127.0.0.1:8080"
-        account = env["SIGNAL_ACCOUNT"] ?? ""
-        allowedUsers = env["SIGNAL_ALLOWED_USERS"] ?? ""
-        groupAllowedUsers = env["SIGNAL_GROUP_ALLOWED_USERS"] ?? ""
-        homeChannel = env["SIGNAL_HOME_CHANNEL"] ?? ""
-        allowAllUsers = PlatformSetupHelpers.parseEnvBool(env["SIGNAL_ALLOW_ALL_USERS"])
-        requireMention = HermesFileService(context: context).loadConfig().signal.requireMention
-        signalCLIInstalled = Self.detectSignalCLI()
     }
 
     /// Best-effort `signal-cli` binary lookup on the login-shell PATH.
@@ -82,7 +86,7 @@ final class SignalSetupViewModel: OutcomeMessageHosting {
         let configKV: [String: String] = [
             "platforms.signal.extra.require_mention": PlatformSetupHelpers.envBool(requireMention)
         ]
-        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV))
+        commitSave(envPairs: envPairs, configKV: configKV)
     }
 
     /// Run `signal-cli link -n HermesAgent` to generate a QR code.

@@ -11,7 +11,18 @@ import os
 /// `transport.readFile / writeFile`, and CLI invocations go through
 /// `transport.runProcess(executable:args:stdin:timeout:)`. iOS gets the
 /// same hub features as Mac without a target-specific code path.
+/// `@MainActor` on the whole type, not on a handful of methods.
+///
+/// ScarfCore builds in Swift 5 language mode with no default actor isolation,
+/// so a method with no annotation here is genuinely nonisolated — and several
+/// of them (`selectSkill`, `selectFile`, the load/apply pair) mutate
+/// `@Observable` state SwiftUI reads on the main actor. Annotating only the
+/// offenders leaves the type half-isolated, which is how the hole appeared in
+/// the first place; the I/O that must stay off the main actor is already
+/// factored into `nonisolated static` helpers called from explicit
+/// `Task.detached` hops (charter C10), and those keep working unchanged.
 @Observable
+@MainActor
 public final class SkillsViewModel {
     private let logger = Logger(subsystem: "com.scarf", category: "SkillsViewModel")
     public let context: ServerContext
@@ -70,7 +81,7 @@ public final class SkillsViewModel {
     private var contentToken: UInt64 = 0
     /// Skill files are hand-sized markdown. Past this a file is not an
     /// editable buffer; the guard refuses rather than republishing it.
-    static let maxSkillFileBytes = 8 * 1024 * 1024
+    nonisolated static let maxSkillFileBytes = 8 * 1024 * 1024
     /// True while the installed-skills scan is in flight. Renders a
     /// progress indicator on iOS; Mac historically didn't surface this
     /// from VM state but adding it doesn't break the existing UI.
@@ -313,14 +324,26 @@ public final class SkillsViewModel {
             contentError = nil
             isLoadingContent = false
         }
-        missingConfig = computeMissingConfig(for: skill)
+        // The config.yaml read is a transport read — an SSH round-trip on a
+        // remote host — so it goes off the main actor like every other read
+        // in this file (C10). Skipped entirely when the skill declares no
+        // required config, exactly as before.
+        if skill.requiredConfig.isEmpty {
+            missingConfig = []
+        } else {
+            let ctx = context
+            let yaml = await Task.detached(priority: .userInitiated) {
+                ctx.readText(ctx.paths.configYAML)
+            }.value
+            missingConfig = Self.computeMissingConfig(for: skill, yaml: yaml)
+        }
     }
 
-    private func computeMissingConfig(for skill: HermesSkill) -> [String] {
+    /// An unreadable config.yaml means "we cannot prove any key is present",
+    /// so every required key is reported missing — the same answer as before.
+    nonisolated static func computeMissingConfig(for skill: HermesSkill, yaml: String?) -> [String] {
         guard !skill.requiredConfig.isEmpty else { return [] }
-        guard let yaml = context.readText(context.paths.configYAML) else {
-            return skill.requiredConfig
-        }
+        guard let yaml else { return skill.requiredConfig }
         return skill.requiredConfig.filter { key in
             !yaml.contains(key)
         }

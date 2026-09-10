@@ -8,9 +8,17 @@ import ScarfCore
 /// `~/.hermes/.env`.
 @Observable
 @MainActor
-final class SimpleXSetupViewModel: OutcomeMessageHosting {
+final class SimpleXSetupViewModel: PlatformSetupForm {
     let context: ServerContext
-    init(context: ServerContext = .local) { self.context = context }
+    /// C10 test seam — nil in production. See ``PlatformSetupForm``.
+    let cliRunner: HermesCLIRunner?
+    /// Load/save in-flight flags owned by ``PlatformSetupForm``.
+    var isLoading = false
+    var isSaving = false
+    init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
+        self.context = context
+        self.cliRunner = cliRunner
+    }
 
     // Required
     var wsURL: String = ""
@@ -29,31 +37,27 @@ final class SimpleXSetupViewModel: OutcomeMessageHosting {
     /// VoiceOver announcement come from this, never from the prose.
     var messageIsFailure = false
 
+    /// Off the main actor (C10) — see ``PlatformSetupForm``.
     func load() {
-        // GW-F6 / audit DI L10: an unreadable `.env` used to arrive as an
-        // EMPTY one, so this form rendered blank fields over live values and
-        // a Save then commented those keys out. Absent is still an empty
-        // form (correct — nothing is set yet); unreadable says so.
-        let (env, envReadFailure) = PlatformSetupHelpers.loadEnv(context: context)
-        if let envReadFailure {
-            message = envReadFailure
-            messageIsFailure = true
+        loadSnapshot(includeConfig: false) { [weak self] snapshot in
+            guard let self else { return }
+            let env = snapshot.env
+            wsURL = env["SIMPLEX_WS_URL"] ?? ""
+            allowedUsers = env["SIMPLEX_ALLOWED_USERS"] ?? ""
+            allowAllUsers = PlatformSetupHelpers.parseEnvBool(env["SIMPLEX_ALLOW_ALL_USERS"])
+            // "*" in the allowlist is the equivalent of allow-all — normalize so the
+            // checkbox reflects either form (mirrors the WhatsApp web-bridge form).
+            if allowedUsers == "*" {
+                allowAllUsers = true
+                allowedUsers = ""
+            }
+            groupAllowed = env["SIMPLEX_GROUP_ALLOWED"] ?? ""
+            // SIMPLEX_AUTO_ACCEPT defaults to true when the key is absent.
+            autoAccept = env["SIMPLEX_AUTO_ACCEPT"].map { PlatformSetupHelpers.parseEnvBool($0) } ?? true
+            homeChannel = env["SIMPLEX_HOME_CHANNEL"] ?? ""
+            homeChannelName = env["SIMPLEX_HOME_CHANNEL_NAME"] ?? ""
+            textBatchDelay = env["HERMES_SIMPLEX_TEXT_BATCH_DELAY"] ?? "0.8"
         }
-        wsURL = env["SIMPLEX_WS_URL"] ?? ""
-        allowedUsers = env["SIMPLEX_ALLOWED_USERS"] ?? ""
-        allowAllUsers = PlatformSetupHelpers.parseEnvBool(env["SIMPLEX_ALLOW_ALL_USERS"])
-        // "*" in the allowlist is the equivalent of allow-all — normalize so the
-        // checkbox reflects either form (mirrors the WhatsApp web-bridge form).
-        if allowedUsers == "*" {
-            allowAllUsers = true
-            allowedUsers = ""
-        }
-        groupAllowed = env["SIMPLEX_GROUP_ALLOWED"] ?? ""
-        // SIMPLEX_AUTO_ACCEPT defaults to true when the key is absent.
-        autoAccept = env["SIMPLEX_AUTO_ACCEPT"].map { PlatformSetupHelpers.parseEnvBool($0) } ?? true
-        homeChannel = env["SIMPLEX_HOME_CHANNEL"] ?? ""
-        homeChannelName = env["SIMPLEX_HOME_CHANNEL_NAME"] ?? ""
-        textBatchDelay = env["HERMES_SIMPLEX_TEXT_BATCH_DELAY"] ?? "0.8"
     }
 
     func save() {
@@ -67,6 +71,6 @@ final class SimpleXSetupViewModel: OutcomeMessageHosting {
             "SIMPLEX_HOME_CHANNEL_NAME": homeChannelName,
             "HERMES_SIMPLEX_TEXT_BATCH_DELAY": textBatchDelay
         ]
-        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: [:]))
+        commitSave(envPairs: envPairs, configKV: [:])
     }
 }

@@ -73,7 +73,12 @@ struct HomeAssistantSetupView: View {
             )
             Spacer()
             Button("Reload") { viewModel.load() }.controlSize(.small)
+                    .disabled(viewModel.isBusy)
             Button("Save") { viewModel.save() }.buttonStyle(ScarfPrimaryButton()).controlSize(.small)
+                // Disabled until the (now off-main, C10) load has landed:
+                // `saveForm` treats a blank field as an unset, so a Save from
+                // the pre-load blanks would comment live keys out of `.env`.
+                .disabled(viewModel.isBusy)
         }
     }
 }

@@ -5,9 +5,17 @@ import ScarfCore
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/mattermost
 @Observable
 @MainActor
-final class MattermostSetupViewModel: OutcomeMessageHosting {
+final class MattermostSetupViewModel: PlatformSetupForm {
     let context: ServerContext
-    init(context: ServerContext = .local) { self.context = context }
+    /// C10 test seam — nil in production. See ``PlatformSetupForm``.
+    let cliRunner: HermesCLIRunner?
+    /// Load/save in-flight flags owned by ``PlatformSetupForm``.
+    var isLoading = false
+    var isSaving = false
+    init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
+        self.context = context
+        self.cliRunner = cliRunner
+    }
 
     var serverURL: String = ""
     var token: String = ""
@@ -24,25 +32,21 @@ final class MattermostSetupViewModel: OutcomeMessageHosting {
     var messageIsFailure = false
     let replyModeOptions = ["off", "thread"]
 
+    /// Off the main actor (C10) — see ``PlatformSetupForm``.
     func load() {
-        // GW-F6 / audit DI L10: an unreadable `.env` used to arrive as an
-        // EMPTY one, so this form rendered blank fields over live values and
-        // a Save then commented those keys out. Absent is still an empty
-        // form (correct — nothing is set yet); unreadable says so.
-        let (env, envReadFailure) = PlatformSetupHelpers.loadEnv(context: context)
-        if let envReadFailure {
-            message = envReadFailure
-            messageIsFailure = true
-        }
-        serverURL = env["MATTERMOST_URL"] ?? ""
-        token = env["MATTERMOST_TOKEN"] ?? ""
-        allowedUsers = env["MATTERMOST_ALLOWED_USERS"] ?? ""
-        homeChannel = env["MATTERMOST_HOME_CHANNEL"] ?? ""
-        freeResponseChannels = env["MATTERMOST_FREE_RESPONSE_CHANNELS"] ?? ""
-        replyMode = env["MATTERMOST_REPLY_MODE"] ?? "off"
+        loadSnapshot { [weak self] snapshot in
+            guard let self else { return }
+            let env = snapshot.env
+            serverURL = env["MATTERMOST_URL"] ?? ""
+            token = env["MATTERMOST_TOKEN"] ?? ""
+            allowedUsers = env["MATTERMOST_ALLOWED_USERS"] ?? ""
+            homeChannel = env["MATTERMOST_HOME_CHANNEL"] ?? ""
+            freeResponseChannels = env["MATTERMOST_FREE_RESPONSE_CHANNELS"] ?? ""
+            replyMode = env["MATTERMOST_REPLY_MODE"] ?? "off"
 
-        let cfg = HermesFileService(context: context).loadConfig().mattermost
-        requireMention = cfg.requireMention
+            guard let cfg = snapshot.config?.mattermost else { return }
+            requireMention = cfg.requireMention
+        }
     }
 
     func save() {
@@ -55,6 +59,6 @@ final class MattermostSetupViewModel: OutcomeMessageHosting {
             "MATTERMOST_REPLY_MODE": replyMode == "off" ? "" : replyMode,
             "MATTERMOST_REQUIRE_MENTION": PlatformSetupHelpers.envBool(requireMention)
         ]
-        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: [:]))
+        commitSave(envPairs: envPairs, configKV: [:])
     }
 }

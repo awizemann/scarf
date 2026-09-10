@@ -68,6 +68,11 @@ struct GatewayView: View {
         guard let store = capabilitiesStore,
               store.capabilities.detected,
               !viewModel.capabilities.detected else { return }
+        // Cancel the outgoing instance's load first: it is a DETACHED task
+        // running three CLI probes and nothing else holds a reference to it
+        // once the VM is replaced, so the first appear leaked a full probe
+        // triple against a possibly-remote host (charter C10).
+        viewModel.cancelLoad()
         viewModel = MessagingGatewayViewModel(
             context: viewModel.context,
             capabilities: store.capabilities

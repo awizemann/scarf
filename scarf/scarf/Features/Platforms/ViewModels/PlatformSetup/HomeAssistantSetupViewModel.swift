@@ -15,10 +15,16 @@ import AppKit
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/homeassistant
 @Observable
 @MainActor
-final class HomeAssistantSetupViewModel: OutcomeMessageHosting {
+final class HomeAssistantSetupViewModel: PlatformSetupForm {
     let context: ServerContext
 
-    init(context: ServerContext = .local) {
+    /// C10 test seam — nil in production. See ``PlatformSetupForm``.
+    let cliRunner: HermesCLIRunner?
+    /// Load/save in-flight flags owned by ``PlatformSetupForm``.
+    var isLoading = false
+    var isSaving = false
+    init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
+        self.cliRunner = cliRunner
         self.context = context
     }
 
@@ -39,25 +45,21 @@ final class HomeAssistantSetupViewModel: OutcomeMessageHosting {
     /// VoiceOver announcement come from this, never from the prose.
     var messageIsFailure = false
 
+    /// Off the main actor (C10) — see ``PlatformSetupForm``.
     func load() {
-        // GW-F6 / audit DI L10: an unreadable `.env` used to arrive as an
-        // EMPTY one, so this form rendered blank fields over live values and
-        // a Save then commented those keys out. Absent is still an empty
-        // form (correct — nothing is set yet); unreadable says so.
-        let (env, envReadFailure) = PlatformSetupHelpers.loadEnv(context: context)
-        if let envReadFailure {
-            message = envReadFailure
-            messageIsFailure = true
-        }
-        url = env["HASS_URL"] ?? "http://homeassistant.local:8123"
-        token = env["HASS_TOKEN"] ?? ""
+        loadSnapshot { [weak self] snapshot in
+            guard let self else { return }
+            let env = snapshot.env
+            url = env["HASS_URL"] ?? "http://homeassistant.local:8123"
+            token = env["HASS_TOKEN"] ?? ""
 
-        let cfg = HermesFileService(context: context).loadConfig().homeAssistant
-        watchAll = cfg.watchAll
-        cooldownSeconds = cfg.cooldownSeconds
-        watchDomains = cfg.watchDomains
-        watchEntities = cfg.watchEntities
-        ignoreEntities = cfg.ignoreEntities
+            guard let cfg = snapshot.config?.homeAssistant else { return }
+            watchAll = cfg.watchAll
+            cooldownSeconds = cfg.cooldownSeconds
+            watchDomains = cfg.watchDomains
+            watchEntities = cfg.watchEntities
+            ignoreEntities = cfg.ignoreEntities
+        }
     }
 
     func save() {
@@ -71,7 +73,7 @@ final class HomeAssistantSetupViewModel: OutcomeMessageHosting {
             "platforms.homeassistant.extra.watch_all": PlatformSetupHelpers.envBool(watchAll),
             "platforms.homeassistant.extra.cooldown_seconds": String(cooldownSeconds)
         ]
-        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV))
+        commitSave(envPairs: envPairs, configKV: configKV)
     }
 
     /// Open config.yaml in the user's default editor so they can manually edit

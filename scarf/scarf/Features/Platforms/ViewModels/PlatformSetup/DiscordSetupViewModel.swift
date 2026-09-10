@@ -6,9 +6,17 @@ import os
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/discord
 @Observable
 @MainActor
-final class DiscordSetupViewModel: OutcomeMessageHosting {
+final class DiscordSetupViewModel: PlatformSetupForm {
     let context: ServerContext
-    init(context: ServerContext = .local) { self.context = context }
+    /// C10 test seam — nil in production. See ``PlatformSetupForm``.
+    let cliRunner: HermesCLIRunner?
+    /// Load/save in-flight flags owned by ``PlatformSetupForm``.
+    var isLoading = false
+    var isSaving = false
+    init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
+        self.context = context
+        self.cliRunner = cliRunner
+    }
 
     var botToken: String = ""
     var allowedUsers: String = ""
@@ -40,30 +48,29 @@ final class DiscordSetupViewModel: OutcomeMessageHosting {
     let allowBotsOptions = ["none", "mentions", "all"]
     let replyToModeOptions = ["off", "first", "all"]
 
+    /// Off the main actor (C10) — see ``PlatformSetupForm``. The `.env` read
+    /// distinguishes absent (empty form — nothing is set yet) from unreadable
+    /// (GW-F6 / DI L10: the form used to render blanks over live values and a
+    /// Save then commented those keys out).
     func load() {
-        // GW-F6 / audit DI L10: an unreadable `.env` used to arrive as an
-        // EMPTY one, so this form rendered blank fields over live values and
-        // a Save then commented those keys out. Absent is still an empty
-        // form (correct — nothing is set yet); unreadable says so.
-        let (env, envReadFailure) = PlatformSetupHelpers.loadEnv(context: context)
-        if let envReadFailure {
-            message = envReadFailure
-            messageIsFailure = true
-        }
-        botToken = env["DISCORD_BOT_TOKEN"] ?? ""
-        allowedUsers = env["DISCORD_ALLOWED_USERS"] ?? ""
-        homeChannel = env["DISCORD_HOME_CHANNEL"] ?? ""
-        homeChannelName = env["DISCORD_HOME_CHANNEL_NAME"] ?? ""
-        allowBots = env["DISCORD_ALLOW_BOTS"] ?? "none"
-        replyToMode = env["DISCORD_REPLY_TO_MODE"] ?? "first"
+        loadSnapshot { [weak self] snapshot in
+            guard let self else { return }
+            let env = snapshot.env
+            botToken = env["DISCORD_BOT_TOKEN"] ?? ""
+            allowedUsers = env["DISCORD_ALLOWED_USERS"] ?? ""
+            homeChannel = env["DISCORD_HOME_CHANNEL"] ?? ""
+            homeChannelName = env["DISCORD_HOME_CHANNEL_NAME"] ?? ""
+            allowBots = env["DISCORD_ALLOW_BOTS"] ?? "none"
+            replyToMode = env["DISCORD_REPLY_TO_MODE"] ?? "first"
 
-        let cfg = HermesFileService(context: context).loadConfig().discord
-        requireMention = cfg.requireMention
-        freeResponseChannels = cfg.freeResponseChannels
-        autoThread = cfg.autoThread
-        reactions = cfg.reactions
-        historyBackfill = cfg.historyBackfill
-        allowAnyAttachment = cfg.allowAnyAttachment
+            guard let cfg = snapshot.config?.discord else { return }
+            requireMention = cfg.requireMention
+            freeResponseChannels = cfg.freeResponseChannels
+            autoThread = cfg.autoThread
+            reactions = cfg.reactions
+            historyBackfill = cfg.historyBackfill
+            allowAnyAttachment = cfg.allowAnyAttachment
+        }
     }
 
     func save() {
@@ -83,6 +90,6 @@ final class DiscordSetupViewModel: OutcomeMessageHosting {
             "discord.history_backfill": PlatformSetupHelpers.envBool(historyBackfill),
             "platforms.discord.extra.allow_any_attachment": PlatformSetupHelpers.envBool(allowAnyAttachment)
         ]
-        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV))
+        commitSave(envPairs: envPairs, configKV: configKV)
     }
 }

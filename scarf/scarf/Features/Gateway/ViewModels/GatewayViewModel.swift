@@ -85,6 +85,15 @@ final class MessagingGatewayViewModel {
     /// coalescing invariants are provable (see `HermesCLIRunner`).
     @ObservationIgnored nonisolated let cliRunner: HermesCLIRunner
 
+    /// The runner exactly as INJECTED — `nil` in production.
+    ///
+    /// `HermesGatewayListService.fetch` judges `gateway list`'s STDOUT alone
+    /// (its own transport call), because a stderr line can have a profile
+    /// row's shape and would parse as a phantom profile. So production keeps
+    /// that call and only a test substitutes a fake here — which is what
+    /// makes the third probe of a load observable at all.
+    @ObservationIgnored nonisolated let injectedRunner: HermesCLIRunner?
+
     /// Cap on each read probe in `load()`. `gateway status` and `pairing
     /// list` answer in well under a second on a healthy host; the point of
     /// naming a shorter cap than `runHermes`'s 60 s default is charter C10 —
@@ -92,6 +101,13 @@ final class MessagingGatewayViewModel {
     /// file-watcher ticks pile up behind it. Nothing user-visible changes on
     /// a healthy host: only the spinner's worst case moves.
     static let probeTimeout: TimeInterval = 30
+
+    /// Cap on each MUTATION spawn (`gateway start|stop|restart`, `pairing
+    /// approve|revoke`). These used `ctx.runHermes(...)` with the silent 60 s
+    /// default; the value is deliberately unchanged (a `gateway restart` on a
+    /// busy host legitimately takes seconds) but it is now NAMED at the site,
+    /// which is what `HermesCLIRunner`'s contract asks of every caller.
+    static let mutationTimeout: TimeInterval = 60
 
     init(
         context: ServerContext = .local,
@@ -101,6 +117,7 @@ final class MessagingGatewayViewModel {
         self.context = context
         self.capabilities = capabilities
         self.cliRunner = cliRunner ?? context.cliRunner
+        self.injectedRunner = cliRunner
     }
 
     var gateway = MessagingGatewayInfo(pid: nil, state: "unknown", exitReason: nil, startTime: nil, updatedAt: nil, platforms: [], isLoaded: false, isServedByMultiplexer: false, isRunning: false)
@@ -126,9 +143,15 @@ final class MessagingGatewayViewModel {
     /// joining or replaying a stale pass answers the wrong question.
     @ObservationIgnored private var loadGeneration = 0
 
+    /// Generation of the load currently owning `isLoading`. See `load()`.
+    @ObservationIgnored private var inFlightLoadGeneration = 0
+
     /// Invalidate every in-flight `load()`. Called at the start of each
     /// mutation so a reload issued afterwards is the only one that can commit.
-    private func invalidateInFlightLoads() {
+    /// Internal rather than private so a test can provoke the supersession
+    /// case directly — a mutation bumps this token WITHOUT starting a load of
+    /// its own, which is the case that used to leave the spinner up.
+    func invalidateInFlightLoads() {
         loadGeneration &+= 1
     }
 
@@ -162,9 +185,16 @@ final class MessagingGatewayViewModel {
         inFlightChangeToken = changeToken
         loadGeneration &+= 1
         let generation = loadGeneration
+        // Which load owns the spinner. `loadGeneration` alone cannot answer
+        // that: a mutation bumps it WITHOUT starting a load, so a load
+        // superseded that way returned early and left `isLoading` true until
+        // the post-mutation reload landed (and poisoned the coalescing test,
+        // whose `isLoading == false` wait was really waiting on that reload).
+        inFlightLoadGeneration = generation
         let ctx = context
         let caps = capabilities
         let run = cliRunner
+        let injected = injectedRunner
         // Cancel-prior so a superseded load stops between its probes rather
         // than running all three to completion just to have its result
         // dropped by the generation guard.
@@ -184,19 +214,36 @@ final class MessagingGatewayViewModel {
             let pairing = Self.parsePairing(output: run(["pairing", "list"], Self.probeTimeout).output)
             if Task.isCancelled { return }
             let listSnap = caps.hasGatewayList
-                ? HermesGatewayListService.fetch(context: ctx)
+                ? HermesGatewayListService.fetch(context: ctx, runner: injected)
                 : nil
             if Task.isCancelled { return }
             await MainActor.run {
-                guard let self, self.loadGeneration == generation else { return }
+                guard let self else { return }
+                // Newest load clears the spinner even when a mutation
+                // invalidated its DATA — only a genuinely newer load in
+                // flight keeps it up.
+                if self.inFlightLoadGeneration == generation { self.isLoading = false }
+                guard self.loadGeneration == generation else { return }
                 self.gateway = status
                 self.approvedUsers = pairing.approved
                 self.pendingPairings = pairing.pending
                 self.gatewayList = listSnap
-                self.isLoading = false
                 self.loadedChangeToken = changeToken
             }
         }
+    }
+
+    /// Stop the in-flight load. Called when this view model is about to be
+    /// replaced (`GatewayView.attachCapabilitiesIfNeeded`) — the detached
+    /// load task outlives the VM otherwise and finishes all three probes
+    /// just to drop the result.
+    func cancelLoad() {
+        loadTask?.cancel()
+        loadTask = nil
+        // Also retire its RESULT: cancellation is only checked between probes,
+        // so a load past its last check would otherwise still commit.
+        invalidateInFlightLoads()
+        isLoading = false
     }
 
     /// Static form of the gateway-status walk so the detached load can call
@@ -423,13 +470,13 @@ final class MessagingGatewayViewModel {
         actionGeneration &+= 1
         invalidateInFlightLoads()
         let generation = actionGeneration
-        let ctx = context
+        let run = cliRunner
 
         Task { [weak self] in
             // `hermes gateway start|stop|restart` is a process spawn against a
             // possibly-remote host; running it inline froze the whole app for
             // the duration. Detached, exactly like `load()` above.
-            let result = await Task.detached { ctx.runHermes(["gateway", verb]) }.value
+            let result = await Task.detached { run(["gateway", verb], Self.mutationTimeout) }.value
             guard let self else { return }
             self.isBusy = false
             // A newer action superseded this one while the CLI ran — its
@@ -463,10 +510,10 @@ final class MessagingGatewayViewModel {
         guard !isBusy else { return }
         isBusy = true
         invalidateInFlightLoads()
-        let ctx = context
+        let run = cliRunner
         Task { [weak self] in
             let result = await Task.detached {
-                ctx.runHermes(["pairing", "approve", platform, code])
+                run(["pairing", "approve", platform, code], Self.mutationTimeout)
             }.value
             guard let self else { return }
             self.isBusy = false
@@ -486,10 +533,10 @@ final class MessagingGatewayViewModel {
         guard !isBusy else { return }
         isBusy = true
         invalidateInFlightLoads()
-        let ctx = context
+        let run = cliRunner
         Task { [weak self] in
             let result = await Task.detached {
-                ctx.runHermes(["pairing", "revoke", user.platform, user.userId])
+                run(["pairing", "revoke", user.platform, user.userId], Self.mutationTimeout)
             }.value
             guard let self else { return }
             self.isBusy = false

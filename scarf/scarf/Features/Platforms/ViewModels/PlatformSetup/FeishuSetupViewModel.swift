@@ -5,9 +5,17 @@ import ScarfCore
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/feishu
 @Observable
 @MainActor
-final class FeishuSetupViewModel: OutcomeMessageHosting {
+final class FeishuSetupViewModel: PlatformSetupForm {
     let context: ServerContext
-    init(context: ServerContext = .local) { self.context = context }
+    /// C10 test seam — nil in production. See ``PlatformSetupForm``.
+    let cliRunner: HermesCLIRunner?
+    /// Load/save in-flight flags owned by ``PlatformSetupForm``.
+    var isLoading = false
+    var isSaving = false
+    init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
+        self.context = context
+        self.cliRunner = cliRunner
+    }
 
     var appID: String = ""
     var appSecret: String = ""
@@ -25,23 +33,19 @@ final class FeishuSetupViewModel: OutcomeMessageHosting {
     let domainOptions = ["feishu", "lark"]
     let connectionOptions = ["websocket", "webhook"]
 
+    /// Off the main actor (C10) — see ``PlatformSetupForm``.
     func load() {
-        // GW-F6 / audit DI L10: an unreadable `.env` used to arrive as an
-        // EMPTY one, so this form rendered blank fields over live values and
-        // a Save then commented those keys out. Absent is still an empty
-        // form (correct — nothing is set yet); unreadable says so.
-        let (env, envReadFailure) = PlatformSetupHelpers.loadEnv(context: context)
-        if let envReadFailure {
-            message = envReadFailure
-            messageIsFailure = true
+        loadSnapshot(includeConfig: false) { [weak self] snapshot in
+            guard let self else { return }
+            let env = snapshot.env
+            appID = env["FEISHU_APP_ID"] ?? ""
+            appSecret = env["FEISHU_APP_SECRET"] ?? ""
+            domain = env["FEISHU_DOMAIN"] ?? "lark"
+            encryptKey = env["FEISHU_ENCRYPT_KEY"] ?? ""
+            verificationToken = env["FEISHU_VERIFICATION_TOKEN"] ?? ""
+            allowedUsers = env["FEISHU_ALLOWED_USERS"] ?? ""
+            connectionMode = env["FEISHU_CONNECTION_MODE"] ?? "websocket"
         }
-        appID = env["FEISHU_APP_ID"] ?? ""
-        appSecret = env["FEISHU_APP_SECRET"] ?? ""
-        domain = env["FEISHU_DOMAIN"] ?? "lark"
-        encryptKey = env["FEISHU_ENCRYPT_KEY"] ?? ""
-        verificationToken = env["FEISHU_VERIFICATION_TOKEN"] ?? ""
-        allowedUsers = env["FEISHU_ALLOWED_USERS"] ?? ""
-        connectionMode = env["FEISHU_CONNECTION_MODE"] ?? "websocket"
     }
 
     func save() {
@@ -54,6 +58,6 @@ final class FeishuSetupViewModel: OutcomeMessageHosting {
             "FEISHU_ALLOWED_USERS": allowedUsers,
             "FEISHU_CONNECTION_MODE": connectionMode == "websocket" ? "" : connectionMode
         ]
-        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: [:]))
+        commitSave(envPairs: envPairs, configKV: [:])
     }
 }

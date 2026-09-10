@@ -8,10 +8,16 @@ import ScarfCore
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/whatsapp
 @Observable
 @MainActor
-final class WhatsAppSetupViewModel: OutcomeMessageHosting {
+final class WhatsAppSetupViewModel: PlatformSetupForm {
     let context: ServerContext
 
-    init(context: ServerContext = .local) {
+    /// C10 test seam — nil in production. See ``PlatformSetupForm``.
+    let cliRunner: HermesCLIRunner?
+    /// Load/save in-flight flags owned by ``PlatformSetupForm``.
+    var isLoading = false
+    var isSaving = false
+    init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
+        self.cliRunner = cliRunner
         self.context = context
     }
 
@@ -36,31 +42,27 @@ final class WhatsAppSetupViewModel: OutcomeMessageHosting {
     let terminalController = EmbeddedSetupTerminalController()
     var pairingInProgress: Bool = false
 
+    /// Off the main actor (C10) — see ``PlatformSetupForm``.
     func load() {
-        // GW-F6 / audit DI L10: an unreadable `.env` used to arrive as an
-        // EMPTY one, so this form rendered blank fields over live values and
-        // a Save then commented those keys out. Absent is still an empty
-        // form (correct — nothing is set yet); unreadable says so.
-        let (env, envReadFailure) = PlatformSetupHelpers.loadEnv(context: context)
-        if let envReadFailure {
-            message = envReadFailure
-            messageIsFailure = true
-        }
-        enabled = PlatformSetupHelpers.parseEnvBool(env["WHATSAPP_ENABLED"])
-        mode = env["WHATSAPP_MODE"] ?? "bot"
-        allowedUsers = env["WHATSAPP_ALLOWED_USERS"] ?? ""
-        allowAllUsers = PlatformSetupHelpers.parseEnvBool(env["WHATSAPP_ALLOW_ALL_USERS"])
-        // Hermes accepts two equivalent ways to mean "allow everyone":
-        //   WHATSAPP_ALLOW_ALL_USERS=true  OR  WHATSAPP_ALLOWED_USERS=*
-        // Normalize so the checkbox reflects either form.
-        if allowedUsers == "*" {
-            allowAllUsers = true
-            allowedUsers = ""
-        }
+        loadSnapshot { [weak self] snapshot in
+            guard let self else { return }
+            let env = snapshot.env
+            enabled = PlatformSetupHelpers.parseEnvBool(env["WHATSAPP_ENABLED"])
+            mode = env["WHATSAPP_MODE"] ?? "bot"
+            allowedUsers = env["WHATSAPP_ALLOWED_USERS"] ?? ""
+            allowAllUsers = PlatformSetupHelpers.parseEnvBool(env["WHATSAPP_ALLOW_ALL_USERS"])
+            // Hermes accepts two equivalent ways to mean "allow everyone":
+            //   WHATSAPP_ALLOW_ALL_USERS=true  OR  WHATSAPP_ALLOWED_USERS=*
+            // Normalize so the checkbox reflects either form.
+            if allowedUsers == "*" {
+                allowAllUsers = true
+                allowedUsers = ""
+            }
 
-        let cfg = HermesFileService(context: context).loadConfig().whatsapp
-        unauthorizedDMBehavior = cfg.unauthorizedDMBehavior
-        replyPrefix = cfg.replyPrefix
+            guard let cfg = snapshot.config?.whatsapp else { return }
+            unauthorizedDMBehavior = cfg.unauthorizedDMBehavior
+            replyPrefix = cfg.replyPrefix
+        }
     }
 
     func save() {
@@ -75,7 +77,7 @@ final class WhatsAppSetupViewModel: OutcomeMessageHosting {
             "whatsapp.unauthorized_dm_behavior": unauthorizedDMBehavior,
             "whatsapp.reply_prefix": replyPrefix
         ]
-        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV))
+        commitSave(envPairs: envPairs, configKV: configKV)
     }
 
     /// Launch `hermes whatsapp` in the embedded terminal. The user scans the QR

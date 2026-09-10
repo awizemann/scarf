@@ -157,14 +157,42 @@ final class MCPLoginController {
             }
         }
 
-        do {
-            try proc.run()
-            process = proc
-            stdoutPipe = outPipe
-            isRunning = true
-        } catch {
-            errorMessage = "Failed to start hermes: \(error.localizedDescription)"
-            logger.error("mcp login failed to start: \(error.localizedDescription)")
+        // C10: `Process.run()` is a fork/exec, and on a remote context it is
+        // an `ssh` spawn — neither belongs on the main actor. The P21
+        // EOF-then-judge sequencing is untouched: both handlers are installed
+        // ABOVE, before the process can produce a byte, and `pump()` still
+        // judges only once EOF and the exit status are both in.
+        //
+        // `isRunning` is raised HERE rather than after the spawn: the sheet
+        // must show the run as live from the click, and raising it in the
+        // continuation could re-raise it after a fast process had already
+        // finished.
+        isRunning = true
+        let spawnGeneration = generation
+        Task { [weak self] in
+            let spawnError: (any Error)? = await Task.detached {
+                do { try proc.run(); return nil } catch { return error }
+            }.value
+            guard let self else { return }
+            guard self.generation == spawnGeneration else {
+                // `stop()` retired this run while it was still spawning, so
+                // it saw a nil `process` and reaped nothing. Do it here.
+                if spawnError == nil {
+                    proc.terminationHandler = nil
+                    proc.terminate()
+                    if self.context.isRemote { self.reapRemoteLogin(server: server) }
+                }
+                return
+            }
+            if let spawnError {
+                self.isRunning = false
+                self.runningServer = nil
+                self.errorMessage = "Failed to start hermes: \(spawnError.localizedDescription)"
+                self.logger.error("mcp login failed to start: \(spawnError.localizedDescription)")
+                return
+            }
+            self.process = proc
+            self.stdoutPipe = outPipe
         }
     }
 

@@ -198,12 +198,7 @@ final class KanbanBoardViewModel {
             // stats: a failure leaves the previous signals on screen
             // rather than blanking the board. Runs inside the actor, off
             // the main actor (C10).
-            if supportsDiagnostics, shouldRefetchDiagnostics {
-                if let diags = try? await service.diagnostics() {
-                    self.diagnosticsByTask = diags
-                    self.lastDiagnosticsFetchAt = Date()
-                }
-            }
+            await refreshDiagnosticsIfDue { [service] in try? await service.diagnostics() }
         } catch let err as KanbanError {
             lastError = err.errorDescription
         } catch {
@@ -482,6 +477,28 @@ final class KanbanBoardViewModel {
 
     private func clearStatusOverride(for taskId: String) {
         optimisticOverrides.removeValue(forKey: taskId)
+    }
+
+    /// The throttled diagnostics fetch.
+    ///
+    /// The stamp advances on FAILURE too. It used to be set only inside the
+    /// success branch, so a host where `kanban diagnostics --json` fails (a
+    /// wedged ssh, a broken tenant) never satisfied the throttle again and
+    /// respawned the command on every 5 s board tick — the exact spawn storm
+    /// charter C10 exists to prevent. The previous signals still stay on
+    /// screen on failure; only the retry cadence is capped.
+    ///
+    /// `fetch` is a parameter rather than a direct `service.diagnostics()`
+    /// call so the throttle is testable without a live host: the invariant
+    /// being pinned is "at most one attempt per interval, success or not".
+    func refreshDiagnosticsIfDue(
+        _ fetch: () async -> [String: [HermesKanbanDiagnostic]]?
+    ) async {
+        guard supportsDiagnostics, shouldRefetchDiagnostics else { return }
+        lastDiagnosticsFetchAt = Date()
+        if let diags = await fetch() {
+            diagnosticsByTask = diags
+        }
     }
 
     private var shouldRefetchDiagnostics: Bool {

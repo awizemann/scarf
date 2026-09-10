@@ -165,10 +165,30 @@ public enum HermesGatewayListService {
         return GatewayListSnapshot(profiles: entries)
     }
 
+    /// Cap on the `gateway list` spawn. Named, not inherited: a wedged SSH
+    /// host must not pin a gateway load (charter C10).
+    public static let fetchTimeout: TimeInterval = 10
+
     /// Synchronous fetch helper — call from a `Task.detached`. Returns
     /// `nil` when the subcommand fails (host without `gateway list`) or when
     /// the output has no recognizable profile lines.
-    public static func fetch(context: ServerContext) -> GatewayListSnapshot? {
+    ///
+    /// - Parameter runner: test seam only (the Mac target's `HermesCLIRunner`
+    ///   shape). Production passes `nil` and keeps the transport call below,
+    ///   because that captures stdout ALONE: `runHermes`-style combined
+    ///   output would let a stderr line with a profile row's shape parse as a
+    ///   phantom profile. Its `output` is therefore read as stdout. Without
+    ///   this parameter this third probe of a gateway load was the one spawn
+    ///   no test could observe.
+    public static func fetch(
+        context: ServerContext,
+        runner: (@Sendable (_ args: [String], _ timeout: TimeInterval) -> (output: String, exitCode: Int32))? = nil
+    ) -> GatewayListSnapshot? {
+        if let runner {
+            let result = runner(["gateway", "list"], fetchTimeout)
+            guard result.exitCode == 0 else { return nil }
+            return parse(result.output)
+        }
         let transport = context.makeTransport()
         let executable = context.paths.hermesBinary
         do {
@@ -176,7 +196,7 @@ public enum HermesGatewayListService {
                 executable: executable,
                 args: ["gateway", "list"],
                 stdin: nil,
-                timeout: 10
+                timeout: fetchTimeout
             )
             guard result.exitCode == 0 else { return nil }
             return parse(result.stdoutString)
