@@ -137,7 +137,7 @@ struct SettingsView: View {
                             Text(spec.displayName)
                                 .font(.body)
                                 .foregroundStyle(.primary)
-                            Text(currentValue(for: spec.key))
+                            Text(verbatim: displayValue(for: spec.key))
                                 .font(.caption.monospaced())
                                 .foregroundStyle(ScarfColor.foregroundMuted)
                                 .lineLimit(1)
@@ -160,6 +160,17 @@ struct SettingsView: View {
         }
     }
 
+    /// What the Quick-edits row shows. Same string as `currentValue` except
+    /// for an ABSENT `approvals.mode`, where the empty sentinel would render
+    /// as a blank caption instead of naming the mode the host runs.
+    private func displayValue(for key: String) -> String {
+        let value = currentValue(for: key)
+        if key == "approvals.mode", value.isEmpty {
+            return HermesConfig.approvalModeHostDefaultLabel(capabilities: caps)
+        }
+        return value
+    }
+
     /// Map a config-set key to the current value from the parsed
     /// HermesConfig. String-based so the Picker / Stepper / Toggle in
     /// the editor sheet can pre-fill correctly. Unknown keys return
@@ -168,9 +179,11 @@ struct SettingsView: View {
         switch key {
         case "model.default": return vm.config.model
         case "model.provider": return vm.config.provider
-        // Empty when the key is absent — the editor sheet then offers the
-        // modes without pre-selecting one, rather than priming `manual` over a
-        // host that runs `smart`.
+        // Empty when the key is ABSENT, which selects the sheet's "Host
+        // default (…)" sentinel row. The sheet must not prime a concrete mode
+        // for it: on a stock v0.19+ host the absent key means `smart`, and
+        // writing `manual` there would pin the mode the sentinel exists to
+        // avoid claiming (round-2 decision 5).
         case "approvals.mode": return vm.config.storedApprovalMode?.rawValue ?? ""
         // "Unlimited" for the no-ceiling case; the sheet's `Int(...) ?? 0`
         // priming maps that straight back onto the 0 sentinel.

@@ -1556,6 +1556,12 @@ public struct HermesConfig: Sendable {
     /// "Host default (manual)", or "Host default (unknown)" when the host
     /// version could not be detected.
     public func approvalModeHostDefaultLabel(capabilities: HermesCapabilities) -> String {
+        Self.approvalModeHostDefaultLabel(capabilities: capabilities)
+    }
+
+    /// The same label without a parsed config in hand — the iOS editor sheet
+    /// builds its option list from a `SettingSpec`, which holds no config.
+    public static func approvalModeHostDefaultLabel(capabilities: HermesCapabilities) -> String {
         guard capabilities.detected else { return "Host default (unknown)" }
         return capabilities.isV019OrLater ? "Host default (smart)" : "Host default (manual)"
     }
