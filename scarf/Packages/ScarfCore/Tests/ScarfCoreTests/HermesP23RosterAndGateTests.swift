@@ -41,7 +41,20 @@ import Testing
             // v2026.6.19 = 0.17.0 — the floor `photon` already had
             "whatsapp_cloud": .init(major: 0, minor: 17, patch: 0),
             // v2026.7.30 = 0.19.1, NOT 0.20 as the roster comment claimed
-            "buzz": .init(major: 0, minor: 19, patch: 1)
+            "buzz": .init(major: 0, minor: 19, patch: 1),
+            // P29: the four rows that carried INLINE literals rather than a
+            // shared floor constant, which is the rule this suite records.
+            // Walked the same way: `gateway/platforms/weixin.py` first at
+            // v2026.4.13 (0.9.0), absent v2026.4.8 (0.8.0);
+            // `gateway/platforms/qqbot.py` first at v2026.4.16 (0.10.0),
+            // absent v2026.4.13; `plugins/platforms/irc/` first at
+            // v2026.4.30 (0.12.0), absent v2026.4.23 (0.11.0);
+            // `gateway/platforms/msgraph_webhook.py` first at v2026.5.16
+            // (0.14.0), absent v2026.5.7 (0.13.0).
+            "weixin": .init(major: 0, minor: 9, patch: 0),
+            "qqbot": .init(major: 0, minor: 10, patch: 0),
+            "irc": .init(major: 0, minor: 12, patch: 0),
+            "msgraph_webhook": .init(major: 0, minor: 14, patch: 0)
         ]
         for (name, floor) in expected {
             #expect(row(name).minimumVersion == floor, "\(name)")
@@ -60,6 +73,12 @@ import Testing
         #expect(row("simplex").minimumVersion == HermesCapabilities.simplexPlatformFloor)
         #expect(row("ntfy").minimumVersion == HermesCapabilities.ntfyPlatformFloor)
         #expect(row("buzz").minimumVersion == HermesCapabilities.buzzPlatformFloor)
+        // P29: these four used to be inline `.init(major:…)` literals on the
+        // row, so there was nothing for a re-floor to keep in step with.
+        #expect(row("irc").minimumVersion == HermesCapabilities.ircPlatformFloor)
+        #expect(row("weixin").minimumVersion == HermesCapabilities.weixinPlatformFloor)
+        #expect(row("qqbot").minimumVersion == HermesCapabilities.qqbotPlatformFloor)
+        #expect(row("msgraph_webhook").minimumVersion == HermesCapabilities.msgraphWebhookPlatformFloor)
 
         // And each flag agrees with its row at the boundary.
         let below = caps("Hermes Agent v0.16.0 (2026.6.5)")
@@ -68,6 +87,25 @@ import Testing
         #expect(at.hasWhatsAppCloudPlatform)
         #expect(!row("whatsapp_cloud").isAvailable(on: below))
         #expect(row("whatsapp_cloud").isAvailable(on: at))
+    }
+
+    /// Each of the four newly-shared floors, at its own boundary and one
+    /// release below it.
+    @Test func theFourFormerlyInlineFloorsGateAtTheirOwnBoundary() {
+        let cases: [(String, String, String)] = [
+            ("weixin", "Hermes Agent v0.8.0 (2026.4.8)", "Hermes Agent v0.9.0 (2026.4.13)"),
+            ("qqbot", "Hermes Agent v0.9.0 (2026.4.13)", "Hermes Agent v0.10.0 (2026.4.16)"),
+            ("irc", "Hermes Agent v0.11.0 (2026.4.23)", "Hermes Agent v0.12.0 (2026.4.30)"),
+            ("msgraph_webhook", "Hermes Agent v0.13.0 (2026.5.7)", "Hermes Agent v0.14.0 (2026.5.16)")
+        ]
+        for (name, belowLine, atLine) in cases {
+            #expect(!row(name).isAvailable(on: caps(belowLine)), "\(name) below its floor")
+            #expect(row(name).isAvailable(on: caps(atLine)), "\(name) at its floor")
+            // At the target everything is on; on an undetected host a gated row
+            // is hidden (C1: a host we cannot version behaves as the oldest).
+            #expect(row(name).isAvailable(on: caps("Hermes Agent v0.21.1 (2026.9.7)")))
+            #expect(!row(name).isAvailable(on: .empty), "\(name) on an undetected host")
+        }
     }
 
     /// The inconsistency the phase exists to fix: at a v0.13 host the two

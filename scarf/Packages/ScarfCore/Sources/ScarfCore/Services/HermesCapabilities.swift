@@ -131,6 +131,29 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// Shared by the flag above and `KnownPlatforms.all`'s `teams` row.
     public static let teamsPlatformFloor = SemVer(major: 0, minor: 12, patch: 0)
 
+    /// First Hermes version carrying the `irc` adapter —
+    /// `plugins/platforms/irc/` first exists at tag v2026.4.30 (0.12.0) and is
+    /// absent at v2026.4.23 (0.11.0). Consumed only by `KnownPlatforms.all`'s
+    /// `irc` row; it lives here, not as an inline literal on that row, so the
+    /// roster's gate has the same provenance as every sibling's.
+    public static let ircPlatformFloor = SemVer(major: 0, minor: 12, patch: 0)
+
+    /// First Hermes version carrying the `weixin` adapter —
+    /// `gateway/platforms/weixin.py` first exists at tag v2026.4.13 (0.9.0) and
+    /// is absent at v2026.4.8 (0.8.0). Consumed only by `KnownPlatforms.all`.
+    public static let weixinPlatformFloor = SemVer(major: 0, minor: 9, patch: 0)
+
+    /// First Hermes version carrying the `qqbot` adapter —
+    /// `gateway/platforms/qqbot.py` first exists at tag v2026.4.16 (0.10.0) and
+    /// is absent at v2026.4.13 (0.9.0). Consumed only by `KnownPlatforms.all`.
+    public static let qqbotPlatformFloor = SemVer(major: 0, minor: 10, patch: 0)
+
+    /// First Hermes version carrying the `msgraph_webhook` adapter —
+    /// `gateway/platforms/msgraph_webhook.py` first exists at tag v2026.5.16
+    /// (0.14.0) and is absent at v2026.5.7 (0.13.0). Consumed only by
+    /// `KnownPlatforms.all`.
+    public static let msgraphWebhookPlatformFloor = SemVer(major: 0, minor: 14, patch: 0)
+
     /// The floor lives in ``yuanbaoPlatformFloor`` so the Platforms roster row
     /// (`HermesToolPlatform`, which gates on a `SemVer`) and this flag
     /// cannot drift apart.
@@ -701,12 +724,12 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// OAuth + local gRPC sidecar), 24th platform (v0.17+).
     ///
     /// The floor lives in ``photonPlatformFloor`` so the Platforms roster row
-    /// (`HermesToolPlatform`, which gates on a `SemVer` rather than a Bool)
+    /// (`KnownPlatforms.all`, which gates on a `SemVer` rather than a Bool)
     /// and this flag cannot drift apart.
     public var hasPhotonPlatform: Bool { atLeast(Self.photonPlatformFloor) }
 
     /// First Hermes version carrying the `photon` gateway adapter. Shared by
-    /// ``hasPhotonPlatform`` and `HermesToolPlatform.known`'s `photon` row.
+    /// ``hasPhotonPlatform`` and `KnownPlatforms.all`'s `photon` row.
     public static let photonPlatformFloor = SemVer(major: 0, minor: 17, patch: 0)
 
     /// First Hermes version carrying the `buzz` adapter —
@@ -799,7 +822,9 @@ public struct HermesCapabilities: Sendable, Equatable {
     // frozenset literal at each one, which is what these floors are:
     //
     //   TTS  edge/elevenlabs/openai/minimax/mistral/neutts/piper/xai/gemini/
-    //        kittentts   first set: v2026.4.23 (v0.11.0)
+    //        kittentts   first DISPATCHED: v2026.4.23 (v0.11.0); the
+    //                    frozenset itself only exists from v2026.4.30
+    //                    (v0.12.0) — see `hasGeminiKittenTTS`
     //   TTS  deepinfra   first set: v2026.7.20 (v0.19.0)   [hasDeepInfraTTS]
     //   STT  local/local_command/groq/openai/mistral/xai
     //                    first set: v2026.5.28 (v0.15.0)
@@ -810,18 +835,36 @@ public struct HermesCapabilities: Sendable, Equatable {
     // minimum need a flag; the v0.11.0 group gets one because v0.6.0–v0.10.0
     // hosts are supported and have no TTS roster at all.
 
-    /// `gemini` and `kittentts` as `tts.provider` values. Both appear in
-    /// `BUILTIN_TTS_PROVIDERS` from its very first tagged form —
-    /// v2026.4.23 (v0.11.0) `tools/tts_tool.py` — and at every later tag
-    /// through v2026.9.7. Neither name occurs anywhere in `tools/tts_tool.py`
-    /// at v2026.4.16 (v0.10.0) or earlier, so v0.11.0 is a real floor rather
-    /// than the artefact of the constant being introduced.
+    /// `gemini` and `kittentts` as `tts.provider` values.
+    ///
+    /// **The floor is v0.11.0, but `BUILTIN_TTS_PROVIDERS` is not the evidence
+    /// for it** — the round-2 doc claimed the constant's "very first tagged
+    /// form" is v2026.4.23, and it is not: `BUILTIN_TTS_PROVIDERS` does not
+    /// exist at that tag at all, its first tagged form being
+    /// `tools/tts_tool.py:316` @ **v2026.4.30 (0.12.0)**. A floor whose cited
+    /// constant postdates it by a release cannot be re-verified from the
+    /// comment (C2).
+    ///
+    /// The real evidence is the provider DISPATCH, which is what actually
+    /// decides whether a `tts.provider` value does anything: the arms
+    /// `elif provider == "gemini"` and `elif provider == "kittentts"` are
+    /// `tools/tts_tool.py:1024` and `:1038` @ **v2026.4.23 (0.11.0)**. At
+    /// v2026.4.16 (0.10.0) `tools/tts_tool.py` exists but contains neither
+    /// name anywhere, so v0.11.0 is a real floor and not an artefact of a
+    /// constant moving.
+    ///
+    /// Both names are in `BUILTIN_TTS_PROVIDERS` from the moment it exists
+    /// (v0.12.0) through v2026.9.7, so the roster and the dispatch agree
+    /// everywhere above the floor.
     public var hasGeminiKittenTTS: Bool { isV011OrLater }
 
     /// `elevenlabs` and `deepinfra` as `stt.provider` values —
     /// `BUILTIN_STT_PROVIDERS` gains both at v2026.7.20 (v0.19.0), the same
     /// tag as `hasDeepInfraTTS`; v2026.7.7.2 (v0.18.2) has neither. Every
-    /// later tag through v2026.9.7 keeps them.
+    /// later tag through v2026.9.7 keeps them. Verified at the mirror too:
+    /// `agent/transcription_registry.py::_BUILTIN_NAMES` (`:40`) lists
+    /// `elevenlabs` (`:47`) and `deepinfra` (`:48`) at v2026.7.20 and neither
+    /// at v2026.7.7.2.
     public var hasElevenLabsDeepInfraSTT: Bool { atLeastSemver(0, 19, 0) }
 
     /// `tts.deepinfra.{model,voice}` — DeepInfra as a TTS backend, alongside

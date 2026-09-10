@@ -188,16 +188,19 @@ public enum KnownPlatforms {
         // gateway/platforms + plugins/platforms). dingtalk / sms /
         // api_server land at v2026.3.23 (0.4.0) and wecom at v2026.3.30
         // (0.6.0) — at or below Scarf's oldest supported host, so no gate.
-        // The rest carry one: weixin v2026.4.13 (0.9.0),
-        // qqbot v2026.4.16 (0.10.0), irc v2026.4.30 (0.12.0),
-        // msgraph_webhook v2026.5.16 (0.14.0), photon v2026.6.19 (0.17.0).
+        // The rest carry one, and every floor is a shared
+        // `HermesCapabilities.<name>PlatformFloor` constant rather than an
+        // inline literal, so the roster row and the evidence for its floor
+        // cannot drift: weixin v2026.4.13 (0.9.0), qqbot v2026.4.16 (0.10.0),
+        // irc v2026.4.30 (0.12.0), msgraph_webhook v2026.5.16 (0.14.0),
+        // photon v2026.6.19 (0.17.0).
         HermesToolPlatform(name: "dingtalk", displayName: "DingTalk", icon: "text.bubble"),
         HermesToolPlatform(name: "sms", displayName: "SMS", icon: "message"),
-        HermesToolPlatform(name: "irc", displayName: "IRC", icon: "number.square", minimumVersion: .init(major: 0, minor: 12, patch: 0)),
+        HermesToolPlatform(name: "irc", displayName: "IRC", icon: "number.square", minimumVersion: HermesCapabilities.ircPlatformFloor),
         HermesToolPlatform(name: "wecom", displayName: "WeCom", icon: "building.2"),
-        HermesToolPlatform(name: "weixin", displayName: "Weixin", icon: "captions.bubble", minimumVersion: .init(major: 0, minor: 9, patch: 0)),
-        HermesToolPlatform(name: "qqbot", displayName: "QQ Bot", icon: "bubble.right", minimumVersion: .init(major: 0, minor: 10, patch: 0)),
-        HermesToolPlatform(name: "msgraph_webhook", displayName: "Microsoft Graph Webhook", icon: "network", minimumVersion: .init(major: 0, minor: 14, patch: 0)),
+        HermesToolPlatform(name: "weixin", displayName: "Weixin", icon: "captions.bubble", minimumVersion: HermesCapabilities.weixinPlatformFloor),
+        HermesToolPlatform(name: "qqbot", displayName: "QQ Bot", icon: "bubble.right", minimumVersion: HermesCapabilities.qqbotPlatformFloor),
+        HermesToolPlatform(name: "msgraph_webhook", displayName: "Microsoft Graph Webhook", icon: "network", minimumVersion: HermesCapabilities.msgraphWebhookPlatformFloor),
         HermesToolPlatform(name: "api_server", displayName: "API Server", icon: "server.rack"),
         // Floor shared with `HermesCapabilities.hasPhotonPlatform` rather than
         // repeated as a literal, so the roster row and the flag cannot drift.

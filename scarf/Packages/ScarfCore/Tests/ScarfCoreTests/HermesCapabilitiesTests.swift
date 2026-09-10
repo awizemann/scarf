@@ -1388,8 +1388,89 @@ import Foundation
         #expect(!HermesCapabilities.empty.isV0201OrLater)
     }
 
+    // MARK: - P29: the three P23 flags that shipped with no boundary tests
+
+    /// `hasGeminiKittenTTS` — four-way. The floor is v0.11.0, evidenced by the
+    /// provider DISPATCH arms `elif provider == "gemini"` / `== "kittentts"`
+    /// (`tools/tts_tool.py:1024,1038` @ v2026.4.23), not by
+    /// `BUILTIN_TTS_PROVIDERS`, which does not exist until v2026.4.30
+    /// (0.12.0). `tools/tts_tool.py` exists at v2026.4.16 (0.10.0) and
+    /// contains neither name.
+    @Test func geminiKittenTTSFloorIsV011() {
+        // Parse + degradation: the release below has no such providers, so
+        // offering them would write a `tts.provider` the host cannot dispatch.
+        let v010 = HermesCapabilities.parseLine("Hermes Agent v0.10.0 (2026.4.16)")
+        #expect(v010.detected)
+        #expect(!v010.hasGeminiKittenTTS)
+
+        // At the floor.
+        let v011 = HermesCapabilities.parseLine("Hermes Agent v0.11.0 (2026.4.23)")
+        #expect(v011.hasGeminiKittenTTS)
+
+        // All-on at the target, and a patch above it does not roll back.
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasGeminiKittenTTS)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.11.1 (2026.4.26)").hasGeminiKittenTTS)
+
+        // Undetected host behaves as the older one.
+        #expect(!HermesCapabilities.empty.hasGeminiKittenTTS)
+    }
+
+    /// `hasElevenLabsDeepInfraSTT` — four-way. `BUILTIN_STT_PROVIDERS` gains
+    /// both names at v2026.7.20 (0.19.0), mirrored by
+    /// `agent/transcription_registry.py::_BUILTIN_NAMES:47-48`; v2026.7.7.2
+    /// (0.18.2) has neither.
+    @Test func elevenLabsDeepInfraSTTFloorIsV019() {
+        let v0182 = HermesCapabilities.parseLine("Hermes Agent v0.18.2 (2026.7.7.2)")
+        #expect(!v0182.hasElevenLabsDeepInfraSTT)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.7.20)").hasElevenLabsDeepInfraSTT)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasElevenLabsDeepInfraSTT)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.19.1 (2026.7.30)").hasElevenLabsDeepInfraSTT)
+        #expect(!HermesCapabilities.empty.hasElevenLabsDeepInfraSTT)
+        // It shares its tag with the DeepInfra TTS side, so the two must move
+        // together.
+        #expect(!v0182.hasDeepInfraTTS)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.7.20)").hasDeepInfraTTS)
+    }
+
+    /// `isV011OrLater` — four-way, through its one consumer. The boundary is a
+    /// DEFAULT that changed inside the supported window:
+    /// `agent.gateway_notify_interval` is `600` at `hermes_cli/config.py:373`
+    /// @ v2026.4.16 (0.10.0) and `180` at `:391` @ v2026.4.23 (0.11.0). An
+    /// absent key therefore displays differently per host, which is the only
+    /// honest thing to show.
+    @Test func isV011OrLaterFloorAndItsNotifyIntervalConsumer() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.10.0 (2026.4.16)").isV011OrLater)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.11.0 (2026.4.23)").isV011OrLater)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").isV011OrLater)
+        #expect(!HermesCapabilities.empty.isV011OrLater)
+
+        // The consumer: an ABSENT key resolves to the host's own default…
+        let config = HermesConfig(yaml: "agent:\n  model: kimi-k2\n")
+        #expect(config.gatewayNotifyInterval == nil)
+        #expect(config.displayGatewayNotifyInterval(
+            capabilities: HermesCapabilities.parseLine("Hermes Agent v0.10.0 (2026.4.16)")) == 600)
+        #expect(config.displayGatewayNotifyInterval(
+            capabilities: HermesCapabilities.parseLine("Hermes Agent v0.11.0 (2026.4.23)")) == 180)
+        // …an undetected host to the older 600…
+        #expect(config.displayGatewayNotifyInterval(capabilities: .empty) == 600)
+        // …and a PRESENT key wins on every host (the patch-still-on arm).
+        let stored = HermesConfig(yaml: "agent:\n  gateway_notify_interval: 42\n")
+        #expect(stored.gatewayNotifyInterval == 42)
+        for line in ["Hermes Agent v0.10.0 (2026.4.16)", "Hermes Agent v0.21.1 (2026.9.7)"] {
+            #expect(stored.displayGatewayNotifyInterval(
+                capabilities: HermesCapabilities.parseLine(line)) == 42)
+        }
+    }
+
     // MARK: - P23 gate removals (floor below the supported minimum)
 
+    /// **The consumer pin lives in the Mac target**, because the ungating
+    /// lives in a VIEW: see
+    /// `scarfTests/HermesP29RoundThreeRemediationTests.theRenameMenuItemIsRenderedUnconditionally`,
+    /// which fails if the `ChatSessionListPane` menu item is wrapped in a
+    /// capability check again. This test can only say that nothing here claims
+    /// a rename floor.
+    ///
     /// `sessions rename` exists at EVERY tag — `hermes_cli/main.py:2373` at
     /// v2026.3.12 (0.2.0), below Scarf's v0.6.0 minimum — so there is no
     /// flag to read. The rename context-menu item in `ChatSessionListPane`
