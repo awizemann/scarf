@@ -798,7 +798,10 @@ final class SessionsViewModel {
             output: stdout + "\n" + result.stderr,
             exitCode: result.exitCode,
             successMarkers: HermesCLIMarkers.sessionsExportSuccess,
-            failureMarkers: HermesCLIMarkers.sessionsExportFailure
+            failureMarkers: HermesCLIMarkers.sessionsExportFailure,
+            // `_write_output` prints the summary with a bare `print`
+            // (sessions_cmd.py:83), i.e. at column 0.
+            successAnchored: true
         )
     }
 

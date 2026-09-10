@@ -622,7 +622,15 @@ public final class SkillsViewModel {
                 timeout: 30
             )
         }.value
-        hubMessage = result.exitCode == 0 ? "Skills reloaded" : "Reload failed"
+        // `do_audit` is `-> None` (skills_hub.py:878) so its exit code is 0
+        // even for the unknown-name refusal (:890). `Auditing <n> skill(s)...`
+        // (:891) is the only line that says the scanner ran; the empty-hub
+        // line (:886) is a legitimate no-op. Both byte-identical back to
+        // v2026.6.19. (This button re-runs the security scanner; the label is
+        // P25's to change, not the verdict's.)
+        hubMessage = Self.auditOutcome(exitCode: result.exitCode, output: result.output).succeeded
+            ? "Skills reloaded"
+            : "Reload failed"
         isHubLoading = false
         await load()
         Task { @MainActor [weak self] in
@@ -717,7 +725,9 @@ public final class SkillsViewModel {
             output: output,
             exitCode: exitCode,
             successMarkers: HermesCLIMarkers.skillsUninstallSuccess,
-            failureMarkers: HermesCLIMarkers.skillsUninstallFailure
+            failureMarkers: HermesCLIMarkers.skillsUninstallFailure,
+            // `_report_pair` prints it at column 0 (skills_hub.py:146).
+            successAnchored: true
         )
     }
 
@@ -864,6 +874,19 @@ public final class SkillsViewModel {
         return ""
     }
 
+    /// The verdict on `hermes skills audit` — see `reloadSkills()`.
+    nonisolated static func auditOutcome(exitCode: Int32, output: String) -> HermesCLIOutcome {
+        HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.skillsAuditSuccess,
+            failureMarkers: HermesCLIMarkers.skillsAuditFailure,
+            // Both lines are printed at column 0 (skills_hub.py:886, :891),
+            // and the per-skill scan reports that follow can quote anything.
+            successAnchored: true
+        )
+    }
+
     /// `hermes skills install` is `do_install(...) -> None`
     /// (hermes_cli/skills_hub.py:645-648 at v2026.9.7): a pinned-source
     /// refusal, an unresolved short name, a fetch failure, an
@@ -876,7 +899,13 @@ public final class SkillsViewModel {
             output: output,
             exitCode: exitCode,
             successMarkers: HermesCLIMarkers.skillsInstallSuccess,
-            failureMarkers: HermesCLIMarkers.skillsInstallFailure
+            failureMarkers: HermesCLIMarkers.skillsInstallFailure,
+            // `Installed:` is printed at column 0 (skills_hub.py:720), and
+            // anchoring matters most here: `_print_tier1_advisory` (:704)
+            // quotes SKILL.md-derived findings into the report BEFORE
+            // `install_from_quarantine` can raise (:714-720), so a bare
+            // substring let a skill's own text claim the install succeeded.
+            successAnchored: true
         )
     }
 
@@ -918,17 +947,45 @@ public final class SkillsViewModel {
         hubMessage = nil
     }
 
+    /// `hermes skills update` is `do_update(...) -> None`
+    /// (hermes_cli/skills_hub.py:831 at v2026.9.7), so the exit code is 0
+    /// whatever happened (charter C5) — and its own summary line is no better:
+    /// `Updated {len(updates) - len(skipped_local)} skill(s).` (:871) is
+    /// printed after the loop regardless of what each nested `do_install`
+    /// did, so it counts ATTEMPTS.
+    ///
+    /// The honest per-skill signal is `do_install`'s own `Installed:` line
+    /// (:720), printed only once `install_from_quarantine` has returned. So:
+    /// `Installed:` lines are successes, `Updating:` lines (:834) are
+    /// attempts, and an attempt with no matching success says "attempted",
+    /// never "updated". All three lines are byte-identical back to
+    /// v2026.6.19, so a pre-target host is judged the same way (C1).
     @MainActor
     private func finishUpdateAll(exitCode: Int32, report: HermesSkillsUpdateReport) async {
         skippedLocalEdits = exitCode == 0 ? report.skipped : []
+        let keptClause = report.skipped.isEmpty
+            ? ""
+            : " · \(report.skipped.count) kept local edits"
         if exitCode != 0 {
             hubMessage = "Update failed"
-        } else if report.skipped.isEmpty {
-            // Pre-v0.20.4 and clean v0.20.4 runs land here — same
-            // wording the UI has always shown.
-            hubMessage = "Updated"
+        } else if report.noUpdatesAvailable {
+            hubMessage = "No updates available"
+        } else if report.installedCount > 0 {
+            hubMessage = report.skipped.isEmpty && report.installedCount == report.attemptedCount
+                ? "Updated"
+                : "Updated \(report.installedCount)\(keptClause)"
+        } else if report.attemptedCount > 0 {
+            // Every skill it tried failed inside `do_install` — which prints
+            // its refusal and returns, leaving `Updated N skill(s).` to claim
+            // the opposite.
+            hubMessage = report.failureDetail.map { "Update attempted — \($0)" }
+                ?? "Update attempted; nothing was updated"
+        } else if !report.skipped.isEmpty {
+            // Everything actionable had local edits.
+            hubMessage = "0 updated · \(report.skipped.count) kept local edits"
         } else {
-            hubMessage = "Updated \(report.updatedCount) · \(report.skipped.count) kept local edits"
+            // Exit 0 with none of `do_update`'s lines: not a success (C5).
+            hubMessage = "Update reported nothing"
         }
         await load()
         checkForUpdates()

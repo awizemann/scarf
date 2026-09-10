@@ -437,7 +437,9 @@ final class CronViewModel {
             exitCode: exitCode,
             successMarkers: HermesCLIMarkers.cronRunSuccess,
             failureMarkers: HermesCLIMarkers.cronRunFailure,
-            failureWins: true
+            failureWins: true,
+            // `_job_action` prints it at column 0 (cron.py:658).
+            successAnchored: true
         )
     }
 

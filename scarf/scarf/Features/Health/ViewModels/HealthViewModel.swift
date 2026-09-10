@@ -775,10 +775,29 @@ final class HealthViewModel {
                 let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
                 switch HermesSecurityAuditVerdict(exitCode: result.exitCode) {
                 case .clean:
-                    // Prefer a concise tail of the output (the summary line)
-                    // over the full report — the panel-less inline strip is short.
-                    let tail = trimmed.split(separator: "\n").suffix(2).joined(separator: " · ")
-                    self.auditMessage = tail.isEmpty ? String(localized: "No known advisories found.") : tail
+                    // Exit 0 means "nothing at or above --fail-on", and the
+                    // threshold is `critical` — so this arm also covers a
+                    // report that IS listing high/moderate/low advisories
+                    // (`int(any(severity >= threshold))`, security_audit.py
+                    // :311-312). Printing its tail with no label told the user
+                    // their environment was clean while the text above said
+                    // otherwise. `_render_human`'s two heads (:255, :257) and
+                    // its `  {severity}  {name}=={version}  {osv-id}` rows
+                    // (:264) are what distinguish them, byte-identical back to
+                    // v2026.5.29 — the `hasHermesAudit` floor (charter C1).
+                    let report = HermesSecurityAuditReport.parse(result.output)
+                    if report.findingCount > 0 {
+                        let summary = report.severitySummary
+                        self.auditMessage = summary.isEmpty
+                            ? String(localized: "No critical advisories · \(report.findingCount) lower-severity finding(s).")
+                            : String(localized: "No critical advisories · \(report.findingCount) finding(s): \(summary).")
+                    } else {
+                        // Prefer a concise tail of the output (the summary
+                        // line) over the full report — the panel-less inline
+                        // strip is short.
+                        let tail = trimmed.split(separator: "\n").suffix(2).joined(separator: " · ")
+                        self.auditMessage = tail.isEmpty ? String(localized: "No known advisories found.") : tail
+                    }
                 case .findings:
                     // The report IS the answer here; `_render_human` leads with
                     // `Found N known vulnerability finding(s) across M

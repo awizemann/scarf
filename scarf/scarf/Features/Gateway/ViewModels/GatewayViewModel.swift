@@ -181,7 +181,7 @@ final class MessagingGatewayViewModel {
         loadTask = Task.detached { [weak self] in
             let status = Self.fetchGatewayStatus(context: ctx, run: run)
             if Task.isCancelled { return }
-            let pairing = Self.fetchPairing(context: ctx, run: run)
+            let pairing = Self.parsePairing(output: run(["pairing", "list"], Self.probeTimeout).output)
             if Task.isCancelled { return }
             let listSnap = caps.hasGatewayList
                 ? HermesGatewayListService.fetch(context: ctx)
@@ -325,11 +325,12 @@ final class MessagingGatewayViewModel {
         return pid != nil
     }
 
-    nonisolated private static func fetchPairing(
-        context: ServerContext,
-        run: HermesCLIRunner
+    /// Parses `hermes pairing list`'s two plain-`print` sections
+    /// (`hermes_cli/pairing.py::_cmd_list`, :31-52 at v2026.9.7). Split out
+    /// from the spawn so the row shapes are testable without a live host.
+    nonisolated static func parsePairing(
+        output: String
     ) -> (approved: [PairedUser], pending: [PendingPairing]) {
-        let output = run(["pairing", "list"], probeTimeout).output
         var approved: [PairedUser] = []
         var pending: [PendingPairing] = []
 
@@ -342,11 +343,28 @@ final class MessagingGatewayViewModel {
             if trimmed.contains("Pending") { inPending = true; inApproved = false; continue }
             if trimmed.isEmpty || trimmed.hasPrefix("Platform") || trimmed.hasPrefix("--------") { continue }
 
+            // The two hint lines `_cmd_list` prints after the pending block
+            // (hermes_cli/pairing.py:38-39) are inside the pending section and
+            // have the shape of a row. Unfiltered they became two pending
+            // pairings with a live Approve button: `Approve with: hermes
+            // pairing approve …` parsed as platform `Approve` / code `with:`,
+            // and `The code the bot DM'd …` as `The` / `code`. Both lines
+            // first appear at v2026.8.3 and are byte-identical from there to
+            // v2026.9.7; below that tag `_cmd_list` prints no hints at all, so
+            // the filter simply never fires on an older host (charter C1).
+            if Self.pairingHintLines.contains(where: { trimmed.hasPrefix($0) }) { continue }
+
             let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true)
-            if inApproved && parts.count >= 3 {
+            // An approved row is `{platform:<12} {user_id:<20} {user_name:<20}`
+            // (pairing.py:48, the same shape back to v2026.6.19:57) and
+            // `user_name` is `a.get("user_name") or ""` —
+            // so a user who never set a display name yields TWO tokens, and
+            // requiring three dropped them from the list entirely: invisible,
+            // and impossible to revoke from Scarf.
+            if inApproved && parts.count >= 2 {
                 let platform = String(parts[0])
                 let userId = String(parts[1])
-                let name = parts[2...].joined(separator: " ")
+                let name = parts.count > 2 ? parts[2...].joined(separator: " ") : ""
                 approved.append(PairedUser(platform: platform, userId: userId, name: name))
             } else if inPending && parts.count >= 2 {
                 let platform = String(parts[0])
@@ -356,6 +374,15 @@ final class MessagingGatewayViewModel {
         }
         return (approved, pending)
     }
+
+    /// `_cmd_list`'s two trailing hints (hermes_cli/pairing.py:38-39 at
+    /// v2026.9.7), matched by their own leading text. Rich is not involved —
+    /// these are plain `print()`s — so the text reaches Scarf verbatim; only
+    /// the leading indent is trimmed before this test.
+    nonisolated static let pairingHintLines = [
+        "Approve with: hermes pairing approve",
+        "The code the bot DM'd the user also works if they relay it.",
+    ]
 
     func startGateway() { runServiceAction("start", label: "start", settleSeconds: 2) }
 
