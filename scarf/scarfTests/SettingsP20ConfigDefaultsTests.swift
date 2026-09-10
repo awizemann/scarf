@@ -45,7 +45,11 @@ import ScarfCore
         let vm = SettingsViewModel(context: scratchContext(), cliRunner: log.runner)
         vm.config = HermesConfig(yaml: yaml)
         vm.setMultiplexProfiles(true)
-        let deadline = Date().addingTimeInterval(10)
+        // The write rides `SettingsViewModel.writeChain` through two detached
+        // hops; under the full parallel `scarfTests` run those can take well
+        // over 10 s to be scheduled, so the bound is generous — it is only
+        // ever waited out on the failure path.
+        let deadline = Date().addingTimeInterval(120)
         while log.calls.isEmpty, Date() < deadline {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
