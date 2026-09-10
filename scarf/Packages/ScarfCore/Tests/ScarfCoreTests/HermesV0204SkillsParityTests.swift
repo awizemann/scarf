@@ -113,7 +113,7 @@ struct HermesV0204SkillsParityTests {
     // MARK: - (a) --force is single-skill only
 
     @Test func forceArgsTargetExactlyOneNamedSkill() {
-        #expect(SkillsViewModel.forceUpdateArgs("reddit") == ["skills", "update", "reddit", "--force"])
+        #expect(SkillsViewModel.forceUpdateArgs("reddit") == ["skills", "update", "--force", "--", "reddit"])
     }
 
     /// The bulk path must NEVER carry `--force`: it would overwrite every

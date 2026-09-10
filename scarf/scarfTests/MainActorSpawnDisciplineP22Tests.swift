@@ -174,7 +174,7 @@ struct MainActorSpawnDisciplineP22Tests {
         vm.approvePairing(platform: "telegram", code: "ABC123")
         await Self.until(timeout: 10) { log.calls.contains { $0.args.first == "pairing" } }
         let pairing = log.calls.first { $0.args.first == "pairing" }
-        #expect(pairing?.args == ["pairing", "approve", "telegram", "ABC123"])
+        #expect(pairing?.args == ["pairing", "approve", "--", "telegram", "ABC123"])
         #expect(pairing?.timeout == MessagingGatewayViewModel.mutationTimeout)
     }
 

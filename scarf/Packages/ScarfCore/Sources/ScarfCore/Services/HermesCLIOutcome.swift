@@ -380,6 +380,129 @@ public enum HermesCLIMarkers {
     /// `do_update`'s per-skill ATTEMPT line (skills_hub.py:864). It is printed
     /// before `do_install` runs, so it proves an attempt and nothing more.
     public static let skillsUpdateAttempt = "Updating:"
+
+    /// The refusals reachable on the **update** path — `skillsInstallFailure`
+    /// minus the two lines `do_install` can only print for a *plain* install.
+    ///
+    /// `do_update` always calls `do_install(..., force=True)`
+    /// (skills_hub.py:868), and `do_install` prints
+    /// `Warning: '<name>' is already installed at <path>` (:682)
+    /// **unconditionally** whenever the lock has an entry — which, for an
+    /// update, it always does — and only THEN checks `if not force` (:683).
+    /// So on this path the warning is printed on every single skill,
+    /// including the ones that update perfectly, and taking it as the
+    /// refusal made "Update attempted — …" quote a benign warning instead of
+    /// the `Installation blocked:` line that actually stopped the install.
+    /// `Use --force to reinstall.` (:684) sits inside that `if not force`
+    /// and is therefore unreachable under `force=True`; it is dropped here
+    /// too rather than carried as a marker that can only ever misfire.
+    ///
+    /// Both lines stay in `skillsInstallFailure`, where they are load-bearing:
+    /// a plain `skills install` of an already-installed skill IS refused by
+    /// exactly that pair. This is why the two sets are no longer one list.
+    public static let skillsUpdateFailure = skillsInstallFailure.filter {
+        $0 != "is already installed at" && $0 != "Use --force to reinstall."
+    }
+
+    // MARK: pairing approve / revoke — hermes_cli/pairing.py
+
+    /// `_cmd_approve`'s only success line —
+    /// `\n  Approved! User {display} on {platform} can now use the bot~`
+    /// (pairing.py:68 @ v2026.9.7). Anchored after the trim, since the
+    /// emitter indents it by two spaces.
+    ///
+    /// Walked across every `v2026.*` tag: `hermes_cli/pairing.py` exists at
+    /// all 32 of them and the line is byte-identical at each (v2026.3.12:74
+    /// … v2026.9.7:68), so this judgement is the same on every host Scarf
+    /// supports (C1).
+    public static let pairingApproveSuccess = ["Approved! User "]
+
+    /// `_cmd_approve`'s two refusal shapes, both at exit 0 because
+    /// `_cmd_approve` and `pairing_command` are plain `-> None`
+    /// (pairing.py:56, :3-19):
+    /// - the unknown/expired arm (:80). Its wording gained a prefix at
+    ///   v2026.8.3 (`Code '<code>' not found or expired…` →
+    ///   `Pairing request or code '<code>' not found or expired…`), so the
+    ///   marker is the tail both spellings share.
+    /// - the rate-limit lockout (:76). First tag: **v2026.5.7**; below that
+    ///   `_cmd_approve` has no lockout branch at all, so the marker is
+    ///   simply never printed there and the older host is judged by the
+    ///   other two lines exactly as a newer one is.
+    public static let pairingApproveFailure = [
+        "not found or expired for platform",
+        pairingLockoutRefusal,
+    ]
+
+    /// The lockout refusal itself (pairing.py:76), named because the detail
+    /// composer has to recognise it — it is the one refusal whose reason
+    /// spans two printed lines.
+    public static let pairingLockoutRefusal = "is locked out after too many failed approval attempts."
+
+    /// The lockout's remediation line, `  Lockout clears in ~{mins}
+    /// minute(s).` (pairing.py:77), printed immediately after the lockout
+    /// refusal and byte-identical since v2026.5.7. It is quoted verbatim
+    /// alongside the refusal — the countdown IS the answer to "what do I do
+    /// now", and summarising it away leaves the operator with nothing.
+    public static let pairingLockoutClears = "Lockout clears in ~"
+
+    /// `_cmd_revoke`'s success line — `\n  Revoked access for user
+    /// {user_id} on {platform}.\n` (pairing.py:88). Byte-identical at all
+    /// 32 `v2026.*` tags.
+    public static let pairingRevokeSuccess = ["Revoked access for user "]
+
+    /// `_cmd_revoke`'s only refusal — `User {user_id} not found in approved
+    /// list for {platform}.` (pairing.py:90), printed when `store.revoke`
+    /// returned falsey, and still exit 0. Byte-identical at all 32 tags.
+    public static let pairingRevokeFailure = ["not found in approved list for"]
+}
+
+/// `hermes pairing approve` / `revoke`, judged by what the emitter printed.
+///
+/// Both handlers are `-> None` (`hermes_cli/pairing.py:56`, `:84`) reached
+/// through a `pairing_command` that is itself `-> None` (`:3-19`), so every
+/// refusal — an expired code, an unknown user, a rate-limit lockout — arrives
+/// as exit 0. Judging by exit code made a refused revoke delete the row from
+/// the list (until the next load put it back) and a refused approve report
+/// nothing at all.
+public enum HermesPairingVerdict {
+    /// `fallbackDetail` is deliberately OFF for both verbs: each refusal is
+    /// followed by a next-step hint (`Run 'hermes pairing list' …` :81, and
+    /// the `To reset sooner, delete the '_lockout:…' entry` line :78), so the
+    /// last significant line is chatter, not the reason.
+    public static func approve(output: String, exitCode: Int32) -> HermesCLIOutcome {
+        let outcome = HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.pairingApproveSuccess,
+            failureMarkers: HermesCLIMarkers.pairingApproveFailure,
+            fallbackDetail: false,
+            successAnchored: true
+        )
+        guard !outcome.succeeded, let detail = outcome.detail else { return outcome }
+        return HermesCLIOutcome(succeeded: false, detail: withLockoutCountdown(detail, in: output))
+    }
+
+    public static func revoke(output: String, exitCode: Int32) -> HermesCLIOutcome {
+        HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.pairingRevokeSuccess,
+            failureMarkers: HermesCLIMarkers.pairingRevokeFailure,
+            fallbackDetail: false,
+            successAnchored: true
+        )
+    }
+
+    /// The lockout refusal is TWO lines in the emitter and only the first
+    /// carries the marker; quoting one leaves the user without the countdown.
+    private static func withLockoutCountdown(_ detail: String, in output: String) -> String {
+        guard detail.contains(HermesCLIMarkers.pairingLockoutRefusal) else { return detail }
+        let lines = HermesCLIVerdict.significantLines(output)
+        guard let i = lines.firstIndex(of: detail), i + 1 < lines.count,
+              lines[i + 1].hasPrefix(HermesCLIMarkers.pairingLockoutClears)
+        else { return detail }
+        return "\(detail) \(lines[i + 1])"
+    }
 }
 
 /// `hermes security audit`'s three-way exit contract — the one site in this

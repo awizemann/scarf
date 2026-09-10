@@ -293,8 +293,15 @@ public enum HermesSkillsHubParser: Sendable {
                 continue
             }
 
+            // The FIRST real refusal. Deliberately `skillsUpdateFailure`,
+            // not `skillsInstallFailure`: `do_update` calls
+            // `do_install(force: True)` (skills_hub.py:868), which prints
+            // `Warning: '<name>' is already installed at …` (:682) for every
+            // skill it updates — including the ones that succeed — before it
+            // ever checks `force` (:683). Matching that made a failed update
+            // quote a benign warning instead of the reason.
             if failureDetail == nil,
-               HermesCLIMarkers.skillsInstallFailure.contains(where: { line.contains($0) }) {
+               HermesCLIMarkers.skillsUpdateFailure.contains(where: { line.contains($0) }) {
                 failureDetail = line
             }
 

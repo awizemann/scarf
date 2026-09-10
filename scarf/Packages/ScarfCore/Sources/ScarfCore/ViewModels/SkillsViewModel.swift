@@ -790,8 +790,16 @@ public final class SkillsViewModel {
     /// v0.20.4+ only. Callers gate on
     /// `HermesCapabilities.hasSkillsUpdateForce`; older hosts have no
     /// skip behaviour to override and don't surface the action.
+    /// **Flags first, then `--`, then the positional** — the same shape as
+    /// `installArgs`/`uninstallArgs`. `--force` must come BEFORE the `--`:
+    /// argparse treats everything after the first `--` as positional, so
+    /// `skills update -- <name> --force` exits 2 with
+    /// `unrecognized arguments: --force`. `skills update` takes exactly one
+    /// optional positional (`name`, `nargs="?"`) plus `--force`
+    /// (`hermes_cli/subcommands/skills.py:79-83` @ `v2026.9.7`), so
+    /// everything after `--` is unambiguous.
     nonisolated static func forceUpdateArgs(_ name: String) -> [String] {
-        ["skills", "update", name, "--force"]
+        ["skills", "update", "--force", "--", name]
     }
 
     public func updateAll() {
