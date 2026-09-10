@@ -55,14 +55,18 @@
 - [ ] Setup forms for the nine newly-rostered gateway platforms (id: t-1ca040c2) (added: 2026-09-08)
 - [ ] Cron copy paths miss argparse's `--` end-of-options marker (id: t-ff609789) (added: 2026-09-08)
 - [ ] Surface image_gen.provider (incl. new meta-ai backend) (id: t-e7af69d4) (added: 2026-09-08) (priority: low)
-- [ ] Audit P9: exit-code-as-truth (skills install, sessions export, mcp login, cron run, plugins enable, security audit) (id: t-8ea370f3) (added: 2026-09-08) (priority: high)
-- [ ] Audit P10: YAML writers and parser that can break config.yaml (id: t-e650c3f3) (added: 2026-09-08) (priority: high)
-- [ ] Audit P11: main-actor blocking writes and uncoalesced gateway loads (C10) (id: t-9b411a5e) (added: 2026-09-08) (priority: high)
-- [ ] Audit P12: skills hub identifier/updates, MCP login stream, mcp test rows (id: t-6bb11cb0) (added: 2026-09-08) (priority: high)
-- [ ] Audit P13: config read correctness (defaults, boolish, enums, ceilings, aliases) (id: t-8d2a8e04) (added: 2026-09-08)
-- [ ] Audit P14: Kanban dead gate surface, goal/diagnostics, sessions rename, HermesDataService dead code (id: t-c66e3882) (added: 2026-09-08)
-- [ ] Audit P15: cron edit skills diff, repeat seed, doctor ids, timestamps, citations (id: t-53e3da94) (added: 2026-09-08)
-- [ ] Audit P16: capabilities/roster hygiene and small dead-code cleanups (id: t-ae5f2f19) (added: 2026-09-08)
+- [ ] Fix three more config defaults Scarf reads wrong (id: t-3ba86dd2) (added: 2026-09-09)
+- [ ] Check whether display.busy_ack_enabled per-platform keys are dead (id: t-d45ea655) (added: 2026-09-09) (priority: low)
+- [ ] Audit P18: Incomplete-fix residue from P9–P17 (id: t-07a31322) (added: 2026-09-09) (priority: high)
+- [ ] Audit P19: YAML writer hardening (id: t-990f41bf) (added: 2026-09-09) (priority: high)
+- [ ] Audit P20: Config-read defaults and platform read paths (id: t-6679d648) (added: 2026-09-09) (priority: high)
+- [ ] Audit P21: Output-verdict correctness (id: t-5324c6fc) (added: 2026-09-09) (priority: high)
+- [ ] Audit P22: Main-actor and spawn discipline (C10) (id: t-840a1f4d) (added: 2026-09-09) (priority: high)
+- [ ] Audit P23: Capability floors and gates (id: t-9fd2e0df) (added: 2026-09-09) (priority: high)
+- [ ] Audit P24: MCP OAuth and transport correctness (id: t-00d04dcc) (added: 2026-09-09)
+- [ ] Audit P25: Surface completeness and copy (id: t-6ba8c1ce) (added: 2026-09-09)
+- [ ] Audit P26: Citation and doc-comment sweep (C2) (id: t-caba4971) (added: 2026-09-09)
+- [ ] Audit P27: check-hermes-tables.py hardening (id: t-f163150a) (added: 2026-09-09)
 
 ## Doing
 
@@ -72,6 +76,15 @@
 
 ## Done
 
+- [x] Audit P17: cross-phase review remediation (ssl_verify boolish, gateway cancel, plugins banner, tests, docs) (id: t-3d4e3b34) (added: 2026-09-09) (priority: high)
+- [x] Audit P16: capabilities/roster hygiene and small dead-code cleanups (id: t-ae5f2f19) (added: 2026-09-08)
+- [x] Audit P15: cron edit skills diff, repeat seed, doctor ids, timestamps, citations (id: t-53e3da94) (added: 2026-09-08)
+- [x] Audit P14: Kanban dead gate surface, goal/diagnostics, sessions rename, HermesDataService dead code (id: t-c66e3882) (added: 2026-09-08)
+- [x] Audit P13: config read correctness (defaults, boolish, enums, ceilings, aliases) (id: t-8d2a8e04) (added: 2026-09-08)
+- [x] Audit P12: skills hub identifier/updates, MCP login stream, mcp test rows (id: t-6bb11cb0) (added: 2026-09-08) (priority: high)
+- [x] Audit P11: main-actor blocking writes and uncoalesced gateway loads (C10) (id: t-9b411a5e) (added: 2026-09-08) (priority: high)
+- [x] Audit P10: YAML writers and parser that can break config.yaml (id: t-e650c3f3) (added: 2026-09-08) (priority: high)
+- [x] Audit P9: exit-code-as-truth (skills install, sessions export, mcp login, cron run, plugins enable, security audit) (id: t-8ea370f3) (added: 2026-09-08) (priority: high)
 - [x] v0.21.1 P8: remediate cross-phase fresh-eyes audit findings (id: t-d8992262) (added: 2026-09-08) (priority: high)
 - [x] v0.21.1 P7: Memory, wiki, version-target reconciliation (id: t-7cc4a105) (added: 2026-09-08)
 - [x] v0.21.1 P6: Providers, image-gen, kanban contract, auth priority, MCP device flow (id: t-eefcfa4e) (added: 2026-09-08)
