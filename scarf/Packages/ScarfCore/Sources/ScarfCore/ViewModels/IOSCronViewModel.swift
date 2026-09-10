@@ -187,8 +187,12 @@ public final class IOSCronViewModel {
     }
 
     static func oneShotRefusalMessage(_ job: HermesCronJob) -> String {
-        if let lastRunAt = job.lastRunAt, !lastRunAt.isEmpty {
-            return "\"\(job.name)\" already ran — a one-shot job can't be resumed. Duplicate it to schedule a new run."
+        // Keyed on the same predicate `oneShotIsUnresumable` now uses: a
+        // spent one-shot is refused because its record is TERMINAL (Hermes's
+        // `_reject_terminal_activation`), not merely because `last_run_at` is
+        // set — a re-armed one-shot carries that timestamp and resumes fine.
+        if job.isTerminal {
+            return "\"\(job.name)\" has already finished — a completed one-shot can't be resumed. Duplicate it to schedule a new run."
         }
         let when = job.schedule.runAt.map { CronScheduleFormatter.formatNextRun(iso: $0) } ?? "its scheduled time"
         return "Can't resume \"\(job.name)\" — the one-shot time (\(when)) is in the past and would never fire. Duplicate it with a new time instead."

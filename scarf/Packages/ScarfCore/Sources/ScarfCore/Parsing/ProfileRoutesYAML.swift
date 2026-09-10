@@ -77,7 +77,12 @@ public enum ProfileRoutesYAML {
         let values = HermesYAML.parseNestedYAML(yaml).values
         let topLevel = values["multiplex_profiles"]
         let raw = topLevel ?? values["gateway.multiplex_profiles"]
-        let value = HermesYAML.stripYAMLQuotes(raw ?? "").lowercased() == "true"
+        // Hermes coerces this with `_coerce_bool(multiplex_profiles, False)`
+        // (`gateway/config.py:733`), i.e. the boolish token sets at :25-26 —
+        // a literal `== "true"` read `multiplex_profiles: yes` (and `on`,
+        // and `1`) as OFF on a host that had it ON. `False` is the dataclass
+        // default (:561) and what an unrecognised token falls back to.
+        let value = HermesYAML.boolishValue(raw) ?? false
         return (value, topLevel != nil)
     }
 

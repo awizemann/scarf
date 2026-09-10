@@ -754,10 +754,15 @@ import Foundation
         }
     }
 
-    /// An already-run one-shot is never eligible again
-    /// (`_recoverable_oneshot_run_at` returns None on any `last_run_at`),
-    /// even with a future `run_at`.
-    @Test @MainActor func cronRefusesResumingAOneShotThatAlreadyRan() async throws {
+    /// A spent one-shot is refused even with a future `run_at` — but (P18)
+    /// because its record is TERMINAL, not because `last_run_at` is set.
+    /// `_advance_after_run` retires every `kind == "once"` with no next run
+    /// via `_complete_job_record`, and `update_job`'s
+    /// `_reject_terminal_activation` is what then refuses the re-activation.
+    /// `resume_job` itself passes no `last_run_at` to `compute_next_run`
+    /// (`cron/jobs.py:1991`), so that timestamp alone decides nothing — see
+    /// `HermesP18RemediationTests.aReArmedOneShotWithAFutureDeadlineResumes`.
+    @Test @MainActor func cronRefusesResumingATerminalOneShot() async throws {
         try await withLocalTransportFactory { [self] in
             let (ctx, _) = try makeFakeHermes()
             let vm = IOSCronViewModel(context: ctx)
@@ -769,7 +774,7 @@ import Foundation
             ))
             #expect(await vm.toggleEnabled(id: "j1") == false)
             #expect(vm.lastToggleRoute == .refused)
-            #expect(vm.lastError?.contains("already ran") == true)
+            #expect(vm.lastError?.contains("already finished") == true)
         }
     }
 

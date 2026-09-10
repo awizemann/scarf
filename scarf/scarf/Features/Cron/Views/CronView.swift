@@ -193,9 +193,15 @@ struct CronView: View {
                     // drag its spent timestamp along.
                     schedule: form.schedule == job.schedule.editValue ? nil : form.schedule,
                     prompt: form.prompt,
+                    // The value the editor was SEEDED with, so `updateJob`
+                    // can tell "user emptied the field" (a real clear
+                    // gesture Hermes can express) from "field was always
+                    // blank" — the same distinction `existingSkills` draws.
+                    existingPrompt: job.prompt,
                     name: form.name,
                     deliver: form.deliver,
                     repeatCount: form.repeatCount,
+                    existingRepeatCount: job.repeatEditValue,
                     // The job's STORED skills, so the edit can be sent as a
                     // diff — `cron edit` treats "no --skill flags" as
                     // "untouched", not "clear" (see `skillEditArguments`).

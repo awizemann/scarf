@@ -107,29 +107,26 @@ public extension HermesConfig {
             guard let raw = scalar(key) else { return nil }
             return Int(raw)
         }
-        // True-optional bool: `nil` means "key absent from config.yaml".
-        // Used where the server-side default CHANGED across Hermes
-        // releases (`checkpoints.enabled`, false since v0.21), so the
-        // display layer resolves the absent case against the host's
-        // capabilities instead of the parse baking in one release's
-        // default. See `HermesConfig.displayCheckpointsEnabled`.
-        func boolOpt(_ key: String) -> Bool? {
-            guard let v = scalar(key) else { return nil }
-            return v.lowercased() == "true"
-        }
         // Boolish true-optional: `nil` means "key absent OR unrecognised",
         // and a PRESENT value is read with Hermes's own boolish sets rather
-        // than a literal `== "true"`. Mirrors `_coerce_bool_extra`
-        // (`plugins/platforms/telegram/adapter.py:1176-1186`): truthy
-        // {true,1,yes,on}, falsy {false,0,no,off}, anything else falls back to
-        // the host default — which for Scarf means reporting "absent" so the
-        // display layer resolves it against the host exactly as it would for
-        // a missing key.
+        // than a literal `== "true"`. Truthy {true,1,yes,on} / falsy
+        // {false,0,no,off} — `_TRUTHY_STRINGS`/`_FALSY_STRINGS`
+        // (`gateway/config.py:25-26`), the same pair `_coerce_bool_extra`
+        // uses (`plugins/platforms/telegram/adapter.py:1176-1186`); anything
+        // else falls back to the host default, which for Scarf means
+        // reporting "absent" so the display layer resolves it against the
+        // host exactly as it would for a missing key.
+        //
+        // This is ALSO the reader for a key whose server-side default CHANGED
+        // across Hermes releases (`checkpoints.enabled`, false since v0.21):
+        // the absent case has to stay distinguishable so the display layer
+        // resolves it against the host's capabilities instead of the parse
+        // baking in one release's default (`HermesConfig.displayCheckpointsEnabled`).
+        // A literal-`true` variant of this reader existed for exactly that
+        // key and got `checkpoints.enabled: yes` wrong in the one direction
+        // the sentinel exists to protect.
         func boolishOpt(_ key: String) -> Bool? {
-            guard let v = scalar(key)?.lowercased() else { return nil }
-            if ["true", "1", "yes", "on"].contains(v) { return true }
-            if ["false", "0", "no", "off"].contains(v) { return false }
-            return nil
+            HermesYAML.boolishValue(values[key])
         }
         // The boolean reader for a key with a KNOWN default (either polarity).
         // `def` is used only when the key is absent or carries a scalar in
@@ -331,7 +328,7 @@ public extension HermesConfig {
         // (enabled true→false, max_snapshots 50→20), so an absent key must
         // resolve against the host — `HermesConfig.displayCheckpoints*`.
         let checkpoints = CheckpointSettings(
-            enabled: boolOpt("checkpoints.enabled"),
+            enabled: boolishOpt("checkpoints.enabled"),
             maxSnapshots: int("checkpoints.max_snapshots", default: 0)
         )
 

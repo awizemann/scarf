@@ -406,6 +406,26 @@ public enum HermesYAML {
         return out.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Hermes's boolish token sets, applied to a RAW config.yaml scalar.
+    /// `nil` = key absent, or a value in neither set (Hermes falls back to
+    /// its own default there rather than guessing).
+    ///
+    /// Truthy `{1, true, yes, on}` / falsy `{0, false, no, off}` are
+    /// `_TRUTHY_STRINGS` / `_FALSY_STRINGS` (`gateway/config.py:25-26`,
+    /// v2026.9.7) as read by `_bool_token` (:29-32) — which does
+    /// `str(value).strip().lower()`, hence `normalizedScalar` here (the raw
+    /// parse keeps `true  # on` verbatim, and no literal comparison would
+    /// ever match it). The same vocabulary is what PyYAML has already turned
+    /// into real bools before any per-key reader runs, so this is the ONE
+    /// boolean spelling in config.yaml — there is no per-key variant.
+    public static func boolishValue(_ raw: String?) -> Bool? {
+        guard let raw else { return nil }
+        let v = normalizedScalar(raw).lowercased()
+        if ["true", "1", "yes", "on"].contains(v) { return true }
+        if ["false", "0", "no", "off"].contains(v) { return false }
+        return nil
+    }
+
     public static func stripYAMLQuotes(_ s: String) -> String {
         guard s.count >= 2 else { return s }
         let first = s.first!

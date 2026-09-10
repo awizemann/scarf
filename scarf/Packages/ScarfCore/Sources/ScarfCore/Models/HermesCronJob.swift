@@ -369,8 +369,22 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// is what `compute_next_run` delegates to for `kind == "once"`.
     public nonisolated func oneShotIsUnresumable(now: Date = Date()) -> Bool {
         guard schedule.kind == "once" else { return false }
-        // `last_run_at` set → "already run, never eligible again".
-        if let lastRunAt, !lastRunAt.isEmpty { return true }
+        // NOT "`last_run_at` is set". `_recoverable_oneshot_run_at` does have
+        // an "already run, never eligible again" arm (`cron/jobs.py:841-853`,
+        // v2026.9.7), but `resume_job` reaches it through
+        // `compute_next_run(job["schedule"])` with `last_run_at` left at its
+        // `None` default (:1991 → :1103), so that arm NEVER fires on the
+        // resume path. A one-shot re-armed by `rearm_oneshot` keeps its old
+        // `last_run_at` (:2036-2055 clears `repeat.completed`, the claims and
+        // the schedule — not the timestamp), so pausing and re-enabling such a
+        // job hit a refusal the host would never have produced.
+        //
+        // What Hermes DOES refuse is re-activating a terminal record:
+        // `update_job` arms `_reject_terminal_activation`
+        // (:1865-1878, called from :1941/:1965), which is also the state a
+        // genuinely spent one-shot ends in — `_advance_after_run` calls
+        // `_complete_job_record` for every `kind == "once"` with no next run.
+        if isTerminal { return true }
         guard let runAt = schedule.runAt, !runAt.isEmpty else { return true }
         // An offset-bearing `run_at` names one instant — compare directly.
         if let exact = CronScheduleFormatter.isoDate(runAt) {

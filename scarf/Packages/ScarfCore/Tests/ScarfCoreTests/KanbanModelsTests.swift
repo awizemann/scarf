@@ -39,9 +39,11 @@ import Foundation
         #expect(task.tenant == "scarf:demo")
         #expect(task.workspaceKind == "scratch")
         #expect(task.skills == ["debugging"])
-        #expect(task.idempotencyKey == "abc")
-        #expect(task.maxRuntimeSeconds == 1800)
-        #expect(task.currentRunId == 1)
+        // P18: `idempotency_key` / `max_runtime_seconds` / `current_run_id`
+        // are kanban DB columns no tagged release has ever emitted
+        // (`_TASK_DICT_FIELDS`, `hermes_cli/kanban_output.py:18-24`), so
+        // they are no longer modelled. The fixture still carries them —
+        // an unknown key must be TOLERATED, not fatal.
         // A row without `session_id` (pre-v0.15 host, or a CLI/dashboard
         // -created task) decodes with `sessionId == nil` — pins the
         // tolerant-decode contract.
@@ -571,9 +573,13 @@ import Foundation
         """
         let run = try JSONDecoder().decode(HermesKanbanRun.self, from: Data(json.utf8))
         #expect(run.id == 1)
-        #expect(run.failureCount == 3)
+        #expect(run.outcome == "crashed")
         let round = String(data: try JSONEncoder().encode(run), encoding: .utf8) ?? ""
         #expect(!round.contains("diagnostics"))
+        // P18: `failure_count` joins `diagnostics` — neither
+        // `_SHOW_RUN_FIELDS` nor `_RUNS_RUN_FIELDS` (:25-32) has ever
+        // carried it, so it is decoded by nobody and re-emitted by nobody.
+        #expect(!round.contains("failure_count"))
     }
 
     @Test func decodeMinimalRun() throws {
@@ -581,7 +587,8 @@ import Foundation
         {"id": 1, "task_id": "t_x", "status": "running", "started_at": 1778160000}
         """
         let run = try JSONDecoder().decode(HermesKanbanRun.self, from: Data(json.utf8))
-        #expect(run.failureCount == nil)
+        #expect(run.id == 1)
+        #expect(run.status == "running")
     }
 
     @Test func taskDetailEnvelopeHasNoDiagnostics() throws {

@@ -378,7 +378,8 @@ struct FleetApplyExecutor: Sendable {
             parts.append(String(localized: "\(deliverAllDowngrades) w/o deliver=all (host < v0.14)"))
         }
         let status = Self.cronFieldStatus(
-            created: created, failed: failed, scriptOnlySkipped: scriptOnlySkipped)
+            created: created, failed: failed, scriptOnlySkipped: scriptOnlySkipped,
+            cancelledRemaining: cancelledRemaining)
         return FieldResult(
             field: .cron,
             status: status,
@@ -389,23 +390,27 @@ struct FleetApplyExecutor: Sendable {
 
     /// Verdict for the cron field from what the pass actually wrote.
     ///
-    /// - `.failed` only when nothing landed AND something errored; a
-    ///   created-but-unpaused job still applied (its live state is surfaced
-    ///   in the field message).
-    /// - `.skipped` when nothing was created, nothing failed, and at least
-    ///   one job was skipped for being script-only (`no_agent`). That is a
-    ///   real outcome — the source's cron jobs all carry a `pre_run_script`
-    ///   fleet-apply does not replicate — and calling it `.applied` told the
-    ///   user their cron field had been applied when not one job was written,
-    ///   and counted toward `TargetResult.appliedCount`.
+    /// - `.failed` whenever a `cron create` errored. A partly-failed pass is
+    ///   NOT `.applied`: the field message carries "N created, M failed", but
+    ///   the status is what `TargetResult.appliedCount` counts and what the
+    ///   row badge shows, and telling the user a field applied while some of
+    ///   its jobs never landed is the same lie the `scriptOnlySkipped` case
+    ///   used to tell. A created-but-unpaused job is a different matter — it
+    ///   DID land, and its live state is surfaced in the message.
+    /// - `.skipped` when nothing was created, nothing failed, and the pass
+    ///   either skipped jobs for being script-only (`no_agent`) or was
+    ///   CANCELLED before it wrote anything. Both are real outcomes where not
+    ///   one job was written; cancellation already reports `.skipped`
+    ///   "cancelled before apply" when it lands between targets, and a cancel
+    ///   between cron creates must not read differently.
     /// - `.applied` otherwise, INCLUDING the all-already-present case: a
     ///   target that already has every job is genuinely in the desired state,
     ///   which is not the same as a job Scarf declined to copy.
     nonisolated static func cronFieldStatus(
-        created: Int, failed: Int, scriptOnlySkipped: Int
+        created: Int, failed: Int, scriptOnlySkipped: Int, cancelledRemaining: Int = 0
     ) -> FieldResult.Status {
-        if created == 0 && failed > 0 { return .failed }
-        if created == 0 && scriptOnlySkipped > 0 { return .skipped }
+        if failed > 0 { return .failed }
+        if created == 0 && (scriptOnlySkipped > 0 || cancelledRemaining > 0) { return .skipped }
         return .applied
     }
 

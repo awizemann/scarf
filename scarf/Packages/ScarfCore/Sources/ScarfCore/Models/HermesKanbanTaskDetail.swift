@@ -1,40 +1,37 @@
 import Foundation
 
-/// Output of `hermes kanban show <id> --json`. Wraps a task with its full
-/// audit trail: comments + events + parent results. Loaded on-demand
+/// Output of `hermes kanban show <id> --json`. Wraps a task with its
+/// comment and event trail. Loaded on-demand
 /// when the user opens the inspector pane; the board itself only carries
 /// the lightweight `HermesKanbanTask` rows.
 public struct HermesKanbanTaskDetail: Sendable, Equatable, Codable {
     public let task: HermesKanbanTask
     public let comments: [HermesKanbanComment]
     public let events: [HermesKanbanEvent]
-    /// Parent-task results keyed by parent task id. Hermes hands these
-    /// to the worker as upstream context; surfacing them in the
-    /// inspector is useful for understanding why a task started.
-    public let parentResults: [String: String]
-    // NOTE: an envelope-level `diagnostics` sibling was modelled here
-    // defensively; `_cmd_show`'s JSON envelope
-    // (`hermes_cli/kanban.py:493-498`, v2026.9.7) carries only task /
-    // latest_summary / parents / children / comments / events / runs, and
-    // never has. Diagnostics come from `kanban diagnostics --json`.
+    // NOTE: `_cmd_show`'s JSON envelope (`hermes_cli/kanban.py:492-498`,
+    // v2026.9.7) carries exactly task / latest_summary / parents / children /
+    // comments / events / runs — and never has carried anything else. Decode
+    // paths for an envelope-level `diagnostics` sibling and for
+    // `parent_results` were modelled here defensively and are deleted:
+    // `parent_results` exists only as `kanban_db.parent_results` (:4060), a
+    // helper the worker CONTEXT builder uses (`_ctx_parent_results` :3692), so
+    // it never reaches any `--json` envelope. Diagnostics come from
+    // `kanban diagnostics --json`; upstream parent ids come from `parents`.
 
     public init(
         task: HermesKanbanTask,
         comments: [HermesKanbanComment] = [],
-        events: [HermesKanbanEvent] = [],
-        parentResults: [String: String] = [:]
+        events: [HermesKanbanEvent] = []
     ) {
         self.task = task
         self.comments = comments
         self.events = events
-        self.parentResults = parentResults
     }
 
     enum CodingKeys: String, CodingKey {
         case task
         case comments
         case events
-        case parentResults = "parent_results"
     }
 
     public init(from decoder: any Decoder) throws {
@@ -52,7 +49,6 @@ public struct HermesKanbanTaskDetail: Sendable, Equatable, Codable {
         }
         self.comments = (try? container.decodeIfPresent([HermesKanbanComment].self, forKey: .comments)) ?? []
         self.events = (try? container.decodeIfPresent([HermesKanbanEvent].self, forKey: .events)) ?? []
-        self.parentResults = (try? container.decodeIfPresent([String: String].self, forKey: .parentResults)) ?? [:]
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -60,6 +56,5 @@ public struct HermesKanbanTaskDetail: Sendable, Equatable, Codable {
         try c.encode(task, forKey: .task)
         try c.encode(comments, forKey: .comments)
         try c.encode(events, forKey: .events)
-        try c.encode(parentResults, forKey: .parentResults)
     }
 }
