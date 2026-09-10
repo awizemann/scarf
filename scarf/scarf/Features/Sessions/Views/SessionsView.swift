@@ -636,16 +636,13 @@ struct SessionsView: View {
         }
         .padding(ScarfSpace.s5)
         .frame(width: 360)
-        // Keep the toggle telling the truth: on a pre-0.21.1 host a trace
-        // export IS redacted, so the checkbox reads ON (and disabled) rather
-        // than OFF-and-ignored.
+        // Keep the toggle telling the truth: a trace export is redacted BY
+        // DEFAULT on every host — unconditionally below v0.21.1 (where the
+        // checkbox is also disabled), and by Hermes's own default above it.
+        // The VM owns the rule, including restoring the user's non-trace
+        // choice when they switch back.
         .onChange(of: viewModel.exportFormat) { old, new in
-            guard !hasTraceNoRedact else { return }
-            if new == .trace {
-                viewModel.exportRedact = true
-            } else if old == .trace {
-                viewModel.exportRedact = false
-            }
+            viewModel.exportFormatChanged(from: old, to: new)
         }
     }
 }

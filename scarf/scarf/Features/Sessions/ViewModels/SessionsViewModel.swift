@@ -204,7 +204,20 @@ final class SessionsViewModel {
     /// session doesn't leak forward.
     var exportFormat: SessionExportFormat = .jsonl
     /// Bound to the format-picker sheet's "Redact secrets" `Toggle`.
+    ///
+    /// The DEFAULT is per-format, because Hermes's is: `--redact` is opt-IN
+    /// for every streamed format, while a `trace` redacts unconditionally and
+    /// `--no-redact` is the opt-OUT (`_export_trace`: "Redaction is ON by
+    /// default (traces leave the machine with --upload)",
+    /// `hermes_cli/sessions_cmd.py:382-383`, read at `:395` @ v2026.9.7).
+    /// Leaving this `false` for a trace made Scarf's default trace export
+    /// actively emit `--no-redact` on a v0.21.1 host — less redaction than
+    /// every prior Scarf release and every pre-0.21.1 host. Drive it through
+    /// ``exportFormatChanged(from:to:)``, never by hand.
     var exportRedact = false
+    /// The user's last explicit NON-trace redact choice, so switching away
+    /// from `trace` restores what they had instead of forcing the toggle OFF.
+    private var exportRedactBeforeTrace = false
     /// Drives the format-picker sheet. Only ever set `true` by
     /// `beginExportFlow` when the host is v0.18.1+; pre-0.18.1 hosts skip
     /// straight to the save panel exactly as before.
@@ -693,8 +706,27 @@ final class SessionsViewModel {
         pendingExportIsAllSessions = sessionId == nil
         pendingExportBaseName = suggestedBaseName
         exportFormat = .jsonl
+        // `.jsonl`'s default, which is Hermes's: no `--redact` unless asked.
         exportRedact = false
+        exportRedactBeforeTrace = false
         showExportOptionsSheet = true
+    }
+
+    /// The format picker changed: carry the per-format redaction DEFAULT, and
+    /// the user's own non-trace choice, across the switch.
+    ///
+    /// Capability-independent on purpose. Below `hasSessionsExportNoRedact`
+    /// the host redacts every trace and the view disables the toggle, so the
+    /// ON state is the truth there too; above it, ON is what produces the
+    /// host's own default (no flag) and OFF is what emits `--no-redact`.
+    func exportFormatChanged(from old: SessionExportFormat, to new: SessionExportFormat) {
+        guard old != new else { return }
+        if new == .trace {
+            exportRedactBeforeTrace = exportRedact
+            exportRedact = true
+        } else if old == .trace {
+            exportRedact = exportRedactBeforeTrace
+        }
     }
 
     /// Called from the picker sheet's "Export" button. Routes to the
@@ -779,7 +811,9 @@ final class SessionsViewModel {
     /// **`trace` inverts the redaction flag.** `--redact` is read only by
     /// `_cmd_export`'s `_redact` closure, which the trace path never calls
     /// (`hermes_cli/sessions_cmd.py:306-309,379-440`): a trace redacts
-    /// unconditionally and `--no-redact` is the opt-OUT (`:394`). So "Redact
+    /// unconditionally and `--no-redact` is the opt-OUT — `redact_trace = not
+    /// getattr(args, "no_redact", False)` at `:395`, with the docstring saying
+    /// so at `:382-383`. So "Redact
     /// secrets" keeps one meaning across formats by emitting nothing for an
     /// ON toggle and `--no-redact` for an OFF one — and only above that
     /// flag's v0.21.1 floor, since a 0.21.0 host exits 2 on the unknown

@@ -298,4 +298,90 @@ struct HermesP28CrossPhaseRemediationTests {
         #expect(controller.output.contains("Authenticated with b"))
         controller.stop()
     }
+
+    // MARK: - M3/L5 · the trace export's redaction default
+
+    /// P25 gave `trace` an inverted flag (ON emits nothing, OFF emits
+    /// `--no-redact`) but left the toggle defaulting to OFF for every format,
+    /// so on a v0.21.1 host Scarf's DEFAULT trace export actively opted out of
+    /// redaction — less than every prior Scarf release and every pre-0.21.1
+    /// host, for the one format that exists to leave the machine
+    /// (`_export_trace`: "Redaction is ON by default (traces leave the machine
+    /// with --upload); --no-redact opts out", `hermes_cli/sessions_cmd.py:382-383`,
+    /// applied at `:395` @ v2026.9.7).
+    ///
+    /// Fails without the per-format default: selecting `trace` leaves the
+    /// toggle OFF and the argv carries `--no-redact`.
+    @Test func selectingTraceDefaultsToRedactedAndEmitsNoOptOut() {
+        let vm = SessionsViewModel(context: .local)
+        #expect(vm.exportRedact == false, "jsonl's default is Hermes's: no --redact unless asked")
+
+        vm.exportFormatChanged(from: .jsonl, to: .trace)
+        #expect(vm.exportRedact, "the default trace export opted OUT of redaction")
+        #expect(
+            !SessionsViewModel.exportArguments(
+                output: "-", sessionId: "abc", format: .trace,
+                redact: vm.exportRedact, traceNoRedactAvailable: true
+            ).contains("--no-redact")
+        )
+        // Turning it OFF is still how a user opts out (round-2 decision 3).
+        vm.exportRedact = false
+        #expect(
+            SessionsViewModel.exportArguments(
+                output: "-", sessionId: "abc", format: .trace,
+                redact: false, traceNoRedactAvailable: true
+            ).contains("--no-redact")
+        )
+    }
+
+    /// L5: switching AWAY from `trace` used to force the toggle OFF, throwing
+    /// away an ON choice the user had made for a streamed format. It restores
+    /// what they had instead. Fails on the old `exportRedact = false` branch
+    /// for the ON case.
+    @Test func switchingAwayFromTraceRestoresTheUsersOwnChoice() {
+        let vm = SessionsViewModel(context: .local)
+        for userChoice in [true, false] {
+            vm.exportRedact = userChoice
+            vm.exportFormatChanged(from: .jsonl, to: .trace)
+            #expect(vm.exportRedact, "trace is redacted by default regardless")
+            vm.exportFormatChanged(from: .trace, to: .jsonl)
+            #expect(vm.exportRedact == userChoice, "the user's own \(userChoice) choice was discarded")
+        }
+        // A switch between two non-trace formats changes nothing, and a no-op
+        // switch does not clobber the remembered value.
+        vm.exportRedact = true
+        vm.exportFormatChanged(from: .jsonl, to: .markdown)
+        #expect(vm.exportRedact)
+        vm.exportFormatChanged(from: .trace, to: .trace)
+        #expect(vm.exportRedact)
+    }
+
+    // MARK: - M4/L3 · the last literal boolish readers
+
+    /// Hermes reads `skip_attachments` as plain Python truthiness over the
+    /// PyYAML-TYPED value (`extra.get("skip_attachments", False)`,
+    /// `plugins/platforms/email/adapter.py:354` @ v2026.9.7), so a YAML bool
+    /// written `yes` / `on` / `1` is ON on the host. The literal
+    /// `stripYAMLQuotes(raw) == "true"` read every one of them as OFF — the
+    /// class P18 declared closed by giving Scarf ONE helper, in a line P22
+    /// then moved without routing it through that helper.
+    ///
+    /// Fails on the literal compare: the toggle reads OFF for `yes`/`on`/`1`/
+    /// `True`, and a Save from that form writes the user's live setting away.
+    @Test func theEmailFormReadsEveryYAMLBoolSpellingForSkipAttachments() async throws {
+        for (scalar, expected) in [("true", true), ("yes", true), ("on", true), ("1", true),
+                                   ("True", true), ("false", false), ("no", false),
+                                   ("off", false), ("0", false)] {
+            let home = try TempHermesHome()
+            defer { home.cleanup() }
+            try "platforms:\n  email:\n    extra:\n      skip_attachments: \(scalar)\n"
+                .write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+
+            let vm = EmailSetupViewModel(context: home.context)
+            vm.load()
+            let deadline = Date().addingTimeInterval(120)
+            while vm.isLoading, Date() < deadline { try? await Task.sleep(for: .milliseconds(20)) }
+            #expect(vm.skipAttachments == expected, "skip_attachments: \(scalar)")
+        }
+    }
 }
