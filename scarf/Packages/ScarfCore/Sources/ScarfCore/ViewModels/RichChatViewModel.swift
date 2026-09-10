@@ -726,15 +726,43 @@ public final class RichChatViewModel {
     /// `availableCommands` ensures the canonical (richer description,
     /// authoritative argument hint) entry wins.
     ///
+    /// The roster is the ACP adapter's own surface and nothing else — P34
+    /// walked `acp_adapter/` across every `v2026.*` tag that ships one
+    /// (v2026.3.17 / 0.3.0 is the first; v2026.3.12 / 0.2.0 has no adapter):
+    /// `help model tools context reset compact|compress steer queue version`
+    /// and never anything more. `_SLASH_COMMANDS` at
+    /// `acp_adapter/server.py:453-463` @ v2026.7.20 becomes
+    /// `SlashCommandsMixin._COMMANDS` at `acp_adapter/commands.py:44-66`
+    /// @ v2026.9.7, with `_available_commands()` (`:69-74`) advertising
+    /// exactly those. An unknown name is not an error — it returns `None`
+    /// and the text falls through to the LLM (`commands.py:88-95`), so a
+    /// dead row silently burns a turn.
+    ///
     /// The set splits on whether a session is active:
-    /// - **Always** (no session AND active session): `/new`. It's the
-    ///   "open a session" affordance and arms the v0.13+ `[<name>]`
-    ///   argument hint via `hasNewWithSessionName`.
-    /// - **Active-session-only**: `/clear`, the version-appropriate
+    /// - **Always** (no session AND active session): `/new`. It is
+    ///   CLIENT-SIDE — `clientSideSlashCommand(for:)` intercepts it before
+    ///   the wire (the adapter has never had a `new`); it's the "open a
+    ///   session" affordance and arms the v0.13+ `[<name>]` argument hint
+    ///   via `hasNewWithSessionName`.
+    /// - **Active-session-only**, all sent to the transport verbatim and
+    ///   all dispatched by the adapter on every supported host (they are in
+    ///   `_SLASH_COMMANDS` from v2026.3.17, below Scarf's v0.6.0 floor, so
+    ///   no capability flag applies): `/help`, `/model`, `/tools`,
+    ///   `/context`, `/reset`, the version-appropriate
     ///   `/compact`-or-`/compress` (see ``compressSlashName(capabilities:)``),
-    ///   `/cost`, `/model`, `/tools`, `/reload-skills`, `/help`, `/exit`.
-    ///   Each requires a live session; surfacing them pre-session would
-    ///   mislead.
+    ///   `/version`. Each requires a live session; surfacing them
+    ///   pre-session would mislead.
+    ///
+    /// Deliberately NOT here (P34): `clear`, `cost`, `reload-skills`,
+    /// `exit`, `yolo`, `sessions`, `codex-runtime`. None is an ACP name at
+    /// any tag. `cost` has never existed anywhere (the CLI verb is `usage`,
+    /// `hermes_cli/commands.py:277` @ v2026.9.7); `clear` (`:58`) and
+    /// `exit` (`:302-303`, an alias of `quit`) are `cli_only` terminal
+    /// commands; `reload-skills` (`:259-260`), `sessions` (`:148`),
+    /// `codex-runtime` (`:156-158`) and `yolo` (`:181`) are CLI/gateway
+    /// CommandDefs the ACP adapter does not wire. `/reset` ("Clear
+    /// conversation history") is the ACP replacement for the `/clear`
+    /// gesture users knew.
     public static func alwaysAvailableCommands(
         capabilities: HermesCapabilities,
         hasActiveSession: Bool
@@ -755,8 +783,32 @@ public final class RichChatViewModel {
         // broken on fresh app launches.
         result.append(contentsOf: [
             HermesSlashCommand(
-                name: "clear",
-                description: "Clear the current conversation",
+                name: "help",
+                description: "Show available commands",
+                argumentHint: nil,
+                source: .alwaysAvailable
+            ),
+            HermesSlashCommand(
+                name: "model",
+                description: "Switch the active model",
+                argumentHint: "[<model>]",
+                source: .alwaysAvailable
+            ),
+            HermesSlashCommand(
+                name: "tools",
+                description: "Manage tool availability",
+                argumentHint: nil,
+                source: .alwaysAvailable
+            ),
+            HermesSlashCommand(
+                name: "context",
+                description: "Show conversation message counts by role",
+                argumentHint: nil,
+                source: .alwaysAvailable
+            ),
+            HermesSlashCommand(
+                name: "reset",
+                description: "Clear conversation history",
                 argumentHint: nil,
                 source: .alwaysAvailable
             ),
@@ -777,69 +829,12 @@ public final class RichChatViewModel {
                 source: .alwaysAvailable
             ),
             HermesSlashCommand(
-                name: "cost",
-                description: "Show cost breakdown for this session",
-                argumentHint: nil,
-                source: .alwaysAvailable
-            ),
-            HermesSlashCommand(
-                name: "model",
-                description: "Switch the active model",
-                argumentHint: "[<model>]",
-                source: .alwaysAvailable
-            ),
-            HermesSlashCommand(
-                name: "tools",
-                description: "Manage tool availability",
-                argumentHint: nil,
-                source: .alwaysAvailable
-            ),
-            HermesSlashCommand(
-                name: "reload-skills",
-                description: "Reload the skills index",
-                argumentHint: nil,
-                source: .alwaysAvailable
-            ),
-            HermesSlashCommand(
-                name: "help",
-                description: "Show available commands",
-                argumentHint: nil,
-                source: .alwaysAvailable
-            ),
-            HermesSlashCommand(
-                name: "exit",
-                description: "End the current session",
+                name: "version",
+                description: "Show Hermes version",
                 argumentHint: nil,
                 source: .alwaysAvailable
             )
         ])
-        // v0.14 — append optional commands when the connected host advertises
-        // them. Filtered here rather than in `availableCommands` so the
-        // capability-gating logic stays co-located with the command shape.
-        if capabilities.hasYOLOSlashCommand {
-            result.append(HermesSlashCommand(
-                name: "yolo",
-                description: "Toggle YOLO mode (skip all dangerous approvals)",
-                argumentHint: nil,
-                source: .alwaysAvailable
-            ))
-        }
-        if capabilities.hasSessionsSlashCommand {
-            result.append(HermesSlashCommand(
-                name: "sessions",
-                description: "Browse and resume previous sessions",
-                argumentHint: nil,
-                source: .alwaysAvailable
-            ))
-        }
-        if capabilities.hasCodexRuntimeSlashCommand {
-            result.append(HermesSlashCommand(
-                name: "codex-runtime",
-                description: "Toggle Codex app-server runtime for OpenAI/Codex models",
-                argumentHint: "[auto|codex_app_server]",
-                source: .alwaysAvailable
-            ))
-        }
         return result
     }
 
@@ -981,9 +976,10 @@ public final class RichChatViewModel {
         }
         let nonInterruptive = supported.filter { !occupied.contains($0.name) }
         // Static fallbacks. `/new` always shows; the rest of the agent-
-        // level command set (`/clear`, the version-appropriate
-        // `/compact`-or-`/compress`, `/cost`, `/model`,
-        // `/tools`, `/reload-skills`, `/help`, `/exit`) only when a
+        // level command set (`/help`, `/model`, `/tools`, `/context`,
+        // `/reset`, the version-appropriate `/compact`-or-`/compress`,
+        // `/version` — the ACP adapter's own roster, see
+        // `alwaysAvailableCommands`) only when a
         // session is active — Hermes ACP doesn't re-emit
         // `available_commands_update` after `session/load`, so without
         // this fallback resumed sessions showed an artificially sparse
@@ -1351,10 +1347,9 @@ public final class RichChatViewModel {
     /// Two grey-out conditions:
     /// - **No active session** (P2 of the projects-feature fix): every
     ///   agent-side command (`/clear`, the version-appropriate
-    ///   `/compact`-or-`/compress`, `/cost /model /tools
-    ///   /reload-skills /help /exit`, plus capability-gated `/yolo
-    ///   /sessions /codex-runtime` and non-interruptive `/steer /goal
-    ///   /queue /subgoal`) needs a live ACP session to do anything.
+    ///   `/compact`-or-`/compress`, `/help /model /tools /context
+    ///   /reset /version`, plus non-interruptive `/steer /queue`) needs a
+    ///   live ACP session to do anything.
     ///   Surfacing them greyed gives the user a visible "what's
     ///   coming once you open a chat" instead of an empty menu.
     /// - **Pre-v0.13 idle session**: `/steer` silently no-ops on
@@ -1380,15 +1375,16 @@ public final class RichChatViewModel {
     /// user is looking at the input bar pre-session. Kept in one place
     /// so the menu and any future enable/disable checks stay in sync.
     /// Includes both `compact` and `compress` since this set is a static,
-    /// capability-independent membership check. `alwaysAvailableCommands`
-    /// only ever emits `compress` (see its comment — the `compact` alias
-    /// postdates most supported hosts), but a 0.18.1+ host advertises the
-    /// alias over ACP, and an ACP-sourced `/compact` row needs a live
-    /// session just the same.
+    /// capability-independent membership check and only one spelling is
+    /// ever surfaced at a time (see ``compressSlashName(capabilities:)``).
+    /// `/new` is absent on purpose: it is the client-side "open a session"
+    /// affordance, so it must stay tappable pre-session. P34 dropped
+    /// `clear`, `cost`, `reload-skills`, `exit`, `yolo`, `sessions` and
+    /// `codex-runtime` from this set along with the menu — the ACP adapter
+    /// dispatches none of them at any tag.
     public static let sessionRequiredCommandNames: Set<String> = [
-        "clear", "compact", "compress", "cost", "model", "tools",
-        "reload-skills", "help", "exit",
-        "yolo", "sessions", "codex-runtime",
+        "help", "model", "tools", "context", "reset", "version",
+        "compact", "compress",
         "steer", "queue"
     ]
 

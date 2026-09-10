@@ -351,22 +351,46 @@ public struct HermesCapabilities: Sendable, Equatable {
     public var hasSubgoal: Bool { atLeastSemver(0, 14, 0) }
 
     /// `/yolo` slash command — toggles YOLO mode (skip all dangerous
-    /// command approvals) for the current session (v0.14+). Available
-    /// in ACP. Pairs with the YOLO warning banner driven by
-    /// `hasYOLOWarning`.
+    /// command approvals) for the current session (v0.14+). Pairs with the
+    /// YOLO warning banner driven by `hasYOLOWarning`.
+    ///
+    /// **CLI/gateway only, NOT ACP.** The old doc comment here said
+    /// "Available in ACP" and was wrong (C2): `yolo` appears nowhere under
+    /// `acp_adapter/` at ANY `v2026.*` tag — the adapter's whole slash dict
+    /// is `help model tools context reset compact|compress steer queue
+    /// version` (`acp_adapter/commands.py:44-66` @ v2026.9.7,
+    /// `acp_adapter/server.py:453-463` @ v2026.7.20). The real definition is
+    /// a CommandDef in the CLI/gateway catalog
+    /// (`hermes_cli/commands.py:181` @ v2026.9.7).
+    ///
+    /// **No consumer** — P34 removed the slash-menu row it used to gate
+    /// (`RichChatViewModel.alwaysAvailableCommands`), because the ACP
+    /// composer sending `/yolo` just fell through to the LLM. Kept because
+    /// the floor is source-verified and rediscovering it costs a tag walk;
+    /// a future CLI/gateway-fronted surface can gate on it.
     public var hasYOLOSlashCommand: Bool { atLeastSemver(0, 14, 0) }
 
     /// `/sessions` slash command — browse and resume previous sessions
-    /// from inside an active chat (v0.14+). Scarf already exposes session
-    /// browse via the sidebar, but the literal slash command is a v0.14
-    /// addition surfaced in the slash menu for parity.
+    /// from inside an active chat (v0.14+).
+    ///
+    /// **CLI/gateway only, NOT ACP** (`hermes_cli/commands.py:148` @
+    /// v2026.9.7; absent from `acp_adapter/` at every tag).
+    ///
+    /// **No consumer** — P34 removed its slash-menu row. Scarf exposes
+    /// session browse via the sidebar, which is the native equivalent.
+    /// Kept for the same reason as ``hasYOLOSlashCommand``.
     public var hasSessionsSlashCommand: Bool { atLeastSemver(0, 14, 0) }
 
     /// `/codex-runtime` slash command — toggle Codex app-server runtime
     /// for OpenAI/Codex models (v0.14+). Argument forms:
-    /// `[auto|codex_app_server]`. Forward-compat flag — Scarf surfaces it
-    /// in the slash menu so users on Codex models can flip the runtime
-    /// without leaving chat.
+    /// `[auto|codex_app_server]`.
+    ///
+    /// **CLI/gateway only, NOT ACP** (`hermes_cli/commands.py:156-158` @
+    /// v2026.9.7, alias `codex_runtime`; absent from `acp_adapter/` at
+    /// every tag).
+    ///
+    /// **No consumer** — P34 removed its slash-menu row. Kept for the same
+    /// reason as ``hasYOLOSlashCommand``.
     public var hasCodexRuntimeSlashCommand: Bool { atLeastSemver(0, 14, 0) }
 
     /// xAI Grok OAuth (SuperGrok) provider — overlay-only, OAuth-external

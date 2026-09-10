@@ -213,10 +213,13 @@ import Foundation
         )
         // The full session-required set should be disabled — that's
         // the v2.10 fix that replaces the empty-menu pre-session UX.
-        #expect(disabled.contains("clear"))
+        // P34: the set is the ACP adapter's roster, so `clear` and `yolo`
+        // are no longer in it — they were never ACP names.
+        #expect(disabled.contains("reset"))
         #expect(disabled.contains("compact"))
         #expect(disabled.contains("model"))
-        #expect(disabled.contains("yolo"))
+        #expect(disabled.contains("context"))
+        #expect(disabled.contains("version"))
         #expect(disabled.contains("steer"))
         #expect(disabled.contains("queue"))
         // `/goal` is gateway-only (not advertised by the ACP adapter), so
@@ -334,14 +337,14 @@ import Foundation
         let vm = RichChatViewModel(context: .local)
         vm.publishCapabilities(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)"))
         let namesBefore = Set(vm.availableCommands.map(\.name))
-        #expect(namesBefore.contains("clear"))
+        #expect(namesBefore.contains("reset"))
         #expect(namesBefore.contains("compress"))
         #expect(namesBefore.contains("model"))
         #expect(namesBefore.contains("help"))
 
         vm.setSessionId("abc-123")
         let namesAfter = Set(vm.availableCommands.map(\.name))
-        #expect(namesAfter.contains("clear"))
+        #expect(namesAfter.contains("reset"))
         #expect(namesAfter.contains("compress"))
         #expect(namesAfter.contains("model"))
         #expect(namesAfter.contains("help"))

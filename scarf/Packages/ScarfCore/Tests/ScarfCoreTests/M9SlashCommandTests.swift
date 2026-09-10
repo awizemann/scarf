@@ -510,22 +510,32 @@ import Foundation
         #expect(!names.contains("subgoal"))
     }
 
+    /// P34 replaces `v014ConfigCommandsRespectCapabilityGate`, which
+    /// asserted the bug: it pinned `/yolo`, `/sessions` and
+    /// `/codex-runtime` into the v0.14 ACP menu. All three are CLI/gateway
+    /// CommandDefs (`hermes_cli/commands.py:181`, `:148`, `:156-158` @
+    /// v2026.9.7) and appear nowhere under `acp_adapter/` at any tag, so
+    /// the composer sending them burned a turn on the LLM. They are gone
+    /// from the menu at v0.14 and at the target — the flags survive
+    /// (source-verified floors, no consumer) with corrected doc comments.
     @MainActor
-    @Test func v014ConfigCommandsRespectCapabilityGate() {
+    @Test func v014ConfigCommandsAreNotInTheACPMenu() {
         let vm = RichChatViewModel(context: .local)
         vm.setSessionId("scratch-session")
-        // None of /yolo /sessions /codex-runtime on a v0.13 host.
-        vm.publishCapabilities(HermesCapabilities.parseLine("Hermes Agent v0.13.0 (2026.5.7)"))
-        var names = vm.availableCommands.map(\.name)
-        #expect(!names.contains("yolo"))
-        #expect(!names.contains("sessions"))
-        #expect(!names.contains("codex-runtime"))
-        // All three show up on a v0.14 host.
-        vm.publishCapabilities(HermesCapabilities.parseLine("Hermes Agent v0.14.0 (2026.5.16)"))
-        names = vm.availableCommands.map(\.name)
-        #expect(names.contains("yolo"))
-        #expect(names.contains("sessions"))
-        #expect(names.contains("codex-runtime"))
+        for line in [
+            "Hermes Agent v0.13.0 (2026.5.7)",
+            "Hermes Agent v0.14.0 (2026.5.16)",
+            "Hermes Agent v0.21.1 (2026.9.7)"
+        ] {
+            let caps = HermesCapabilities.parseLine(line)
+            vm.publishCapabilities(caps)
+            let names = vm.availableCommands.map(\.name)
+            #expect(!names.contains("yolo"), "\(line)")
+            #expect(!names.contains("sessions"), "\(line)")
+            #expect(!names.contains("codex-runtime"), "\(line)")
+            // The flags themselves keep their verified v0.14 floor.
+            #expect(caps.hasYOLOSlashCommand == caps.isV014OrLater)
+        }
     }
 
     @MainActor
@@ -581,5 +591,181 @@ import Foundation
             withIntermediateDirectories: true
         )
         return dir
+    }
+
+    // MARK: - P34: the ACP slash roster the adapter actually dispatches
+
+    /// The ACP adapter's whole slash surface, verbatim, walked across every
+    /// `v2026.*` tag that ships an `acp_adapter/` (v2026.3.12 / 0.2.0 has
+    /// none; v2026.3.17 / 0.3.0 is the first).
+    ///
+    /// - `help model tools context reset version` are in `_SLASH_COMMANDS`
+    ///   from v2026.3.17 (`acp_adapter/server.py:453-463` @ v2026.7.20 has
+    ///   the same six) — i.e. below Scarf's v0.6.0 support floor, so they
+    ///   need no capability flag.
+    /// - `steer` and `queue` join at v2026.5.7 (0.13.0) and are gated
+    ///   elsewhere (`nonInterruptiveCommands` + `hasACPQueue`).
+    /// - the compress command is spelled `compact` through v2026.7.20
+    ///   (0.19.0) and `compress` from v2026.7.30 (0.19.1) — see
+    ///   ``HermesCapabilities/hasACPCompressSpelling``.
+    /// - at v2026.9.7 the dict moves to `acp_adapter/commands.py:44-66`
+    ///   (`SlashCommandsMixin._COMMANDS`) with the same nine names, and
+    ///   `_available_commands()` (`:69-74`) advertises exactly those.
+    ///
+    /// Unknown names are NOT errors: `_handle_slash_command` returns `None`
+    /// for anything outside the dict and the text falls through to the LLM
+    /// (`acp_adapter/commands.py:88-95` @ v2026.9.7), which is why a dead
+    /// menu row costs a turn instead of showing a mistake.
+    static let acpDispatchedNames: Set<String> = [
+        "help", "model", "tools", "context", "reset",
+        "compact", "compress", "steer", "queue", "version"
+    ]
+
+    /// Names Scarf used to offer that the ACP adapter has never dispatched
+    /// at any of the 32 tags. `cost` never existed anywhere (the CLI verb is
+    /// `usage`, `hermes_cli/commands.py:277` @ v2026.9.7); `clear` / `exit`
+    /// are `cli_only` terminal commands (`:58`, `:302-303`);
+    /// `reload-skills` (`:259-260`), `sessions` (`:148`), `codex-runtime`
+    /// (`:156-158`) and `yolo` (`:181`) are CLI/gateway CommandDefs the ACP
+    /// adapter does not wire.
+    static let neverDispatchedByACP = [
+        "clear", "cost", "reload-skills", "exit",
+        "yolo", "sessions", "codex-runtime"
+    ]
+
+    /// The fallback roster on the target host is exactly the adapter's
+    /// surface: `/new` (client-side) plus the seven interruptive ACP names.
+    /// `/steer` and `/queue` come from `nonInterruptiveCommands`, not here.
+    @Test func acpFallbackRosterMatchesTheAdapterAtV0211() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+        let names = Set(
+            RichChatViewModel.alwaysAvailableCommands(
+                capabilities: caps,
+                hasActiveSession: true
+            ).map(\.name)
+        )
+        #expect(names == ["new", "help", "model", "tools", "context", "reset", "compress", "version"])
+    }
+
+    /// Every name the fallback offers is either client-side (`/new`) or one
+    /// the adapter dispatches at that version — on every supported host.
+    @Test func everyFallbackNameIsDispatchedOrClientSide() {
+        let hosts = [
+            HermesCapabilities.empty,
+            HermesCapabilities.parseLine("Hermes Agent v0.6.0 (2026.3.30)"),
+            HermesCapabilities.parseLine("Hermes Agent v0.13.0 (2026.5.7)"),
+            HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.7.20)"),
+            HermesCapabilities.parseLine("Hermes Agent v0.19.1 (2026.7.30)"),
+            HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+        ]
+        for caps in hosts {
+            for cmd in RichChatViewModel.alwaysAvailableCommands(
+                capabilities: caps, hasActiveSession: true
+            ) {
+                if cmd.name == "new" {
+                    // Client-side: intercepted before the wire.
+                    #expect(
+                        RichChatViewModel.clientSideSlashCommand(for: "/new") != nil,
+                        "\(caps.versionLine)"
+                    )
+                    continue
+                }
+                // Everything else IS sent to the transport verbatim, so it
+                // must be a name the adapter dispatches.
+                #expect(
+                    RichChatViewModel.clientSideSlashCommand(for: "/\(cmd.name)") == nil,
+                    "\(cmd.name) @ \(caps.versionLine)"
+                )
+                #expect(
+                    Self.acpDispatchedNames.contains(cmd.name),
+                    "\(cmd.name) @ \(caps.versionLine)"
+                )
+            }
+        }
+    }
+
+    /// `/cost` and the six other never-dispatched names are gone at every
+    /// version, including an undetected host and a pre-floor one.
+    @Test func neverDispatchedNamesAreAbsentAtEveryVersion() {
+        let hosts = [
+            HermesCapabilities.empty,
+            HermesCapabilities.parseLine("Hermes Agent v0.6.0 (2026.3.30)"),
+            HermesCapabilities.parseLine("Hermes Agent v0.14.0 (2026.5.16)"),
+            HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+        ]
+        for caps in hosts {
+            let names = Set(
+                RichChatViewModel.alwaysAvailableCommands(
+                    capabilities: caps, hasActiveSession: true
+                ).map(\.name)
+            )
+            for dead in Self.neverDispatchedByACP {
+                #expect(!names.contains(dead), "\(dead) @ \(caps.versionLine)")
+                #expect(
+                    !RichChatViewModel.sessionRequiredCommandNames.contains(dead),
+                    "\(dead) in the grey-out set"
+                )
+            }
+        }
+    }
+
+    /// `reset`, `context` and `version` predate Scarf's v0.6.0 support floor
+    /// (`_SLASH_COMMANDS` @ v2026.3.17, the first tag with an
+    /// `acp_adapter/`), so they are offered unconditionally — including on
+    /// an undetected host, where C1 says behave like the oldest one.
+    @Test func resetContextVersionAreOfferedOnEveryHost() {
+        let hosts = [
+            HermesCapabilities.empty,
+            HermesCapabilities.parseLine("Hermes Agent v0.6.0 (2026.3.30)"),
+            HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+        ]
+        for caps in hosts {
+            let names = Set(
+                RichChatViewModel.alwaysAvailableCommands(
+                    capabilities: caps, hasActiveSession: true
+                ).map(\.name)
+            )
+            for live in ["reset", "context", "version"] {
+                #expect(names.contains(live), "\(live) @ \(caps.versionLine)")
+                #expect(RichChatViewModel.sessionRequiredCommandNames.contains(live))
+            }
+        }
+    }
+
+    /// Ordering: the fallback is only the pre-advertisement stand-in. Before
+    /// `available_commands_update` arrives the menu is the fallback; once it
+    /// arrives the advertised entries win and the fallback contributes no
+    /// duplicate.
+    @MainActor
+    @Test func advertisedCommandsSupersedeTheFallbackRoster() {
+        let vm = RichChatViewModel(context: .local)
+        vm.setSessionId("scratch-session")
+        vm.publishCapabilities(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)"))
+
+        // Pre-advertisement (the `session/load` case the fallback exists for).
+        let before = vm.availableCommands
+        #expect(before.contains { $0.name == "version" && $0.source == .alwaysAvailable })
+        #expect(before.contains { $0.name == "reset" && $0.source == .alwaysAvailable })
+
+        // The adapter advertises its nine (`_available_commands()`,
+        // `acp_adapter/commands.py:69-74` @ v2026.9.7).
+        vm.handleACPEvent(.availableCommands(sessionId: "scratch-session", commands: [
+            ["name": "help", "description": "List available commands"],
+            ["name": "model", "description": "Show current model and provider, or switch models"],
+            ["name": "tools", "description": "List available tools with descriptions"],
+            ["name": "context", "description": "Show conversation message counts by role"],
+            ["name": "reset", "description": "Clear conversation history"],
+            ["name": "compress", "description": "Compress conversation context"],
+            ["name": "steer", "description": "Inject guidance into the currently running agent turn"],
+            ["name": "queue", "description": "Queue a prompt to run after the current turn finishes"],
+            ["name": "version", "description": "Show Hermes version"]
+        ]))
+        let after = vm.availableCommands
+        for name in ["help", "model", "tools", "context", "reset", "compress", "steer", "queue", "version"] {
+            #expect(after.filter { $0.name == name }.count == 1, "\(name)")
+            #expect(after.first { $0.name == name }?.source == .acp, "\(name)")
+        }
+        // `/new` is Scarf's own affordance and survives the advertisement.
+        #expect(after.contains { $0.name == "new" })
     }
 }
