@@ -16,6 +16,44 @@ import ScarfCore
 
     // MARK: - `multiplex_profiles` writes to the key in effect
 
+    /// Records the argv of every `hermes` invocation the VM makes. The
+    /// runner closure is `@Sendable` and runs detached, hence the lock.
+    private final class ArgvLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _calls: [[String]] = []
+        var calls: [[String]] { lock.lock(); defer { lock.unlock() }; return _calls }
+        var runner: HermesCLIRunner {
+            { [self] args, _ in
+                lock.lock(); _calls.append(args); lock.unlock()
+                return ("", 0)
+            }
+        }
+    }
+
+    private static func scratchContext() -> ServerContext {
+        let home = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("scarf-p20-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        return .local(home: home)
+    }
+
+    /// Drives the REAL `setMultiplexProfiles` with `config` parsed from
+    /// `yaml`, and returns the config key it wrote through `hermes config set`.
+    @MainActor
+    private static func multiplexWriteKey(for yaml: String) async -> String? {
+        let log = ArgvLog()
+        let vm = SettingsViewModel(context: scratchContext(), cliRunner: log.runner)
+        vm.config = HermesConfig(yaml: yaml)
+        vm.setMultiplexProfiles(true)
+        let deadline = Date().addingTimeInterval(10)
+        while log.calls.isEmpty, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        guard let argv = log.calls.first, argv.count >= 4,
+              argv[0] == "config", argv[1] == "set" else { return nil }
+        return argv[2]
+    }
+
     /// `GatewayConfig.from_dict` resolves this as `data.get("multiplex_profiles")`
     /// and only falls through to `nested_gateway.get(...)` when that is `None`
     /// (`gateway/config.py:708-710` @ v2026.9.7). So with a non-null top-level
@@ -23,31 +61,21 @@ import ScarfCore
     /// changed a key the host never reads: the save toast said "Saved" and
     /// routing stayed off.
     ///
-    /// Fails before P20, which always returned the `gateway.` spelling.
-    @Test func multiplexWriteTargetsTheKeyInEffect() {
-        #expect(SettingsViewModel.multiplexProfilesKey(isTopLevel: true) == "multiplex_profiles")
-        #expect(SettingsViewModel.multiplexProfilesKey(isTopLevel: false) == "gateway.multiplex_profiles")
-    }
-
-    /// End to end through the parser: the shape that used to be a dead end
-    /// (top-level key set, `gateway.` key written) now routes to the top-level
-    /// spelling, and a config with only the nested spelling still routes there.
-    @Test func multiplexWriteTargetFollowsTheParsedConfig() {
-        let topLevel = HermesConfig(yaml: "multiplex_profiles: false\n")
-        #expect(SettingsViewModel.multiplexProfilesKey(
-            isTopLevel: topLevel.profileRoutes.multiplexIsTopLevel
-        ) == "multiplex_profiles")
-
-        let nested = HermesConfig(yaml: "gateway:\n  multiplex_profiles: false\n")
-        #expect(SettingsViewModel.multiplexProfilesKey(
-            isTopLevel: nested.profileRoutes.multiplexIsTopLevel
-        ) == "gateway.multiplex_profiles")
-
+    /// Driven through the real writer and the injected runner (not a key
+    /// helper the writer might stop calling) so it fails whenever the
+    /// production key choice regresses. Fails before P20, which always wrote
+    /// the `gateway.` spelling.
+    @Test func multiplexWriteTargetsTheKeyInEffect() async {
+        // Top-level key set → that spelling is what Hermes reads.
+        #expect(await Self.multiplexWriteKey(for: "multiplex_profiles: false\n") == "multiplex_profiles")
+        // Only the nested spelling → keep writing there.
+        #expect(await Self.multiplexWriteKey(for: "gateway:\n  multiplex_profiles: false\n") == "gateway.multiplex_profiles")
+        // Nothing set at all → the nested spelling Scarf has always written.
+        #expect(await Self.multiplexWriteKey(for: "") == "gateway.multiplex_profiles")
         // A NULL top-level key is not "in effect" — Hermes falls through to
         // the nested one — so the write must too.
-        let nulled = HermesConfig(yaml: "multiplex_profiles: null\ngateway:\n  multiplex_profiles: false\n")
-        #expect(SettingsViewModel.multiplexProfilesKey(
-            isTopLevel: nulled.profileRoutes.multiplexIsTopLevel
+        #expect(await Self.multiplexWriteKey(
+            for: "multiplex_profiles: null\ngateway:\n  multiplex_profiles: false\n"
         ) == "gateway.multiplex_profiles")
     }
 

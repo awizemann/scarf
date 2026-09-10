@@ -993,16 +993,16 @@ final class SettingsViewModel {
     /// is exactly that "top-level and not null" test (`ProfileRoutesYAML
     /// .parseMultiplex`), which is why it also gates the explanatory banner.
     func setMultiplexProfiles(_ value: Bool) {
-        setSetting(
-            Self.multiplexProfilesKey(isTopLevel: config.profileRoutes.multiplexIsTopLevel),
-            value: value ? "true" : "false"
-        )
-    }
-
-    /// The `multiplex_profiles` spelling currently in effect. Pure so the key
-    /// choice is testable without shelling out through `setSetting`.
-    static func multiplexProfilesKey(isTopLevel: Bool) -> String {
-        isTopLevel ? "multiplex_profiles" : "gateway.multiplex_profiles"
+        // Two literal call sites rather than one computed key: the
+        // write/read parity gate (`SettingsWriteReadParityTests`) scans this
+        // file for same-line string-literal keys, and BOTH spellings must
+        // stay under it.
+        let scalar = value ? "true" : "false"
+        if config.profileRoutes.multiplexIsTopLevel {
+            setSetting("multiplex_profiles", value: scalar)
+        } else {
+            setSetting("gateway.multiplex_profiles", value: scalar)
+        }
     }
 
     /// Shared read → transform → write → reload path for the direct-YAML
