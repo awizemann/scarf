@@ -33,7 +33,14 @@ final class PlatformsViewModel: OutcomeMessageHosting {
     /// body re-render never does synchronous scp/SSH on the main thread.
     private(set) var configuredPlatforms: Set<String> = []
 
-    var platforms: [HermesToolPlatform] { KnownPlatforms.all }
+    /// Whether `configuredPlatforms` holds a READ rather than its empty
+    /// initial value. The roster filter needs the difference: "no platform is
+    /// configured" and "we have not looked yet" are the same `Set` but must
+    /// render differently, or a sub-floor row the user configured themselves
+    /// is hidden for the first paint and pops in when the detached load
+    /// lands. Until this is true the filter treats every row as possibly
+    /// configured, which is what Scarf rendered before the gate existed.
+    private(set) var hasLoadedConfiguredPlatforms = false
 
     /// Tracks the file-watcher change token this VM last loaded for, so a
     /// plain section re-entry (same token) skips the remote re-read while a
@@ -66,6 +73,7 @@ final class PlatformsViewModel: OutcomeMessageHosting {
             guard let self, !Task.isCancelled else { return }
             self.gatewayState = result.state
             self.configuredPlatforms = result.configured
+            self.hasLoadedConfiguredPlatforms = true
             self.loadedChangeToken = changeToken
         }
     }
@@ -78,9 +86,10 @@ final class PlatformsViewModel: OutcomeMessageHosting {
         return hasConfigBlock(for: platform) ? .configured : .notConfigured
     }
 
-    /// Does the platform have any configuration on disk — either a top-level
-    /// `<platform>:` block in config.yaml, or an "identifying" env var in
-    /// `.env` (e.g. `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`)?
+    /// Does the platform have any configuration on disk — a top-level
+    /// `<platform>:` block in config.yaml, a nested `platforms.<platform>.…`
+    /// key, or an "identifying" env var in `.env` (e.g.
+    /// `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`)?
     ///
     /// We need the env-var check because the new per-platform setup forms
     /// write credentials to `.env` primarily; most platforms don't create a
@@ -93,9 +102,9 @@ final class PlatformsViewModel: OutcomeMessageHosting {
     }
 
     /// Compute, off main, the set of platforms with configuration on disk —
-    /// a top-level `<platform>:` block in config.yaml OR an identifying env
-    /// var in `.env`. Reads each source ONCE (vs. the old per-platform read).
-    /// Detection mirrors the previous `hasConfigBlock` exactly.
+    /// a top-level `<platform>:` block in config.yaml, a nested
+    /// `platforms.<platform>.…` key, or an identifying env var in `.env`.
+    /// Reads each source ONCE (vs. the old per-platform read).
     nonisolated static func computeConfiguredPlatforms(context: ServerContext) -> Set<String> {
         let yaml = context.readText(context.paths.configYAML) ?? ""
         // A top-level section is `<name>:` followed by ANYTHING — Hermes
@@ -141,10 +150,36 @@ final class PlatformsViewModel: OutcomeMessageHosting {
         // result. A blip shows one platform as unconfigured for one paint
         // and self-corrects on the next read. The setup FORMS, whose blank
         // fields turn into `unset` writes, take `loadProven` instead.
+        // NESTED keys count too. Every row added to the gated set carries a
+        // setup form that writes `platforms.<name>.…` and nothing at indent 0
+        // (`NtfySetupViewModel.save`, `WhatsAppCloudSetupViewModel.save`), and
+        // the five rows with no Scarf form at all (`yuanbao`, `teams`,
+        // `google_chat`, `line`, `buzz`) are configured by `hermes setup`,
+        // which writes the same nested block. Detecting only a top-level
+        // section made `isConfigured` permanently false for exactly the rows
+        // `isVisible`'s widen-for-current hatch exists to protect, so a failed
+        // version probe removed a channel the user had set up in Scarf's own
+        // form with no UI path back to it. `gateway.platforms.<name>` is
+        // accepted for the same reason `HermesConfig+YAML` accepts it as the
+        // alternate bridge source.
+        let nestedKeys = {
+            let parsed = HermesYAML.parseNestedYAML(yaml)
+            var keys = Set(parsed.values.keys)
+            keys.formUnion(parsed.lists.keys)
+            keys.formUnion(parsed.maps.keys)
+            return keys
+        }()
+        func hasNestedBlock(_ name: String) -> Bool {
+            for prefix in ["platforms.\(name).", "gateway.platforms.\(name)."]
+            where nestedKeys.contains(where: { $0.hasPrefix(prefix) }) {
+                return true
+            }
+            return false
+        }
         let env = HermesEnvService(context: context).load()
         var configured: Set<String> = []
         for platform in KnownPlatforms.all where platform.name != "cli" {
-            if topLevel.contains(platform.name) {
+            if topLevel.contains(platform.name) || hasNestedBlock(platform.name) {
                 configured.insert(platform.name)
             } else if let key = identifyingEnvVar(for: platform.name),
                       let value = env[key], !value.isEmpty {
@@ -173,6 +208,16 @@ final class PlatformsViewModel: OutcomeMessageHosting {
         case "bluebubbles": return "BLUEBUBBLES_SERVER_URL"
         case "homeassistant": return "HASS_TOKEN"
         case "webhook": return "WEBHOOK_ENABLED"
+        // The gated rows whose Scarf setup form writes `.env` at all. `ntfy`
+        // writes `NTFY_TOPIC` (`NtfySetupViewModel.swift:64`) and `simplex`
+        // writes `SIMPLEX_WS_URL` (`SimpleXSetupViewModel.swift:65`); those
+        // are the keys each form's own LOAD treats as the primary field, so
+        // they are the honest "setup has started" signal. `whatsapp_cloud`
+        // deliberately has no arm — its form writes config.yaml only
+        // (`WhatsAppCloudSetupViewModel.swift:86-97`), and the nested-block
+        // check above is what finds it. Same for the five form-less rows.
+        case "ntfy": return "NTFY_TOPIC"
+        case "simplex": return "SIMPLEX_WS_URL"
         default: return nil
         }
     }

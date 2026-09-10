@@ -204,6 +204,22 @@ public enum KnownPlatforms {
         HermesToolPlatform(name: "photon", displayName: "iMessage via Photon", icon: "antenna.radiowaves.left.and.right", minimumVersion: HermesCapabilities.photonPlatformFloor),
     ]
 
+    /// The rows the Platforms list and the Tools tab's platform menu should
+    /// offer, in roster order.
+    ///
+    /// ONE seam for both surfaces. P23 gated the Platforms list and left the
+    /// Tools picker on the raw roster, so a 0.14 host hid `ntfy` in one place
+    /// while the other still offered to shell
+    /// `hermes tools enable … --platform ntfy` at an adapter the host does not
+    /// have (charter C5). `isConfigured` is a closure rather than a `Set` so a
+    /// caller can answer it from whatever it already holds.
+    public static func visible(
+        on capabilities: HermesCapabilities,
+        isConfigured: (String) -> Bool
+    ) -> [HermesToolPlatform] {
+        all.filter { $0.isVisible(on: capabilities, isConfigured: isConfigured($0.name)) }
+    }
+
     public static func icon(for platform: String) -> String {
         switch platform {
         case "cli": return "terminal"

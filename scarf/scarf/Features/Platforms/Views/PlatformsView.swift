@@ -28,11 +28,15 @@ struct PlatformsView: View {
     /// already CONFIGURED stays listed even below the floor, so a failed
     /// version probe never hides their own setup from them.
     private var visiblePlatforms: [HermesToolPlatform] {
-        KnownPlatforms.all.filter {
-            $0.isVisible(
-                on: capabilities,
-                isConfigured: viewModel.configuredPlatforms.contains($0.name)
-            )
+        KnownPlatforms.visible(on: capabilities) {
+            // Before the detached load lands, `configuredPlatforms` is empty
+            // because nothing has been READ — not because nothing is
+            // configured. Answering `false` there hides a configured
+            // sub-floor row for the first paint and pops it in a moment
+            // later; answering `true` renders what Scarf rendered before the
+            // gate existed and then settles down to the gated list.
+            !viewModel.hasLoadedConfiguredPlatforms
+                || viewModel.configuredPlatforms.contains($0)
         }
     }
 
