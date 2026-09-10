@@ -148,11 +148,24 @@ enum PlatformSetupHelpers {
         var env: [String: String] = [:]
         /// Non-nil when `.env` exists but could not be read (GW-F6 / DI L10).
         var envFailure: String?
-        /// `nil` when the caller asked for env only.
+        /// `nil` when the caller asked for env only, and also when the
+        /// config.yaml read was REFUSED — see ``configFailure``. A form's
+        /// `apply` already treats nil as "leave the fields alone", which is
+        /// exactly right for an unproven read.
         var config: HermesConfig?
+        /// Non-nil when config.yaml exists but could not be read (GW-F6 /
+        /// DI L10, round-3 P33). The other half of ``envFailure``: a setup
+        /// form reads BOTH files, and proving only one of them still leaves
+        /// the blank-form-over-live-values hole open through the other door.
+        var configFailure: String?
         /// Raw config.yaml text — only for the one form that needs a key
         /// `HermesConfig` does not model (see `EmailSetupViewModel.load`).
+        /// `nil` (never `""`) when the read was refused, for the same reason.
         var rawConfigText: String?
+
+        /// The first refusal either half produced, or `nil` when both reads
+        /// are proven. This is what gates a save.
+        var loadFailure: String? { envFailure ?? configFailure }
     }
 
     /// Run `work` off the main actor and commit its result back on it.
@@ -194,11 +207,19 @@ enum PlatformSetupHelpers {
                 snapshot.env = env
                 snapshot.envFailure = failure
             }
-            if includeConfig {
-                snapshot.config = HermesFileService(context: context).loadConfig()
-            }
-            if includeRawConfigText {
-                snapshot.rawConfigText = context.readText(context.paths.configYAML) ?? ""
+            // ONE proven read serves both consumers: `loadConfig()` and a
+            // second `readText` were two separate round-trips of the same
+            // file that could disagree, and neither could tell an ABSENT
+            // config.yaml (a fresh host — an empty form is the truth, and
+            // Save must stay allowed) from an unreadable one.
+            if includeConfig || includeRawConfigText {
+                do {
+                    let proven = try HermesFileService(context: context).loadConfigProven()
+                    if includeConfig { snapshot.config = proven.config }
+                    if includeRawConfigText { snapshot.rawConfigText = proven.rawText }
+                } catch {
+                    snapshot.configFailure = error.localizedDescription
+                }
             }
             return snapshot
         }, then: commit)
@@ -237,6 +258,39 @@ enum PlatformSetupHelpers {
 ///   as an `unset` — so saving from an unhydrated form would comment live
 ///   credentials out of `.env`. This is GW-F6 / DI L10 reached through the
 ///   other door.
+/// - A save must not run when a load COMPLETED without proving what it read.
+///   Same hazard, slower fuse: a `.env` or config.yaml that is there and
+///   unreadable arrives as an empty form, and the next Save publishes those
+///   blanks. Both halves are proved (`HermesEnvService.loadProven`,
+///   `HermesFileService.loadConfigProven`) and either one's refusal latches
+///   ``loadRefusal``, which ``commitSave(envPairs:configKV:)`` bounces off.
+///   An ABSENT file is NOT a refusal — a fresh host with no `.env` and no
+///   config.yaml genuinely has nothing set, the empty form is the truth, and
+///   Save has to work or first-run setup is impossible.
+///
+/// ## Why a setup form writes the resolved default and Settings does not
+///
+/// Round-3 product decision 9 (`.memory/decisions/hermes-v0-21-1-compatibility-decisions.md`).
+/// The two config-writing surfaces have deliberately opposite postures on a
+/// key the user never touched, and this is the rule:
+///
+/// - **A platform setup form is a "set up this platform" gesture.** It writes
+///   the WHOLE block explicitly, resolved defaults included — `api_version:
+///   "v20.0"`, `dm_policy: "open"`, `enabled: true|false`. The user's mental
+///   model is "these are my WhatsApp Cloud settings, save them", the block is
+///   authored as a unit, and a partly-written platform block is a platform
+///   that half-starts. Writing the default it is showing is therefore the
+///   truthful thing: the form is the record of the decision.
+/// - **Settings edits ONE key at a time**, and there absence is a SENTINEL
+///   ("Host default") that must survive an unrelated save — writing the
+///   resolved default would freeze today's Hermes default into the file and
+///   silently opt the user out of the host's future one. So Settings writes
+///   nothing for an untouched key, and a sentinel row is a no-op.
+///
+/// One rule, stated once, because the two look inconsistent from the outside
+/// and the inconsistency is intentional. No behaviour change is implied by
+/// this comment; if a form ever needs Settings' posture, it needs a sentinel
+/// of its own first.
 @MainActor
 protocol PlatformSetupForm: OutcomeMessageHosting {
     /// The server whose `.env` and config.yaml this form reads and writes.
@@ -247,6 +301,12 @@ protocol PlatformSetupForm: OutcomeMessageHosting {
     var isLoading: Bool { get set }
     /// True while a save is in flight.
     var isSaving: Bool { get set }
+    /// Non-nil when the last load could NOT prove one of the two files it
+    /// reads, so the fields on screen may be blanks over live values. Owned
+    /// by ``loadSnapshot(includeEnv:includeConfig:includeRawConfigText:apply:)``
+    /// and read by ``commitSave(envPairs:configKV:)``, which refuses while
+    /// it is set. See the type's doc comment.
+    var loadRefusal: String? { get set }
 }
 
 extension PlatformSetupForm {
@@ -275,10 +335,13 @@ extension PlatformSetupForm {
             guard let self else { return }
             self.isLoading = false
             guard !self.isSaving else { return }
-            // GW-F6 / DI L10: absent `.env` is an empty form (nothing is set
-            // yet); UNREADABLE says so, because a Save from the blank form it
-            // would otherwise render comments the live keys out.
-            if let failure = snapshot.envFailure { self.showSaveFailure(failure) }
+            // GW-F6 / DI L10: an ABSENT `.env` or config.yaml is an empty
+            // form (nothing is set yet); UNREADABLE says so and LATCHES,
+            // because a Save from the blank form it would otherwise render
+            // comments the live keys out — or, for a config-only form like
+            // whatsapp_cloud, writes `""` over the access token.
+            self.loadRefusal = snapshot.loadFailure
+            if let failure = snapshot.loadFailure { self.showSaveFailure(failure) }
             apply(snapshot)
         }
     }
@@ -286,6 +349,15 @@ extension PlatformSetupForm {
     /// Write this form off the main actor and put the outcome on the save bar.
     func commitSave(envPairs: [String: String], configKV: [String: String]) {
         guard !isBusy else { return }
+        // The load landed but could not prove one of its two files, so the
+        // fields below may be blanks over live values. Re-state the reason
+        // rather than failing silently: the Save button is enabled (the form
+        // is not busy) and a press that did nothing at all would read as a
+        // bug. Cleared by the next proven load — the message names Reload.
+        if let refusal = loadRefusal {
+            showSaveFailure(refusal)
+            return
+        }
         isSaving = true
         PlatformSetupHelpers.save(
             context: context,

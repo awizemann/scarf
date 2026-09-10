@@ -51,6 +51,73 @@ struct HermesFileService: Sendable {
         readFileResult(context.paths.configYAML).map { HermesConfig(yaml: $0) }
     }
 
+    /// What a PROVEN config.yaml read found: the parsed config, its raw
+    /// text, and whether the file is actually there.
+    struct ProvenConfig: Sendable {
+        let config: HermesConfig
+        let rawText: String
+        /// `false` only when a `stat` could not confirm the file after the
+        /// read failed — i.e. a fresh host that has no config.yaml yet.
+        let exists: Bool
+    }
+
+    /// ``loadConfig()`` with the two failures kept apart, the same way
+    /// `HermesEnvService.loadProven()` splits `.env`'s (GW-F6 / DI L10,
+    /// round-3 P33).
+    ///
+    /// **Why `loadConfigResult()` is not this.** That one maps a plain
+    /// `readFileResult`, so it (a) cannot tell an ABSENT config.yaml from an
+    /// unreadable one — both are `.failure`, and refusing to save on a fresh
+    /// host that simply has no config.yaml yet would break every first-run
+    /// setup — and (b) judges on ONE read, so a single dropped SSH round-trip
+    /// reads as damage. `GuardedTextFile.load` is the primitive that already
+    /// settles both: absence is proved by a failed read AND a failed `stat`,
+    /// and a present-but-unreadable file is only declared after a RETRY.
+    ///
+    /// **Why the distinction is load-bearing.** `loadConfig()`'s `.empty`
+    /// fallback feeds the platform setup forms. A blipped read made
+    /// `whatsapp_cloud` render blank fields over live values, and its Save
+    /// writes the whole block explicitly — so pressing Save on a form the
+    /// user never edited would `hermes config set … ""` over the access
+    /// token, app secret and verify token, and set `enabled: false`.
+    /// Surfacing at LOAD, and refusing the save, is what closes it.
+    /// Why a config.yaml could not be read. Mirrors
+    /// `HermesEnvService.LoadRefusal` — the two files' refusals reach the
+    /// same save bar, so they read as one sentence family.
+    ///
+    /// `GuardedTextFile.Refusal`'s own prose is written for a WRITE ("refusing
+    /// to overwrite it"), which is the wrong tense on a form that has not
+    /// written anything yet and needs to be told what to do next.
+    enum LoadRefusal: LocalizedError, Equatable {
+        case unreadable(path: String)
+
+        var errorDescription: String? {
+            switch self {
+            case let .unreadable(path):
+                return "Couldn't read \(path). It's there, but two reads of it failed — the fields below may be blank even though values are set. Fix the connection or the file's permissions and Reload before saving, or a save will write those blanks over live values."
+            }
+        }
+    }
+
+    nonisolated func loadConfigProven() throws -> ProvenConfig {
+        // Read-only, so the UNSERIALIZED initializer is correct: reads need
+        // no serialization against each other, only against a writer, and a
+        // reader that loses that race read bytes that were true a moment ago
+        // (see `GuardedTextFile.lockContext`).
+        let path = context.paths.configYAML
+        let loaded: GuardedTextFile.Loaded
+        do {
+            loaded = try GuardedTextFile(transport: transport, label: "config.yaml").load(path)
+        } catch {
+            throw LoadRefusal.unreadable(path: path)
+        }
+        return ProvenConfig(
+            config: loaded.exists ? HermesConfig(yaml: loaded.text) : .empty,
+            rawText: loaded.text,
+            exists: loaded.exists
+        )
+    }
+
     /// Parsed YAML result bundle. Type alias into ScarfCore's canonical
     /// `ParsedYAML` so app-side callers keep their existing spelling.
     typealias ParsedYAML = ScarfCore.ParsedYAML

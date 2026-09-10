@@ -13,6 +13,10 @@ final class EmailSetupViewModel: PlatformSetupForm {
     /// Load/save in-flight flags owned by ``PlatformSetupForm``.
     var isLoading = false
     var isSaving = false
+    /// Latched load refusal owned by ``PlatformSetupForm`` — set when a
+    /// `.env` / config.yaml read could not be proved, and what makes
+    /// `commitSave` refuse rather than publish blanks (P33).
+    var loadRefusal: String?
     init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
         self.cliRunner = cliRunner
         self.context = context
@@ -86,7 +90,13 @@ final class EmailSetupViewModel: PlatformSetupForm {
             // `extra.` path. The stale top-level key is left in place —
             // Hermes ignores unknown platform keys, and a second
             // `config unset` round-trip on every save isn't worth it.
-            let parsed = HermesFileService.parseNestedYAML(snapshot.rawConfigText ?? "")
+            // `nil` means the config.yaml read was REFUSED (P33), not that
+            // the file is empty — leave the toggle showing whatever it had
+            // rather than flipping it to the default over a live `true`.
+            // `loadSnapshot` has already put the refusal on the bar and
+            // latched the save.
+            guard let rawConfigText = snapshot.rawConfigText else { return }
+            let parsed = HermesFileService.parseNestedYAML(rawConfigText)
             let raw = parsed.values["platforms.email.extra.skip_attachments"]
                 ?? parsed.values["platforms.email.skip_attachments"]
                 ?? "false"

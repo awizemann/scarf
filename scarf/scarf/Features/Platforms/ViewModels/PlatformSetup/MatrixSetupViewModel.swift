@@ -12,6 +12,10 @@ final class MatrixSetupViewModel: PlatformSetupForm {
     /// Load/save in-flight flags owned by ``PlatformSetupForm``.
     var isLoading = false
     var isSaving = false
+    /// Latched load refusal owned by ``PlatformSetupForm`` — set when a
+    /// `.env` / config.yaml read could not be proved, and what makes
+    /// `commitSave` refuse rather than publish blanks (P33).
+    var loadRefusal: String?
     init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
         self.context = context
         self.cliRunner = cliRunner
