@@ -693,24 +693,6 @@ public final class RichChatViewModel {
         )
     ]
 
-    /// Static fallback commands Hermes ACP always supports but only
-    /// advertises via `available_commands_update` after `session/new` —
-    /// not after `session/load`. Without this fallback, resumed sessions
-    /// (and "no active session" cold starts) showed an artificially
-    /// sparse menu. With this list, the menu is discoverable everywhere;
-    /// when the ACP-advertised version arrives, dedupe-by-name in
-    /// `availableCommands` ensures the canonical (richer description,
-    /// authoritative argument hint) entry wins.
-    ///
-    /// The set splits on whether a session is active:
-    /// - **Always** (no session AND active session): `/new`. It's the
-    ///   "open a session" affordance and arms the v0.13+ `[<name>]`
-    ///   argument hint via `hasNewWithSessionName`.
-    /// - **Active-session-only**: `/clear`, the version-appropriate
-    ///   `/compact`-or-`/compress` (see ``compressSlashName(capabilities:)``),
-    ///   `/cost`, `/model`, `/tools`, `/reload-skills`, `/help`, `/exit`.
-    ///   Each requires a live session; surfacing them pre-session would
-    ///   mislead.
     /// The slash command name that compresses the conversation on THIS host,
     /// without a leading slash: `"compress"` at/above v0.19.1, `"compact"`
     /// below it (and on an undetected host).
@@ -735,6 +717,24 @@ public final class RichChatViewModel {
         return trimmed.isEmpty ? "/\(name)" : "/\(name) \(trimmed)"
     }
 
+    /// Static fallback commands Hermes ACP always supports but only
+    /// advertises via `available_commands_update` after `session/new` —
+    /// not after `session/load`. Without this fallback, resumed sessions
+    /// (and "no active session" cold starts) showed an artificially
+    /// sparse menu. With this list, the menu is discoverable everywhere;
+    /// when the ACP-advertised version arrives, dedupe-by-name in
+    /// `availableCommands` ensures the canonical (richer description,
+    /// authoritative argument hint) entry wins.
+    ///
+    /// The set splits on whether a session is active:
+    /// - **Always** (no session AND active session): `/new`. It's the
+    ///   "open a session" affordance and arms the v0.13+ `[<name>]`
+    ///   argument hint via `hasNewWithSessionName`.
+    /// - **Active-session-only**: `/clear`, the version-appropriate
+    ///   `/compact`-or-`/compress` (see ``compressSlashName(capabilities:)``),
+    ///   `/cost`, `/model`, `/tools`, `/reload-skills`, `/help`, `/exit`.
+    ///   Each requires a live session; surfacing them pre-session would
+    ///   mislead.
     public static func alwaysAvailableCommands(
         capabilities: HermesCapabilities,
         hasActiveSession: Bool
@@ -1448,7 +1448,7 @@ public final class RichChatViewModel {
         availableCommands.contains { $0.name == "compress" || $0.name == "compact" }
     }
 
-    /// True when the menu carries more than just `/compress` — used to hide
+    /// True when the menu carries more than just the compress command — used to hide
     /// the dedicated compress button in favor of the full slash menu.
     public var hasBroaderCommandMenu: Bool { availableCommands.count > 1 }
 

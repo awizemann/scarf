@@ -47,8 +47,14 @@ extension Process {
         // only when the child has already outstayed it.
         terminate()
         if poll(Self.signalGrace) { return false }
-        kill(processIdentifier, SIGKILL)
-        _ = poll(Self.signalGrace)
+        // Guard the pid: `kill(0, …)` signals the WHOLE process group, which
+        // includes Scarf itself. `isRunning` being true means it launched, so
+        // this should never be 0 — which is exactly why it is worth asserting
+        // rather than trusting.
+        if processIdentifier > 0 {
+            kill(processIdentifier, SIGKILL)
+            _ = poll(Self.signalGrace)
+        }
         return false
     }
 
