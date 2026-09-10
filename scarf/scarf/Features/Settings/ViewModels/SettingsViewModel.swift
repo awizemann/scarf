@@ -1012,6 +1012,30 @@ final class SettingsViewModel {
     private func saveDirectYAML(
         label: String, transform: @escaping @Sendable (String) -> String?
     ) async {
+        // SERIALISED on the same chain as every `hermes config set`
+        // (round-3 P33). These writers are a read-modify-write of the WHOLE
+        // config.yaml, so they are the most damaging thing that can
+        // interleave with a toggle's write/re-read pair: a `config set` that
+        // lands between this frame's guarded load and its publish is
+        // overwritten by the splice, and the toggle then visibly snaps back
+        // — the exact race `writeChain` was built for, which `runConfigMigrate`
+        // already joins and this one did not. The guarded lock underneath
+        // protects the BYTES from a second process; the chain is what orders
+        // this process's own writes against each other.
+        let previous = writeChain
+        let save = Task { [weak self] in
+            _ = await previous?.value
+            await self?.performDirectYAMLSave(label: label, transform: transform)
+        }
+        writeChain = Task { _ = await save.value }
+        await save.value
+    }
+
+    /// The body of ``saveDirectYAML(label:transform:)``, split out so the
+    /// chain hop above stays legible.
+    private func performDirectYAMLSave(
+        label: String, transform: @escaping @Sendable (String) -> String?
+    ) async {
         let path = context.paths.configYAML
         // GUARDED. `readText(path) ?? ""` collapsed "unreadable" into
         // "empty" and then published the splice over it — the whole Hermes
