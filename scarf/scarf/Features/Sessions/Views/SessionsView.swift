@@ -33,6 +33,13 @@ struct SessionsView: View {
         capabilitiesStore?.capabilities.hasSessionsExportFormats ?? false
     }
 
+    /// `hermes sessions export --no-redact` (v0.21.1+). Below the floor a
+    /// `trace` export always redacts and the flag is an argparse error, so
+    /// the toggle can't be honoured for that format — the sheet says so.
+    private var hasTraceNoRedact: Bool {
+        capabilitiesStore?.capabilities.hasSessionsExportNoRedact ?? false
+    }
+
     /// Top-of-list filter pills. `today` filters by `startedAt` falling
     /// within the current calendar day; `starred` filters on
     /// `HermesSession.pinned` — Hermes v0.20's `sessions.pinned` column,
@@ -137,7 +144,7 @@ struct SessionsView: View {
                     .textSelection(.enabled)
             }
             Button {
-                viewModel.exportAll(formatsAvailable: hasExportFormats)
+                viewModel.exportAll(formatsAvailable: hasExportFormats, traceNoRedactAvailable: hasTraceNoRedact)
             } label: {
                 Label("Export", systemImage: "square.and.arrow.down")
             }
@@ -356,7 +363,7 @@ struct SessionsView: View {
                     )
                     .contextMenu {
                         Button("Rename…") { viewModel.beginRename(session) }
-                        Button("Export…") { viewModel.exportSession(session, formatsAvailable: hasExportFormats) }
+                        Button("Export…") { viewModel.exportSession(session, formatsAvailable: hasExportFormats, traceNoRedactAvailable: hasTraceNoRedact) }
                         Divider()
                         Button("Delete…", role: .destructive) { viewModel.beginDelete(session) }
                     }
@@ -507,7 +514,7 @@ struct SessionsView: View {
                     subagentSessions: viewModel.subagentSessions,
                     preview: viewModel.previewFor(session),
                     onRename: { viewModel.beginRename(session) },
-                    onExport: { viewModel.exportSession(session, formatsAvailable: hasExportFormats) },
+                    onExport: { viewModel.exportSession(session, formatsAvailable: hasExportFormats, traceNoRedactAvailable: hasTraceNoRedact) },
                     onDelete: { viewModel.beginDelete(session) },
                     onSelectSubagent: { sub in
                         Task { await viewModel.selectSession(sub) }
@@ -571,6 +578,13 @@ struct SessionsView: View {
     /// the save panel. `md`/`qmd` write a whole directory of files and
     /// `html` needs a real output path — `confirmExportOptions()` routes to
     /// the right panel kind once the user picks.
+    /// A `trace` export on a pre-0.21.1 host: redaction is unconditional
+    /// there and `--no-redact` doesn't parse, so the toggle is shown disabled
+    /// rather than offered and ignored.
+    private var traceRedactionIsForced: Bool {
+        viewModel.exportFormat == .trace && !hasTraceNoRedact
+    }
+
     private var exportOptionsSheet: some View {
         VStack(alignment: .leading, spacing: ScarfSpace.s4) {
             Text("Export Sessions")
@@ -588,8 +602,13 @@ struct SessionsView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                if viewModel.availableExportFormats.count < SessionExportFormat.allCases.count {
+                if viewModel.context.isRemote {
                     Text("Markdown, Quarto, and HTML exports write files on the remote host, so only stream-capable formats are offered here.")
+                        .scarfStyle(.caption)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                }
+                if viewModel.exportAllExcludesTrace {
+                    Text("Trace exports cover one session at a time — use a session's own Export… for that.")
                         .scarfStyle(.caption)
                         .foregroundStyle(ScarfColor.foregroundMuted)
                 }
@@ -598,6 +617,12 @@ struct SessionsView: View {
             Toggle("Redact secrets", isOn: $viewModel.exportRedact)
                 .toggleStyle(.checkbox)
                 .help("Strip API keys, tokens, and credentials from the exported content.")
+                .disabled(traceRedactionIsForced)
+            if traceRedactionIsForced {
+                Text("This host always redacts trace exports — opting out needs Hermes v0.21.1.")
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+            }
 
             HStack {
                 Button("Cancel") { viewModel.cancelExportOptions() }
@@ -611,6 +636,17 @@ struct SessionsView: View {
         }
         .padding(ScarfSpace.s5)
         .frame(width: 360)
+        // Keep the toggle telling the truth: on a pre-0.21.1 host a trace
+        // export IS redacted, so the checkbox reads ON (and disabled) rather
+        // than OFF-and-ignored.
+        .onChange(of: viewModel.exportFormat) { old, new in
+            guard !hasTraceNoRedact else { return }
+            if new == .trace {
+                viewModel.exportRedact = true
+            } else if old == .trace {
+                viewModel.exportRedact = false
+            }
+        }
     }
 }
 

@@ -1460,6 +1460,22 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// it has to show the CLI's output rather than a spinner.
     public var hasMCPOAuthFlow: Bool { isV0211OrLater }
 
+    /// `hermes sessions export --no-redact` — the opt-OUT for the forced
+    /// redaction a `trace` export applies by default (v0.21.1+,
+    /// `hermes_cli/subcommands/sessions.py:83`; read by `_export_trace` as
+    /// `redact_trace = not args.no_redact`, `hermes_cli/sessions_cmd.py:394`).
+    ///
+    /// **The flag is newer than `--format trace` itself is.** `trace` has been
+    /// a `--format` choice since v0.18.1 (`hasSessionsExportFormats`), and
+    /// `_export_trace` read `getattr(args, "no_redact", False)` at v2026.8.31
+    /// already — but argparse registered no such option there, so the getattr
+    /// always saw `False` and a 0.21.0 host ALWAYS redacts a trace while
+    /// rejecting the flag outright (exit 2). A walk of all 32 v2026.* tags puts
+    /// the first registration at v2026.9.7. So the export argv may only carry
+    /// `--no-redact` above this floor; below it, "Redact secrets" off cannot be
+    /// honoured for `trace` and the UI says so instead of lying.
+    public var hasSessionsExportNoRedact: Bool { isV0211OrLater }
+
     // MARK: Older floors corrected/added in the v0.21.1 pass
     //
     // Three surfaces the v0.21.1 audit reached for turned out to predate

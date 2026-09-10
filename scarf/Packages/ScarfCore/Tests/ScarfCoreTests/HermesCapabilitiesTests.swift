@@ -1071,6 +1071,7 @@ import Foundation
         #expect(caps.hasKanbanCompletionContract)
         #expect(caps.hasAuthPriority)
         #expect(caps.hasMCPOAuthFlow)
+        #expect(caps.hasSessionsExportNoRedact)
         #expect(caps.hasServiceTierBoundedModes)
         #expect(caps.hasSharedMetricsSend)
         #expect(caps.hasPerplexityWebBackend)
@@ -1100,6 +1101,13 @@ import Foundation
         #expect(!caps.hasKanbanCompletionContract)
         #expect(!caps.hasAuthPriority)
         #expect(!caps.hasMCPOAuthFlow)
+        // `sessions export --no-redact` is registered for the first time at
+        // v2026.9.7 (`subcommands/sessions.py:83`); a 0.21.0 host exits 2 on
+        // the option while redacting every trace anyway.
+        #expect(!caps.hasSessionsExportNoRedact)
+        // ...but `--format trace` ITSELF predates it by three releases, so
+        // the format stays offered on that host.
+        #expect(caps.hasSessionsExportFormats)
         #expect(!caps.hasServiceTierBoundedModes)
         #expect(!caps.hasSharedMetricsSend)
         #expect(!caps.hasPerplexityWebBackend)
@@ -1122,6 +1130,7 @@ import Foundation
         #expect(caps.hasKanbanCompletionContract)
         #expect(caps.hasAuthPriority)
         #expect(caps.hasMCPOAuthFlow)
+        #expect(caps.hasSessionsExportNoRedact)
         #expect(caps.hasServiceTierBoundedModes)
         #expect(caps.hasSharedMetricsSend)
         #expect(caps.hasPerplexityWebBackend)
@@ -1131,6 +1140,7 @@ import Foundation
         #expect(!HermesCapabilities.empty.isV0211OrLater)
         #expect(!HermesCapabilities.empty.hasPluginsCompat)
         #expect(!HermesCapabilities.empty.hasPerplexityWebBackend)
+        #expect(!HermesCapabilities.empty.hasSessionsExportNoRedact)
     }
 
     @Test func v0211FlagsStillEnableEveryOlderFlag() {
