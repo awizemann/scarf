@@ -955,6 +955,27 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// option moved to `subcommands/sessions.py:75` by v2026.9.7, unchanged.
     public var hasSessionsExportFormats: Bool { isV0181OrLater }
 
+    /// `max` in `agent.reasoning_effort` / `agent.reasoning_overrides`.
+    ///
+    /// **Floor v0.18.1, not v0.20.** `VALID_REASONING_EFFORTS` is
+    /// `("minimal","low","medium","high","xhigh")` at v2026.7.1 (0.18.0,
+    /// `hermes_constants.py:794`) and gains `"max"` in the same line at tag
+    /// **v2026.7.7** (`pyproject.toml` = `0.18.1`). Walked across every
+    /// `v2026.*` tag; v2026.6.19 and earlier carry the five-level tuple.
+    /// Offering the level on a host that accepts it is a permissive
+    /// rendering change, not a C1 degradation (round-3 decision 5).
+    public var hasReasoningEffortMax: Bool { isV0181OrLater }
+
+    /// `ultra` in `agent.reasoning_effort` / `agent.reasoning_overrides`.
+    ///
+    /// **Floor v0.19.0, not v0.20.** `VALID_REASONING_EFFORTS` still ends at
+    /// `"max"` at v2026.7.7.2 (0.18.2, `hermes_constants.py:794`) and gains
+    /// `"ultra"` at tag **v2026.7.20** (`pyproject.toml` = `0.19.0`,
+    /// `hermes_constants.py:835-837`), where the tuple wraps to two lines.
+    /// One release later than ``hasReasoningEffortMax`` — the two levels did
+    /// not arrive together.
+    public var hasReasoningEffortUltra: Bool { isV019OrLater }
+
     // MARK: v0.19.x re-floored flags (v2026.7.20 = 0.19.0, v2026.7.30 = 0.19.1)
     //
     // These shipped in the v0.20 audit's flag cluster because v2026.7.30 was
