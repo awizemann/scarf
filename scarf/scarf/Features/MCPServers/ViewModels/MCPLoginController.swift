@@ -268,22 +268,55 @@ final class MCPLoginController {
     ///   quotes every token through `remotePathArg`, so no caller can inject a
     ///   shell operator into the remote command — by design, and worth keeping.
     ///
-    /// What is left is an explicit best-effort reap over the same transport.
-    /// The pattern matches only a command line that carries `mcp login` AND
-    /// this server's name after the `--`, i.e. the process this controller
-    /// started. `pkill` may be absent (its exit code says so) — the reap is
-    /// advisory, and its failure is logged, never surfaced: the login is
-    /// already over as far as the user is concerned.
+    /// What is left is an explicit best-effort reap over the same transport,
+    /// scoped three ways so it can only ever signal this controller's own
+    /// process:
+    ///
+    /// * **By owner.** `pkill` without `-u` matches every user on the box.
+    ///   On a shared host, one person dismissing a login sheet would kill a
+    ///   colleague's login to the same server. `-u` restricts to an
+    ///   EFFECTIVE uid on both platforms Scarf reaches — `-u euid` on
+    ///   macOS/BSD `pkill(1)`, `-u, --euid` on Linux procps — so the same
+    ///   argv is correct on either, and the uid comes from an `id -u` on
+    ///   the remote rather than a guess at the SSH username (`~/.ssh/config`
+    ///   can rewrite it). If that probe fails there is no way to scope the
+    ///   kill, and the reap is ABANDONED: leaving a polling loop to hit its
+    ///   own 300 s deadline is strictly better than signalling a process
+    ///   that may not be ours.
+    /// * **By command line**, which must carry `mcp login` and end with this
+    ///   server's name after the `--`, every ERE metacharacter in the name
+    ///   escaped (`regexEscaped`).
+    /// * **Away from the `bash -lc` wrapper**, for free, by that `$` anchor:
+    ///   `SSHTransport.composedRemoteCommand` runs every token through
+    ///   `remotePathArg`, which double-quotes UNCONDITIONALLY
+    ///   (`SSHTransport.swift:303-322`), so the shell's own command line ends
+    ///   `… "--" "github"` — a literal `"` after the name — while the
+    ///   `hermes` it execs has had the quotes removed. Only the second one
+    ///   matches. `MCPOAuthAndTransportP24Tests` pins that with the real
+    ///   `grep -E`, because it is a property of ANOTHER file that this one
+    ///   silently depends on.
+    ///
+    /// `pkill` may be absent (its exit code says so) — the reap is advisory,
+    /// and its failure is logged, never surfaced: the login is already over
+    /// as far as the user is concerned.
     private func reapRemoteLogin(server: String) {
         let xport = context.makeTransport()
-        let pattern = "mcp login .*-- " + Self.regexEscaped(server) + "$"
+        let pattern = Self.reapPattern(server: server)
         let logger = self.logger
         Task.detached {
             do {
                 // C10: off the main actor, with a timeout, like every other
                 // spawn Scarf makes.
+                let whoami = try xport.runProcess(
+                    executable: "id", args: ["-u"], stdin: nil, timeout: 10)
+                let uid = whoami.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard whoami.exitCode == 0, !uid.isEmpty,
+                      uid.allSatisfy({ $0.isASCII && $0.isNumber }) else {
+                    logger.info("remote mcp login reap skipped: could not resolve the remote uid")
+                    return
+                }
                 let result = try xport.runProcess(
-                    executable: "pkill", args: ["-f", pattern], stdin: nil, timeout: 10)
+                    executable: "pkill", args: ["-u", uid, "-f", pattern], stdin: nil, timeout: 10)
                 // pkill exits 1 when nothing matched (the run had already
                 // finished) and 127 when it is not installed. Neither is
                 // actionable here.
@@ -294,6 +327,12 @@ final class MCPLoginController {
                 logger.info("remote mcp login reap failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    /// The `pkill -f` ERE for one server's login. Pure, so a test can assert
+    /// what it does and does not match.
+    nonisolated static func reapPattern(server: String) -> String {
+        "mcp login .*-- " + regexEscaped(server) + "$"
     }
 
     /// Escape every POSIX ERE metacharacter so a server name is matched

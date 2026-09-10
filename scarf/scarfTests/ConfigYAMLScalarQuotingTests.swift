@@ -195,8 +195,10 @@ struct ConfigYAMLScalarQuotingTests {
     /// `false` for an entry that isn't there), and the call site consumes it.
     @Test func transportStampFailureIsObservable() throws {
         let (service, home) = try loadFixture()
-        // A name with no entry: the stamp cannot land.
-        #expect(service.setMCPServerSSETimeout(name: "no_such_server", sseReadTimeout: 30) == false)
+        // A name with no entry: the stamp cannot land. Any user of
+        // `patchMCPServerField` proves that (the SSE-specific one is gone —
+        // `sse_read_timeout` is a key no supported Hermes reads, see P24).
+        #expect(service.setMCPServerTimeouts(name: "no_such_server", timeout: 30, connectTimeout: nil) == false)
         // …and the real entry is untouched.
         #expect(try readConfig(home) == Self.fixtureYAML)
     }

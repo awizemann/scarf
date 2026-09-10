@@ -21,9 +21,6 @@ final class MCPServerEditorViewModel {
     var promptsEnabled: Bool
     var timeoutDraft: String
     var connectTimeoutDraft: String
-    /// SSE-only — renders as a third numeric on `.sse` servers. Empty string
-    /// means "use Hermes default" (writer drops the scalar).
-    var sseReadTimeoutDraft: String
     /// v0.14 — supports_parallel_tool_calls toggle. Three states:
     /// nil = "use Hermes default" (no key written), true = opt in,
     /// false = opt out explicitly. Bound to a tri-state Picker in the
@@ -73,7 +70,6 @@ final class MCPServerEditorViewModel {
         self.promptsEnabled = server.promptsEnabled
         self.timeoutDraft = server.timeout.map { String($0) } ?? ""
         self.connectTimeoutDraft = server.connectTimeout.map { String($0) } ?? ""
-        self.sseReadTimeoutDraft = server.sseReadTimeout.map { String($0) } ?? ""
         self.parallelToolCallsDraft = server.supportsParallelToolCalls
         self.clientCertDraft = server.clientCert ?? ""
         self.clientKeyDraft = server.clientKey ?? ""
@@ -209,8 +205,6 @@ final class MCPServerEditorViewModel {
         let exclude = excludeDraft.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         let timeoutValue = Int(timeoutDraft.trimmingCharacters(in: .whitespaces))
         let connectValue = Int(connectTimeoutDraft.trimmingCharacters(in: .whitespaces))
-        let trimmedSSE = sseReadTimeoutDraft.trimmingCharacters(in: .whitespaces)
-        let sseTimeoutValue: Int? = trimmedSSE.isEmpty ? nil : Int(trimmedSSE)
         let parallelDraft = parallelToolCallsDraft
         let originalParallel = server.supportsParallelToolCalls
         // v0.15 — mTLS drafts. Resolve empty strings to nil so an untouched /
@@ -268,10 +262,12 @@ final class MCPServerEditorViewModel {
                 case .http:
                     if !service.setMCPServerHeaders(name: name, headers: headerMap) { ok = false }
                 case .sse:
-                    // SSE servers carry headers like .http does, plus an
-                    // optional sse_read_timeout written below.
+                    // SSE servers carry headers exactly like .http does.
+                    // There is no SSE-only scalar to write: `sse_read_timeout`
+                    // is a literal 300.0 on every supported Hermes, so Scarf
+                    // neither offers it nor touches it (see
+                    // `HermesMCPServer.sseReadTimeout`).
                     if !service.setMCPServerHeaders(name: name, headers: headerMap) { ok = false }
-                    if !service.setMCPServerSSETimeout(name: name, sseReadTimeout: sseTimeoutValue) { ok = false }
                 }
                 if !service.updateMCPToolFilters(
                     name: name,

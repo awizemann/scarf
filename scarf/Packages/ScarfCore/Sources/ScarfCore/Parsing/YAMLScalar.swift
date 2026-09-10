@@ -59,6 +59,7 @@ public enum YAMLScalar {
     /// bools (they stay strings), which is why `ssl_verify: y` is a path.
     public static func resolvesToNonString(_ s: String) -> Bool {
         if s.isEmpty { return true }                       // empty plain scalar = null
+        if resolvesToBool(s) { return true }
         for pattern in implicitResolverPatterns {
             if pattern.firstMatch(
                 in: s,
@@ -69,6 +70,22 @@ public enum YAMLScalar {
             }
         }
         return false
+    }
+
+    /// True when PyYAML's implicit resolvers load this plain scalar as a
+    /// `bool` — its resolver set exactly, so no bare `y` / `n`.
+    ///
+    /// Split out of ``resolvesToNonString(_:)`` because "retyped" and
+    /// "retyped to a bool" are different questions. A writer only needs the
+    /// first (quote it either way). A READER of a bool-ish key needs the
+    /// second: Hermes's `_parse_boolish` honours a real `bool` but falls
+    /// back to its default for an `int`, so `enabled: false` and
+    /// `enabled: 0` mean opposite things on the host.
+    public static func resolvesToBool(_ s: String) -> Bool {
+        guard let pattern = boolResolverPattern else { return false }
+        return pattern.firstMatch(
+            in: s, options: [], range: NSRange(s.startIndex..., in: s)
+        ) != nil
     }
 
     /// Quote a YAML scalar if emitting it bare would change what PyYAML
@@ -123,14 +140,19 @@ public enum YAMLScalar {
 
     // MARK: - Implicit resolvers
 
-    /// Anchored mirrors of PyYAML's implicit-resolver regexes (null, bool,
-    /// int, float, timestamp, merge and value keys). Compiled once.
+    /// PyYAML's bool resolver — its set exactly; no bare y/n.
+    private static let boolResolverPattern: NSRegularExpression? = try? NSRegularExpression(
+        pattern: #"^(?:yes|Yes|YES|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF)$"#
+    )
+
+    /// Anchored mirrors of PyYAML's implicit-resolver regexes (null, int,
+    /// float, timestamp, merge and value keys). Compiled once. The bool
+    /// resolver lives in ``boolResolverPattern`` so readers can ask about it
+    /// separately; ``resolvesToNonString(_:)`` consults both.
     private static let implicitResolverPatterns: [NSRegularExpression] = {
         let sources = [
             // null
             #"^(?:~|null|Null|NULL)$"#,
-            // bool — PyYAML's set exactly; no bare y/n.
-            #"^(?:yes|Yes|YES|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF)$"#,
             // int: binary, octal (leading zero), decimal, hex, sexagesimal
             #"^[-+]?0b[0-1_]+$"#,
             #"^[-+]?0[0-7_]+$"#,

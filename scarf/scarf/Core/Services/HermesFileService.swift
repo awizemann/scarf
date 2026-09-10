@@ -315,8 +315,12 @@ struct HermesFileService: Sendable {
         guard let yaml = readFile(context.paths.configYAML) else { return [] }
         let parsed = parseMCPServersBlock(yaml: yaml)
         return parsed.map { server in
-            let tokenPath = context.paths.mcpTokensDir + "/" + server.name + ".json"
-            let hasToken = transport.fileExists(tokenPath)
+            // NOT `<name>.json`: Hermes files OAuth state under
+            // `_safe_filename(name)`, so `github.com` is `github_com.json`.
+            // See `HermesMCPOAuthPaths` for the port and the tag walk.
+            let hasToken = HermesMCPOAuthPaths
+                .tokenPaths(serverName: server.name, tokensDir: context.paths.mcpTokensDir)
+                .contains { transport.fileExists($0) }
             guard hasToken != server.hasOAuthToken else { return server }
             return HermesMCPServer(
                 name: server.name,
@@ -515,10 +519,9 @@ struct HermesFileService: Sendable {
     /// for capability-gating.
     ///
     /// Hermes v0.16 `mcp add` only understands `--url` (there is NO
-    /// `--transport` / `--sse-read-timeout` flag — they'd be rejected at
-    /// argparse time). So we create the entry with `hermes mcp add --url`
-    /// (which produces a remote/HTTP-shaped block) and then write the
-    /// `transport: sse` (+ optional `sse_read_timeout`) scalars into that
+    /// `--transport` flag — it'd be rejected at argparse time). So we create
+    /// the entry with `hermes mcp add --url` (which produces a remote/HTTP-
+    /// shaped block) and then write the `transport: sse` scalar into that
     /// server's YAML block via the same surgical patcher the rest of the
     /// MCP YAML surface uses. The `transport: sse` scalar is what the
     /// reader keys on to discriminate SSE from HTTP.
@@ -526,7 +529,6 @@ struct HermesFileService: Sendable {
     nonisolated func addMCPServerSSE(
         name: String,
         url: String,
-        sseReadTimeout: Int?,
         auth: String? = nil,
         apiKey: String = "",
         overwriteConfirmed: Bool = false
@@ -552,8 +554,8 @@ struct HermesFileService: Sendable {
             output: tokenWasDiscarded ? Self.tokenReusedNote(name: name) + "\n" + run.output : run.output
         )
         guard addResult.exitCode == 0 else { return addResult }
-        // Stamp the SSE transport discriminator (+ optional read timeout)
-        // into the freshly-written entry's YAML block.
+        // Stamp the SSE transport discriminator into the freshly-written
+        // entry's YAML block.
         //
         // The stamp is not cosmetic: `transport: sse` is the ONLY thing that
         // discriminates this entry from the plain HTTP entry `hermes mcp add
@@ -564,9 +566,6 @@ struct HermesFileService: Sendable {
         // fix or remove it.
         let stamped = patchMCPServerField(name: name) { entryLines in
             Self.replaceOrInsertScalar(key: "transport", value: "sse", in: &entryLines)
-            if let timeout = sseReadTimeout {
-                Self.replaceOrInsertScalar(key: "sse_read_timeout", value: String(timeout), in: &entryLines)
-            }
         }
         guard stamped else {
             return (
@@ -579,20 +578,6 @@ struct HermesFileService: Sendable {
             )
         }
         return addResult
-    }
-
-    /// Updates the `sse_read_timeout` scalar in-place via the same surgical
-    /// patcher used by `setMCPServerTimeouts`. Pass `nil` to remove the
-    /// scalar entirely (Hermes default applies).
-    @discardableResult
-    nonisolated func setMCPServerSSETimeout(name: String, sseReadTimeout: Int?) -> Bool {
-        patchMCPServerField(name: name) { entryLines in
-            if let timeout = sseReadTimeout {
-                Self.replaceOrInsertScalar(key: "sse_read_timeout", value: String(timeout), in: &entryLines)
-            } else {
-                Self.removeScalar(key: "sse_read_timeout", in: &entryLines)
-            }
-        }
     }
 
     /// Updates the v0.14 `supports_parallel_tool_calls` scalar on an MCP
@@ -1011,15 +996,35 @@ struct HermesFileService: Sendable {
         }
     }
 
+    /// "Clear Token" — unlink the SAME set of files Hermes's own
+    /// `remove_oauth_tokens` unlinks (`tools/mcp_oauth.py:690-693` →
+    /// `HermesTokenStorage.remove`, `:391-394`, at `v2026.9.7`): the tokens,
+    /// the DCR client registration, the discovered server metadata and the
+    /// CIMD-refused marker.
+    ///
+    /// Deleting only `<name>.json` was worse than doing nothing: it left the
+    /// cached `client.json`, so the next login re-sent a `client_id` the
+    /// server had already forgotten and failed with an `invalid_client` the
+    /// user had no way to clear — the very state Hermes drops on its own
+    /// when it can see the rejection (`tools/mcp_oauth_manager.py:174`).
+    ///
+    /// Every unlink is best-effort by construction: both transports'
+    /// `removeFile` is `rm -f`-shaped, so a sidecar an older Hermes never
+    /// wrote is a no-op, not a failure. Only a real I/O error is reported.
     @discardableResult
     nonisolated func deleteMCPOAuthToken(name: String) -> Bool {
-        let path = context.paths.mcpTokensDir + "/" + name + ".json"
-        do {
-            try transport.removeFile(path)
-            return true
-        } catch {
-            return false
+        var ok = true
+        for path in HermesMCPOAuthPaths.statePaths(
+            serverName: name, tokensDir: context.paths.mcpTokensDir
+        ) {
+            do {
+                try transport.removeFile(path)
+            } catch {
+                Self.logger.error("clear MCP OAuth state failed for \(path, privacy: .public)")
+                ok = false
+            }
         }
+        return ok
     }
 
     @discardableResult
@@ -1117,8 +1122,18 @@ struct HermesFileService: Sendable {
             // entries fall back to .http (v0.12 shape) and command-bearing entries
             // to .stdio. This preserves byte-for-byte round-trip on existing files
             // — pre-v0.13 entries have no `transport:` key so they parse identically.
+            //
+            // The comparison is EXACT-CASE because Hermes's is:
+            // `if config.get("transport") == "sse"` (`tools/mcp_tool_transport.py:412`
+            // at `v2026.9.7`), with no `.lower()` anywhere on the path. A
+            // `transport: SSE` entry goes down the Streamable-HTTP arm on the
+            // host, so showing it as SSE in Scarf described a server that does
+            // not exist — and the editor then offered SSE-only fields for
+            // it. The `unquote` is not a widening: `"sse"` and `'sse'` are
+            // the same `str` to PyYAML as bare `sse`, and the old
+            // `.lowercased()` matched NEITHER of them.
             let transport: MCPTransport = {
-                if fields["transport"]?.lowercased() == "sse" { return .sse }
+                if Self.unquote(fields["transport"] ?? "") == "sse" { return .sse }
                 if fields["url"] != nil { return .http }
                 return .stdio
             }()
@@ -2240,9 +2255,35 @@ struct HermesFileService: Sendable {
 
     /// As `boolish` but `nil` for absent-or-unrecognised, for the callers that
     /// must distinguish "the user set it" from "Hermes decides".
+    ///
+    /// **The word sets are only half of `_parse_boolish`; the other half is a
+    /// TYPE gate, and getting it wrong inverts the answer.** Hermes is handed
+    /// a value PyYAML has already typed, and it matches the words only
+    /// `isinstance(value, str)` (`tools/mcp_tool_common.py:124-137` at
+    /// `v2026.9.7`). A bare `enabled: 0` is an `int` to PyYAML — neither
+    /// `bool` nor `str` — so it warns and returns the DEFAULT. `enabled: 0`
+    /// is therefore an ENABLED server on the host (default `True`), and
+    /// `supports_parallel_tool_calls: 1` is OFF (default `False`). Scarf read
+    /// both backwards. Quoted (`enabled: "0"`) IS a `str` and does read as
+    /// false, which is why the gate runs on the raw scalar, before `unquote`.
+    ///
+    /// `null` / `~` / an empty value are the same case from the other side:
+    /// PyYAML loads `None`, and `_parse_boolish` returns the default for it
+    /// explicitly (`:127-128`).
+    ///
+    /// This is deliberately NOT the reader for `ssl_verify`, which never
+    /// reaches `_parse_boolish` — it is passed to httpx as-is, where a bare
+    /// `0` and a CA-bundle path both mean something else again. That one
+    /// stays a `String?` all the way to the UI.
     nonisolated static func boolishOptional(_ raw: String?) -> Bool? {
         guard let raw else { return nil }
-        let value = unquote(stripInlineComment(raw))
+        let plain = stripInlineComment(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+        // Anything PyYAML retypes to a non-`str`, non-`bool` (int, float,
+        // null, timestamp) never reaches Hermes's word match.
+        if YAMLScalar.resolvesToNonString(plain), !YAMLScalar.resolvesToBool(plain) {
+            return nil
+        }
+        let value = unquote(plain)
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         if boolishTrueWords.contains(value) { return true }
