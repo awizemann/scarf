@@ -49,14 +49,19 @@ struct ChatSessionListPane: View {
                             onSelect: { chatViewModel.resumeSession(session.id) }
                         )
                         .contextMenu {
-                            if chatViewModel.capabilitiesStore?.capabilities.hasSessionsRename ?? false {
-                                Button("Rename…") {
-                                    renameText = chatViewModel.previewFor(session)
-                                    chatViewModel.renameError = nil
-                                    renameTarget = session
-                                }
-                                Divider()
+                            // UNGATED, deliberately. `sessions rename` exists
+                            // at every tagged Hermes — `add_parser("rename", …)`
+                            // at `hermes_cli/main.py:2373`, tag v2026.3.12
+                            // (0.2.0), below Scarf's v0.6.0 minimum — so the
+                            // `hasSessionsRename` flag that used to guard this
+                            // (floored at v0.16) only hid the item from
+                            // 0.12–0.15 hosts that have the verb.
+                            Button("Rename…") {
+                                renameText = chatViewModel.previewFor(session)
+                                chatViewModel.renameError = nil
+                                renameTarget = session
                             }
+                            Divider()
                             Button("Delete…", role: .destructive) {
                                 deleteTarget = session
                             }

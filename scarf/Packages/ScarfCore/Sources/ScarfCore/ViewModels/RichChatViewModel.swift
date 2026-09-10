@@ -693,6 +693,30 @@ public final class RichChatViewModel {
         )
     ]
 
+    /// The slash command name that compresses the conversation on THIS host,
+    /// without a leading slash: `"compress"` at/above v0.19.1, `"compact"`
+    /// below it (and on an undetected host).
+    ///
+    /// Scarf's chat composer speaks ACP, and the ACP adapter renamed the
+    /// command mid-window with no alias in either direction — so sending the
+    /// other spelling does not error, it falls through to the LLM and burns a
+    /// turn. See ``HermesCapabilities/hasACPCompressSpelling`` for the
+    /// per-tag evidence.
+    public static func compressSlashName(capabilities: HermesCapabilities) -> String {
+        capabilities.hasACPCompressSpelling ? "compress" : "compact"
+    }
+
+    /// The full text the compress gesture sends, focus topic optional —
+    /// `/compress`, `/compact`, or either with a trailing focus topic.
+    public static func compressSlashCommand(
+        capabilities: HermesCapabilities,
+        focus: String = ""
+    ) -> String {
+        let name = compressSlashName(capabilities: capabilities)
+        let trimmed = focus.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "/\(name)" : "/\(name) \(trimmed)"
+    }
+
     /// Static fallback commands Hermes ACP always supports but only
     /// advertises via `available_commands_update` after `session/new` —
     /// not after `session/load`. Without this fallback, resumed sessions
@@ -706,9 +730,11 @@ public final class RichChatViewModel {
     /// - **Always** (no session AND active session): `/new`. It's the
     ///   "open a session" affordance and arms the v0.13+ `[<name>]`
     ///   argument hint via `hasNewWithSessionName`.
-    /// - **Active-session-only**: `/clear`, `/compact` (`/compress` on v0.20+), `/cost`, `/model`,
-    ///   `/tools`, `/reload-skills`, `/help`, `/exit`. Each requires a
-    ///   live session; surfacing them pre-session would mislead.
+    /// - **Active-session-only**: `/clear`, the version-appropriate
+    ///   `/compact`-or-`/compress` (see ``compressSlashName(capabilities:)``),
+    ///   `/cost`, `/model`, `/tools`, `/reload-skills`, `/help`, `/exit`.
+    ///   Each requires a live session; surfacing them pre-session would
+    ///   mislead.
     public static func alwaysAvailableCommands(
         capabilities: HermesCapabilities,
         hasActiveSession: Bool
@@ -734,8 +760,18 @@ public final class RichChatViewModel {
                 argumentHint: nil,
                 source: .alwaysAvailable
             ),
+            // The SPELLING is version-dependent, and the table that decides
+            // it is the ACP adapter's — not `hermes_cli/commands.py`, which
+            // the chat composer never talks to. ACP's `_SLASH_COMMANDS` says
+            // `compact` through v2026.7.20 (0.19.0) and `compress` from
+            // v2026.7.30 (0.19.1), with no alias either way, so the wrong
+            // spelling falls through to the LLM and nothing compresses. See
+            // ``HermesCapabilities/hasACPCompressSpelling`` for the 32-tag
+            // walk; on a v0.12 host the TUI's unrelated `/compact` display
+            // toggle (`tui_gateway/server.py:3846` `_TUI_EXTRA` at
+            // v2026.4.30) is a different surface again.
             HermesSlashCommand(
-                name: capabilities.hasCompressCommand ? "compress" : "compact",
+                name: Self.compressSlashName(capabilities: capabilities),
                 description: "Compress the conversation history",
                 argumentHint: nil,
                 source: .alwaysAvailable
@@ -945,7 +981,8 @@ public final class RichChatViewModel {
         }
         let nonInterruptive = supported.filter { !occupied.contains($0.name) }
         // Static fallbacks. `/new` always shows; the rest of the agent-
-        // level command set (`/clear`, `/compact`/`/compress`, `/cost`, `/model`,
+        // level command set (`/clear`, the version-appropriate
+        // `/compact`-or-`/compress`, `/cost`, `/model`,
         // `/tools`, `/reload-skills`, `/help`, `/exit`) only when a
         // session is active — Hermes ACP doesn't re-emit
         // `available_commands_update` after `session/load`, so without
@@ -1313,7 +1350,8 @@ public final class RichChatViewModel {
     ///
     /// Two grey-out conditions:
     /// - **No active session** (P2 of the projects-feature fix): every
-    ///   agent-side command (`/clear /compact(/compress) /cost /model /tools
+    ///   agent-side command (`/clear`, the version-appropriate
+    ///   `/compact`-or-`/compress`, `/cost /model /tools
     ///   /reload-skills /help /exit`, plus capability-gated `/yolo
     ///   /sessions /codex-runtime` and non-interruptive `/steer /goal
     ///   /queue /subgoal`) needs a live ACP session to do anything.
@@ -1342,9 +1380,11 @@ public final class RichChatViewModel {
     /// user is looking at the input bar pre-session. Kept in one place
     /// so the menu and any future enable/disable checks stay in sync.
     /// Includes both `compact` and `compress` since this set is a static,
-    /// capability-independent membership check — `alwaysAvailableCommands`
-    /// only ever emits one of the two spellings depending on
-    /// `hasCompressCommand`, so the unused name here is inert.
+    /// capability-independent membership check. `alwaysAvailableCommands`
+    /// only ever emits `compress` (see its comment — the `compact` alias
+    /// postdates most supported hosts), but a 0.18.1+ host advertises the
+    /// alias over ACP, and an ACP-sourced `/compact` row needs a live
+    /// session just the same.
     public static let sessionRequiredCommandNames: Set<String> = [
         "clear", "compact", "compress", "cost", "model", "tools",
         "reload-skills", "help", "exit",
@@ -1402,9 +1442,13 @@ public final class RichChatViewModel {
         return ProjectSlashCommandService(context: context).expand(cmd, withArgument: argument)
     }
 
-    public var supportsCompress: Bool { availableCommands.contains { $0.name == "compress" } }
+    public var supportsCompress: Bool {
+        // Either spelling counts: pre-0.19.1 ACP hosts advertise `compact`
+        // and that is their compress command. See `compressSlashName`.
+        availableCommands.contains { $0.name == "compress" || $0.name == "compact" }
+    }
 
-    /// True when the menu carries more than just `/compress` — used to hide
+    /// True when the menu carries more than just the compress command — used to hide
     /// the dedicated compress button in favor of the full slash menu.
     public var hasBroaderCommandMenu: Bool { availableCommands.count > 1 }
 

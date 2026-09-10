@@ -26,8 +26,20 @@ final class MCPLoginController {
     private let logger = Logger(subsystem: "com.scarf", category: "MCPLoginController")
     let context: ServerContext
 
-    init(context: ServerContext = .local) {
+    /// Builds the `Process` for one login run, given the `hermes` argv.
+    ///
+    /// Injectable for the same reason `HermesCLIRunner` is (P11): the
+    /// interesting behaviour here is the drain/termination race, and there is
+    /// no way to provoke a specific interleaving through a real `hermes`.
+    /// Production always uses `defaultProcess(args:)`; the caller must NOT set
+    /// `standardOutput`/`standardError` — `start` owns the pipe.
+    typealias ProcessFactory = @MainActor (_ args: [String]) -> Process
+
+    private let makeLoginProcess: ProcessFactory?
+
+    init(context: ServerContext = .local, makeLoginProcess: ProcessFactory? = nil) {
         self.context = context
+        self.makeLoginProcess = makeLoginProcess
     }
 
     /// Accumulated combined output, shown verbatim. Hermes's own wording is
@@ -45,6 +57,27 @@ final class MCPLoginController {
 
     private var process: Process?
     private var stdoutPipe: Pipe?
+    /// Everything the reader has decoded but the main actor has not consumed
+    /// yet, plus whether the reader has seen EOF. Reads land on the pipe's own
+    /// queue and each one schedules an independent `Task { @MainActor }`;
+    /// those hops are NOT ordered relative to one another, so the text has to
+    /// be sequenced where it is produced rather than where it is applied.
+    ///
+    /// ONE PER RUN, captured by that run's reader closure. A single instance
+    /// reset per run re-opened P21's drain race: the reader's `append` /
+    /// `markEOF` carry no generation check (they run on the pipe's queue,
+    /// where `generation` is not readable), so a retired run's reader wrote
+    /// into the replacement run's buffer — and could `markEOF` it — and the
+    /// new run's verdict was then judged on the old run's text, or before its
+    /// own output had drained. That is exactly the success-reported-as-failure
+    /// bug P21 fixed. With a fresh inbox per run, a stale reader writes into a
+    /// buffer nothing will ever drain.
+    private var inbox = OutputInbox()
+    /// The exit status, once the termination handler has reported it. Nil
+    /// until then — and the verdict waits for BOTH this and EOF.
+    private var pendingExit: Int32?
+    /// Set by `finish`, so a late pump can't judge the same run twice.
+    private var didFinish = false
     /// The server name of the run in flight, kept so `stop()` can reap the
     /// REMOTE half of it. Nil when nothing is running.
     private var runningServer: String?
@@ -66,6 +99,10 @@ final class MCPLoginController {
         devicePrompt = nil
         succeeded = nil
         errorMessage = nil
+        let inbox = OutputInbox()
+        self.inbox = inbox
+        pendingExit = nil
+        didFinish = false
 
         var args = ["mcp", "login"]
         if let flow, !flow.isEmpty {
@@ -76,25 +113,7 @@ final class MCPLoginController {
         args += ["--", server]
         runningServer = server
 
-        // Same PYTHONUNBUFFERED reasoning as OAuthFlowController: without it
-        // Python block-buffers when stdout is a pipe, and the device prompt —
-        // the entire point of the sheet — arrives only once the process is
-        // done waiting, i.e. too late to be used.
-        let proc: Process
-        if context.isRemote {
-            proc = context.makeTransport().makeProcess(
-                executable: "env",
-                args: ["PYTHONUNBUFFERED=1", context.paths.hermesBinary] + args
-            )
-        } else {
-            proc = context.makeTransport().makeProcess(
-                executable: context.paths.hermesBinary,
-                args: args
-            )
-            var env = HermesFileService.enrichedEnvironment()
-            env["PYTHONUNBUFFERED"] = "1"
-            proc.environment = env
-        }
+        let proc = (makeLoginProcess ?? defaultProcess)(args)
 
         let outPipe = Pipe()
         proc.standardOutput = outPipe
@@ -106,8 +125,9 @@ final class MCPLoginController {
         // WHOLE chunk. The device code or the verification URL disappearing
         // because a multi-byte glyph straddled a read is not recoverable by
         // the user. Keep the undecodable tail and prepend it to the next
-        // read. Reads are serialised on the pipe's own queue, so the buffer
-        // needs no lock beyond being owned by this run's closure.
+        // read. Reads are serialised on the pipe's own queue, so the decoder
+        // needs no lock; the decoded text goes into `inbox`, which does have
+        // one because the main actor drains it concurrently.
         let decoder = IncrementalUTF8Decoder()
         let generation = self.generation
         outPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
@@ -119,42 +139,105 @@ final class MCPLoginController {
                 // complete it, so flush it lossily rather than dropping the
                 // process's last bytes, which can be the whole reason a
                 // failure was reported the way it was.
-                let tail = decoder.flush()
-                guard !tail.isEmpty else { return }
-                Task { @MainActor [weak self] in
-                    guard let self, self.generation == generation else { return }
-                    self.append(tail)
-                }
-                return
+                inbox.append(decoder.flush())
+                inbox.markEOF()
+            } else {
+                inbox.append(decoder.decode(data))
             }
-            let chunk = decoder.decode(data)
-            guard !chunk.isEmpty else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.generation == generation else { return }
-                self.append(chunk)
+                self.pump()
             }
         }
         proc.terminationHandler = { [weak self] p in
             let code = p.terminationStatus
             Task { @MainActor [weak self] in
-                outPipe.fileHandleForReading.readabilityHandler = nil
-                // A run that `stop()` already retired must not report its
-                // exit: a retried login would be marked failed by run A's
-                // SIGTERM landing after run B started.
+                // NB the reader's `readabilityHandler` is deliberately LEFT
+                // INSTALLED here. Clearing it on termination is what made a
+                // successful login report as a failure: the `✓ Authenticated`
+                // line is written just before the process exits, and on the
+                // losing side of that race the chunk carrying it was never
+                // read — so the output the verdict judges did not contain it.
+                // The pipe stays live until it reports EOF; `pump` judges only
+                // once BOTH signals are in.
                 guard let self, self.generation == generation else { return }
-                self.finish(exitCode: code)
+                self.pendingExit = code
+                self.pump()
+                self.scheduleDrainDeadline(generation: generation)
             }
         }
 
-        do {
-            try proc.run()
-            process = proc
-            stdoutPipe = outPipe
-            isRunning = true
-        } catch {
-            errorMessage = "Failed to start hermes: \(error.localizedDescription)"
-            logger.error("mcp login failed to start: \(error.localizedDescription)")
+        // C10: `Process.run()` is a fork/exec, and on a remote context it is
+        // an `ssh` spawn — neither belongs on the main actor. The P21
+        // EOF-then-judge sequencing is untouched: both handlers are installed
+        // ABOVE, before the process can produce a byte, and `pump()` still
+        // judges only once EOF and the exit status are both in.
+        //
+        // `isRunning` is raised HERE rather than after the spawn: the sheet
+        // must show the run as live from the click, and raising it in the
+        // continuation could re-raise it after a fast process had already
+        // finished.
+        isRunning = true
+        let spawnGeneration = generation
+        Task { [weak self] in
+            let spawnError: (any Error)? = await Task.detached {
+                do { try proc.run(); return nil } catch { return error }
+            }.value
+            guard let self else { return }
+            guard self.generation == spawnGeneration else {
+                // `stop()` retired this run while it was still spawning, so it
+                // saw a nil `process`/`stdoutPipe` and could retire neither the
+                // process nor its reader. Do both here: an uncleared
+                // `readabilityHandler` keeps decoding this dead run's output
+                // for as long as the pipe is open.
+                outPipe.fileHandleForReading.readabilityHandler = nil
+                if spawnError == nil {
+                    proc.terminationHandler = nil
+                    proc.terminate()
+                    if self.context.isRemote { self.reapRemoteLogin(server: server) }
+                }
+                return
+            }
+            if let spawnError {
+                self.isRunning = false
+                self.runningServer = nil
+                self.errorMessage = "Failed to start hermes: \(spawnError.localizedDescription)"
+                self.logger.error("mcp login failed to start: \(spawnError.localizedDescription)")
+                return
+            }
+            // A fast-exiting login (an unknown server name prints its refusal
+            // and exits) can be FINISHED before the spawn continuation
+            // resumes. `finish()` nils `process`/`stdoutPipe` precisely so a
+            // later `stop()` does not spend two SSH round trips reaping a
+            // process that has exited; re-publishing them here would hand
+            // `stop()` a live-looking `process` and do exactly that.
+            guard !self.didFinish else { return }
+            self.process = proc
+            self.stdoutPipe = outPipe
         }
+    }
+
+    /// The production `Process` for a login run.
+    ///
+    /// Same PYTHONUNBUFFERED reasoning as OAuthFlowController: without it
+    /// Python block-buffers when stdout is a pipe, and the device prompt —
+    /// the entire point of the sheet — arrives only once the process is done
+    /// waiting, i.e. too late to be used.
+    private func defaultProcess(_ args: [String]) -> Process {
+        if context.isRemote {
+            return context.makeTransport().makeProcess(
+                executable: "env",
+                args: ["PYTHONUNBUFFERED=1", context.paths.hermesBinary] + args
+            )
+        }
+        let proc = context.makeTransport().makeProcess(
+            executable: context.paths.hermesBinary,
+            args: args
+        )
+        var env = HermesFileService.enrichedEnvironment()
+        env["PYTHONUNBUFFERED"] = "1"
+        proc.environment = env
+        return proc
     }
 
     /// Terminate an in-flight login. Safe when nothing is running — the sheet
@@ -186,10 +269,11 @@ final class MCPLoginController {
     /// (`SSHTransport.swift:693-716`). `-T` allocates no pty, so terminating
     /// the local `ssh` closes the channel but leaves the remote `hermes`
     /// running: it is in `_authorize`'s polling loop
-    /// (`tools/mcp_oauth_device.py:131-140`), writes nothing until it is
-    /// done, and so never takes a SIGPIPE. It keeps hitting the provider's
-    /// token endpoint until its own deadline — `min(expires_in, timeout)`,
-    /// default 300 s (`:123-124`) — long after the user dismissed the sheet.
+    /// (`tools/mcp_oauth_device.py:132-144` at `v2026.9.7`), writes nothing
+    /// until it is done, and so never takes a SIGPIPE. It keeps hitting the
+    /// provider's token endpoint until its own deadline —
+    /// `min(expires_in, timeout)`, default 300 s (`:124-125`) — long after the
+    /// user dismissed the sheet.
     ///
     /// Two fixes were considered and rejected before this one:
     ///
@@ -206,22 +290,55 @@ final class MCPLoginController {
     ///   quotes every token through `remotePathArg`, so no caller can inject a
     ///   shell operator into the remote command — by design, and worth keeping.
     ///
-    /// What is left is an explicit best-effort reap over the same transport.
-    /// The pattern matches only a command line that carries `mcp login` AND
-    /// this server's name after the `--`, i.e. the process this controller
-    /// started. `pkill` may be absent (its exit code says so) — the reap is
-    /// advisory, and its failure is logged, never surfaced: the login is
-    /// already over as far as the user is concerned.
+    /// What is left is an explicit best-effort reap over the same transport,
+    /// scoped three ways so it can only ever signal this controller's own
+    /// process:
+    ///
+    /// * **By owner.** `pkill` without `-u` matches every user on the box.
+    ///   On a shared host, one person dismissing a login sheet would kill a
+    ///   colleague's login to the same server. `-u` restricts to an
+    ///   EFFECTIVE uid on both platforms Scarf reaches — `-u euid` on
+    ///   macOS/BSD `pkill(1)`, `-u, --euid` on Linux procps — so the same
+    ///   argv is correct on either, and the uid comes from an `id -u` on
+    ///   the remote rather than a guess at the SSH username (`~/.ssh/config`
+    ///   can rewrite it). If that probe fails there is no way to scope the
+    ///   kill, and the reap is ABANDONED: leaving a polling loop to hit its
+    ///   own 300 s deadline is strictly better than signalling a process
+    ///   that may not be ours.
+    /// * **By command line**, which must carry `mcp login` and end with this
+    ///   server's name after the `--`, every ERE metacharacter in the name
+    ///   escaped (`regexEscaped`).
+    /// * **Away from the `bash -lc` wrapper**, for free, by that `$` anchor:
+    ///   `SSHTransport.composedRemoteCommand` runs every token through
+    ///   `remotePathArg`, which double-quotes UNCONDITIONALLY
+    ///   (`SSHTransport.swift:303-322`), so the shell's own command line ends
+    ///   `… "--" "github"` — a literal `"` after the name — while the
+    ///   `hermes` it execs has had the quotes removed. Only the second one
+    ///   matches. `MCPOAuthAndTransportP24Tests` pins that with the real
+    ///   `grep -E`, because it is a property of ANOTHER file that this one
+    ///   silently depends on.
+    ///
+    /// `pkill` may be absent (its exit code says so) — the reap is advisory,
+    /// and its failure is logged, never surfaced: the login is already over
+    /// as far as the user is concerned.
     private func reapRemoteLogin(server: String) {
         let xport = context.makeTransport()
-        let pattern = "mcp login .*-- " + Self.regexEscaped(server) + "$"
+        let pattern = Self.reapPattern(server: server)
         let logger = self.logger
         Task.detached {
             do {
                 // C10: off the main actor, with a timeout, like every other
                 // spawn Scarf makes.
+                let whoami = try xport.runProcess(
+                    executable: "id", args: ["-u"], stdin: nil, timeout: 10)
+                let uid = whoami.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard whoami.exitCode == 0, !uid.isEmpty,
+                      uid.allSatisfy({ $0.isASCII && $0.isNumber }) else {
+                    logger.info("remote mcp login reap skipped: could not resolve the remote uid")
+                    return
+                }
                 let result = try xport.runProcess(
-                    executable: "pkill", args: ["-f", pattern], stdin: nil, timeout: 10)
+                    executable: "pkill", args: ["-u", uid, "-f", pattern], stdin: nil, timeout: 10)
                 // pkill exits 1 when nothing matched (the run had already
                 // finished) and 127 when it is not installed. Neither is
                 // actionable here.
@@ -232,6 +349,12 @@ final class MCPLoginController {
                 logger.info("remote mcp login reap failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    /// The `pkill -f` ERE for one server's login. Pure, so a test can assert
+    /// what it does and does not match.
+    nonisolated static func reapPattern(server: String) -> String {
+        "mcp login .*-- " + regexEscaped(server) + "$"
     }
 
     /// Escape every POSIX ERE metacharacter so a server name is matched
@@ -256,6 +379,32 @@ final class MCPLoginController {
         guard let code = devicePrompt?.userCode else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(code, forType: .string)
+    }
+
+    /// A process can exit while something else still holds the write end of
+    /// the pipe (a browser helper the login spawned, say), and then EOF never
+    /// arrives. Waiting for the reader is right; waiting for it forever is
+    /// not — the sheet would sit on its spinner with the verdict already
+    /// knowable. After the grace period the drain is declared over and the
+    /// verdict is taken on what did arrive.
+    private func scheduleDrainDeadline(generation: UInt64) {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard let self, self.generation == generation, !self.didFinish else { return }
+            self.inbox.markEOF()
+            self.pump()
+        }
+    }
+
+    /// Applies everything the reader has produced so far, then judges — but
+    /// only once the reader has hit EOF AND the process has reported its exit
+    /// status. Either can arrive first.
+    private func pump() {
+        let (text, sawEOF) = inbox.drain()
+        if !text.isEmpty { append(text) }
+        guard sawEOF, let code = pendingExit, !didFinish else { return }
+        didFinish = true
+        finish(exitCode: code)
     }
 
     private func append(_ chunk: String) {
@@ -290,12 +439,18 @@ final class MCPLoginController {
             exitCode: exitCode,
             successMarkers: HermesCLIMarkers.mcpLoginSuccess,
             failureMarkers: HermesCLIMarkers.mcpLoginFailure,
-            fallbackDetail: false
+            fallbackDetail: false,
+            // `_success` prints `  ✓ Authenticated …` (mcp_config.py:34) —
+            // column 0 once the indent and the glyph are stripped.
+            successAnchored: true
         )
     }
 
     private func finish(exitCode: Int32) {
         isRunning = false
+        stdoutPipe?.fileHandleForReading.readabilityHandler = nil
+        process = nil
+        stdoutPipe = nil
         // The run is over on its own; a later `stop()` (the sheet closing)
         // must not spend an SSH round trip reaping a process that has exited.
         runningServer = nil
@@ -311,4 +466,32 @@ final class MCPLoginController {
                     : "hermes exited with code \(exitCode)")
         }
     }
+}
+
+/// The reader side's hand-off buffer: text accumulates here in READ order on
+/// the pipe's queue, and the main actor drains it whenever one of its hops
+/// lands. Sequencing the text here rather than in the hops is what makes the
+/// out-of-order `Task { @MainActor }` scheduling harmless.
+private final class OutputInbox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending = ""
+    private var eof = false
+
+    func append(_ text: String) {
+        guard !text.isEmpty else { return }
+        lock.lock(); pending += text; lock.unlock()
+    }
+
+    func markEOF() {
+        lock.lock(); eof = true; lock.unlock()
+    }
+
+    /// Everything buffered since the last drain, plus whether the reader has
+    /// reported EOF.
+    func drain() -> (text: String, sawEOF: Bool) {
+        lock.lock()
+        defer { pending = ""; lock.unlock() }
+        return (pending, eof)
+    }
+
 }

@@ -363,7 +363,11 @@ public enum HermesPeerCLI {
     private static func bool(_ value: Any?) -> Bool {
         if let b = value as? Bool { return b }
         if let n = value as? NSNumber { return n.boolValue }
-        if let s = value as? String { return s == "true" }
+        // A JSON bool arrives as a real `Bool`; the string arm is tolerance
+        // for a field Python stringified on the way out (`str(True)` is
+        // `"True"`, which the literal compare missed). Same one helper as
+        // every other boolish read (P18).
+        if let s = value as? String { return HermesYAML.boolishValue(s) ?? false }
         return false
     }
 

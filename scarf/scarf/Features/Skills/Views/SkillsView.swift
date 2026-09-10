@@ -62,12 +62,13 @@ struct SkillsView: View {
             ) {
                 HStack(spacing: 6) {
                     Button {
-                        Task { await viewModel.reloadSkills() }
+                        Task { await viewModel.rescanSkills() }
                     } label: {
-                        Label("Reload", systemImage: "arrow.clockwise")
+                        Label("Re-scan skills", systemImage: "checkmark.shield")
                     }
                     .buttonStyle(ScarfGhostButton())
-                    .help("Re-scan ~/.hermes/skills/ and pick up edits without restarting Hermes")
+                    .help("Re-run Hermes's security scanner over every hub-installed skill (hermes skills audit). It does not reload a running agent — that's the /reload-skills chat command.")
+                    .accessibilityLabel("Re-scan installed skills with the security scanner")
 
                     if capabilitiesStore?.capabilities.hasSkillURLInstall ?? false {
                         Button {

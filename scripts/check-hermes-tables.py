@@ -17,7 +17,8 @@ turns the "reconcile on every Hermes bump" chore into a mechanical gate:
      in loadProviders(), the overlay is dormant fallback); an entry that is
      neither a Hermes overlay nor a bundled plugin provider (lane 4's subject,
      which overlayOnlyProviders deliberately mirrors) fails as a stale
-     provider. Lane skipped when the cache file is absent (fresh machine).
+     provider. The lane cannot run without the cache file (fresh machine);
+     that is a SKIP, and a skip is non-OK unless --allow-skip is passed.
   5. ModelCatalogService.capabilityProviderOverrides (+ providerAliases)
                                            <->  agent/models_dev.py
      PROVIDER_TO_MODELS_DEV. This is the SECOND provider table and it answers
@@ -42,16 +43,35 @@ turns the "reconcile on every Hermes bump" chore into a mechanical gate:
 
 Usage:
     scripts/check-hermes-tables.py [path/to/hermes-agent]
+                                   [--tag <tag> | --worktree] [--allow-skip]
 
 The Hermes checkout defaults to $HERMES_SRC, then ~/.hermes/hermes-agent.
-Check the checkout out at the tag Scarf targets (see HermesCapabilities.swift)
-before trusting the result. Exits 1 on any FAIL, 0 on PASS/WARN.
+
+READ MODE. By default every Hermes file is read AT A TAG via
+``git -C <checkout> show <tag>:<path>`` — never from the checkout's working
+tree, which is whatever the last person left checked out (a reviewer's
+`v2026.9.7-385-g9e6c4100cb` tree printed OK and meant nothing). The tag
+defaults to ``HERMES_TARGET_TAG`` below, the ONE place this repo records the
+tag Scarf targets; ``--tag`` overrides it and ``--worktree`` opts back into
+reading the working tree for local development. The checkout is only ever
+READ — no command here writes to it or moves its HEAD. The mode is printed in
+the verdict line.
+
+FAIL CLOSED. A lane that cannot run does NOT leave the verdict at OK: every
+skip prints ``SKIPPED lane N`` and exits non-zero unless ``--allow-skip`` is
+passed. A Hermes table that is present but not the shape a lane parses is a
+hard error, not a skip — that is how a table rename would otherwise slip
+through as a silent pass.
+
+Exits 1 on any FAIL, 2 on a SKIPPED lane without --allow-skip, 0 on PASS/WARN.
 """
 
+import argparse
 import ast
 import json
 import os
 import re
+import subprocess
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -65,11 +85,85 @@ DEFAULT_HERMES = os.environ.get(
     "HERMES_SRC", os.path.expanduser("~/.hermes/hermes-agent"))
 MODELS_DEV_CACHE = os.path.expanduser("~/.hermes/models_dev_cache.json")
 
+# The ONE place this repo records the Hermes tag Scarf targets, and the default
+# `--tag`. Bump it in the same commit that bumps a capability floor in
+# HermesCapabilities.swift; the audit trail for what the tag means lives in the
+# `// MARK: vX.Y (<tag>) flags` sections there, not here.
+HERMES_TARGET_TAG = "v2026.9.7"
+
 failures = []
 warnings = []
+skipped = []
 
 
-def parse_hermes(providers_py):
+class HermesSource:
+    """Reads Hermes files either at a git tag or from the checkout's work tree.
+
+    Every lane goes through this instead of `open()` so the read mode is a
+    single decision made once, in one place, and cannot be mode-correct in one
+    lane and working-tree in another.
+    """
+
+    def __init__(self, checkout, tag=None):
+        self.checkout = checkout
+        self.tag = tag  # None => working tree
+
+    @property
+    def mode(self):
+        return f"tag {self.tag}" if self.tag else f"WORKING TREE of {self.checkout}"
+
+    def _git(self, *args):
+        try:
+            proc = subprocess.run(["git", "-C", self.checkout, *args],
+                                  capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.SubprocessError) as exc:
+            sys.exit(f"error: git {' '.join(args)} failed in {self.checkout}: {exc}")
+        return proc
+
+    def read(self, relpath):
+        """File contents, or None when the path doesn't exist at this revision."""
+        if self.tag is None:
+            full = os.path.join(self.checkout, relpath)
+            if not os.path.exists(full):
+                return None
+            with open(full) as fh:
+                return fh.read()
+        proc = self._git("show", f"{self.tag}:{relpath}")
+        return proc.stdout if proc.returncode == 0 else None
+
+    def listdir(self, relpath):
+        """Sorted entry names directly under `relpath`, or [] when it is absent."""
+        if self.tag is None:
+            full = os.path.join(self.checkout, relpath)
+            if not os.path.isdir(full):
+                return []
+            return sorted(os.listdir(full))
+        proc = self._git("ls-tree", "--name-only", f"{self.tag}:{relpath}")
+        if proc.returncode != 0:
+            return []
+        return sorted(line.rstrip("/") for line in proc.stdout.splitlines() if line)
+
+    def describe(self):
+        """`git describe` of whatever is checked out, or None."""
+        proc = self._git("describe", "--tags", "--always", "--dirty")
+        return proc.stdout.strip() if proc.returncode == 0 else None
+
+    def validate(self):
+        """Fail fast on a checkout/tag that can't answer — never read a blank."""
+        if not os.path.isdir(self.checkout):
+            sys.exit(f"error: {self.checkout} is not a directory — pass the "
+                     f"hermes-agent checkout path")
+        if self.tag is None:
+            return
+        if self._git("rev-parse", "--verify", f"{self.tag}^{{commit}}").returncode != 0:
+            sys.exit(f"error: tag '{self.tag}' does not exist in {self.checkout} "
+                     f"— fetch it, or pass --worktree to read the working tree")
+
+
+PROVIDERS_PY = "hermes_cli/providers.py"
+
+
+def parse_hermes(src):
     """AST-walk providers.py for ALIASES and HERMES_OVERLAYS.
 
     ``ALIASES`` has had two shapes. Through v0.21.0 it was a dict literal
@@ -79,7 +173,11 @@ def parse_hermes(providers_py):
     `ast.DictComp` raises AttributeError. Both shapes are handled; the literal
     path stays so the script keeps working against older tags.
     """
-    tree = ast.parse(open(providers_py).read())
+    text = src.read(PROVIDERS_PY)
+    if text is None:
+        sys.exit(f"error: {PROVIDERS_PY} not found at {src.mode} — pass the "
+                 f"hermes-agent checkout path")
+    tree = ast.parse(text)
     aliases, alias_groups, overlay_keys, aggregators = {}, {}, [], set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.AnnAssign):
@@ -111,39 +209,58 @@ def parse_hermes(providers_py):
     if not aliases:
         aliases = alias_groups
     if not aliases or not overlay_keys:
-        sys.exit(f"error: could not parse ALIASES/HERMES_OVERLAYS from {providers_py}")
+        sys.exit(f"error: could not parse ALIASES/HERMES_OVERLAYS from "
+                 f"{PROVIDERS_PY} at {src.mode}")
     return aliases, overlay_keys, aggregators
 
 
-def parse_models_dev_map(hermes_src):
+MODELS_DEV_PY = "agent/models_dev.py"
+
+
+def parse_models_dev_map(src):
     """``PROVIDER_TO_MODELS_DEV`` from agent/models_dev.py (a plain annotated
-    dict literal at v2026.9.7:107). Returns {} when the file or the name is
-    absent so the lane can skip rather than fail on an older checkout."""
-    path = os.path.join(hermes_src, "agent/models_dev.py")
-    if not os.path.exists(path):
-        return {}
-    tree = ast.parse(open(path).read())
+    dict literal at v2026.9.7:108; :107 is the section comment above it).
+
+    FAILS CLOSED, exactly as `parse_hermes` does for ALIASES: the only benign
+    absence is the whole FILE being missing (a pre-v0.21 checkout), which
+    returns None so lane 5 can record a SKIP. A file that exists but whose
+    ``PROVIDER_TO_MODELS_DEV`` is gone or is no longer a plain ``ast.Dict``
+    (a rename, a comprehension, a `dict(...)` call, a module-level merge) is a
+    shape change, and a shape change must never read as "nothing to compare" —
+    that is the hole that let the v0.21.1 `ALIASES` comprehension pass.
+    """
+    text = src.read(MODELS_DEV_PY)
+    if text is None:
+        return None
+    tree = ast.parse(text)
     for node in ast.walk(tree):
         target = node.target if isinstance(node, ast.AnnAssign) else (
             node.targets[0] if isinstance(node, ast.Assign) and node.targets else None)
         if getattr(target, "id", "") != "PROVIDER_TO_MODELS_DEV":
             continue
         if not isinstance(node.value, ast.Dict):
-            continue
-        return {k.value: v.value for k, v in zip(node.value.keys, node.value.values)
-                if isinstance(k, ast.Constant) and isinstance(v, ast.Constant)}
-    return {}
+            sys.exit(f"error: PROVIDER_TO_MODELS_DEV in {MODELS_DEV_PY} at {src.mode} "
+                     f"is a {type(node.value).__name__}, not a dict literal — the "
+                     f"table changed shape; teach lane 5 the new shape")
+        pairs = {k.value: v.value for k, v in zip(node.value.keys, node.value.values)
+                 if isinstance(k, ast.Constant) and isinstance(v, ast.Constant)}
+        if not pairs:
+            sys.exit(f"error: PROVIDER_TO_MODELS_DEV in {MODELS_DEV_PY} at {src.mode} "
+                     f"parsed to zero literal entries — the table changed shape")
+        return pairs
+    sys.exit(f"error: PROVIDER_TO_MODELS_DEV not found in {MODELS_DEV_PY} at "
+             f"{src.mode} — it was renamed or moved; teach lane 5 where it went")
 
 
 # auth_type values models_catalog_static.py refuses to auto-append (they need
-# bespoke picker UX). Mirrored verbatim from its skip set at v2026.9.7:365.
+# bespoke picker UX). Mirrored verbatim from its skip set at v2026.9.7:360-362.
 PLUGIN_PROVIDER_SKIP_AUTH = {
     "oauth_device_code", "oauth_external", "external_process", "aws_sdk",
     "copilot", "vertex",
 }
 
 
-def parse_plugin_providers(hermes_src):
+def parse_plugin_providers(src):
     """Provider ids registered by bundled model-provider plugins.
 
     Mirrors `hermes_cli/models_catalog_static.py:356-367`: every provider a
@@ -155,16 +272,14 @@ def parse_plugin_providers(hermes_src):
     (ids, skipped_plugin_dirs); a plugin whose provider name isn't a string
     literal (e.g. kimi-coding's factory) is reported rather than guessed at.
     """
-    root = os.path.join(hermes_src, "plugins/model-providers")
+    root = "plugins/model-providers"
     ids, skipped = [], set()
-    if not os.path.isdir(root):
-        return ids, skipped
-    for entry in sorted(os.listdir(root)):
-        init = os.path.join(root, entry, "__init__.py")
-        if not os.path.exists(init):
+    for entry in src.listdir(root):
+        init = src.read(f"{root}/{entry}/__init__.py")
+        if init is None:
             continue
         try:
-            tree = ast.parse(open(init).read())
+            tree = ast.parse(init)
         except SyntaxError:
             skipped.add(entry)
             continue
@@ -213,13 +328,13 @@ def parse_plugin_providers(hermes_src):
     return ids, skipped
 
 
-def parse_static_catalog(hermes_src):
+def parse_static_catalog(src):
     """(static CANONICAL_PROVIDERS slugs, _PROVIDER_ALIASES) from models_catalog_static.py.
 
     Two things lane 4 cannot get right without this file:
 
     * A plugin whose provider name is ALREADY a static ``CANONICAL_PROVIDERS``
-      slug is NOT auto-appended — `models_catalog_static.py:357` skips any name
+      slug is NOT auto-appended — `models_catalog_static.py:360` skips any name
       already in ``_canonical_slugs``. ``gemini`` is exactly that case: the
       static row ("gemini", "Google AI Studio") predates the plugin, so
       reporting it as an unreachable *plugin* provider is simply wrong.
@@ -237,14 +352,14 @@ def parse_static_catalog(hermes_src):
     # Read the new path first, then the old one — checking only the new path
     # against a pre-v0.21.1 checkout reports "absent" for a table that is very
     # much present, which is the exact trap this cycle kept hitting.
-    path = next(
-        (p for p in (os.path.join(hermes_src, "hermes_cli/models_catalog_static.py"),
-                     os.path.join(hermes_src, "hermes_cli/models.py"))
-         if os.path.exists(p)),
+    text = next(
+        (t for t in (src.read("hermes_cli/models_catalog_static.py"),
+                     src.read("hermes_cli/models.py"))
+         if t is not None),
         None)
-    if path is None:
+    if text is None:
         return set(), {}
-    tree = ast.parse(open(path).read())
+    tree = ast.parse(text)
     slugs, aliases = set(), {}
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
@@ -315,25 +430,42 @@ def check(lane, scarf, hermes, missing_msg, extra_msg):
     return not (missing or extra)
 
 
-def main():
-    hermes_src = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_HERMES
-    if len(sys.argv) <= 1:
-        # Make checkout drift visible when relying on the default path.
-        print(f"using default hermes-agent checkout: {hermes_src}")
-        import subprocess
-        try:
-            desc = subprocess.run(
-                ["git", "-C", hermes_src, "describe", "--tags", "--always"],
-                capture_output=True, text=True, timeout=10)
-            if desc.returncode == 0:
-                print(f"checkout version: {desc.stdout.strip()}")
-        except OSError:
-            pass
-    providers_py = os.path.join(hermes_src, "hermes_cli/providers.py")
-    if not os.path.exists(providers_py):
-        sys.exit(f"error: {providers_py} not found — pass the hermes-agent checkout path")
+def build_parser():
+    p = argparse.ArgumentParser(
+        description="Diff Scarf's mirrored Hermes provider tables against hermes source.")
+    p.add_argument("checkout", nargs="?", default=DEFAULT_HERMES,
+                   help="hermes-agent checkout (default: $HERMES_SRC, then "
+                        "~/.hermes/hermes-agent)")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--tag", default=HERMES_TARGET_TAG,
+                      help=f"read Hermes files at this git tag via `git show` "
+                           f"(default: {HERMES_TARGET_TAG})")
+    mode.add_argument("--worktree", action="store_true",
+                      help="read the checkout's working tree instead of a tag "
+                           "(local development only — the result is only as "
+                           "trustworthy as whatever is checked out)")
+    p.add_argument("--allow-skip", action="store_true",
+                   help="let a lane that cannot run (e.g. no models.dev cache) "
+                        "leave the verdict at OK; the default is strict")
+    return p
 
-    aliases, overlay_keys, aggregators = parse_hermes(providers_py)
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    # The verdict accumulators are module-level (every lane appends to them);
+    # clear them so a second call in one process can't inherit the first's.
+    del failures[:], warnings[:], skipped[:]
+    src = HermesSource(args.checkout, None if args.worktree else args.tag)
+    src.validate()
+    print(f"reading hermes from {src.mode}")
+    if src.tag is None:
+        # In tag mode the tag IS the provenance; in worktree mode this line is
+        # the only record of what was actually measured.
+        desc = src.describe()
+        if desc:
+            print(f"working-tree version: {desc}")
+
+    aliases, overlay_keys, aggregators = parse_hermes(src)
 
     # Lane 1: providerAliases <-> ALIASES (minus identity entries)
     hermes_aliases = {k: v for k, v in aliases.items() if k != v}
@@ -359,8 +491,8 @@ def main():
     # Plugin-registered providers are lane 4's subject, but lane 3 needs the set
     # too: `overlayOnlyProviders` deliberately mirrors them, and they are not
     # HERMES_OVERLAYS entries, so without this they read as stale entries.
-    static_slugs, static_aliases = parse_static_catalog(hermes_src)
-    registered, plugin_skipped = parse_plugin_providers(hermes_src)
+    static_slugs, static_aliases = parse_static_catalog(src)
+    registered, plugin_skipped = parse_plugin_providers(src)
     plugin_provider_ids = set(registered)
 
     # Lane 3: overlayOnlyProviders keys <-> overlays absent from models.dev
@@ -387,7 +519,10 @@ def main():
                 failures.append(
                     f"[overlay-only] '{pid}' is not a Hermes overlay at all — stale entry")
     else:
-        warnings.append(f"[overlay-only] skipped — {MODELS_DEV_CACHE} not found")
+        skipped.append(f"lane 3 (overlay-only): {MODELS_DEV_CACHE} not found — "
+                       f"Hermes writes it on its first models.dev fetch "
+                       f"(agent/models_dev.py), so use this host after Hermes "
+                       f"has run once")
 
     # Lane 4: plugin-registered providers Hermes auto-appends to the picker
     if os.path.exists(MODELS_DEV_CACHE):
@@ -419,7 +554,7 @@ def main():
         unreachable = {
             pid for pid in registered
             # A name already in the static CANONICAL_PROVIDERS list is not
-            # auto-appended at all (models_catalog_static.py:357 skips it), so
+            # auto-appended at all (models_catalog_static.py:360 skips it), so
             # it is not this lane's subject.
             if pid not in static_slugs and not is_reachable(pid)
         }
@@ -434,14 +569,15 @@ def main():
                 f"[plugin-providers] {len(plugin_skipped)} plugin(s) skipped (provider "
                 f"name not a literal): {', '.join(sorted(plugin_skipped))}")
     else:
-        warnings.append(f"[plugin-providers] skipped — {MODELS_DEV_CACHE} not found")
+        skipped.append(f"lane 4 (plugin-providers): {MODELS_DEV_CACHE} not found — "
+                       f"same cache as lane 3")
 
     # Lane 5: capabilityProviderOverrides <-> PROVIDER_TO_MODELS_DEV
-    hermes_models_dev = parse_models_dev_map(hermes_src)
+    hermes_models_dev = parse_models_dev_map(src)
     swift_overrides = dict(
         re.findall(r'"([^"]+)"\s*:\s*"([^"]+)"',
                    "\n".join(swift_block(CATALOG_SWIFT, "let capabilityProviderOverrides"))))
-    if hermes_models_dev:
+    if hermes_models_dev is not None:
         def models_dev_key(pid):
             """Swift `ModelCatalogService.modelsDevProviderKey`, in Python."""
             key = pid.strip().lower()
@@ -463,18 +599,32 @@ def main():
                 f"PROVIDER_TO_MODELS_DEV entry — a deliberate Scarf extension "
                 f"(see the table's doc comment) or a stale mirror")
     else:
-        warnings.append("[models-dev] skipped — agent/models_dev.py "
-                        "PROVIDER_TO_MODELS_DEV not found in this checkout")
+        skipped.append(f"lane 5 (models-dev): {MODELS_DEV_PY} does not exist at "
+                       f"{src.mode} — pre-v0.21 Hermes")
 
     for w in warnings:
         print(f"WARN  {w}")
+    for s_ in skipped:
+        print(f"SKIPPED {s_}")
     for f in failures:
         print(f"FAIL  {f}")
+    counts = (f"aliases={len(swift_aliases)} aggregators={len(swift_aggs)} "
+              f"overlays={len(swift_overlays)} lanes={5 - len(skipped)}/5")
     if failures:
-        print(f"\n{len(failures)} failure(s) — reconcile the Swift tables against {providers_py}")
+        print(f"\n{len(failures)} failure(s) — reconcile the Swift tables against "
+              f"{PROVIDERS_PY} at {src.mode}")
         sys.exit(1)
-    print(f"OK    aliases={len(swift_aliases)} aggregators={len(swift_aggs)} "
-          f"overlays={len(swift_overlays)} checked against {hermes_src}")
+    # A skipped lane is NOT a pass. Two of five lanes silently disabled is how
+    # an OK verdict becomes worthless on a fresh machine; say so and exit 2
+    # unless the caller has explicitly accepted a partial run.
+    if skipped and not args.allow_skip:
+        print(f"\nNOT-OK {len(skipped)} lane(s) could not run — re-run once the "
+              f"precondition above is met, or pass --allow-skip to accept a "
+              f"partial check. {counts}, read from {src.mode}")
+        sys.exit(2)
+    verdict = "OK   " if not skipped else "OK*  "
+    print(f"{verdict} {counts} read from {src.mode}"
+          + (" (partial — --allow-skip)" if skipped else ""))
 
 
 if __name__ == "__main__":

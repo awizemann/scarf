@@ -6,9 +6,11 @@ import Foundation
 /// mappings, this scanner walks the block directly and hands back typed
 /// rules plus every unmodeled line verbatim.
 ///
-/// Source of truth: hermes-agent tag v2026.8.3 —
-/// `gateway/config.py:1356-1360` (which form wins), `gateway/config.py:1345-1352`
-/// (`multiplex_profiles` precedence), `gateway/profile_routing.py`
+/// Source of truth at tag `v2026.9.7`: `gateway/config_loader.py:76` with
+/// `_bridge_lookup`'s `"none"` arm at `:100-104` (which form wins — top-level
+/// unless it is null, then `gateway.profile_routes`), consumed by
+/// `gateway/config.py:745`; `gateway/config.py:708-710`
+/// (`multiplex_profiles` precedence); `gateway/profile_routing.py`
 /// (rule fields).
 public enum ProfileRoutesYAML {
 
@@ -72,12 +74,37 @@ public enum ProfileRoutesYAML {
     }
 
     /// `multiplex_profiles` — top-level form wins over `gateway.multiplex_profiles`,
-    /// matching gateway/config.py:1345-1352.
+    /// matching `gateway/config.py:708-710` at `v2026.9.7`.
     private static func parseMultiplex(_ yaml: String) -> (value: Bool, isTopLevel: Bool) {
         let values = HermesYAML.parseNestedYAML(yaml).values
-        let topLevel = values["multiplex_profiles"]
+        // Top-level wins only when it is NOT null: Hermes does
+        // `multiplex_profiles = data.get("multiplex_profiles"); if
+        // multiplex_profiles is None: multiplex_profiles =
+        // nested_gateway.get("multiplex_profiles")`
+        // (`gateway/config.py:708-710` @ v2026.9.7) — a presence test would
+        // let `multiplex_profiles: null` shadow a live `gateway.` value that
+        // Hermes actually reads. (A bare `multiplex_profiles:` with no value
+        // never reaches `values` at all: `parseNestedYAML` treats an empty
+        // value as a section header, which lands on the same answer.)
+        //
+        // `isTopLevel` is therefore "the top-level spelling is the one in
+        // effect", which is what both consumers need — the explanatory banner
+        // AND `SettingsViewModel.setMultiplexProfiles`, which writes to the
+        // key in effect rather than always to `gateway.`.
+        let topLevel = values["multiplex_profiles"].flatMap { raw -> String? in
+            let v = HermesYAML.normalizedScalar(raw).lowercased()
+            // `null` / `~` only — an explicitly quoted `key: ''` is the empty
+            // STRING to PyYAML, which is not None, so the top-level spelling
+            // still wins (and `_coerce_bool("", False)` reads it as off).
+            return (v == "null" || v == "~") ? nil : raw
+        }
         let raw = topLevel ?? values["gateway.multiplex_profiles"]
-        let value = HermesYAML.stripYAMLQuotes(raw ?? "").lowercased() == "true"
+        // Hermes coerces this with `_coerce_bool(multiplex_profiles, False)`
+        // (`gateway/config.py:733`), i.e. the boolish token sets at :25-26 —
+        // a literal `== "true"` read `multiplex_profiles: yes` (and `on`,
+        // and `1`) as OFF on a host that had it ON. `False` is the dataclass
+        // default (:561) and what an unrecognised token falls back to.
+        let value = HermesYAML.boolishValue(raw) ?? false
         return (value, topLevel != nil)
     }
 

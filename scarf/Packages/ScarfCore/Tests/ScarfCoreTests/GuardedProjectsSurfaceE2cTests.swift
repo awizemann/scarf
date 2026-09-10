@@ -16,7 +16,11 @@ import Foundation
 
     private static var runningAsRoot: Bool { getuid() == 0 }
 
-    private static func withScratch(_ body: sending (URL) async throws -> Void) async throws {
+    /// The body is `@MainActor` rather than `sending`: `SkillsViewModel`'s
+    /// selection methods are explicitly main-actor isolated (P22 — they mutate
+    /// `@Observable` UI state), and from a nonisolated closure the view model
+    /// created inside it would have to be *sent* into every call.
+    private static func withScratch(_ body: @MainActor (URL) async throws -> Void) async throws {
         let base = FileManager.default.temporaryDirectory
             .appendingPathComponent("scarf-e2c-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)

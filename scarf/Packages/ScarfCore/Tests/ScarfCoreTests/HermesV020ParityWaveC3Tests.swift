@@ -187,13 +187,28 @@ import Testing
 
     // MARK: - gating
 
-    @Test func bothSurfacesGateOnV020() {
-        let v020 = HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)")
-        #expect(v020.hasApprovalsSuggest)
-        #expect(v020.hasCronRuns)
+    /// Both surfaces were floored at v0.20 and both are actually older —
+    /// re-floored in P23 against the tags. `cron runs` is
+    /// `hermes_cli/subcommands/cron.py:159` at v2026.7.20 (0.19.0) and
+    /// `hermes_cli/approvals_suggest.py` first exists at v2026.7.30 (0.19.1).
+    @Test func bothSurfacesGateOnTheirRealFloors() {
+        let target = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+        #expect(target.hasApprovalsSuggest)
+        #expect(target.hasCronRuns)
 
-        let v019 = HermesCapabilities.parseLine("Hermes Agent v0.19.2 (2026.7.20)")
-        #expect(!v019.hasApprovalsSuggest)
-        #expect(!v019.hasCronRuns)
+        let v0191 = HermesCapabilities.parseLine("Hermes Agent v0.19.1 (2026.7.30)")
+        #expect(v0191.hasApprovalsSuggest)
+        #expect(v0191.hasCronRuns)
+
+        let v0190 = HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.7.20)")
+        #expect(!v0190.hasApprovalsSuggest)
+        #expect(v0190.hasCronRuns)
+
+        let v0182 = HermesCapabilities.parseLine("Hermes Agent v0.18.2 (2026.7.7.2)")
+        #expect(!v0182.hasApprovalsSuggest)
+        #expect(!v0182.hasCronRuns)
+
+        #expect(!HermesCapabilities.empty.hasApprovalsSuggest)
+        #expect(!HermesCapabilities.empty.hasCronRuns)
     }
 }

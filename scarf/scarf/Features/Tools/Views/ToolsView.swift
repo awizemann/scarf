@@ -4,6 +4,23 @@ import ScarfDesign
 
 struct ToolsView: View {
     @State private var viewModel: ToolsViewModel
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
+
+    /// Capabilities resolved at view-eval time. `.empty` outside the
+    /// per-server `ContextBoundRoot`, exactly as in `PlatformsView`.
+    private var capabilities: HermesCapabilities {
+        capabilitiesStore?.capabilities ?? .empty
+    }
+
+    /// The platform rows this host can actually serve. Same seam and same
+    /// widen-for-current hatch as the Platforms list: a platform the user has
+    /// already configured stays offered even below the floor, and nothing is
+    /// hidden before the roster load has told us which those are.
+    private var visiblePlatforms: [HermesToolPlatform] {
+        KnownPlatforms.visible(on: capabilities) {
+            !viewModel.hasLoadedPlatforms || viewModel.configuredPlatformNames.contains($0)
+        }
+    }
 
     init(context: ServerContext) {
         _viewModel = State(initialValue: ToolsViewModel(context: context))
@@ -70,7 +87,7 @@ struct ToolsView: View {
             // dropdown. We use a filled SF Symbol "circlebadge.fill" and the status
             // text suffix so users can tell offline from connected inside the menu.
             Menu {
-                ForEach(viewModel.availablePlatforms) { platform in
+                ForEach(visiblePlatforms) { platform in
                     Button {
                         Task { await viewModel.switchPlatform(platform) }
                     } label: {

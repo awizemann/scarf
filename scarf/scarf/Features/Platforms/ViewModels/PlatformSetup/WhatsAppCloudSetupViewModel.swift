@@ -12,9 +12,17 @@ import ScarfCore
 /// can be hand-edited in config.yaml if needed.
 @Observable
 @MainActor
-final class WhatsAppCloudSetupViewModel: OutcomeMessageHosting {
+final class WhatsAppCloudSetupViewModel: PlatformSetupForm {
     let context: ServerContext
-    init(context: ServerContext = .local) { self.context = context }
+    /// C10 test seam — nil in production. See ``PlatformSetupForm``.
+    let cliRunner: HermesCLIRunner?
+    /// Load/save in-flight flags owned by ``PlatformSetupForm``.
+    var isLoading = false
+    var isSaving = false
+    init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
+        self.context = context
+        self.cliRunner = cliRunner
+    }
 
     // Required
     var phoneNumberID: String = ""
@@ -36,17 +44,21 @@ final class WhatsAppCloudSetupViewModel: OutcomeMessageHosting {
     var messageIsFailure = false
     let dmPolicyOptions = ["open", "allowlist"]
 
+    /// Off the main actor (C10) — see ``PlatformSetupForm``. Config-only:
+    /// whatsapp_cloud keeps every credential in config.yaml (see `save()`).
     func load() {
-        let cfg = HermesFileService(context: context).loadConfig().whatsappCloud
-        phoneNumberID = cfg.phoneNumberID
-        accessToken = cfg.accessToken
-        verifyToken = cfg.verifyToken
-        appSecret = cfg.appSecret
-        appID = cfg.appID
-        wabaID = cfg.wabaID
-        apiVersion = cfg.apiVersion.isEmpty ? "v20.0" : cfg.apiVersion
-        dmPolicy = cfg.dmPolicy.isEmpty ? "open" : cfg.dmPolicy
-        allowFrom = cfg.allowFrom
+        loadSnapshot(includeEnv: false) { [weak self] snapshot in
+            guard let self, let cfg = snapshot.config?.whatsappCloud else { return }
+            phoneNumberID = cfg.phoneNumberID
+            accessToken = cfg.accessToken
+            verifyToken = cfg.verifyToken
+            appSecret = cfg.appSecret
+            appID = cfg.appID
+            wabaID = cfg.wabaID
+            apiVersion = cfg.apiVersion.isEmpty ? "v20.0" : cfg.apiVersion
+            dmPolicy = cfg.dmPolicy.isEmpty ? "open" : cfg.dmPolicy
+            allowFrom = cfg.allowFrom
+        }
     }
 
     func save() {
@@ -83,6 +95,6 @@ final class WhatsAppCloudSetupViewModel: OutcomeMessageHosting {
             "platforms.whatsapp_cloud.extra.dm_policy": dmPolicy,
             "platforms.whatsapp_cloud.extra.allow_from": allowFrom
         ]
-        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: [:], configKV: configKV))
+        commitSave(envPairs: [:], configKV: configKV)
     }
 }

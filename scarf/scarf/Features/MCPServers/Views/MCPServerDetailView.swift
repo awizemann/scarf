@@ -151,9 +151,6 @@ struct MCPServerDetailView: View {
                 }
             case .sse:
                 summaryRow(label: "URL", value: server.url ?? "—")
-                if let timeout = server.sseReadTimeout {
-                    summaryRow(label: "Read TO", value: "\(timeout)s")
-                }
             }
         }
         .padding(ScarfSpace.s3)

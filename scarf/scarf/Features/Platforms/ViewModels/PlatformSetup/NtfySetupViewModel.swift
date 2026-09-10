@@ -15,9 +15,17 @@ import os
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/ntfy
 @Observable
 @MainActor
-final class NtfySetupViewModel: OutcomeMessageHosting {
+final class NtfySetupViewModel: PlatformSetupForm {
     let context: ServerContext
-    init(context: ServerContext = .local) { self.context = context }
+    /// C10 test seam — nil in production. See ``PlatformSetupForm``.
+    let cliRunner: HermesCLIRunner?
+    /// Load/save in-flight flags owned by ``PlatformSetupForm``.
+    var isLoading = false
+    var isSaving = false
+    init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
+        self.context = context
+        self.cliRunner = cliRunner
+    }
 
     // Required
     var topic: String = ""
@@ -32,27 +40,23 @@ final class NtfySetupViewModel: OutcomeMessageHosting {
     /// VoiceOver announcement come from this, never from the prose.
     var messageIsFailure = false
 
+    /// Off the main actor (C10) — see ``PlatformSetupForm``.
     func load() {
-        // GW-F6 / audit DI L10: an unreadable `.env` used to arrive as an
-        // EMPTY one, so this form rendered blank fields over live values and
-        // a Save then commented those keys out. Absent is still an empty
-        // form (correct — nothing is set yet); unreadable says so.
-        let (env, envReadFailure) = PlatformSetupHelpers.loadEnv(context: context)
-        if let envReadFailure {
-            message = envReadFailure
-            messageIsFailure = true
-        }
-        let cfg = HermesFileService(context: context).loadConfig().ntfy
+        loadSnapshot { [weak self] snapshot in
+            guard let self else { return }
+            let env = snapshot.env
+            guard let cfg = snapshot.config?.ntfy else { return }
 
-        // env wins over config.yaml for topic + server.
-        topic = env["NTFY_TOPIC"] ?? cfg.topic
-        server = env["NTFY_SERVER_URL"] ?? (cfg.server.isEmpty ? "https://ntfy.sh" : cfg.server)
-        publishTopic = cfg.publishTopic
-        // config.yaml wins in Hermes (`extra.get("token") or NTFY_TOKEN`),
-        // so read it first — a token left there by an older Scarf or by hand
-        // is what the adapter will actually use. Save migrates it to .env.
-        token = cfg.token.isEmpty ? (env["NTFY_TOKEN"] ?? "") : cfg.token
-        markdown = cfg.markdown
+            // env wins over config.yaml for topic + server.
+            topic = env["NTFY_TOPIC"] ?? cfg.topic
+            server = env["NTFY_SERVER_URL"] ?? (cfg.server.isEmpty ? "https://ntfy.sh" : cfg.server)
+            publishTopic = cfg.publishTopic
+            // config.yaml wins in Hermes (`extra.get("token") or NTFY_TOKEN`),
+            // so read it first — a token left there by an older Scarf or by hand
+            // is what the adapter will actually use. Save migrates it to .env.
+            token = cfg.token.isEmpty ? (env["NTFY_TOKEN"] ?? "") : cfg.token
+            markdown = cfg.markdown
+        }
     }
 
     func save() {
@@ -78,6 +82,6 @@ final class NtfySetupViewModel: OutcomeMessageHosting {
             "platforms.ntfy.extra.token": "",
             "platforms.ntfy.extra.markdown": PlatformSetupHelpers.envBool(markdown)
         ]
-        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV))
+        commitSave(envPairs: envPairs, configKV: configKV)
     }
 }

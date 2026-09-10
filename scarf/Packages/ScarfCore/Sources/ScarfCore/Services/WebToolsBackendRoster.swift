@@ -72,6 +72,38 @@ public enum WebToolsBackendRoster {
                  caps: caps, selected: selected)
     }
 
+    /// Which of the two Web Tools editors to render.
+    ///
+    /// Mirrors `HermesServiceTier.editorStyle`: an `.empty` capabilities
+    /// value means the PROBE FAILED, not "old host", so a gate whose false
+    /// branch renders the LOSSY editor must also consider the stored value.
+    /// The combined `web.backend` row is that lossy editor — it neither shows
+    /// nor writes `web.search_backend` / `web.extract_backend`, so on an
+    /// undetected host with either override set the user saw "Automatic"
+    /// (those keys' own default is `""`, which the shared row spells that
+    /// way) and any pick wrote `web.backend`, which the overrides shadow —
+    /// a control that silently does nothing.
+    ///
+    /// The widening branch is only reachable for a config Scarf could not
+    /// have written on a pre-v0.13 host, because the combined row never
+    /// writes the override keys. So C1 holds: every host that rendered the
+    /// single row before still renders it.
+    public static func editorStyle(
+        _ caps: HermesCapabilities,
+        searchBackend: String = "",
+        extractBackend: String = ""
+    ) -> EditorStyle {
+        if caps.hasWebToolsBackendSplit { return .split }
+        return (searchBackend.isEmpty && extractBackend.isEmpty) ? .combined : .split
+    }
+
+    public enum EditorStyle: Sendable, Equatable {
+        /// The pre-v0.13 single shared `web.backend` row.
+        case combined
+        /// The v0.13+ `web.search_backend` + `web.extract_backend` pair.
+        case split
+    }
+
     /// Prune the one removal window, widen with whatever the config actually
     /// names, then prepend the inherit/unset row.
     private static func finalize(

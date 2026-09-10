@@ -5,18 +5,19 @@ import Foundation
 /// F5 / CONFIGURE-1 — platform config keys that live in the adapter's
 /// `extra:` sub-map.
 ///
-/// Hermes builds `PlatformConfig.extra` from exactly two sources
-/// (`gateway/config.py`, tag `v2026.8.31`):
+/// Hermes builds `PlatformConfig.extra` from exactly two sources (tag
+/// `v2026.9.7`):
 ///
 /// 1. the platform section's literal `extra:` sub-key
-///    (`PlatformConfig.from_dict`), and
+///    (`gateway/config.py::PlatformConfig.from_dict`, `:415,419,442`), and
 /// 2. a HARDCODED list of "shared" keys bridged up from the section's top
-///    level (`load_gateway_config`, ~lines 1700-1766, applied by
-///    `extra.update(bridged)` at :1809).
+///    level — `_SHARED_KEYS` (`gateway/config_loader.py:197-213`), collected
+///    by `_bridged_keys` (`:224-236`) and applied by `extra.update(bridged)`
+///    at `:283`.
 ///
 /// A key in neither place is a silent no-op no matter how sensible the
 /// top-level spelling looks. `require_mention` IS in the bridge list
-/// (config.py:1719-1720); `skip_attachments` is NOT — which is why the
+/// (`config_loader.py:200`); `skip_attachments` is NOT — which is why the
 /// email toggle needed moving under `extra.` and the slack one did not.
 struct SectionAuditF5PlatformExtraKeyTests {
 
@@ -82,10 +83,11 @@ struct SectionAuditF5PlatformExtraKeyTests {
     // MARK: - slack: require_mention (REFUTED — top level is bridged)
 
     /// Scarf writes `platforms.slack.require_mention` (top level in the
-    /// slack section). That is NOT dead: config.py:1719-1720 bridges it
+    /// slack section). That is NOT dead: `config_loader.py:200` bridges it
     /// into `extra`, and the slack plugin's `_apply_yaml_config` hook also
     /// exports SLACK_REQUIRE_MENTION. The adapter's read site is
-    /// `plugins/platforms/slack/adapter.py:9058`
+    /// `plugins/platforms/slack/adapter.py:5920` inside
+    /// `_slack_require_mention` (`:5917-5925` @ `v2026.9.7`)
     /// (`self.config.extra.get("require_mention")`), which the bridge fills.
     /// This pins the shape Scarf writes staying readable.
     @Test func slackRequireMentionRoundTripsAtTopLevel() {

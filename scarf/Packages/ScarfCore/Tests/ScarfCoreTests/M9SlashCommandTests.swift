@@ -299,29 +299,43 @@ import Foundation
     }
 
     @MainActor
-    @Test func availableCommandsUsesCompactNamePreV020() {
-        // Pre-0.20 hosts must render byte-identical to today: the
-        // fallback command list surfaces `/compact`, never `/compress`.
-        let vm = RichChatViewModel(context: .local)
-        vm.setSessionId("scratch-session")
-        let caps = HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.6.1)")
-        vm.publishCapabilities(caps)
-        let names = vm.availableCommands.map(\.name)
-        #expect(names.contains("compact"))
-        #expect(!names.contains("compress"))
+    @Test func availableCommandsFollowsTheACPCompressSpellingFloor() {
+        // The table that decides the spelling is the ACP adapter's, not
+        // `hermes_cli/commands.py`: `_SLASH_COMMANDS` says `compact` through
+        // v2026.7.20 (0.19.0) (`acp_adapter/server.py:459`) and `compress`
+        // from v2026.7.30 (0.19.1) (`:574`), with no alias either way. So the
+        // menu must change names at the floor, not pin one spelling.
+        for (line, expected) in [
+            ("Hermes Agent v0.12.0 (2026.4.30)", "compact"),
+            ("Hermes Agent v0.19.0 (2026.7.20)", "compact"),
+            ("Hermes Agent v0.19.1 (2026.7.30)", "compress"),
+            ("Hermes Agent v0.20.0 (2026.8.3)", "compress"),
+            ("Hermes Agent v0.21.1 (2026.9.7)", "compress")
+        ] {
+            let vm = RichChatViewModel(context: .local)
+            vm.setSessionId("scratch-session")
+            vm.publishCapabilities(HermesCapabilities.parseLine(line))
+            let names = vm.availableCommands.map(\.name)
+            let other = expected == "compress" ? "compact" : "compress"
+            #expect(names.contains(expected), "\(line)")
+            #expect(!names.contains(other), "\(line)")
+            // Either spelling still lights the compress affordance.
+            #expect(vm.supportsCompress, "\(line)")
+        }
     }
 
     @MainActor
-    @Test func availableCommandsUsesCompressNameOnV020() {
-        // v0.20+ hosts renamed the ACP command; the fallback list must
-        // switch to `/compress` and never show `/compact` alongside it.
+    @Test func availableCommandsUsesCompactOnUndetectedHost() {
+        // An undetected host (`.empty` — the probe failed) must behave as the
+        // OLDER one (C1): thirteen of the sixteen supported releases are
+        // below the 0.19.1 rename, so `/compact` is the safer default.
         let vm = RichChatViewModel(context: .local)
         vm.setSessionId("scratch-session")
-        let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)")
-        vm.publishCapabilities(caps)
+        vm.publishCapabilities(.empty)
         let names = vm.availableCommands.map(\.name)
-        #expect(names.contains("compress"))
-        #expect(!names.contains("compact"))
+        #expect(names.contains("compact"))
+        #expect(!names.contains("compress"))
+        #expect(vm.supportsCompress)
     }
 
     @MainActor
@@ -348,6 +362,9 @@ import Foundation
         // The grey-out set is capability-independent (static), so it
         // must cover both spellings even though only one is ever
         // surfaced in the menu at a time.
+        // `compact` stays in the grey-out set even though the menu never
+        // surfaces it: a 0.18.1+ host advertises the alias over ACP, and an
+        // ACP-sourced `/compact` still needs a live session.
         #expect(RichChatViewModel.sessionRequiredCommandNames.contains("compact"))
         #expect(RichChatViewModel.sessionRequiredCommandNames.contains("compress"))
     }

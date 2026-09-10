@@ -37,7 +37,7 @@ public struct HermesMCPDevicePrompt: Sendable, Equatable {
 
     /// The last line of Hermes's single-`print` block. Its arrival is the
     /// only proof that the two lines above it are COMPLETE — see `parse`.
-    /// Verbatim from `mcp_oauth_device.py:125-126`.
+    /// Verbatim from `tools/mcp_oauth_device.py:126-127` at `v2026.9.7`.
     public static let completionSentinel = "Waiting for approval..."
 
     /// Parse the prompt out of accumulated CLI output, or `nil` while it is
@@ -47,7 +47,7 @@ public struct HermesMCPDevicePrompt: Sendable, Equatable {
     /// as arrived only once `Waiting for approval...` has.** Both rules exist
     /// for the same reason: a `readabilityHandler` chunk boundary falls on a
     /// byte count, not a line. Hermes writes the whole block in one
-    /// `print(..., flush=True)` (`tools/mcp_oauth_device.py:125-126`), but the
+    /// `print(..., flush=True)` (`tools/mcp_oauth_device.py:126-127`), but the
     /// pipe can still hand Scarf `…\n  Code: WDJB-MJ` — and `WDJB-MJ` is a
     /// perfectly non-empty string. The old parser latched it, the sheet
     /// rendered a truncated code, and re-parsing was skipped forever after
@@ -70,11 +70,34 @@ public struct HermesMCPDevicePrompt: Sendable, Equatable {
         var sawSentinel = false
         // Drop the trailing fragment: everything after the LAST newline has
         // not been terminated yet and may be half a line.
-        var lines = output.split(separator: "\n", omittingEmptySubsequences: false)
-        guard lines.count > 1 else { return nil }
-        lines.removeLast()
+        //
+        // The one exception is a final fragment that IS the sentinel. The
+        // sentinel is the LAST line Hermes's block prints, so it cannot be a
+        // truncation of something longer — and its presence is what proves
+        // the lines above it are whole. Requiring a newline after it made
+        // completion depend on Hermes printing something MORE, which on the
+        // device flow it does not do until the user has approved: the sheet
+        // sat on its spinner holding a code it had already received.
+        //
+        // CRLF is normalised BEFORE the split, not trimmed after it. Swift
+        // treats `\r\n` as a SINGLE grapheme cluster, so
+        // `split(separator: "\n")` does not see it at all — a CRLF stream
+        // came through as one enormous "line" and nothing matched. Same
+        // trap `YAMLScalar.containsLineBreak` documents from P19.
+        let normalized = output.replacingOccurrences(of: "\r\n", with: "\n")
+        var lines = normalized.split(separator: "\n", omittingEmptySubsequences: false)
+        if !isSentinelLine(lines.last) {
+            guard lines.count > 1 else { return nil }
+            lines.removeLast()
+        }
         for rawLine in lines {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            // `.whitespacesAndNewlines`, not `.whitespaces`: the latter does
+            // not contain `\r`, so on a CRLF stream every line kept a
+            // trailing carriage return — "Copy" put `WDJB-MJHT\r` on the
+            // pasteboard and the URL failed to parse. Nothing in the current
+            // `-T`/pipe transports produces CRLF, which is exactly why this
+            // would have been found by a user and not by us.
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             if line.contains(Self.completionSentinel) { sawSentinel = true }
             if url == nil, let range = line.range(of: "MCP OAuth: open ") {
                 // "…open <url> on any device." — take the URL token, which
@@ -89,12 +112,21 @@ public struct HermesMCPDevicePrompt: Sendable, Equatable {
                 }
             } else if code == nil, line.hasPrefix("Code: ") {
                 let candidate = String(line.dropFirst("Code: ".count))
-                    .trimmingCharacters(in: .whitespaces)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 if !candidate.isEmpty { code = candidate }
             }
             if url != nil && code != nil && sawSentinel { break }
         }
         guard sawSentinel, let url, let code else { return nil }
         return HermesMCPDevicePrompt(verificationURL: url, userCode: code)
+    }
+
+    /// Whether an UNTERMINATED trailing fragment already carries the
+    /// sentinel — the only fragment safe to read without its newline.
+    private static func isSentinelLine(_ fragment: Substring?) -> Bool {
+        guard let fragment else { return false }
+        return fragment
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .contains(Self.completionSentinel)
     }
 }

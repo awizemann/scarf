@@ -5,9 +5,17 @@ import ScarfCore
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/matrix
 @Observable
 @MainActor
-final class MatrixSetupViewModel: OutcomeMessageHosting {
+final class MatrixSetupViewModel: PlatformSetupForm {
     let context: ServerContext
-    init(context: ServerContext = .local) { self.context = context }
+    /// C10 test seam — nil in production. See ``PlatformSetupForm``.
+    let cliRunner: HermesCLIRunner?
+    /// Load/save in-flight flags owned by ``PlatformSetupForm``.
+    var isLoading = false
+    var isSaving = false
+    init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
+        self.context = context
+        self.cliRunner = cliRunner
+    }
 
     var homeserver: String = ""
     var accessToken: String = ""        // preferred
@@ -28,29 +36,25 @@ final class MatrixSetupViewModel: OutcomeMessageHosting {
     /// VoiceOver announcement come from this, never from the prose.
     var messageIsFailure = false
 
+    /// Off the main actor (C10) — see ``PlatformSetupForm``.
     func load() {
-        // GW-F6 / audit DI L10: an unreadable `.env` used to arrive as an
-        // EMPTY one, so this form rendered blank fields over live values and
-        // a Save then commented those keys out. Absent is still an empty
-        // form (correct — nothing is set yet); unreadable says so.
-        let (env, envReadFailure) = PlatformSetupHelpers.loadEnv(context: context)
-        if let envReadFailure {
-            message = envReadFailure
-            messageIsFailure = true
-        }
-        homeserver = env["MATRIX_HOMESERVER"] ?? ""
-        accessToken = env["MATRIX_ACCESS_TOKEN"] ?? ""
-        userID = env["MATRIX_USER_ID"] ?? ""
-        password = env["MATRIX_PASSWORD"] ?? ""
-        allowedUsers = env["MATRIX_ALLOWED_USERS"] ?? ""
-        homeRoom = env["MATRIX_HOME_ROOM"] ?? ""
-        recoveryKey = env["MATRIX_RECOVERY_KEY"] ?? ""
-        encryption = PlatformSetupHelpers.parseEnvBool(env["MATRIX_ENCRYPTION"])
+        loadSnapshot { [weak self] snapshot in
+            guard let self else { return }
+            let env = snapshot.env
+            homeserver = env["MATRIX_HOMESERVER"] ?? ""
+            accessToken = env["MATRIX_ACCESS_TOKEN"] ?? ""
+            userID = env["MATRIX_USER_ID"] ?? ""
+            password = env["MATRIX_PASSWORD"] ?? ""
+            allowedUsers = env["MATRIX_ALLOWED_USERS"] ?? ""
+            homeRoom = env["MATRIX_HOME_ROOM"] ?? ""
+            recoveryKey = env["MATRIX_RECOVERY_KEY"] ?? ""
+            encryption = PlatformSetupHelpers.parseEnvBool(env["MATRIX_ENCRYPTION"])
 
-        let cfg = HermesFileService(context: context).loadConfig().matrix
-        requireMention = cfg.requireMention
-        autoThread = cfg.autoThread
-        dmMentionThreads = cfg.dmMentionThreads
+            guard let cfg = snapshot.config?.matrix else { return }
+            requireMention = cfg.requireMention
+            autoThread = cfg.autoThread
+            dmMentionThreads = cfg.dmMentionThreads
+        }
     }
 
     func save() {
@@ -69,6 +73,6 @@ final class MatrixSetupViewModel: OutcomeMessageHosting {
             "matrix.auto_thread": PlatformSetupHelpers.envBool(autoThread),
             "matrix.dm_mention_threads": PlatformSetupHelpers.envBool(dmMentionThreads)
         ]
-        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV))
+        commitSave(envPairs: envPairs, configKV: configKV)
     }
 }

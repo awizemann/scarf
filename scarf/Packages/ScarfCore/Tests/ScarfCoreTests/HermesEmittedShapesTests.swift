@@ -167,7 +167,10 @@ import Foundation
             in: yaml, section: "slack", key: "opts", pairs: [("a", "1")]
         )
         if let loaded = HermesEmission.pyYAMLLoad(mapped) {
-            #expect(loaded.contains(#""opts": {"a": 1}"#))
+            // P19: an implicitly-typed scalar is QUOTED, so the string "1"
+            // the caller passed stays the string "1" instead of PyYAML
+            // retyping it to an int on the way back in.
+            #expect(loaded.contains(#""opts": {"a": "1"}"#))
         }
     }
 
@@ -182,9 +185,15 @@ import Foundation
             in: yaml, platform: "telegram", key: "allowed_chats", items: ["12345"]
         )
         if let loaded = HermesEmission.pyYAMLLoad(updated) {
-            // The writer emits the numeric id unquoted, so PyYAML reads an
-            // int — Hermes's own shape for Telegram chat ids.
-            #expect(loaded.contains(#""allowed_chats": [12345]"#))
+            // P19: the numeric id is QUOTED, so PyYAML reads the string the
+            // user typed rather than retyping it to an int. Hermes reads it
+            // identically — every allowlist consumer coerces the LIST branch
+            // with `str(part).strip()`
+            // (`plugins/platforms/telegram/adapter.py:5019-5026`,
+            // `plugins/platforms/slack/adapter.py:5960-5973` at v2026.9.7) —
+            // and a quoted id is the only spelling that survives a leading
+            // zero or a `0x` prefix.
+            #expect(loaded.contains(#""allowed_chats": ["12345"]"#))
             #expect(loaded.contains(#""busy_ack_enabled": true"#))
         }
     }

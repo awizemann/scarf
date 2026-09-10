@@ -1,8 +1,9 @@
 import Foundation
 
 /// Hermes v0.20 reasoning-effort vocabulary — verbatim mirror of
-/// `VALID_REASONING_EFFORTS` in hermes_constants.py:942 plus the "none"
-/// disable alias `parse_reasoning_effort` accepts (hermes_constants.py:967).
+/// `VALID_REASONING_EFFORTS` (`hermes_constants.py:873` at `v2026.9.7`)
+/// plus the disable aliases `parse_reasoning_effort` accepts (function at
+/// `:876`, alias set `{"none", "false", "disabled"}` at `:885`).
 /// `max` and `ultra` are the v0.20 additions (#62650).
 public enum HermesReasoningEffort {
     /// Levels valid on every supported host (pre-v0.20 vocabulary).
@@ -10,10 +11,12 @@ public enum HermesReasoningEffort {
     /// v0.20 additions.
     public static let v020Levels = ["max", "ultra"]
 
-    /// Disable aliases `parse_reasoning_effort` treats identically to
-    /// "none" (hermes_constants.py:967): a hand-edited `disabled` / `false`
-    /// / `off` row is Hermes-valid and must pass validation verbatim — the
-    /// UI never offers these, but it must not reject (or rewrite) them.
+    /// Spellings validation must accept for a hand-edited row, beyond
+    /// `VALID_REASONING_EFFORTS` + "none". `disabled` and `false` are in
+    /// `parse_reasoning_effort`'s own alias set (`hermes_constants.py:885`);
+    /// `off` is NOT — it only disables by way of YAML bool coercion, so the
+    /// writer canonicalises it (see `canonicalDisableSpelling`). The UI never
+    /// offers any of the three, but must not reject a row that uses them.
     public static let disableAliases = ["disabled", "false", "off"]
 
     /// Effort options to offer for the given host generation.
@@ -51,7 +54,9 @@ public enum PowerSettingsWriter {
         capabilities: HermesCapabilities
     ) -> String? {
         guard capabilities.isV020OrLater else { return nil }
-        let cleaned = pairs.filter { !$0.key.trimmingCharacters(in: .whitespaces).isEmpty }
+        let cleaned = pairs
+            .filter { !$0.key.trimmingCharacters(in: .whitespaces).isEmpty }
+            .map { (key: $0.key, value: Self.canonicalDisableSpelling($0.value)) }
         guard cleaned.allSatisfy({ HermesReasoningEffort.isValid($0.value) }) else { return nil }
         // A refusal (a config.yaml shape the line editor can't rewrite
         // without clobbering it) reports as the same nil the pre-v0.20 and
@@ -62,6 +67,22 @@ public enum PowerSettingsWriter {
             key: "reasoning_overrides",
             pairs: cleaned
         ).appliedText(orUnchanged: yaml)
+    }
+
+    /// `off` is a disable alias ONLY by way of YAML's bool coercion: bare
+    /// `off` loads as Python `False` and `parse_reasoning_effort` does
+    /// `str(False).lower()` → `"false"` → disabled
+    /// (`hermes_constants.py:876-889` at `v2026.9.7`). Since P19 the writer
+    /// QUOTES implicitly-typed scalars, which keeps `off` a string — and the
+    /// string `"off"` is in neither of that function's sets, so it would
+    /// silently mean "use the default effort" instead of "disabled".
+    /// Canonicalise it to `none`, which is the spelling the function accepts
+    /// literally and the one the picker offers. `false` and `disabled` are
+    /// already accepted as strings, so they are written as typed.
+    private static func canonicalDisableSpelling(_ effort: String) -> String {
+        effort.trimmingCharacters(in: .whitespaces).lowercased() == "off"
+            ? "none"
+            : effort
     }
 
     /// Replace the `model_catalog.excluded_providers:` list. Returns nil on

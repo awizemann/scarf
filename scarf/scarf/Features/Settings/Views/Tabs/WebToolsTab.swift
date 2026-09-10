@@ -3,7 +3,10 @@ import ScarfCore
 import ScarfDesign
 
 /// Web Tools tab — search + extract backend pickers. Pre-v0.13 hosts
-/// see a single "Backend" row writing the shared `web.backend` key.
+/// (and only those: an UNDETECTED host whose config already sets either
+/// override key gets the split editor, per
+/// `WebToolsBackendRoster.editorStyle`) see a single "Backend" row writing
+/// the shared `web.backend` key.
 /// v0.13+ hosts see two rows writing the per-capability override keys
 /// (`web.search_backend` + `web.extract_backend`; "" = inherit
 /// `web.backend`); SearXNG appears in the search picker only because
@@ -12,8 +15,16 @@ struct WebToolsTab: View {
     @Bindable var viewModel: SettingsViewModel
     @Environment(\.hermesCapabilities) private var capabilitiesStore
 
+    /// Not a bare `hasWebToolsBackendSplit` read — see
+    /// `WebToolsBackendRoster.editorStyle` for why an undetected host whose
+    /// config already names a per-capability override gets the split editor
+    /// anyway.
     private var split: Bool {
-        capabilitiesStore?.capabilities.hasWebToolsBackendSplit ?? false
+        WebToolsBackendRoster.editorStyle(
+            caps,
+            searchBackend: viewModel.config.webToolsSearchBackend,
+            extractBackend: viewModel.config.webToolsExtractBackend
+        ) == .split
     }
 
     // The roster lives in `WebToolsBackendRoster` (ScarfCore) so the pickers

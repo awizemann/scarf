@@ -224,13 +224,22 @@ struct HermesMCPServerV0204RegressionTests {
     }
 
     /// The shared helper, exercised directly on the shapes YAML makes legal.
+    ///
+    /// The word sets apply only to a PyYAML `str`. A BARE `1` / `0` is an
+    /// `int`, which `_parse_boolish` rejects in favour of its default
+    /// (`tools/mcp_tool_common.py:124-137` at `v2026.9.7`) — see the P24
+    /// suite. Quoted, the same digits are a `str` and do match, which is
+    /// why both spellings appear below.
     @Test func boolishHelperMirrorsHermesWordSets() {
-        for word in ["true", "TRUE", "1", "yes", "On", " yes ", "\"yes\""] {
+        for word in ["true", "TRUE", "\"1\"", "yes", "On", " yes ", "\"yes\""] {
             #expect(HermesFileService.boolish(word, default: false) == true, "\(word)")
         }
-        for word in ["false", "0", "no", "OFF", "'off'", "false  # note"] {
+        for word in ["false", "'0'", "no", "OFF", "'off'", "false  # note"] {
             #expect(HermesFileService.boolish(word, default: true) == false, "\(word)")
         }
+        // Bare digits are ints to PyYAML: the default wins, both ways.
+        #expect(HermesFileService.boolish("1", default: false) == false)
+        #expect(HermesFileService.boolish("0", default: true) == true)
         // Unrecognised and absent both fall back to the caller's default,
         // which is what Hermes does after its logger.warning.
         #expect(HermesFileService.boolish("maybe", default: true) == true)

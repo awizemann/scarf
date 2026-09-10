@@ -23,8 +23,12 @@ final class ToolsViewModel {
     var toolsets: [HermesToolset] = []
     var mcpStatus: String = ""
     var isLoading = false
-    var availablePlatforms: [HermesToolPlatform] = []
     var connectivity: [String: PlatformConnectivity] = [:]
+    /// Platforms with configuration on disk, and whether that has been read
+    /// yet. `ToolsView` needs both to answer `isVisible(on:isConfigured:)`:
+    /// an empty set before the first load means "not looked yet", not "none".
+    private(set) var configuredPlatformNames: Set<String> = []
+    private(set) var hasLoadedPlatforms = false
 
     @MainActor
     func load() async {
@@ -76,21 +80,32 @@ final class ToolsViewModel {
     /// Enumerate all known platforms and compute a connectivity status per platform.
     ///
     /// Source of truth:
-    /// - `KnownPlatforms.all` defines every platform the app knows about (always show these).
+    /// - `KnownPlatforms.all` defines every platform the app knows about.
     /// - `~/.hermes/gateway_state.json` tells us which are currently connected.
     /// - `~/.hermes/config.yaml` top-level keys (`discord:`, `whatsapp:`, etc.) tell us which have been configured.
+    ///
+    /// The ROSTER is not "always show these": the picker feeds
+    /// `hermes tools enable … --platform <name>`, so offering a platform the
+    /// host has no adapter for is a guaranteed CLI failure (charter C5).
+    /// `ToolsView` filters this list through `KnownPlatforms.visible(on:…)`
+    /// — the same seam the Platforms list uses — rather than each surface
+    /// inventing its own rule.
     @MainActor
     private func loadPlatforms() async {
         let ctx = context
-        let yaml: String = await Task.detached {
-            ctx.readText(ctx.paths.configYAML) ?? ""
-        }.value
-
         let gatewayState: GatewayState? = await Task.detached {
             HermesFileService(context: ctx).loadGatewayState()
         }.value
 
-        let configuredNames = Self.parseConfiguredPlatforms(yaml: yaml)
+        // ONE detector, shared with the Platforms list. This surface used to
+        // carry its own `hasSuffix(":")` scan, which saw neither a
+        // preserved-empty section (`slack: {}`) nor a nested
+        // `platforms.<name>.…` block — so with the roster now GATED on the
+        // same answer, a second, weaker detector would hide a configured row
+        // here while showing it there.
+        let configuredNames = await Task.detached {
+            PlatformsViewModel.computeConfiguredPlatforms(context: ctx)
+        }.value
         var status: [String: PlatformConnectivity] = [:]
 
         for platform in KnownPlatforms.all {
@@ -112,28 +127,8 @@ final class ToolsViewModel {
         }
 
         connectivity = status
-        availablePlatforms = KnownPlatforms.all
-        if !availablePlatforms.contains(where: { $0.name == selectedPlatform.name }),
-           let first = availablePlatforms.first {
-            selectedPlatform = first
-        }
-    }
-
-    /// Find top-level YAML keys that look like messaging platform sections.
-    /// Matches any known platform name followed by `:` at indent 0.
-    private static func parseConfiguredPlatforms(yaml: String) -> Set<String> {
-        var found: Set<String> = []
-        let knownNames = Set(KnownPlatforms.all.map(\.name))
-        for line in yaml.components(separatedBy: "\n") {
-            guard !line.isEmpty, !line.hasPrefix(" "), !line.hasPrefix("\t") else { continue }
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasSuffix(":") else { continue }
-            let name = String(trimmed.dropLast()).trimmingCharacters(in: .whitespaces)
-            if knownNames.contains(name) {
-                found.insert(name)
-            }
-        }
-        return found
+        configuredPlatformNames = configuredNames
+        hasLoadedPlatforms = true
     }
 
     @MainActor

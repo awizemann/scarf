@@ -115,7 +115,10 @@ final class GatewayBehaviorViewModel: OutcomeMessageHosting {
     ///    `slash_command_notice_ttl_seconds` key were never read by any
     ///    Hermes version and are no longer written.)
     func save() {
-        guard !isSaving else { return }
+        // `!isLoading` too: the form renders this VM's DEFAULTS until the
+        // detached load lands, so a save from there would write them over
+        // whatever config.yaml actually holds.
+        guard !isSaving, !isLoading else { return }
         isSaving = true
         dismissMessage()
 

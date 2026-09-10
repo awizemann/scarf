@@ -446,7 +446,6 @@ import Foundation
 
     @Test func v016FlagsAllOnForV016Host() {
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.16.0 (2026.6.5)")
-        #expect(caps.hasSessionsRename)
         #expect(caps.hasSessionsOptimize)
         #expect(caps.hasKanbanGoalMode)
         #expect(caps.hasInsightsCommand)
@@ -457,7 +456,6 @@ import Foundation
     @Test func v015HostHidesV016Flags() {
         // Every v0.16 flag must stay off on a pristine v0.15 host.
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.15.2 (2026.5.29)")
-        #expect(!caps.hasSessionsRename)
         #expect(!caps.hasSessionsOptimize)
         #expect(!caps.hasKanbanGoalMode)
         #expect(!caps.hasInsightsCommand)
@@ -494,7 +492,7 @@ import Foundation
         #expect(!caps.hasTelegramRichMessages)
         #expect(!caps.isV017OrLater)
         // v0.16 surfaces stay alive on a v0.16 host.
-        #expect(caps.hasSessionsRename)
+        #expect(caps.hasSessionsOptimize)
         #expect(caps.isV016OrLater)
     }
 
@@ -622,12 +620,12 @@ import Foundation
 
     @Test func v020FlagsAllOnForV020Host() {
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)")
-        #expect(caps.hasCompressCommand)
         #expect(caps.hasCuratorAdopt)
         #expect(caps.hasApprovalsSuggest)
         #expect(caps.hasCronRuns)
         #expect(caps.hasSessionsExportFormats)
         #expect(caps.hasApprovalSmartPolicy)
+        #expect(caps.hasACPCompressSpelling)
         #expect(caps.hasBitwardenEncryptedCache)
         #expect(caps.hasCommandSecretSource)
         #expect(caps.hasSharedMetricsTelemetry)
@@ -643,12 +641,18 @@ import Foundation
         // The seven re-floored surfaces are deliberately NOT in this list —
         // they ship in v2026.7.30 = 0.19.1 and are asserted on below.
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.19.2 (2026.7.20)")
-        #expect(!caps.hasCompressCommand)
-        #expect(!caps.hasCuratorAdopt)
-        #expect(!caps.hasApprovalsSuggest)
-        #expect(!caps.hasCronRuns)
-        #expect(!caps.hasSessionsExportFormats)
         #expect(!caps.isV020OrLater)
+        // Re-floored in P23: every one of these landed BELOW v0.20 and a
+        // 0.19.2 host genuinely has them. `hasCuratorAdopt` /
+        // `hasApprovalsSuggest` → 0.19.1 (v2026.7.30), `hasCronRuns` →
+        // 0.19.0 (v2026.7.20), `hasSessionsExportFormats` → 0.18.1
+        // (v2026.7.7). `hasCompressCommand` became `hasACPCompressSpelling`,
+        // floored at 0.19.1 — the tag where the ACP adapter renamed
+        // `/compact` to `/compress` — so a 0.19.2 host has it.
+        #expect(caps.hasCuratorAdopt)
+        #expect(caps.hasApprovalsSuggest)
+        #expect(caps.hasCronRuns)
+        #expect(caps.hasSessionsExportFormats)
         // Re-floored to v0.19.1 (v2026.7.30's pyproject.toml says 0.19.1),
         // so a 0.19.2 host keeps them.
         #expect(caps.hasApprovalSmartPolicy)
@@ -671,7 +675,6 @@ import Foundation
         // A future v0.20.x patch should still enable every v0.20 flag —
         // patches don't roll back capability gates.
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.1 (2026.8.10)")
-        #expect(caps.hasCompressCommand)
         #expect(caps.hasCuratorAdopt)
         #expect(caps.hasApprovalsSuggest)
         #expect(caps.hasCronRuns)
@@ -784,8 +787,8 @@ import Foundation
     }
 
     @Test func v020HostHidesV0204Flags() {
-        // A pristine v0.20.0 host must not see any v0.20.4 flag — a plain
-        // minor check (isV020OrLater) would wrongly light these up.
+        // A pristine v0.20.0 host must not see any flag in this group — a
+        // plain minor check (isV020OrLater) would wrongly light them up.
         let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)")
         #expect(!caps.hasCronPauseMarkerGate)
         #expect(!caps.hasBuiltinPersonalitiesInCode)
@@ -795,24 +798,30 @@ import Foundation
         #expect(!caps.hasSkillsProjectTrust)
         #expect(!caps.hasSkillsUpdateForce)
         #expect(!caps.hasMCPIdentityHeader)
+        #expect(!caps.isV0201OrLater)
+        #expect(!caps.isV0203OrLater)
         #expect(!caps.isV0204OrLater)
         // v0.20 surfaces stay alive on a v0.20.0 host.
-        #expect(caps.hasCompressCommand)
+        #expect(caps.hasCuratorAdopt)
         #expect(caps.isV020OrLater)
     }
 
-    @Test func v0203HostHidesV0204Flags() {
-        // Degradation must hold through the last pre-0.20.4 patch too.
-        let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.3 (2026.8.15)")
-        #expect(!caps.hasCronPauseMarkerGate)
-        #expect(!caps.hasBuiltinPersonalitiesInCode)
-        #expect(!caps.hasCuratorLedger)
-        #expect(!caps.hasCuratorPurge)
-        #expect(!caps.hasCuratorEntryRollback)
-        #expect(!caps.hasSkillsProjectTrust)
-        #expect(!caps.hasSkillsUpdateForce)
+    @Test func v0203HostHidesOnlyTheGenuineV0204Flag() {
+        // P23 re-floor: of this group only `hasMCPIdentityHeader` is really
+        // a v0.20.4 surface. The other seven land at 0.20.1 / 0.20.3 and a
+        // 0.20.3 host has every one of them.
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.20.3 (2026.8.16.2)")
         #expect(!caps.hasMCPIdentityHeader)
         #expect(!caps.isV0204OrLater)
+        #expect(caps.hasCronPauseMarkerGate)
+        #expect(caps.hasBuiltinPersonalitiesInCode)
+        #expect(caps.hasCuratorLedger)
+        #expect(caps.hasCuratorPurge)
+        #expect(caps.hasCuratorEntryRollback)
+        #expect(caps.hasSkillsProjectTrust)
+        #expect(caps.hasSkillsUpdateForce)
+        #expect(caps.isV0201OrLater)
+        #expect(caps.isV0203OrLater)
         #expect(caps.isV020OrLater)
     }
 
@@ -1064,6 +1073,7 @@ import Foundation
         #expect(caps.hasKanbanCompletionContract)
         #expect(caps.hasAuthPriority)
         #expect(caps.hasMCPOAuthFlow)
+        #expect(caps.hasSessionsExportNoRedact)
         #expect(caps.hasServiceTierBoundedModes)
         #expect(caps.hasSharedMetricsSend)
         #expect(caps.hasPerplexityWebBackend)
@@ -1093,6 +1103,11 @@ import Foundation
         #expect(!caps.hasKanbanCompletionContract)
         #expect(!caps.hasAuthPriority)
         #expect(!caps.hasMCPOAuthFlow)
+        // `sessions export --no-redact` is NOT a v0.21.1 surface: argparse
+        // registers it at `hermes_cli/main.py:13567` @ v2026.7.7 (0.18.1),
+        // so it stays ON here — the same floor as `--format trace` itself.
+        #expect(caps.hasSessionsExportNoRedact)
+        #expect(caps.hasSessionsExportFormats)
         #expect(!caps.hasServiceTierBoundedModes)
         #expect(!caps.hasSharedMetricsSend)
         #expect(!caps.hasPerplexityWebBackend)
@@ -1115,6 +1130,7 @@ import Foundation
         #expect(caps.hasKanbanCompletionContract)
         #expect(caps.hasAuthPriority)
         #expect(caps.hasMCPOAuthFlow)
+        #expect(caps.hasSessionsExportNoRedact)
         #expect(caps.hasServiceTierBoundedModes)
         #expect(caps.hasSharedMetricsSend)
         #expect(caps.hasPerplexityWebBackend)
@@ -1124,6 +1140,32 @@ import Foundation
         #expect(!HermesCapabilities.empty.isV0211OrLater)
         #expect(!HermesCapabilities.empty.hasPluginsCompat)
         #expect(!HermesCapabilities.empty.hasPerplexityWebBackend)
+        #expect(!HermesCapabilities.empty.hasSessionsExportNoRedact)
+    }
+
+    /// `sessions export --no-redact` four-way: the floor is v0.18.1, the tag
+    /// that registered the option (`hermes_cli/main.py:13567` @ v2026.7.7),
+    /// NOT v0.21.1 — and it moves with `--format trace`, since an export
+    /// cannot opt out of redacting a format the host does not offer.
+    @Test func sessionsExportNoRedactFloorIsV0181() {
+        let below = HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)")
+        #expect(!below.hasSessionsExportNoRedact)
+        #expect(!below.hasSessionsExportFormats)
+
+        let at = HermesCapabilities.parseLine("Hermes Agent v0.18.1 (2026.7.7)")
+        #expect(at.hasSessionsExportNoRedact)
+        #expect(at.hasSessionsExportFormats)
+
+        // Every release in between keeps it — this is the span the round-2
+        // pass force-disabled.
+        for line in ["Hermes Agent v0.19.0 (2026.7.20)",
+                     "Hermes Agent v0.20.0 (2026.8.3)",
+                     "Hermes Agent v0.21.0 (2026.8.31)",
+                     "Hermes Agent v0.21.1 (2026.9.7)"] {
+            #expect(HermesCapabilities.parseLine(line).hasSessionsExportNoRedact)
+        }
+
+        #expect(!HermesCapabilities.empty.hasSessionsExportNoRedact)
     }
 
     @Test func v0211FlagsStillEnableEveryOlderFlag() {
@@ -1257,5 +1299,292 @@ import Foundation
         #expect(HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)").hasDebugShareYes)
         #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasDebugShareYes)
         #expect(!HermesCapabilities.empty.hasDebugShareYes)
+    }
+
+    // MARK: - P23 re-floor walks (round-2 whole-surface audit)
+    //
+    // One test per re-floored flag, each asserting the floor tag ON and the
+    // tag immediately BELOW it OFF, which is what makes the test fail if the
+    // floor is reverted: the old v0.20 / v0.20.4 literals all fail the
+    // floor-on half.
+
+    /// `hermes cron runs` — `hermes_cli/subcommands/cron.py:159` at v2026.7.20
+    /// (0.19.0); the symbol `cron_runs` exists in no file at v2026.7.7.2.
+    @Test func cronRunsFloorIsV0190() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.18.2 (2026.7.7.2)").hasCronRuns)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.7.20)").hasCronRuns)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasCronRuns)
+        #expect(!HermesCapabilities.empty.hasCronRuns)
+    }
+
+    /// `curator adopt` / `curator list-unmanaged` — `hermes_cli/curator.py:344`
+    /// and `:748` at v2026.7.30 (0.19.1); neither at v2026.7.20 (0.19.0).
+    @Test func curatorAdoptFloorIsV0191() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.7.20)").hasCuratorAdopt)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.19.1 (2026.7.30)").hasCuratorAdopt)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasCuratorAdopt)
+        #expect(!HermesCapabilities.empty.hasCuratorAdopt)
+    }
+
+    /// `hermes_cli/approvals_suggest.py` first exists at v2026.7.30 (0.19.1).
+    @Test func approvalsSuggestFloorIsV0191() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.7.20)").hasApprovalsSuggest)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.19.1 (2026.7.30)").hasApprovalsSuggest)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasApprovalsSuggest)
+        #expect(!HermesCapabilities.empty.hasApprovalsSuggest)
+    }
+
+    /// `sessions export --format` with the five choices —
+    /// `hermes_cli/main.py:13546` at v2026.7.7 (0.18.1); `qmd` occurs nowhere
+    /// under `hermes_cli/` at v2026.7.1 (0.18.0).
+    @Test func sessionsExportFormatsFloorIsV0181() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)").hasSessionsExportFormats)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.18.1 (2026.7.7)").hasSessionsExportFormats)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasSessionsExportFormats)
+        #expect(!HermesCapabilities.empty.hasSessionsExportFormats)
+    }
+
+    /// `hermes_cli/personality.py` first exists at v2026.8.13 (0.20.1).
+    @Test func builtinPersonalitiesInCodeFloorIsV0201() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)").hasBuiltinPersonalitiesInCode)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.1 (2026.8.13)").hasBuiltinPersonalitiesInCode)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.3 (2026.8.16.2)").hasBuiltinPersonalitiesInCode)
+        #expect(!HermesCapabilities.empty.hasBuiltinPersonalitiesInCode)
+    }
+
+    /// `cron/jobs.py:482` `_has_pause_marker` at v2026.8.13 (0.20.1); the
+    /// symbol is absent from that file at v2026.8.3 (0.20.0).
+    @Test func cronPauseMarkerGateFloorIsV0201() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)").hasCronPauseMarkerGate)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.1 (2026.8.13)").hasCronPauseMarkerGate)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasCronPauseMarkerGate)
+        #expect(!HermesCapabilities.empty.hasCronPauseMarkerGate)
+    }
+
+    /// The five curator/skills verbs land together at v2026.8.16.2 (0.20.3)
+    /// and are all absent at v2026.8.16 (0.20.2).
+    @Test func curatorAndSkillsVerbFloorsAreV0203() {
+        let v0202 = HermesCapabilities.parseLine("Hermes Agent v0.20.2 (2026.8.16)")
+        #expect(!v0202.hasCuratorLedger)
+        #expect(!v0202.hasCuratorPurge)
+        #expect(!v0202.hasCuratorEntryRollback)
+        #expect(!v0202.hasSkillsProjectTrust)
+        #expect(!v0202.hasSkillsUpdateForce)
+
+        let v0203 = HermesCapabilities.parseLine("Hermes Agent v0.20.3 (2026.8.16.2)")
+        #expect(v0203.hasCuratorLedger)
+        #expect(v0203.hasCuratorPurge)
+        #expect(v0203.hasCuratorEntryRollback)
+        #expect(v0203.hasSkillsProjectTrust)
+        #expect(v0203.hasSkillsUpdateForce)
+
+        #expect(!HermesCapabilities.empty.hasCuratorLedger)
+        #expect(!HermesCapabilities.empty.hasSkillsUpdateForce)
+    }
+
+    @Test func isV0201OrLater_boundaries() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)").isV0201OrLater)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.1 (2026.8.13)").isV0201OrLater)
+        #expect(!HermesCapabilities.empty.isV0201OrLater)
+    }
+
+    // MARK: - P29: the three P23 flags that shipped with no boundary tests
+
+    /// `hasGeminiKittenTTS` — four-way. The floor is v0.11.0, evidenced by the
+    /// provider DISPATCH arms `elif provider == "gemini"` / `== "kittentts"`
+    /// (`tools/tts_tool.py:1024,1038` @ v2026.4.23), not by
+    /// `BUILTIN_TTS_PROVIDERS`, which does not exist until v2026.4.30
+    /// (0.12.0). `tools/tts_tool.py` exists at v2026.4.16 (0.10.0) and
+    /// contains neither name.
+    @Test func geminiKittenTTSFloorIsV011() {
+        // Parse + degradation: the release below has no such providers, so
+        // offering them would write a `tts.provider` the host cannot dispatch.
+        let v010 = HermesCapabilities.parseLine("Hermes Agent v0.10.0 (2026.4.16)")
+        #expect(v010.detected)
+        #expect(!v010.hasGeminiKittenTTS)
+
+        // At the floor.
+        let v011 = HermesCapabilities.parseLine("Hermes Agent v0.11.0 (2026.4.23)")
+        #expect(v011.hasGeminiKittenTTS)
+
+        // All-on at the target, and a patch above it does not roll back.
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasGeminiKittenTTS)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.11.1 (2026.4.26)").hasGeminiKittenTTS)
+
+        // Undetected host behaves as the older one.
+        #expect(!HermesCapabilities.empty.hasGeminiKittenTTS)
+    }
+
+    /// `hasElevenLabsDeepInfraSTT` — four-way. `BUILTIN_STT_PROVIDERS` gains
+    /// both names at v2026.7.20 (0.19.0), mirrored by
+    /// `agent/transcription_registry.py::_BUILTIN_NAMES:47-48`; v2026.7.7.2
+    /// (0.18.2) has neither.
+    @Test func elevenLabsDeepInfraSTTFloorIsV019() {
+        let v0182 = HermesCapabilities.parseLine("Hermes Agent v0.18.2 (2026.7.7.2)")
+        #expect(!v0182.hasElevenLabsDeepInfraSTT)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.7.20)").hasElevenLabsDeepInfraSTT)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasElevenLabsDeepInfraSTT)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.19.1 (2026.7.30)").hasElevenLabsDeepInfraSTT)
+        #expect(!HermesCapabilities.empty.hasElevenLabsDeepInfraSTT)
+        // It shares its tag with the DeepInfra TTS side, so the two must move
+        // together.
+        #expect(!v0182.hasDeepInfraTTS)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.7.20)").hasDeepInfraTTS)
+    }
+
+    /// `isV011OrLater` — four-way, through its one consumer. The boundary is a
+    /// DEFAULT that changed inside the supported window:
+    /// `agent.gateway_notify_interval` is `600` at `hermes_cli/config.py:373`
+    /// @ v2026.4.16 (0.10.0) and `180` at `:391` @ v2026.4.23 (0.11.0). An
+    /// absent key therefore displays differently per host, which is the only
+    /// honest thing to show.
+    @Test func isV011OrLaterFloorAndItsNotifyIntervalConsumer() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.10.0 (2026.4.16)").isV011OrLater)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.11.0 (2026.4.23)").isV011OrLater)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").isV011OrLater)
+        #expect(!HermesCapabilities.empty.isV011OrLater)
+
+        // The consumer: an ABSENT key resolves to the host's own default…
+        let config = HermesConfig(yaml: "agent:\n  model: kimi-k2\n")
+        #expect(config.gatewayNotifyInterval == nil)
+        #expect(config.displayGatewayNotifyInterval(
+            capabilities: HermesCapabilities.parseLine("Hermes Agent v0.10.0 (2026.4.16)")) == 600)
+        #expect(config.displayGatewayNotifyInterval(
+            capabilities: HermesCapabilities.parseLine("Hermes Agent v0.11.0 (2026.4.23)")) == 180)
+        // …an undetected host to the older 600…
+        #expect(config.displayGatewayNotifyInterval(capabilities: .empty) == 600)
+        // …and a PRESENT key wins on every host (the patch-still-on arm).
+        let stored = HermesConfig(yaml: "agent:\n  gateway_notify_interval: 42\n")
+        #expect(stored.gatewayNotifyInterval == 42)
+        for line in ["Hermes Agent v0.10.0 (2026.4.16)", "Hermes Agent v0.21.1 (2026.9.7)"] {
+            #expect(stored.displayGatewayNotifyInterval(
+                capabilities: HermesCapabilities.parseLine(line)) == 42)
+        }
+    }
+
+    // MARK: - P23 gate removals (floor below the supported minimum)
+
+    /// **The consumer pin lives in the Mac target**, because the ungating
+    /// lives in a VIEW: see
+    /// `scarfTests/HermesP29RoundThreeRemediationTests.theRenameMenuItemIsRenderedUnconditionally`,
+    /// which fails if the `ChatSessionListPane` menu item is wrapped in a
+    /// capability check again. This test can only say that nothing here claims
+    /// a rename floor.
+    ///
+    /// `sessions rename` exists at EVERY tag — `hermes_cli/main.py:2373` at
+    /// v2026.3.12 (0.2.0), below Scarf's v0.6.0 minimum — so there is no
+    /// flag to read. The rename context-menu item in `ChatSessionListPane`
+    /// is unconditional; this pins the absence of a gate by asserting that
+    /// the oldest supported host is not distinguishable from the target on
+    /// any sessions-rename-shaped capability. (Compile-time proof that
+    /// `hasSessionsRename` is gone lives in the file itself — referencing it
+    /// here would not build.)
+    @Test func sessionsRenameIsUngated() {
+        // The one sessions flag that IS release-gated still gates; nothing
+        // alongside it claims a rename floor.
+        let v012 = HermesCapabilities.parseLine("Hermes Agent v0.12.0 (2026.4.30)")
+        #expect(!v012.hasSessionsOptimize)
+        #expect(v012.detected)
+    }
+
+    /// The compress slash command's spelling is ACP-gated at v0.19.1, and
+    /// BOTH spellings are pinned on both sides of the floor. The ACP adapter
+    /// has no alias either way (`acp_adapter/commands.py:88-95` @ v2026.9.7,
+    /// `acp_adapter/server.py:1743-1748` @ v2026.7.20 — unknown commands fall
+    /// through to the LLM), so sending the other name is a silently burned
+    /// turn, not an error. `_SLASH_COMMANDS` says `compact` at
+    /// `acp_adapter/server.py:459` @ v2026.7.20 (0.19.0) and `compress` at
+    /// `:574` @ v2026.7.30 (0.19.1).
+    @Test func compressSlashCommandSpellingFollowsTheACPFloor() {
+        // Below the floor — and an undetected host, which must behave as the
+        // older one (C1) — the command is `/compact`.
+        let below = [
+            HermesCapabilities.empty,
+            HermesCapabilities.parseLine("Hermes Agent v0.12.0 (2026.4.30)"),
+            HermesCapabilities.parseLine("Hermes Agent v0.18.0 (2026.7.1)"),
+            HermesCapabilities.parseLine("Hermes Agent v0.19.0 (2026.7.20)")
+        ]
+        for caps in below {
+            #expect(!caps.hasACPCompressSpelling, "\(caps.versionLine)")
+            #expect(RichChatViewModel.compressSlashName(capabilities: caps) == "compact")
+            #expect(RichChatViewModel.compressSlashCommand(capabilities: caps) == "/compact")
+            #expect(
+                RichChatViewModel.compressSlashCommand(capabilities: caps, focus: " auth ")
+                    == "/compact auth"
+            )
+            let names = RichChatViewModel.alwaysAvailableCommands(
+                capabilities: caps,
+                hasActiveSession: true
+            ).map(\.name)
+            #expect(names.contains("compact"), "\(caps.versionLine)")
+            #expect(!names.contains("compress"), "\(caps.versionLine)")
+        }
+
+        // At and above the floor it is `/compress`.
+        let atOrAbove = [
+            HermesCapabilities.parseLine("Hermes Agent v0.19.1 (2026.7.30)"),
+            HermesCapabilities.parseLine("Hermes Agent v0.20.0 (2026.8.3)"),
+            HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+        ]
+        for caps in atOrAbove {
+            #expect(caps.hasACPCompressSpelling, "\(caps.versionLine)")
+            #expect(RichChatViewModel.compressSlashName(capabilities: caps) == "compress")
+            #expect(RichChatViewModel.compressSlashCommand(capabilities: caps) == "/compress")
+            #expect(
+                RichChatViewModel.compressSlashCommand(capabilities: caps, focus: " auth ")
+                    == "/compress auth"
+            )
+            let names = RichChatViewModel.alwaysAvailableCommands(
+                capabilities: caps,
+                hasActiveSession: true
+            ).map(\.name)
+            #expect(names.contains("compress"), "\(caps.versionLine)")
+            #expect(!names.contains("compact"), "\(caps.versionLine)")
+        }
+    }
+
+    // MARK: - P23 parser fails closed (Alan's round-2 decision 7)
+
+    /// A DATE-only version line (`v2026.9.7` — what a wrapper or shim on
+    /// PATH emits) used to parse as `SemVer(2026, 9, 7)` and light up every
+    /// floor in the file, including the write and argv gates. It must now
+    /// yield the same `.empty` a failed probe does.
+    @Test func parseRejectsDateOnlyVersionLine() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v2026.9.7")
+        #expect(caps.semver == nil)
+        #expect(!caps.detected)
+        #expect(!caps.hasCronCreatePaused)
+        #expect(!caps.hasConfigDottedKeyEscape)
+        #expect(!caps.hasCronFailureDeliver)
+        // Same through the production entry point, with the date suffix too.
+        let viaParse = HermesCapabilities.parse("Hermes Agent v2026.9.7 (2026.9.7)\n")
+        #expect(!viaParse.detected)
+        #expect(!viaParse.isV021OrLater)
+    }
+
+    /// A two-digit major is outside the recognised 0...9 range, so it fails
+    /// closed rather than reading as "newer than everything".
+    @Test func parseRejectsTwoDigitMajor() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v10.0.0").detected)
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v99.1.2 (2027.1.1)").detected)
+    }
+
+    /// The legitimate shapes must still parse — the bound is a ceiling on the
+    /// MAJOR only, not on minor or patch.
+    @Test func parseStillAcceptsLegitimateShapes() {
+        let target = HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)")
+        #expect(target.semver == HermesCapabilities.SemVer(major: 0, minor: 21, patch: 1))
+        #expect(target.dateVersion == HermesCapabilities.DateVersion(year: 2026, month: 9, day: 7))
+
+        let oldest = HermesCapabilities.parseLine("Hermes Agent v0.6.0 (2026.3.30)")
+        #expect(oldest.semver == HermesCapabilities.SemVer(major: 0, minor: 6, patch: 0))
+
+        // Single-digit majors above 0 are plausible future Hermes and stay in.
+        #expect(HermesCapabilities.parseLine("Hermes Agent v1.0.0").semver
+            == HermesCapabilities.SemVer(major: 1, minor: 0, patch: 0))
+        #expect(HermesCapabilities.parseLine("Hermes Agent v9.300.4000").semver
+            == HermesCapabilities.SemVer(major: 9, minor: 300, patch: 4000))
+        // No date suffix is still fine.
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.20.3").detected)
     }
 }

@@ -26,11 +26,24 @@ public struct HermesToolPlatform: Identifiable, Sendable {
     public let displayName: String
     public let icon: String
     /// First Hermes version that HAS this adapter, or `nil` for a row that
-    /// predates every version Scarf supports. A row is hidden on a host
-    /// below its floor — and on an undetected one — so the Platforms list
-    /// never offers a channel the host cannot listen on (C1). Each floor
-    /// was found by walking `gateway/platforms/` and `plugins/platforms/`
-    /// across EVERY tag, not by diffing two of them.
+    /// predates every version Scarf supports OR is deliberately left
+    /// ungated. A row is hidden on a host below its floor — and on an
+    /// undetected one — so the Platforms list never offers a channel the
+    /// host cannot listen on (C1). Each floor was found by walking
+    /// `gateway/platforms/` and `plugins/platforms/` across EVERY tag, not
+    /// by diffing two of them.
+    ///
+    /// **Which rows carry one** (Alan's round-2 decision 6, 2026-09-10):
+    /// every row added in a Scarf parity cycle with a known floor does —
+    /// `photon` carried one and `whatsapp_cloud`, the same v0.17 adapter,
+    /// did not, and the rest of the `-- v0.1x additions` groups were
+    /// ungated the same way. The standing exception is a row that predates
+    /// this audit cycle and has no parity-cycle floor attribution —
+    /// `bluebubbles`, which shipped as `imessage` from Scarf's own
+    /// beginnings: enforcing its 0.9 floor would REMOVE a row users already
+    /// see whenever the probe has not answered. The original core roster
+    /// (`cli` … `mattermost`) is ungated for the same reason and because
+    /// every one of those adapters predates v0.6.0 anyway.
     public let minimumVersion: HermesCapabilities.SemVer?
 
     public init(
@@ -49,6 +62,21 @@ public struct HermesToolPlatform: Identifiable, Sendable {
     public func isAvailable(on capabilities: HermesCapabilities) -> Bool {
         guard let minimumVersion else { return true }
         return capabilities.isAtLeast(minimumVersion)
+    }
+
+    /// Whether the Platforms list should show this row.
+    ///
+    /// `isAvailable` plus the widen-for-current escape hatch every other
+    /// lossy gate in Scarf carries (`HermesServiceTier.editorStyle`,
+    /// `WebToolsBackendRoster.editorStyle`): an `.empty` capabilities value
+    /// means the PROBE FAILED, not "old host", and hiding a row the user has
+    /// ALREADY configured hides their own config behind a failed probe. So a
+    /// configured platform stays listed regardless of floor — they can see
+    /// and fix what they set up. An UNconfigured row below the floor stays
+    /// hidden, which is the point of the gate: never offer a channel the
+    /// host cannot listen on.
+    public func isVisible(on capabilities: HermesCapabilities, isConfigured: Bool) -> Bool {
+        isConfigured || isAvailable(on: capabilities)
     }
 }
 
@@ -89,39 +117,42 @@ public enum KnownPlatforms {
         // distinction in the setup copy. Names match Hermes's gateway
         // platform identifiers — Teams is `teams` (plugins/platforms/teams/
         // adapter.py), not `microsoft-teams`.
-        HermesToolPlatform(name: "yuanbao", displayName: "Yuanbao 元宝", icon: "bubble.left.and.bubble.right.fill"),
-        HermesToolPlatform(name: "teams", displayName: "Microsoft Teams", icon: "person.2.fill"),
+        HermesToolPlatform(name: "yuanbao", displayName: "Yuanbao 元宝", icon: "bubble.left.and.bubble.right.fill", minimumVersion: HermesCapabilities.yuanbaoPlatformFloor),
+        HermesToolPlatform(name: "teams", displayName: "Microsoft Teams", icon: "person.2.fill", minimumVersion: HermesCapabilities.teamsPlatformFloor),
         // -- v0.13 additions ---------------------------------------------
         // Google Chat is the 20th gateway platform. Setup runs through
         // `hermes setup` rather than per-field forms because the auth
         // dance is OAuth-style and lives outside Scarf. Identifier is
         // `google_chat` (snake_case, per plugins/platforms/google_chat/
         // adapter.py) — earlier Scarf releases wrongly used `google-chat`.
-        HermesToolPlatform(name: "google_chat", displayName: "Google Chat", icon: "bubble.left.fill"),
+        HermesToolPlatform(name: "google_chat", displayName: "Google Chat", icon: "bubble.left.fill", minimumVersion: HermesCapabilities.googleChatPlatformFloor),
         // -- v0.14 additions ---------------------------------------------
         // LINE Messaging API (21st platform, first-class native adapter)
         // and SimpleX Chat (22nd platform, talks to a local
         // `simplex-chat` daemon in WebSocket mode). Identifiers match
         // Hermes's gateway platform names verbatim.
-        HermesToolPlatform(name: "line", displayName: "LINE", icon: "bubble.left.and.text.bubble.right"),
-        HermesToolPlatform(name: "simplex", displayName: "SimpleX Chat", icon: "lock.shield.fill"),
+        HermesToolPlatform(name: "line", displayName: "LINE", icon: "bubble.left.and.text.bubble.right", minimumVersion: HermesCapabilities.linePlatformFloor),
+        HermesToolPlatform(name: "simplex", displayName: "SimpleX Chat", icon: "lock.shield.fill", minimumVersion: HermesCapabilities.simplexPlatformFloor),
         // -- v0.15 additions ---------------------------------------------
         // ntfy (23rd platform) — pub/sub push via an ntfy.sh-compatible
         // server. Outbound-capable with an optional separate publish
         // topic; auth is an optional bearer token or `user:pass` Basic.
         // Identifier matches Hermes's gateway platform name verbatim.
-        HermesToolPlatform(name: "ntfy", displayName: "ntfy", icon: "bell.badge"),
+        HermesToolPlatform(name: "ntfy", displayName: "ntfy", icon: "bell.badge", minimumVersion: HermesCapabilities.ntfyPlatformFloor),
         // -- v0.17 additions ---------------------------------------------
         // WhatsApp Business Cloud API (25th platform) — Meta's hosted webhook
         // path, distinct from the older `whatsapp` web-bridge. (iMessage via
         // Photon was held back here as a moving protocol; it is rostered
         // below as of the v0.21.1 B4 sweep, still without a setup form.)
-        HermesToolPlatform(name: "whatsapp_cloud", displayName: "WhatsApp Cloud", icon: "phone.bubble.fill"),
-        // -- v0.20 additions ---------------------------------------------
+        HermesToolPlatform(name: "whatsapp_cloud", displayName: "WhatsApp Cloud", icon: "phone.bubble.fill", minimumVersion: HermesCapabilities.whatsAppCloudPlatformFloor),
+        // -- v0.19.1 additions -------------------------------------------
         // Buzz — Block's Nostr-based messenger (plugins/platforms/buzz/).
         // User-gated via `allowed_users` (hex pubkeys / npubs), so it has
-        // no GatewayAllowlistKind mapping.
-        HermesToolPlatform(name: "buzz", displayName: "Buzz", icon: "bolt.horizontal.circle"),
+        // no GatewayAllowlistKind mapping. Filed under "v0.20" until the
+        // round-2 walk: the directory first exists at tag v2026.7.30, whose
+        // `pyproject.toml` reads `version = "0.19.1"` — the same tag the
+        // v0.20 audit mis-read as an unnumbered pre-release.
+        HermesToolPlatform(name: "buzz", displayName: "Buzz", icon: "bolt.horizontal.circle", minimumVersion: HermesCapabilities.buzzPlatformFloor),
         // -- v0.21.1 audit finding B4 -------------------------------------
         // Ten platform ids that are REAL and user-configurable at BOTH
         // v2026.8.31 (0.21.0) and v2026.9.7 (0.21.1) but were never in this
@@ -137,7 +168,7 @@ public enum KnownPlatforms {
         // v0.21.1 surface, and no capability flag applies. Platforms without
         // a per-field setup view fall to `PlatformsView`'s default panel
         // ("No setup form for this platform yet"), which is the same
-        // degradation `buzz` has had since v0.20.
+        // degradation `buzz` has had since v0.19.1.
         //
         // DELIBERATELY EXCLUDED, verified at v2026.9.7:
         //  - `local` (Platform.LOCAL), `relay` (marked EXPERIMENTAL in the
@@ -157,21 +188,40 @@ public enum KnownPlatforms {
         // gateway/platforms + plugins/platforms). dingtalk / sms /
         // api_server land at v2026.3.23 (0.4.0) and wecom at v2026.3.30
         // (0.6.0) — at or below Scarf's oldest supported host, so no gate.
-        // The rest carry one: weixin v2026.4.13 (0.9.0),
-        // qqbot v2026.4.16 (0.10.0), irc v2026.4.30 (0.12.0),
-        // msgraph_webhook v2026.5.16 (0.14.0), photon v2026.6.19 (0.17.0).
+        // The rest carry one, and every floor is a shared
+        // `HermesCapabilities.<name>PlatformFloor` constant rather than an
+        // inline literal, so the roster row and the evidence for its floor
+        // cannot drift: weixin v2026.4.13 (0.9.0), qqbot v2026.4.16 (0.10.0),
+        // irc v2026.4.30 (0.12.0), msgraph_webhook v2026.5.16 (0.14.0),
+        // photon v2026.6.19 (0.17.0).
         HermesToolPlatform(name: "dingtalk", displayName: "DingTalk", icon: "text.bubble"),
         HermesToolPlatform(name: "sms", displayName: "SMS", icon: "message"),
-        HermesToolPlatform(name: "irc", displayName: "IRC", icon: "number.square", minimumVersion: .init(major: 0, minor: 12, patch: 0)),
+        HermesToolPlatform(name: "irc", displayName: "IRC", icon: "number.square", minimumVersion: HermesCapabilities.ircPlatformFloor),
         HermesToolPlatform(name: "wecom", displayName: "WeCom", icon: "building.2"),
-        HermesToolPlatform(name: "weixin", displayName: "Weixin", icon: "captions.bubble", minimumVersion: .init(major: 0, minor: 9, patch: 0)),
-        HermesToolPlatform(name: "qqbot", displayName: "QQ Bot", icon: "bubble.right", minimumVersion: .init(major: 0, minor: 10, patch: 0)),
-        HermesToolPlatform(name: "msgraph_webhook", displayName: "Microsoft Graph Webhook", icon: "network", minimumVersion: .init(major: 0, minor: 14, patch: 0)),
+        HermesToolPlatform(name: "weixin", displayName: "Weixin", icon: "captions.bubble", minimumVersion: HermesCapabilities.weixinPlatformFloor),
+        HermesToolPlatform(name: "qqbot", displayName: "QQ Bot", icon: "bubble.right", minimumVersion: HermesCapabilities.qqbotPlatformFloor),
+        HermesToolPlatform(name: "msgraph_webhook", displayName: "Microsoft Graph Webhook", icon: "network", minimumVersion: HermesCapabilities.msgraphWebhookPlatformFloor),
         HermesToolPlatform(name: "api_server", displayName: "API Server", icon: "server.rack"),
         // Floor shared with `HermesCapabilities.hasPhotonPlatform` rather than
         // repeated as a literal, so the roster row and the flag cannot drift.
         HermesToolPlatform(name: "photon", displayName: "iMessage via Photon", icon: "antenna.radiowaves.left.and.right", minimumVersion: HermesCapabilities.photonPlatformFloor),
     ]
+
+    /// The rows the Platforms list and the Tools tab's platform menu should
+    /// offer, in roster order.
+    ///
+    /// ONE seam for both surfaces. P23 gated the Platforms list and left the
+    /// Tools picker on the raw roster, so a 0.14 host hid `ntfy` in one place
+    /// while the other still offered to shell
+    /// `hermes tools enable … --platform ntfy` at an adapter the host does not
+    /// have (charter C5). `isConfigured` is a closure rather than a `Set` so a
+    /// caller can answer it from whatever it already holds.
+    public static func visible(
+        on capabilities: HermesCapabilities,
+        isConfigured: (String) -> Bool
+    ) -> [HermesToolPlatform] {
+        all.filter { $0.isVisible(on: capabilities, isConfigured: isConfigured($0.name)) }
+    }
 
     public static func icon(for platform: String) -> String {
         switch platform {

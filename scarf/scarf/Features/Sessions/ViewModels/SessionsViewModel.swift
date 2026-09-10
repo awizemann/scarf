@@ -52,7 +52,7 @@ enum SessionRenamedSignal {
     nonisolated static let contextKey = "context"
 }
 
-/// `hermes sessions export --format {jsonl,md,qmd,html,trace}` (v0.20+,
+/// `hermes sessions export --format {jsonl,md,qmd,html,trace}` (v0.18.1+,
 /// gated on `HermesCapabilities.hasSessionsExportFormats`). Cases mirror the
 /// CLI's own `--format` choices exactly, so `cliValue == rawValue`.
 ///
@@ -197,16 +197,29 @@ final class SessionsViewModel {
     /// reports nothing at all is the bug this replaced.
     var exportMessage: String?
 
-    // MARK: - Export format picker (v0.20, hasSessionsExportFormats)
+    // MARK: - Export format picker (v0.18.1, hasSessionsExportFormats)
 
     /// Bound to the format-picker sheet's `Picker`. Reset to `.jsonl`
     /// whenever a new export flow starts so a stale pick from a previous
     /// session doesn't leak forward.
     var exportFormat: SessionExportFormat = .jsonl
     /// Bound to the format-picker sheet's "Redact secrets" `Toggle`.
+    ///
+    /// The DEFAULT is per-format, because Hermes's is: `--redact` is opt-IN
+    /// for every streamed format, while a `trace` redacts unconditionally and
+    /// `--no-redact` is the opt-OUT (`_export_trace`: "Redaction is ON by
+    /// default (traces leave the machine with --upload)",
+    /// `hermes_cli/sessions_cmd.py:382-383`, read at `:395` @ v2026.9.7).
+    /// Leaving this `false` for a trace made Scarf's default trace export
+    /// actively emit `--no-redact` on every v0.18.1+ host — less redaction
+    /// than any prior Scarf release. Drive it through
+    /// ``exportFormatChanged(from:to:)``, never by hand.
     var exportRedact = false
+    /// The user's last explicit NON-trace redact choice, so switching away
+    /// from `trace` restores what they had instead of forcing the toggle OFF.
+    private var exportRedactBeforeTrace = false
     /// Drives the format-picker sheet. Only ever set `true` by
-    /// `beginExportFlow` when the host is v0.20+; pre-0.20 hosts skip
+    /// `beginExportFlow` when the host is v0.18.1+; pre-0.18.1 hosts skip
     /// straight to the save panel exactly as before.
     var showExportOptionsSheet = false
 
@@ -217,6 +230,14 @@ final class SessionsViewModel {
     /// Filename/folder-name stem (no extension) suggested to the save/open
     /// panel once the format is chosen.
     private var pendingExportBaseName: String = "hermes-sessions"
+    /// `true` while the open picker sheet belongs to an "Export All" flow.
+    /// Read by `availableExportFormats` and surfaced as
+    /// `exportAllExcludesTrace` — `trace` cannot serve that flow.
+    private var pendingExportIsAllSessions = false
+    /// `HermesCapabilities.hasSessionsExportNoRedact`, captured when the
+    /// flow starts (same environment-read-stays-in-SwiftUI split as
+    /// `formatsAvailable`).
+    private(set) var traceNoRedactAvailable = false
 
     // MARK: - Project attribution (v2.5)
     //
@@ -614,42 +635,100 @@ final class SessionsViewModel {
     /// a CLI that executes on the far host over SSH, so the file would land
     /// on the remote box while the success banner claims a local path (the
     /// exact bug class `beginExport`'s doc comment describes for the stdout
-    /// flow). Local contexts keep all five formats.
+    /// flow). Local contexts keep all five formats — except that an "Export
+    /// All" flow drops `trace` on either kind of context, because the CLI
+    /// cannot produce a multi-session trace on stdout at all (see
+    /// `exportAllExcludesTrace`).
     var availableExportFormats: [SessionExportFormat] {
-        context.isRemote
+        var formats = context.isRemote
             ? SessionExportFormat.allCases.filter(\.usesStdout)
             : SessionExportFormat.allCases
+        if pendingExportIsAllSessions {
+            formats.removeAll { $0 == .trace }
+        }
+        return formats
     }
+
+    /// Why `trace` is not offered for "Export All": with neither
+    /// `--session-id` nor a filter, `_export_trace` takes its "the last thing
+    /// I did" branch and resolves ONE session via
+    /// `list_sessions_rich(limit=1, order_by_last_active=True)`
+    /// (`hermes_cli/sessions_cmd.py:383-388` at v2026.9.7), so the export
+    /// Scarf captured held a single session while the banner claimed the
+    /// whole board. The CLI's own multi-session trace path writes a
+    /// DIRECTORY of `<id>.trace.jsonl` files (`:425-436`, the `else` branch
+    /// through its `except TraceRedactionError`; `:439` is already
+    /// `def _export_markdown`) and so cannot
+    /// stream to the one file the save panel picked either. Per-session
+    /// "Export…" still offers `trace` — that path passes `--session-id`.
+    var exportAllExcludesTrace: Bool { pendingExportIsAllSessions }
 
     /// - Parameter formatsAvailable: `HermesCapabilities.hasSessionsExportFormats`,
     ///   read by the view from `@Environment(\.hermesCapabilities)`. The
     ///   view model has no capability store of its own — same split as
     ///   `PlatformsView`/`GatewayBehaviorViewModel`, where the environment
     ///   read stays in SwiftUI and the flag crosses in as a plain `Bool`.
-    func exportSession(_ session: HermesSession, formatsAvailable: Bool) {
-        beginExportFlow(sessionId: session.id, suggestedBaseName: session.id, formatsAvailable: formatsAvailable)
+    func exportSession(_ session: HermesSession, formatsAvailable: Bool, traceNoRedactAvailable: Bool = false) {
+        beginExportFlow(
+            sessionId: session.id,
+            suggestedBaseName: session.id,
+            formatsAvailable: formatsAvailable,
+            traceNoRedactAvailable: traceNoRedactAvailable
+        )
     }
 
-    func exportAll(formatsAvailable: Bool) {
-        beginExportFlow(sessionId: nil, suggestedBaseName: "hermes-sessions", formatsAvailable: formatsAvailable)
+    func exportAll(formatsAvailable: Bool, traceNoRedactAvailable: Bool = false) {
+        beginExportFlow(
+            sessionId: nil,
+            suggestedBaseName: "hermes-sessions",
+            formatsAvailable: formatsAvailable,
+            traceNoRedactAvailable: traceNoRedactAvailable
+        )
     }
 
-    /// Pre-0.20 hosts: identical to the original behavior — straight to the
+    /// Pre-0.18.1 hosts: identical to the original behavior — straight to the
     /// save panel, jsonl only, no picker sheet. v0.20+: opens the
     /// format/redact picker sheet; `confirmExportOptions()` continues once
     /// the user picks.
-    private func beginExportFlow(sessionId: String?, suggestedBaseName: String, formatsAvailable: Bool) {
+    private func beginExportFlow(
+        sessionId: String?,
+        suggestedBaseName: String,
+        formatsAvailable: Bool,
+        traceNoRedactAvailable: Bool
+    ) {
+        self.traceNoRedactAvailable = traceNoRedactAvailable
         guard formatsAvailable else {
+            pendingExportIsAllSessions = false
             exportFormat = .jsonl
             exportRedact = false
             beginExport(sessionId: sessionId, suggestedName: "\(suggestedBaseName).jsonl", format: .jsonl, redact: false)
             return
         }
         pendingExportSessionId = sessionId
+        pendingExportIsAllSessions = sessionId == nil
         pendingExportBaseName = suggestedBaseName
         exportFormat = .jsonl
+        // `.jsonl`'s default, which is Hermes's: no `--redact` unless asked.
         exportRedact = false
+        exportRedactBeforeTrace = false
         showExportOptionsSheet = true
+    }
+
+    /// The format picker changed: carry the per-format redaction DEFAULT, and
+    /// the user's own non-trace choice, across the switch.
+    ///
+    /// Capability-independent on purpose. `hasSessionsExportNoRedact` shares
+    /// its v0.18.1 floor with `--format trace`, so on any host that offers a
+    /// trace export the opt-out exists: ON produces the host's own default
+    /// (no flag) and OFF emits `--no-redact`.
+    func exportFormatChanged(from old: SessionExportFormat, to new: SessionExportFormat) {
+        guard old != new else { return }
+        if new == .trace {
+            exportRedactBeforeTrace = exportRedact
+            exportRedact = true
+        } else if old == .trace {
+            exportRedact = exportRedactBeforeTrace
+        }
     }
 
     /// Called from the picker sheet's "Export" button. Routes to the
@@ -659,11 +738,17 @@ final class SessionsViewModel {
         showExportOptionsSheet = false
         let sessionId = pendingExportSessionId
         let baseName = pendingExportBaseName
+        // Belt and braces: the picker can only offer what
+        // `availableExportFormats` lists, so a format outside it means the
+        // selection went stale — fall back to the format every host and
+        // every flow supports rather than issuing an argv that lies.
+        let format = availableExportFormats.contains(exportFormat) ? exportFormat : .jsonl
         pendingExportSessionId = nil
+        pendingExportIsAllSessions = false
         beginExport(
             sessionId: sessionId,
-            suggestedName: "\(baseName).\(exportFormat.fileExtension)",
-            format: exportFormat,
+            suggestedName: "\(baseName).\(format.fileExtension)",
+            format: format,
             redact: exportRedact
         )
     }
@@ -671,6 +756,7 @@ final class SessionsViewModel {
     func cancelExportOptions() {
         showExportOptionsSheet = false
         pendingExportSessionId = nil
+        pendingExportIsAllSessions = false
     }
 
     /// The export always lands on **this Mac**, whichever host Hermes runs
@@ -721,10 +807,34 @@ final class SessionsViewModel {
     /// to the pre-0.20 shape (`jsonl`, no `--redact`) so every existing
     /// call site — and the argv-shape tests pinning them — keeps producing
     /// exactly the same arguments it always has.
-    static func exportArguments(output: String, sessionId: String?, format: SessionExportFormat = .jsonl, redact: Bool = false) -> [String] {
+    /// - Parameter traceNoRedactAvailable: `hasSessionsExportNoRedact`. Only
+    ///   consulted for `trace`.
+    ///
+    /// **`trace` inverts the redaction flag.** `--redact` is read only by
+    /// `_cmd_export`'s `_redact` closure, which the trace path never calls
+    /// (`hermes_cli/sessions_cmd.py:306-309,379-440`): a trace redacts
+    /// unconditionally and `--no-redact` is the opt-OUT — `redact_trace = not
+    /// getattr(args, "no_redact", False)` at `:395`, with the docstring saying
+    /// so at `:382-383`. So "Redact
+    /// secrets" keeps one meaning across formats by emitting nothing for an
+    /// ON toggle and `--no-redact` for an OFF one — and only above that
+    /// flag's **v0.18.1** floor (`hermes_cli/main.py:13567` @ v2026.7.7), the
+    /// same tag that introduced `--format trace` itself. Below it there is no
+    /// trace format to opt out of.
+    static func exportArguments(
+        output: String,
+        sessionId: String?,
+        format: SessionExportFormat = .jsonl,
+        redact: Bool = false,
+        traceNoRedactAvailable: Bool = false
+    ) -> [String] {
         var args = ["sessions", "export", output]
         if format != .jsonl { args += ["--format", format.cliValue] }
-        if redact { args += ["--redact"] }
+        if format == .trace {
+            if !redact && traceNoRedactAvailable { args += ["--no-redact"] }
+        } else if redact {
+            args += ["--redact"]
+        }
         if let sessionId { args += ["--session-id", sessionId] }
         return args
     }
@@ -736,7 +846,10 @@ final class SessionsViewModel {
     func performExport(to url: URL, sessionId: String?, format: SessionExportFormat = .jsonl, redact: Bool = false) {
         // `-` is the CLI's "write to stdout" sentinel — only valid for
         // stdout-capable formats (jsonl/trace).
-        let args = Self.exportArguments(output: "-", sessionId: sessionId, format: format, redact: redact)
+        let args = Self.exportArguments(
+            output: "-", sessionId: sessionId, format: format, redact: redact,
+            traceNoRedactAvailable: traceNoRedactAvailable
+        )
         Task.detached { [sessionExportRunner, context, args, url, format, self] in
             let result = sessionExportRunner(context, args)
             let outcome = Self.writeExport(result: result, to: url, format: format)
@@ -758,7 +871,10 @@ final class SessionsViewModel {
     /// (or directory of files) itself, so there's no stdout payload to pipe
     /// back — we just run the command and report the exit code.
     func performPathExport(to url: URL, sessionId: String?, format: SessionExportFormat, redact: Bool) {
-        let args = Self.exportArguments(output: url.path, sessionId: sessionId, format: format, redact: redact)
+        let args = Self.exportArguments(
+            output: url.path, sessionId: sessionId, format: format, redact: redact,
+            traceNoRedactAvailable: traceNoRedactAvailable
+        )
         Task.detached { [sessionExportRunner, context, args, url, self] in
             let result = sessionExportRunner(context, args)
             let outcome = Self.pathExportOutcome(result: result)
@@ -798,7 +914,10 @@ final class SessionsViewModel {
             output: stdout + "\n" + result.stderr,
             exitCode: result.exitCode,
             successMarkers: HermesCLIMarkers.sessionsExportSuccess,
-            failureMarkers: HermesCLIMarkers.sessionsExportFailure
+            failureMarkers: HermesCLIMarkers.sessionsExportFailure,
+            // `_write_output` prints the summary with a bare `print`
+            // (sessions_cmd.py:83), i.e. at column 0.
+            successAnchored: true
         )
     }
 

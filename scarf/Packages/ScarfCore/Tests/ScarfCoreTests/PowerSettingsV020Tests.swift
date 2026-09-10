@@ -336,11 +336,22 @@ import Testing
         #expect(updated.contains("- C1"))
     }
 
-    @Test func hermesDisableAliasesAcceptedAndRoundTrippedVerbatim() {
-        // parse_reasoning_effort (hermes_constants.py:967) accepts
-        // disabled/false/off as "none" aliases — a hand-edited alias row
-        // must not brick the save, and the user's spelling is preserved.
-        for alias in ["disabled", "false", "off", "none"] {
+    @Test func hermesDisableAliasesAcceptedAndWrittenSoTheyStillDisable() {
+        // `parse_reasoning_effort` (hermes_constants.py:876-889 at
+        // v2026.9.7) does `str(effort).strip().lower()` and disables on
+        // {"none", "false", "disabled"}. P19 quotes implicitly-typed
+        // scalars, which changes what each alias means on the way back in:
+        //   - "disabled"/"none" are plain words → written bare, unchanged.
+        //   - "false" is quoted → loads as the STRING "false", still in the
+        //     disable set. Meaning preserved.
+        //   - "off" only ever meant "disabled" via YAML's bool coercion
+        //     (bare `off` → Python False → str(False) == "false"). Quoted
+        //     it would load as "off", which is in NEITHER set and would
+        //     silently mean "use the default effort" — so the writer
+        //     canonicalises it to "none".
+        let expected = ["disabled": "disabled", "none": "none",
+                        "false": "'false'", "off": "none"]
+        for (alias, emitted) in expected {
             #expect(HermesReasoningEffort.isValid(alias))
             let updated = PowerSettingsWriter.setReasoningOverrides(
                 in: "agent:\n  verbose: false\n",
@@ -348,7 +359,7 @@ import Testing
                 capabilities: v020
             )
             #expect(updated != nil)
-            #expect(updated!.contains("some-model: \(alias)"))
+            #expect(updated!.contains("some-model: \(emitted)"))
         }
         #expect(!HermesReasoningEffort.isValid("bogus"))
         // Aliases are pass-through only — never offered in the picker.

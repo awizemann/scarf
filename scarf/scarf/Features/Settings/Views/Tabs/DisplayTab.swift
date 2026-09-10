@@ -7,6 +7,7 @@ import Stats
 struct DisplayTab: View {
     @Bindable var viewModel: SettingsViewModel
     @Environment(\.hermesCapabilities) private var capabilitiesStore
+    private var capabilities: HermesCapabilities { capabilitiesStore?.capabilities ?? .empty }
 
     /// Scarf-local chat density preferences (issues #47 / #48).
     /// Independent of the Hermes config flags rendered in the
@@ -80,7 +81,13 @@ struct DisplayTab: View {
 
         SettingsSection(title: "Output", icon: "doc.plaintext") {
             ToggleRow(label: "Streaming", isOn: viewModel.config.streaming) { viewModel.setStreaming($0) }
-            ToggleRow(label: "Show Reasoning", isOn: viewModel.config.showReasoning) { viewModel.setShowReasoning($0) }
+            // Absent key resolves against the host: `display.show_reasoning`
+            // flipped false → true at v0.18.1, so a flat `false` rendered the
+            // toggle off on every stock v0.18.1+ host that streams reasoning.
+            ToggleRow(
+                label: "Show Reasoning",
+                isOn: viewModel.config.displayShowReasoning(capabilities: capabilities)
+            ) { viewModel.setShowReasoning($0) }
             ToggleRow(label: "Show Cost", isOn: viewModel.config.showCost) { viewModel.setShowCost($0) }
             ToggleRow(label: "Interim Messages", isOn: viewModel.config.interimAssistantMessages) { viewModel.setInterimAssistantMessages($0) }
             // No "Verbose" row: `agent.verbose` is not a config key.

@@ -11,7 +11,18 @@ import os
 /// `transport.readFile / writeFile`, and CLI invocations go through
 /// `transport.runProcess(executable:args:stdin:timeout:)`. iOS gets the
 /// same hub features as Mac without a target-specific code path.
+/// `@MainActor` on the whole type, not on a handful of methods.
+///
+/// ScarfCore builds in Swift 5 language mode with no default actor isolation,
+/// so a method with no annotation here is genuinely nonisolated — and several
+/// of them (`selectSkill`, `selectFile`, the load/apply pair) mutate
+/// `@Observable` state SwiftUI reads on the main actor. Annotating only the
+/// offenders leaves the type half-isolated, which is how the hole appeared in
+/// the first place; the I/O that must stay off the main actor is already
+/// factored into `nonisolated static` helpers called from explicit
+/// `Task.detached` hops (charter C10), and those keep working unchanged.
 @Observable
+@MainActor
 public final class SkillsViewModel {
     private let logger = Logger(subsystem: "com.scarf", category: "SkillsViewModel")
     public let context: ServerContext
@@ -70,7 +81,7 @@ public final class SkillsViewModel {
     private var contentToken: UInt64 = 0
     /// Skill files are hand-sized markdown. Past this a file is not an
     /// editable buffer; the guard refuses rather than republishing it.
-    static let maxSkillFileBytes = 8 * 1024 * 1024
+    nonisolated static let maxSkillFileBytes = 8 * 1024 * 1024
     /// True while the installed-skills scan is in flight. Renders a
     /// progress indicator on iOS; Mac historically didn't surface this
     /// from VM state but adding it doesn't break the existing UI.
@@ -313,14 +324,26 @@ public final class SkillsViewModel {
             contentError = nil
             isLoadingContent = false
         }
-        missingConfig = computeMissingConfig(for: skill)
+        // The config.yaml read is a transport read — an SSH round-trip on a
+        // remote host — so it goes off the main actor like every other read
+        // in this file (C10). Skipped entirely when the skill declares no
+        // required config, exactly as before.
+        if skill.requiredConfig.isEmpty {
+            missingConfig = []
+        } else {
+            let ctx = context
+            let yaml = await Task.detached(priority: .userInitiated) {
+                ctx.readText(ctx.paths.configYAML)
+            }.value
+            missingConfig = Self.computeMissingConfig(for: skill, yaml: yaml)
+        }
     }
 
-    private func computeMissingConfig(for skill: HermesSkill) -> [String] {
+    /// An unreadable config.yaml means "we cannot prove any key is present",
+    /// so every required key is reported missing — the same answer as before.
+    nonisolated static func computeMissingConfig(for skill: HermesSkill, yaml: String?) -> [String] {
         guard !skill.requiredConfig.isEmpty else { return [] }
-        guard let yaml = context.readText(context.paths.configYAML) else {
-            return skill.requiredConfig
-        }
+        guard let yaml else { return skill.requiredConfig }
         return skill.requiredConfig.filter { key in
             !yaml.contains(key)
         }
@@ -605,12 +628,14 @@ public final class SkillsViewModel {
         }
     }
 
-    /// v0.12: trigger a hot reload of `~/.hermes/skills/` so the agent
-    /// picks up file edits without a session restart. Hermes ships
-    /// `/reload-skills` as a slash command in chat AND `hermes skills
-    /// audit` as a CLI form. We use `audit` here so the reload works
-    /// even when no chat session is active.
-    public func reloadSkills() async {
+    /// Re-runs Hermes's **security scanner** over every hub-installed skill
+    /// — `hermes skills audit`, whose `do_audit` scans each install path with
+    /// `scan_skill` and prints the report (`hermes_cli/skills_hub.py:879-904`
+    /// at v2026.9.7). It does NOT reload anything: the only reload Hermes has
+    /// is the `/reload-skills` slash command inside a chat session
+    /// (`gateway/slash_commands.py:1038-1048`), which has no CLI form, so a
+    /// running gateway is untouched by this call.
+    public func rescanSkills() async {
         isHubLoading = true
         let bin = context.paths.hermesBinary
         let xport = transport
@@ -622,7 +647,15 @@ public final class SkillsViewModel {
                 timeout: 30
             )
         }.value
-        hubMessage = result.exitCode == 0 ? "Skills reloaded" : "Reload failed"
+        // `do_audit` is `-> None` (skills_hub.py:879-880) so its exit code is 0
+        // even for the unknown-name refusal (:891). `Auditing <n> skill(s)...`
+        // (:893) is the only line that says the scanner ran; the empty-hub
+        // line (:887) is a legitimate no-op. Both byte-identical back to
+        // v2026.6.19. The button re-runs the security scanner — the banner
+        // says "re-scanned", never "reloaded".
+        hubMessage = Self.auditOutcome(exitCode: result.exitCode, output: result.output).succeeded
+            ? "Skills re-scanned"
+            : "Re-scan failed"
         isHubLoading = false
         await load()
         Task { @MainActor [weak self] in
@@ -717,7 +750,9 @@ public final class SkillsViewModel {
             output: output,
             exitCode: exitCode,
             successMarkers: HermesCLIMarkers.skillsUninstallSuccess,
-            failureMarkers: HermesCLIMarkers.skillsUninstallFailure
+            failureMarkers: HermesCLIMarkers.skillsUninstallFailure,
+            // `_report_pair` prints it at column 0 (skills_hub.py:146).
+            successAnchored: true
         )
     }
 
@@ -787,7 +822,12 @@ public final class SkillsViewModel {
                 transport: xport,
                 timeout: 300
             )
-            await self?.finishForceUpdate(name: name, exitCode: result.exitCode)
+            let report = HermesSkillsHubParser.parseUpdateReport(result.output)
+            await self?.finishForceUpdate(
+                name: name,
+                exitCode: result.exitCode,
+                report: report
+            )
         }
     }
 
@@ -864,6 +904,19 @@ public final class SkillsViewModel {
         return ""
     }
 
+    /// The verdict on `hermes skills audit` — see `rescanSkills()`.
+    nonisolated static func auditOutcome(exitCode: Int32, output: String) -> HermesCLIOutcome {
+        HermesCLIVerdict.judge(
+            output: output,
+            exitCode: exitCode,
+            successMarkers: HermesCLIMarkers.skillsAuditSuccess,
+            failureMarkers: HermesCLIMarkers.skillsAuditFailure,
+            // Both lines are printed at column 0 (skills_hub.py:887, :893),
+            // and the per-skill scan reports that follow can quote anything.
+            successAnchored: true
+        )
+    }
+
     /// `hermes skills install` is `do_install(...) -> None`
     /// (hermes_cli/skills_hub.py:645-648 at v2026.9.7): a pinned-source
     /// refusal, an unresolved short name, a fetch failure, an
@@ -876,7 +929,13 @@ public final class SkillsViewModel {
             output: output,
             exitCode: exitCode,
             successMarkers: HermesCLIMarkers.skillsInstallSuccess,
-            failureMarkers: HermesCLIMarkers.skillsInstallFailure
+            failureMarkers: HermesCLIMarkers.skillsInstallFailure,
+            // `Installed:` is printed at column 0 (skills_hub.py:720), and
+            // anchoring matters most here: `_print_tier1_advisory` (:704)
+            // quotes SKILL.md-derived findings into the report BEFORE
+            // `install_from_quarantine` can raise (:714-720), so a bare
+            // substring let a skill's own text claim the install succeeded.
+            successAnchored: true
         )
     }
 
@@ -918,17 +977,45 @@ public final class SkillsViewModel {
         hubMessage = nil
     }
 
+    /// `hermes skills update` is `do_update(...) -> None`
+    /// (hermes_cli/skills_hub.py:831-832 at v2026.9.7), so the exit code is 0
+    /// whatever happened (charter C5) — and its own summary line is no better:
+    /// `Updated {len(updates) - len(skipped_local)} skill(s).` (:872) is
+    /// printed after the loop regardless of what each nested `do_install`
+    /// did, so it counts ATTEMPTS.
+    ///
+    /// The honest per-skill signal is `do_install`'s own `Installed:` line
+    /// (:720), printed only once `install_from_quarantine` has returned. So:
+    /// `Installed:` lines are successes, `Updating:` lines (:864) are
+    /// attempts, and an attempt with no matching success says "attempted",
+    /// never "updated". All three lines are byte-identical back to
+    /// v2026.6.19, so a pre-target host is judged the same way (C1).
     @MainActor
     private func finishUpdateAll(exitCode: Int32, report: HermesSkillsUpdateReport) async {
         skippedLocalEdits = exitCode == 0 ? report.skipped : []
+        let keptClause = report.skipped.isEmpty
+            ? ""
+            : " · \(report.skipped.count) kept local edits"
         if exitCode != 0 {
             hubMessage = "Update failed"
-        } else if report.skipped.isEmpty {
-            // Pre-v0.20.4 and clean v0.20.4 runs land here — same
-            // wording the UI has always shown.
-            hubMessage = "Updated"
+        } else if report.noUpdatesAvailable {
+            hubMessage = "No updates available"
+        } else if report.installedCount > 0 {
+            hubMessage = report.skipped.isEmpty && report.installedCount == report.attemptedCount
+                ? "Updated"
+                : "Updated \(report.installedCount)\(keptClause)"
+        } else if report.attemptedCount > 0 {
+            // Every skill it tried failed inside `do_install` — which prints
+            // its refusal and returns, leaving `Updated N skill(s).` to claim
+            // the opposite.
+            hubMessage = report.failureDetail.map { "Update attempted — \($0)" }
+                ?? "Update attempted; nothing was updated"
+        } else if !report.skipped.isEmpty {
+            // Everything actionable had local edits.
+            hubMessage = "0 updated · \(report.skipped.count) kept local edits"
         } else {
-            hubMessage = "Updated \(report.updatedCount) · \(report.skipped.count) kept local edits"
+            // Exit 0 with none of `do_update`'s lines: not a success (C5).
+            hubMessage = "Update reported nothing"
         }
         await load()
         checkForUpdates()
@@ -936,14 +1023,64 @@ public final class SkillsViewModel {
         hubMessage = nil
     }
 
+    /// Verdict for `skills update <name> --force`, read from the OUTPUT and
+    /// not from the exit code — exactly as `finishUpdateAll` does.
+    ///
+    /// `do_update` is `-> None` (`hermes_cli/skills_hub.py:831-832`) and so is
+    /// the `do_install(force=True)` it nests (`:868`), so a refusal is printed
+    /// and returned from at exit 0: a blocked scan verdict reaches
+    /// `_install_blocked` and prints `Installation blocked: …` (`:699`, printed at
+    /// `:498`), and an invalid bundle path reaches `_invalid_path` (`:692`). Judging this by
+    /// exit code made the ONE action that destroys the user's local edits
+    /// announce that it had succeeded when nothing was written (C5).
+    ///
+    /// The skill only leaves `skippedLocalEdits` when `Installed:` — the one
+    /// honest success line — actually appeared for it, so the "kept your local
+    /// edits" badge survives a force update that did not land.
+    /// The verdict itself, as a pure function so it can be driven from a test
+    /// with a real `do_update` transcript — the exit-code version shipped
+    /// green because nothing could exercise it.
+    ///
+    /// - Returns: the status line to show, and whether the skill's local-edits
+    ///   badge may be cleared (only when it really was rewritten, or when
+    ///   there was nothing to rewrite).
+    public static func forceUpdateVerdict(
+        name: String,
+        exitCode: Int32,
+        report: HermesSkillsUpdateReport
+    ) -> (message: String, clearSkipped: Bool) {
+        if exitCode != 0 {
+            return (report.failureDetail.map { "Update failed for \(name) — \($0)" }
+                ?? "Update failed for \(name)", false)
+        }
+        if report.installedCount > 0 {
+            return ("Updated \(name) (local edits discarded)", true)
+        }
+        if report.noUpdatesAvailable {
+            // `--force` discards local edits; it does not invent a new
+            // revision. Nothing to do is a truthful, non-destructive answer —
+            // and the skill is no longer "kept back", it is simply current.
+            return ("No updates available for \(name)", true)
+        }
+        if report.attemptedCount > 0 {
+            return (report.failureDetail.map { "Update attempted — \($0)" }
+                ?? "Update attempted; \(name) was not updated", false)
+        }
+        // Exit 0 with none of `do_update`'s lines: not a success (C5).
+        return ("Update reported nothing for \(name)", false)
+    }
+
     @MainActor
-    private func finishForceUpdate(name: String, exitCode: Int32) async {
+    private func finishForceUpdate(
+        name: String,
+        exitCode: Int32,
+        report: HermesSkillsUpdateReport
+    ) async {
         isHubLoading = false
-        if exitCode == 0 {
+        let verdict = Self.forceUpdateVerdict(name: name, exitCode: exitCode, report: report)
+        hubMessage = verdict.message
+        if verdict.clearSkipped {
             skippedLocalEdits.removeAll { $0 == name }
-            hubMessage = "Updated \(name) (local edits discarded)"
-        } else {
-            hubMessage = "Update failed for \(name)"
         }
         await load()
         try? await Task.sleep(nanoseconds: 3_000_000_000)

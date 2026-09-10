@@ -80,3 +80,4 @@ scarf/Configs/SwiftStatsLocal.xcconfig
 
 # Walkabout UI-automation flows/guides (local, uncommitted)
 .walkabout/
+__pycache__/

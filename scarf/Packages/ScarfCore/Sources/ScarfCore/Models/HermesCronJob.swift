@@ -77,9 +77,18 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
             } else if let single = try? c.decode(String.self, forKey: .skills) {
                 raw = [single]                    // `isinstance(skills, str)`
             } else {
-                // Neither a list nor a string (a number, an object): Hermes's
-                // `list(skills)` raises and the record is treated as
-                // skill-less rather than failing the whole file.
+                // Neither a list nor a string. Hermes does NOT degrade here:
+                // `_normalize_skill_list` falls through to `list(skills)`
+                // (`cron/jobs.py:391` @ `v2026.9.7`), which raises TypeError
+                // on a number or bool and returns the KEYS of a mapping. That
+                // raise is unguarded all the way out — `_apply_skill_fields`
+                // (`:403`) → `_normalize_job_record` (`:456`) → `list_jobs`
+                // (`:1851`) — so `hermes cron list` fails outright on such a
+                // record. Scarf deliberately diverges and degrades to
+                // skill-less instead of failing the whole file: Scarf is a
+                // read-only viewer and a hand-edited jobs.json must not blank
+                // the board. The skills it shows for that one job are wrong in
+                // the mapping case; nothing Scarf writes back invents them.
                 raw = []
             }
         } else if let legacy = try? l.decodeIfPresent(String.self, forKey: .skill) {
@@ -243,9 +252,11 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// round-trip silently strips it from jobs.json (workdir/contextFrom/
     /// noAgent were dropped this way until the v0.18 audit caught it).
     ///
-    /// Flipping `enabled` alone is NOT enough. Since v0.20.4
-    /// `is_job_runnable()` (`cron/jobs.py::is_job_runnable`, v2026.9.7 :482-485;
-    /// claim gate `_evaluate_due_job` :2910, roster filter :3009) refuses
+    /// Flipping `enabled` alone is NOT enough. Since v0.20.1
+    /// `is_job_runnable()` (`cron/jobs.py::is_job_runnable`, v2026.9.7
+    /// :482-485; its one in-file call site is the claim gate at :2509, and
+    /// the scheduler's own scan filter is
+    /// `cron/scheduler_provider.py:261`) refuses
     /// to fire whenever `state == "paused"` OR `paused_at` is set —
     /// regardless of `enabled` — so an enable-toggle that forwards the old
     /// pause markers produces a job that looks enabled and never runs.
@@ -257,7 +268,10 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     ///
     /// Deliberately UNGATED (no `hasCronPauseMarkerGate` check). Those two
     /// Hermes functions are byte-identical at v0.20.0 (v2026.8.3) and
-    /// v0.20.4 (v2026.8.18), so these markers are exactly what every
+    /// v0.20.1 (v2026.8.13 — the tag that introduced `_has_pause_marker`,
+    /// `cron/jobs.py:482`, called from `is_job_runnable` at `:489`/`:498`;
+    /// the name does not occur at v2026.8.3 at all), so these markers are
+    /// exactly what every
     /// supported host already writes for itself; older hosts simply ignore
     /// them in the runnable check. Gating would also be awkward here — the
     /// capability store is a service, unreachable from the model layer —
@@ -369,8 +383,22 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     /// is what `compute_next_run` delegates to for `kind == "once"`.
     public nonisolated func oneShotIsUnresumable(now: Date = Date()) -> Bool {
         guard schedule.kind == "once" else { return false }
-        // `last_run_at` set → "already run, never eligible again".
-        if let lastRunAt, !lastRunAt.isEmpty { return true }
+        // NOT "`last_run_at` is set". `_recoverable_oneshot_run_at` does have
+        // an "already run, never eligible again" arm (`cron/jobs.py:841-853`,
+        // v2026.9.7), but `resume_job` reaches it through
+        // `compute_next_run(job["schedule"])` with `last_run_at` left at its
+        // `None` default (:1991 → :1103), so that arm NEVER fires on the
+        // resume path. A one-shot re-armed by `rearm_oneshot` keeps its old
+        // `last_run_at` (:2036-2055 clears `repeat.completed`, the claims and
+        // the schedule — not the timestamp), so pausing and re-enabling such a
+        // job hit a refusal the host would never have produced.
+        //
+        // What Hermes DOES refuse is re-activating a terminal record:
+        // `update_job` arms `_reject_terminal_activation`
+        // (:1865-1878, called from :1941/:1965), which is also the state a
+        // genuinely spent one-shot ends in — `_advance_after_run` calls
+        // `_complete_job_record` for every `kind == "once"` with no next run.
+        if isTerminal { return true }
         guard let runAt = schedule.runAt, !runAt.isEmpty else { return true }
         // An offset-bearing `run_at` names one instant — compare directly.
         if let exact = CronScheduleFormatter.isoDate(runAt) {
@@ -999,9 +1027,12 @@ public struct CronDispatchStamp: Sendable, Equatable {
     /// (`hermes_cli/cron.py::_format_lateness`, v2026.9.7 :88-91): it
     /// TRUNCATES (Python `int()`), it does not round, and it CLAMPS. Scarf
     /// rounded and never clamped, so `59.7s` read `1m` where the CLI says
-    /// `59s`, and an EARLY dispatch — a scheduler that fires a second
-    /// ahead of `scheduled_at`, which the catch-up path can produce —
-    /// rendered `-1s late` where the CLI says `0s`.
+    /// `59s`. The clamp is belt-and-braces against a hand-edited
+    /// `jobs.json`, not against Hermes: the writer already does
+    /// `max(0.0, (now - d.next_run_dt).total_seconds())` before stamping
+    /// `lateness_seconds` (`cron/jobs.py:2972` @ `v2026.9.7`), so no
+    /// Hermes-authored record carries a negative value. Without the clamp a
+    /// negative one would render `-1s late` where the CLI says `0s`.
     public var latenessDisplay: String {
         // `Int(_: Double)` TRAPS on NaN/±inf, and `lateness_seconds` is
         // whatever the JSON carried. Hermes's own `except (TypeError,

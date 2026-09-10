@@ -213,12 +213,41 @@ import ScarfCore
         // Nothing landed and something errored → failed, script-only or not.
         #expect(FleetApplyExecutor.cronFieldStatus(created: 0, failed: 2, scriptOnlySkipped: 0) == .failed)
         #expect(FleetApplyExecutor.cronFieldStatus(created: 0, failed: 1, scriptOnlySkipped: 1) == .failed)
-        // Something landed → applied, even alongside a skip or a failure.
+        // Something landed and nothing errored → applied, even alongside a skip.
         #expect(FleetApplyExecutor.cronFieldStatus(created: 1, failed: 0, scriptOnlySkipped: 2) == .applied)
-        #expect(FleetApplyExecutor.cronFieldStatus(created: 2, failed: 1, scriptOnlySkipped: 0) == .applied)
         // Nothing to do at all, and nothing declined: the target is already
         // in the desired state, which is applied — not skipped.
         #expect(FleetApplyExecutor.cronFieldStatus(created: 0, failed: 0, scriptOnlySkipped: 0) == .applied)
+    }
+
+    // MARK: - P18: the two verdicts the `scriptOnlySkipped` fix didn't reach
+
+    /// A PARTLY failed pass is not `.applied`. This assertion used to read
+    /// `created: 2, failed: 1 == .applied` — the same lie P17 removed for
+    /// script-only skips, one arm over: `status` is what
+    /// `TargetResult.appliedCount` counts and what the row badge paints, so
+    /// a green "applied" for a field where a `cron create` errored hides the
+    /// failure behind a count in the message text.
+    @Test func cronFieldIsFailedWhenAnyCreateErroredEvenIfOthersLanded() {
+        #expect(FleetApplyExecutor.cronFieldStatus(created: 2, failed: 1, scriptOnlySkipped: 0) == .failed)
+        #expect(FleetApplyExecutor.cronFieldStatus(created: 5, failed: 1, scriptOnlySkipped: 1) == .failed)
+    }
+
+    /// A pass CANCELLED before it wrote anything is `.skipped`, not
+    /// `.applied`. `cancelledRemaining` was simply not an input to the
+    /// verdict, so cancelling a fleet apply mid-run reported every
+    /// untouched target's cron field as applied. Cancellation landing
+    /// BETWEEN targets already reports `.skipped` "cancelled before apply"
+    /// (`FleetApplyExecutor.swift:153`); landing between cron creates must
+    /// not read differently.
+    @Test func cronFieldIsSkippedWhenCancelledWithNothingWritten() {
+        #expect(FleetApplyExecutor.cronFieldStatus(
+            created: 0, failed: 0, scriptOnlySkipped: 0, cancelledRemaining: 4) == .skipped)
+        // …but a cancel AFTER something landed is a real partial apply: the
+        // created jobs are live on the host and the message says how many
+        // were cancelled.
+        #expect(FleetApplyExecutor.cronFieldStatus(
+            created: 1, failed: 0, scriptOnlySkipped: 0, cancelledRemaining: 3) == .applied)
     }
 
 }

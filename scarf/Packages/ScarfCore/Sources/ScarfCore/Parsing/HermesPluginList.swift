@@ -228,16 +228,31 @@ public struct HermesPluginInstallOutcome: Sendable, Equatable {
     public let missingEnvVars: [String]
     /// True when the CLI emitted its `hermes gateway restart` reminder.
     public let needsGatewayRestart: Bool
+    /// True when `_run_capability_consent`'s non-TTY arm fired
+    /// (`plugins_cmd.py:1092-1098`) — the plugin is installed but every
+    /// capability it declared stayed UNGRANTED. `cmd_install` (:764) discards
+    /// the `bool` that says so, so the line it printed is the only signal.
+    /// First possible at v2026.8.13 (where the consent call arrives); an
+    /// older host never prints it, so this is always `false` there.
+    public let capabilitiesNotGranted: Bool
     /// The plugin's `after-install.md` (or default confirmation) and any
     /// dependency notes, verbatim, for display.
     public let notes: String
 
-    public init(enabled: Bool, installedDisabled: Bool, missingEnvVars: [String], needsGatewayRestart: Bool, notes: String) {
+    public init(
+        enabled: Bool,
+        installedDisabled: Bool,
+        missingEnvVars: [String],
+        needsGatewayRestart: Bool,
+        notes: String,
+        capabilitiesNotGranted: Bool = false
+    ) {
         self.enabled = enabled
         self.installedDisabled = installedDisabled
         self.missingEnvVars = missingEnvVars
         self.needsGatewayRestart = needsGatewayRestart
         self.notes = notes
+        self.capabilitiesNotGranted = capabilitiesNotGranted
     }
 
     /// Parses `hermes plugins install` stdout.
@@ -267,7 +282,8 @@ public struct HermesPluginInstallOutcome: Sendable, Equatable {
             installedDisabled: disabled,
             missingEnvVars: missing,
             needsGatewayRestart: lower.contains("restart the gateway"),
-            notes: output.trimmingCharacters(in: .whitespacesAndNewlines)
+            notes: output.trimmingCharacters(in: .whitespacesAndNewlines),
+            capabilitiesNotGranted: output.contains(HermesCLIMarkers.pluginsConsentRefusal)
         )
     }
 }

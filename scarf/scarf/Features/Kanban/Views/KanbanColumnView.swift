@@ -18,8 +18,8 @@ struct KanbanColumnView: View {
     let onDrop: (KanbanTaskRef) -> Void
     let canCreate: Bool
     /// True when the connected Hermes is on v0.13+. Forwarded to each
-    /// `KanbanCardView` so the diagnostics dot
-    /// + auto-block sub-line gate uniformly.
+    /// `KanbanCardView`, which drops its diagnostics list (and with it the
+    /// severity dot) to empty when this is false.
     let supportsKanbanDiagnostics: Bool
     /// Optimistic-aware accessor forwarded to cards. Default is
     /// "no override" so Previews and harness contexts still render
@@ -27,7 +27,8 @@ struct KanbanColumnView: View {
     let diagnostics: (HermesKanbanTask) -> [HermesKanbanDiagnostic]
     /// v0.15+ gate forwarded to each card's context menu.
     let supportsKanbanV015: Bool
-    /// v0.16+ gate forwarded to each card's goal-mode badge.
+    /// v0.21.1+ gate forwarded to each card's `last_failure_error`
+    /// sub-line, a field that only enters `kanban list --json` at v2026.9.7.
     let supportsKanbanCompletionContract: Bool
     /// v0.15 context-menu callbacks, keyed by the acted-on task.
     let onPromote: (HermesKanbanTask) -> Void

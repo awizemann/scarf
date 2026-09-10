@@ -12,7 +12,7 @@ import Foundation
 ///
 /// - `hermes_cli/skills_hub.py:645-648` — `def do_install(...) -> None`, with
 ///   nine bare `return`s after printing (`:659`, `:662`, `:667`, `:669`,
-///   `:684-685`, `:691`, `:696`, `:711`, `:715`).
+///   `:685`, `:693`, `:701`, `:712`, `:718`).
 /// - `hermes_cli/sessions_cmd.py:46-48` — `_not_found()` prints
 ///   `Session '<id>' not found.` **to stdout** and returns 1, but its callers
 ///   (`:319`, `:392`, `:488`) discard that and return `None`.
@@ -54,9 +54,13 @@ public enum HermesCLIVerdict {
     /// they are normally suppressed, but `FORCE_COLOR`/`CLICOLOR_FORCE` in the
     /// user's environment (and some SSH wrappers) put them back, and a marker
     /// that starts a line would then be preceded by `ESC[32m`.
+    /// NB the pattern is NOT a raw string: `\u{1B}` is a **Swift** escape for
+    /// ESC, and ICU's regex dialect has no `\u{…}` form — inside a `#"…"#`
+    /// literal it reached the engine verbatim and matched nothing, so this
+    /// stripped no colour at all. Anchored markers depend on it.
     public static func stripANSI(_ text: String) -> String {
         text.replacingOccurrences(
-            of: #"\u{1B}\[[0-9;]*[a-zA-Z]"#,
+            of: "\u{1B}\\[[0-9;]*[a-zA-Z]",
             with: "",
             options: .regularExpression
         )
@@ -69,6 +73,21 @@ public enum HermesCLIVerdict {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
     }
+
+    /// One already-trimmed line with any leading status glyph removed, so an
+    /// anchored marker can be tested with `hasPrefix`. Hermes prefixes its
+    /// success/refusal lines through small helpers — `  ✓ ` / `  ✗ ` / `  ⚠ `
+    /// (`hermes_cli/mcp_config.py:34-36`), `⊘` (`plugins_cmd.py:1198`) — and
+    /// the marker text starts immediately after.
+    public static func unglyphed(_ line: String) -> String {
+        var head = Substring(line)
+        while let first = head.first, Self.statusGlyphs.contains(first) || first == " " {
+            head = head.dropFirst()
+        }
+        return String(head)
+    }
+
+    private static let statusGlyphs: Set<Character> = ["\u{2713}", "\u{2717}", "\u{26A0}", "\u{2298}", "\u{2022}"]
 
     /// - Parameters:
     ///   - output: combined stdout+stderr (or stdout alone — both work; the
@@ -92,22 +111,40 @@ public enum HermesCLIVerdict {
     ///     marker matched. On for commands whose every refusal is a single
     ///     terminal line; off where trailing chatter (hints, next-step
     ///     instructions) would be quoted instead of the reason.
+    ///   - successAnchored: require the success marker to START its line
+    ///     (after ANSI stripping, trimming and any leading status glyph)
+    ///     rather than appear anywhere in it. On for every emitter that
+    ///     prints its success line at column 0, which is all of them except
+    ///     the `plugins` ones — there the marker is a mid-sentence clause.
+    ///     A bare substring is not safe there: with the usual
+    ///     `failureWins: false`, a success PHRASE quoted inside a report body
+    ///     outranks a real refusal. `do_install` is the live case —
+    ///     `_print_tier1_advisory` (skills_hub.py:704, 726-747) prints
+    ///     SKILL.md-derived findings BEFORE `install_from_quarantine` can
+    ///     raise (:714-720), so a skill whose own text contains
+    ///     `Installed: …` used to be reported installed after it was refused.
     public static func judge(
         output: String,
         exitCode: Int32,
         successMarkers: [String],
         failureMarkers: [String] = [],
         failureWins: Bool = false,
-        fallbackDetail: Bool = true
+        fallbackDetail: Bool = true,
+        successAnchored: Bool = false
     ) -> HermesCLIOutcome {
         let lines = significantLines(output)
         let refusal = lines.first { line in failureMarkers.contains { line.contains($0) } }
         func failed(_ detail: String?) -> HermesCLIOutcome {
             HermesCLIOutcome(succeeded: false, detail: detail ?? (fallbackDetail ? lines.last : nil))
         }
+        func matchesSuccess(_ line: String) -> Bool {
+            guard successAnchored else { return successMarkers.contains { line.contains($0) } }
+            let head = unglyphed(line)
+            return successMarkers.contains { head.hasPrefix($0) }
+        }
         guard exitCode == 0 else { return failed(refusal) }
         if failureWins, refusal != nil { return failed(refusal) }
-        if lines.contains(where: { line in successMarkers.contains { line.contains($0) } }) {
+        if lines.contains(where: matchesSuccess) {
             return HermesCLIOutcome(succeeded: true, detail: nil)
         }
         // Exit 0 with no success line: a `None`-returning refusal we have no
@@ -132,8 +169,8 @@ public enum HermesCLIMarkers {
     /// - `Error:` — `_print_error` (skills_hub.py:134-135), reached from
     ///   `_pinned_sources` (:582) and `_print_fetch_failure` (:592).
     /// - `Installation blocked:` — `_install_blocked` (:498), reached from the
-    ///   scan verdict (:707) and `_invalid_path` (:506).
-    /// - `is already installed at` / `Use --force to reinstall.` — :683-686.
+    ///   scan verdict (:699) and `_invalid_path` (:506).
+    /// - `is already installed at` (:682) / `Use --force to reinstall.` (:684).
     /// - `Cannot install from URL:` / `Invalid --name:` —
     ///   `_resolve_url_bundle_name` (:520, :525).
     /// - `Installation cancelled.` — `_confirm_install` (:642) and :537.
@@ -270,11 +307,79 @@ public enum HermesCLIMarkers {
         "is already disabled.",
     ]
 
-    /// Same `_fail` refusals as enable; `disable` runs no consent screen.
+    /// Same `_fail` refusal as enable, minus one: `disable` runs no consent
+    /// screen and no legacy-relay refusal.
+    ///
+    /// `was removed.` was a DEAD marker here. The phrase is printed only by
+    /// `_refuse_legacy_relay` (plugins_cmd.py:996-1002 at v2026.9.7), which is
+    /// defined inside — and called only from — `cmd_enable` (`:1002`, `:1007`).
+    /// Floor walk over every `v2026.*` tag carrying `hermes_cli/plugins_cmd.py`
+    /// (v2026.3.23 … v2026.9.7): the string first appears at **v2026.8.19**, at
+    /// lines 1424 and 1439, both inside `cmd_enable` (`:1405`) and well above
+    /// `cmd_disable` (`:1710`); identical at v2026.8.27 and v2026.8.31. So no
+    /// supported host has ever printed it from `plugins disable`, and carrying
+    /// it here only risked flipping a real disable into a failure.
     public static let pluginsDisableFailure = [
         "is not installed or bundled.",
-        "was removed.",
     ]
+
+    /// `✓ Plugin <name> updated.` (:828) or
+    /// `✓ Plugin <name> is already up to date.` (:826) — `cmd_update`'s two
+    /// success lines, both printed AFTER the capability consent screen, which
+    /// is why `update` judges with `failureWins: true` like `enable`.
+    public static let pluginsUpdateSuccess = [
+        "updated.",
+        "is already up to date.",
+    ]
+
+    /// `cmd_update` (plugins_cmd.py:822) calls `_run_capability_consent(...)`
+    /// and DISCARDS its bool exactly as `cmd_enable` does, so the non-TTY arm
+    /// (:1092-1098) fires and the update still announces success. That
+    /// ungranted-capability case is the ONLY failure `update` can reach at
+    /// exit 0, which is why it is the only marker here.
+    ///
+    /// **A bare `Error:` does not belong in this set.** Every other refusal
+    /// `cmd_update` can reach goes through `_fail` → `sys.exit(1)`
+    /// (`:80-83`, call site `:809`), so the exit code already catches it —
+    /// while the same run prints text it does NOT control: the post-pull
+    /// `format_scan_report(scan_result)` over the freshly pulled tree
+    /// (`:844`, via `_rescan_after_update` at `:819`) and the raw `git pull`
+    /// output (`:829`). A scan finding that quotes `Error:` out of a plugin's
+    /// own source, or a commit message containing it, would be matched as a
+    /// bare substring — and this set is consumed with `failureWins: true`, so
+    /// that turns a completed update into a reported failure. Same asymmetry
+    /// the success side fixed by anchoring.
+    public static let pluginsUpdateFailure = [
+        "capabilities NOT granted",
+    ]
+
+    /// `cmd_install` (plugins_cmd.py:764) discards the same bool. Unlike
+    /// `enable`/`update`, `install` reports through `HermesPluginInstallOutcome`,
+    /// so this is the one marker that path needs.
+    public static let pluginsConsentRefusal = "capabilities NOT granted"
+
+    // MARK: skills audit / update — hermes_cli/skills_hub.py
+
+    /// `do_audit` is `-> None` (skills_hub.py:879-880) and exits 0 on its
+    /// refusal too. `Auditing <n> skill(s)...` (:893) is the only line that says
+    /// the scan actually ran; `No hub-installed skills to audit.` (:887) is a
+    /// legitimate empty run, not a failure. Both byte-identical back to
+    /// v2026.6.19.
+    public static let skillsAuditSuccess = [
+        "Auditing ",
+        "No hub-installed skills to audit.",
+    ]
+
+    /// `_print_error` (skills_hub.py:134-135) via the unknown-name arm (:891).
+    public static let skillsAuditFailure = ["Error:"]
+
+    /// `do_update`'s nothing-to-do line (skills_hub.py:849), verbatim and
+    /// byte-identical back to v2026.6.19.
+    public static let skillsUpdateNoUpdates = "No updates available."
+
+    /// `do_update`'s per-skill ATTEMPT line (skills_hub.py:864). It is printed
+    /// before `do_install` runs, so it proves an attempt and nothing more.
+    public static let skillsUpdateAttempt = "Updating:"
 }
 
 /// `hermes security audit`'s three-way exit contract — the one site in this
@@ -306,4 +411,75 @@ public enum HermesSecurityAuditVerdict: Equatable, Sendable {
         default: self = .failed(exitCode)
         }
     }
+}
+
+/// The `hermes security audit` human report, parsed just enough to tell the
+/// two exit-0 cases apart.
+///
+/// `--fail-on critical` (Scarf's explicit threshold, and Hermes's default)
+/// makes the exit code answer only "was anything CRITICAL?". Exit 0 therefore
+/// covers both "nothing found at all" and "high/moderate/low advisories
+/// found" — and the `.clean` arm was printing the tail of a report that was
+/// listing real vulnerabilities, with no label saying so.
+///
+/// `_render_human` (`hermes_cli/security_audit.py:254-268` at v2026.9.7) emits
+/// exactly one of two heads —
+/// `No known vulnerabilities found across <n> component(s).` (:255) or
+/// `Found <n> known vulnerability finding(s) across <m> component(s):` (:257) —
+/// then one `  {severity.ljust(8)}  {name}=={version}  {osv-id}` row per
+/// finding (:264). Both heads and the row shape are byte-identical back to
+/// **v2026.5.29** — the release `security audit` shipped in and the floor of
+/// `hasHermesAudit` — so this parse changes nothing on a pre-target host (C1).
+///
+/// A third exit-0 shape has no findings section at all:
+/// `No components discovered (everything skipped, or empty environment).`
+/// (`cmd_security_audit`, :299-301).
+public struct HermesSecurityAuditReport: Sendable, Equatable {
+    /// `n` from the `Found n known vulnerability finding(s)` head; 0 when the
+    /// report's head is the clean one.
+    public let findingCount: Int
+    /// Severity tier → number of rows, using the emitter's own uppercase
+    /// spellings (`SEVERITY_ORDER`, :29 — UNKNOWN/LOW/MODERATE/MEDIUM/HIGH/
+    /// CRITICAL).
+    public let severityCounts: [String: Int]
+
+    public init(findingCount: Int, severityCounts: [String: Int]) {
+        self.findingCount = findingCount
+        self.severityCounts = severityCounts
+    }
+
+    /// Highest-first summary of the tiers present, e.g. `2 high · 1 moderate`.
+    public var severitySummary: String {
+        Self.severityOrder.compactMap { tier -> String? in
+            guard let n = severityCounts[tier], n > 0 else { return nil }
+            return "\(n) \(tier.lowercased())"
+        }.joined(separator: " · ")
+    }
+
+    /// `SEVERITY_ORDER`'s keys, highest first. `MEDIUM` is OSV's alias for
+    /// `MODERATE` (same rank, :29) and both can appear in a report.
+    static let severityOrder = ["CRITICAL", "HIGH", "MODERATE", "MEDIUM", "LOW", "UNKNOWN"]
+
+    public static func parse(_ output: String) -> HermesSecurityAuditReport {
+        var count = 0
+        var counts: [String: Int] = [:]
+        for line in HermesCLIVerdict.significantLines(output) {
+            if count == 0, line.hasPrefix(Self.foundPrefix), line.contains("known vulnerability finding(s)") {
+                let digits = line.dropFirst(Self.foundPrefix.count).prefix { $0.isNumber }
+                count = Int(digits) ?? 0
+                continue
+            }
+            // A finding row: `<SEVERITY>  <name>==<version>  <OSV-ID>`. The
+            // trimmed line starts with the tier word, and the `==` pins it to
+            // a row rather than any prose that happens to open with one.
+            guard let tier = line.split(separator: " ").first.map(String.init),
+                  Self.severityOrder.contains(tier),
+                  line.contains("==")
+            else { continue }
+            counts[tier, default: 0] += 1
+        }
+        return HermesSecurityAuditReport(findingCount: count, severityCounts: counts)
+    }
+
+    private static let foundPrefix = "Found "
 }

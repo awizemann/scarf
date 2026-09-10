@@ -131,11 +131,20 @@ struct MainActorBlockingWritesP11Tests {
         // exit stamp still equals its entry stamp is one that has only
         // started, and comparing against it would make the overlap check
         // vacuously true.
-        await Self.until(timeout: 10) {
+        // Generous: under the full parallel `scarfTests` run the two detached
+        // hops can take far longer than 10 s to be scheduled, and this wait
+        // is only ever exhausted on the failure path.
+        await Self.until(timeout: 120) {
             log.spans.count == 2 && log.spans.allSatisfy { $0.1 > $0.0 }
         }
         let spans = log.spans
-        #expect(spans.count == 2)
+        // `guard`, not a bare subscript: indexing `spans[1]` after a
+        // count mismatch traps and takes the WHOLE test host down with it,
+        // cascading into every suite still running (seen under load).
+        guard spans.count == 2, log.calls.count == 2 else {
+            Issue.record("expected 2 serialised config writes, saw \(spans.count) spans / \(log.calls.count) calls")
+            return
+        }
         #expect(spans.allSatisfy { $0.1 > $0.0 })
         // Second invocation started only after the first returned.
         #expect(spans[1].0 >= spans[0].1, "config writes overlapped — the chain is not serialising")

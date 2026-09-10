@@ -79,13 +79,14 @@ struct ScarfGoKanbanDetailSheet: View {
                 VStack(alignment: .leading, spacing: 16) {
                     headerCard(detail.task)
                     if let body = detail.task.body, !body.isEmpty {
-                        if let attributed = try? AttributedString(markdown: body) {
-                            Text(attributed)
-                                .font(.body)
-                        } else {
-                            Text(body)
-                                .font(.body)
-                        }
+                        // PLAIN text, deliberately — parity with the Mac
+                        // inspector's `bodySection`. A card body is written by
+                        // whatever worker touched the card, and
+                        // `AttributedString(markdown:)` renders links with no
+                        // scheme allowlist, so a worker could plant
+                        // `[Approve](javascript:…)`-shaped bait here.
+                        Text(body)
+                            .font(.body)
                     }
                     let taskDiags = diagnostics.filter { $0.runId == nil }
                     if !taskDiags.isEmpty {

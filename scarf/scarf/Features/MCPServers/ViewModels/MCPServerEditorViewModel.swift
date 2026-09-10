@@ -21,9 +21,6 @@ final class MCPServerEditorViewModel {
     var promptsEnabled: Bool
     var timeoutDraft: String
     var connectTimeoutDraft: String
-    /// SSE-only — renders as a third numeric on `.sse` servers. Empty string
-    /// means "use Hermes default" (writer drops the scalar).
-    var sseReadTimeoutDraft: String
     /// v0.14 — supports_parallel_tool_calls toggle. Three states:
     /// nil = "use Hermes default" (no key written), true = opt in,
     /// false = opt out explicitly. Bound to a tri-state Picker in the
@@ -73,7 +70,6 @@ final class MCPServerEditorViewModel {
         self.promptsEnabled = server.promptsEnabled
         self.timeoutDraft = server.timeout.map { String($0) } ?? ""
         self.connectTimeoutDraft = server.connectTimeout.map { String($0) } ?? ""
-        self.sseReadTimeoutDraft = server.sseReadTimeout.map { String($0) } ?? ""
         self.parallelToolCallsDraft = server.supportsParallelToolCalls
         self.clientCertDraft = server.clientCert ?? ""
         self.clientKeyDraft = server.clientKey ?? ""
@@ -152,22 +148,63 @@ final class MCPServerEditorViewModel {
         headersDraft.removeAll { $0.id == id }
     }
 
+    /// The first key two rows share after trimming, or `nil` when they are
+    /// all distinct.
+    ///
+    /// `appendEnvRow` / `appendHeaderRow` add a BLANK row and nothing has
+    /// ever checked the result, so two rows keyed `" API_KEY"` and
+    /// `"API_KEY"` — or simply the same name typed twice — trimmed to the
+    /// same string and `Dictionary(uniqueKeysWithValues:)` hit its
+    /// precondition failure, which TRAPS the whole app on Save. Last-wins
+    /// would not be better: the user cannot see which row won.
+    static func duplicateKey(in rows: [KeyValueRow]) -> String? {
+        var seen = Set<String>()
+        for row in rows {
+            let key = row.key.trimmingCharacters(in: .whitespaces)
+            guard !key.isEmpty else { continue }
+            if !seen.insert(key).inserted { return key }
+        }
+        return nil
+    }
+
     func save(completion: @escaping (Bool) -> Void) {
         isSaving = true
         saveError = nil
 
-        let envMap = Dictionary(uniqueKeysWithValues: envDraft
-            .filter { !$0.key.trimmingCharacters(in: .whitespaces).isEmpty }
-            .map { ($0.key.trimmingCharacters(in: .whitespaces), $0.value) })
-        let headerMap = Dictionary(uniqueKeysWithValues: headersDraft
-            .filter { !$0.key.trimmingCharacters(in: .whitespaces).isEmpty }
-            .map { ($0.key.trimmingCharacters(in: .whitespaces), $0.value) })
+        // Surfaced as a validation error through the same `saveError` the
+        // write-failure path uses, BEFORE anything touches config.yaml.
+        if let duplicate = Self.duplicateKey(in: envDraft) {
+            isSaving = false
+            saveError = "Two environment rows use the key “\(duplicate)”. Rename or remove one, then save."
+            completion(false)
+            return
+        }
+        if let duplicate = Self.duplicateKey(in: headersDraft) {
+            isSaving = false
+            saveError = "Two header rows use the key “\(duplicate)”. Rename or remove one, then save."
+            completion(false)
+            return
+        }
+
+        // `uniquingKeysWith` rather than `uniqueKeysWithValues`: the guards
+        // above are the user-visible answer, and this is the belt that keeps
+        // a future caller from trapping the process on a collision.
+        let envMap = Dictionary(
+            envDraft
+                .filter { !$0.key.trimmingCharacters(in: .whitespaces).isEmpty }
+                .map { ($0.key.trimmingCharacters(in: .whitespaces), $0.value) },
+            uniquingKeysWith: { _, last in last }
+        )
+        let headerMap = Dictionary(
+            headersDraft
+                .filter { !$0.key.trimmingCharacters(in: .whitespaces).isEmpty }
+                .map { ($0.key.trimmingCharacters(in: .whitespaces), $0.value) },
+            uniquingKeysWith: { _, last in last }
+        )
         let include = includeDraft.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         let exclude = excludeDraft.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         let timeoutValue = Int(timeoutDraft.trimmingCharacters(in: .whitespaces))
         let connectValue = Int(connectTimeoutDraft.trimmingCharacters(in: .whitespaces))
-        let trimmedSSE = sseReadTimeoutDraft.trimmingCharacters(in: .whitespaces)
-        let sseTimeoutValue: Int? = trimmedSSE.isEmpty ? nil : Int(trimmedSSE)
         let parallelDraft = parallelToolCallsDraft
         let originalParallel = server.supportsParallelToolCalls
         // v0.15 — mTLS drafts. Resolve empty strings to nil so an untouched /
@@ -225,10 +262,12 @@ final class MCPServerEditorViewModel {
                 case .http:
                     if !service.setMCPServerHeaders(name: name, headers: headerMap) { ok = false }
                 case .sse:
-                    // SSE servers carry headers like .http does, plus an
-                    // optional sse_read_timeout written below.
+                    // SSE servers carry headers exactly like .http does.
+                    // There is no SSE-only scalar to write: `sse_read_timeout`
+                    // is a literal 300.0 on every supported Hermes, so Scarf
+                    // neither offers it nor touches it (see
+                    // `HermesMCPServer.sseReadTimeout`).
                     if !service.setMCPServerHeaders(name: name, headers: headerMap) { ok = false }
-                    if !service.setMCPServerSSETimeout(name: name, sseReadTimeout: sseTimeoutValue) { ok = false }
                 }
                 if !service.updateMCPToolFilters(
                     name: name,

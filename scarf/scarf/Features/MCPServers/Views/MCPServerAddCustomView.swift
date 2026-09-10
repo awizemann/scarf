@@ -13,7 +13,6 @@ struct MCPServerAddCustomView: View {
     @State private var argsText: String = ""
     @State private var url: String = ""
     @State private var auth: String = "none"
-    @State private var sseReadTimeout: String = ""
     @State private var showCatalog = false
     /// Manifest `tools.default_excluded` from the picked catalog entry, if
     /// any — written to `mcp_servers.<name>.tools.exclude` right after the
@@ -249,16 +248,6 @@ struct MCPServerAddCustomView: View {
                         .font(.system(.body, design: .monospaced))
                         .accessibilityLabel("URL")
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("SSE Read Timeout (seconds)").font(.caption.bold())
-                    TextField("default 300", text: $sseReadTimeout)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 140)
-                        .accessibilityLabel("SSE Read Timeout (seconds)")
-                    Text("Hermes-side keepalive interval. Leave blank to use the default.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
             }
         }
     }
@@ -297,12 +286,9 @@ struct MCPServerAddCustomView: View {
                 defaultExcludedTools: pendingDefaultExcludedTools
             )
         case .sse:
-            let trimmedTimeout = sseReadTimeout.trimmingCharacters(in: .whitespaces)
-            let parsedTimeout: Int? = trimmedTimeout.isEmpty ? nil : Int(trimmedTimeout)
             viewModel.addCustomSSE(
                 name: trimmedName,
                 url: url.trimmingCharacters(in: .whitespaces),
-                sseReadTimeout: parsedTimeout,
                 auth: resolvedAuth,
                 apiKey: apiKey,
                 defaultEnabledTools: pendingDefaultEnabledTools,

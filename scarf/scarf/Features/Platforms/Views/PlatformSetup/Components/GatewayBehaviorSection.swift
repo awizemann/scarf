@@ -85,7 +85,10 @@ struct GatewayBehaviorSection: View {
                 Button("Save behavior") { viewModel.save() }
                     .buttonStyle(ScarfPrimaryButton())
                     .controlSize(.small)
-                    .disabled(viewModel.isSaving)
+                    // Also disabled while the (detached) load is in flight:
+                    // saving from the pre-load form would write this VM's
+                    // defaults over whatever config.yaml actually holds.
+                    .disabled(viewModel.isSaving || viewModel.isLoading)
             }
         }
         .onAppear { viewModel.load() }

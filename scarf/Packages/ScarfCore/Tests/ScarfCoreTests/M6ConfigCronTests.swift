@@ -177,7 +177,9 @@ import Foundation
         #expect(c.bitwarden.enabled == false)
         #expect(c.bitwarden.accessTokenEnv == "BWS_ACCESS_TOKEN")
         #expect(c.bitwarden.projectID == "")
-        #expect(c.bitwarden.overrideExisting == false)
+        // TRUE, per `config_defaults.py:2174` @ v2026.9.7 and the key's very
+        // first appearance (v2026.5.28 / v0.15.0). P20 corrected this.
+        #expect(c.bitwarden.overrideExisting == true)
         #expect(c.bitwarden.serverURL == "")
         #expect(c.bitwarden.cacheTTLSeconds == 300)
         #expect(c.bitwarden.autoInstall == true)
@@ -486,19 +488,11 @@ import Foundation
         #expect(c.database.walAutocheckpoint == Optional(0))
     }
 
-    @Test func parsesPermanentAllowlist() {
-        let yaml = """
-        permanent_allowlist:
-          - ls
-          - pwd
-          - stat
-        """
-        let c = HermesConfig(yaml: yaml)
-        #expect(c.commandAllowlist == ["ls", "pwd", "stat"])
-    }
-
-    @Test func parsesCommandAllowlistLegacyName() {
-        // Fall back to `command_allowlist` when `permanent_allowlist` absent.
+    /// `command_allowlist` is the only spelling Hermes reads or writes
+    /// (`tools/approval.py:327-332` and `:358-366` @ v2026.9.7); a whole-tree
+    /// grep for `permanent_allowlist` as a CONFIG key finds nothing at any of
+    /// the 32 `v2026.*` tags. P20 dropped the `permanent_allowlist` read.
+    @Test func parsesCommandAllowlist() {
         let yaml = """
         command_allowlist:
           - whoami
@@ -506,6 +500,21 @@ import Foundation
         """
         let c = HermesConfig(yaml: yaml)
         #expect(c.commandAllowlist == ["whoami", "id"])
+    }
+
+    /// Fails before P20: `permanent_allowlist` used to be PREFERRED, so a
+    /// config carrying both showed the list Hermes ignores.
+    @Test func permanentAllowlistIsNotAConfigKeyHermesReads() {
+        let yaml = """
+        permanent_allowlist:
+          - ls
+          - pwd
+        command_allowlist:
+          - whoami
+        """
+        let c = HermesConfig(yaml: yaml)
+        #expect(c.commandAllowlist == ["whoami"])
+        #expect(HermesConfig(yaml: "permanent_allowlist:\n  - ls\n").commandAllowlist == [])
     }
 
     @Test func preservesQuotedStrings() {
@@ -572,21 +581,30 @@ import Foundation
     }
 
     @Test func gatewayAllowlistCoexistsWithLegacyPlatformKeys() {
-        // Regression: the legacy `slack.reply_to_mode` /
-        // `matrix.require_mention` keys live in the SAME top-level section as
-        // the v0.16 allowlist keys — both must keep parsing, no collisions.
+        // Regression: the legacy `matrix.require_mention` key lives in the
+        // SAME top-level section as the v0.16 allowlist keys — both must keep
+        // parsing, no collisions.
+        //
+        // `slack.reply_to_mode` is deliberately NOT read from the top level
+        // any more (P20): it is not a `_SHARED_KEYS` member and
+        // `merge_platform_sections` never merges a bare top-level `slack:`
+        // block, so no Hermes version has ever read it there. The nested
+        // spelling — which is what Scarf's own writer emits — is what wins.
         let yaml = """
         slack:
           reply_to_mode: all
           allowed_channels:
             - C01
+        platforms:
+          slack:
+            reply_to_mode: first
         matrix:
           require_mention: false
           allowed_rooms:
             - '!room:matrix.org'
         """
         let cfg = HermesConfig(yaml: yaml)
-        #expect(cfg.slack.replyToMode == "all")
+        #expect(cfg.slack.replyToMode == "first")
         #expect(cfg.matrix.requireMention == false)
         #expect(cfg.gatewayPlatforms["slack"]?.allowedChannels == ["C01"])
         #expect(cfg.gatewayPlatforms["matrix"]?.allowedRooms == ["!room:matrix.org"])

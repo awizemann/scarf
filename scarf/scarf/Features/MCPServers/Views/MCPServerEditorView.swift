@@ -213,17 +213,6 @@ struct MCPServerEditorView: View {
                         .frame(maxWidth: 140)
                         .accessibilityLabel("Call timeout")
                 }
-                if viewModel.server.transport == .sse {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("SSE read timeout")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        TextField("default 300", text: $viewModel.sseReadTimeoutDraft)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 140)
-                            .accessibilityLabel("SSE read timeout")
-                    }
-                }
                 Spacer()
             }
         }

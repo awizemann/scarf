@@ -85,11 +85,11 @@ final class HealthViewModel {
     var diagnosticsOutput: String = ""
     var isSharingDebug = false
 
-    // MARK: - Supply-chain audit (`hermes audit`, v0.15)
+    // MARK: - Supply-chain audit (`hermes security audit`, v0.15)
 
-    /// True while `hermes audit` is shelling out so the header button can show
-    /// a spinner. The OSV.dev lookup is a network round-trip — easily a couple
-    /// seconds — so this runs off MainActor and never blocks the UI.
+    /// True while `hermes security audit` is shelling out so the header button
+    /// can show a spinner. The OSV.dev lookup is a network round-trip — easily
+    /// a couple seconds — so this runs off MainActor and never blocks the UI.
     var isRunningAudit = false
     /// Inline result strip for the last audit run. Nil before the first run.
     /// Mirrors the `--setup-browser` inline-status pattern in `HealthView` —
@@ -184,8 +184,12 @@ final class HealthViewModel {
             // `async let` would park five cooperative-pool threads.
             async let pidProbe        = Task.detached { svc.hermesPID() }.value
             async let versionProbe    = Task.detached { Self.probeVersion(ctx) }.value
-            async let statusProbe     = Task.detached { ctx.runHermes(["status"]).output }.value
-            async let doctorProbe     = Task.detached { ctx.runHermes(["doctor"]).output }.value
+            // Every `runHermes` NAMES its timeout (P22's rule): the 60 s
+            // default in `ServerContext+Mac.swift:21` is silent, so a site
+            // that omits it cannot be read as having chosen anything. These
+            // two are read-only probes behind a spinner.
+            async let statusProbe     = Task.detached { ctx.runHermes(["status"], timeout: 60).output }.value
+            async let doctorProbe     = Task.detached { ctx.runHermes(["doctor"], timeout: 60).output }.value
             async let subscriptionRead = Task.detached { subSvc.loadState() }.value
             async let configRead      = Task.detached { svc.loadConfig() }.value
             // v0.18+ — `computer-use permissions status --json` exits 1
@@ -505,7 +509,7 @@ final class HealthViewModel {
         actionMessage = "Starting…"
         let ctx = context
         Task { [weak self] in
-            let result = await Task.detached { ctx.runHermes(["gateway", "start"]) }.value
+            let result = await Task.detached { ctx.runHermes(["gateway", "start"], timeout: 60) }.value
             guard let self else { return }
             self.isControlBusy = false
             let started = result.exitCode == 0
@@ -530,7 +534,7 @@ final class HealthViewModel {
         Task { [weak self] in
             let stopped = await Task.detached { svc.stopHermes() }.value
             try? await Task.sleep(for: .seconds(2))
-            let result = await Task.detached { ctx.runHermes(["gateway", "start"]) }.value
+            let result = await Task.detached { ctx.runHermes(["gateway", "start"], timeout: 60) }.value
             guard let self else { return }
             self.isControlBusy = false
             let started = result.exitCode == 0
@@ -663,7 +667,10 @@ final class HealthViewModel {
         actionMessage = "Running dump…"
         let ctx = context
         Task { [weak self] in
-            let result = await Task.detached { ctx.runHermes(["dump"]) }.value
+            // Longer than the 60 s default on purpose: `hermes dump` walks
+            // state.db and the config tree, and on a remote host that is an
+            // SSH round trip over the whole thing.
+            let result = await Task.detached { ctx.runHermes(["dump"], timeout: 120) }.value
             guard let self else { return }
             self.isRunningDump = false
             self.diagnosticsOutput = result.output
@@ -775,10 +782,29 @@ final class HealthViewModel {
                 let trimmed = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
                 switch HermesSecurityAuditVerdict(exitCode: result.exitCode) {
                 case .clean:
-                    // Prefer a concise tail of the output (the summary line)
-                    // over the full report — the panel-less inline strip is short.
-                    let tail = trimmed.split(separator: "\n").suffix(2).joined(separator: " · ")
-                    self.auditMessage = tail.isEmpty ? String(localized: "No known advisories found.") : tail
+                    // Exit 0 means "nothing at or above --fail-on", and the
+                    // threshold is `critical` — so this arm also covers a
+                    // report that IS listing high/moderate/low advisories
+                    // (`int(any(severity >= threshold))`, security_audit.py
+                    // :311-312). Printing its tail with no label told the user
+                    // their environment was clean while the text above said
+                    // otherwise. `_render_human`'s two heads (:255, :257) and
+                    // its `  {severity}  {name}=={version}  {osv-id}` rows
+                    // (:264) are what distinguish them, byte-identical back to
+                    // v2026.5.29 — the `hasHermesAudit` floor (charter C1).
+                    let report = HermesSecurityAuditReport.parse(result.output)
+                    if report.findingCount > 0 {
+                        let summary = report.severitySummary
+                        self.auditMessage = summary.isEmpty
+                            ? String(localized: "No critical advisories · \(report.findingCount) lower-severity finding(s).")
+                            : String(localized: "No critical advisories · \(report.findingCount) finding(s): \(summary).")
+                    } else {
+                        // Prefer a concise tail of the output (the summary
+                        // line) over the full report — the panel-less inline
+                        // strip is short.
+                        let tail = trimmed.split(separator: "\n").suffix(2).joined(separator: " · ")
+                        self.auditMessage = tail.isEmpty ? String(localized: "No known advisories found.") : tail
+                    }
                 case .findings:
                     // The report IS the answer here; `_render_human` leads with
                     // `Found N known vulnerability finding(s) across M
@@ -1046,6 +1072,10 @@ final class HealthViewModel {
         actionMessage = "Starting dashboard…"
 
         let port = dashboardStatus.port
+        // No timeout on THIS process, deliberately: it is the dashboard
+        // server, meant to outlive the click. C10's "every subprocess has a
+        // timeout" is about waits — nothing here waits on it; liveness comes
+        // from the HTTP probe below and the stop path signals it by PID.
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: binary)
         proc.arguments = ["dashboard", "--no-open", "--port", String(port)]
@@ -1055,45 +1085,48 @@ final class HealthViewModel {
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = FileHandle.nullDevice
 
-        do {
-            try proc.run()
-            dashboardProcess = proc
-            Task { [weak self] in
-                // Give uvicorn up to ~6 seconds to bind the port, probing
-                // every 300ms. First 200 response opens the browser.
-                for _ in 0..<20 {
-                    if await Self.probeDashboard(port: port) {
-                        if let url = URL(string: "http://127.0.0.1:\(port)") {
-                            await MainActor.run {
-                                _ = NSWorkspace.shared.open(url)
-                            }
-                        }
-                        break
-                    }
-                    try? await Task.sleep(nanoseconds: 300_000_000)
+        // C10: `Process.run()` is fork/exec plus PATH and bundle resolution —
+        // it can block for tens of milliseconds, and on a wedged filesystem
+        // far longer. Spawn off the main actor and come back with either the
+        // live process or the error; everything that touches view state stays
+        // on MainActor.
+        Task { [weak self] in
+            let spawnError: (any Error)? = await Task.detached {
+                do { try proc.run(); return nil } catch { return error }
+            }.value
+            guard let self else { return }
+            if let spawnError {
+                Self.dashboardLogger.error("Failed to spawn hermes dashboard: \(spawnError.localizedDescription, privacy: .public)")
+                self.dashboardProcess = nil
+                self.dashboardStatus = WebDashboardStatus(
+                    running: self.dashboardStatus.running,
+                    port: self.dashboardStatus.port,
+                    busy: false
+                )
+                self.actionMessage = "Failed to start: \(spawnError.localizedDescription)"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                    self?.actionMessage = nil
                 }
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    self.dashboardStatus = WebDashboardStatus(
-                        running: self.dashboardStatus.running,
-                        port: self.dashboardStatus.port,
-                        busy: false
-                    )
-                    self.actionMessage = nil
-                }
+                return
             }
-        } catch {
-            Self.dashboardLogger.error("Failed to spawn hermes dashboard: \(error.localizedDescription, privacy: .public)")
-            dashboardProcess = nil
-            dashboardStatus = WebDashboardStatus(
-                running: dashboardStatus.running,
-                port: dashboardStatus.port,
+            self.dashboardProcess = proc
+            // Give uvicorn up to ~6 seconds to bind the port, probing every
+            // 300ms. First 200 response opens the browser.
+            for _ in 0..<20 {
+                if await Self.probeDashboard(port: port) {
+                    if let url = URL(string: "http://127.0.0.1:\(port)") {
+                        _ = NSWorkspace.shared.open(url)
+                    }
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 300_000_000)
+            }
+            self.dashboardStatus = WebDashboardStatus(
+                running: self.dashboardStatus.running,
+                port: self.dashboardStatus.port,
                 busy: false
             )
-            actionMessage = "Failed to start: \(error.localizedDescription)"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                self?.actionMessage = nil
-            }
+            self.actionMessage = nil
         }
     }
 
@@ -1111,29 +1144,36 @@ final class HealthViewModel {
         )
         actionMessage = "Stopping dashboard…"
 
-        if let proc = dashboardProcess, proc.isRunning {
-            proc.terminate()
-            dashboardProcess = nil
-        } else if let pid = Self.dashboardListenerPID(port: dashboardStatus.port) {
-            // External instance — signal only the process actually
-            // bound to our dashboard port, not anything that happens
-            // to mention "hermes dashboard" in its argv.
-            _ = Darwin.kill(pid, SIGTERM)
-        }
+        let port = dashboardStatus.port
+        let owned = dashboardProcess
+        let terminateOwned = owned?.isRunning == true
+        if terminateOwned { dashboardProcess = nil }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-            guard let self else { return }
-            Task {
-                let running = await Self.probeDashboard(port: self.dashboardStatus.port)
-                await MainActor.run {
-                    self.dashboardStatus = WebDashboardStatus(
-                        running: running,
-                        port: self.dashboardStatus.port,
-                        busy: false
-                    )
-                    self.actionMessage = nil
+        // C10: `terminate()` and the `lsof` probe are both process work — and
+        // `lsof` is a whole spawn whose `waitUntilExit()` had no timeout, so a
+        // hung lsof froze the window. Off the main actor, then hop back.
+        Task { [weak self] in
+            await Task.detached {
+                if terminateOwned {
+                    owned?.terminate()
+                } else if let pid = Self.dashboardListenerPID(port: port) {
+                    // External instance — signal only the process actually
+                    // bound to our dashboard port, not anything that happens
+                    // to mention "hermes dashboard" in its argv.
+                    _ = Darwin.kill(pid, SIGTERM)
                 }
-            }
+            }.value
+            // Same settle delay as before, now a suspension rather than a
+            // main-queue timer.
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            let running = await Self.probeDashboard(port: port)
+            guard let self else { return }
+            self.dashboardStatus = WebDashboardStatus(
+                running: running,
+                port: port,
+                busy: false
+            )
+            self.actionMessage = nil
         }
     }
 
@@ -1145,6 +1185,8 @@ final class HealthViewModel {
     /// `lsof -c hermes` — Hermes installs as a Python shebang script,
     /// so the process COMM is `python` / `python3` and a `-c hermes`
     /// filter silently misses every standard install.
+    private static let lsofTimeout: TimeInterval = 3
+
     private static func dashboardListenerPID(port: Int) -> pid_t? {
         let lsof = Process()
         lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
@@ -1156,7 +1198,15 @@ final class HealthViewModel {
 
         do {
             try lsof.run()
-            lsof.waitUntilExit()
+            // C10: every subprocess gets a timeout. `waitUntilExit()` alone
+            // waits forever, and lsof CAN hang — a stuck NFS/FUSE mount or an
+            // unresponsive socket makes it block in the kernel. An overrun is
+            // reported as "no listener", the same answer a failed lsof has
+            // always given.
+            guard lsof.waitUntilExit(timeout: lsofTimeout) else {
+                Self.dashboardLogger.warning("lsof timed out locating the dashboard listener")
+                return nil
+            }
             // lsof exits 1 when nothing matches — that's "no listener",
             // not an error. Anything else is something we can't recover
             // from in this code path; log and bail.

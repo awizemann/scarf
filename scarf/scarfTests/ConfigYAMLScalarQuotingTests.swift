@@ -195,8 +195,10 @@ struct ConfigYAMLScalarQuotingTests {
     /// `false` for an entry that isn't there), and the call site consumes it.
     @Test func transportStampFailureIsObservable() throws {
         let (service, home) = try loadFixture()
-        // A name with no entry: the stamp cannot land.
-        #expect(service.setMCPServerSSETimeout(name: "no_such_server", sseReadTimeout: 30) == false)
+        // A name with no entry: the stamp cannot land. Any user of
+        // `patchMCPServerField` proves that (the SSE-specific one is gone —
+        // `sse_read_timeout` is a key no supported Hermes reads, see P24).
+        #expect(service.setMCPServerTimeouts(name: "no_such_server", timeout: 30, connectTimeout: nil) == false)
         // …and the real entry is untouched.
         #expect(try readConfig(home) == Self.fixtureYAML)
     }
@@ -273,5 +275,26 @@ struct ConfigYAMLScalarQuotingTests {
         """
         try yaml.write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
         #expect(!PlatformsViewModel.computeConfiguredPlatforms(context: home.context).contains("slack"))
+    }
+
+    /// P26 — the comment above the split claimed it cut at the `key: value`
+    /// separator colon; the code cut at `firstIndex(of: ":")`. On a top-level
+    /// key that CONTAINS a colon those disagree, and the plain-first-colon
+    /// version invented a platform the file never configured. Neither line
+    /// below is a `slack` / `teams` section.
+    @Test func colonInsideATopLevelKeyDoesNotInventAPlatform() throws {
+        let home = try TempHermesHome()
+        let yaml = """
+        slack:dev: {}
+        teams:staging:
+          reply_to_mode: first
+        discord: {}
+        """
+        try yaml.write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
+        let configured = PlatformsViewModel.computeConfiguredPlatforms(context: home.context)
+        #expect(!configured.contains("slack"), "`slack:dev:` is not a `slack` section")
+        #expect(!configured.contains("teams"), "`teams:staging:` is not a `teams` section")
+        // The separator rule still finds an ordinary section in the same file.
+        #expect(configured.contains("discord"))
     }
 }

@@ -8,9 +8,17 @@ import os
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/telegram
 @Observable
 @MainActor
-final class TelegramSetupViewModel: OutcomeMessageHosting {
+final class TelegramSetupViewModel: PlatformSetupForm {
     let context: ServerContext
-    init(context: ServerContext = .local) { self.context = context }
+    /// C10 test seam — nil in production. See ``PlatformSetupForm``.
+    let cliRunner: HermesCLIRunner?
+    /// Load/save in-flight flags owned by ``PlatformSetupForm``.
+    var isLoading = false
+    var isSaving = false
+    init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
+        self.context = context
+        self.cliRunner = cliRunner
+    }
 
     // Required
     var botToken: String = ""
@@ -54,29 +62,29 @@ final class TelegramSetupViewModel: OutcomeMessageHosting {
     /// value to `.empty`, changing which keys the next save writes.
     func load(capabilities: HermesCapabilities) {
         self.capabilities = capabilities
-        // GW-F6 / audit DI L10: an unreadable `.env` used to arrive as an
-        // EMPTY one, so this form rendered blank fields over live values and
-        // a Save then commented those keys out. Absent is still an empty
-        // form (correct — nothing is set yet); unreadable says so.
-        let (env, envReadFailure) = PlatformSetupHelpers.loadEnv(context: context)
-        if let envReadFailure {
-            message = envReadFailure
-            messageIsFailure = true
-        }
-        botToken = env["TELEGRAM_BOT_TOKEN"] ?? ""
-        allowedUsers = env["TELEGRAM_ALLOWED_USERS"] ?? ""
-        homeChannel = env["TELEGRAM_HOME_CHANNEL"] ?? ""
-        webhookURL = env["TELEGRAM_WEBHOOK_URL"] ?? ""
-        webhookPort = env["TELEGRAM_WEBHOOK_PORT"] ?? ""
-        webhookSecret = env["TELEGRAM_WEBHOOK_SECRET"] ?? ""
+        // Off the main actor (C10) — see ``PlatformSetupForm``. GW-F6 /
+        // audit DI L10: an unreadable `.env` used to arrive as an EMPTY one,
+        // so this form rendered blank fields over live values and a Save
+        // then commented those keys out. Absent is still an empty form
+        // (correct — nothing is set yet); unreadable says so.
+        loadSnapshot { [weak self] snapshot in
+            guard let self else { return }
+            let env = snapshot.env
+            botToken = env["TELEGRAM_BOT_TOKEN"] ?? ""
+            allowedUsers = env["TELEGRAM_ALLOWED_USERS"] ?? ""
+            homeChannel = env["TELEGRAM_HOME_CHANNEL"] ?? ""
+            webhookURL = env["TELEGRAM_WEBHOOK_URL"] ?? ""
+            webhookPort = env["TELEGRAM_WEBHOOK_PORT"] ?? ""
+            webhookSecret = env["TELEGRAM_WEBHOOK_SECRET"] ?? ""
 
-        let cfg = HermesFileService(context: context).loadConfig()
-        requireMention = cfg.telegram.requireMention
-        reactions = cfg.telegram.reactions
-        disableTopicAutoRename = cfg.telegram.disableTopicAutoRename
-        ignoreRootDM = cfg.telegram.ignoreRootDM
-        richMessages = cfg.displayTelegramRichMessages(capabilities: capabilities)
-        statusIndicator = cfg.telegram.statusIndicator
+            guard let cfg = snapshot.config else { return }
+            requireMention = cfg.telegram.requireMention
+            reactions = cfg.telegram.reactions
+            disableTopicAutoRename = cfg.telegram.disableTopicAutoRename
+            ignoreRootDM = cfg.telegram.ignoreRootDM
+            richMessages = cfg.displayTelegramRichMessages(capabilities: capabilities)
+            statusIndicator = cfg.telegram.statusIndicator
+        }
     }
 
     func save() {
@@ -104,6 +112,6 @@ final class TelegramSetupViewModel: OutcomeMessageHosting {
             configKV["platforms.telegram.extra.rich_messages"] = PlatformSetupHelpers.envBool(richMessages)
             configKV["platforms.telegram.extra.status_indicator"] = PlatformSetupHelpers.envBool(statusIndicator)
         }
-        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV))
+        commitSave(envPairs: envPairs, configKV: configKV)
     }
 }

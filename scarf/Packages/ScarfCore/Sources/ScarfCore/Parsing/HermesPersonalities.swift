@@ -27,7 +27,7 @@ public struct HermesPersonalityEntry: Identifiable, Sendable, Equatable {
 ///
 /// Ground truth is Hermes' `hermes_cli/personality.py`:
 /// `BUILTIN_PERSONALITIES` (the 14 names below) and
-/// `NEUTRAL_PERSONALITY_NAMES`. As of Hermes v0.20.4 (tag v2026.8.18) the
+/// `NEUTRAL_PERSONALITY_NAMES`. As of Hermes v0.20.1 (tag v2026.8.13) the
 /// built-ins were removed from the shipped `config.yaml` — it now carries
 /// `agent.personalities: {}` for user-defined entries only — so a pure YAML
 /// scrape returns nothing and the pickers go empty.
@@ -158,11 +158,11 @@ public enum HermesPersonalities {
     /// `hasBuiltinPersonalitiesInCode` is the host capability, and it decides
     /// where the built-ins come from — the union is NOT unconditional:
     ///
-    /// * `true` (v0.20.4+): the 14 built-ins live only in
+    /// * `true` (v0.20.1+): the 14 built-ins live only in
     ///   `hermes_cli/personality.py` and the shipped config carries
     ///   `agent.personalities: {}`. The static list is the only source, so
     ///   it is unioned in and a user entry overlays the built-in it names.
-    /// * `false` (pre-v0.20.4): the built-ins are ordinary, editable YAML in
+    /// * `false` (pre-v0.20.1): the built-ins are ordinary, editable YAML in
     ///   the shipped config.yaml. A user who deleted one genuinely removed
     ///   it from that host, so the config parse is authoritative and the
     ///   static list must NOT resurrect the deleted entry.
@@ -175,7 +175,7 @@ public enum HermesPersonalities {
     /// so on a `hasBuiltinPersonalitiesInCode` host it degrades back to the
     /// built-in row (`isBuiltin: true`, empty prompt = "text lives in
     /// Hermes' source"). The name never silently loses its identity, and no
-    /// prompt text is invented. On a pre-v0.20.4 host there is no in-code
+    /// prompt text is invented. On a pre-v0.20.1 host there is no in-code
     /// built-in to fall back to, so the parsed entry stands as written.
     public static func resolve(yaml: String, hasBuiltinPersonalitiesInCode: Bool) -> [HermesPersonalityEntry] {
         let parsed = parseUserDefined(yaml: yaml)

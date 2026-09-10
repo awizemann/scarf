@@ -201,7 +201,7 @@ public enum HermesSkillsHubParser: Sendable {
     /// content hash (`bundle_content_hash`, `:300`), so there is nothing
     /// to render as "1.0.0 → 1.1.0". Every row is returned, status and
     /// all; `SkillsViewModel` splits the actionable `update_available`
-    /// rows (the only ones `do_update` acts on, `skills_hub.py:843`) from
+    /// rows (the only ones `do_update` acts on, `skills_hub.py:847`) from
     /// the three fault statuses, which are diagnostics the user has to fix
     /// by hand.
     ///
@@ -256,6 +256,10 @@ public enum HermesSkillsHubParser: Sendable {
     public static func parseUpdateReport(_ output: String) -> HermesSkillsUpdateReport {
         var updatedCount: Int?
         var skipped: [String] = []
+        var noUpdatesAvailable = false
+        var attemptedCount = 0
+        var installedCount = 0
+        var failureDetail: String?
 
         func appendSkipped(_ name: String) {
             let clean = name.trimmingCharacters(in: CharacterSet(charactersIn: " .,\"'"))
@@ -263,9 +267,36 @@ public enum HermesSkillsHubParser: Sendable {
             skipped.append(clean)
         }
 
-        for raw in output.components(separatedBy: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            guard !line.isEmpty else { continue }
+        for line in HermesCLIVerdict.significantLines(output) {
+
+            // `do_update` prints this and returns when nothing is actionable
+            // (skills_hub.py:849). Exit 0 with nothing else is then correct,
+            // not a silent refusal.
+            if line.hasPrefix(Self.noUpdatesLine) {
+                noUpdatesAvailable = true
+                continue
+            }
+
+            // `Updating: <name>` (:864) is an ATTEMPT — it is printed before
+            // `do_install` runs, so it proves intent, never success.
+            if line.hasPrefix(Self.attemptPrefix) {
+                attemptedCount += 1
+                continue
+            }
+
+            // `Installed: <path>` (:720) is the only HONEST per-skill success
+            // line: `do_install` prints it after `install_from_quarantine`
+            // returned. Anchored for the same reason `installOutcome` anchors
+            // it — the Tier 1 advisory (:704) quotes SKILL.md text first.
+            if HermesCLIVerdict.unglyphed(line).hasPrefix(Self.installedPrefix) {
+                installedCount += 1
+                continue
+            }
+
+            if failureDetail == nil,
+               HermesCLIMarkers.skillsInstallFailure.contains(where: { line.contains($0) }) {
+                failureDetail = line
+            }
 
             // Per-skill skip notice. The strict `Skipping:` prefix keeps
             // us clear of the unrelated `Skipping entry with no
@@ -298,13 +329,23 @@ public enum HermesSkillsHubParser: Sendable {
             }
         }
 
-        return HermesSkillsUpdateReport(updatedCount: updatedCount ?? 0, skipped: skipped)
+        return HermesSkillsUpdateReport(
+            updatedCount: updatedCount ?? 0,
+            skipped: skipped,
+            noUpdatesAvailable: noUpdatesAvailable,
+            attemptedCount: attemptedCount,
+            installedCount: installedCount,
+            failureDetail: failureDetail
+        )
     }
 
     private static let skipPrefix = "Skipping:"
     private static let updatedPrefix = "Updated "
     private static let skillCountSuffix = "skill(s)"
     private static let keptMarker = "skill(s) kept your local edits:"
+    private static let noUpdatesLine = HermesCLIMarkers.skillsUpdateNoUpdates
+    private static let attemptPrefix = HermesCLIMarkers.skillsUpdateAttempt
+    private static let installedPrefix = HermesCLIMarkers.skillsInstallSuccess[0]
 }
 
 // MARK: - Public model types
@@ -315,12 +356,38 @@ public enum HermesSkillsHubParser: Sendable {
 /// skills it left alone because the user edited them on disk. On
 /// pre-v0.20.4 hosts `skipped` is always empty.
 public struct HermesSkillsUpdateReport: Sendable, Equatable {
+    /// `N` from `Updated N skill(s).` (`skills_hub.py:872`). This counts
+    /// ATTEMPTS, not successes: it is `len(updates) - len(skipped_local)`,
+    /// computed from the list `do_update` decided to walk and printed
+    /// unconditionally after the loop, whatever each `do_install` did. Kept
+    /// for continuity; prefer `installedCount` for a verdict.
     public let updatedCount: Int
     public let skipped: [String]
+    /// `do_update` printed `No updates available.` (`:849`) — a legitimate
+    /// no-op, distinct from "it printed nothing we recognise".
+    public let noUpdatesAvailable: Bool
+    /// `Updating: <name>` lines (`:864`) — one per skill it tried.
+    public let attemptedCount: Int
+    /// `Installed: <path>` lines (`:720`) — one per skill `do_install`
+    /// actually landed. The honest success count.
+    public let installedCount: Int
+    /// The first refusal line any nested `do_install` printed, if one did.
+    public let failureDetail: String?
 
-    public init(updatedCount: Int, skipped: [String]) {
+    public init(
+        updatedCount: Int,
+        skipped: [String],
+        noUpdatesAvailable: Bool = false,
+        attemptedCount: Int = 0,
+        installedCount: Int = 0,
+        failureDetail: String? = nil
+    ) {
         self.updatedCount = updatedCount
         self.skipped = skipped
+        self.noUpdatesAvailable = noUpdatesAvailable
+        self.attemptedCount = attemptedCount
+        self.installedCount = installedCount
+        self.failureDetail = failureDetail
     }
 }
 
@@ -349,7 +416,7 @@ public struct HermesHubSkill: Identifiable, Sendable, Equatable {
 /// One row of `hermes skills check`.
 ///
 /// `identifier` is the lock-file skill NAME — which is what
-/// `hermes skills update <name>` takes (`skills_hub.py:843`, keyed off
+/// `hermes skills update <name>` takes (`skills_hub.py:847`, keyed off
 /// `entry["name"]`). It is deliberately NOT the hub identifier: the update
 /// path resolves through the lock file, not through a registry slug.
 public struct HermesSkillUpdate: Identifiable, Sendable, Equatable {

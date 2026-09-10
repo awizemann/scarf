@@ -315,8 +315,12 @@ struct HermesFileService: Sendable {
         guard let yaml = readFile(context.paths.configYAML) else { return [] }
         let parsed = parseMCPServersBlock(yaml: yaml)
         return parsed.map { server in
-            let tokenPath = context.paths.mcpTokensDir + "/" + server.name + ".json"
-            let hasToken = transport.fileExists(tokenPath)
+            // NOT `<name>.json`: Hermes files OAuth state under
+            // `_safe_filename(name)`, so `github.com` is `github_com.json`.
+            // See `HermesMCPOAuthPaths` for the port and the tag walk.
+            let hasToken = HermesMCPOAuthPaths
+                .tokenPaths(serverName: server.name, tokensDir: context.paths.mcpTokensDir)
+                .contains { transport.fileExists($0) }
             guard hasToken != server.hasOAuthToken else { return server }
             return HermesMCPServer(
                 name: server.name,
@@ -515,10 +519,9 @@ struct HermesFileService: Sendable {
     /// for capability-gating.
     ///
     /// Hermes v0.16 `mcp add` only understands `--url` (there is NO
-    /// `--transport` / `--sse-read-timeout` flag — they'd be rejected at
-    /// argparse time). So we create the entry with `hermes mcp add --url`
-    /// (which produces a remote/HTTP-shaped block) and then write the
-    /// `transport: sse` (+ optional `sse_read_timeout`) scalars into that
+    /// `--transport` flag — it'd be rejected at argparse time). So we create
+    /// the entry with `hermes mcp add --url` (which produces a remote/HTTP-
+    /// shaped block) and then write the `transport: sse` scalar into that
     /// server's YAML block via the same surgical patcher the rest of the
     /// MCP YAML surface uses. The `transport: sse` scalar is what the
     /// reader keys on to discriminate SSE from HTTP.
@@ -526,7 +529,6 @@ struct HermesFileService: Sendable {
     nonisolated func addMCPServerSSE(
         name: String,
         url: String,
-        sseReadTimeout: Int?,
         auth: String? = nil,
         apiKey: String = "",
         overwriteConfirmed: Bool = false
@@ -552,8 +554,8 @@ struct HermesFileService: Sendable {
             output: tokenWasDiscarded ? Self.tokenReusedNote(name: name) + "\n" + run.output : run.output
         )
         guard addResult.exitCode == 0 else { return addResult }
-        // Stamp the SSE transport discriminator (+ optional read timeout)
-        // into the freshly-written entry's YAML block.
+        // Stamp the SSE transport discriminator into the freshly-written
+        // entry's YAML block.
         //
         // The stamp is not cosmetic: `transport: sse` is the ONLY thing that
         // discriminates this entry from the plain HTTP entry `hermes mcp add
@@ -564,9 +566,6 @@ struct HermesFileService: Sendable {
         // fix or remove it.
         let stamped = patchMCPServerField(name: name) { entryLines in
             Self.replaceOrInsertScalar(key: "transport", value: "sse", in: &entryLines)
-            if let timeout = sseReadTimeout {
-                Self.replaceOrInsertScalar(key: "sse_read_timeout", value: String(timeout), in: &entryLines)
-            }
         }
         guard stamped else {
             return (
@@ -579,20 +578,6 @@ struct HermesFileService: Sendable {
             )
         }
         return addResult
-    }
-
-    /// Updates the `sse_read_timeout` scalar in-place via the same surgical
-    /// patcher used by `setMCPServerTimeouts`. Pass `nil` to remove the
-    /// scalar entirely (Hermes default applies).
-    @discardableResult
-    nonisolated func setMCPServerSSETimeout(name: String, sseReadTimeout: Int?) -> Bool {
-        patchMCPServerField(name: name) { entryLines in
-            if let timeout = sseReadTimeout {
-                Self.replaceOrInsertScalar(key: "sse_read_timeout", value: String(timeout), in: &entryLines)
-            } else {
-                Self.removeScalar(key: "sse_read_timeout", in: &entryLines)
-            }
-        }
     }
 
     /// Updates the v0.14 `supports_parallel_tool_calls` scalar on an MCP
@@ -962,14 +947,28 @@ struct HermesFileService: Sendable {
 
     @discardableResult
     nonisolated func setMCPServerEnv(name: String, env: [String: String]) -> Bool {
-        patchMCPServerField(name: name) { entryLines in
+        // `expecting` is what makes this write fail CLOSED. The structural
+        // half of `verifyPatchedConfig` cannot see this damage: a key that
+        // commented its own mapping out leaves the `mcp_servers` entry list
+        // untouched (`entryNames` only reads indent 0/2) and leaves a shape
+        // `unpatchableReason` accepts (it skips `#` lines). Naming the rows
+        // we wrote turns "the file still looks like a file" into "the rows
+        // we wrote are in it" — and a missing row restores the original.
+        patchMCPServerField(
+            name: name,
+            expecting: env.isEmpty ? [] : Self.subMapRows(header: "env", map: env)
+        ) { entryLines in
             Self.replaceOrInsertSubMap(header: "env", map: env, in: &entryLines)
         }
     }
 
     @discardableResult
     nonisolated func setMCPServerHeaders(name: String, headers: [String: String]) -> Bool {
-        patchMCPServerField(name: name) { entryLines in
+        // Read-back proof for the rows we wrote — see `setMCPServerEnv`.
+        patchMCPServerField(
+            name: name,
+            expecting: headers.isEmpty ? [] : Self.subMapRows(header: "headers", map: headers)
+        ) { entryLines in
             Self.replaceOrInsertSubMap(header: "headers", map: headers, in: &entryLines)
         }
     }
@@ -997,15 +996,35 @@ struct HermesFileService: Sendable {
         }
     }
 
+    /// "Clear Token" — unlink the SAME set of files Hermes's own
+    /// `remove_oauth_tokens` unlinks (`tools/mcp_oauth.py:690-693` →
+    /// `HermesTokenStorage.remove`, `:391-394`, at `v2026.9.7`): the tokens,
+    /// the DCR client registration, the discovered server metadata and the
+    /// CIMD-refused marker.
+    ///
+    /// Deleting only `<name>.json` was worse than doing nothing: it left the
+    /// cached `client.json`, so the next login re-sent a `client_id` the
+    /// server had already forgotten and failed with an `invalid_client` the
+    /// user had no way to clear — the very state Hermes drops on its own
+    /// when it can see the rejection (`tools/mcp_oauth_manager.py:174`).
+    ///
+    /// Every unlink is best-effort by construction: both transports'
+    /// `removeFile` is `rm -f`-shaped, so a sidecar an older Hermes never
+    /// wrote is a no-op, not a failure. Only a real I/O error is reported.
     @discardableResult
     nonisolated func deleteMCPOAuthToken(name: String) -> Bool {
-        let path = context.paths.mcpTokensDir + "/" + name + ".json"
-        do {
-            try transport.removeFile(path)
-            return true
-        } catch {
-            return false
+        var ok = true
+        for path in HermesMCPOAuthPaths.statePaths(
+            serverName: name, tokensDir: context.paths.mcpTokensDir
+        ) {
+            do {
+                try transport.removeFile(path)
+            } catch {
+                Self.logger.error("clear MCP OAuth state failed for \(path, privacy: .public)")
+                ok = false
+            }
         }
+        return ok
     }
 
     @discardableResult
@@ -1098,15 +1117,37 @@ struct HermesFileService: Sendable {
 
         func flush() {
             guard let name = currentName else { return }
-            // 3-way transport discriminator: an explicit `transport: sse` scalar
-            // wins (Hermes v0.13+ emits it for SSE servers); otherwise URL-bearing
-            // entries fall back to .http (v0.12 shape) and command-bearing entries
-            // to .stdio. This preserves byte-for-byte round-trip on existing files
-            // — pre-v0.13 entries have no `transport:` key so they parse identically.
+            // 3-way transport discriminator, in HERMES'S OWN ORDER: `url`
+            // first, then `transport`.
+            //
+            // `_is_http()` is `"url" in self._config`
+            // (`tools/mcp_tool_health.py:27` @ `v2026.9.7`), and
+            // `:412`'s `config.get("transport") == "sse"` is only REACHED on
+            // the HTTP path. Hermes's own status payload says the same thing:
+            // `cfg.get("transport", "http") if "url" in cfg else "stdio"`
+            // (`tools/mcp_tool_discovery.py:484`) — a url-less entry is
+            // `stdio` whatever its `transport:` key says. Testing `transport`
+            // first made Scarf render `.sse` for a url-less `transport: sse`
+            // entry: a transport the host does not run, with the editor then
+            // offering SSE-only fields for it.
+            //
+            // Below the SSE check, URL-bearing entries fall back to .http
+            // (v0.12 shape) and command-bearing entries to .stdio. This
+            // preserves byte-for-byte round-trip on existing files — pre-v0.13
+            // entries have no `transport:` key so they parse identically.
+            //
+            // The comparison is EXACT-CASE because Hermes's is:
+            // `if config.get("transport") == "sse"` (`tools/mcp_tool_transport.py:412`
+            // at `v2026.9.7`), with no `.lower()` anywhere on the path. A
+            // `transport: SSE` entry goes down the Streamable-HTTP arm on the
+            // host, so showing it as SSE in Scarf described a server that does
+            // not exist — and the editor then offered SSE-only fields for
+            // it. The `unquote` is not a widening: `"sse"` and `'sse'` are
+            // the same `str` to PyYAML as bare `sse`, and the old
+            // `.lowercased()` matched NEITHER of them.
             let transport: MCPTransport = {
-                if fields["transport"]?.lowercased() == "sse" { return .sse }
-                if fields["url"] != nil { return .http }
-                return .stdio
+                guard fields["url"] != nil else { return .stdio }
+                return Self.unquote(fields["transport"] ?? "") == "sse" ? .sse : .http
             }()
             // Hermes reads every one of these through `_parse_boolish`
             // (`tools/mcp_tool_common.py:120-137` at `v2026.9.7`; the same
@@ -1555,8 +1596,15 @@ struct HermesFileService: Sendable {
     /// file silently failed on a CRLF `config.yaml` — the entry became
     /// invisible and the registrar re-ran a 90-second `hermes mcp add` on
     /// every launch, forever.
+    /// A leading U+FEFF is framing too, and in NEITHER `.whitespaces` nor
+    /// `.whitespacesAndNewlines` — so on a BOM'd config.yaml the very first
+    /// line read as `"\u{FEFF}mcp_servers:"`, `extractMCPBlock` found no
+    /// block, and every MCP edit refused forever. Stripped here, after the
+    /// trim, so every comparison in this file sees the same bytes; the line
+    /// itself is never rewritten, so the BOM survives on disk.
     nonisolated static func trimYAMLLine(_ line: String) -> String {
-        line.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        return YAMLScalar.strippingBOM(trimmed)
     }
 
     /// Drop an unquoted trailing `# comment` from a scalar value.
@@ -1643,6 +1691,7 @@ struct HermesFileService: Sendable {
             guard let colon = trimmed.firstIndex(of: ":") else {
                 return "line is not a key"
             }
+            if let why = badKeyReason(trimmed: trimmed, colon: colon) { return why }
             let value = trimmed[trimmed.index(after: colon)...]
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if value.hasPrefix("&") || value.hasPrefix("*") {
@@ -1657,6 +1706,33 @@ struct HermesFileService: Sendable {
                     return "block scalar"
                 }
             }
+        }
+        return nil
+    }
+
+    /// Why the KEY half of an entry's `key: value` line is a shape the
+    /// line mutators cannot round-trip, or `nil` when it is fine.
+    ///
+    /// `unpatchableReason` used to accept any indent-4-or-deeper line with a
+    /// colon in it, which meant a key carrying a YAML flow indicator — the
+    /// exact damage the pre-P19 unquoted map-key writer produced — passed
+    /// the post-write verification that exists to catch it. A quoted key is
+    /// always fine; a bare one must not open a flow collection.
+    nonisolated private static func badKeyReason(
+        trimmed: String,
+        colon: String.Index
+    ) -> String? {
+        guard let first = trimmed.first, first != "'", first != "\"" else { return nil }
+        let key = String(trimmed[trimmed.startIndex..<colon])
+        // A tab anywhere in a plain scalar makes PyYAML raise a ScannerError.
+        if key.contains("\t") { return "tab inside the key `\(key)`" }
+        // Only a LEADING `{` / `[` is a hazard — it opens a flow collection,
+        // and PyYAML then raises a ConstructorError on the unhashable key.
+        // Verified against PyYAML 6: `a,b`, `a}b`, `a]b`, `a{b` and `a[b` all
+        // load fine as plain keys, so rejecting those would refuse to edit
+        // configs Hermes reads perfectly well.
+        if let first = key.first, first == "{" || first == "[" {
+            return "YAML flow indicator opens the unquoted key `\(key)`"
         }
         return nil
     }
@@ -1933,6 +2009,30 @@ struct HermesFileService: Sendable {
         }
     }
 
+    /// The exact rows `replaceOrInsertSubMap` emits for a nested
+    /// `env:` / `headers:` mapping — shared with the callers so they can
+    /// hand them to `patchMCPServerField(expecting:)` and have the
+    /// post-write reader PROVE they landed.
+    ///
+    /// **Keys are quoted, not just values.** P10 routed the values through
+    /// `yamlScalar` and left the keys bare, so a user-typed key was spliced
+    /// in raw. Verified against PyYAML 6 at indent 6 under `headers:`:
+    /// `{a}` / `[x]` raise `ConstructorError`, `a: b` and a key containing a
+    /// TAB raise `ScannerError`, `*z` raises `ComposerError` (undefined
+    /// alias), a leading `#` turns the whole `headers` mapping into `None`,
+    /// and `on` becomes the key `True`. Hermes swallows a PyYAML error and
+    /// discards the ENTIRE config.yaml layer (`gateway/config.py:775-791`
+    /// at `v2026.9.7`), so none of those fail loudly. Keys go through the
+    /// same `YAMLScalar.quoteIfNeeded` as `GatewayConfigWriter.setMap`'s —
+    /// the two writers no longer disagree.
+    nonisolated static func subMapRows(header: String, map: [String: String]) -> [String] {
+        var rows = ["    \(header):"]
+        for key in map.keys.sorted() {
+            rows.append("      \(YAMLScalar.quoteIfNeeded(key)): \(yamlScalar(map[key] ?? ""))")
+        }
+        return rows
+    }
+
     nonisolated private static func replaceOrInsertSubMap(header: String, map: [String: String], in lines: inout [String]) {
         var headerIndex: Int?
         var removeEnd: Int?
@@ -1966,11 +2066,7 @@ struct HermesFileService: Sendable {
             return
         }
 
-        newLines.append("    \(header):")
-        for key in map.keys.sorted() {
-            let value = map[key] ?? ""
-            newLines.append("      \(key): \(yamlScalar(value))")
-        }
+        newLines.append(contentsOf: subMapRows(header: header, map: map))
 
         if let headerIndex {
             let end = removeEnd ?? lines.count
@@ -2115,10 +2211,37 @@ struct HermesFileService: Sendable {
             "@", "*", "&", "?", "|", ">", "!", "%", ",",
             "[", "]", "{", "}", "<", "`", "'", "\""
         ]
+        // A value carrying a line break cannot sit on one row at all:
+        // emitted bare it produced a column-0 fragment, and
+        // `verifyPatchedConfig` only noticed when the damaged entry was not
+        // the LAST in `mcp_servers`. `GatewayConfigWriter` has had this
+        // guard since P10 (`containsLineBreak`); this twin never did. The
+        // double-quoted form is the only YAML style that can carry the
+        // break inline, and `unquote` decodes `\\n` / `\\r` back, so the
+        // value round-trips instead of being refused or truncated.
+        if YAMLScalar.containsLineBreak(value) { return YAMLScalar.doubleQuoted(value) }
         let firstCharNeedsQuoting = value.first.map { reservedFirstChars.contains($0) } ?? false
         let needsQuoting = value.contains(":") || value.contains("#") || value.contains("\"")
             || value.hasPrefix(" ") || value.hasSuffix(" ") || value.hasPrefix("-")
-            || ["true", "false", "null", "yes", "no"].contains(value.lowercased())
+            // A TAB anywhere in the scalar. YAML forbids the tab as
+            // indentation and PyYAML's scanner rejects the row outright
+            // ("found character '\t' that cannot start any token"), which
+            // discards the WHOLE config.yaml layer, not just this value.
+            // `YAMLScalar.quoteIfNeeded` — which the KEY on the very same
+            // emitted row goes through — has had this arm all along
+            // (`YAMLScalar.swift:119`); the value half never did, so one row
+            // would quote its key for a tab and not its value.
+            //
+            // `patchMCPServerField(expecting:)` cannot catch it either: the
+            // expected rows are built by the same `subMapRows`, so the literal
+            // match succeeds on a file PyYAML rejects. A structural verifier
+            // cannot see damage that leaves the structure intact.
+            || value.contains("\t")
+            // Every plain spelling PyYAML's implicit resolvers would RETYPE
+            // — `~`, `null`, `on`, `007`, `0x1F`, `.inf`, `2026-09-09` —
+            // not just the five bool/null words this used to list. An env
+            // value of `007` loaded as the int 7.
+            || YAMLScalar.resolvesToNonString(value)
             || firstCharNeedsQuoting
         if needsQuoting {
             let escaped = value.replacingOccurrences(of: "\\", with: "\\\\")
@@ -2158,9 +2281,35 @@ struct HermesFileService: Sendable {
 
     /// As `boolish` but `nil` for absent-or-unrecognised, for the callers that
     /// must distinguish "the user set it" from "Hermes decides".
+    ///
+    /// **The word sets are only half of `_parse_boolish`; the other half is a
+    /// TYPE gate, and getting it wrong inverts the answer.** Hermes is handed
+    /// a value PyYAML has already typed, and it matches the words only
+    /// `isinstance(value, str)` (`tools/mcp_tool_common.py:124-137` at
+    /// `v2026.9.7`). A bare `enabled: 0` is an `int` to PyYAML — neither
+    /// `bool` nor `str` — so it warns and returns the DEFAULT. `enabled: 0`
+    /// is therefore an ENABLED server on the host (default `True`), and
+    /// `supports_parallel_tool_calls: 1` is OFF (default `False`). Scarf read
+    /// both backwards. Quoted (`enabled: "0"`) IS a `str` and does read as
+    /// false, which is why the gate runs on the raw scalar, before `unquote`.
+    ///
+    /// `null` / `~` / an empty value are the same case from the other side:
+    /// PyYAML loads `None`, and `_parse_boolish` returns the default for it
+    /// explicitly (`:127-128`).
+    ///
+    /// This is deliberately NOT the reader for `ssl_verify`, which never
+    /// reaches `_parse_boolish` — it is passed to httpx as-is, where a bare
+    /// `0` and a CA-bundle path both mean something else again. That one
+    /// stays a `String?` all the way to the UI.
     nonisolated static func boolishOptional(_ raw: String?) -> Bool? {
         guard let raw else { return nil }
-        let value = unquote(stripInlineComment(raw))
+        let plain = stripInlineComment(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+        // Anything PyYAML retypes to a non-`str`, non-`bool` (int, float,
+        // null, timestamp) never reaches Hermes's word match.
+        if YAMLScalar.resolvesToNonString(plain), !YAMLScalar.resolvesToBool(plain) {
+            return nil
+        }
+        let value = unquote(plain)
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         if boolishTrueWords.contains(value) { return true }
@@ -2171,16 +2320,23 @@ struct HermesFileService: Sendable {
     nonisolated static func unquote(_ value: String) -> String {
         let v = value
         if v.count >= 2, v.hasPrefix("\""), v.hasSuffix("\"") {
-            // Double-quoted YAML: `\\` and `\"` are the escapes we emit.
-            // Other escape sequences are left as written rather than
-            // half-decoded — we never produce them, and inventing a partial
-            // decoder for `\n`/`\uXXXX` would be a new way to be wrong.
+            // Double-quoted YAML: `\\`, `\"`, `\n` and `\r` are the escapes
+            // we emit (the last two since P19 gave `yamlScalar` a
+            // line-break guard). Anything else is left as written rather
+            // than half-decoded — we never produce it, and inventing a
+            // partial decoder for `\uXXXX` would be a new way to be wrong.
             var out = ""
             var escaped = false
             for char in v.dropFirst().dropLast() {
                 if escaped {
-                    if char != "\\" && char != "\"" { out.append("\\") }
-                    out.append(char)
+                    switch char {
+                    case "\\", "\"": out.append(char)
+                    case "n": out.append("\n")
+                    case "r": out.append("\r")
+                    default:
+                        out.append("\\")
+                        out.append(char)
+                    }
                     escaped = false
                 } else if char == "\\" {
                     escaped = true

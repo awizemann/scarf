@@ -5,9 +5,17 @@ import ScarfCore
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/slack
 @Observable
 @MainActor
-final class SlackSetupViewModel: OutcomeMessageHosting {
+final class SlackSetupViewModel: PlatformSetupForm {
     let context: ServerContext
-    init(context: ServerContext = .local) { self.context = context }
+    /// C10 test seam — nil in production. See ``PlatformSetupForm``.
+    let cliRunner: HermesCLIRunner?
+    /// Load/save in-flight flags owned by ``PlatformSetupForm``.
+    var isLoading = false
+    var isSaving = false
+    init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
+        self.context = context
+        self.cliRunner = cliRunner
+    }
 
     var botToken: String = ""           // xoxb-...
     var appToken: String = ""           // xapp-...
@@ -27,27 +35,23 @@ final class SlackSetupViewModel: OutcomeMessageHosting {
 
     let replyToModeOptions = ["off", "first", "all"]
 
+    /// Off the main actor (C10) — see ``PlatformSetupForm``.
     func load() {
-        // GW-F6 / audit DI L10: an unreadable `.env` used to arrive as an
-        // EMPTY one, so this form rendered blank fields over live values and
-        // a Save then commented those keys out. Absent is still an empty
-        // form (correct — nothing is set yet); unreadable says so.
-        let (env, envReadFailure) = PlatformSetupHelpers.loadEnv(context: context)
-        if let envReadFailure {
-            message = envReadFailure
-            messageIsFailure = true
-        }
-        botToken = env["SLACK_BOT_TOKEN"] ?? ""
-        appToken = env["SLACK_APP_TOKEN"] ?? ""
-        allowedUsers = env["SLACK_ALLOWED_USERS"] ?? ""
-        homeChannel = env["SLACK_HOME_CHANNEL"] ?? ""
-        homeChannelName = env["SLACK_HOME_CHANNEL_NAME"] ?? ""
+        loadSnapshot { [weak self] snapshot in
+            guard let self else { return }
+            let env = snapshot.env
+            botToken = env["SLACK_BOT_TOKEN"] ?? ""
+            appToken = env["SLACK_APP_TOKEN"] ?? ""
+            allowedUsers = env["SLACK_ALLOWED_USERS"] ?? ""
+            homeChannel = env["SLACK_HOME_CHANNEL"] ?? ""
+            homeChannelName = env["SLACK_HOME_CHANNEL_NAME"] ?? ""
 
-        let cfg = HermesFileService(context: context).loadConfig().slack
-        replyToMode = cfg.replyToMode
-        requireMention = cfg.requireMention
-        replyInThread = cfg.replyInThread
-        replyBroadcast = cfg.replyBroadcast
+            guard let cfg = snapshot.config?.slack else { return }
+            replyToMode = cfg.replyToMode
+            requireMention = cfg.requireMention
+            replyInThread = cfg.replyInThread
+            replyBroadcast = cfg.replyBroadcast
+        }
     }
 
     func save() {
@@ -65,6 +69,6 @@ final class SlackSetupViewModel: OutcomeMessageHosting {
             "platforms.slack.extra.reply_in_thread": PlatformSetupHelpers.envBool(replyInThread),
             "platforms.slack.extra.reply_broadcast": PlatformSetupHelpers.envBool(replyBroadcast)
         ]
-        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: configKV))
+        commitSave(envPairs: envPairs, configKV: configKV)
     }
 }

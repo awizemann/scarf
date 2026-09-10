@@ -27,7 +27,19 @@ struct AgentTab: View {
             ) { viewModel.setMaxTurns($0) }
             // v0.20 added the `max` and `ultra` tiers (hermes_constants.py
             // VALID_REASONING_EFFORTS); older hosts keep the shorter list.
-            PickerRow(label: "Reasoning Effort", selection: viewModel.config.reasoningEffort, options: HermesReasoningEffort.levels(capabilities: capabilitiesStore?.capabilities ?? .empty)) { viewModel.setReasoningEffort($0) }
+            //
+            // The leading empty row is the ABSENT key, and absent is not
+            // `medium`: `agent.reasoning_effort` is in no schema layer at any
+            // supported tag, so nothing decides the level but the model
+            // provider itself. Asserting `medium` in the picker claimed a
+            // level Hermes never chose — and the first unrelated save on that
+            // tab wrote it.
+            PickerRow(
+                label: "Reasoning Effort",
+                selection: viewModel.config.reasoningEffort,
+                options: [""] + HermesReasoningEffort.levels(capabilities: capabilities),
+                optionLabel: { $0.isEmpty ? String(localized: "Provider default") : $0 }
+            ) { viewModel.setReasoningEffort($0) }
             PickerRow(label: "Tool Use Enforcement", selection: viewModel.config.toolUseEnforcement, options: ["auto", "true", "false"]) { viewModel.setToolUseEnforcement($0) }
         }
 
@@ -45,12 +57,36 @@ struct AgentTab: View {
             // way Hermes reads it, so a config still carrying `auto` shows the
             // `manual` the host is actually enforcing instead of a blank
             // picker. See `HermesApprovalMode`.
+            //
+            // The leading empty row is the ABSENT key, rendered as the mode
+            // the connected host would run — "Host default (smart)" on
+            // v0.19.0+, "Host default (manual)" below it, "Host default
+            // (unknown)" when the version could not be detected. Reading the
+            // absent key as a flat `manual` told every stock v0.19+ user that
+            // Scarf would ask before each guarded command while the guardian
+            // model was actually deciding. Selecting any explicit mode writes
+            // it; selecting the host-default row writes nothing.
             PickerRow(
                 label: "Approval Mode",
-                selection: HermesApprovalMode.normalize(viewModel.config.approvalMode).rawValue,
-                options: HermesApprovalMode.options
+                selection: viewModel.config.storedApprovalMode?.rawValue ?? "",
+                options: [""] + HermesApprovalMode.options,
+                optionLabel: {
+                    $0.isEmpty
+                        ? viewModel.config.approvalModeHostDefaultLabel(capabilities: capabilities)
+                        : $0
+                }
             ) { viewModel.setApprovalMode($0) }
-            StepperRow(label: "Approval Timeout (s)", value: viewModel.config.approvalTimeout, range: 5...600, step: 5) { viewModel.setApprovalTimeout($0) }
+            // Absent key (sentinel 0) shows the host's own default — 300 on
+            // v0.19.1+, 60 before — without writing it back, so the first
+            // stepper tap steps from the resolved default rather than from 0.
+            // The 5-second floor stays: Hermes accepts any positive value and
+            // 300 is expressible, so nothing snaps.
+            StepperRow(
+                label: "Approval Timeout (s)",
+                value: viewModel.config.displayApprovalTimeout(capabilities: capabilities),
+                range: 5...600,
+                step: 5
+            ) { viewModel.setApprovalTimeout($0) }
         }
 
         SettingsSection(title: "Messaging Gateway", icon: "antenna.radiowaves.left.and.right") {
@@ -62,7 +98,17 @@ struct AgentTab: View {
             // nothing about that host's behaviour changes.
             fastModeRows
             StepperRow(label: "Gateway Timeout (s)", value: viewModel.config.gatewayTimeout, range: 60...7200, step: 60) { viewModel.setGatewayTimeout($0) }
-            StepperRow(label: "Notify Interval (s)", value: viewModel.config.gatewayNotifyInterval, range: 0...3600, step: 30) { viewModel.setGatewayNotifyInterval($0) }
+            // Absent key shows the host's own default — 180 on v0.11.0+, 600
+            // before — without writing it back. An explicit `0` on disk is a
+            // real setting ("no still-working notices"), which is why the
+            // parse carries a true optional rather than a 0 sentinel here.
+            // The 30-second step keeps 180 expressible; 600 was already.
+            StepperRow(
+                label: "Notify Interval (s)",
+                value: viewModel.config.displayGatewayNotifyInterval(capabilities: capabilities),
+                range: 0...3600,
+                step: 30
+            ) { viewModel.setGatewayNotifyInterval($0) }
             // v0.20.4+ (isV0204OrLater).
             if capabilitiesStore?.capabilities.isV0204OrLater ?? false {
                 StepperRow(label: "Cron Drain Timeout (s)", value: viewModel.config.cronDrainTimeout, range: 0...600, step: 5) { viewModel.setCronDrainTimeout($0) }

@@ -35,8 +35,9 @@ public final class CuratorViewModel {
     public private(set) var archivedSkills: [HermesCuratorArchivedSkill] = []
     public private(set) var isLoadingArchive = false
 
-    // Unmanaged/adopt state (v0.20+ only — populated by `loadUnmanaged()`
-    // on hosts where `hasCuratorAdopt` is true).
+    // Unmanaged/adopt state (v0.19.1+ only — populated by `loadUnmanaged()`
+    // on hosts where `hasCuratorAdopt` is true; P23 re-floored that flag from
+    // the v0.20 the v0.20 audit assumed).
     public private(set) var unmanagedSkills: [HermesCuratorUnmanagedSkill] = []
     public private(set) var isAdopting = false
 
@@ -47,8 +48,8 @@ public final class CuratorViewModel {
     /// Idle threshold (days) chosen in `planPrune`, reused by `confirmPrune`.
     private var plannedPruneDays = 90
 
-    // Ledger state (v0.20.4+ only — populated by `loadLedger()` on hosts
-    // where `hasCuratorLedger` is true).
+    // Ledger state (v0.20.3+ only — populated by `loadLedger()` on hosts
+    // where `hasCuratorLedger` is true; P23 re-floored that flag).
     public private(set) var ledgerEntries: [HermesCuratorLedgerEntry] = []
     public private(set) var isLoadingLedger = false
 
@@ -170,7 +171,7 @@ public final class CuratorViewModel {
         }
     }
 
-    // MARK: - Writes (v0.20.4 purge — caller gates on hasCuratorPurge)
+    // MARK: - Writes (v0.20.3 purge — caller gates on hasCuratorPurge)
 
     /// Stage 1 of the purge flow. Calls `curator purge [--days N]
     /// --dry-run` and populates `purgeSummary` (the archived skills a real
@@ -248,7 +249,7 @@ public final class CuratorViewModel {
         await load()
     }
 
-    // MARK: - Writes (v0.20 adopt — caller gates on hasCuratorAdopt)
+    // MARK: - Writes (v0.19.1 adopt — caller gates on hasCuratorAdopt)
 
     public func adopt(_ skill: String) async {
         isAdopting = true

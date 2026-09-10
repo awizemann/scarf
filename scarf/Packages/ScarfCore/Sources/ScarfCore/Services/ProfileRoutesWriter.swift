@@ -10,7 +10,8 @@ import Foundation
 /// flavor round-trips.
 ///
 /// **Where it writes.** Hermes prefers a top-level `profile_routes:` and only
-/// falls back to `gateway.profile_routes:` (gateway/config.py:1356-1360), so
+/// falls back to `gateway.profile_routes:` (`gateway/config_loader.py:76`
+/// with `_bridge_lookup:100-104` @ `v2026.9.7`), so
 /// the writer edits whichever form is live (`HermesProfileRoutes.location`).
 /// Writing the nested form while a top-level list exists would leave the user
 /// staring at edits Hermes ignores.

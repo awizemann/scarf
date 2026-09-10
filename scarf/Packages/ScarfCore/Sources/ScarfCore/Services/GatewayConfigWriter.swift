@@ -105,7 +105,7 @@ public enum GatewayConfigWriter {
         // previously failed every `trimmed ==` match, so the section was
         // "missing" and a DUPLICATE top-level section was appended — which
         // PyYAML resolves last-wins, clobbering the original section).
-        crlfRoundTrip(yaml) { normalized in
+        normalizedRoundTrip(yaml) { normalized in
             setListLF(in: normalized, platform: platform, key: key, items: items)
         }
     }
@@ -196,7 +196,7 @@ public enum GatewayConfigWriter {
         pairs: [(key: String, value: String)]
     ) -> WriteOutcome {
         // Same CRLF round-trip contract as `setList` — see the comment there.
-        crlfRoundTrip(yaml) { normalized in
+        normalizedRoundTrip(yaml) { normalized in
             setMapLF(in: normalized, section: section, key: key, pairs: pairs)
         }
     }
@@ -236,9 +236,13 @@ public enum GatewayConfigWriter {
         switch locateBlock(in: lines, platform: section, key: key) {
         case .found(let blockRange, let indents):
             var newLines = Array(lines.prefix(blockRange.lowerBound))
+            let comments = preservedComments(in: lines, blockRange: blockRange, key: key)
             if !trimmedPairs.isEmpty {
-                newLines.append("\(spaces(indents.key))\(key):")
+                newLines.append("\(spaces(indents.key))\(key):\(comments.headerSuffix)")
+                newLines.append(contentsOf: comments.interior)
                 newLines.append(contentsOf: entryRows(indents.item))
+            } else {
+                newLines.append(contentsOf: comments.interior)
             }
             let tailStart = blockRange.upperBound + 1
             if tailStart < lines.count {
@@ -325,19 +329,41 @@ public enum GatewayConfigWriter {
 
     // MARK: - Internals
 
-    /// Run `body` on an LF-normalized copy and re-emit CRLF when the input
-    /// used it, so a CRLF config.yaml survives the write byte-for-byte
-    /// outside the edited key.
-    private static func crlfRoundTrip(
+    /// Run `body` on a framing-normalized copy (no BOM, LF line endings)
+    /// and restore the framing on output, so a BOM'd and/or CRLF
+    /// config.yaml survives the write byte-for-byte outside the edited key.
+    ///
+    /// **BOM.** A leading U+FEFF is not in `.whitespaces` OR
+    /// `.whitespacesAndNewlines` (exactly as `\r` was not, before P10), so
+    /// it stayed glued to the first line's content and defeated every
+    /// `trimmed == "slack:"` header match. The file's FIRST top-level
+    /// section therefore read as MISSING and the write appended a DUPLICATE
+    /// `<platform>:` block — PyYAML resolves duplicates last-wins, so the
+    /// original section's siblings were silently lost. Stripped here once
+    /// and re-prefixed on the way out.
+    ///
+    /// **Line endings are restored PER LINE.** The old code re-emitted CRLF
+    /// on any file that contained one `\r\n`, converting every LF-only line
+    /// in a mixed file — a wholesale rewrite, which is the one thing this
+    /// editor promises never to do. `YAMLLineEndings.restore` (lifted from
+    /// `HermesBotProfileYAML`, which solved this first) gives every surviving
+    /// line back the terminator it had and the newly written rows the file's
+    /// dominant one. A pure-LF file takes the fast path and is byte-identical.
+    private static func normalizedRoundTrip(
         _ yaml: String,
         _ body: (String) -> WriteOutcome
     ) -> WriteOutcome {
-        let usesCRLF = yaml.contains("\r\n")
-        guard usesCRLF else { return body(yaml) }
-        let normalized = yaml.replacingOccurrences(of: "\r\n", with: "\n")
-        switch body(normalized) {
+        if yaml.hasPrefix(YAMLScalar.bom) {
+            switch normalizedRoundTrip(YAMLScalar.strippingBOM(yaml), body) {
+            case .updated(let text): return .updated(YAMLScalar.bom + text)
+            case .unchanged: return .unchanged
+            case .refused(let why): return .refused(why)
+            }
+        }
+        guard yaml.contains("\r\n") else { return body(yaml) }
+        switch body(YAMLLineEndings.normalized(yaml)) {
         case .updated(let text):
-            return .updated(text.replacingOccurrences(of: "\n", with: "\r\n"))
+            return .updated(YAMLLineEndings.restore(text, matching: yaml))
         case .unchanged:
             return .unchanged
         case .refused(let why):
@@ -345,14 +371,11 @@ public enum GatewayConfigWriter {
         }
     }
 
-    /// True when `s` carries a CR or LF anywhere.
-    ///
-    /// Scanned over unicode SCALARS on purpose: Swift's `String.contains`
-    /// works on grapheme clusters, and `"\r\n"` is a SINGLE cluster — so
-    /// `"a\r\nb".contains("\n")` is `false`, and the naive check waved a
-    /// Windows-style line break straight through into a YAML row.
+    /// True when `s` carries a CR or LF anywhere. See
+    /// ``YAMLScalar/containsLineBreak(_:)`` — one implementation, shared
+    /// with the MCP-entry writers.
     private static func containsLineBreak(_ s: String) -> Bool {
-        s.unicodeScalars.contains { $0 == "\n" || $0 == "\r" }
+        YAMLScalar.containsLineBreak(s)
     }
 
     private static func debugSnippet(_ s: String) -> String {
@@ -658,11 +681,17 @@ public enum GatewayConfigWriter {
         itemIndent: Int
     ) -> String {
         var newLines = Array(lines.prefix(blockRange.lowerBound))
+        let comments = preservedComments(in: lines, blockRange: blockRange, key: key)
         if !items.isEmpty {
-            newLines.append("\(spaces(keyIndent))\(key):")
+            newLines.append("\(spaces(keyIndent))\(key):\(comments.headerSuffix)")
+            newLines.append(contentsOf: comments.interior)
             for item in items {
                 newLines.append("\(spaces(itemIndent))- \(yamlQuoteIfNeeded(item))")
             }
+        } else {
+            // The key is going away, but the user's standalone comments are
+            // not the key — keep them where they were.
+            newLines.append(contentsOf: comments.interior)
         }
         // Drop the old block but keep everything after it.
         let tailStart = blockRange.upperBound + 1
@@ -792,43 +821,87 @@ public enum GatewayConfigWriter {
         String(repeating: " ", count: n)
     }
 
-    /// Quote a YAML scalar if it contains characters the parser would
-    /// otherwise read as structure. Beyond `:` `#` and the block indicators,
-    /// this covers the YAML 1.2 flow indicators (`[ ] { } ,`) and the
-    /// leading-position indicators (`! % \` ? & * @ -`) — an unquoted
-    /// `#general, #random` or `{a}` used to make PyYAML raise, and one
-    /// PyYAML error makes Hermes discard the WHOLE config.yaml layer
-    /// (gateway/config.py:776-791 at v2026.9.7). Plain alphanumeric IDs (the
-    /// common case for Slack channel IDs and Telegram numeric chat IDs) are
-    /// still emitted unquoted.
+    // MARK: - Comment preservation
+
+    /// The user's comments that live INSIDE the block we are about to
+    /// replace: the trailing `# …` on the key's own line, and every
+    /// comment-only row between the key and its last item.
     ///
-    /// A value carrying a literal newline cannot be represented on one row
-    /// at all; callers reject those before reaching here (see
-    /// ``WriteOutcome/refused(_:)``), and as a last resort this escapes the
-    /// value double-quoted rather than emitting a broken document.
-    static func yamlQuoteIfNeeded(_ raw: String) -> String {
-        if raw.isEmpty { return "''" }
-        if containsLineBreak(raw) {
-            // Double quotes are the only YAML style that can carry an
-            // escaped line break inline.
-            let escaped = raw
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "\"", with: "\\\"")
-                .replacingOccurrences(of: "\r", with: "\\r")
-                .replacingOccurrences(of: "\n", with: "\\n")
-            return "\"\(escaped)\""
-        }
-        let anywhere: Set<Character> = [":", "#", "&", "*", ">", "|", "[", "]", "{", "}", ","]
-        let leading: Set<Character> = ["@", "-", " ", "\"", "'", "!", "%", "`", "?", "="]
-        let needsQuoting = raw.contains(where: { anywhere.contains($0) })
-            || raw.first.map { leading.contains($0) } ?? false
-            || raw.last == " "
-            || raw.contains("\t")
-        if !needsQuoting { return raw }
-        // Single-quote, escaping any embedded single quotes by doubling.
-        let escaped = raw.replacingOccurrences(of: "'", with: "''")
-        return "'\(escaped)'"
+    /// Without this, `replaceBlock` / `setMapLF` replaced the whole block
+    /// range with freshly generated rows and the comments went with it —
+    /// `allowed_channels: []  # none yet` lost its note, and a `# internal
+    /// only` sitting between two bullets was deleted on save. Comments are
+    /// the one thing in a config a tool has no business throwing away.
+    ///
+    /// Interior comments are re-emitted directly under the key rather than
+    /// back between the bullets they sat between — a bullet's identity is
+    /// its VALUE, and the values are exactly what this edit replaces, so
+    /// there is no honest "where it was" to restore to. The first save of a
+    /// config with interleaved comments therefore reflows the block once and
+    /// is stable from then on (the idempotence assertion in
+    /// `HermesP19YAMLHardeningTests` pins that).
+    private struct PreservedComments {
+        /// Trailing comment from the key's own line, `#` included.
+        let headerComment: String?
+        /// Comment-only lines from inside the block, verbatim and in order.
+        let interior: [String]
+
+        var headerSuffix: String { headerComment.map { "  " + $0 } ?? "" }
     }
+
+    private static func preservedComments(
+        in lines: [String],
+        blockRange: ClosedRange<Int>,
+        key: String
+    ) -> PreservedComments {
+        let headerLine = lines[blockRange.lowerBound]
+        var header: String?
+        if let keyColon = headerLine.range(of: "\(key):") {
+            header = trailingComment(in: String(headerLine[keyColon.upperBound...]))
+        }
+        var interior: [String] = []
+        if blockRange.lowerBound < blockRange.upperBound {
+            for line in lines[(blockRange.lowerBound + 1)...blockRange.upperBound]
+            where line.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("#") {
+                interior.append(line)
+            }
+        }
+        return PreservedComments(headerComment: header, interior: interior)
+    }
+
+    /// The `# …` comment in `fragment`, or nil. A `#` only opens a comment
+    /// when preceded by whitespace (or the fragment's start) and not inside
+    /// a quoted scalar — `a#b` is the value `a#b`, per YAML.
+    private static func trailingComment(in fragment: String) -> String? {
+        var quote: Character?
+        var afterSpace = true
+        var i = fragment.startIndex
+        while i < fragment.endIndex {
+            let ch = fragment[i]
+            if let q = quote {
+                if ch == q { quote = nil }
+            } else if ch == "'" || ch == "\"" {
+                quote = ch
+            } else if ch == "#", afterSpace {
+                let comment = String(fragment[i...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return comment.isEmpty ? nil : comment
+            }
+            afterSpace = ch == " " || ch == "\t"
+            i = fragment.index(after: i)
+        }
+        return nil
+    }
+
+    /// Quote a YAML scalar if emitting it bare would change what PyYAML
+    /// loads. One implementation, shared with the MCP-entry map writers —
+    /// see ``YAMLScalar/quoteIfNeeded(_:)``. P10 had two quoting routines
+    /// in two files; this one quoted map keys and the other did not, which
+    /// is the HIGH P19 fixed.
+    static func yamlQuoteIfNeeded(_ raw: String) -> String {
+        YAMLScalar.quoteIfNeeded(raw)
+    }
+
 }
 
 extension GatewayConfigWriter.WriteOutcome {

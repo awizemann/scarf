@@ -431,7 +431,6 @@ final class MCPServersViewModel {
     func addCustomSSE(
         name: String,
         url: String,
-        sseReadTimeout: Int?,
         auth: String? = nil,
         apiKey: String = "",
         defaultEnabledTools: [String] = [],
@@ -441,7 +440,7 @@ final class MCPServersViewModel {
         if !overwriteConfirmed, serverNameIsTaken(name) {
             pendingOverwrite = PendingOverwrite(name: name) { [weak self] in
                 self?.addCustomSSE(
-                    name: name, url: url, sseReadTimeout: sseReadTimeout,
+                    name: name, url: url,
                     auth: auth, apiKey: apiKey,
                     defaultEnabledTools: defaultEnabledTools,
                     defaultExcludedTools: defaultExcludedTools,
@@ -453,7 +452,7 @@ final class MCPServersViewModel {
         let fileService = self.fileService
         Task.detached { [weak self] in
             let result = fileService.addMCPServerSSE(
-                name: name, url: url, sseReadTimeout: sseReadTimeout,
+                name: name, url: url,
                 auth: auth, apiKey: apiKey, overwriteConfirmed: overwriteConfirmed
             )
             if result.exitCode == 0 {

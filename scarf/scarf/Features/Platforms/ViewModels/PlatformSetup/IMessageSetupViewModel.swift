@@ -6,9 +6,17 @@ import ScarfCore
 /// Field reference: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/bluebubbles
 @Observable
 @MainActor
-final class IMessageSetupViewModel: OutcomeMessageHosting {
+final class IMessageSetupViewModel: PlatformSetupForm {
     let context: ServerContext
-    init(context: ServerContext = .local) { self.context = context }
+    /// C10 test seam — nil in production. See ``PlatformSetupForm``.
+    let cliRunner: HermesCLIRunner?
+    /// Load/save in-flight flags owned by ``PlatformSetupForm``.
+    var isLoading = false
+    var isSaving = false
+    init(context: ServerContext = .local, cliRunner: HermesCLIRunner? = nil) {
+        self.context = context
+        self.cliRunner = cliRunner
+    }
 
     var serverURL: String = ""
     var password: String = ""
@@ -25,25 +33,21 @@ final class IMessageSetupViewModel: OutcomeMessageHosting {
     /// VoiceOver announcement come from this, never from the prose.
     var messageIsFailure = false
 
+    /// Off the main actor (C10) — see ``PlatformSetupForm``.
     func load() {
-        // GW-F6 / audit DI L10: an unreadable `.env` used to arrive as an
-        // EMPTY one, so this form rendered blank fields over live values and
-        // a Save then commented those keys out. Absent is still an empty
-        // form (correct — nothing is set yet); unreadable says so.
-        let (env, envReadFailure) = PlatformSetupHelpers.loadEnv(context: context)
-        if let envReadFailure {
-            message = envReadFailure
-            messageIsFailure = true
+        loadSnapshot(includeConfig: false) { [weak self] snapshot in
+            guard let self else { return }
+            let env = snapshot.env
+            serverURL = env["BLUEBUBBLES_SERVER_URL"] ?? ""
+            password = env["BLUEBUBBLES_PASSWORD"] ?? ""
+            webhookHost = env["BLUEBUBBLES_WEBHOOK_HOST"] ?? "127.0.0.1"
+            webhookPort = env["BLUEBUBBLES_WEBHOOK_PORT"] ?? "8645"
+            webhookPath = env["BLUEBUBBLES_WEBHOOK_PATH"] ?? ""
+            allowedUsers = env["BLUEBUBBLES_ALLOWED_USERS"] ?? ""
+            homeChannel = env["BLUEBUBBLES_HOME_CHANNEL"] ?? ""
+            allowAllUsers = PlatformSetupHelpers.parseEnvBool(env["BLUEBUBBLES_ALLOW_ALL_USERS"])
+            sendReadReceipts = PlatformSetupHelpers.parseEnvBool(env["BLUEBUBBLES_SEND_READ_RECEIPTS"])
         }
-        serverURL = env["BLUEBUBBLES_SERVER_URL"] ?? ""
-        password = env["BLUEBUBBLES_PASSWORD"] ?? ""
-        webhookHost = env["BLUEBUBBLES_WEBHOOK_HOST"] ?? "127.0.0.1"
-        webhookPort = env["BLUEBUBBLES_WEBHOOK_PORT"] ?? "8645"
-        webhookPath = env["BLUEBUBBLES_WEBHOOK_PATH"] ?? ""
-        allowedUsers = env["BLUEBUBBLES_ALLOWED_USERS"] ?? ""
-        homeChannel = env["BLUEBUBBLES_HOME_CHANNEL"] ?? ""
-        allowAllUsers = PlatformSetupHelpers.parseEnvBool(env["BLUEBUBBLES_ALLOW_ALL_USERS"])
-        sendReadReceipts = PlatformSetupHelpers.parseEnvBool(env["BLUEBUBBLES_SEND_READ_RECEIPTS"])
     }
 
     func save() {
@@ -58,6 +62,6 @@ final class IMessageSetupViewModel: OutcomeMessageHosting {
             "BLUEBUBBLES_ALLOW_ALL_USERS": allowAllUsers ? "true" : "",
             "BLUEBUBBLES_SEND_READ_RECEIPTS": sendReadReceipts ? "true" : ""
         ]
-        applySaveOutcome(PlatformSetupHelpers.saveForm(context: context, envPairs: envPairs, configKV: [:]))
+        commitSave(envPairs: envPairs, configKV: [:])
     }
 }

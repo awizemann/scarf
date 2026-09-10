@@ -178,8 +178,17 @@ public struct ModelCatalogService: Sendable {
     /// Overlay metadata for a provider that isn't in the models.dev catalog —
     /// Scarf needs to surface these so the picker matches `hermes model` on
     /// the CLI.
+    ///
+    /// Raw id first, then the canonical alias, exactly as `providerByID` and
+    /// `validateModel` resolve it: an alias spelling Hermes accepts
+    /// (`grok-oauth` → `xai-oauth`) must find the overlay registered under its
+    /// canonical id instead of silently returning nil. Only aliases whose
+    /// CANONICAL id is an `overlayOnlyProviders` key are reachable this way —
+    /// `ai-gateway` canonicalises to `vercel`, which is not one, so that
+    /// spelling still returns nil and is not an example of what this fixes.
     public func overlayMetadata(for providerID: String) -> HermesProviderOverlay? {
         Self.overlayOnlyProviders[providerID]
+            ?? Self.overlayOnlyProviders[Self.canonicalProviderID(providerID)]
     }
 
     /// Async wrapper around `loadProviders()` for use from MainActor view
@@ -484,7 +493,7 @@ public struct ModelCatalogService: Sendable {
     /// Map a Hermes provider ID onto its models.dev cache key for
     /// capability lookups — a Scarf mirror of the entries in Hermes's
     /// `agent/models_dev.py` `PROVIDER_TO_MODELS_DEV` that diverge from
-    /// `canonicalProviderID(_:)`. Three divergence classes matter:
+    /// `canonicalProviderID(_:)`. Four classes matter:
     ///
     /// - Bare `openai` aliases to `openrouter` for *inference routing*
     ///   (providers.py ALIASES), but Hermes resolves its *capability
@@ -496,15 +505,10 @@ public struct ModelCatalogService: Sendable {
     /// - Providers whose models.dev cache key differs from the Hermes
     ///   wire ID: `novita` → `novita-ai`, `fireworks` → `fireworks-ai`
     ///   (both verified against the live cache, 2026-07).
-    ///
-    /// `openai-api` is a deliberate Scarf EXTENSION, not a mirror:
-    /// Hermes's map has no `openai-api` entry, so on that provider
-    /// Hermes resolves no capability metadata at all and auto-mode
-    /// always routes images through the text pipeline. Resolving it
-    /// against the models.dev `openai` catalog keeps the composer
-    /// heads-up truthful for text-only models (the image WILL go
-    /// through the lossy fallback); the cost is a suppressed heads-up
-    /// for vision models, never a false one.
+    /// - `openai-api` → `openai`, which is Hermes's own entry and not a
+    ///   Scarf extension: `PROVIDER_TO_MODELS_DEV` carries
+    ///   `"openai-api": "openai"` (`agent/models_dev.py:110` @
+    ///   `v2026.9.7`).
     ///
     /// Providers absent from both this map and the catalog resolve to
     /// `.unknown` downstream, which is the safe default. Reconcile on
@@ -523,7 +527,7 @@ public struct ModelCatalogService: Sendable {
 
     private static let capabilityProviderOverrides: [String: String] = [
         "openai": "openai",
-        "openai-api": "openai",  // Scarf extension — see doc comment above.
+        "openai-api": "openai",  // agent/models_dev.py:110 @ v2026.9.7.
         "openai-codex": "openai",
         "xai-oauth": "xai",
         "qwen-oauth": "alibaba",

@@ -29,12 +29,17 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
     public let result: String?
     public let skills: [String]
 
-    // v2.7.5 fields exposed by `kanban show --json` and `kanban watch`.
-    public let idempotencyKey: String?
-    public let lastHeartbeatAt: String?
-    public let maxRuntimeSeconds: Int?
-    public let currentRunId: Int?
-
+    // NOTE: the task JSON is exactly `_TASK_DICT_FIELDS`
+    // (`hermes_cli/kanban_output.py:18-24`, v2026.9.7) — `_task_to_dict`
+    // (:85-88) is the ONLY task serialiser, shared by `kanban create --json`
+    // (`kanban.py:381`), `list --json` (:429) and `show --json` (:494).
+    // `idempotency_key`, `last_heartbeat_at`, `max_runtime_seconds` and
+    // `current_run_id` were modelled here from release notes; they are kanban
+    // DB columns that no tagged release has ever put on the wire (walked
+    // across every `v2026.*` tag: the dict is a literal at v0.13–v0.20 and a
+    // field tuple after the output module split, and none of the four appears
+    // in either). The decode paths are deleted rather than kept "defensively"
+    // — a field that is always nil reads as "the host didn't report it".
     // v0.13 (v2026.5.7) reliability + recovery fields. All Optional with
     // `nil` decoded for pre-v0.13 hosts so the v2.7.5 surface keeps
     // rendering unchanged when the connected Hermes hasn't shipped them.
@@ -100,10 +105,6 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         completedAt: String? = nil,
         result: String? = nil,
         skills: [String] = [],
-        idempotencyKey: String? = nil,
-        lastHeartbeatAt: String? = nil,
-        maxRuntimeSeconds: Int? = nil,
-        currentRunId: Int? = nil,
         maxRetries: Int? = nil,
         sessionId: String? = nil,
         branchName: String? = nil,
@@ -128,10 +129,6 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         self.completedAt = completedAt
         self.result = result
         self.skills = skills
-        self.idempotencyKey = idempotencyKey
-        self.lastHeartbeatAt = lastHeartbeatAt
-        self.maxRuntimeSeconds = maxRuntimeSeconds
-        self.currentRunId = currentRunId
         self.maxRetries = maxRetries
         self.sessionId = sessionId
         self.branchName = branchName
@@ -151,10 +148,6 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         case startedAt = "started_at"
         case completedAt = "completed_at"
         case result, skills
-        case idempotencyKey = "idempotency_key"
-        case lastHeartbeatAt = "last_heartbeat_at"
-        case maxRuntimeSeconds = "max_runtime_seconds"
-        case currentRunId = "current_run_id"
         case maxRetries = "max_retries"
         case sessionId = "session_id"
         case branchName = "branch_name"
@@ -187,10 +180,6 @@ public struct HermesKanbanTask: Sendable, Equatable, Identifiable, Codable {
         self.completedAt = try Self.decodeFlexibleTimestamp(c, forKey: .completedAt)
         self.result = try c.decodeIfPresent(String.self, forKey: .result)
         self.skills = try c.decodeIfPresent([String].self, forKey: .skills) ?? []
-        self.idempotencyKey = try c.decodeIfPresent(String.self, forKey: .idempotencyKey)
-        self.lastHeartbeatAt = try Self.decodeFlexibleTimestamp(c, forKey: .lastHeartbeatAt)
-        self.maxRuntimeSeconds = try c.decodeIfPresent(Int.self, forKey: .maxRuntimeSeconds)
-        self.currentRunId = try c.decodeIfPresent(Int.self, forKey: .currentRunId)
         // v0.13 fields — every one is `decodeIfPresent` so a v0.12 host's
         // task row decodes successfully with these all nil/empty. The
         // tolerant-decode contract is pinned by KanbanModelsTests.

@@ -107,8 +107,8 @@ public final class IOSCronViewModel {
     /// Toggle `enabled` on the job with the given id.
     ///
     /// **Preferred route: the Hermes CLI.** `hermes cron pause|resume <id>`
-    /// carries the full upstream semantics — `resume_job` (cron/jobs.py:
-    /// 2212-2233) recomputes `next_run_at` from now and refuses a
+    /// carries the full upstream semantics — `resume_job`
+    /// (`cron/jobs.py:1986-2003` @ v2026.9.7) recomputes `next_run_at` from now and refuses a
     /// past-deadline one-shot — which a jobs.json rewrite can't reproduce.
     /// iOS reaches it the same way macOS's `CronViewModel` does
     /// (CronViewModel.swift:126-130): `ServerTransport.runProcess`, which
@@ -177,7 +177,10 @@ public final class IOSCronViewModel {
                 // A stale past `next_run_at` would make the scheduler fire a
                 // spurious catch-up run on the very next tick — and that fire
                 // flows through `mark_job_run`, consuming one of the job's
-                // `repeat.times` (cron/jobs.py:3019-3032). Clear it and let
+                // `repeat.times` (`mark_job_run` at `cron/jobs.py:2239`
+                // calls `_advance_after_run` at `:2266`, which bumps
+                // `repeat.completed` at `:2203-2217` @ `v2026.9.7`).
+                // Clear it and let
                 // Hermes's own loader recompute (see `clearingNextRunAt`).
                 next = next.clearingNextRunAt()
             }
@@ -187,8 +190,12 @@ public final class IOSCronViewModel {
     }
 
     static func oneShotRefusalMessage(_ job: HermesCronJob) -> String {
-        if let lastRunAt = job.lastRunAt, !lastRunAt.isEmpty {
-            return "\"\(job.name)\" already ran — a one-shot job can't be resumed. Duplicate it to schedule a new run."
+        // Keyed on the same predicate `oneShotIsUnresumable` now uses: a
+        // spent one-shot is refused because its record is TERMINAL (Hermes's
+        // `_reject_terminal_activation`), not merely because `last_run_at` is
+        // set — a re-armed one-shot carries that timestamp and resumes fine.
+        if job.isTerminal {
+            return "\"\(job.name)\" has already finished — a completed one-shot can't be resumed. Duplicate it to schedule a new run."
         }
         let when = job.schedule.runAt.map { CronScheduleFormatter.formatNextRun(iso: $0) } ?? "its scheduled time"
         return "Can't resume \"\(job.name)\" — the one-shot time (\(when)) is in the past and would never fire. Duplicate it with a new time instead."

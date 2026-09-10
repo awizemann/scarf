@@ -222,8 +222,16 @@ final class PluginsViewModel: OutcomeMessageHosting {
             let name = HermesFileService.stripYAMLQuotes(parsed.values["name"] ?? "")
             let source = HermesFileService.stripYAMLQuotes(parsed.values["source"] ?? parsed.values["repository"] ?? parsed.values["url"] ?? "")
             let version = HermesFileService.stripYAMLQuotes(parsed.values["version"] ?? "")
-            let toolOverrideRaw = HermesFileService.stripYAMLQuotes(parsed.values["tool_override"] ?? "").lowercased()
-            return (name, source, version, toolOverrideRaw == "true", true)
+            // Same boolish helper as every other YAML flag read (P18): a
+            // manifest author writing `tool_override: yes` meant the same
+            // thing as `true`, and the literal comparison read it as false.
+            // (Scarf's own display read — Hermes gates an override on
+            // `plugins.entries.<id>.allow_tool_override` in config.yaml,
+            // `hermes_cli/plugins.py:568-578` @ v2026.9.7 — so this decides a
+            // badge, not behaviour. It should still agree with the `plugin.json`
+            // arm below, which uses a real `Bool`.)
+            let toolOverride = HermesYAML.boolishValue(parsed.values["tool_override"]) ?? false
+            return (name, source, version, toolOverride, true)
         }
         let jsonPath = path + "/plugin.json"
         if let data = context.readData(jsonPath),
@@ -286,21 +294,51 @@ final class PluginsViewModel: OutcomeMessageHosting {
                 // exit 0 only means "the process finished", and the enable
                 // outcome has to come out of stdout.
                 let failed = result.exitCode != 0
-                self.applySaveOutcome(
-                    failed
-                        ? .failure(String(localized: "Install failed"))
-                        : .success(outcome.enabled
-                                   ? String(localized: "Installed and enabled")
-                                   : String(localized: "Installed (not enabled)"))
-                )
+                // `cmd_install` (plugins_cmd.py:764) discards
+                // `_run_capability_consent`'s bool the same way `enable` and
+                // `update` do, so a capability-declaring plugin installs
+                // "successfully" with nothing granted (:1092-1098). That is
+                // the install's real outcome, not a footnote in the report.
+                if !failed, outcome.capabilitiesNotGranted {
+                    self.applySaveOutcome(.failure(
+                        Self.friendlyPluginFailure(HermesCLIMarkers.pluginsConsentRefusal)
+                            ?? String(localized: "Installed, but its capabilities were not granted")
+                    ))
+                } else {
+                    self.applySaveOutcome(
+                        failed
+                            ? .failure(String(localized: "Install failed"))
+                            : .success(outcome.enabled
+                                       ? String(localized: "Installed and enabled")
+                                       : String(localized: "Installed (not enabled)"))
+                    )
+                }
                 self.installReport = InstallReport(identifier: identifier, outcome: outcome, failed: failed)
                 self.load(force: true)
             }
         }
     }
 
+    /// `cmd_update` (plugins_cmd.py:822 at v2026.9.7) calls
+    /// `_run_capability_consent(...)` and DISCARDS its `bool` exactly as
+    /// `cmd_enable` does — round 1 only caught `enable`. Its non-TTY arm
+    /// (:1092-1098) is the one Scarf always takes, so a capability-declaring
+    /// plugin updated from Scarf reported a plain "Updated" while its
+    /// capabilities were left ungranted (fail closed).
+    ///
+    /// Both success lines are printed AFTER the consent screen (:826, :828),
+    /// so both markers are present by design and the refusal has to win —
+    /// same shape as `enable`. The consent call arrives at v2026.8.13 and the
+    /// two success lines go back to v2026.6.19, so an older host prints a
+    /// success line and no refusal and is judged exactly as before (C1).
     func update(_ plugin: HermesPlugin) {
-        runAndReload(["plugins", "update", plugin.name], success: "Updated")
+        runAndReload(
+            ["plugins", "update", plugin.name],
+            success: "Updated",
+            successMarkers: HermesCLIMarkers.pluginsUpdateSuccess,
+            failureMarkers: HermesCLIMarkers.pluginsUpdateFailure,
+            failureWins: true
+        )
     }
 
     func remove(_ plugin: HermesPlugin) {
@@ -382,18 +420,32 @@ final class PluginsViewModel: OutcomeMessageHosting {
     /// lifecycle-guard message set. It gets its own sentence instead.
     nonisolated static func friendlyPluginFailure(_ detail: String?) -> String? {
         guard let detail, !detail.isEmpty else { return nil }
-        if detail.contains("capabilities NOT granted") {
-            return String(localized: "Enabled, but its requested capabilities were NOT granted — Hermes fails closed without a terminal. Grant them with `hermes plugins enable` in a terminal; the plugin should otherwise degrade gracefully.")
+        if detail.contains(HermesCLIMarkers.pluginsConsentRefusal) {
+            // Deliberately verb-neutral: the same consent screen runs from
+            // `enable` (:1033), `install` (:764) and `update` (:822), so a
+            // sentence that opened with "Enabled," would be wrong on two of
+            // the three.
+            return String(localized: "The plugin's requested capabilities were NOT granted — Hermes fails closed without a terminal. Grant them with `hermes plugins enable` in a terminal; the plugin should otherwise degrade gracefully.")
         }
         return String(detail.prefix(200))
     }
 
-    /// `successMarkers: nil` keeps the exit code as the verdict, for the verbs
-    /// that genuinely report through it: `cmd_update` (:808-809) and
-    /// `cmd_remove` (:895) refuse via `_fail` (:80-83), which `sys.exit(1)`s.
-    /// Only `enable`/`disable` route through the discarded-bool consent screen,
-    /// so only they need output judging — narrowing this to the sites the
-    /// finding names keeps update/remove byte-identical.
+    /// `successMarkers: nil` keeps the exit code as the verdict, which is
+    /// sound for `remove` alone: every refusal `cmd_remove` can reach goes
+    /// through `_fail` (:895, :412, :415 → :80-83), which `sys.exit(1)`s. Even
+    /// there the exit code is not the MESSAGE — the `_fail` line is the only
+    /// thing that says what went wrong — so the detail is carried across.
+    /// The `_fail` line out of a nonzero `plugins` run. `detail: nil` used to
+    /// throw it away and leave the user a bare "Failed", yet it is the only
+    /// text that says what happened (`Error: Could not remove plugin 'x': …`,
+    /// plugins_cmd.py:895). Prefer the line carrying `Error:` over the last
+    /// line: `_require_installed_plugin` (:415) puts a second line —
+    /// `Installed plugins: …` — after the reason.
+    nonisolated static func failLine(_ output: String) -> String? {
+        let lines = HermesCLIVerdict.significantLines(output)
+        return lines.first { $0.contains("Error:") } ?? lines.last
+    }
+
     private func runAndReload(
         _ args: [String],
         success: String,
@@ -412,7 +464,10 @@ final class PluginsViewModel: OutcomeMessageHosting {
                     failureMarkers: failureMarkers,
                     failureWins: failureWins
                 )
-            } ?? HermesCLIOutcome(succeeded: result.exitCode == 0, detail: nil)
+            } ?? HermesCLIOutcome(
+                succeeded: result.exitCode == 0,
+                detail: result.exitCode == 0 ? nil : Self.failLine(result.output)
+            )
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.applySaveOutcome(

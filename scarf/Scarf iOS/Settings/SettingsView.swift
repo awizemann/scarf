@@ -137,7 +137,7 @@ struct SettingsView: View {
                             Text(spec.displayName)
                                 .font(.body)
                                 .foregroundStyle(.primary)
-                            Text(currentValue(for: spec.key))
+                            Text(verbatim: displayValue(for: spec.key))
                                 .font(.caption.monospaced())
                                 .foregroundStyle(ScarfColor.foregroundMuted)
                                 .lineLimit(1)
@@ -160,6 +160,17 @@ struct SettingsView: View {
         }
     }
 
+    /// What the Quick-edits row shows. Same string as `currentValue` except
+    /// for an ABSENT `approvals.mode`, where the empty sentinel would render
+    /// as a blank caption instead of naming the mode the host runs.
+    private func displayValue(for key: String) -> String {
+        let value = currentValue(for: key)
+        if key == "approvals.mode", value.isEmpty {
+            return HermesConfig.approvalModeHostDefaultLabel(capabilities: caps)
+        }
+        return value
+    }
+
     /// Map a config-set key to the current value from the parsed
     /// HermesConfig. String-based so the Picker / Stepper / Toggle in
     /// the editor sheet can pre-fill correctly. Unknown keys return
@@ -168,12 +179,21 @@ struct SettingsView: View {
         switch key {
         case "model.default": return vm.config.model
         case "model.provider": return vm.config.provider
-        case "approvals.mode": return vm.config.approvalMode
+        // Empty when the key is ABSENT, which selects the sheet's "Host
+        // default (…)" sentinel row. The sheet must not prime a concrete mode
+        // for it: on a stock v0.19+ host the absent key means `smart`, and
+        // writing `manual` there would pin the mode the sentinel exists to
+        // avoid claiming (round-2 decision 5).
+        case "approvals.mode": return vm.config.storedApprovalMode?.rawValue ?? ""
         // "Unlimited" for the no-ceiling case; the sheet's `Int(...) ?? 0`
         // priming maps that straight back onto the 0 sentinel.
         case "agent.max_turns": return vm.config.displayMaxTurnsText(capabilities: caps)
         case "display.show_cost": return vm.config.showCost ? "true" : "false"
-        case "display.show_reasoning": return vm.config.showReasoning ? "true" : "false"
+        // Sentinel-aware: absent key primes the host's own default (true on
+        // v0.18.1+), so saving the sheet without touching the toggle cannot
+        // flip reasoning off.
+        case "display.show_reasoning":
+            return vm.config.displayShowReasoning(capabilities: caps) ? "true" : "false"
         case "display.streaming": return vm.config.streaming ? "true" : "false"
         default: return ""
         }
@@ -188,7 +208,12 @@ struct SettingsView: View {
             if !vm.config.provider.isEmpty, vm.config.provider != "unknown" {
                 LabeledContent("Provider", value: vm.config.provider)
             }
-            LabeledContent("Reasoning effort", value: vm.config.reasoningEffort)
+            // Absent key = the model provider's own default, not `medium`.
+            LabeledContent(
+                "Reasoning effort",
+                value: vm.config.reasoningEffort.isEmpty
+                    ? "Provider default" : vm.config.reasoningEffort
+            )
             if !vm.config.timezone.isEmpty {
                 LabeledContent("Timezone", value: vm.config.timezone)
             }
@@ -198,7 +223,13 @@ struct SettingsView: View {
     @ViewBuilder
     private var agentSection: some View {
         Section("Agent") {
-            LabeledContent("Approval mode", value: vm.config.approvalMode)
+            // Sentinel-aware: absent key shows the mode the host enforces
+            // (smart on v0.19.0+, manual before, "unknown" undetected).
+            LabeledContent(
+                "Approval mode",
+                value: vm.config.storedApprovalMode?.rawValue
+                    ?? vm.config.approvalModeHostDefaultLabel(capabilities: caps)
+            )
             // Sentinel-aware: absent key shows the host's effective default
             // ("Unlimited" on v0.20.5+, 500 on v0.20.0–v0.20.4, 60 before)
             // rather than 0.
@@ -212,7 +243,7 @@ struct SettingsView: View {
     private var displaySection: some View {
         Section("Display") {
             yesNoRow("Streaming", vm.config.streaming)
-            yesNoRow("Show reasoning", vm.config.showReasoning)
+            yesNoRow("Show reasoning", vm.config.displayShowReasoning(capabilities: caps))
             yesNoRow("Show cost", vm.config.showCost)
             LabeledContent("Skin", value: vm.config.display.skin)
             yesNoRow("Compact", vm.config.display.compact)

@@ -119,8 +119,9 @@ struct HermesV0204ConfigTests {
     }
 
     /// Top-level `multiplex_profile_allowlist` takes precedence over
-    /// `gateway.multiplex_profile_allowlist` (gateway/config.py:1190-1195,
-    /// 1413-1423).
+    /// `gateway.multiplex_profile_allowlist` (`gateway/config_loader.py:75`
+    /// presence bridge; `gateway/config.py:668-670` `pick()`, consumed at
+    /// `:734` @ `v2026.9.7`).
     @Test func multiplexProfileAllowlistTopLevelPrecedenceOverGateway() {
         let cfg = HermesConfig(yaml: """
         multiplex_profile_allowlist:

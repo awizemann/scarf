@@ -100,12 +100,26 @@ final class CronViewModel {
                     // The doctor parse resolves headers against the id
                     // roster (an id may contain spaces), so a roster that
                     // arrives AFTER the doctor run — the cold-launch order,
-                    // since both probes start from `onAppear` — leaves the
-                    // findings parsed by the weaker fallback. Re-run only
-                    // when the doctor has already answered once, so a host
-                    // without `cron doctor` never gains a spawn.
-                    if self.hasLoadedDoctorFindings, previousIDs != Set(jobs.map(\.id)) {
-                        self.loadDoctor(force: true)
+                    // since both probes start from `onAppear` — would leave
+                    // the findings parsed by the weaker `isPlausibleJobID`
+                    // fallback. Re-PARSE the doctor's retained stdout against
+                    // the new roster rather than re-running the verb: the
+                    // roster is the only input that changed, and a re-parse
+                    // provably adds no spawn on any host (C1), where the old
+                    // `loadDoctor(force:)` did — and was gated on
+                    // `hasLoadedDoctorFindings`, which is false at exactly
+                    // the moment the cold-launch race needs it.
+                    if previousIDs != Set(jobs.map(\.id)) {
+                        self.reparseDoctorFindings()
+                        // …and re-run the verb itself when it has already
+                        // answered on this host. The roster changed because
+                        // `jobs.json` changed, so the findings may be
+                        // genuinely out of date and not merely mis-keyed —
+                        // the file-watcher path depends on this. Gated
+                        // exactly as before (C1); the re-parse above is the
+                        // part that also covers the cold-launch race, when
+                        // this gate is still false.
+                        if self.hasLoadedDoctorFindings { self.loadDoctor(force: true) }
                     }
                     self.loadDecodeFailed = decodeFailed
                     self.availableSkills = skills
@@ -127,11 +141,11 @@ final class CronViewModel {
         }
     }
 
-    // MARK: - Run history (Hermes v0.20+, `hermes cron runs`)
+    // MARK: - Run history (Hermes v0.19.0+, `hermes cron runs`)
 
     /// Durable execution attempts for the selected job. Only loaded when
     /// the (capability-gated) RUN HISTORY disclosure is expanded — the
-    /// view gates on `hasCronRuns`, so pre-0.20 hosts never issue the call.
+    /// view gates on `hasCronRuns`, so pre-0.19.0 hosts never issue the call.
     var runHistory: [HermesCronRun] = []
     var isLoadingRunHistory = false
     /// Job id the current `runHistory` belongs to; stale-guard for
@@ -173,6 +187,9 @@ final class CronViewModel {
     /// retryable — memoizing it would leave the row badges permanently
     /// blank with no way back short of an app restart.
     @ObservationIgnored private var hasLoadedIncidents = false
+    /// A `loadIncidents(force:)` that arrived mid-flight. See
+    /// `doctorRefreshPending`.
+    @ObservationIgnored private var incidentsRefreshPending = false
 
     /// Whether `cron incidents` has ever answered on this host. Same
     /// gate rationale as `hasLoadedDoctorFindings`.
@@ -188,7 +205,13 @@ final class CronViewModel {
     /// hand before the user expands anything.
     func loadIncidents(force: Bool = false) {
         if !force, hasLoadedIncidents { return }
-        if isLoadingIncidents { return }   // don't stack duplicate in-flight probes
+        if isLoadingIncidents {
+            // Coalesce rather than drop (same reasoning as `loadDoctor`):
+            // the in-flight probe predates the mutation the caller is
+            // refreshing for, so silently returning left a stale listing.
+            if force { incidentsRefreshPending = true }
+            return
+        }
         isLoadingIncidents = true
         let svc = fileService
         let log = logger
@@ -206,6 +229,10 @@ final class CronViewModel {
                     self.hasLoadedIncidents = true
                 }
                 self.isLoadingIncidents = false
+                if self.incidentsRefreshPending {
+                    self.incidentsRefreshPending = false
+                    self.loadIncidents(force: true)
+                }
             }
         }
     }
@@ -253,16 +280,46 @@ final class CronViewModel {
     var hasLoadedDoctorFindings: Bool { hasLoadedDoctor }
     @ObservationIgnored private(set) var isLoadingDoctor = false
 
+    /// Raw `cron doctor` stdout from the last run that produced recognizable
+    /// output. Retained so the findings can be re-parsed against a roster
+    /// that lands later WITHOUT re-spawning the verb — see `load`.
+    @ObservationIgnored private var doctorOutput: String?
+    /// A `loadDoctor(force:)` that arrived while a run was already in flight.
+    /// The early return alone silently dropped it, so a post-mutation refresh
+    /// that raced the initial run left the findings describing the job as it
+    /// was BEFORE the edit — the very staleness
+    /// `refreshDiagnosticsAfterMutation` exists to fix.
+    @ObservationIgnored private var doctorRefreshPending = false
+
+    /// Adopt one `cron doctor` run's raw stdout. Split out of `loadDoctor`'s
+    /// completion so the roster-ordering contract can be driven without a
+    /// CLI seam; production has exactly one caller.
+    func adoptDoctorOutput(_ stdout: String) {
+        doctorOutput = stdout
+        hasLoadedDoctor = true
+        reparseDoctorFindings()
+    }
+
+    /// Re-parse the retained `cron doctor` output against the CURRENT job
+    /// roster. No spawn, no capability surface: a host that never ran the
+    /// verb has no retained output and this is a no-op.
+    func reparseDoctorFindings() {
+        guard let doctorOutput else { return }
+        doctorFindings = HermesCronDoctorParser.parse(
+            text: doctorOutput, knownJobIDs: Set(jobs.map(\.id)))
+    }
+
     func loadDoctor(force: Bool = false) {
         if !force, hasLoadedDoctor { return }
-        if isLoadingDoctor { return }
+        if isLoadingDoctor {
+            // Coalesce rather than drop: the in-flight run was started
+            // before whatever the caller just changed.
+            if force { doctorRefreshPending = true }
+            return
+        }
         isLoadingDoctor = true
         let svc = fileService
         let log = logger
-        // The doctor header is `  {id} {name}` and a job id may itself
-        // contain spaces, so the parse needs the roster to know where the
-        // id ends. Snapshot it here, on the main actor, before hopping off.
-        let knownJobIDs = Set(jobs.map(\.id))
         Task.detached { [weak self] in
             // `cron doctor` exits 1 when it FINDS issues — that's the
             // normal path, not a failure, so the exit code can't be the
@@ -272,17 +329,27 @@ final class CronViewModel {
             // retryable rather than being memoized as "no findings".
             let result = svc.runHermesCLISplit(args: HermesCronDoctorParser.args(), timeout: 30)
             let ok = HermesCronDoctorParser.looksLikeDoctorOutput(result.stdout)
-            let parsed = ok ? HermesCronDoctorParser.parse(text: result.stdout, knownJobIDs: knownJobIDs) : [:]
+            let stdout = result.stdout
             if !ok {
                 log.warning("cron doctor produced unrecognized output (exit \(result.exitCode)): \(result.stderr.prefix(300))")
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 if ok {
-                    self.doctorFindings = parsed
-                    self.hasLoadedDoctor = true
+                    // The doctor header is `  {id} {name}` and a job id may
+                    // itself contain spaces, so the parse needs the roster to
+                    // know where the id ends. Parse HERE, against whatever
+                    // roster is current now, so the re-parse fires whichever
+                    // of `load()` / `loadDoctor()` finishes second — parsing
+                    // against a pre-hop snapshot lost every roster that
+                    // landed during the run.
+                    self.adoptDoctorOutput(stdout)
                 }
                 self.isLoadingDoctor = false
+                if self.doctorRefreshPending {
+                    self.doctorRefreshPending = false
+                    self.loadDoctor(force: true)
+                }
             }
         }
     }
@@ -370,7 +437,9 @@ final class CronViewModel {
             exitCode: exitCode,
             successMarkers: HermesCLIMarkers.cronRunSuccess,
             failureMarkers: HermesCLIMarkers.cronRunFailure,
-            failureWins: true
+            failureWins: true,
+            // `_job_action` prints it at column 0 (cron.py:658).
+            successAnchored: true
         )
     }
 
@@ -606,20 +675,79 @@ final class CronViewModel {
         return args
     }
 
-    func updateJob(id: String, schedule: String?, prompt: String?, name: String?, deliver: String?, repeatCount: String?, existingSkills: [String], newSkills: [String]?, clearSkills: Bool, script: String?, workdir: String? = nil, noAgent: Bool? = nil, failureDeliver: String? = nil) {
+    /// The `--prompt` tail of a `cron edit`.
+    ///
+    /// Same "an emptied field is a real gesture" rule `skillEditArguments`
+    /// applies to skills. Hermes's update guard is `if prompt is not None`
+    /// (`tools/cronjob_tools.py::_update_core_fields`, v2026.9.7 :689-697),
+    /// so `--prompt ""` genuinely CLEARS the prompt — dropping the flag on
+    /// an empty string, as this did, made "the user deleted the prompt" and
+    /// "the user didn't touch the prompt" the same argv and the job kept
+    /// running the old instruction under a success toast.
+    ///
+    /// Only an ACTUAL emptying is forwarded: `existing` is the value the
+    /// editor was seeded with, so a form that opened blank and stayed blank
+    /// sends nothing rather than a write. Whether the clear is *accepted* is
+    /// Hermes's call — `update_job` refuses a job left with no runnable
+    /// payload at all (`cron/jobs.py::job_payload_is_empty` :428-436, armed
+    /// at :1949), and that refusal is surfaced verbatim rather than
+    /// second-guessed here.
+    ///
+    /// Ungated. `cron edit --prompt` is registered at Scarf's minimum
+    /// supported Hermes v0.6.0 (`hermes_cli/main.py:3943` at tag
+    /// `v2026.3.30`), moved to `hermes_cli/subcommands/cron.py:91` by the
+    /// v0.17 modularisation and unchanged at `v2026.9.7`.
+    nonisolated static func promptEditArguments(existing: String, newValue: String?) -> [String] {
+        guard let newValue else { return [] }   // caller didn't touch the prompt
+        if newValue.isEmpty {
+            return existing.isEmpty ? [] : ["--prompt", ""]
+        }
+        return ["--prompt", newValue]
+    }
+
+    /// The `--repeat` tail of a `cron edit`.
+    ///
+    /// The clear gesture is `--repeat 0`, not an omitted flag:
+    /// `normalize_repeat_value` folds `<= 0` to `None` = run forever
+    /// (`cron/jobs.py:591-617` at `v2026.9.7`, reached from
+    /// `tools/cronjob_tools.py::_update_run_fields` :787-792, whose guard is
+    /// `if a["repeat"] is not None` — `0` passes it). Dropping the flag on an
+    /// empty string left the old count in place, so a user who cleared
+    /// "Repeat" to mean "forever" got "Updated" and a job that still went
+    /// terminal after N runs.
+    ///
+    /// Only an ACTUAL emptying is forwarded, compared against the value the
+    /// editor was seeded with (`HermesCronJob.repeatEditValue`) — an
+    /// untouched blank field writes nothing.
+    ///
+    /// Ungated. `cron edit --repeat` is registered at Scarf's minimum
+    /// supported Hermes v0.6.0 (`hermes_cli/main.py:3946` at `v2026.3.30`),
+    /// moved to `hermes_cli/subcommands/cron.py:97` by the v0.17
+    /// modularisation and unchanged at `v2026.9.7`; the `<= 0 -> forever`
+    /// fold is present from v0.4.0 (`v2026.3.23`), also below the floor.
+    nonisolated static func repeatEditArguments(existing: String, newValue: String?) -> [String] {
+        guard let newValue else { return [] }   // caller didn't touch the field
+        let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            return existing.isEmpty ? [] : ["--repeat", "0"]
+        }
+        return ["--repeat", trimmed]
+    }
+
+    func updateJob(id: String, schedule: String?, prompt: String?, existingPrompt: String, name: String?, deliver: String?, repeatCount: String?, existingRepeatCount: String, existingSkills: [String], newSkills: [String]?, clearSkills: Bool, script: String?, workdir: String? = nil, noAgent: Bool? = nil, failureDeliver: String? = nil) {
         // `job_id` is `cron edit`'s only positional, so it moves to the very
         // end behind `--` — every flag has to precede the marker, since
         // argparse treats each token after it as a positional.
         var args = ["cron", "edit"]
         if let schedule, !schedule.isEmpty { args += ["--schedule", schedule] }
-        if let prompt, !prompt.isEmpty { args += ["--prompt", prompt] }
+        args += Self.promptEditArguments(existing: existingPrompt, newValue: prompt)
         if let name, !name.isEmpty { args += ["--name", name] }
         if let deliver { args += ["--deliver", deliver] }
         // v0.21.1: `nil` = untouched (omit the flag); `""` is Hermes's own
         // documented "clear the override" gesture on edit, so it is passed
         // through rather than dropped like an empty create value.
         if let failureDeliver { args += ["--failure-deliver", failureDeliver] }
-        if let repeatCount, !repeatCount.isEmpty { args += ["--repeat", repeatCount] }
+        args += Self.repeatEditArguments(existing: existingRepeatCount, newValue: repeatCount)
         args += Self.skillEditArguments(
             existing: existingSkills, newSkills: newSkills, clearSkills: clearSkills
         )
@@ -653,8 +781,13 @@ final class CronViewModel {
     /// changed run state (`cron run` prints a green line and then
     /// `Ran now: failed.`).
     func refreshDiagnosticsAfterMutation() {
-        if hasLoadedIncidentList { loadIncidents(force: true) }
-        if hasLoadedDoctorFindings { loadDoctor(force: true) }
+        // `|| isLoading…`: a probe in flight is a probe this host ALREADY
+        // received, so refreshing behind it adds no spawn a pre-target host
+        // would not have made (C1) — and on a cold launch the in-flight run
+        // is the only reason `hasLoaded…` is still false. `loadIncidents` /
+        // `loadDoctor` coalesce the mid-flight case internally.
+        if hasLoadedIncidentList || isLoadingIncidents { loadIncidents(force: true) }
+        if hasLoadedDoctorFindings || isLoadingDoctor { loadDoctor(force: true) }
     }
 
     /// `onOutcome` (main-actor, success flag only) exists so a wrapper like
