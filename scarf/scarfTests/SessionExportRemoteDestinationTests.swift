@@ -239,10 +239,19 @@ import ScarfCore
         #expect(args == ["sessions", "export", "-", "--redact"])
     }
 
-    @Test("redact with trace over stdout")
+    /// `trace` is the one format that inverts the flag: it redacts
+    /// unconditionally and `--no-redact` is the opt-out, while `--redact` is
+    /// read only by a closure the trace path never calls
+    /// (`hermes_cli/sessions_cmd.py:394` at v2026.9.7). This test pinned the
+    /// old `--redact` shape, which was a no-op the toggle couldn't undo — see
+    /// `AuditP25SurfaceCopyTests` for the full contract.
+    @Test("redact with trace over stdout sends nothing — trace redacts by default")
     func redactWithTrace() {
-        let args = SessionsViewModel.exportArguments(output: "-", sessionId: nil, format: .trace, redact: true)
-        #expect(args == ["sessions", "export", "-", "--format", "trace", "--redact"])
+        let args = SessionsViewModel.exportArguments(
+            output: "-", sessionId: nil, format: .trace, redact: true,
+            traceNoRedactAvailable: true
+        )
+        #expect(args == ["sessions", "export", "-", "--format", "trace"])
     }
 
     @Test("redact with markdown directory output")
