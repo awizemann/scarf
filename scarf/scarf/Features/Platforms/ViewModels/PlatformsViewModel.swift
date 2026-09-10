@@ -170,9 +170,11 @@ final class PlatformsViewModel: OutcomeMessageHosting {
             return keys
         }()
         func hasNestedBlock(_ name: String) -> Bool {
-            for prefix in ["platforms.\(name).", "gateway.platforms.\(name)."]
-            where nestedKeys.contains(where: { $0.hasPrefix(prefix) }) {
-                return true
+            for path in ["platforms.\(name)", "gateway.platforms.\(name)"] {
+                // The path itself (a flow map or a bare `platforms: {ntfy: …}`)
+                // or anything under it.
+                if nestedKeys.contains(path) { return true }
+                if nestedKeys.contains(where: { $0.hasPrefix(path + ".") }) { return true }
             }
             return false
         }
