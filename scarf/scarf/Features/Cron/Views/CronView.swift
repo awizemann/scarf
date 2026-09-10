@@ -196,6 +196,10 @@ struct CronView: View {
                     name: form.name,
                     deliver: form.deliver,
                     repeatCount: form.repeatCount,
+                    // The job's STORED skills, so the edit can be sent as a
+                    // diff — `cron edit` treats "no --skill flags" as
+                    // "untouched", not "clear" (see `skillEditArguments`).
+                    existingSkills: job.skills ?? [],
                     newSkills: form.skills,
                     clearSkills: form.clearSkills,
                     script: form.script,
@@ -1439,6 +1443,15 @@ struct CronJobEditor: View {
                 form.deliver = job.deliver ?? ""
                 form.failureDeliver = job.failureDeliver ?? ""
                 form.skills = job.skills ?? []
+                // `repeat` is unmodeled and rides in `extra`; `repeatSpec`
+                // is the read side (a port of `cron/jobs.py::
+                // normalize_repeat_value`, v2026.9.7 :591). Without this the
+                // field opened blank on every edit, so saving an unrelated
+                // change omitted `--repeat` and Hermes kept the old count —
+                // but the user had just been shown "Optional count" and had
+                // every reason to think the job repeated forever.
+                // `nil` times = run forever, which IS the empty field.
+                form.repeatCount = job.repeatEditValue
                 form.script = job.preRunScript ?? ""
                 form.workdir = job.workdir ?? ""
                 form.noAgent = job.noAgent ?? false
