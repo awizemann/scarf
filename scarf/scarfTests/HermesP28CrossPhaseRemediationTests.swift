@@ -237,4 +237,65 @@ struct HermesP28CrossPhaseRemediationTests {
                 == PlatformsViewModel.computeConfiguredPlatforms(context: home.context)
         )
     }
+
+    // MARK: - M1/M2 · a retired run must not outlive its own stop
+
+    /// P22 moved `proc.run()` into a detached task, so `self.process` /
+    /// `self.stdoutPipe` are published only AFTER the spawn resumes. A
+    /// `start()` landing in that window finds `process == nil`, so `stop()`
+    /// can retire neither the previous run's process nor its
+    /// `readabilityHandler` — and the reader's `append`/`markEOF` carry no
+    /// generation check (they run on the pipe's queue), so a live stale reader
+    /// writes into, and can `markEOF`, the replacement run's buffer. That is
+    /// P21's success-reported-as-failure bug: a verdict judged on the previous
+    /// run's text, or before this run's output has drained.
+    ///
+    /// The spawn's generation-mismatch branch is the only place that window
+    /// can be closed, and it now unhooks the reader there (plus each run gets
+    /// its OWN `OutputInbox`, so even an unhooked-too-late reader writes
+    /// somewhere nothing drains). `readabilityHandler` is readable, so the
+    /// assertion is on the invariant itself rather than on a timing-dependent
+    /// symptom. Fails without the fix: the retired run's handler is still
+    /// installed.
+    @Test func aRetiredRunsReaderIsUnhookedWhenItsSpawnResumes() async {
+        func sh(_ script: String) -> Process {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            p.arguments = ["-c", script]
+            return p
+        }
+        // A blocks, so it cannot reach EOF on its own and unhook itself.
+        let runA = sh("exec sleep 30")
+        let runB = sh("sleep 1.2; printf '  \u{2713} Authenticated with b - 3 tool(s) available\n'; exit 0")
+
+        final class Handout { var count = 0 }
+        let handout = Handout()
+        let controller = MCPLoginController(context: .local, makeLoginProcess: { _ in
+            handout.count += 1
+            return handout.count == 1 ? runA : runB
+        })
+        controller.start(server: "a", flow: nil)
+        // No `await` between the two starts: B lands before A's spawn
+        // continuation can have resumed, which IS the window — `start()`'s
+        // `stop()` sees a nil `stdoutPipe` and unhooks nothing.
+        controller.start(server: "b", flow: nil)
+
+        let pipeA = runA.standardOutput as? Pipe
+        #expect(pipeA != nil, "the controller did not wire a stdout pipe for run A")
+        let deadline = Date().addingTimeInterval(60)
+        while pipeA?.fileHandleForReading.readabilityHandler != nil, Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(pipeA?.fileHandleForReading.readabilityHandler == nil,
+                "the retired run's reader is still installed and feeding the live run")
+        #expect(runA.isRunning == false, "the retired run was not terminated")
+
+        // …and run B is still judged on its own output, by its own success line.
+        while controller.succeeded == nil, Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(controller.succeeded == true, "run B: \(controller.errorMessage ?? "nil")")
+        #expect(controller.output.contains("Authenticated with b"))
+        controller.stop()
+    }
 }

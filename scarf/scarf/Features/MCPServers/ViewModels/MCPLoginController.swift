@@ -62,7 +62,17 @@ final class MCPLoginController {
     /// queue and each one schedules an independent `Task { @MainActor }`;
     /// those hops are NOT ordered relative to one another, so the text has to
     /// be sequenced where it is produced rather than where it is applied.
-    private let inbox = OutputInbox()
+    ///
+    /// ONE PER RUN, captured by that run's reader closure. A single instance
+    /// reset per run re-opened P21's drain race: the reader's `append` /
+    /// `markEOF` carry no generation check (they run on the pipe's queue,
+    /// where `generation` is not readable), so a retired run's reader wrote
+    /// into the replacement run's buffer — and could `markEOF` it — and the
+    /// new run's verdict was then judged on the old run's text, or before its
+    /// own output had drained. That is exactly the success-reported-as-failure
+    /// bug P21 fixed. With a fresh inbox per run, a stale reader writes into a
+    /// buffer nothing will ever drain.
+    private var inbox = OutputInbox()
     /// The exit status, once the termination handler has reported it. Nil
     /// until then — and the verdict waits for BOTH this and EOF.
     private var pendingExit: Int32?
@@ -89,7 +99,8 @@ final class MCPLoginController {
         devicePrompt = nil
         succeeded = nil
         errorMessage = nil
-        inbox.reset()
+        let inbox = OutputInbox()
+        self.inbox = inbox
         pendingExit = nil
         didFinish = false
 
@@ -119,7 +130,6 @@ final class MCPLoginController {
         // one because the main actor drains it concurrently.
         let decoder = IncrementalUTF8Decoder()
         let generation = self.generation
-        let inbox = self.inbox
         outPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.isEmpty {
@@ -175,8 +185,12 @@ final class MCPLoginController {
             }.value
             guard let self else { return }
             guard self.generation == spawnGeneration else {
-                // `stop()` retired this run while it was still spawning, so
-                // it saw a nil `process` and reaped nothing. Do it here.
+                // `stop()` retired this run while it was still spawning, so it
+                // saw a nil `process`/`stdoutPipe` and could retire neither the
+                // process nor its reader. Do both here: an uncleared
+                // `readabilityHandler` keeps decoding this dead run's output
+                // for as long as the pipe is open.
+                outPipe.fileHandleForReading.readabilityHandler = nil
                 if spawnError == nil {
                     proc.terminationHandler = nil
                     proc.terminate()
@@ -191,6 +205,13 @@ final class MCPLoginController {
                 self.logger.error("mcp login failed to start: \(spawnError.localizedDescription)")
                 return
             }
+            // A fast-exiting login (an unknown server name prints its refusal
+            // and exits) can be FINISHED before the spawn continuation
+            // resumes. `finish()` nils `process`/`stdoutPipe` precisely so a
+            // later `stop()` does not spend two SSH round trips reaping a
+            // process that has exited; re-publishing them here would hand
+            // `stop()` a live-looking `process` and do exactly that.
+            guard !self.didFinish else { return }
             self.process = proc
             self.stdoutPipe = outPipe
         }
@@ -473,7 +494,4 @@ private final class OutputInbox: @unchecked Sendable {
         return (pending, eof)
     }
 
-    func reset() {
-        lock.lock(); pending = ""; eof = false; lock.unlock()
-    }
 }
